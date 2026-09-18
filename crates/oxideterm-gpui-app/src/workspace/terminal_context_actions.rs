@@ -40,7 +40,9 @@ impl WorkspaceApp {
                 let Some(command) = terminal_selection_command_bar_text(&selection) else {
                     return false;
                 };
-                self.search.visible = false;
+                if let Some(id) = self.active_pane_id(cx) {
+                    self.hide_search(id, cx);
+                }
                 if self.ai_entity.read(cx).terminal_inline_panel().open {
                     self.close_terminal_ai_inline_panel(window, cx);
                 }

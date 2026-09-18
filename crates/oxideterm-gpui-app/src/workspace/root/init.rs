@@ -619,7 +619,7 @@ impl WorkspaceApp {
             auto_close_terminal_sessions_scheduled: false,
             tab_host,
             _tab_host_subscription: tab_host_subscription,
-            search: SearchBarState::default(),
+            search: actions::TerminalSearchState::default(),
             terminal_recording_menu_open: false,
             terminal_highlight_popover_open: false,
             terminal_trigger_settings_pane: None,

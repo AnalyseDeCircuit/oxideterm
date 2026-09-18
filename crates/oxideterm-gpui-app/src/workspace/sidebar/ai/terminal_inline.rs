@@ -56,7 +56,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.search.visible = false;
+        if let Some(id) = self.active_pane_id(cx) {
+            self.hide_search(id, cx);
+        }
         self.close_terminal_command_overlays(cx);
         self.close_ai_model_selector(cx);
 

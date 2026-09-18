@@ -280,6 +280,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
+        if self.search.blur() {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+        }
         self.clear_ai_sidebar_keyboard_focus(cx);
         self.terminal_command_sender.update(cx, |sender, cx| {
             sender.set_compact_focused(false, cx);

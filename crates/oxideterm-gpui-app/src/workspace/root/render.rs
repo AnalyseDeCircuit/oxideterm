@@ -194,7 +194,7 @@ impl WorkspaceApp {
                         | TabKind::RemoteDesktop
                 )
             })
-            && !self.search.visible
+            && self.focused_search_pane(cx).is_none()
             && self.connection_form_state(cx).form.is_none()
             && let Some(pane) = self.active_pane(cx)
         {
@@ -1010,25 +1010,15 @@ impl WorkspaceApp {
                                 main.child(self.render_tab_bar(window, cx))
                             })
                             .child(
-                                div()
-                                    .flex_1()
-                                    .relative()
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .absolute()
-                                            .top_0()
-                                            .left_0()
-                                            .right_0()
-                                            .bottom_0()
-                                            .child(content),
-                                    )
-                                    .when(
-                                        self.search.visible && self.active_pane(cx).is_some(),
-                                        |main_content| {
-                                            main_content.child(self.render_search_bar(cx))
-                                        },
-                                    ),
+                                div().flex_1().relative().overflow_hidden().child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .right_0()
+                                        .bottom_0()
+                                        .child(content),
+                                ),
                             ),
                     )
                     .when(!zen_mode && self.context_sidebar_rendered, |layout| {

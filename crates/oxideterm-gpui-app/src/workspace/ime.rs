@@ -15,7 +15,7 @@ use oxideterm_editor_core::utf16::{
     word_range_for_utf16_offset,
 };
 
-use super::WorkspaceApp;
+use super::{WorkspaceApp, PaneId};
 use super::connection_monitor::HostToolsTextInput;
 use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
@@ -119,7 +119,7 @@ pub(super) enum WorkspaceImeTarget {
     ActiveSessionSearch,
     KnowledgeSearch,
     KnowledgeRename,
-    Search,
+    Search(PaneId),
     TerminalCommandSenderCompact,
     TerminalCwdSearch,
     TerminalGitBranchSearch,
@@ -494,7 +494,7 @@ impl WorkspaceImeTarget {
             Self::ActiveSessionSearch => 22,
             Self::KnowledgeSearch => 23,
             Self::KnowledgeRename => 24,
-            Self::Search => 1,
+            Self::Search(pane_id) => (1_u64 << 63) | pane_id.0,
             Self::TerminalCommandSenderCompact => 2,
             Self::TerminalCwdSearch => 18,
             Self::TerminalGitBranchSearch => 17,
@@ -1284,7 +1284,7 @@ impl WorkspaceApp {
             return Some(target);
         }
 
-        self.search.visible.then_some(WorkspaceImeTarget::Search)
+        self.focused_search_pane(cx).map(WorkspaceImeTarget::Search)
     }
 
     pub(super) fn active_ime_target_for_window(
@@ -1295,12 +1295,20 @@ impl WorkspaceApp {
         let target = self.active_ime_target(cx)?;
         let knowledge = self.knowledge_workspace.read(cx);
         let owner = match target {
+            WorkspaceImeTarget::Search(pane_id) => self.tabs(cx).iter()
+                .find(|tab|tab.root_pane.as_ref().is_some_and(|root|root.contains_pane(pane_id)))
+                .and_then(|tab| self.tab_host.read(cx).detached_window_handle(tab.id)
+                    .or_else(|| self.window_registry.handle_for_role(super::window_registry::WindowRole::Main)))
+                .map(|handle|handle.window_id()),
             WorkspaceImeTarget::KnowledgeSearch => knowledge.navigator_search_window,
             WorkspaceImeTarget::KnowledgeRename => {
                 knowledge.rename.as_ref().map(|rename| rename.window_id)
             }
             _ => None,
         };
+        if matches!(target, WorkspaceImeTarget::Search(_)) && owner != Some(window_id) {
+            return None;
+        }
         if matches!(
             target,
             WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename
@@ -2067,7 +2075,11 @@ impl WorkspaceApp {
                 .rename
                 .as_ref()
                 .map(|rename| rename.name.clone()),
-            WorkspaceImeTarget::Search => Some(self.search.query.clone()),
+            WorkspaceImeTarget::Search(pane_id) => self
+                .search
+                .panes
+                .get(&pane_id)
+                .map(|search| search.query.clone()),
             WorkspaceImeTarget::TerminalCommandSenderCompact => self
                 .terminal_command_sender
                 .read(cx)
@@ -2884,9 +2896,10 @@ impl WorkspaceApp {
                 self.show_active_input_caret(cx);
                 cx.notify();
             }
-            WorkspaceImeTarget::Search => {
-                replace_utf16(&mut self.search.query, replacement_range, text);
-                self.update_search_query(cx);
+            WorkspaceImeTarget::Search(pane_id) => {
+                if self.search.replace_query(pane_id, replacement_range, text) {
+                    self.update_search_query_for_pane(pane_id, true, cx);
+                }
             }
             WorkspaceImeTarget::TerminalCommandSenderCompact => {
                 let mut draft = Zeroizing::new(
@@ -3807,6 +3820,19 @@ fn path_completion_owns_vertical_navigation(
 
 #[cfg(test)]
 mod tests {
+    use oxideterm_workspace::PaneId;
+
+    #[test]
+    fn terminal_search_inputs_have_distinct_pane_selection_and_geometry() {
+        let first = super::WorkspaceImeTarget::Search(PaneId(1));
+        let second = super::WorkspaceImeTarget::Search(PaneId(2));
+        assert_ne!(first, second);
+        assert_ne!(first.anchor_id(), second.anchor_id());
+        assert_ne!(
+            first.anchor_id(),
+            super::WorkspaceImeTarget::CommandPalette.anchor_id()
+        );
+    }
     use gpui::{Keystroke, Modifiers};
     use zeroize::{Zeroize, Zeroizing};
 
@@ -3860,7 +3886,7 @@ mod tests {
         caret.advance_tick(now + std::time::Duration::from_secs(1));
         assert!(!visibility.visible());
 
-        assert!(caret.sync_active_target(Some(WorkspaceImeTarget::Search)));
+        assert!(caret.sync_active_target(Some(WorkspaceImeTarget::Search(PaneId(1)))));
         assert!(visibility.visible());
         assert_eq!(
             caret.next_tick_delay(now),
@@ -4142,7 +4168,7 @@ mod tests {
             );
         }
         assert_eq!(
-            ime_text_snapshot(WorkspaceImeTarget::Search, secret),
+            ime_text_snapshot(WorkspaceImeTarget::Search(PaneId(1)), secret),
             secret
         );
     }
@@ -4244,7 +4270,7 @@ mod tests {
             ));
         }
         assert!(!path_completion_owns_vertical_navigation(
-            WorkspaceImeTarget::Search,
+            WorkspaceImeTarget::Search(PaneId(1)),
             "arrowdown",
             true,
             false,
@@ -4263,7 +4289,7 @@ mod tests {
             WorkspaceImeTarget::ReadOnlyText(42)
         ));
         assert!(collapsed_copy_shortcut_is_owned_by_target(
-            WorkspaceImeTarget::Search
+            WorkspaceImeTarget::Search(PaneId(1))
         ));
     }
 
@@ -4274,7 +4300,7 @@ mod tests {
             CopyShortcutOwner::SelectedRange(2..5)
         );
         assert_eq!(
-            copy_shortcut_owner_for_target(WorkspaceImeTarget::Search, Some(&(3..3))),
+            copy_shortcut_owner_for_target(WorkspaceImeTarget::Search(PaneId(1)), Some(&(3..3))),
             CopyShortcutOwner::FocusedEditableInput
         );
         assert_eq!(

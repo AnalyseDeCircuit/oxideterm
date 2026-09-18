@@ -77,6 +77,51 @@ fn resolve_terminal_broadcast_entries(
 }
 
 #[derive(Default)]
+pub(super) struct TerminalSearchState {
+    pub(super) panes: HashMap<PaneId, SearchBarState>,
+    pub(super) focused: Option<PaneId>,
+}
+
+impl TerminalSearchState {
+    fn open(&mut self, pane_id: PaneId) {
+        self.panes.entry(pane_id).or_default().visible = true;
+        self.focused = Some(pane_id);
+    }
+
+    pub(super) fn blur(&mut self) -> bool {
+        self.focused.take().is_some()
+    }
+
+    fn close(&mut self, pane_id: PaneId) -> bool {
+        if let Some(search) = self.panes.get_mut(&pane_id) {
+            search.visible = false;
+            search.clear_match_state();
+        }
+        self.focused == Some(pane_id) && self.blur()
+    }
+
+    pub(super) fn replace_query(
+        &mut self,
+        pane_id: PaneId,
+        range: Option<std::ops::Range<usize>>,
+        text: &str,
+    ) -> bool {
+        let Some(search) = self.panes.get_mut(&pane_id).filter(|search| search.visible) else {
+            return false;
+        };
+        oxideterm_editor_core::utf16::replace_utf16(&mut search.query, range, text);
+        true
+    }
+
+    pub(super) fn remove(&mut self, pane_id: PaneId) {
+        self.panes.remove(&pane_id);
+        if self.focused == Some(pane_id) {
+            self.focused = None;
+        }
+    }
+}
+
+#[derive(Default)]
 pub(super) struct SearchBarState {
     pub(super) visible: bool,
     pub(super) query: String,
@@ -102,6 +147,72 @@ fn terminal_tab_capture_keystroke(keystroke: &gpui::Keystroke) -> bool {
     // also treat them as focus traversal keys. Capture only that collision;
     // Ctrl+Tab and other chords stay owned by the normal keybinding registry.
     keystroke.key.as_str() == "tab" && !modifiers.platform && !modifiers.control && !modifiers.alt
+}
+
+#[cfg(test)]
+mod terminal_search_tests {
+    use super::*;
+
+    #[test]
+    fn pane_searches_keep_their_queries_and_matches_across_focus_and_close() {
+        let mut searches = TerminalSearchState::default();
+        let first = PaneId(10);
+        let second = PaneId(20);
+        searches.open(first);
+        searches.replace_query(first, None, "错误🦀");
+        searches
+            .panes
+            .get_mut(&first)
+            .unwrap()
+            .sync_from_terminal(TerminalSearchStatus {
+                query: Some("错误🦀".into()),
+                active_match: Some(2),
+                match_count: 4,
+            });
+        searches.blur();
+        assert!(searches.panes[&first].visible);
+        assert_eq!(searches.focused, None);
+        searches.open(second);
+        searches.replace_query(second, None, "warning");
+        searches
+            .panes
+            .get_mut(&second)
+            .unwrap()
+            .sync_from_terminal(TerminalSearchStatus {
+                query: Some("warning".into()),
+                active_match: Some(0),
+                match_count: 1,
+            });
+        searches.open(first);
+        assert_eq!(
+            (
+                &*searches.panes[&first].query,
+                searches.panes[&first].active_match,
+                searches.panes[&first].match_count
+            ),
+            ("错误🦀", Some(2), 4)
+        );
+        searches.replace_query(first, Some(2..4), "日志");
+        assert_eq!(searches.panes[&first].query, "错误日志");
+        assert_eq!(
+            (
+                &*searches.panes[&second].query,
+                searches.panes[&second].active_match,
+                searches.panes[&second].match_count
+            ),
+            ("warning", Some(0), 1)
+        );
+        searches.close(first);
+        assert!(!searches.replace_query(first, None, "late input"));
+        searches.open(first);
+        assert_eq!(searches.panes[&first].query, "错误日志");
+        searches.remove(first);
+        assert_eq!(searches.focused, None);
+        assert_eq!(
+            searches.panes.keys().copied().collect::<Vec<_>>(),
+            vec![second]
+        );
+    }
 }
 
 fn terminal_tab_capture_blocked_by_workspace_ui(
@@ -190,54 +301,139 @@ impl WorkspaceApp {
             settings.begin_keybinding_reset_confirm_exit(delay, cx)
         })
     }
+    pub(super) fn search_visible(&self, cx: &App) -> bool {
+        self.active_pane_id(cx)
+            .and_then(|id| self.search.panes.get(&id))
+            .is_some_and(|search| search.visible)
+    }
+
+    pub(super) fn focused_search_pane(&self, cx: &App) -> Option<PaneId> {
+        let pane_id = self.search.focused?;
+        if !self
+            .search
+            .panes
+            .get(&pane_id)
+            .is_some_and(|search| search.visible)
+        {
+            return None;
+        }
+        let host = self.tab_host.read(cx);
+        let tab = host
+            .tabs()
+            .iter()
+            .find(|tab| tab.active_pane_id == Some(pane_id))?;
+        if self.active_tab_id(cx) != Some(tab.id) && !host.is_outside_main_window(tab.id) {
+            return None;
+        }
+        let owner = host
+            .detached_window_handle(tab.id)
+            .or_else(|| self.window_registry.handle_for_role(window_registry::WindowRole::Main));
+        // A remembered search focus in another native window cannot claim this window's keys.
+        if cx
+            .active_window()
+            .is_some_and(|active| owner.is_none_or(|owner| owner.window_id() != active.window_id()))
+        {
+            return None;
+        }
+        Some(pane_id)
+    }
+
+    fn focus_search_pane(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let tab_id = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.root_pane.as_ref().is_some_and(|root| root.contains_pane(pane_id)))
+            .map(|tab| tab.id);
+        let Some(tab_id) = tab_id else { return; };
+        self.blur_text_inputs(cx);
+        self.tab_host
+            .update(cx, |host, _| host.set_active_pane(Some(tab_id), pane_id));
+        if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
+            self.set_main_window_active_tab(Some(tab_id), cx);
+        }
+        self.search.focused = Some(pane_id);
+    }
+
     pub(super) fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search.visible = true;
+        let Some(pane_id) = self.active_pane_id(cx) else {
+            return;
+        };
+        self.open_search_for_pane(pane_id, window, cx);
+    }
+
+    pub(super) fn open_search_for_pane(
+        &mut self,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.close_terminal_quick_commands_popover(cx);
+        self.focus_search_pane(pane_id, cx);
+        self.search.open(pane_id);
         window.focus(&self.focus_handle, cx);
-        if let Some(pane) = self.active_pane(cx) {
-            let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
-            let selected_match = query
-                .as_ref()
-                .map(|_| self.search.active_match.unwrap_or(0));
-            let status = pane.update(cx, |pane, cx| {
-                pane.set_search_query(query, selected_match, cx)
-            });
-            self.search.sync_from_terminal(status);
-        } else {
-            self.search.clear_match_state();
+        self.update_search_query_for_pane(pane_id, false, cx);
+        self.select_all_active_text_input(cx);
+        cx.notify();
+    }
+
+    pub(super) fn hide_search(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        if self.search.close(pane_id) {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+        }
+        if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
+            pane.update(cx, |pane, cx| pane.set_search_query(None, None, cx));
         }
         cx.notify();
     }
 
     pub(super) fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.search.visible = false;
-        self.search.clear_match_state();
-        self.ime_marked_text = None;
-        if let Some(pane) = self.active_pane(cx) {
-            let _ = pane.update(cx, |pane, cx| pane.set_search_query(None, None, cx));
+        if let Some(id) = self.active_pane_id(cx) {
+            self.hide_search(id, cx);
         }
         self.focus_active_pane(window, cx);
-        cx.notify();
     }
 
-    pub(super) fn update_search_query(&mut self, cx: &mut Context<Self>) {
-        let query = (!self.search.query.is_empty()).then(|| self.search.query.clone());
-        self.search.active_match = query.as_ref().map(|_| 0);
-        if let Some(pane) = self.active_pane(cx) {
-            let status = pane.update(cx, |pane, cx| {
-                pane.set_search_query(query, self.search.active_match, cx)
-            });
-            self.search.sync_from_terminal(status);
-        } else {
-            self.search.clear_match_state();
+    pub(super) fn update_search_query_for_pane(
+        &mut self,
+        pane_id: PaneId,
+        reset_match: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(search) = self.search.panes.get_mut(&pane_id) else {
+            return;
+        };
+        let query = (!search.query.is_empty()).then(|| search.query.clone());
+        if reset_match {
+            search.active_match = query.as_ref().map(|_| 0);
+        }
+        if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
+            let status = pane.read(cx).search_status();
+            let status = if !reset_match && status.query==query {status} else {
+                pane.update(cx, |pane,cx|pane.set_search_query(query,search.active_match,cx))
+            };
+            search.sync_from_terminal(status);
         }
         cx.notify();
     }
 
     pub(super) fn search_next(&mut self, forward: bool, cx: &mut Context<Self>) {
-        if let Some(pane) = self.active_pane(cx) {
+        if let Some(id) = self.active_pane_id(cx) {
+            self.search_next_for_pane(id, forward, cx);
+        }
+    }
+
+    pub(super) fn search_next_for_pane(
+        &mut self,
+        pane_id: PaneId,
+        forward: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
             let status = pane.update(cx, |pane, cx| pane.select_next_search_result(forward, cx));
-            self.search.sync_from_terminal(status);
+            if let Some(search) = self.search.panes.get_mut(&pane_id) {
+                search.sync_from_terminal(status);
+            }
             cx.notify();
         }
     }
@@ -369,7 +565,7 @@ impl WorkspaceApp {
             return false;
         }
 
-        let terminal_panel_open = self.search.visible
+        let terminal_panel_open = self.focused_search_pane(cx).is_some()
             || self.ai_entity.read(cx).terminal_inline_panel().open
             || self.context_sidebar_visible();
         if !crate::keybindings::action_allowed_by_terminal_behavior(
@@ -487,7 +683,7 @@ impl WorkspaceApp {
         if self.close_terminal_command_overlays(cx) {
             return;
         }
-        if self.search.visible {
+        if self.search_visible(cx) {
             self.close_search(window, cx);
             return;
         }
@@ -864,7 +1060,7 @@ impl WorkspaceApp {
             &self.settings_store.settings().keybindings.overrides,
         );
 
-        if close_panel_shortcut && self.search.visible {
+        if close_panel_shortcut && self.focused_search_pane(cx).is_some() {
             self.close_search(window, cx);
             return;
         }
@@ -881,14 +1077,12 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.search.visible && !modifiers.platform {
+        if self.focused_search_pane(cx).is_some() && !modifiers.platform {
             match key {
                 "escape" => self.close_search(window, cx),
                 "enter" => self.search_next(!modifiers.shift, cx),
                 "backspace" => {
-                    if self.search.query.pop().is_some() {
-                        self.update_search_query(cx);
-                    }
+                    self.handle_active_text_input_delete_selection(&event.keystroke, cx);
                 }
                 _ => {}
             }
@@ -2564,15 +2758,21 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn render_search_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_search_bar(&self, pane_id: PaneId, cx: &mut Context<Self>) -> AnyElement {
         const SEARCH_PANEL_BG_ALPHA: u32 = 0xf5; // Tauri bg-theme-bg-elevated translated to native opacity.
         const SEARCH_PANEL_BORDER_ALPHA: u32 = 0xcc; // Tauri border-theme-border.
 
         let theme = self.tokens.ui;
-        let target = WorkspaceImeTarget::Search;
-        let has_query = !self.search.query.is_empty();
+        let Some(search) = self.search.panes.get(&pane_id) else {
+            return div().into_any_element();
+        };
+        let focused = self.focused_search_pane(cx) == Some(pane_id);
+        let target = WorkspaceImeTarget::Search(pane_id);
+        let has_query = !search.query.is_empty();
         let marked_text = self.marked_text_for_target(target, cx);
-        let selected_range = self.ime_selected_range_for_target(target, cx);
+        let selected_range = focused
+            .then(|| self.ime_selected_range_for_target(target, cx))
+            .flatten();
         let input_range = selected_range.filter(|_| has_query && marked_text.is_none());
         let selection_range = input_range.clone().filter(|range| range.start < range.end);
         let caret_offset = input_range
@@ -2582,15 +2782,12 @@ impl WorkspaceApp {
         let shows_selection = selection_range.is_some();
         let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
         let query = if has_query {
-            self.search.query.clone()
+            search.query.clone()
         } else {
             self.i18n.t("search.placeholder")
         };
-        let match_count = self.search.match_count;
-        let active_match = self
-            .search
-            .active_match
-            .filter(|index| *index < match_count);
+        let match_count = search.match_count;
+        let active_match = search.active_match.filter(|index| *index < match_count);
         let navigation_disabled = !has_query || match_count == 0;
         let result_label = if !has_query {
             String::new()
@@ -2601,6 +2798,7 @@ impl WorkspaceApp {
         };
 
         div()
+            .id(("terminal-search", pane_id.0))
             .absolute()
             .top(px(12.0))
             .right(px(12.0))
@@ -2616,6 +2814,7 @@ impl WorkspaceApp {
             .shadow_lg()
             .text_size(px(13.0))
             .text_color(rgb(theme.text))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .h(px(44.0))
@@ -2648,7 +2847,7 @@ impl WorkspaceApp {
                                 } else {
                                     rgb(theme.text_muted)
                                 })
-                                .when(!has_query && marked_text.is_none(), |input| {
+                                .when(focused && !has_query && marked_text.is_none(), |input| {
                                     input
                                         .child(text_caret(&self.tokens, self.input_caret.visible()))
                                 })
@@ -2675,7 +2874,10 @@ impl WorkspaceApp {
                                     )
                                 })
                                 .when(
-                                    has_query && !shows_selection && !shows_positioned_caret,
+                                    focused
+                                        && has_query
+                                        && !shows_selection
+                                        && !shows_positioned_caret,
                                     |input| {
                                         input.child(text_caret(
                                             &self.tokens,
@@ -2683,7 +2885,7 @@ impl WorkspaceApp {
                                         ))
                                     },
                                 ),
-                            |_this, _cx| {},
+                            move |this, cx| this.focus_search_pane(pane_id, cx),
                             cx,
                         ),
                     )
@@ -2723,8 +2925,8 @@ impl WorkspaceApp {
                             ))
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.search_next(false, cx);
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.search_next_for_pane(pane_id, false, cx);
                                     cx.stop_propagation();
                                 }),
                             ),
@@ -2755,8 +2957,8 @@ impl WorkspaceApp {
                             ))
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.search_next(true, cx);
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.search_next_for_pane(pane_id, true, cx);
                                     cx.stop_propagation();
                                 }),
                             ),
@@ -2777,8 +2979,12 @@ impl WorkspaceApp {
                             ))
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    this.close_search(window, cx);
+                                cx.listener(move |this, _event, window, cx| {
+                                    let restore_focus=this.search.focused==Some(pane_id) || this.active_pane_id(cx)==Some(pane_id);
+                                    this.hide_search(pane_id, cx);
+                                    if restore_focus && let Some(pane)=this.tab_host.read(cx).panes().get(&pane_id).cloned() {
+                                        pane.update(cx,|pane,cx|pane.focus(window,cx));
+                                    }
                                     cx.stop_propagation();
                                 }),
                             ),

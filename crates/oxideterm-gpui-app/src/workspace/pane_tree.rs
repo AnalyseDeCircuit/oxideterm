@@ -214,12 +214,11 @@ impl WorkspaceApp {
                 }
             }
             TerminalPaneEvent::SearchStatusChanged => {
-                if self.active_pane_id(cx) == Some(pane_id)
-                    && self.search.visible
-                    && let Some(pane) = self.active_pane(cx)
+                if let Some(search) = self.search.panes.get_mut(&pane_id)
+                    && search.visible
+                    && let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id)
                 {
-                    self.search
-                        .sync_from_terminal(pane.read(cx).search_status());
+                    search.sync_from_terminal(pane.read(cx).search_status());
                     cx.notify();
                 }
             }
@@ -363,6 +362,11 @@ impl WorkspaceApp {
         pane_id: &PaneId,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
+        if self.search.focused == Some(*pane_id) {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+        }
+        self.search.remove(*pane_id);
         self.tab_host
             .update(cx, |tab_host, _cx| tab_host.remove_terminal_pane(*pane_id))
     }
@@ -831,6 +835,9 @@ impl WorkspaceApp {
                         active && self.ai_entity.read(cx).terminal_inline_panel().open,
                         |pane_frame| pane_frame.child(self.render_terminal_ai_inline_panel(cx)),
                     )
+                    .when(self.search.panes.get(pane_id).is_some_and(|search|search.visible), |frame| {
+                        frame.child(self.render_search_bar(*pane_id, cx))
+                    })
                     .into_any_element()
             }
             PaneNode::Group {

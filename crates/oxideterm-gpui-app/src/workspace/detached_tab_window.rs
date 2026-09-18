@@ -137,6 +137,57 @@ impl Render for DetachedTabWindow {
                         }
                         return true;
                     }
+                    if !session.app_lock.locked
+                        && let Some(pane_id) = session.tab_by_id(detached.tab_id, cx).and_then(|tab| tab.active_pane_id)
+                    {
+                        let input = session.active_ime_target_for_window(window_id, cx);
+                        if input.is_none_or(|target| matches!(target, super::ime::WorkspaceImeTarget::Search(_)))
+                            && crate::keybindings::keystroke_matches_action(
+                                &event.keystroke,
+                                "terminal.search",
+                                &session.settings_store.settings().keybindings.overrides,
+                            )
+                        {
+                            session.open_search_for_pane(pane_id, window, cx);
+                            return true;
+                        }
+                        if matches!(
+                            session.active_ime_target_for_window(window_id, cx),
+                            Some(super::ime::WorkspaceImeTarget::Search(_))
+                        ) {
+                            if session.defer_active_ime_key(&event.keystroke, window, cx) {
+                                return false;
+                            }
+                            if session.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+                                || session
+                                    .handle_active_text_input_delete_selection(&event.keystroke, cx)
+                                || session.handle_active_text_input_transpose(&event.keystroke, cx)
+                                || session.handle_active_text_input_navigation(&event.keystroke, cx)
+                            {
+                                return true;
+                            }
+                            match event.keystroke.key.as_str() {
+                                "escape" => {
+                                    session.hide_search(pane_id, cx);
+                                    if let Some(pane) =
+                                        session.tab_host.read(cx).panes().get(&pane_id).cloned()
+                                    {
+                                        pane.update(cx, |pane, cx| pane.focus(window, cx));
+                                    }
+                                    return true;
+                                }
+                                "enter" => {
+                                    session.search_next_for_pane(
+                                        pane_id,
+                                        !event.keystroke.modifiers.shift,
+                                        cx,
+                                    );
+                                    return true;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     if matches!(
                         session.active_ime_target_for_window(window_id, cx),
                         Some(
