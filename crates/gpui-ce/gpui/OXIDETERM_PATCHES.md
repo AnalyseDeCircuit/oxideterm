@@ -512,6 +512,24 @@ WSLg is a known reason for `WAYLAND_DISPLAY` to be present without a
 environment check, so remote, nested, kiosk, and future compositors receive the
 same behavior.
 
+### Wayland window-state restoration
+
+`gpui_linux/src/linux/wayland/window.rs` preserves the application's saved outer
+size on the first floating-window configure, using `FrameLoop::Unconfigured`
+to identify startup. Later interactive resizes use the compositor's dimensions
+and decoration insets; maximized, fullscreen, and tiled windows retain the
+compositor's sizing authority. Popup and layer-shell surfaces must not receive
+the startup-size override.
+
+Maximized/fullscreen transitions notify GPUI's bounds observer even when the
+pixel size is unchanged or an interactive resize is throttled. Release window
+state and callback borrows before invoking application callbacks.
+
+Keep these behaviors when refreshing the vendor code: losing the initial-size
+override regressed the earlier #456 fix in #597. The configure-size tests cover
+startup suggestions, unspecified sizes, unmaximize, ordinary resize, and
+compositor-constrained windows.
+
 ### Hidden system cursor
 
 Remote desktop must be able to hide the local system pointer while painting a
