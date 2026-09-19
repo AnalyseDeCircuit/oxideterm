@@ -23,6 +23,9 @@ impl RemoteDesktopSessionEntity {
 
     pub(super) fn bind_window(&mut self, window_handle: AnyWindowHandle) {
         let window_changed = self.window_handle != window_handle;
+        if window_changed && self.spice_mouse_capture.is_some() {
+            self.release_inputs();
+        }
         self.window_handle = window_handle;
         if window_changed && let Some(worker_wake) = self.worker_wake.as_ref() {
             // A wake may have targeted the old window during handoff. Store

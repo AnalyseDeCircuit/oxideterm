@@ -363,7 +363,7 @@ impl Drop for WaylandMouseCapture {
 
 impl Dispatch<zwp_relative_pointer_v1::ZwpRelativePointerV1, ()> for WaylandClientStatePtr {
     fn event(
-        &mut self,
+        this: &mut Self,
         pointer: &zwp_relative_pointer_v1::ZwpRelativePointerV1,
         event: zwp_relative_pointer_v1::Event,
         _: &(),
@@ -378,7 +378,7 @@ impl Dispatch<zwp_relative_pointer_v1::ZwpRelativePointerV1, ()> for WaylandClie
         else {
             return;
         };
-        let client = self.get_client();
+        let client = this.get_client();
         let state = client.borrow();
         let Some(capture) = state
             .relative_capture
@@ -401,7 +401,7 @@ impl Dispatch<zwp_relative_pointer_v1::ZwpRelativePointerV1, ()> for WaylandClie
 
 impl Dispatch<zwp_locked_pointer_v1::ZwpLockedPointerV1, ()> for WaylandClientStatePtr {
     fn event(
-        &mut self,
+        this: &mut Self,
         lock: &zwp_locked_pointer_v1::ZwpLockedPointerV1,
         event: zwp_locked_pointer_v1::Event,
         _: &(),
@@ -409,7 +409,7 @@ impl Dispatch<zwp_locked_pointer_v1::ZwpLockedPointerV1, ()> for WaylandClientSt
         _: &QueueHandle<Self>,
     ) {
         if matches!(event, zwp_locked_pointer_v1::Event::Unlocked) {
-            let client = self.get_client();
+            let client = this.get_client();
             let mut state = client.borrow_mut();
             if state
                 .relative_capture

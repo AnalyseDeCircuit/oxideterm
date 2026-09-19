@@ -960,9 +960,20 @@ mod tests {
 
     #[gpui::test]
     fn session_window_handoff_resumes_delivery_without_stopping_runtime(cx: &mut TestAppContext) {
+        struct Capture(std::rc::Rc<std::cell::Cell<bool>>);
+        impl gpui::PlatformMouseCapture for Capture {
+            fn is_active(&self) -> bool {
+                self.0.get()
+            }
+        }
+        impl Drop for Capture {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
         let first_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
         let second_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
-        let protocol = RemoteDesktopProtocol::Rdp;
+        let protocol = RemoteDesktopProtocol::Spice;
         let profile = preview_remote_desktop_profile(protocol);
         let provider = builtin_preview_provider_registry()
             .unwrap()
@@ -971,6 +982,8 @@ mod tests {
             .unwrap();
         let worker_wake = RemoteDesktopWorkerWake::default();
         let observed_wake = worker_wake.clone();
+        let captured = std::rc::Rc::new(std::cell::Cell::new(true));
+        let (request_tx, request_rx) = mpsc::channel();
         let session = cx.new(|_cx| {
             let mut session = RemoteDesktopSessionEntity::new(
                 TabId(10),
@@ -981,14 +994,29 @@ mod tests {
                 RemoteDesktopFrameDeliverySlot::new(),
                 first_window.into(),
             );
+            session.spice_mouse_capture = Some(Box::new(Capture(captured.clone())));
+            session.worker = Some(RemoteDesktopWorkerOwner::new(
+                request_tx,
+                None,
+                thread::spawn(|| {}),
+            ));
             session.worker_wake = Some(worker_wake);
             session
         });
 
+        session.update(cx, |session, _cx| session.bind_window(first_window.into()));
+        assert!(captured.get());
+        assert!(request_rx.try_recv().is_err());
         session.update(cx, |session, _cx| {
             session.bind_window(second_window.into());
         });
 
+        assert!(!captured.get());
+        assert!(matches!(
+            request_rx.try_recv().unwrap(),
+            RemoteDesktopHelperRequest::ReleaseAllInputs
+        ));
+        assert!(request_rx.try_recv().is_err());
         assert!(observed_wake.take());
         assert!(!observed_wake.is_stopped());
     }

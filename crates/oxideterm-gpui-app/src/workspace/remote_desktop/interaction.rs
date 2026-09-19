@@ -36,6 +36,15 @@ impl RemoteDesktopSessionEntity {
         &mut self,
         position: Point<Pixels>,
     ) -> Option<RemoteDesktopMappedPoint> {
+        if self.profile.protocol == RemoteDesktopProtocol::Spice
+            && self.spice.mouse_mode == Some(oxideterm_spice::SpiceMouseMode::Server)
+            && !self
+                .spice_mouse_capture
+                .as_ref()
+                .is_some_and(|capture| capture.is_active())
+        {
+            return None;
+        }
         let point = self.geometry.map_window_point(position)?;
         // Servers do not always echo pointer moves. Keep the custom cursor
         // responsive without waiting for a round trip.
@@ -355,7 +364,11 @@ impl WorkspaceApp {
                 .as_ref()
                 .is_some_and(|capture| capture.is_active())
             {
-                session.release_inputs();
+                // Native focus loss may have released the guard already. Send
+                // releases once, rather than on every uncaptured pointer move.
+                if session.spice_mouse_capture.is_some() {
+                    session.release_inputs();
+                }
                 return true;
             }
             if let Some(delta) = event.relative_delta {

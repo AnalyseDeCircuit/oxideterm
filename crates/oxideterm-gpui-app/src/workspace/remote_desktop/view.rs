@@ -619,6 +619,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.focus_remote_desktop_keyboard(window, cx);
                     if !this.capture_spice_mouse(tab_id, window, cx) {
                         cx.stop_propagation();
                         return;
@@ -632,7 +633,6 @@ impl WorkspaceApp {
                     ) {
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(window, cx);
                     cx.stop_propagation();
                 }),
             )

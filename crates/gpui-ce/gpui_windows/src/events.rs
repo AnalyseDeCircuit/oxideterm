@@ -974,7 +974,7 @@ impl WindowsWindowInner {
             return None;
         }
         let mouse = unsafe { input.data.mouse };
-        if mouse.usFlags & MOUSE_MOVE_ABSOLUTE != MOUSE_MOVE_ABSOLUTE
+        if mouse.usFlags.0 & MOUSE_MOVE_ABSOLUTE.0 == 0
             && let Some(mut callback) = self.state.callbacks.input.take()
         {
             callback(PlatformInput::MouseMove(MouseMoveEvent {
