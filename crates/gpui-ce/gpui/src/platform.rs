@@ -871,8 +871,17 @@ pub enum TextInputStateChange {
     ContentChanged,
 }
 
+/// Owns a platform pointer lock; dropping it restores normal pointer movement.
+pub trait PlatformMouseCapture {
+    /// Whether this owner still holds the lock after focus or window changes.
+    fn is_active(&self) -> bool;
+}
+
 #[expect(missing_docs)]
 pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+    fn capture_relative_mouse(&self) -> anyhow::Result<Box<dyn PlatformMouseCapture>> {
+        anyhow::bail!("relative mouse capture is unavailable on this window backend")
+    }
     fn bounds(&self) -> Bounds<Pixels>;
     fn is_maximized(&self) -> bool;
     fn is_minimized(&self) -> bool {

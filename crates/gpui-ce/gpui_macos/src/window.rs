@@ -598,6 +598,8 @@ unsafe fn apply_simple_fullscreen_plan(
 }
 
 struct MacWindowState {
+    mouse_captured: bool,
+    mouse_capture_generation: u64,
     handle: AnyWindowHandle,
     foreground_executor: ForegroundExecutor,
     background_executor: BackgroundExecutor,
@@ -650,6 +652,15 @@ struct MacWindowState {
 }
 
 impl MacWindowState {
+    fn release_mouse_capture(&mut self) {
+        if self.mouse_captured {
+            self.mouse_captured = false;
+            unsafe {
+                core_graphics::display::CGAssociateMouseAndMouseCursorPosition(1);
+            }
+            let _ = core_graphics::display::CGDisplay::main().show_cursor();
+        }
+    }
     fn move_traffic_light(&mut self) {
         if let Some(traffic_light_position) = self.traffic_light_position {
             if self.is_fullscreen() {
@@ -1062,6 +1073,8 @@ impl MacWindow {
                 background_appearance: WindowBackgroundAppearance::Opaque,
                 cursor_style: CursorStyle::Arrow,
                 cursor_visible,
+                mouse_captured: false,
+                mouse_capture_generation: 0,
                 frame_source: None,
                 renderer: renderer::new_renderer(
                     renderer_context,
@@ -1338,9 +1351,32 @@ impl MacWindow {
     }
 }
 
+struct MacMouseCapture(Weak<Mutex<MacWindowState>>, u64);
+
+impl gpui::PlatformMouseCapture for MacMouseCapture {
+    fn is_active(&self) -> bool {
+        self.0.upgrade().is_some_and(|state| {
+            let state = state.lock();
+            state.mouse_captured && state.mouse_capture_generation == self.1
+        })
+    }
+}
+
+impl Drop for MacMouseCapture {
+    fn drop(&mut self) {
+        if let Some(state) = self.0.upgrade() {
+            let mut state = state.lock();
+            if state.mouse_capture_generation == self.1 {
+                state.release_mouse_capture();
+            }
+        }
+    }
+}
+
 impl Drop for MacWindow {
     fn drop(&mut self) {
         let mut this = self.0.lock();
+        this.release_mouse_capture();
         // AppKit closes asynchronously, but GPUI has already removed this window.
         this.closed.store(true, Ordering::Release);
         this.request_frame_callback.take();
@@ -1394,6 +1430,31 @@ fn run_frame_callback(
 }
 
 impl PlatformWindow for MacWindow {
+    fn capture_relative_mouse(&self) -> anyhow::Result<Box<dyn gpui::PlatformMouseCapture>> {
+        let mut state = self.0.lock();
+        anyhow::ensure!(
+            !state.mouse_captured && !state.closed.load(Ordering::Acquire),
+            "window cannot capture the mouse"
+        );
+        anyhow::ensure!(
+            unsafe { state.native_window.isKeyWindow() == YES },
+            "mouse capture requires an active window"
+        );
+        let result = unsafe { core_graphics::display::CGAssociateMouseAndMouseCursorPosition(0) };
+        anyhow::ensure!(result == 0, "platform mouse capture failed ({result})");
+        if let Err(error) = core_graphics::display::CGDisplay::main().hide_cursor() {
+            unsafe {
+                core_graphics::display::CGAssociateMouseAndMouseCursorPosition(1);
+            }
+            anyhow::bail!("platform cursor hiding failed ({error})");
+        }
+        state.mouse_captured = true;
+        state.mouse_capture_generation = state.mouse_capture_generation.wrapping_add(1);
+        Ok(Box::new(MacMouseCapture(
+            Arc::downgrade(&self.0),
+            state.mouse_capture_generation,
+        )))
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.0.as_ref().lock().bounds()
     }
@@ -2724,7 +2785,7 @@ extern "C" fn handle_view_event(this: &Object, _: Sel, native_event: id) {
                 // Synthetic drag is used for selecting long buffer contents while buffer is being scrolled.
                 // External file drag and drop is able to emit its own synthetic mouse events which will conflict
                 // with these ones.
-                if !lock.external_files_dragged {
+                if !lock.external_files_dragged && !lock.mouse_captured {
                     lock.synthetic_drag_counter += 1;
                     let executor = lock.foreground_executor.clone();
                     executor
@@ -2878,11 +2939,14 @@ extern "C" fn window_did_change_screen(this: &Object, _: Sel, _: id) {
 
 extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) {
     let window_state = unsafe { get_window_state(this) };
-    let lock = window_state.lock();
+    let mut lock = window_state.lock();
     if lock.closed.load(Ordering::Acquire) {
         return;
     }
     let is_active = unsafe { lock.native_window.isKeyWindow() == YES };
+    if !is_active {
+        lock.release_mouse_capture();
+    }
 
     // AppKit also unhides the cursor on activation changes, so mirror that here.
     lock.cursor_visible.store(true, Ordering::Relaxed);
@@ -2992,6 +3056,7 @@ extern "C" fn close_window(this: &Object, _: Sel) {
             let window_state = get_window_state(this);
             let mut lock = window_state.as_ref().lock();
             lock.closed.store(true, Ordering::Release);
+            lock.release_mouse_capture();
             lock.request_frame_callback.take();
             lock.frame_source.take();
             (

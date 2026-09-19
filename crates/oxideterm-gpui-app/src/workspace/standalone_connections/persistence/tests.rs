@@ -214,6 +214,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
         ),
     ] {
         let profile = RemoteDesktopConnectionProfile {
+            sasl_credential_ref: None,
             id: "runtime-profile".into(),
             label: "desktop".into(),
             protocol,
@@ -240,6 +241,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
                 kind,
                 host.into(),
                 StandaloneConnectionLaunch::RemoteDesktop {
+                    spice_sasl_password: None,
                     profile,
                     provider: provider_registry
                         .get_for_protocol(protocol)

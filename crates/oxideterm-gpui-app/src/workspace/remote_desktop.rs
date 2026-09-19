@@ -10,6 +10,7 @@ use std::{
 };
 
 use super::forwards;
+use gpui::point;
 
 use oxideterm_gpui_remote_desktop::{
     RemoteDesktopFrameApplyStats, RemoteDesktopMappedPoint, RemoteDesktopViewState,
@@ -19,6 +20,7 @@ use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
 };
 use oxideterm_gpui_ui::{
+    TextInputView,
     context_menu::{
         context_menu_event_boundary, context_menu_item_height_estimate,
         context_menu_separator_height_estimate,
@@ -31,6 +33,7 @@ use oxideterm_gpui_ui::{
         dialog_overlay, modal_body, modal_container, modal_footer, modal_header,
         overlay_content_boundary,
     },
+    text_input,
 };
 use oxideterm_remote_desktop::{
     NegotiatedCapabilities, NegotiatedCapabilityStatus, RemoteDesktopClipboardData,
@@ -44,6 +47,11 @@ use oxideterm_remote_desktop::{
     RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta,
     builtin_preview_provider_registry, builtin_provider_registry,
 };
+use oxideterm_spice::{
+    SpiceConnectOptions, SpiceEndpoint, SpiceFileUploadAction, SpiceFileUploadRuntime,
+    SpiceHelperEvent, SpiceRemoteDesktopAdapter, SpiceSasl, SpiceSecret, SpiceTransportSecurity,
+    SpiceWorkerConfig, SpiceWorkerDelivery, SpiceWorkerRequest, resolve_spice_helper_command,
+};
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use tokio::sync::Notify;
 use zeroize::Zeroizing;
@@ -56,6 +64,7 @@ mod input;
 mod interaction;
 mod public_mcp;
 mod session;
+mod spice;
 mod vendor_files;
 mod view;
 mod worker;
@@ -65,6 +74,7 @@ pub(in crate::workspace) use public_mcp::RemoteDesktopPublicClipboardSnapshot;
 use certificate::*;
 use clipboard::*;
 use input::*;
+use spice::*;
 use vendor_files::*;
 use worker::*;
 
@@ -146,7 +156,6 @@ fn remote_desktop_resolution_label(size: RemoteDesktopSize) -> String {
     format!("{} × {}", size.width, size.height)
 }
 
-#[derive(Debug)]
 pub(super) enum RemoteDesktopWorkerDelivery {
     FrameReady {
         tab_id: TabId,
@@ -165,6 +174,11 @@ pub(super) enum RemoteDesktopWorkerDelivery {
         tab_id: TabId,
         generation: u64,
         message: String,
+    },
+    SpiceEvent {
+        tab_id: TabId,
+        generation: u64,
+        event: SpiceHelperEvent,
     },
 }
 
@@ -382,16 +396,19 @@ impl RemoteDesktopModifierState {
 
 struct RemoteDesktopWorkerOwner {
     request_tx: Option<mpsc::Sender<RemoteDesktopHelperRequest>>,
+    spice_request_tx: Option<mpsc::Sender<SpiceWorkerRequest>>,
     worker_thread: Option<thread::JoinHandle<()>>,
 }
 
 impl RemoteDesktopWorkerOwner {
     fn new(
         request_tx: mpsc::Sender<RemoteDesktopHelperRequest>,
+        spice_request_tx: Option<mpsc::Sender<SpiceWorkerRequest>>,
         worker_thread: thread::JoinHandle<()>,
     ) -> Self {
         Self {
             request_tx: Some(request_tx),
+            spice_request_tx,
             worker_thread: Some(worker_thread),
         }
     }
@@ -410,7 +427,15 @@ impl RemoteDesktopWorkerOwner {
         }
     }
 
+    fn send_spice(&self, request: SpiceWorkerRequest) {
+        if let Some(request_tx) = self.spice_request_tx.as_ref() {
+            let _ = request_tx.send(request);
+        }
+    }
+
     fn shutdown(&mut self) {
+        // SPICE-only tools share this tab's helper lifetime and cannot outlive it.
+        self.spice_request_tx.take();
         if let Some(request_tx) = self.request_tx.take() {
             // Session shutdown and helper replacement release input state before
             // asking the helper to exit cooperatively.
@@ -539,6 +564,9 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     password: Option<RemoteDesktopSecret>,
     credential_prompt_task: Option<gpui::Task<()>>,
     credential_prompt_generation: Option<u64>,
+    spice_sasl_password: Option<SpiceSecret>,
+    spice_mouse_capture: Option<Box<dyn gpui::PlatformMouseCapture>>,
+    spice_motion_remainder: Point<Pixels>,
     certificate_store_path: PathBuf,
     certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
     session_trusted_certificate_fingerprint: Option<String>,
@@ -571,6 +599,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     wheel_pixel_remainder: RemoteDesktopWheelDelta,
     render_diagnostics: RemoteDesktopRenderDiagnostics,
     vnc_files: RemoteDesktopVncFileBrowserState,
+    spice: SpiceSessionRuntimeState,
 }
 
 impl RemoteDesktopSessionEntity {
@@ -613,6 +642,9 @@ impl RemoteDesktopSessionEntity {
             password,
             credential_prompt_task: None,
             credential_prompt_generation: None,
+            spice_sasl_password: None,
+            spice_mouse_capture: None,
+            spice_motion_remainder: point(px(0.0), px(0.0)),
             certificate_store_path,
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
@@ -647,6 +679,7 @@ impl RemoteDesktopSessionEntity {
             wheel_pixel_remainder: remote_desktop_empty_wheel_delta(),
             render_diagnostics: RemoteDesktopRenderDiagnostics::default(),
             vnc_files: RemoteDesktopVncFileBrowserState::default(),
+            spice: SpiceSessionRuntimeState::default(),
         }
     }
 
@@ -902,6 +935,7 @@ mod tests {
             session.worker_wake = Some(worker_wake);
             session.worker = Some(RemoteDesktopWorkerOwner::new(
                 request_tx,
+                None,
                 thread::spawn(|| {}),
             ));
             session.install_release_handler(cx);
@@ -926,9 +960,20 @@ mod tests {
 
     #[gpui::test]
     fn session_window_handoff_resumes_delivery_without_stopping_runtime(cx: &mut TestAppContext) {
+        struct Capture(std::rc::Rc<std::cell::Cell<bool>>);
+        impl gpui::PlatformMouseCapture for Capture {
+            fn is_active(&self) -> bool {
+                self.0.get()
+            }
+        }
+        impl Drop for Capture {
+            fn drop(&mut self) {
+                self.0.set(false);
+            }
+        }
         let first_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
         let second_window = cx.add_window(|_window, _cx| RemoteDesktopTestRoot);
-        let protocol = RemoteDesktopProtocol::Rdp;
+        let protocol = RemoteDesktopProtocol::Spice;
         let profile = preview_remote_desktop_profile(protocol);
         let provider = builtin_preview_provider_registry()
             .unwrap()
@@ -937,6 +982,8 @@ mod tests {
             .unwrap();
         let worker_wake = RemoteDesktopWorkerWake::default();
         let observed_wake = worker_wake.clone();
+        let captured = std::rc::Rc::new(std::cell::Cell::new(true));
+        let (request_tx, request_rx) = mpsc::channel();
         let session = cx.new(|_cx| {
             let mut session = RemoteDesktopSessionEntity::new(
                 TabId(10),
@@ -947,14 +994,29 @@ mod tests {
                 RemoteDesktopFrameDeliverySlot::new(),
                 first_window.into(),
             );
+            session.spice_mouse_capture = Some(Box::new(Capture(captured.clone())));
+            session.worker = Some(RemoteDesktopWorkerOwner::new(
+                request_tx,
+                None,
+                thread::spawn(|| {}),
+            ));
             session.worker_wake = Some(worker_wake);
             session
         });
 
+        session.update(cx, |session, _cx| session.bind_window(first_window.into()));
+        assert!(captured.get());
+        assert!(request_rx.try_recv().is_err());
         session.update(cx, |session, _cx| {
             session.bind_window(second_window.into());
         });
 
+        assert!(!captured.get());
+        assert!(matches!(
+            request_rx.try_recv().unwrap(),
+            RemoteDesktopHelperRequest::ReleaseAllInputs
+        ));
+        assert!(request_rx.try_recv().is_err());
         assert!(observed_wake.take());
         assert!(!observed_wake.is_stopped());
     }

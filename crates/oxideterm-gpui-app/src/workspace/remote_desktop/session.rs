@@ -16,12 +16,16 @@ impl RemoteDesktopSessionEntity {
             drop(session.ssh_tunnel.take());
             drop(session.password.take());
             session.credential_prompt_task.take();
+            drop(session.spice_sasl_password.take());
         })
         .detach();
     }
 
     pub(super) fn bind_window(&mut self, window_handle: AnyWindowHandle) {
         let window_changed = self.window_handle != window_handle;
+        if window_changed && self.spice_mouse_capture.is_some() {
+            self.release_inputs();
+        }
         self.window_handle = window_handle;
         if window_changed && let Some(worker_wake) = self.worker_wake.as_ref() {
             // A wake may have targeted the old window during handoff. Store
@@ -31,6 +35,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn shutdown_worker(&mut self) {
+        self.spice_mouse_capture.take();
         self.reset_vnc_file_browser_connection();
         if let Some(mut worker) = self.worker.take() {
             worker.shutdown();
@@ -118,6 +123,7 @@ impl RemoteDesktopSessionEntity {
         drop(self.ssh_tunnel.take());
         drop(self.password.take());
         self.credential_prompt_task.take();
+        drop(self.spice_sasl_password.take());
         let images = self.state.take_all_images();
         let textures = self.state.take_all_textures();
         for image in images {
@@ -270,18 +276,7 @@ impl RemoteDesktopSessionEntity {
                             changed = true;
                         }
                         event => {
-                            let connection_established = matches!(
-                                &event,
-                                RemoteDesktopHelperEvent::Connected { .. }
-                                    | RemoteDesktopHelperEvent::Status {
-                                        status: RemoteDesktopSessionStatus::Connected,
-                                        ..
-                                    }
-                            );
                             self.state.apply_event(event);
-                            if connection_established {
-                                self.mark_connection_established();
-                            }
                             let retired_images = self.state.take_retired_images();
                             let retired_textures = self.state.take_retired_textures();
                             self.drop_images(retired_images, window, cx);
@@ -303,8 +298,7 @@ impl RemoteDesktopSessionEntity {
                         let _ = self.apply_frame_ready(generation, window, cx);
                     }
                     if self.has_connected {
-                        // A helper transport may be replaced only after this
-                        // tab has proven that its profile can establish.
+                        // Replace a helper transport only after this tab has presented a frame.
                         self.begin_automatic_reconnect(generation, window, cx);
                     } else {
                         self.state
@@ -320,6 +314,19 @@ impl RemoteDesktopSessionEntity {
                         // retrying an unproven profile would hide setup errors.
                         self.shutdown_worker();
                     }
+                    changed = true;
+                }
+                RemoteDesktopWorkerDelivery::SpiceEvent {
+                    tab_id,
+                    generation,
+                    event,
+                } => {
+                    debug_assert_eq!(tab_id, self.tab_id);
+                    if self.worker_generation != generation {
+                        continue;
+                    }
+                    // SPICE-only channel state is consumed by the protocol tool surface.
+                    self.apply_spice_event(event, cx);
                     changed = true;
                 }
             }
@@ -375,6 +382,8 @@ impl RemoteDesktopSessionEntity {
         let apply_started_at = Instant::now();
         let apply_stats = self.state.apply_frame_events(events);
         if self.state.snapshot().status == RemoteDesktopSessionStatus::Connected {
+            // A negotiated transport is not yet a usable desktop. Trust it for automatic
+            // reconnect only after this generation has produced a presentable frame.
             self.mark_connection_established();
         }
         let apply_elapsed = apply_started_at.elapsed();
@@ -436,7 +445,28 @@ impl RemoteDesktopSessionEntity {
         delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     ) -> RemoteDesktopWorkerOwner {
         let tab_id = self.tab_id;
+        let spice_ticket = (profile.protocol == RemoteDesktopProtocol::Spice).then(|| {
+            // The tab retains its zeroizing owner so automatic reconnect can start a fresh helper.
+            SpiceSecret::new(
+                self.password
+                    .as_ref()
+                    .map(RemoteDesktopSecret::expose_secret)
+                    .unwrap_or_default()
+                    .to_string(),
+            )
+        });
+        let spice_sasl_password = self
+            .spice_sasl_password
+            .as_ref()
+            .map(SpiceSecret::duplicate_for_reauthentication);
         let (request_tx, request_rx) = mpsc::channel();
+        let (spice_request_tx, spice_request_rx) =
+            if profile.protocol == RemoteDesktopProtocol::Spice {
+                let (request_tx, request_rx) = mpsc::channel();
+                (Some(request_tx), Some(request_rx))
+            } else {
+                (None, None)
+            };
         let worker_thread = thread::Builder::new()
             .name(format!("remote-desktop-{}", tab_id.0))
             .spawn(move || {
@@ -445,6 +475,8 @@ impl RemoteDesktopSessionEntity {
                     generation,
                     profile,
                     provider,
+                    spice_ticket,
+                    spice_sasl_password,
                     password_available,
                     initial_size,
                     scale_factor,
@@ -452,11 +484,12 @@ impl RemoteDesktopSessionEntity {
                     frame_slot,
                     worker_wake,
                     request_rx,
+                    spice_request_rx,
                     delivery_tx,
                 );
             })
             .expect("failed to start remote desktop worker");
-        RemoteDesktopWorkerOwner::new(request_tx, worker_thread)
+        RemoteDesktopWorkerOwner::new(request_tx, spice_request_tx, worker_thread)
     }
 
     fn start_worker(
@@ -503,6 +536,9 @@ impl RemoteDesktopSessionEntity {
         self.last_monitor_layout = monitor_layout;
         self.last_lock_keys = None;
         self.wheel_pixel_remainder = remote_desktop_empty_wheel_delta();
+        if self.profile.protocol == RemoteDesktopProtocol::Spice {
+            self.spice = SpiceSessionRuntimeState::default();
+        }
         self.state.apply_event(RemoteDesktopHelperEvent::Status {
             status: RemoteDesktopSessionStatus::Connecting,
             message: None,
@@ -563,6 +599,9 @@ impl RemoteDesktopSessionEntity {
         self.resize_generation = Arc::new(AtomicU64::new(0));
         self.last_lock_keys = None;
         self.wheel_pixel_remainder = remote_desktop_empty_wheel_delta();
+        if self.profile.protocol == RemoteDesktopProtocol::Spice {
+            self.spice = SpiceSessionRuntimeState::default();
+        }
         if let Some(previous_worker_wake) = previous_worker_wake {
             previous_worker_wake.stop();
         }
@@ -1465,6 +1504,25 @@ impl WorkspaceApp {
                     snapshot.negotiated_capabilities.as_ref(),
                 )
             });
+        let spice_tools_tooltip = (snapshot.protocol == RemoteDesktopProtocol::Spice).then(|| {
+            let summary = session.spice.activity_summary();
+            let unavailable = self.i18n.t("remote_desktop.spice_unavailable");
+            let usb = summary
+                .usb_available
+                .then(|| summary.usb_devices.to_string())
+                .unwrap_or_else(|| unavailable.clone());
+            let smartcards = summary
+                .smartcard_available
+                .then(|| summary.smartcard_readers.to_string())
+                .unwrap_or(unavailable);
+            self.i18n
+                .t("remote_desktop.spice_tools_summary")
+                .replace("{{usb}}", &usb)
+                .replace("{{smartcards}}", &smartcards)
+                .replace("{{active}}", &summary.active_transfers.to_string())
+                .replace("{{failed}}", &summary.failed_transfers.to_string())
+                .replace("{{bytes}}", &summary.accepted_bytes.to_string())
+        });
         let label = format!(
             "{} · {}:{}",
             session.provider.name, session.profile.endpoint.host, session.profile.endpoint.port
@@ -1542,6 +1600,40 @@ impl WorkspaceApp {
                     )
                 },
             )
+            .when_some(spice_tools_tooltip, |footer, tooltip| {
+                let tooltip_for_move = tooltip;
+                footer.child(
+                    remote_desktop_capability_chip(
+                        &self.tokens,
+                        self.i18n.t("remote_desktop.spice_tools"),
+                    )
+                    .id("remote-desktop-spice-tools")
+                    .cursor_pointer()
+                    .on_mouse_move(
+                        cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                            this.queue_workspace_tooltip(
+                                "remote-desktop-spice-tools",
+                                tooltip_for_move.clone(),
+                                f32::from(event.position.x) + 12.0,
+                                f32::from(event.position.y) + 16.0,
+                                cx,
+                            );
+                        }),
+                    )
+                    .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                        if !*hovered {
+                            this.clear_workspace_tooltip("remote-desktop-spice-tools", cx);
+                        }
+                    }))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.toggle_spice_tools(tab_id, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -2422,6 +2514,7 @@ mod tests {
             session.worker_wake = Some(worker_wake);
             session.worker = Some(RemoteDesktopWorkerOwner::new(
                 request_tx,
+                None,
                 thread::spawn(|| {}),
             ));
             session

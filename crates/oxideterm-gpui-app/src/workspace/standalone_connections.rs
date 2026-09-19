@@ -5,6 +5,7 @@ use crate::workspace::new_connection::MoshConnectionOptions;
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopProviderManifest, RemoteDesktopSecret,
 };
+use oxideterm_spice::SpiceSecret;
 
 pub(super) type StandaloneConnectionId = String;
 
@@ -15,6 +16,7 @@ pub(super) enum StandaloneConnectionKind {
     Serial,
     Rdp,
     Vnc,
+    Spice,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -57,6 +59,7 @@ pub(super) enum StandaloneConnectionLaunch {
         provider: RemoteDesktopProviderManifest,
         // Ephemeral credentials remain zeroizing and are dropped with the runtime record.
         password: Option<RemoteDesktopSecret>,
+        spice_sasl_password: Option<SpiceSecret>,
         ssh_gateway_connection_id: Option<String>,
     },
     SavedRemoteDesktop {
@@ -103,6 +106,7 @@ enum StandaloneReconnectPlan {
         profile: RemoteDesktopConnectionProfile,
         provider: RemoteDesktopProviderManifest,
         password: Option<RemoteDesktopSecret>,
+        spice_sasl_password: Option<SpiceSecret>,
         ssh_gateway_connection_id: Option<String>,
     },
     SavedRemoteDesktop {
@@ -232,12 +236,14 @@ impl WorkspaceApp {
                 profile,
                 provider,
                 password,
+                spice_sasl_password,
                 ssh_gateway_connection_id,
             } => {
                 if ssh_gateway_connection_id.is_some() {
                     self.open_remote_desktop_connection_for_connection(
                         profile,
                         password,
+                        spice_sasl_password,
                         ssh_gateway_connection_id,
                         Some(connection_attempt_id.clone()),
                         window,
@@ -249,6 +255,7 @@ impl WorkspaceApp {
                         provider,
                         title,
                         password,
+                        spice_sasl_password,
                         None,
                         None,
                         Some(connection_attempt_id.clone()),
@@ -420,6 +427,7 @@ impl WorkspaceApp {
                 profile,
                 provider,
                 password,
+                spice_sasl_password,
                 ssh_gateway_connection_id,
             } => StandaloneReconnectPlan::RemoteDesktop {
                 profile: profile.clone(),
@@ -427,6 +435,9 @@ impl WorkspaceApp {
                 password: password
                     .as_ref()
                     .map(RemoteDesktopSecret::duplicate_for_reauthentication),
+                spice_sasl_password: spice_sasl_password
+                    .as_ref()
+                    .map(SpiceSecret::duplicate_for_reauthentication),
                 ssh_gateway_connection_id: ssh_gateway_connection_id.clone(),
             },
             StandaloneConnectionLaunch::SavedRemoteDesktop { profile_id } => {
@@ -729,7 +740,9 @@ impl StandaloneConnectionRegistry {
                 // Reacquire protected authentication data for each future connection attempt.
                 record.launch = StandaloneConnectionLaunch::SavedMosh { profile_id };
             }
-            StandaloneConnectionKind::Rdp | StandaloneConnectionKind::Vnc => {
+            StandaloneConnectionKind::Rdp
+            | StandaloneConnectionKind::Vnc
+            | StandaloneConnectionKind::Spice => {
                 record.launch = StandaloneConnectionLaunch::SavedRemoteDesktop { profile_id };
             }
         }

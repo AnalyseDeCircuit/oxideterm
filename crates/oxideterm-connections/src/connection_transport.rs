@@ -8,6 +8,7 @@ pub const MOSH_DEFAULT_PORT_TEXT: &str = "22";
 pub const TELNET_DEFAULT_PORT_TEXT: &str = "23";
 pub const RDP_DEFAULT_PORT_TEXT: &str = "3389";
 pub const VNC_DEFAULT_PORT_TEXT: &str = "5900";
+pub const SPICE_DEFAULT_PORT_TEXT: &str = "5900";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectionTransport {
@@ -20,6 +21,7 @@ pub enum ConnectionTransport {
     Serial,
     Rdp,
     Vnc,
+    Spice,
     WslGraphics,
 }
 
@@ -39,6 +41,7 @@ pub fn transport_default_port(transport: ConnectionTransport) -> Option<&'static
         ConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
         ConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
         ConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
+        ConnectionTransport::Spice => Some(SPICE_DEFAULT_PORT_TEXT),
         ConnectionTransport::Serial | ConnectionTransport::WslGraphics => None,
     }
 }
@@ -74,7 +77,7 @@ pub fn transport_username_transition(
         {
             Some(TransportUsernameTransition::Set("Administrator"))
         }
-        ConnectionTransport::Vnc
+        ConnectionTransport::Vnc | ConnectionTransport::Spice
             if matches!(
                 previous_transport,
                 ConnectionTransport::Ssh
@@ -119,6 +122,7 @@ fn is_known_transport_default_port(port: &str) -> bool {
         TELNET_DEFAULT_PORT_TEXT,
         RDP_DEFAULT_PORT_TEXT,
         VNC_DEFAULT_PORT_TEXT,
+        SPICE_DEFAULT_PORT_TEXT,
     ]
     .contains(&port)
 }

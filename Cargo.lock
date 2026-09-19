@@ -7373,6 +7373,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxide-spice-helper-protocol"
+version = "0.1.1"
+source = "git+https://github.com/AnalyseDeCircuit/OxideSpice?rev=c590b29678a6fddcbddabe798cacedece21763da#c590b29678a6fddcbddabe798cacedece21763da"
+dependencies = [
+ "oxide-spice-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "zeroize",
+]
+
+[[package]]
+name = "oxide-spice-protocol"
+version = "0.1.1"
+source = "git+https://github.com/AnalyseDeCircuit/OxideSpice?rev=c590b29678a6fddcbddabe798cacedece21763da#c590b29678a6fddcbddabe798cacedece21763da"
+dependencies = [
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "oxideterm-acp-adapter"
 version = "2.0.30"
 dependencies = [
@@ -7709,6 +7729,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
+ "crossbeam-channel",
  "embed-resource",
  "fs2",
  "futures-util",
@@ -7767,6 +7788,7 @@ dependencies = [
  "oxideterm-settings-model",
  "oxideterm-sftp",
  "oxideterm-skills",
+ "oxideterm-spice",
  "oxideterm-ssh",
  "oxideterm-ssh-launch",
  "oxideterm-terminal",
@@ -8368,6 +8390,19 @@ dependencies = [
  "serde_yaml",
  "sha2 0.10.9",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "oxideterm-spice"
+version = "2.0.30"
+dependencies = [
+ "crossbeam-channel",
+ "oxide-spice-helper-protocol",
+ "oxideterm-pcm-audio",
+ "oxideterm-remote-desktop",
+ "tempfile",
+ "thiserror 2.0.20",
+ "zeroize",
 ]
 
 [[package]]

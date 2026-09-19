@@ -101,6 +101,7 @@ pub(super) fn strip_remote_desktop_credential_refs(
     // Protected-store identifiers are device-local and must never cross the cloud boundary.
     for profile in &mut snapshot.records {
         profile.credential_ref = None;
+        profile.sasl_credential_ref = None;
     }
 }
 
@@ -111,18 +112,22 @@ pub(super) fn preserve_local_remote_desktop_credential_refs(
     let local_refs = connection_store
         .remote_desktop_profiles()
         .iter()
-        .filter_map(|profile| {
-            profile
-                .credential_ref
-                .as_ref()
-                .map(|credential_ref| (profile.id.as_str(), credential_ref))
+        .map(|profile| {
+            (
+                profile.id.as_str(),
+                (
+                    profile.credential_ref.as_ref(),
+                    profile.sasl_credential_ref.as_ref(),
+                ),
+            )
         })
         .collect::<BTreeMap<_, _>>();
     // Applying remote metadata must not erase an existing device-local protected-store binding.
     for profile in &mut snapshot.records {
-        profile.credential_ref = local_refs
-            .get(profile.id.as_str())
-            .map(|credential_ref| (*credential_ref).clone());
+        if let Some((credential_ref, sasl_credential_ref)) = local_refs.get(profile.id.as_str()) {
+            profile.credential_ref = credential_ref.cloned();
+            profile.sasl_credential_ref = sasl_credential_ref.cloned();
+        }
     }
 }
 

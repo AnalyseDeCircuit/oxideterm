@@ -626,6 +626,27 @@ These aliases are migration compatibility layers, not new GPUI abstractions.
 Remove either alias only after all OxideTerm call sites have moved to the
 GPUI-CE API and the full workspace builds without it.
 
+## Relative Mouse Capture
+
+`PlatformWindow::capture_relative_mouse` and its `Window` wrapper return an
+owned `PlatformMouseCapture` guard. Dropping the guard releases capture;
+native focus loss and window teardown also release it. Capture generations
+prevent an obsolete guard from releasing a newer capture.
+
+`MouseMoveEvent::relative_delta` carries native relative motion independently
+of desktop scaling. macOS uses cursor disassociation and event deltas, Windows
+uses Raw Input and cursor confinement, Wayland uses the relative-pointer and
+pointer-constraints protocols, and X11 uses XI2 raw motion with a confined grab.
+Unsupported platforms return an error rather than simulating relative input
+from absolute coordinates. Preserve the event field in synthetic input too.
+
+SPICE mode negotiation, capture initiation, release shortcuts and remote input
+forwarding remain owned by the application. Windows and macOS application
+checks and Linux backend compilation have passed. Native GUI capture behavior
+still requires platform verification before release. The application rejects
+server-mode pointer actions until capture is active and releases capture when
+a desktop session moves to another window.
+
 ## Product-Owned Remote Desktop Integration
 
 Remote desktop behavior belongs to OxideTerm product crates and must not be
