@@ -641,9 +641,11 @@ Unsupported platforms return an error rather than simulating relative input
 from absolute coordinates. Preserve the event field in synthetic input too.
 
 SPICE mode negotiation, capture initiation, release shortcuts and remote input
-forwarding remain owned by the application. These implementations have passed
-the macOS application compile check; Windows/Linux compilation and native GUI
-capture behavior still require platform verification before release.
+forwarding remain owned by the application. Windows and macOS application
+checks and Linux backend compilation have passed. Native GUI capture behavior
+still requires platform verification before release. The application rejects
+server-mode pointer actions until capture is active and releases capture when
+a desktop session moves to another window.
 
 ## Product-Owned Remote Desktop Integration
 
