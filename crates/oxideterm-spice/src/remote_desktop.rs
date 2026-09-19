@@ -544,7 +544,6 @@ fn spice_set1_scancode(key: &RemoteDesktopKey) -> Option<u32> {
     }
 }
 
-
 fn normalize_key_code(code: &str) -> String {
     if matches!(code, "\n" | "\r") {
         return "enter".to_string();
