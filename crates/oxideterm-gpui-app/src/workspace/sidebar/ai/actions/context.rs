@@ -57,35 +57,38 @@ impl WorkspaceApp {
     ) -> Option<String> {
         let mut parts = Vec::new();
         parts.push("## Environment".to_string());
-        parts.push(format!("- Local OS: {}", ai_local_os_label()));
+        parts.push(format!(
+            "- OxideTerm host OS (local application only): {}",
+            ai_local_os_label()
+        ));
         if let Some(tab) = self.active_tab(cx) {
             parts.push(format!("- Active tab: {}", ai_tab_kind_label(&tab.kind)));
         }
         if let Some(cwd) = self.ai_active_cwd(cx) {
-            parts.push(format!("- Current working directory: {cwd}"));
+            parts.push(format!(
+                "- Active terminal CWD (inferred; verify on the selected target): {cwd}"
+            ));
         }
-        match self.active_tab(cx).map(|tab| &tab.kind) {
-            Some(TabKind::SshTerminal) => {
-                if let Some((_, node_id)) = self.ai_active_ssh_session(cx)
-                    && let Some(node) = self.ssh_nodes.get(&node_id)
-                {
-                    parts.push(format!(
-                        "- Terminal: SSH to {}@{}:{}",
-                        node.endpoint.username, node.endpoint.host, node.endpoint.port
-                    ));
-                }
+        let terminal_kind = self.active_pane_id(cx).and_then(|pane_id| {
+            self.tab_host.read(cx).panes().get(&pane_id)
+                .map(|pane| pane.read(cx).session_kind())
+        });
+        if let Some(kind) = terminal_kind {
+            parts.push(format!(
+                "- Active terminal: {}",
+                ai_terminal_environment(kind, ai_local_os_label())
+            ));
+            if kind == oxideterm_terminal::TerminalSessionKind::SshPty
+                && let Some((_, node_id)) = self.ai_active_ssh_session(cx)
+                && let Some(node) = self.ssh_nodes.get(&node_id)
+            {
+                parts.push(format!(
+                    "- Active SSH endpoint: {}@{}:{}",
+                    node.endpoint.username, node.endpoint.host, node.endpoint.port
+                ));
             }
-            Some(TabKind::LocalTerminal) => {
-                if self.ai_active_terminal_session_id(cx).is_some() {
-                    parts.push(format!("- Terminal: Local ({})", ai_local_os_label()));
-                }
-            }
-            Some(TabKind::MoshTerminal) => {
-                if self.ai_active_terminal_session_id(cx).is_some() {
-                    parts.push("- Terminal: Mosh (remote OS unknown)".to_string());
-                }
-            }
-            _ => parts.push("- Terminal: No active terminal".to_string()),
+        } else {
+            parts.push("- Terminal: No active terminal".to_string());
         }
         parts.push(String::new());
         parts.push("## Runtime State".to_string());
@@ -579,6 +582,20 @@ pub(in crate::workspace) fn ai_local_os_label() -> &'static str {
     }
 }
 
+fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_os: &str) -> String {
+    use oxideterm_terminal::TerminalSessionKind;
+    // Telnet and serial panes share the local tab kind but run on another target.
+    match kind {
+        TerminalSessionKind::LocalPty => format!("Local ({local_os}; shell unverified)"),
+        TerminalSessionKind::SshPty => "SSH (remote OS and shell unverified)".to_string(),
+        TerminalSessionKind::Mosh => "Mosh (remote OS and shell unverified)".to_string(),
+        TerminalSessionKind::Telnet => "Telnet (remote OS and shell unverified)".to_string(),
+        TerminalSessionKind::Serial => {
+            "Serial device (OS and command interface unverified)".to_string()
+        }
+    }
+}
+
 pub(in crate::workspace) fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
     match kind {
         TabKind::LocalTerminal => "local_terminal",
@@ -634,5 +651,24 @@ impl WorkspaceApp {
         let window = oxideterm_ai::model_context_window(settings.active_model.as_deref().unwrap_or_default(),
             &settings.model_context_windows, settings.active_provider_id.as_deref(), &settings.user_context_windows);
         oxideterm_ai::agent::ambient_context_budget(window.max(1) as usize)
+    }
+}
+
+#[cfg(test)]
+mod terminal_environment_tests {
+    use super::ai_terminal_environment;
+    use oxideterm_terminal::TerminalSessionKind;
+
+    #[test]
+    fn only_local_pty_inherits_the_application_host_os() {
+        for (kind, expected) in [
+            (TerminalSessionKind::LocalPty, "Local (macOS; shell unverified)"),
+            (TerminalSessionKind::SshPty, "SSH (remote OS and shell unverified)"),
+            (TerminalSessionKind::Mosh, "Mosh (remote OS and shell unverified)"),
+            (TerminalSessionKind::Telnet, "Telnet (remote OS and shell unverified)"),
+            (TerminalSessionKind::Serial, "Serial device (OS and command interface unverified)"),
+        ] {
+            assert_eq!(ai_terminal_environment(kind, "macOS"), expected);
+        }
     }
 }

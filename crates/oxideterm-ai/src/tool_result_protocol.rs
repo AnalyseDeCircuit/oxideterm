@@ -95,7 +95,12 @@ pub fn ai_tool_result_model_content(result: &AiExecutedToolResult) -> String {
     if let Some(error) = error {
         payload.insert("error".to_string(), error);
     }
-    for key in ["recoverable", "waitingForInput"] {
+    for key in [
+        "recoverable",
+        "waitingForInput",
+        "inputWaitReason",
+        "tuiState",
+    ] {
         if let Some(value) = envelope.get(key) {
             payload.insert(key.to_string(), value.clone());
         }

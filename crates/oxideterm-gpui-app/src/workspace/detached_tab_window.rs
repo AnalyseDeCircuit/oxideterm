@@ -138,16 +138,18 @@ impl Render for DetachedTabWindow {
                         return true;
                     }
                     if !session.app_lock.locked
-                        && let Some(pane_id) = session.tab_by_id(detached.tab_id, cx).and_then(|tab| tab.active_pane_id)
+                        && let Some(pane_id) = session
+                            .tab_by_id(detached.tab_id, cx)
+                            .and_then(|tab| tab.active_pane_id)
                     {
                         let input = session.active_ime_target_for_window(window_id, cx);
-                        if input.is_none_or(|target| matches!(target, super::ime::WorkspaceImeTarget::Search(_)))
-                            && crate::keybindings::keystroke_matches_action(
-                                &event.keystroke,
-                                "terminal.search",
-                                &session.settings_store.settings().keybindings.overrides,
-                            )
-                        {
+                        if input.is_none_or(|target| {
+                            matches!(target, super::ime::WorkspaceImeTarget::Search(_))
+                        }) && crate::keybindings::keystroke_matches_action(
+                            &event.keystroke,
+                            "terminal.search",
+                            &session.settings_store.settings().keybindings.overrides,
+                        ) {
                             session.open_search_for_pane(pane_id, window, cx);
                             return true;
                         }

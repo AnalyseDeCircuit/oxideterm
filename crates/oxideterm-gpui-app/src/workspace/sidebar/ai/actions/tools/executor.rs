@@ -1691,6 +1691,13 @@ impl AiOrchestratorRuntimeSnapshot {
         envelope.insert("ok".to_string(), serde_json::json!(result.ok));
         envelope.insert("summary".to_string(), serde_json::json!(safe_summary));
         envelope.insert("output".to_string(), serde_json::json!(output));
+        // Keep compact interaction facts available when model formatting drops
+        // the full UI-only data payload (including the terminal screen).
+        for key in ["inputWaitReason", "tuiState"] {
+            if let Some(value) = safe_data.get(key).and_then(serde_json::Value::as_str) {
+                envelope.insert(key.to_string(), serde_json::json!(value));
+            }
+        }
         // Tauri omits `data` when an action did not provide it. Preserve that
         // shape so models do not learn data=null as a meaningful result.
         if !safe_data.is_null() && !data_is_internal_waiting_hint {
