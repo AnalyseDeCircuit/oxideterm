@@ -789,6 +789,9 @@ impl MacWindowState {
 
     fn start_display_link(&mut self) {
         self.stop_display_link();
+        if self.closed.load(Ordering::Acquire) {
+            return;
+        }
         unsafe {
             if !self
                 .native_window
@@ -1338,10 +1341,13 @@ impl MacWindow {
 impl Drop for MacWindow {
     fn drop(&mut self) {
         let mut this = self.0.lock();
+        // AppKit closes asynchronously, but GPUI has already removed this window.
+        this.closed.store(true, Ordering::Release);
+        this.request_frame_callback.take();
+        this.frame_source.take();
         this.renderer.destroy();
         let window = this.native_window;
         let sheet_parent = this.sheet_parent.take();
-        this.frame_source.take();
         unsafe {
             this.native_window.setDelegate_(nil);
         }
@@ -1368,6 +1374,22 @@ impl Drop for MacWindow {
 fn if_window_not_closed(closed: Arc<AtomicBool>, f: impl FnOnce()) {
     if !closed.load(Ordering::Acquire) {
         f();
+    }
+}
+
+fn run_frame_callback(
+    mut callback: Box<dyn FnMut(RequestFrameOptions)>,
+    closed: &AtomicBool,
+) -> Option<Box<dyn FnMut(RequestFrameOptions)>> {
+    if closed.load(Ordering::Acquire) {
+        return None;
+    }
+    callback(Default::default());
+    // The callback can remove its own window; do not restore its captures after teardown.
+    if closed.load(Ordering::Acquire) {
+        None
+    } else {
+        Some(callback)
     }
 }
 
@@ -2857,6 +2879,9 @@ extern "C" fn window_did_change_screen(this: &Object, _: Sel, _: id) {
 extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) {
     let window_state = unsafe { get_window_state(this) };
     let lock = window_state.lock();
+    if lock.closed.load(Ordering::Acquire) {
+        return;
+    }
     let is_active = unsafe { lock.native_window.isKeyWindow() == YES };
 
     // AppKit also unhides the cursor on activation changes, so mirror that here.
@@ -2902,13 +2927,19 @@ extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) 
     if selector == sel!(windowDidBecomeKey:) && is_active {
         let window_state = unsafe { get_window_state(this) };
         let mut lock = window_state.lock();
+        if lock.closed.load(Ordering::Acquire) {
+            return;
+        }
 
         if lock.activated_least_once {
-            if let Some(mut callback) = lock.request_frame_callback.take() {
+            if let Some(callback) = lock.request_frame_callback.take() {
+                let closed = lock.closed.clone();
                 lock.renderer.set_presents_with_transaction(true);
                 lock.stop_display_link();
                 drop(lock);
-                callback(Default::default());
+                let Some(callback) = run_frame_callback(callback, &closed) else {
+                    return;
+                };
 
                 let mut lock = window_state.lock();
                 lock.request_frame_callback = Some(callback);
@@ -2923,6 +2954,9 @@ extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) 
     executor
         .spawn(async move {
             let mut lock = window_state.as_ref().lock();
+            if lock.closed.load(Ordering::Acquire) {
+                return;
+            }
             if is_active {
                 lock.move_traffic_light();
             }
@@ -2930,7 +2964,10 @@ extern "C" fn window_did_change_key_status(this: &Object, selector: Sel, _: id) 
             if let Some(mut callback) = lock.activate_callback.take() {
                 drop(lock);
                 callback(is_active);
-                window_state.lock().activate_callback = Some(callback);
+                let mut lock = window_state.lock();
+                if !lock.closed.load(Ordering::Acquire) {
+                    lock.activate_callback = Some(callback);
+                }
             };
         })
         .detach();
@@ -2955,6 +2992,8 @@ extern "C" fn close_window(this: &Object, _: Sel) {
             let window_state = get_window_state(this);
             let mut lock = window_state.as_ref().lock();
             lock.closed.store(true, Ordering::Release);
+            lock.request_frame_callback.take();
+            lock.frame_source.take();
             (
                 lock.close_callback.take(),
                 lock.simple_fullscreen_state.take(),
@@ -3025,11 +3064,17 @@ extern "C" fn set_frame_size(this: &Object, _: Sel, size: NSSize) {
 extern "C" fn display_layer(this: &Object, _: Sel, _: id) {
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.lock();
-    if let Some(mut callback) = lock.request_frame_callback.take() {
+    if lock.closed.load(Ordering::Acquire) {
+        return;
+    }
+    if let Some(callback) = lock.request_frame_callback.take() {
+        let closed = lock.closed.clone();
         lock.renderer.set_presents_with_transaction(true);
         lock.stop_display_link();
         drop(lock);
-        callback(Default::default());
+        let Some(callback) = run_frame_callback(callback, &closed) else {
+            return;
+        };
 
         let mut lock = window_state.lock();
         lock.request_frame_callback = Some(callback);
@@ -3043,10 +3088,11 @@ extern "C" fn step(view: *mut c_void) {
     let window_state = unsafe { get_window_state(&*view) };
     let mut lock = window_state.lock();
 
-    if let Some(mut callback) = lock.request_frame_callback.take() {
+    if let Some(callback) = lock.request_frame_callback.take() {
+        let closed = lock.closed.clone();
         drop(lock);
-        callback(Default::default());
-        window_state.lock().request_frame_callback = Some(callback);
+        let callback = run_frame_callback(callback, &closed);
+        window_state.lock().request_frame_callback = callback;
     }
 }
 
@@ -3623,6 +3669,37 @@ extern "C" fn toggle_tab_bar(this: &Object, _sel: Sel, _id: id) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::rc::Rc;
+
+    #[test]
+    fn closing_during_a_frame_releases_the_callback_instead_of_restoring_it() {
+        let closed = Arc::new(AtomicBool::new(false));
+        let owner = Rc::new(());
+        let weak_owner = Rc::downgrade(&owner);
+        let callback_closed = closed.clone();
+        let callback = Box::new(move |_| {
+            let _keep_alive = &owner;
+            callback_closed.store(true, Ordering::Release);
+        });
+
+        assert!(run_frame_callback(callback, &closed).is_none());
+        assert!(weak_owner.upgrade().is_none());
+
+        let late_callback = Box::new(|_| panic!("a closed window must not receive another frame"));
+        assert!(run_frame_callback(late_callback, &closed).is_none());
+    }
+
+    #[test]
+    fn an_open_window_keeps_its_frame_callback_for_subsequent_frames() {
+        let closed = AtomicBool::new(false);
+        let frames = Rc::new(Cell::new(0));
+        let callback_frames = frames.clone();
+        let callback = Box::new(move |_| callback_frames.set(callback_frames.get() + 1));
+
+        let callback = run_frame_callback(callback, &closed).unwrap();
+        let _callback = run_frame_callback(callback, &closed).unwrap();
+        assert_eq!(frames.get(), 2);
+    }
 
     #[test]
     fn display_id_for_screen_returns_none_for_null_screen() {

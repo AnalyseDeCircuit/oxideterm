@@ -359,6 +359,22 @@ results or entering later dispatch work:
 These are semantic lock-scope safeguards migrated from the previous GPUI vendor tree. Do not
 collapse the bindings back into `if let` scrutinee temporaries during cleanup.
 
+### macOS frame callbacks during window teardown
+
+`crates/gpui-ce/gpui_macos/src/window.rs` marks the window closed and disposes of its
+frame source before renderer destruction or asynchronous AppKit close. The native close
+entry point also stops the frame source immediately. Display-link startup must reject
+closed windows.
+
+Display-link ticks, layer redraws, and synchronous activation redraws share a callback
+runner that checks closure before and after invoking application code. A callback may
+remove its own window: in that case, discard it and do not access the renderer or restart
+the frame source. Deferred activation work follows the same closed-window boundary.
+Regression tests cover closure during a frame, release of callback captures, late frame
+delivery, and continued callback reuse for an open window.
+
+Preserve these teardown boundaries across vendor refreshes (see #599).
+
 ### Windows DirectWrite callback and glyph readback safety
 
 `crates/gpui-ce/gpui_windows/src/direct_write.rs` carries the Windows text-rendering hardening
