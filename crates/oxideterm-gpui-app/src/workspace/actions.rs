@@ -325,9 +325,10 @@ impl WorkspaceApp {
         if self.active_tab_id(cx) != Some(tab.id) && !host.is_outside_main_window(tab.id) {
             return None;
         }
-        let owner = host
-            .detached_window_handle(tab.id)
-            .or_else(|| self.window_registry.handle_for_role(window_registry::WindowRole::Main));
+        let owner = host.detached_window_handle(tab.id).or_else(|| {
+            self.window_registry
+                .handle_for_role(window_registry::WindowRole::Main)
+        });
         // A remembered search focus in another native window cannot claim this window's keys.
         if cx
             .active_window()
@@ -342,9 +343,15 @@ impl WorkspaceApp {
         let tab_id = self
             .tabs(cx)
             .iter()
-            .find(|tab| tab.root_pane.as_ref().is_some_and(|root| root.contains_pane(pane_id)))
+            .find(|tab| {
+                tab.root_pane
+                    .as_ref()
+                    .is_some_and(|root| root.contains_pane(pane_id))
+            })
             .map(|tab| tab.id);
-        let Some(tab_id) = tab_id else { return; };
+        let Some(tab_id) = tab_id else {
+            return;
+        };
         self.blur_text_inputs(cx);
         self.tab_host
             .update(cx, |host, _| host.set_active_pane(Some(tab_id), pane_id));
@@ -409,8 +416,12 @@ impl WorkspaceApp {
         }
         if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
             let status = pane.read(cx).search_status();
-            let status = if !reset_match && status.query==query {status} else {
-                pane.update(cx, |pane,cx|pane.set_search_query(query,search.active_match,cx))
+            let status = if !reset_match && status.query == query {
+                status
+            } else {
+                pane.update(cx, |pane, cx| {
+                    pane.set_search_query(query, search.active_match, cx)
+                })
             };
             search.sync_from_terminal(status);
         }
@@ -2980,10 +2991,14 @@ impl WorkspaceApp {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, window, cx| {
-                                    let restore_focus=this.search.focused==Some(pane_id) || this.active_pane_id(cx)==Some(pane_id);
+                                    let restore_focus = this.search.focused == Some(pane_id)
+                                        || this.active_pane_id(cx) == Some(pane_id);
                                     this.hide_search(pane_id, cx);
-                                    if restore_focus && let Some(pane)=this.tab_host.read(cx).panes().get(&pane_id).cloned() {
-                                        pane.update(cx,|pane,cx|pane.focus(window,cx));
+                                    if restore_focus
+                                        && let Some(pane) =
+                                            this.tab_host.read(cx).panes().get(&pane_id).cloned()
+                                    {
+                                        pane.update(cx, |pane, cx| pane.focus(window, cx));
                                     }
                                     cx.stop_propagation();
                                 }),

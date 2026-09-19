@@ -835,9 +835,13 @@ impl WorkspaceApp {
                         active && self.ai_entity.read(cx).terminal_inline_panel().open,
                         |pane_frame| pane_frame.child(self.render_terminal_ai_inline_panel(cx)),
                     )
-                    .when(self.search.panes.get(pane_id).is_some_and(|search|search.visible), |frame| {
-                        frame.child(self.render_search_bar(*pane_id, cx))
-                    })
+                    .when(
+                        self.search
+                            .panes
+                            .get(pane_id)
+                            .is_some_and(|search| search.visible),
+                        |frame| frame.child(self.render_search_bar(*pane_id, cx)),
+                    )
                     .into_any_element()
             }
             PaneNode::Group {

@@ -146,9 +146,7 @@ impl WorkspaceApp {
                     self.spawn_sftp_pane_remote_mutation(
                         pane,
                         move |sftp| {
-                            Box::pin(async move {
-                                sftp.rename(&old_path, &new_path).await
-                            })
+                            Box::pin(async move { sftp.rename(&old_path, &new_path).await })
                         },
                         Some(toast),
                         cx,
@@ -212,9 +210,7 @@ impl WorkspaceApp {
                             };
                             self.spawn_remote_sftp_mutation(
                                 move |sftp| {
-                                    Box::pin(async move {
-                                        sftp.rename(&old_path, &new_path).await
-                                    })
+                                    Box::pin(async move { sftp.rename(&old_path, &new_path).await })
                                 },
                                 Some(toast),
                                 cx,
@@ -242,11 +238,7 @@ impl WorkspaceApp {
                     };
                     self.spawn_sftp_pane_remote_mutation(
                         pane,
-                        move |sftp| {
-                            Box::pin(async move {
-                                sftp.mkdir(&path).await
-                            })
-                        },
+                        move |sftp| Box::pin(async move { sftp.mkdir(&path).await }),
                         Some(toast),
                         cx,
                     );
@@ -292,11 +284,7 @@ impl WorkspaceApp {
                                 error_title: self.i18n.t("sftp.toast.create_folder_failed"),
                             };
                             self.spawn_remote_sftp_mutation(
-                                move |sftp| {
-                                    Box::pin(async move {
-                                        sftp.mkdir(&path).await
-                                    })
-                                },
+                                move |sftp| Box::pin(async move { sftp.mkdir(&path).await }),
                                 Some(toast),
                                 cx,
                             );
@@ -419,9 +407,8 @@ impl WorkspaceApp {
                                     // Tauri nodeSftpDeleteRecursive returns the
                                     // recursive item count; keep the success
                                     // toast tied to the same backend count.
-                                    deleted = deleted.saturating_add(
-                                        sftp.delete_recursive(&path).await?,
-                                    );
+                                    deleted =
+                                        deleted.saturating_add(sftp.delete_recursive(&path).await?);
                                 }
                                 Ok(deleted)
                             }

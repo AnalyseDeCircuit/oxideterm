@@ -15,7 +15,6 @@ use oxideterm_editor_core::utf16::{
     word_range_for_utf16_offset,
 };
 
-use super::{WorkspaceApp, PaneId};
 use super::connection_monitor::HostToolsTextInput;
 use super::file_manager::FileManagerInput;
 use super::forwards::ForwardInput;
@@ -30,6 +29,7 @@ use super::quick_commands::{
 use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
 use super::terminal_git::TerminalGitPanelSection;
+use super::{PaneId, WorkspaceApp};
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
@@ -1295,11 +1295,24 @@ impl WorkspaceApp {
         let target = self.active_ime_target(cx)?;
         let knowledge = self.knowledge_workspace.read(cx);
         let owner = match target {
-            WorkspaceImeTarget::Search(pane_id) => self.tabs(cx).iter()
-                .find(|tab|tab.root_pane.as_ref().is_some_and(|root|root.contains_pane(pane_id)))
-                .and_then(|tab| self.tab_host.read(cx).detached_window_handle(tab.id)
-                    .or_else(|| self.window_registry.handle_for_role(super::window_registry::WindowRole::Main)))
-                .map(|handle|handle.window_id()),
+            WorkspaceImeTarget::Search(pane_id) => self
+                .tabs(cx)
+                .iter()
+                .find(|tab| {
+                    tab.root_pane
+                        .as_ref()
+                        .is_some_and(|root| root.contains_pane(pane_id))
+                })
+                .and_then(|tab| {
+                    self.tab_host
+                        .read(cx)
+                        .detached_window_handle(tab.id)
+                        .or_else(|| {
+                            self.window_registry
+                                .handle_for_role(super::window_registry::WindowRole::Main)
+                        })
+                })
+                .map(|handle| handle.window_id()),
             WorkspaceImeTarget::KnowledgeSearch => knowledge.navigator_search_window,
             WorkspaceImeTarget::KnowledgeRename => {
                 knowledge.rename.as_ref().map(|rename| rename.window_id)
