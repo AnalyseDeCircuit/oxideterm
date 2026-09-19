@@ -192,7 +192,7 @@ pub(super) async fn connect_native_rdp(
         input_tx.clone(),
         output_tx.clone(),
         config.graphics_epoch,
-        config.session_options,
+        config.session_options.clone(),
         config.monitor_layout.clone(),
     );
     let should_upgrade = {
