@@ -335,6 +335,27 @@ ownership rules in `crates/gpui-ce/gpui/src/elements/div.rs` and
 Without this patch, one macOS trackpad event can move both a child and its scrollable ancestor,
 which makes the GPUI-CE build feel substantially more sensitive than the previous GPUI build.
 
+### SVG font sources and character fallback
+
+`crates/gpui-ce/gpui/src/svg_renderer.rs` loads only the font asset paths returned
+by `AssetSource::list("fonts")`. The application supplies JetBrainsMono and
+MapleMono regular faces through `NativeAssets`; MapleMono uses the existing
+decompression path. Do not restore hard-coded IBM Plex Sans or Lilex asset
+requirements. Missing generic families resolve to available faces, while valid
+system mappings remain intact. The enriched database is initialized once per
+renderer and shared by its clones.
+
+Emoji retain their platform-specific selection. Other missing characters search
+available system and application faces with matching text metrics preferred,
+preserving database order within each matching group. Previously tried
+fonts and fonts without the requested glyph are excluded. Successful fallback
+uses debug logging; asset listing/loading failures and usvg's unresolved-glyph
+warnings remain visible.
+
+`crates/gpui-ce/gpui_macos/src/text_system.rs` logs successful PostScript-name
+deduplication at debug level. Invalid-font and missing-required-glyph diagnostics
+remain warnings.
+
 ### Zero-area SVG paint semantics
 
 `crates/gpui-ce/gpui/src/window.rs` treats SVG bounds that become empty after device-pixel

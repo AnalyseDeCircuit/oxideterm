@@ -1,7 +1,20 @@
 use std::borrow::Cow;
 
+use crate::bundled_fonts::BundledTerminalFace;
 use anyhow::Result;
 use gpui::{AssetSource, SharedString};
+
+// SVG has its own font database; only regular faces are needed for its bundled fallbacks.
+const SVG_FONTS: &[(&str, BundledTerminalFace)] = &[
+    (
+        "fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Subset-Regular.ttf",
+        BundledTerminalFace::JetBrainsRegular,
+    ),
+    (
+        "fonts/MapleMono/MapleMono-NF-CN-Subset-Regular.ttf",
+        BundledTerminalFace::MapleRegular,
+    ),
+];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum LucideIcon {
@@ -381,6 +394,9 @@ pub(crate) struct NativeAssets;
 
 impl AssetSource for NativeAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if let Some((_, face)) = SVG_FONTS.iter().find(|(name, _)| *name == path) {
+            return face.load().map(|bytes| Some(Cow::Owned(bytes)));
+        }
         if let Some(bytes) = oxideterm_gpui_ui::file_icons::load_asset(path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
@@ -521,6 +537,12 @@ impl AssetSource for NativeAssets {
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        if path == "fonts" {
+            return Ok(SVG_FONTS
+                .iter()
+                .map(|(path, _)| SharedString::from(*path))
+                .collect());
+        }
         if path == "lucide" {
             return Ok([
                 "activity.svg",
@@ -651,6 +673,53 @@ impl AssetSource for NativeAssets {
             .collect());
         }
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn svg_font_assets_are_loadable_and_keep_latin_and_cjk_coverage() {
+        let assets = NativeAssets;
+        let paths = assets.list("fonts").unwrap();
+        let expected = [
+            (
+                "fonts/JetBrainsMono/JetBrainsMonoNerdFontMono-Subset-Regular.ttf",
+                oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY,
+                'A',
+            ),
+            (
+                "fonts/MapleMono/MapleMono-NF-CN-Subset-Regular.ttf",
+                oxideterm_settings::MAPLE_MONO_SUBSET_FAMILY,
+                '中',
+            ),
+        ];
+        assert_eq!(
+            paths
+                .iter()
+                .map(|path| path.as_ref())
+                .collect::<Vec<&str>>(),
+            expected
+                .iter()
+                .map(|(path, _, _)| *path)
+                .collect::<Vec<_>>()
+        );
+        for (path, family, glyph) in expected {
+            let data = assets.load(path).unwrap().unwrap();
+            let face = ttf_parser::Face::parse(&data, 0).unwrap();
+            assert!(
+                face.names()
+                    .into_iter()
+                    .any(|name| name.name_id == ttf_parser::name_id::FAMILY
+                        && name.to_string().as_deref() == Some(family))
+            );
+            assert!(
+                face.glyph_index(glyph).is_some(),
+                "{family} must cover {glyph}"
+            );
+        }
     }
 }
 

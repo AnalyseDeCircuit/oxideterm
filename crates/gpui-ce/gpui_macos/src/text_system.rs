@@ -363,7 +363,7 @@ impl MacTextSystemState {
             // `font_ids_by_postscript_name` would skip every already-registered
             // font and leave the second call's `font_ids` empty.
             if !postscript_names_seen.insert(postscript_name.clone()) {
-                log::warn!(
+                log::debug!(
                     "skipping duplicate font {:?} with PostScript name {:?} \
                      in family {:?}",
                     font.full_name(),
