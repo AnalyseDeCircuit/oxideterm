@@ -452,6 +452,7 @@ mod tests {
             username: None,
             domain: None,
             credential_ref: None,
+            sasl_credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
         }
@@ -543,6 +544,7 @@ mod tests {
                 disable_graphics_pipeline: true,
             },
             vnc: crate::RemoteDesktopVncOptions::default(),
+            spice: crate::RemoteDesktopSpiceOptions::default(),
         };
 
         let effective = effective_session_options(requested, &provider);
