@@ -3,8 +3,8 @@
 
 //! Bundled terminal font registration for the native GPUI app.
 //!
-//! The Tauri app uses web-font subsets for the same families. Native embeds the
-//! decompressed TTF subset files because GPUI/font-kit loads SFNT font bytes.
+//! MapleMono faces are embedded as independent Zstd frames and decompressed
+//! only when registered. GPUI/font-kit still receives the original SFNT bytes.
 //! Registration stays lazy: startup and terminal-open paths load only the
 //! selected font's critical faces, matching Tauri's fontLoader strategy.
 
@@ -12,7 +12,7 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::{LazyLock, Mutex};
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use gpui::TextSystem;
 use oxideterm_settings::{FontFamily, PersistedSettings};
 
@@ -33,17 +33,25 @@ const MESLO_ITALIC: &[u8] =
     include_bytes!("../resources/fonts/Meslo/MesloLGMNerdFontMono-Subset-Italic.ttf");
 const MESLO_BOLD_ITALIC: &[u8] =
     include_bytes!("../resources/fonts/Meslo/MesloLGMNerdFontMono-Subset-BoldItalic.ttf");
-const MAPLE_REGULAR: &[u8] =
-    include_bytes!("../resources/fonts/MapleMono/MapleMono-NF-CN-Subset-Regular.ttf");
-const MAPLE_BOLD: &[u8] =
-    include_bytes!("../resources/fonts/MapleMono/MapleMono-NF-CN-Subset-Bold.ttf");
-const MAPLE_ITALIC: &[u8] =
-    include_bytes!("../resources/fonts/MapleMono/MapleMono-NF-CN-Subset-Italic.ttf");
-const MAPLE_BOLD_ITALIC: &[u8] =
-    include_bytes!("../resources/fonts/MapleMono/MapleMono-NF-CN-Subset-BoldItalic.ttf");
+const MAPLE_REGULAR: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/MapleMono-NF-CN-Subset-Regular.ttf.zst"
+));
+const MAPLE_BOLD: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/MapleMono-NF-CN-Subset-Bold.ttf.zst"
+));
+const MAPLE_ITALIC: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/MapleMono-NF-CN-Subset-Italic.ttf.zst"
+));
+const MAPLE_BOLD_ITALIC: &[u8] = include_bytes!(concat!(
+    env!("OUT_DIR"),
+    "/MapleMono-NF-CN-Subset-BoldItalic.ttf.zst"
+));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum BundledTerminalFace {
+pub(crate) enum BundledTerminalFace {
     JetBrainsRegular,
     JetBrainsBold,
     JetBrainsItalic,
@@ -59,7 +67,7 @@ enum BundledTerminalFace {
 }
 
 impl BundledTerminalFace {
-    fn bytes(self) -> &'static [u8] {
+    fn embedded_bytes(self) -> &'static [u8] {
         match self {
             Self::JetBrainsRegular => JETBRAINS_REGULAR,
             Self::JetBrainsBold => JETBRAINS_BOLD,
@@ -73,6 +81,23 @@ impl BundledTerminalFace {
             Self::MapleBold => MAPLE_BOLD,
             Self::MapleItalic => MAPLE_ITALIC,
             Self::MapleBoldItalic => MAPLE_BOLD_ITALIC,
+        }
+    }
+
+    pub(crate) fn load(self) -> Result<Vec<u8>> {
+        let bytes = self.embedded_bytes();
+        if matches!(
+            self,
+            Self::MapleRegular | Self::MapleBold | Self::MapleItalic | Self::MapleBoldItalic
+        ) {
+            // The build script writes frames with their original length, allowing one allocation.
+            let size = zstd::zstd_safe::get_frame_content_size(bytes)
+                .map_err(|error| anyhow::anyhow!("invalid bundled font {self:?}: {error}"))?
+                .context("bundled font frame has no content size")?;
+            zstd::bulk::decompress(bytes, usize::try_from(size)?)
+                .with_context(|| format!("failed to decompress bundled font {self:?}"))
+        } else {
+            Ok(bytes.to_vec())
         }
     }
 }
@@ -194,15 +219,17 @@ fn register_faces(text_system: &TextSystem, faces: &[BundledTerminalFace]) -> Re
         let mut loaded = LOADED_TERMINAL_FACES
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        faces
-            .iter()
-            .filter_map(|face| {
-                loaded.insert(*face).then(|| {
-                    inserted_faces.push(*face);
-                    Cow::Owned(face.bytes().to_vec())
-                })
-            })
-            .collect::<Vec<_>>()
+        let mut fonts = Vec::new();
+        for face in faces {
+            if loaded.contains(face) || inserted_faces.contains(face) {
+                continue;
+            }
+            fonts.push(Cow::Owned(face.load()?));
+            inserted_faces.push(*face);
+        }
+        // A decode failure must leave every face retryable, including earlier faces in this batch.
+        loaded.extend(inserted_faces.iter().copied());
+        fonts
     };
     if fonts.is_empty() {
         return Ok(());
@@ -224,14 +251,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bundled_terminal_font_manifest_covers_all_subset_styles() {
-        assert_eq!(ALL_TERMINAL_FACES.len(), 12);
-        assert!(
-            ALL_TERMINAL_FACES
-                .iter()
-                .all(|face| !face.bytes().is_empty())
-        );
-        assert!(ALL_TERMINAL_FACES.iter().all(|face| is_sfnt(face.bytes())));
+    fn bundled_maple_faces_preserve_the_complete_original_fonts() {
+        for (face, style) in [
+            (BundledTerminalFace::MapleRegular, "Regular"),
+            (BundledTerminalFace::MapleBold, "Bold"),
+            (BundledTerminalFace::MapleItalic, "Italic"),
+            (BundledTerminalFace::MapleBoldItalic, "BoldItalic"),
+        ] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "resources/fonts/MapleMono/MapleMono-NF-CN-Subset-{style}.ttf"
+            ));
+            let original = std::fs::read(path).unwrap();
+            let decoded = face.load().unwrap();
+            assert!(
+                decoded == original,
+                "{face:?} must preserve every original byte"
+            );
+            assert!(
+                face.embedded_bytes().len() < original.len(),
+                "{face:?} must reduce embedded size"
+            );
+        }
     }
 
     #[test]
@@ -256,7 +296,8 @@ mod tests {
                 }
             };
 
-            let runtime_family_names = sfnt_runtime_family_names(face.bytes());
+            let bytes = face.load().unwrap();
+            let runtime_family_names = sfnt_runtime_family_names(&bytes);
             assert!(
                 !runtime_family_names.is_empty(),
                 "{face:?} must declare a runtime family name"
@@ -290,10 +331,6 @@ mod tests {
                 "{family:?} must keep the app code font available"
             );
         }
-    }
-
-    fn is_sfnt(bytes: &[u8]) -> bool {
-        bytes.starts_with(b"\0\x01\0\0") || bytes.starts_with(b"OTTO") || bytes.starts_with(b"ttcf")
     }
 
     fn sfnt_runtime_family_names(bytes: &[u8]) -> Vec<String> {

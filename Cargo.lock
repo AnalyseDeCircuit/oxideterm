@@ -7800,6 +7800,7 @@ dependencies = [
  "windows-core 0.61.2",
  "x11-dl",
  "zeroize",
+ "zstd",
 ]
 
 [[package]]

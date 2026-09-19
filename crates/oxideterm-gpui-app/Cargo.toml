@@ -98,9 +98,11 @@ url.workspace = true
 walkdir = "2"
 whoami.workspace = true
 zeroize.workspace = true
+zstd = "0.13"
 
 [build-dependencies]
 embed-resource = "3.0.9"
+zstd = "0.13"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
