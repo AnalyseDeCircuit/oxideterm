@@ -7374,8 +7374,8 @@ dependencies = [
 
 [[package]]
 name = "oxide-spice-helper-protocol"
-version = "0.1.0"
-source = "git+https://github.com/AnalyseDeCircuit/OxideSpice?rev=5d6c961aeff43ca284d94ce76600910e00ee94fd#5d6c961aeff43ca284d94ce76600910e00ee94fd"
+version = "0.1.1"
+source = "git+https://github.com/AnalyseDeCircuit/OxideSpice?rev=c590b29678a6fddcbddabe798cacedece21763da#c590b29678a6fddcbddabe798cacedece21763da"
 dependencies = [
  "oxide-spice-protocol",
  "serde",
@@ -7386,8 +7386,8 @@ dependencies = [
 
 [[package]]
 name = "oxide-spice-protocol"
-version = "0.1.0"
-source = "git+https://github.com/AnalyseDeCircuit/OxideSpice?rev=5d6c961aeff43ca284d94ce76600910e00ee94fd#5d6c961aeff43ca284d94ce76600910e00ee94fd"
+version = "0.1.1"
+source = "git+https://github.com/AnalyseDeCircuit/OxideSpice?rev=c590b29678a6fddcbddabe798cacedece21763da#c590b29678a6fddcbddabe798cacedece21763da"
 dependencies = [
  "thiserror 2.0.20",
 ]

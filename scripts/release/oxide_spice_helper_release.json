@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "repository": "AnalyseDeCircuit/OxideSpice",
-  "version": "0.1.0",
-  "tag": "v0.1.0",
+  "version": "0.1.1",
+  "tag": "v0.1.1",
   "ipcProtocolVersion": 1,
   "minisignPublicKey": "RWSTFhGkwjRnYCd3GfHgJ5mVE5pDnwvwlZJdrtUfbkOf8Gfogj0u4+T1",
   "requiredCapabilities": [
@@ -32,27 +32,27 @@
   "targets": {
     "aarch64-apple-darwin": {
       "archive": "oxide-spice-helper-aarch64-apple-darwin.tar.gz",
-      "sha256": "13b0395304bd463b99f427b716fcc2f748b8fc548bda83e2dfd7926ceeb5c538"
+      "sha256": "1cd58e4f1c36a3ea05b121f22b31b46d1e841c3baa5b4d19dc276f5c82158281"
     },
     "x86_64-apple-darwin": {
       "archive": "oxide-spice-helper-x86_64-apple-darwin.tar.gz",
-      "sha256": "4cf8e40b3647cc5cdb34d3f0b11a809aa9c10c568fc16420c0d37fb68e154b47"
+      "sha256": "3a1549a92de7465d936053ff25ad4fb818cf98815b09acf15ce4968cdd79e035"
     },
     "aarch64-unknown-linux-gnu": {
       "archive": "oxide-spice-helper-aarch64-unknown-linux-gnu.tar.gz",
-      "sha256": "52797aee313976b79a379cb29b95f5c08b6d47a7b6e540deed6af006fbe470fd"
+      "sha256": "7ab9298446a22bbb1fdc61d6a5e97bc52179a64ef09c309d9ec7c13dc97f6601"
     },
     "x86_64-unknown-linux-gnu": {
       "archive": "oxide-spice-helper-x86_64-unknown-linux-gnu.tar.gz",
-      "sha256": "24d33f425ede913f18c536f82df91e0425aefa38e86b8bc578a3a80143618338"
+      "sha256": "db3c9e5189a4941af47d04e5c9befe1fb9f774da8ce19a6fcdcdd5556366f178"
     },
     "aarch64-pc-windows-msvc": {
       "archive": "oxide-spice-helper-aarch64-pc-windows-msvc.zip",
-      "sha256": "8756fa1397c853fe5c8f255710569c1a7048499aca4cffb02d3f1d433ad96b30"
+      "sha256": "5c52a6f1ea88a60aff6fcd806eed8e4913191a40e9c0b1b76356e00c92b3a4b8"
     },
     "x86_64-pc-windows-msvc": {
       "archive": "oxide-spice-helper-x86_64-pc-windows-msvc.zip",
-      "sha256": "3dcec185fe744e425b134157e9629c7639ea3b780aed8ac80c39d6a384352df0"
+      "sha256": "2f03caafe58c436d7edc49da3b6b080873eaf531260a94a83659eaa9458d5168"
     }
   }
 }
