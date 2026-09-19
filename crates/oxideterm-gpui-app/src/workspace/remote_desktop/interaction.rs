@@ -210,6 +210,19 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn send_control_shortcut(&mut self, code: &str) {
+        let shortcut_modifiers = RemoteDesktopModifierState {
+            ctrl: true,
+            ..Default::default()
+        };
+        // SPICE sends physical scan codes and does not synthesize modifiers from
+        // key metadata. Bracket the shortcut while preserving held keys.
+        if self.profile.protocol == RemoteDesktopProtocol::Spice {
+            for request in
+                remote_desktop_modifier_sync_requests(self.last_input_modifiers, shortcut_modifiers)
+            {
+                self.send_request(request);
+            }
+        }
         let key = RemoteDesktopKey {
             code: code.to_string(),
             text: Some(code.to_string()),
@@ -226,6 +239,13 @@ impl RemoteDesktopSessionEntity {
             key,
             state: RemoteDesktopKeyState::Released,
         });
+        if self.profile.protocol == RemoteDesktopProtocol::Spice {
+            for request in
+                remote_desktop_modifier_sync_requests(shortcut_modifiers, self.last_input_modifiers)
+            {
+                self.send_request(request);
+            }
+        }
     }
 
     fn paste_clipboard(&mut self, item: ClipboardItem) {
@@ -680,6 +700,70 @@ mod clipboard_tests {
     impl Render for ClipboardTestWindow {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
+        }
+    }
+
+    #[gpui::test]
+    fn spice_copy_sends_control_edges_and_preserves_held_control(cx: &mut TestAppContext) {
+        use oxideterm_spice::SpiceKeyState::{Pressed, Released};
+        let window = cx.add_window(|_window, _cx| ClipboardTestWindow);
+        let provider = builtin_provider_registry()
+            .unwrap()
+            .get_for_protocol(RemoteDesktopProtocol::Spice)
+            .cloned()
+            .unwrap();
+        let mut session = RemoteDesktopSessionEntity::new(
+            TabId(72),
+            preview_remote_desktop_profile(RemoteDesktopProtocol::Spice),
+            provider,
+            None,
+            std::path::PathBuf::new(),
+            RemoteDesktopFrameDeliverySlot::new(),
+            window.into(),
+        );
+        let (tx, rx) = mpsc::channel();
+        session.worker = Some(RemoteDesktopWorkerOwner {
+            spice_request_tx: None,
+            request_tx: Some(tx),
+            worker_thread: None,
+        });
+        let mut adapter = SpiceRemoteDesktopAdapter::new(
+            RemoteDesktopSize {
+                width: 1024,
+                height: 768,
+            },
+            RemoteDesktopMonitorLayout::default(),
+            false,
+        );
+        for held in [false, true] {
+            session.sync_modifiers(gpui::Modifiers {
+                control: held,
+                ..Default::default()
+            });
+            for request in rx.try_iter() {
+                adapter.map_request(request);
+            }
+            session.send_control_shortcut("c");
+            let events: Vec<_> = rx
+                .try_iter()
+                .flat_map(|request| adapter.map_request(request))
+                .map(|event| match event {
+                    SpiceWorkerRequest::KeyCode { code, state } => (code, state),
+                    _ => panic!("expected keyboard event"),
+                })
+                .collect();
+            let expected = if held {
+                vec![(0x2e, Pressed), (0x2e, Released)]
+            } else {
+                vec![
+                    (0x1d, Pressed),
+                    (0x2e, Pressed),
+                    (0x2e, Released),
+                    (0x1d, Released),
+                ]
+            };
+            assert_eq!(events, expected);
+            assert_eq!(session.last_input_modifiers.ctrl, held);
         }
     }
 
