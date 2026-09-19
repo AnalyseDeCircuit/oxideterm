@@ -168,7 +168,65 @@ struct ScrollAxisState {
     scroll_value: Option<f32>,
 }
 
+struct X11RelativeCapture {
+    window: xproto::Window,
+    confinement: xproto::Window,
+    position: Point<Pixels>,
+}
+
+struct X11MouseCapture {
+    client: X11ClientStatePtr,
+    confinement: xproto::Window,
+}
+
+impl gpui::PlatformMouseCapture for X11MouseCapture {
+    fn is_active(&self) -> bool {
+        self.client.get_client().is_some_and(|client| {
+            client
+                .0
+                .borrow()
+                .relative_capture
+                .as_ref()
+                .is_some_and(|capture| capture.confinement == self.confinement)
+        })
+    }
+}
+
+impl Drop for X11MouseCapture {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.get_client() {
+            let mut state = client.0.borrow_mut();
+            if state
+                .relative_capture
+                .as_ref()
+                .is_some_and(|capture| capture.confinement == self.confinement)
+            {
+                state.release_relative_mouse();
+            }
+        }
+    }
+}
+
+impl X11ClientState {
+    fn release_relative_mouse(&mut self) {
+        if let Some(capture) = self.relative_capture.take() {
+            let _ = self.xcb_connection.ungrab_pointer(x11rb::CURRENT_TIME);
+            let _ = self.xcb_connection.destroy_window(capture.confinement);
+            let root = self.xcb_connection.setup().roots[self.x_root_index].root;
+            let _ = self.xcb_connection.xinput_xi_select_events(
+                root,
+                &[xinput::EventMask {
+                    deviceid: XINPUT_ALL_DEVICE_GROUPS,
+                    mask: vec![],
+                }],
+            );
+            let _ = self.xcb_connection.flush();
+        }
+    }
+}
+
 pub struct X11ClientState {
+    relative_capture: Option<X11RelativeCapture>,
     pub(crate) loop_handle: LoopHandle<'static, X11Client>,
     pub(crate) event_loop: Option<calloop::EventLoop<'static, X11Client>>,
 
@@ -229,6 +287,92 @@ pub struct X11ClientState {
 pub struct X11ClientStatePtr(pub Weak<RefCell<X11ClientState>>);
 
 impl X11ClientStatePtr {
+    pub(crate) fn capture_relative_mouse(
+        &self,
+        window: xproto::Window,
+    ) -> anyhow::Result<Box<dyn gpui::PlatformMouseCapture>> {
+        let client = self
+            .get_client()
+            .ok_or_else(|| anyhow!("X11 client is closed"))?;
+        let mut state = client.0.borrow_mut();
+        anyhow::ensure!(
+            state.relative_capture.is_none() && state.keyboard_focused_window == Some(window),
+            "mouse capture requires an active window"
+        );
+        let pointer = state.xcb_connection.query_pointer(window)?.reply()?;
+        let position = point(
+            px(pointer.win_x as f32 / state.scale_factor),
+            px(pointer.win_y as f32 / state.scale_factor),
+        );
+        let cursor = state
+            .get_or_create_invisible_cursor()
+            .ok_or_else(|| anyhow!("cannot create capture cursor"))?;
+        let confinement = state.xcb_connection.generate_id()?;
+        state
+            .xcb_connection
+            .create_window(
+                0,
+                confinement,
+                window,
+                pointer.win_x,
+                pointer.win_y,
+                1,
+                1,
+                0,
+                xproto::WindowClass::INPUT_ONLY,
+                0,
+                &xproto::CreateWindowAux::default(),
+            )?
+            .check()?;
+        let result = (|| -> anyhow::Result<()> {
+            state.xcb_connection.map_window(confinement)?.check()?;
+            let grabbed = state
+                .xcb_connection
+                .grab_pointer(
+                    false,
+                    window,
+                    EventMask::BUTTON_PRESS | EventMask::BUTTON_RELEASE | EventMask::POINTER_MOTION,
+                    xproto::GrabMode::ASYNC,
+                    xproto::GrabMode::ASYNC,
+                    confinement,
+                    cursor,
+                    x11rb::CURRENT_TIME,
+                )?
+                .reply()?;
+            anyhow::ensure!(
+                grabbed.status == xproto::GrabStatus::SUCCESS,
+                "X11 pointer grab was refused"
+            );
+            let root = state.xcb_connection.setup().roots[state.x_root_index].root;
+            state
+                .xcb_connection
+                .xinput_xi_select_events(
+                    root,
+                    &[xinput::EventMask {
+                        deviceid: XINPUT_ALL_DEVICE_GROUPS,
+                        mask: vec![xinput::XIEventMask::RAW_MOTION],
+                    }],
+                )?
+                .check()?;
+            state.xcb_connection.flush()?;
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = state.xcb_connection.ungrab_pointer(x11rb::CURRENT_TIME);
+            let _ = state.xcb_connection.destroy_window(confinement);
+            let _ = state.xcb_connection.flush();
+            return Err(error);
+        }
+        state.relative_capture = Some(X11RelativeCapture {
+            window,
+            confinement,
+            position,
+        });
+        Ok(Box::new(X11MouseCapture {
+            client: self.clone(),
+            confinement,
+        }))
+    }
     pub fn get_client(&self) -> Option<X11Client> {
         self.0.upgrade().map(X11Client)
     }
@@ -238,6 +382,14 @@ impl X11ClientStatePtr {
             return;
         };
         let mut state = client.0.borrow_mut();
+
+        if state
+            .relative_capture
+            .as_ref()
+            .is_some_and(|capture| capture.window == x_window)
+        {
+            state.release_relative_mouse();
+        }
 
         if let Some(window_ref) = state.windows.remove(&x_window)
             && let Some(RefreshState::PeriodicRefresh {
@@ -539,6 +691,7 @@ impl X11Client {
             resource_database,
             atoms,
             windows: HashMap::default(),
+            relative_capture: None,
             mouse_focused_window: None,
             keyboard_focused_window: None,
             xkb: xkb_state,
@@ -989,6 +1142,7 @@ impl X11Client {
                 let window = self.get_window(event.event)?;
                 window.set_active(false);
                 let mut state = self.0.borrow_mut();
+                state.release_relative_mouse();
                 // Set last scroll values to `None` so that a large delta isn't created if scrolling is done outside the window (the valuator is global)
                 reset_all_pointer_device_scroll_positions(&mut state.pointer_device_states);
                 state.keyboard_focused_window = None;
@@ -1247,6 +1401,31 @@ impl X11Client {
                     None => {}
                 }
             }
+            Event::XinputRawMotion(event) => {
+                let state = self.0.borrow();
+                let capture = state.relative_capture.as_ref()?;
+                let window = self.get_window(capture.window)?;
+                let mut axes = event.axisvalues_raw.iter();
+                let mask = event.valuator_mask.first().copied().unwrap_or(0);
+                let dx = if mask & 1 != 0 {
+                    axes.next().copied().map(fp3232_to_f32).unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                let dy = if mask & 2 != 0 {
+                    axes.next().copied().map(fp3232_to_f32).unwrap_or(0.0)
+                } else {
+                    0.0
+                };
+                let input = gpui::MouseMoveEvent {
+                    position: capture.position,
+                    relative_delta: Some(point(px(dx), px(dy))),
+                    pressed_button: None,
+                    modifiers: state.modifiers,
+                };
+                drop(state);
+                window.handle_input(PlatformInput::MouseMove(input));
+            }
             Event::XinputMotion(event) => {
                 let window = self.get_window(event.event)?;
                 let mut state = self.0.borrow_mut();
@@ -1289,6 +1468,7 @@ impl X11Client {
 
                 if event.valuator_mask[0] & 3 != 0 {
                     window.handle_input(PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                        relative_delta: None,
                         position,
                         pressed_button,
                         modifiers,

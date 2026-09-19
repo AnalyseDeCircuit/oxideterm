@@ -50,6 +50,7 @@ pub use model::{
     RemoteDesktopRdpOptions, RemoteDesktopRect, RemoteDesktopRemoteFileEntry,
     RemoteDesktopRemoteFileKind, RemoteDesktopSessionId, RemoteDesktopSessionOptions,
     RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopSocksProxy,
+    RemoteDesktopSpiceOptions, RemoteDesktopSpiceSaslMode, RemoteDesktopSpiceTransportSecurity,
     RemoteDesktopVncCompression, RemoteDesktopVncImageQuality, RemoteDesktopVncOptions,
     RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
 };

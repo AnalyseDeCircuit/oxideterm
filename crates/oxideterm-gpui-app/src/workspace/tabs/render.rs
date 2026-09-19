@@ -1513,7 +1513,9 @@ impl WorkspaceApp {
             WelcomeRecentKind::Serial => LucideIcon::Radio,
             WelcomeRecentKind::Telnet => LucideIcon::Terminal,
             WelcomeRecentKind::Mosh => LucideIcon::Wifi,
-            WelcomeRecentKind::Rdp | WelcomeRecentKind::Vnc => LucideIcon::Monitor,
+            WelcomeRecentKind::Rdp | WelcomeRecentKind::Vnc | WelcomeRecentKind::Spice => {
+                LucideIcon::Monitor
+            }
         }
     }
 
@@ -1525,6 +1527,7 @@ impl WorkspaceApp {
             WelcomeRecentKind::Mosh => "terminal.typeMosh",
             WelcomeRecentKind::Rdp => "modals.new_connection.transport_rdp",
             WelcomeRecentKind::Vnc => "modals.new_connection.transport_vnc",
+            WelcomeRecentKind::Spice => "modals.new_connection.transport_spice",
         }
     }
 

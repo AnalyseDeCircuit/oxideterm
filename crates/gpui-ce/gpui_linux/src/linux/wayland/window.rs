@@ -1739,6 +1739,13 @@ impl rwh::HasDisplayHandle for WaylandWindow {
 }
 
 impl PlatformWindow for WaylandWindow {
+    fn capture_relative_mouse(&self) -> anyhow::Result<Box<dyn gpui::PlatformMouseCapture>> {
+        let state = self.0.state.borrow();
+        let client = state.client.clone();
+        let surface = state.surface.clone();
+        drop(state);
+        client.capture_relative_mouse(&surface)
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.borrow().bounds
     }

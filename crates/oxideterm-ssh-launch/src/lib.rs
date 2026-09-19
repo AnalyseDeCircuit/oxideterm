@@ -19,9 +19,11 @@ pub const DEFAULT_TELNET_PORT: u16 = 23;
 pub const DEFAULT_MOSH_SSH_PORT: u16 = 22;
 pub const DEFAULT_RDP_PORT: u16 = 3389;
 pub const DEFAULT_VNC_PORT: u16 = 5900;
+pub const DEFAULT_SPICE_PORT: u16 = 5900;
 
 /// URI schemes accepted by native startup and operating-system deep links.
-pub const SUPPORTED_CONNECTION_URI_SCHEMES: [&str; 5] = ["ssh", "telnet", "mosh", "rdp", "vnc"];
+pub const SUPPORTED_CONNECTION_URI_SCHEMES: [&str; 6] =
+    ["ssh", "telnet", "mosh", "rdp", "vnc", "spice"];
 
 /// A native application launch request carried by an owner-only handoff.
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -141,6 +143,7 @@ impl fmt::Debug for TemporaryMoshLaunch {
 pub enum RemoteDesktopLaunchProtocol {
     Rdp,
     Vnc,
+    Spice,
 }
 
 impl RemoteDesktopLaunchProtocol {
@@ -148,6 +151,7 @@ impl RemoteDesktopLaunchProtocol {
         match self {
             Self::Rdp => "rdp",
             Self::Vnc => "vnc",
+            Self::Spice => "spice",
         }
     }
 
@@ -155,6 +159,7 @@ impl RemoteDesktopLaunchProtocol {
         match self {
             Self::Rdp => DEFAULT_RDP_PORT,
             Self::Vnc => DEFAULT_VNC_PORT,
+            Self::Spice => DEFAULT_SPICE_PORT,
         }
     }
 }
@@ -309,6 +314,13 @@ pub fn parse_connection_uri(
         ),
         "vnc" => parse_remote_desktop_launch(
             RemoteDesktopLaunchProtocol::Vnc,
+            username,
+            password,
+            host,
+            explicit_port,
+        ),
+        "spice" => parse_remote_desktop_launch(
+            RemoteDesktopLaunchProtocol::Spice,
             username,
             password,
             host,

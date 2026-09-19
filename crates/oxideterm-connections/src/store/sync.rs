@@ -22,7 +22,10 @@ impl fmt::Debug for ConnectionStoreCheckpoint {
         formatter
             .debug_struct("ConnectionStoreCheckpoint")
             .field("store_path", &self.store_path)
-            .field("contents", &"[redacted complete connection store checkpoint]")
+            .field(
+                "contents",
+                &"[redacted complete connection store checkpoint]",
+            )
             .finish()
     }
 }
@@ -528,6 +531,7 @@ impl ConnectionStore {
             // Protected-store references are device-local and cannot be imported as credentials.
             profile.credential_ref = None;
             profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
+            profile.sasl_credential_ref = None;
             if let Some(existing) = self
                 .data
                 .remote_desktop_profiles
@@ -541,6 +545,7 @@ impl ConnectionStore {
                         &mut profile.upstream_proxy,
                         &existing.upstream_proxy,
                     );
+                    profile.sasl_credential_ref = existing.sasl_credential_ref.clone();
                     *existing = profile;
                     applied += 1;
                 }
@@ -635,7 +640,6 @@ impl ConnectionStore {
         }
         Ok(applied)
     }
-
 }
 
 fn build_saved_connection_from_sync_payload(
@@ -889,7 +893,9 @@ fn portable_mosh_auth(auth: &SavedAuth) -> SavedAuth {
             plaintext_passphrase: None,
         },
         SavedAuth::Certificate {
-            key_path, cert_path, ..
+            key_path,
+            cert_path,
+            ..
         } => SavedAuth::Certificate {
             key_path: key_path.clone(),
             cert_path: cert_path.clone(),
@@ -920,7 +926,9 @@ fn conventional_auth_target_matches(left: &SavedAuth, right: &SavedAuth) -> bool
         | (SavedAuth::Agent, SavedAuth::Agent) => true,
         (
             SavedAuth::Key { key_path: left, .. },
-            SavedAuth::Key { key_path: right, .. },
+            SavedAuth::Key {
+                key_path: right, ..
+            },
         ) => left == right,
         (
             SavedAuth::ManagedKey { key_id: left, .. },
@@ -1141,6 +1149,7 @@ fn build_remote_desktop_profiles_sync_snapshot(
         // Snapshots are portable asset metadata, never a transport for local credential handles.
         profile.credential_ref = None;
         profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
+        profile.sasl_credential_ref = None;
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
     let revision = sha256_hex(
@@ -1327,11 +1336,7 @@ fn portable_upstream_proxy(policy: &SavedUpstreamProxyPolicy) -> SavedUpstreamPr
     match policy {
         SavedUpstreamProxyPolicy::Custom { proxy } => {
             let mut proxy = proxy.clone();
-            if let SavedUpstreamProxyAuth::Password {
-                username,
-                ..
-            } = &proxy.auth
-            {
+            if let SavedUpstreamProxyAuth::Password { username, .. } = &proxy.auth {
                 proxy.auth = SavedUpstreamProxyAuth::Password {
                     username: username.clone(),
                     keychain_id: None,
@@ -1470,10 +1475,8 @@ mod mosh_tests {
 
     #[test]
     fn mosh_snapshot_apply_preserves_matching_local_credential() {
-        let path = std::env::temp_dir().join(format!(
-            "oxideterm-mosh-sync-{}.json",
-            uuid::Uuid::new_v4()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("oxideterm-mosh-sync-{}.json", uuid::Uuid::new_v4()));
         let mut store = ConnectionStore::load(&path).expect("store must load");
         let mut local = password_profile(Some("local-keychain-entry"));
         local.proxy_chain.push(SavedProxyHop {

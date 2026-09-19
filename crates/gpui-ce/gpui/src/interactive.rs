@@ -483,6 +483,8 @@ pub enum NavigationDirection {
 /// A mouse move event from the platform.
 #[derive(Clone, Debug, Default)]
 pub struct MouseMoveEvent {
+    /// Platform motion independent of the window position, used while the pointer is locked.
+    pub relative_delta: Option<Point<Pixels>>,
     /// The position of the mouse on the window.
     pub position: Point<Pixels>,
 

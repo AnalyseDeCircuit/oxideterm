@@ -229,6 +229,51 @@ pub struct RemoteDesktopRdpOptions {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopSpiceTransportSecurity {
+    #[default]
+    Plain,
+    Tls,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteDesktopSpiceSaslMode {
+    #[default]
+    Disabled,
+    Gssapi,
+    Password,
+}
+
+/// SPICE connection negotiation settings persisted without either secret value.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDesktopSpiceOptions {
+    #[serde(default)]
+    pub transport_security: RemoteDesktopSpiceTransportSecurity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_server_name: Option<String>,
+    #[serde(default)]
+    pub tls_root_certificates_der: Vec<Vec<u8>>,
+    #[serde(default)]
+    pub sasl_mode: RemoteDesktopSpiceSaslMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl_hostname: Option<String>,
+    #[serde(default = "default_spice_sasl_service")]
+    pub sasl_service: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl_authentication_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl_authorization_id: Option<String>,
+    #[serde(default)]
+    pub sasl_allow_gssapi: bool,
+}
+
+fn default_spice_sasl_service() -> String {
+    "spice".to_string()
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteDesktopSessionOptions {
     #[serde(default)]
@@ -241,6 +286,8 @@ pub struct RemoteDesktopSessionOptions {
     pub rdp: RemoteDesktopRdpOptions,
     #[serde(default)]
     pub vnc: RemoteDesktopVncOptions,
+    #[serde(default)]
+    pub spice: RemoteDesktopSpiceOptions,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -281,6 +328,7 @@ pub enum RemoteDesktopProtocol {
     #[default]
     Rdp,
     Vnc,
+    Spice,
 }
 
 impl RemoteDesktopProtocol {
@@ -289,6 +337,7 @@ impl RemoteDesktopProtocol {
         match scheme.to_ascii_lowercase().as_str() {
             "rdp" => Some(Self::Rdp),
             "vnc" => Some(Self::Vnc),
+            "spice" => Some(Self::Spice),
             _ => None,
         }
     }
@@ -297,6 +346,7 @@ impl RemoteDesktopProtocol {
         match self {
             Self::Rdp => "rdp",
             Self::Vnc => "vnc",
+            Self::Spice => "spice",
         }
     }
 
@@ -304,6 +354,7 @@ impl RemoteDesktopProtocol {
         match self {
             Self::Rdp => 3389,
             Self::Vnc => 5900,
+            Self::Spice => 5900,
         }
     }
 }
@@ -420,6 +471,9 @@ pub struct RemoteDesktopConnectionProfile {
     pub username: Option<String>,
     pub domain: Option<String>,
     pub credential_ref: Option<String>,
+    /// Protected-store reference for SASL password authentication.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl_credential_ref: Option<String>,
     pub read_only: bool,
     #[serde(default)]
     pub session_options: RemoteDesktopSessionOptions,
@@ -452,6 +506,7 @@ impl RemoteDesktopConnectionProfile {
             username: None,
             domain: None,
             credential_ref: None,
+            sasl_credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
         })

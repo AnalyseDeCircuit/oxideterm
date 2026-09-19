@@ -18,6 +18,7 @@ pub(super) enum WelcomeRecentKind {
     Mosh,
     Rdp,
     Vnc,
+    Spice,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -102,6 +103,7 @@ pub(super) fn welcome_recent_connections(
                     kind: match profile.protocol {
                         RemoteDesktopProtocol::Rdp => WelcomeRecentKind::Rdp,
                         RemoteDesktopProtocol::Vnc => WelcomeRecentKind::Vnc,
+                        RemoteDesktopProtocol::Spice => WelcomeRecentKind::Spice,
                     },
                     target: WelcomeRecentTarget::RemoteDesktop(profile.id.clone()),
                     last_used_at: profile.last_used_at?,

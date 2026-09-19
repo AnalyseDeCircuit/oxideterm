@@ -300,6 +300,10 @@ pub(crate) unsafe fn platform_input_from_native(
 
                 window_height.map(|window_height| {
                     PlatformInput::MouseMove(MouseMoveEvent {
+                        relative_delta: Some(point(
+                            px(native_event.deltaX() as f32),
+                            px(native_event.deltaY() as f32),
+                        )),
                         pressed_button: Some(pressed_button),
                         position: point(
                             px(native_event.locationInWindow().x as f32),
@@ -311,6 +315,10 @@ pub(crate) unsafe fn platform_input_from_native(
             }
             NSEventType::NSMouseMoved => window_height.map(|window_height| {
                 PlatformInput::MouseMove(MouseMoveEvent {
+                    relative_delta: Some(point(
+                        px(native_event.deltaX() as f32),
+                        px(native_event.deltaY() as f32),
+                    )),
                     position: point(
                         px(native_event.locationInWindow().x as f32),
                         window_height - px(native_event.locationInWindow().y as f32),

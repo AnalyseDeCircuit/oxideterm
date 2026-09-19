@@ -5,6 +5,17 @@ use super::*;
 
 impl RemoteDesktopSessionEntity {
     pub(super) fn send_request(&mut self, request: RemoteDesktopHelperRequest) {
+        if self.profile.protocol == RemoteDesktopProtocol::Spice
+            && self.profile.read_only
+            && !matches!(
+                request,
+                RemoteDesktopHelperRequest::Close
+                    | RemoteDesktopHelperRequest::ReleaseAllInputs
+                    | RemoteDesktopHelperRequest::RequestFrame
+            )
+        {
+            return;
+        }
         if matches!(request, RemoteDesktopHelperRequest::Resize { .. })
             && !self.provider.capabilities.resize
         {
@@ -28,12 +39,16 @@ impl RemoteDesktopSessionEntity {
         let point = self.geometry.map_window_point(position)?;
         // Servers do not always echo pointer moves. Keep the custom cursor
         // responsive without waiting for a round trip.
-        self.state.apply_event(RemoteDesktopHelperEvent::Cursor {
-            x: point.x,
-            y: point.y,
-            width: 0,
-            height: 0,
-        });
+        if self.profile.protocol != RemoteDesktopProtocol::Spice
+            || self.spice.mouse_mode == Some(oxideterm_spice::SpiceMouseMode::Client)
+        {
+            self.state.apply_event(RemoteDesktopHelperEvent::Cursor {
+                x: point.x,
+                y: point.y,
+                width: 0,
+                height: 0,
+            });
+        }
         Some(point)
     }
 
@@ -150,6 +165,8 @@ impl RemoteDesktopSessionEntity {
     }
 
     pub(super) fn release_inputs(&mut self) {
+        self.spice_mouse_capture.take();
+        self.spice_motion_remainder = point(px(0.0), px(0.0));
         self.last_input_modifiers = RemoteDesktopModifierState::default();
         self.last_lock_keys = None;
         self.pressed_mouse_buttons.clear();
@@ -269,6 +286,97 @@ impl RemoteDesktopSessionEntity {
 }
 
 impl WorkspaceApp {
+    pub(super) fn capture_spice_mouse(
+        &mut self,
+        tab_id: TabId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
+            return true;
+        };
+        let state = session.read(cx);
+        if state.profile.protocol != RemoteDesktopProtocol::Spice
+            || state.spice.mouse_mode != Some(oxideterm_spice::SpiceMouseMode::Server)
+        {
+            return true;
+        }
+        if state.profile.read_only {
+            return false;
+        }
+        if state
+            .spice_mouse_capture
+            .as_ref()
+            .is_some_and(|capture| capture.is_active())
+        {
+            return true;
+        }
+        session.update(cx, |session, _cx| session.release_inputs());
+        match window.capture_relative_mouse() {
+            Ok(capture) => {
+                session.update(cx, |session, _cx| {
+                    session.spice_mouse_capture = Some(capture)
+                });
+                self.push_command_palette_toast(
+                    self.i18n.t("remote_desktop.spice_mouse_release"),
+                    None,
+                    TerminalNoticeVariant::Default,
+                    cx,
+                );
+            }
+            Err(_) => self.push_command_palette_toast(
+                self.i18n.t("remote_desktop.spice_mouse_unavailable"),
+                None,
+                TerminalNoticeVariant::Error,
+                cx,
+            ),
+        }
+        // Acquiring the pointer must not click at the guest's previous cursor position.
+        false
+    }
+
+    pub(super) fn handle_spice_relative_motion(
+        &mut self,
+        tab_id: TabId,
+        event: &MouseMoveEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(entity) = self.remote_desktop_session_entity(tab_id, cx) else {
+            return false;
+        };
+        entity.update(cx, |session, _cx| {
+            if session.profile.protocol != RemoteDesktopProtocol::Spice
+                || session.spice.mouse_mode != Some(oxideterm_spice::SpiceMouseMode::Server)
+            {
+                return false;
+            }
+            if !session
+                .spice_mouse_capture
+                .as_ref()
+                .is_some_and(|capture| capture.is_active())
+            {
+                session.release_inputs();
+                return true;
+            }
+            if let Some(delta) = event.relative_delta {
+                session.spice_motion_remainder.x += delta.x;
+                session.spice_motion_remainder.y += delta.y;
+                let dx = f32::from(session.spice_motion_remainder.x).trunc() as i32;
+                let dy = f32::from(session.spice_motion_remainder.y).trunc() as i32;
+                session.spice_motion_remainder.x -= px(dx as f32);
+                session.spice_motion_remainder.y -= px(dy as f32);
+                if dx != 0 || dy != 0 {
+                    session.send_spice_request(SpiceWorkerRequest::PointerMotion {
+                        dx,
+                        dy,
+                        buttons: 0,
+                    });
+                }
+            }
+            true
+        })
+    }
+
     pub(in crate::workspace) fn handle_remote_desktop_mouse_move(
         &mut self,
         tab_id: TabId,
@@ -404,6 +512,15 @@ impl WorkspaceApp {
         let Some(tab_id) = self.active_remote_desktop_tab_id(cx) else {
             return false;
         };
+        if event.keystroke.key == "escape"
+            && event.keystroke.modifiers.control
+            && event.keystroke.modifiers.alt
+            && let Some(session) = self.remote_desktop_session_entity(tab_id, cx)
+            && session.read(cx).spice_mouse_capture.is_some()
+        {
+            session.update(cx, |session, _cx| session.release_inputs());
+            return true;
+        }
         if remote_desktop_paste_shortcut(
             &event.keystroke,
             &self.settings_store.settings().keybindings.overrides,
@@ -536,6 +653,7 @@ impl WorkspaceApp {
         match protocol {
             RemoteDesktopProtocol::Rdp => self.i18n.t("remote_desktop.rdp_preview_title"),
             RemoteDesktopProtocol::Vnc => self.i18n.t("remote_desktop.vnc_preview_title"),
+            RemoteDesktopProtocol::Spice => self.i18n.t("remote_desktop.spice_preview_title"),
         }
     }
 }
@@ -573,6 +691,7 @@ mod clipboard_tests {
         );
         let (tx, rx) = mpsc::channel();
         session.worker = Some(RemoteDesktopWorkerOwner {
+            spice_request_tx: None,
             request_tx: Some(tx),
             worker_thread: None,
         });

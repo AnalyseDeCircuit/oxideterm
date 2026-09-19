@@ -131,6 +131,10 @@ fn remote_desktop_credential_ref(profile_id: &str) -> String {
     format!("remote-desktop:{profile_id}")
 }
 
+fn remote_desktop_sasl_credential_ref(profile_id: &str) -> String {
+    format!("remote-desktop:{profile_id}:sasl")
+}
+
 fn managed_key_display_name(name: Option<String>, fallback: &str) -> String {
     name.as_deref()
         .map(str::trim)
@@ -180,8 +184,12 @@ fn recover_legacy_hex_managed_private_key(
 fn has_supported_private_key_container(private_key: &str) -> bool {
     let private_key = private_key.trim();
     if private_key.starts_with("PuTTY-User-Key-File-") {
-        return private_key.lines().any(|line| line.starts_with("Private-Lines:"))
-            && private_key.lines().any(|line| line.starts_with("Private-MAC:"));
+        return private_key
+            .lines()
+            .any(|line| line.starts_with("Private-Lines:"))
+            && private_key
+                .lines()
+                .any(|line| line.starts_with("Private-MAC:"));
     }
 
     [
@@ -390,9 +398,7 @@ fn existing_upstream_proxy_password_keychain_id(
     }
 }
 
-fn existing_proxy_command_keychain_id(
-    proxy_command: Option<&SavedProxyCommand>,
-) -> Option<String> {
+fn existing_proxy_command_keychain_id(proxy_command: Option<&SavedProxyCommand>) -> Option<String> {
     proxy_command.and_then(|command| command.keychain_id.clone())
 }
 
@@ -439,9 +445,7 @@ fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {
         .collect()
 }
 
-fn collect_imported_privilege_keychain_ids(
-    connections: &[SavedConnection],
-) -> HashSet<String> {
+fn collect_imported_privilege_keychain_ids(connections: &[SavedConnection]) -> HashSet<String> {
     // Only imported plaintext values can overwrite the protected store. Existing
     // metadata without a secret leaves the local keychain entry unchanged.
     connections
@@ -588,11 +592,7 @@ fn auth_with_protected_credential(auth: SavedAuth) -> Result<(SavedAuth, String)
         } => {
             let (fallback, reference) = auth_with_protected_credential(*fallback)?;
             Ok((
-                SavedAuth::with_kerberos_preferred(
-                    fallback,
-                    server_identity,
-                    delegate_credentials,
-                ),
+                SavedAuth::with_kerberos_preferred(fallback, server_identity, delegate_credentials),
                 reference,
             ))
         }
