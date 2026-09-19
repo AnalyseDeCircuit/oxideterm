@@ -2348,6 +2348,11 @@ impl WorkspaceApp {
             .terminal_screen
             .clone()
             .unwrap_or_else(|| serde_json::json!({ "lines": [] }));
+        let input_wait_reason = ai_terminal_input_wait_reason(
+            target_snapshot.terminal_buffer.as_deref().unwrap_or_default(),
+            self.ai_terminal_pane_for_session(session_id, cx)
+                .is_some_and(|pane| pane.read(cx).ai_waiting_for_secret()),
+        );
         snapshot
             .ok(
                 "Terminal observed.",
@@ -2355,7 +2360,8 @@ impl WorkspaceApp {
                 serde_json::json!({
                     "buffer": output,
                     "screen": screen,
-                    "waitingForInput": looks_waiting_for_input(target_snapshot.terminal_buffer.as_deref().unwrap_or_default()),
+                    "waitingForInput": input_wait_reason.is_some(),
+                    "inputWaitReason": input_wait_reason,
                     "tuiState": ai_terminal_tui_state(
                         target_snapshot.terminal_screen.as_ref(),
                         target_snapshot.terminal_buffer.as_deref().unwrap_or_default(),
@@ -2938,6 +2944,7 @@ impl WorkspaceApp {
                             "executionState": if output_empty { "timeout" } else { "output_captured" },
                             "visibleInTerminal": true,
                             "waitingForInput": last_waiting_for_secret,
+                            "inputWaitReason": last_waiting_for_secret.then_some("credential_prompt"),
                             "commandId": command_id,
                         }),
                         error_code: output_empty
@@ -3076,7 +3083,7 @@ impl WorkspaceApp {
                     let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
                         .and_then(|id| this.ssh_registry.get(&id)).is_some_and(|connection|
                             matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
-                    if recovering { return Some((initial_buffer.clone(), initial_alternate_screen, Vec::new(), true)); }
+                    if recovering { return Some((initial_buffer.clone(), initial_alternate_screen, Vec::new(), true, false)); }
                     if let Some(node) = &node_id {
                         let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
                             .is_some_and(|connection| !matches!(connection.state(), ConnectionState::Disconnected | ConnectionState::Disconnecting));
@@ -3107,9 +3114,10 @@ impl WorkspaceApp {
                         pane.ai_screen_is_alternate_buffer(),
                         pane.ai_command_records(),
                         false,
+                        pane.ai_waiting_for_secret(),
                     ))
                 });
-                let Ok(Some((buffer, alternate_screen, records, recovering))) = observation else {
+                let Ok(Some((buffer, alternate_screen, records, recovering, waiting_for_secret))) = observation else {
                     owner_closed = true;
                     break;
                 };
@@ -3150,6 +3158,7 @@ impl WorkspaceApp {
                         let current_snapshot = this
                             .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
                         let output = trim_tail_chars(&buffer, max_chars);
+                        let input_wait_reason = ai_terminal_input_wait_reason(&buffer, waiting_for_secret);
                         current_snapshot.to_executed_tool_result(
                             tool_call_id.clone(),
                             tool_name.clone(),
@@ -3159,8 +3168,9 @@ impl WorkspaceApp {
                                 serde_json::json!({
                                     "matched": matched,
                                     "buffer": output,
-                                    "waitingForInput": looks_waiting_for_input(&buffer),
-                                    "tuiState": if alternate_screen { "alternate_screen" } else { "shell" },
+                                    "waitingForInput": input_wait_reason.is_some(),
+                                    "inputWaitReason": input_wait_reason,
+                                    "tuiState": if alternate_screen { "alternate_screen" } else if input_wait_reason.is_some() { "prompt" } else { "shell" },
                                 }),
                                 "read",
                             ),

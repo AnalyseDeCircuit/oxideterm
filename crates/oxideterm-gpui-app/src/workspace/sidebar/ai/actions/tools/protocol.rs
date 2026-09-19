@@ -494,9 +494,25 @@ pub(in crate::workspace) fn looks_waiting_for_input(value: &str) -> bool {
         .map(str::trim)
         .find(|line| !line.is_empty())
         .unwrap_or_default();
-    ["password", "passphrase", "sudo", "验证码", "口令", "密码"]
+    // A mention in command output is not an input request. Keep this heuristic
+    // separate from the terminal owner's authoritative credential prompt state.
+    let prompt_suffix = prompt_line.ends_with([':', '：', '?', '？']);
+    prompt_suffix && ["password", "passphrase", "verification code", "验证码", "口令", "密码"]
         .iter()
         .any(|needle| prompt_line.contains(needle))
+}
+
+pub(in crate::workspace) fn ai_terminal_input_wait_reason(
+    buffer: &str,
+    waiting_for_secret: bool,
+) -> Option<&'static str> {
+    if waiting_for_secret {
+        Some("credential_prompt")
+    } else if looks_waiting_for_input(buffer) {
+        Some("possible_credential_prompt")
+    } else {
+        None
+    }
 }
 
 pub(in crate::workspace) fn settings_with_json_patch(
@@ -519,6 +535,36 @@ pub(in crate::workspace) fn settings_with_json_patch(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_input_state_reaches_model_without_false_secret_waits() {
+        let snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
+        for (buffer, known_secret, alternate, expected_reason, expected_tui) in [
+            ("[sudo] password for deploy:", false, false, Some("possible_credential_prompt"), "prompt"),
+            ("Enter passphrase for key '/tmp/key':", false, false, Some("possible_credential_prompt"), "prompt"),
+            ("请输入验证码：", false, false, Some("possible_credential_prompt"), "prompt"),
+            ("sudo: command not found", false, false, None, "shell"),
+            ("password updated successfully", false, false, None, "shell"),
+            ("Password:\nSelect an item and press Enter", false, true, None, "alternate_screen"),
+            ("Protected input", true, true, Some("credential_prompt"), "alternate_screen"),
+        ] {
+            let reason = ai_terminal_input_wait_reason(buffer, known_secret);
+            let screen = serde_json::json!({"isAlternateBuffer": alternate});
+            let result = snapshot.to_executed_tool_result(
+                "observe-1".into(), "observe_terminal".into(),
+                snapshot.ok("Terminal observed.", buffer, serde_json::json!({
+                    "waitingForInput": reason.is_some(),
+                    "inputWaitReason": reason,
+                    "tuiState": ai_terminal_tui_state(Some(&screen), buffer),
+                }), "read"), 0,
+            );
+            let content = oxideterm_ai::ai_tool_result_model_content(&result);
+            let model: serde_json::Value = serde_json::from_str(&content).unwrap();
+            assert_eq!(model["waitingForInput"], expected_reason.is_some(), "{buffer}");
+            assert_eq!(model.get("inputWaitReason").and_then(serde_json::Value::as_str), expected_reason, "{buffer}");
+            assert_eq!(model["tuiState"], expected_tui, "{buffer}");
+        }
+    }
 
     pub(in crate::workspace) fn sample_result() -> AiExecutedToolResult {
         AiExecutedToolResult {

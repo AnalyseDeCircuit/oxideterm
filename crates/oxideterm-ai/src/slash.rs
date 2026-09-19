@@ -109,7 +109,7 @@ pub const AI_SLASH_COMMANDS: &[AiSlashCommand] = &[
         label_key: "ai.slash.fix",
         description_key: "ai.slash.fix_desc",
         system_prompt_modifier: Some(
-            "The user needs help fixing an error or problem. Diagnose the root cause step by step. Check the most common causes first. Use tools to gather diagnostic data when possible. Provide the exact fix with explanation.",
+            "The user wants a problem fixed. Use available tools to inspect the actual failure, identify its cause, implement an authorized fix, and verify the outcome. Continue within the established task scope and runtime approval policy; ask only for information or authorization that is genuinely missing. If the user requested diagnosis only, report findings without making changes.",
         ),
         client_only: false,
     },
@@ -324,7 +324,7 @@ const AI_INTENT_PATTERNS: &[AiIntentPattern] = &[
     AiIntentPattern {
         kind: "execute",
         confidence_percent: 85,
-        system_hint: "The user wants to execute an action. Focus on providing actionable commands and confirming before executing anything destructive.",
+        system_hint: "The request appears to ask for action. If that matches the user's actual instructions, use available tools to perform the authorized work, observe results, and complete the task. Reuse existing authorization for the same scope and follow runtime approval policy. If tools are unavailable, explain the limitation and provide actionable instructions.",
         predicates: &[
             starts_with_execute_verb,
             contains_execute_phrase,
@@ -345,7 +345,7 @@ const AI_INTENT_PATTERNS: &[AiIntentPattern] = &[
     AiIntentPattern {
         kind: "troubleshoot",
         confidence_percent: 90,
-        system_hint: "The user is troubleshooting a problem. Analyze error messages carefully, suggest diagnostic commands, and provide step-by-step fixes.",
+        system_hint: "The request appears to concern troubleshooting. Use available tools to gather evidence and identify the cause. When the user asks for a fix, apply and verify it within the authorized scope and runtime approval policy. If the user asks only for analysis, report the diagnosis without changing anything.",
         predicates: &[
             starts_with_troubleshoot_phrase,
             contains_error_phrase,
@@ -356,7 +356,7 @@ const AI_INTENT_PATTERNS: &[AiIntentPattern] = &[
     AiIntentPattern {
         kind: "create",
         confidence_percent: 85,
-        system_hint: "The user wants to create or generate something. Provide complete, production-ready code or configurations.",
+        system_hint: "The request appears to ask for a deliverable. Create it using available tools when authorized, respecting the requested location and format, then verify it. Do not stop at instructions for the user to create it. If the user requested an example or explanation, answer in the conversation instead.",
         predicates: &[
             starts_with_create_verb,
             starts_with_add_verb,
