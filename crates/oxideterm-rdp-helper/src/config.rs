@@ -71,7 +71,7 @@ pub(super) fn build_client_rdp_config(config: &RdpWorkerConfig) -> Result<Client
         socks_proxy: config.socks_proxy.clone(),
         connector,
         graphics_epoch: config.graphics_epoch,
-        session_options: config.session_options,
+        session_options: config.session_options.clone(),
         monitor_layout: config.monitor_layout.clone(),
     })
 }

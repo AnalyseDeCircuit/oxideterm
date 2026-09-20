@@ -204,7 +204,7 @@ impl LaunchSnapshot {
                 saved.username = profile.username.clone();
                 saved.domain = profile.domain.clone();
                 saved.read_only = profile.read_only;
-                saved.session_options = profile.session_options;
+                saved.session_options = profile.session_options.clone();
                 saved.ssh_gateway_connection_id = ssh_gateway_connection_id.clone();
                 if let Some(proxy) = &profile.socks_proxy {
                     saved.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
@@ -288,7 +288,9 @@ impl LaunchSnapshot {
                     store.get_mosh_profile(&profile_id)?;
                     StandaloneConnectionLaunch::SavedMosh { profile_id }
                 }
-                StandaloneConnectionKind::Rdp | StandaloneConnectionKind::Vnc => {
+                StandaloneConnectionKind::Rdp
+                | StandaloneConnectionKind::Vnc
+                | StandaloneConnectionKind::Spice => {
                     store.get_remote_desktop_profile(&profile_id)?;
                     StandaloneConnectionLaunch::SavedRemoteDesktop { profile_id }
                 }

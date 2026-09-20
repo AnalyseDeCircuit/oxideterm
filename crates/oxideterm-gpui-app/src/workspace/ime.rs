@@ -38,6 +38,7 @@ use oxideterm_gpui_ui::{
         text_input_anchor_probe, text_input_secret_mask,
     },
 };
+use oxideterm_workspace::TabId;
 use zeroize::{Zeroize, Zeroizing};
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
@@ -152,6 +153,7 @@ pub(super) enum WorkspaceImeTarget {
     AiMessageEdit,
     PluginControl { key: u64, secret: bool },
     Sftp(SftpInput),
+    SpicePort { tab_id: u64, channel_id: u8 },
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
 }
@@ -527,6 +529,10 @@ impl WorkspaceImeTarget {
             Self::AiConversationRename => 1_899,
             Self::PluginControl { key, .. } => key.wrapping_add(10_000),
             Self::Sftp(input) => 1_900 + input.anchor_key(),
+            Self::SpicePort { tab_id, channel_id } => tab_id
+                .wrapping_mul(256)
+                .wrapping_add(u64::from(channel_id))
+                .wrapping_add(30_000),
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
         };
@@ -1025,6 +1031,15 @@ impl WorkspaceApp {
             && self.new_connection_field_accepts_ime(form.focused_field, cx)
         {
             return Some(WorkspaceImeTarget::NewConnection(form.focused_field));
+        }
+
+        if let Some(tab_id) = self.active_remote_desktop_tab_id(cx)
+            && let Some(channel_id) = self.spice_focused_port(tab_id, cx)
+        {
+            return Some(WorkspaceImeTarget::SpicePort {
+                tab_id: tab_id.0,
+                channel_id,
+            });
         }
 
         if let Some(input) = self.focused_oxide_dialog_input(cx) {
@@ -2312,6 +2327,9 @@ impl WorkspaceApp {
                     None
                 }
             }
+            WorkspaceImeTarget::SpicePort { tab_id, channel_id } => self
+                .spice_port_input(TabId(tab_id), channel_id, cx)
+                .map(|value| ime_text_snapshot(target, value)),
             WorkspaceImeTarget::NewConnection(field) => {
                 let form = self.connection_form_state(cx).form.as_ref()?;
                 new_connection_field_value(form, field)
@@ -3228,6 +3246,18 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
+            WorkspaceImeTarget::SpicePort { tab_id, channel_id } => {
+                if self.replace_spice_port_input(
+                    TabId(tab_id),
+                    channel_id,
+                    replacement_range,
+                    text,
+                    cx,
+                ) {
+                    self.show_active_input_caret(cx);
+                    cx.notify();
+                }
+            }
             WorkspaceImeTarget::NewConnection(field) => {
                 let changed = self.update_connection_form_state(cx, |state| {
                     let editing_saved = state.saved_connection_source_id().is_some()
@@ -3325,6 +3355,12 @@ fn new_connection_field_value(
         NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
         NewConnectionField::MoshLocale => &form.mosh_locale,
+        NewConnectionField::SpiceTlsServerName => &form.spice_tls_server_name,
+        NewConnectionField::SpiceSaslHostname => &form.spice_sasl_hostname,
+        NewConnectionField::SpiceSaslService => &form.spice_sasl_service,
+        NewConnectionField::SpiceSaslAuthenticationId => &form.spice_sasl_authentication_id,
+        NewConnectionField::SpiceSaslAuthorizationId => &form.spice_sasl_authorization_id,
+        NewConnectionField::SpiceSaslPassword => &form.spice_sasl_password,
         NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
         NewConnectionField::ConnectTimeoutSeconds => &form.connect_timeout_seconds_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
@@ -3427,6 +3463,12 @@ fn connection_field_value_mut(
         NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
         NewConnectionField::MoshLocale => &mut form.mosh_locale,
+        NewConnectionField::SpiceTlsServerName => &mut form.spice_tls_server_name,
+        NewConnectionField::SpiceSaslHostname => &mut form.spice_sasl_hostname,
+        NewConnectionField::SpiceSaslService => &mut form.spice_sasl_service,
+        NewConnectionField::SpiceSaslAuthenticationId => &mut form.spice_sasl_authentication_id,
+        NewConnectionField::SpiceSaslAuthorizationId => &mut form.spice_sasl_authorization_id,
+        NewConnectionField::SpiceSaslPassword => &mut form.spice_sasl_password,
         NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
         NewConnectionField::ConnectTimeoutSeconds => &mut form.connect_timeout_seconds_text,
         NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
@@ -3598,6 +3640,7 @@ fn ime_target_is_secret(target: WorkspaceImeTarget) -> bool {
         target,
         WorkspaceImeTarget::NewConnection(
             NewConnectionField::Password
+                | NewConnectionField::SpiceSaslPassword
                 | NewConnectionField::Passphrase
                 | NewConnectionField::UpstreamProxyPassword
                 | NewConnectionField::JumpPassword
@@ -4162,6 +4205,7 @@ mod tests {
         let targets = [
             WorkspaceImeTarget::Settings(SettingsInput::AiProviderApiKey(0)),
             WorkspaceImeTarget::NewConnection(NewConnectionField::Password),
+            WorkspaceImeTarget::NewConnection(NewConnectionField::SpiceSaslPassword),
             WorkspaceImeTarget::NewConnection(NewConnectionField::UpstreamProxyPassword),
             WorkspaceImeTarget::KeyboardInteractive(0),
             WorkspaceImeTarget::HostTmuxDialogInput,

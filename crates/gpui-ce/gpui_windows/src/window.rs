@@ -24,7 +24,13 @@ use windows::{
         System::{
             Com::*, Diagnostics::Debug::MessageBeep, LibraryLoader::*, Ole::*, SystemServices::*,
         },
-        UI::{Controls::*, HiDpi::*, Input::KeyboardAndMouse::*, Shell::*, WindowsAndMessaging::*},
+        UI::{
+            Controls::*,
+            HiDpi::*,
+            Input::{KeyboardAndMouse::*, *},
+            Shell::*,
+            WindowsAndMessaging::*,
+        },
     },
     core::*,
 };
@@ -47,6 +53,10 @@ impl std::ops::Deref for WindowsWindow {
 }
 
 pub struct WindowsWindowState {
+    pub relative_mouse_active: Cell<bool>,
+    pub relative_mouse_generation: Cell<u64>,
+    pub relative_mouse_position: Cell<Point<Pixels>>,
+    pub relative_mouse_previous_clip: Cell<Option<RECT>>,
     pub origin: Cell<Point<Pixels>>,
     pub logical_size: Cell<Size<Pixels>>,
     pub min_size: Option<Size<Pixels>>,
@@ -184,6 +194,10 @@ impl WindowsWindowState {
             .context("initializing Direct Manipulation")?;
 
         Ok(Self {
+            relative_mouse_active: Cell::new(false),
+            relative_mouse_generation: Cell::new(0),
+            relative_mouse_position: Cell::new(Point::default()),
+            relative_mouse_previous_clip: Cell::new(None),
             origin: Cell::new(origin),
             logical_size: Cell::new(logical_size),
             fullscreen_restore_bounds: Cell::new(fullscreen_restore_bounds),
@@ -714,8 +728,54 @@ impl rwh::HasDisplayHandle for WindowsWindow {
     }
 }
 
+impl WindowsWindowState {
+    pub(crate) fn release_relative_mouse(&self) {
+        if self.relative_mouse_active.replace(false) {
+            unsafe {
+                let previous = self.relative_mouse_previous_clip.take();
+                let _ = ClipCursor(previous.as_ref().map(|rect| rect as *const RECT));
+                let _ = RegisterRawInputDevices(
+                    &[RAWINPUTDEVICE {
+                        usUsagePage: 1,
+                        usUsage: 2,
+                        dwFlags: RIDEV_REMOVE,
+                        hwndTarget: HWND::default(),
+                    }],
+                    std::mem::size_of::<RAWINPUTDEVICE>() as u32,
+                );
+                SetCursor(self.current_cursor.get());
+            }
+        }
+    }
+}
+
+struct WindowsMouseCapture {
+    window: Weak<WindowsWindowInner>,
+    generation: u64,
+}
+
+impl PlatformMouseCapture for WindowsMouseCapture {
+    fn is_active(&self) -> bool {
+        self.window.upgrade().is_some_and(|window| {
+            window.state.relative_mouse_active.get()
+                && window.state.relative_mouse_generation.get() == self.generation
+        })
+    }
+}
+
+impl Drop for WindowsMouseCapture {
+    fn drop(&mut self) {
+        if let Some(window) = self.window.upgrade()
+            && window.state.relative_mouse_generation.get() == self.generation
+        {
+            window.state.release_relative_mouse();
+        }
+    }
+}
+
 impl Drop for WindowsWindow {
     fn drop(&mut self) {
+        self.state.release_relative_mouse();
         // clone this `Rc` to prevent early release of the pointer
         let this = self.0.clone();
         self.0
@@ -732,6 +792,61 @@ impl Drop for WindowsWindow {
 }
 
 impl PlatformWindow for WindowsWindow {
+    fn capture_relative_mouse(&self) -> Result<Box<dyn PlatformMouseCapture>> {
+        anyhow::ensure!(
+            !self.state.relative_mouse_active.get(),
+            "mouse is already captured"
+        );
+        unsafe {
+            anyhow::ensure!(
+                GetForegroundWindow() == self.hwnd,
+                "mouse capture requires an active window"
+            );
+            let mut point = POINT::default();
+            GetCursorPos(&mut point)?;
+            let mut previous = RECT::default();
+            GetClipCursor(&mut previous)?;
+            RegisterRawInputDevices(
+                &[RAWINPUTDEVICE {
+                    usUsagePage: 1,
+                    usUsage: 2,
+                    dwFlags: RAWINPUTDEVICE_FLAGS(0),
+                    hwndTarget: self.hwnd,
+                }],
+                std::mem::size_of::<RAWINPUTDEVICE>() as u32,
+            )?;
+            let rect = RECT {
+                left: point.x,
+                top: point.y,
+                right: point.x + 1,
+                bottom: point.y + 1,
+            };
+            if let Err(error) = ClipCursor(Some(&rect)) {
+                let _ = RegisterRawInputDevices(
+                    &[RAWINPUTDEVICE {
+                        usUsagePage: 1,
+                        usUsage: 2,
+                        dwFlags: RIDEV_REMOVE,
+                        hwndTarget: HWND::default(),
+                    }],
+                    std::mem::size_of::<RAWINPUTDEVICE>() as u32,
+                );
+                return Err(error.into());
+            }
+            self.state.relative_mouse_previous_clip.set(Some(previous));
+            self.state
+                .relative_mouse_position
+                .set(self.mouse_position());
+            self.state.relative_mouse_active.set(true);
+            let generation = self.state.relative_mouse_generation.get().wrapping_add(1);
+            self.state.relative_mouse_generation.set(generation);
+            SetCursor(None);
+            Ok(Box::new(WindowsMouseCapture {
+                window: Rc::downgrade(&self.0),
+                generation,
+            }))
+        }
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.state.bounds()
     }

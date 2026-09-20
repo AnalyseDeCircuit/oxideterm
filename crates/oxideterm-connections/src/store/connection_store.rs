@@ -81,7 +81,10 @@ impl ConnectionStore {
     }
 
     pub fn get_mosh_profile(&self, id: &str) -> Option<&MoshProfile> {
-        self.data.mosh_profiles.iter().find(|profile| profile.id == id)
+        self.data
+            .mosh_profiles
+            .iter()
+            .find(|profile| profile.id == id)
     }
 
     pub fn standalone_sftp_profiles(&self) -> &[StandaloneSftpProfile] {
@@ -142,7 +145,12 @@ impl ConnectionStore {
             Err(_keychain_error) => {
                 let _ = self.managed_keychain.delete(secret_id);
                 let (config_key, created_config_key) = get_or_create_config_encryption_key()?;
-                write_managed_ssh_key_secret_file(self.data_dir()?, secret_id, secret, &config_key)?;
+                write_managed_ssh_key_secret_file(
+                    self.data_dir()?,
+                    secret_id,
+                    secret,
+                    &config_key,
+                )?;
                 Ok(ManagedSshKeySecretWrite { created_config_key })
             }
         }
@@ -215,7 +223,8 @@ impl ConnectionStore {
         });
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Connection(id.clone()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::Connection(id.clone()));
         let old_keychain_ids = self
             .get(&id)
             .map(collect_connection_keychain_ids)
@@ -230,9 +239,9 @@ impl ConnectionStore {
         // Tauri preserves saved per-connection SSH options on edit and only
         // overwrites fields carried by the current form. This keeps imported
         // Tauri config tails such as compression/term_type from being dropped.
-        options.connect_timeout_seconds =
-            (request.connect_timeout_seconds != DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS)
-                .then_some(request.connect_timeout_seconds.max(1));
+        options.connect_timeout_seconds = (request.connect_timeout_seconds
+            != DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS)
+            .then_some(request.connect_timeout_seconds.max(1));
         options.agent_forwarding = request.agent_forwarding;
         options.identity_agent = request.identity_agent;
         options.agent_forwarding_socket = request.agent_forwarding_socket;
@@ -448,12 +457,15 @@ impl ConnectionStore {
         id: &str,
         slot: ConnectionCredentialSlot,
     ) -> Result<bool> {
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Connection(id.to_string()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::Connection(id.to_string()));
         let Some(connection) = self.get(id) else {
             return Ok(false);
         };
         let (next_auth, reference) = match slot {
-            ConnectionCredentialSlot::Primary => auth_without_protected_credential(&connection.auth),
+            ConnectionCredentialSlot::Primary => {
+                auth_without_protected_credential(&connection.auth)
+            }
             ConnectionCredentialSlot::ProxyHop { index } => connection
                 .proxy_chain
                 .get(index)
@@ -492,7 +504,7 @@ impl ConnectionStore {
                 };
                 connection.updated_at = Some(Utc::now());
                 self.record_cleared_credentials(previous_credentials);
-        self.save()?;
+                self.save()?;
                 self.delete_or_queue_connection_keychain_entry(reference)?;
                 return Ok(true);
             }
@@ -638,12 +650,9 @@ impl ConnectionStore {
         if group_path_is_within(&new_name, &old_name) {
             bail!("a group cannot be moved into its own subtree");
         }
-        if self
-            .data
-            .groups
-            .iter()
-            .any(|group| group_path_is_within(group, &new_name) && !group_path_is_within(group, &old_name))
-        {
+        if self.data.groups.iter().any(|group| {
+            group_path_is_within(group, &new_name) && !group_path_is_within(group, &old_name)
+        }) {
             bail!("the destination group already exists");
         }
 
@@ -981,10 +990,10 @@ impl ConnectionStore {
         else {
             return Ok(false);
         };
-        let input_changed = input_line_ending
-            .is_some_and(|line_ending| profile.input_line_ending != line_ending);
-        let output_changed = output_line_ending
-            .is_some_and(|line_ending| profile.output_line_ending != line_ending);
+        let input_changed =
+            input_line_ending.is_some_and(|line_ending| profile.input_line_ending != line_ending);
+        let output_changed =
+            output_line_ending.is_some_and(|line_ending| profile.output_line_ending != line_ending);
         if !input_changed && !output_changed {
             return Ok(false);
         }
@@ -1133,10 +1142,7 @@ impl ConnectionStore {
         Ok(true)
     }
 
-    pub fn upsert_mosh_profile(
-        &mut self,
-        request: SaveMoshProfileRequest,
-    ) -> Result<MoshProfile> {
+    pub fn upsert_mosh_profile(&mut self, request: SaveMoshProfileRequest) -> Result<MoshProfile> {
         self.upsert_mosh_profile_with_runtime_secrets(request)
             .map(|(profile, _secrets)| profile)
     }
@@ -1148,7 +1154,8 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Mosh(id.clone()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::Mosh(id.clone()));
         let existing = self.get_mosh_profile(&id).cloned();
         let old_keychain_ids = existing
             .as_ref()
@@ -1316,7 +1323,8 @@ impl ConnectionStore {
 
     /// Forgets a Mosh primary credential without changing its recent-use timestamp.
     pub fn forget_mosh_profile_credential(&mut self, id: &str) -> Result<bool> {
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Mosh(id.to_string()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::Mosh(id.to_string()));
         let Some(profile) = self.get_mosh_profile(id) else {
             return Ok(false);
         };
@@ -1338,12 +1346,9 @@ impl ConnectionStore {
         Ok(true)
     }
 
-    pub fn forget_mosh_proxy_hop_credential(
-        &mut self,
-        id: &str,
-        hop_index: usize,
-    ) -> Result<bool> {
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::Mosh(id.to_string()));
+    pub fn forget_mosh_proxy_hop_credential(&mut self, id: &str, hop_index: usize) -> Result<bool> {
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::Mosh(id.to_string()));
         let Some(profile) = self.get_mosh_profile(id) else {
             return Ok(false);
         };
@@ -1404,7 +1409,8 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::StandaloneSftp(id.clone()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::StandaloneSftp(id.clone()));
         // Validate portable metadata before any temporary credential crosses into keychain.
         non_empty(id.trim(), "Standalone SFTP profile id")?;
         non_empty(request.name.trim(), "Standalone SFTP profile name")?;
@@ -1650,7 +1656,8 @@ impl ConnectionStore {
         let group = normalize_optional_group_name(request.group.as_deref())?;
         let now = Utc::now();
         let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::RemoteDesktop(id.clone()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::RemoteDesktop(id.clone()));
         let existing = self.get_remote_desktop_profile(&id).cloned();
         let old_proxy_ids = existing
             .as_ref()
@@ -1668,10 +1675,23 @@ impl ConnectionStore {
         let old_credential_ref = existing
             .as_ref()
             .and_then(|profile| profile.credential_ref.clone());
+        let old_sasl_credential_ref = existing
+            .as_ref()
+            .and_then(|profile| profile.sasl_credential_ref.clone());
         if request.clear_credential
             && (request.credential.is_some() || request.credential_ref.is_some())
         {
             bail!("Cannot replace and clear a remote desktop credential in one update");
+        }
+        if request.clear_sasl_credential
+            && (request.sasl_credential.is_some() || request.sasl_credential_ref.is_some())
+        {
+            bail!("Cannot replace and clear a SPICE SASL credential in one update");
+        }
+        if request.protocol != oxideterm_remote_desktop::RemoteDesktopProtocol::Spice
+            && (request.sasl_credential.is_some() || request.sasl_credential_ref.is_some())
+        {
+            bail!("Only a SPICE profile can own a SASL credential");
         }
         let requested_credential_ref = normalize_optional_text(request.credential_ref);
         let mut credential_ref = if request.clear_credential {
@@ -1681,6 +1701,17 @@ impl ConnectionStore {
         };
         if request.credential.is_some() && credential_ref.is_none() {
             credential_ref = Some(remote_desktop_credential_ref(&id));
+        }
+        let requested_sasl_credential_ref = normalize_optional_text(request.sasl_credential_ref);
+        let mut sasl_credential_ref = if request.clear_sasl_credential
+            || request.protocol != oxideterm_remote_desktop::RemoteDesktopProtocol::Spice
+        {
+            None
+        } else {
+            requested_sasl_credential_ref.or_else(|| old_sasl_credential_ref.clone())
+        };
+        if request.sasl_credential.is_some() && sasl_credential_ref.is_none() {
+            sasl_credential_ref = Some(remote_desktop_sasl_credential_ref(&id));
         }
 
         let mut profile = existing.unwrap_or_else(|| {
@@ -1708,6 +1739,7 @@ impl ConnectionStore {
             normalize_optional_text(request.ssh_gateway_connection_id);
         profile.credential_ref = credential_ref.clone();
         profile.upstream_proxy = policy;
+        profile.sasl_credential_ref = sasl_credential_ref.clone();
         profile.read_only = request.read_only;
         profile.session_options = request.session_options;
         profile.updated_at = now;
@@ -1720,6 +1752,12 @@ impl ConnectionStore {
             (request.credential.as_ref(), credential_ref.as_deref())
         {
             // Validation runs first; only the protected backend receives a valid asset's secret.
+            self.keychain.store(reference, credential)?;
+        }
+        if let (Some(credential), Some(reference)) = (
+            request.sasl_credential.as_ref(),
+            sasl_credential_ref.as_deref(),
+        ) {
             self.keychain.store(reference, credential)?;
         }
 
@@ -1752,6 +1790,11 @@ impl ConnectionStore {
         {
             self.delete_or_queue_connection_keychain_entry(id)?;
         }
+        if old_sasl_credential_ref != sasl_credential_ref
+            && let Some(stale_reference) = old_sasl_credential_ref
+        {
+            self.delete_or_queue_connection_keychain_entry(stale_reference)?;
+        }
         Ok(profile)
     }
 
@@ -1763,6 +1806,9 @@ impl ConnectionStore {
         let credential_ref = self
             .get_remote_desktop_profile(id)
             .and_then(|profile| profile.credential_ref.clone());
+        let sasl_credential_ref = self
+            .get_remote_desktop_profile(id)
+            .and_then(|profile| profile.sasl_credential_ref.clone());
         let before = self.data.remote_desktop_profiles.len();
         self.data
             .remote_desktop_profiles
@@ -1774,6 +1820,9 @@ impl ConnectionStore {
                 self.delete_or_queue_connection_keychain_entry(reference)?;
             }
             if let Some(reference) = credential_ref {
+                self.delete_or_queue_connection_keychain_entry(reference)?;
+            }
+            if let Some(reference) = sasl_credential_ref {
                 self.delete_or_queue_connection_keychain_entry(reference)?;
             }
         }
@@ -1806,8 +1855,7 @@ impl ConnectionStore {
             .ok_or_else(|| anyhow::anyhow!("Remote desktop profile not found"))?
             .credential_ref
             .clone();
-        let reference =
-            existing_ref.unwrap_or_else(|| remote_desktop_credential_ref(profile_id));
+        let reference = existing_ref.unwrap_or_else(|| remote_desktop_credential_ref(profile_id));
         // Persist the secret before publishing its reference in profile metadata.
         self.keychain.store(&reference, credential)?;
         let profile = self
@@ -1832,8 +1880,48 @@ impl ConnectionStore {
         self.keychain.get_optional(reference)
     }
 
+    pub fn get_remote_desktop_sasl_credential(
+        &self,
+        profile_id: &str,
+    ) -> Result<Option<SecretString>> {
+        let Some(reference) = self
+            .get_remote_desktop_profile(profile_id)
+            .and_then(|profile| profile.sasl_credential_ref.as_deref())
+        else {
+            return Ok(None);
+        };
+        self.keychain.get_optional(reference)
+    }
+
+    pub fn save_remote_desktop_sasl_credential(
+        &mut self,
+        profile_id: &str,
+        credential: &SecretString,
+    ) -> Result<String> {
+        let existing_ref = self
+            .get_remote_desktop_profile(profile_id)
+            .ok_or_else(|| anyhow::anyhow!("Remote desktop profile not found"))?
+            .sasl_credential_ref
+            .clone();
+        let reference =
+            existing_ref.unwrap_or_else(|| remote_desktop_sasl_credential_ref(profile_id));
+        // Publish the device-local reference only after the protected value exists.
+        self.keychain.store(&reference, credential)?;
+        let profile = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+            .expect("remote desktop profile checked above");
+        profile.sasl_credential_ref = Some(reference.clone());
+        profile.updated_at = Utc::now();
+        self.save()?;
+        Ok(reference)
+    }
+
     pub fn delete_remote_desktop_credential(&mut self, profile_id: &str) -> Result<bool> {
-        let previous_credentials = self.stored_credential_targets(&CredentialOwner::RemoteDesktop(profile_id.to_string()));
+        let previous_credentials =
+            self.stored_credential_targets(&CredentialOwner::RemoteDesktop(profile_id.to_string()));
         let Some(profile) = self
             .data
             .remote_desktop_profiles
@@ -1847,6 +1935,24 @@ impl ConnectionStore {
         };
         profile.updated_at = Utc::now();
         self.record_cleared_credentials(previous_credentials);
+        self.save()?;
+        self.delete_or_queue_connection_keychain_entry(reference)?;
+        Ok(true)
+    }
+
+    pub fn delete_remote_desktop_sasl_credential(&mut self, profile_id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .remote_desktop_profiles
+            .iter_mut()
+            .find(|profile| profile.id == profile_id)
+        else {
+            return Ok(false);
+        };
+        let Some(reference) = profile.sasl_credential_ref.take() else {
+            return Ok(false);
+        };
+        profile.updated_at = Utc::now();
         self.save()?;
         self.delete_or_queue_connection_keychain_entry(reference)?;
         Ok(true)
@@ -1991,8 +2097,7 @@ impl ConnectionStore {
         }
         let original_data = self.data.clone();
         let original_keychain = self.snapshot_keychain_entries(&original_data)?;
-        let imported_privilege_keychain_ids =
-            collect_imported_privilege_keychain_ids(&connections);
+        let imported_privilege_keychain_ids = collect_imported_privilege_keychain_ids(&connections);
         let existing_privilege_keychain_ids = original_data
             .connections
             .iter()
@@ -2021,8 +2126,10 @@ impl ConnectionStore {
         let result = (|| {
             for managed_key in managed_keys {
                 touched_managed_secret_ids.insert(managed_key.key.secret_id.clone());
-                let secret_write =
-                    self.store_managed_ssh_key_secret(&managed_key.key.secret_id, &managed_key.secret)?;
+                let secret_write = self.store_managed_ssh_key_secret(
+                    &managed_key.key.secret_id,
+                    &managed_key.secret,
+                )?;
                 created_managed_secret_config_key |= secret_write.created_config_key;
                 self.data
                     .managed_ssh_keys
@@ -2045,18 +2152,24 @@ impl ConnectionStore {
             self.data = original_data;
             let mut rollback_errors = Vec::new();
             if let Err(rollback_error) = self.save() {
-                rollback_errors.push(format!("connection file restore failed: {rollback_error:#}"));
+                rollback_errors.push(format!(
+                    "connection file restore failed: {rollback_error:#}"
+                ));
             }
             if let Err(rollback_error) =
                 self.rollback_keychain_entries(&touched_keychain_ids, &original_keychain)
             {
-                rollback_errors.push(format!("connection credential restore failed: {rollback_error:#}"));
+                rollback_errors.push(format!(
+                    "connection credential restore failed: {rollback_error:#}"
+                ));
             }
             if let Err(rollback_error) = self.rollback_privilege_keychain_entries(
                 &touched_privilege_keychain_ids,
                 &original_privilege_keychain,
             ) {
-                rollback_errors.push(format!("privilege credential restore failed: {rollback_error:#}"));
+                rollback_errors.push(format!(
+                    "privilege credential restore failed: {rollback_error:#}"
+                ));
             }
             if let Err(rollback_error) = self.rollback_managed_keychain_entries(
                 &touched_managed_secret_ids,
@@ -2184,8 +2297,7 @@ impl ConnectionStore {
     ) -> Result<bool> {
         let credentials = self.privilege_credentials_for_scope_mut(connection_id)?;
         let before = credentials.len();
-        credentials
-            .retain(|credential| credential.id != credential_id);
+        credentials.retain(|credential| credential.id != credential_id);
         let removed = before != credentials.len();
         if removed {
             self.touch_privilege_scope(connection_id);
@@ -2473,9 +2585,15 @@ impl ConnectionStore {
             .context("failed to load ProxyCommand from protected storage")
     }
 
-    pub fn save_global_upstream_proxy_password(&mut self, password: &SecretString) -> Result<String> {
+    pub fn save_global_upstream_proxy_password(
+        &mut self,
+        password: &SecretString,
+    ) -> Result<String> {
         // Reuse this device's current slot, including one allocated by cloud restore.
-        let reference = self.data.synced_global_proxy_reference.clone()
+        let reference = self
+            .data
+            .synced_global_proxy_reference
+            .clone()
             .unwrap_or_else(|| GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID.to_string());
         self.keychain.store(&reference, password)?;
         self.data.global_proxy_credential_revision = Uuid::new_v4().to_string();
@@ -2485,7 +2603,8 @@ impl ConnectionStore {
     }
 
     pub fn delete_global_upstream_proxy_password(&mut self) -> Result<()> {
-        self.keychain.delete(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID)?;
+        self.keychain
+            .delete(GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID)?;
         if let Some(reference) = self.data.synced_global_proxy_reference.take() {
             self.keychain.delete(&reference)?;
         }
@@ -2496,7 +2615,11 @@ impl ConnectionStore {
 
     pub fn get_global_upstream_proxy_password(&self, keychain_id: &str) -> Result<SecretString> {
         if keychain_id != GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID
-            && keychain_id.strip_prefix("oxide_global_proxy_").and_then(|id| Uuid::parse_str(id).ok()).is_none() {
+            && keychain_id
+                .strip_prefix("oxide_global_proxy_")
+                .and_then(|id| Uuid::parse_str(id).ok())
+                .is_none()
+        {
             bail!("Invalid global upstream proxy keychain id");
         }
         self.keychain.get(keychain_id)
@@ -2525,10 +2648,10 @@ impl ConnectionStore {
     ) -> Result<ManagedSshKeyInfo> {
         let path = path.as_ref();
         let fallback_name = fallback_name_from_path(path);
-        let private_key = SecretString::from(
-            fs::read_to_string(path)
-                .with_context(|| format!("failed to read SSH private key file {}", path.display()))?,
-        );
+        let private_key =
+            SecretString::from(fs::read_to_string(path).with_context(|| {
+                format!("failed to read SSH private key file {}", path.display())
+            })?);
         self.create_managed_ssh_key(
             private_key,
             name,
@@ -2555,11 +2678,7 @@ impl ConnectionStore {
             .ok_or_else(|| anyhow::anyhow!("Managed SSH key not found"))
     }
 
-    pub fn rename_managed_ssh_key(
-        &mut self,
-        id: &str,
-        name: String,
-    ) -> Result<ManagedSshKeyInfo> {
+    pub fn rename_managed_ssh_key(&mut self, id: &str, name: String) -> Result<ManagedSshKeyInfo> {
         let key = self
             .data
             .managed_ssh_keys
@@ -2623,7 +2742,8 @@ impl ConnectionStore {
             &private_key,
             &managed_key.fingerprint,
             managed_key.requires_passphrase,
-        )? else {
+        )?
+        else {
             // Secret material leaves the managed backend only at the SSH auth boundary.
             // Callers must decode/use it immediately and must not persist this value.
             return Ok(private_key);
@@ -2894,7 +3014,10 @@ impl ConnectionStore {
         }
     }
 
-    fn materialize_proxy_chain(&self, proxy_chain: Vec<SavedProxyHop>) -> Result<Vec<SavedProxyHop>> {
+    fn materialize_proxy_chain(
+        &self,
+        proxy_chain: Vec<SavedProxyHop>,
+    ) -> Result<Vec<SavedProxyHop>> {
         self.materialize_proxy_chain_with_runtime_secrets(proxy_chain)
             .map(|(proxy_chain, _secrets)| proxy_chain)
     }
@@ -2940,9 +3063,7 @@ impl ConnectionStore {
         existing_policy: Option<&SavedUpstreamProxyPolicy>,
     ) -> Result<(SavedUpstreamProxyPolicy, Option<SecretString>)> {
         match policy {
-            SavedUpstreamProxyPolicy::UseGlobal => {
-                Ok((SavedUpstreamProxyPolicy::UseGlobal, None))
-            }
+            SavedUpstreamProxyPolicy::UseGlobal => Ok((SavedUpstreamProxyPolicy::UseGlobal, None)),
             SavedUpstreamProxyPolicy::Direct => Ok((SavedUpstreamProxyPolicy::Direct, None)),
             SavedUpstreamProxyPolicy::Custom { proxy } => {
                 let (auth, runtime_secret) = self
@@ -3175,8 +3296,8 @@ impl ConnectionStore {
         } else if connection.created_at.timestamp() <= 0 {
             connection.created_at = now;
         }
-        let (privilege_credentials, touched_privilege_keychain_ids) =
-            self.materialize_privilege_credentials(&connection.id, connection.privilege_credentials)?;
+        let (privilege_credentials, touched_privilege_keychain_ids) = self
+            .materialize_privilege_credentials(&connection.id, connection.privilege_credentials)?;
         connection.privilege_credentials = privilege_credentials;
         connection.updated_at = Some(now);
 
@@ -3278,12 +3399,8 @@ impl ConnectionStore {
         let mut errors = Vec::new();
         for keychain_id in touched_keychain_ids {
             let result = match original_keychain.get(keychain_id) {
-                Some(Some(secret)) => {
-                    self.keychain.store(keychain_id, secret)
-                }
-                Some(None) | None => {
-                    self.keychain.delete(keychain_id)
-                }
+                Some(Some(secret)) => self.keychain.store(keychain_id, secret),
+                Some(None) | None => self.keychain.delete(keychain_id),
             };
             if let Err(error) = result {
                 errors.push(error.to_string());
@@ -3300,12 +3417,8 @@ impl ConnectionStore {
         let mut errors = Vec::new();
         for keychain_id in touched_keychain_ids {
             let result = match original_keychain.get(keychain_id) {
-                Some(Some(secret)) => {
-                    self.privilege_keychain.store(keychain_id, secret)
-                }
-                Some(None) | None => {
-                    self.privilege_keychain.delete(keychain_id)
-                }
+                Some(Some(secret)) => self.privilege_keychain.store(keychain_id, secret),
+                Some(None) | None => self.privilege_keychain.delete(keychain_id),
             };
             if let Err(error) = result {
                 errors.push(error.to_string());
@@ -3322,12 +3435,10 @@ impl ConnectionStore {
         let mut errors = Vec::new();
         for secret_id in touched_secret_ids {
             let result = match original_keychain.get(secret_id) {
-                Some(Some(secret)) => {
-                    self.store_managed_ssh_key_secret(secret_id, secret).map(|_| ())
-                }
-                Some(None) | None => {
-                    self.delete_managed_ssh_key_secret(secret_id)
-                }
+                Some(Some(secret)) => self
+                    .store_managed_ssh_key_secret(secret_id, secret)
+                    .map(|_| ()),
+                Some(None) | None => self.delete_managed_ssh_key_secret(secret_id),
             };
             if let Err(error) = result {
                 errors.push(error.to_string());
@@ -3453,12 +3564,14 @@ impl ConnectionStore {
         self.data.connection_tombstones =
             active_connection_tombstones(&self.data.connection_tombstones);
         self.data.ftp_tombstones = active_connection_tombstones(&self.data.ftp_tombstones);
-        self.data
-            .recent
-            .retain(|recent_id| self.data.connections.iter().any(|conn| &conn.id == recent_id));
+        self.data.recent.retain(|recent_id| {
+            self.data
+                .connections
+                .iter()
+                .any(|conn| &conn.id == recent_id)
+        });
         self.data.recent.dedup();
-        self.data
-            .groups.sort_by_key(|left| left.to_lowercase());
+        self.data.groups.sort_by_key(|left| left.to_lowercase());
         self.data.groups.dedup();
         let implicit_groups = self
             .data
@@ -3476,7 +3589,12 @@ impl ConnectionStore {
             .serial_profiles
             .iter()
             .filter_map(|profile| profile.group.clone())
-            .chain(self.data.ftp_profiles.iter().filter_map(|profile|profile.group.clone()))
+            .chain(
+                self.data
+                    .ftp_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
             .chain(
                 self.data
                     .telnet_profiles
@@ -3532,7 +3650,9 @@ impl ConnectionStore {
         self.data
             .standalone_sftp_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-        self.data.ftp_profiles.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data
+            .ftp_profiles
+            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
     }
 
     fn add_connection(&mut self, connection: SavedConnection) {
@@ -3605,8 +3725,8 @@ mod persistence_safety_tests {
         )
         .unwrap();
         for bytes in [b"{ not valid json".to_vec(), future] {
-            let path =
-                std::env::temp_dir().join(format!("oxideterm-rejected-{}.json", uuid::Uuid::new_v4()));
+            let path = std::env::temp_dir()
+                .join(format!("oxideterm-rejected-{}.json", uuid::Uuid::new_v4()));
             fs::write(&path, &bytes).unwrap();
             let result = ConnectionStore::load(&path);
             let preserved = fs::read(&path).unwrap();

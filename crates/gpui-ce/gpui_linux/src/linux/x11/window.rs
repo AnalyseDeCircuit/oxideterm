@@ -1378,6 +1378,10 @@ impl X11WindowStatePtr {
 }
 
 impl PlatformWindow for X11Window {
+    fn capture_relative_mouse(&self) -> anyhow::Result<Box<dyn gpui::PlatformMouseCapture>> {
+        let client = self.0.state.borrow().client.clone();
+        client.capture_relative_mouse(self.0.x_window)
+    }
     fn bounds(&self) -> Bounds<Pixels> {
         self.0.state.borrow().bounds
     }

@@ -4726,6 +4726,7 @@ mod tests {
             .update_window(any_window, |_, window, cx| {
                 window.dispatch_event(
                     MouseMoveEvent {
+                        relative_delta: None,
                         position: point(px(10.), px(10.)),
                         modifiers: Default::default(),
                         pressed_button: None,
@@ -4845,6 +4846,7 @@ mod tests {
             .update_window(any_window, |_, window, cx| {
                 window.dispatch_event(
                     MouseMoveEvent {
+                        relative_delta: None,
                         position: point(px(75.), px(75.)),
                         modifiers: Default::default(),
                         pressed_button: None,

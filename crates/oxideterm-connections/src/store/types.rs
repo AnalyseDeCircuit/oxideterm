@@ -325,7 +325,9 @@ impl SshAlgorithmPreferences {
             for algorithm in algorithms {
                 if algorithm.is_empty()
                     || algorithm.len() > MAX_SSH_ALGORITHM_NAME_BYTES
-                    || algorithm.bytes().any(|byte| byte == b',' || byte.is_ascii_whitespace())
+                    || algorithm
+                        .bytes()
+                        .any(|byte| byte == b',' || byte.is_ascii_whitespace())
                 {
                     bail!("Invalid SSH {category} algorithm name");
                 }
@@ -451,7 +453,6 @@ pub enum SavedUpstreamProxyAuth {
     },
 }
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedUpstreamProxyConfig {
@@ -473,7 +474,9 @@ pub enum SavedUpstreamProxyPolicy {
     #[default]
     UseGlobal,
     Direct,
-    Custom { proxy: SavedUpstreamProxyConfig },
+    Custom {
+        proxy: SavedUpstreamProxyConfig,
+    },
 }
 
 impl SavedUpstreamProxyPolicy {
@@ -481,7 +484,6 @@ impl SavedUpstreamProxyPolicy {
         matches!(self, Self::UseGlobal)
     }
 }
-
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SavedProxyCommand {
@@ -498,10 +500,7 @@ impl fmt::Debug for SavedProxyCommand {
             .field("keychain_id", &self.keychain_id)
             .field(
                 "plaintext_command",
-                &self
-                    .plaintext_command
-                    .as_ref()
-                    .map(|_| "[redacted secret]"),
+                &self.plaintext_command.as_ref().map(|_| "[redacted secret]"),
             )
             .finish()
     }
@@ -613,7 +612,10 @@ pub struct SavedConnection {
     pub auth: SavedAuth,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proxy_chain: Vec<SavedProxyHop>,
-    #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
+    #[serde(
+        default,
+        skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global"
+    )]
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     /// Manual ProxyCommand text stays in the protected store; metadata keeps only its reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -988,8 +990,13 @@ pub enum MoshIpFamily {
 pub enum MoshUdpPortSelection {
     #[default]
     Automatic,
-    Fixed { port: u16 },
-    Range { start: u16, end: u16 },
+    Fixed {
+        port: u16,
+    },
+    Range {
+        start: u16,
+        end: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -1134,7 +1141,10 @@ pub struct StandaloneSftpEndpoint {
     pub connect_timeout_seconds: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proxy_chain: Vec<SavedProxyHop>,
-    #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
+    #[serde(
+        default,
+        skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global"
+    )]
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     /// Manual ProxyCommand text stays in protected storage; metadata keeps only its reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1242,7 +1252,10 @@ pub struct StandaloneSftpProfile {
     pub connect_timeout_seconds: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub proxy_chain: Vec<SavedProxyHop>,
-    #[serde(default, skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global")]
+    #[serde(
+        default,
+        skip_serializing_if = "SavedUpstreamProxyPolicy::is_use_global"
+    )]
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     /// Manual ProxyCommand text stays in protected storage; metadata keeps only its reference.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1416,6 +1429,9 @@ pub struct RemoteDesktopProfile {
     /// Stable protected-store reference; the credential value is never serialized here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential_ref: Option<String>,
+    /// Device-local protected-store reference for a distinct SPICE SASL password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sasl_credential_ref: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     pub read_only: bool,
     #[serde(default)]
@@ -1448,6 +1464,12 @@ pub struct SaveRemoteDesktopProfileRequest {
     pub credential: Option<SecretString>,
     /// Explicitly removes the device-local protected credential while updating the profile.
     pub clear_credential: bool,
+    /// An explicit SASL reference is primarily used by trusted import and sync paths.
+    pub sasl_credential_ref: Option<String>,
+    /// The SPICE SASL password remains separately owned from the Ticket secret.
+    pub sasl_credential: Option<SecretString>,
+    /// Explicitly removes the device-local SASL password while updating the profile.
+    pub clear_sasl_credential: bool,
     pub read_only: bool,
     pub session_options: RemoteDesktopSessionOptions,
 }
@@ -1616,9 +1638,11 @@ impl MoshProfile {
             }
             MoshUdpPortSelection::Fixed { .. } | MoshUdpPortSelection::Range { .. } => {}
         }
-        if self.locale.as_deref().is_some_and(|locale| {
-            locale.trim().is_empty() || locale.contains(['\0', '\r', '\n'])
-        }) {
+        if self
+            .locale
+            .as_deref()
+            .is_some_and(|locale| locale.trim().is_empty() || locale.contains(['\0', '\r', '\n']))
+        {
             bail!("Mosh locale is invalid");
         }
         self.ssh_algorithms.validate()?;
@@ -1728,6 +1752,7 @@ impl RemoteDesktopProfile {
             ssh_gateway_connection_id: None,
             upstream_proxy: SavedUpstreamProxyPolicy::Direct,
             credential_ref: None,
+            sasl_credential_ref: None,
             read_only: false,
             session_options: RemoteDesktopSessionOptions::default(),
             created_at: now,
@@ -1777,6 +1802,16 @@ impl RemoteDesktopProfile {
             .is_some_and(|reference| reference.trim().is_empty())
         {
             bail!("Remote desktop credential reference cannot be empty");
+        }
+        if self
+            .sasl_credential_ref
+            .as_deref()
+            .is_some_and(|reference| reference.trim().is_empty())
+        {
+            bail!("SPICE SASL credential reference cannot be empty");
+        }
+        if self.protocol != RemoteDesktopProtocol::Spice && self.sasl_credential_ref.is_some() {
+            bail!("Only a SPICE profile can own a SASL credential reference");
         }
         Ok(())
     }
@@ -1849,17 +1884,11 @@ impl fmt::Debug for SavedConnectionRuntimeSecrets {
             )
             .field(
                 "upstream_proxy",
-                &self
-                    .upstream_proxy
-                    .as_ref()
-                    .map(|_| "[redacted secret]"),
+                &self.upstream_proxy.as_ref().map(|_| "[redacted secret]"),
             )
             .field(
                 "proxy_command",
-                &self
-                    .proxy_command
-                    .as_ref()
-                    .map(|_| "[redacted secret]"),
+                &self.proxy_command.as_ref().map(|_| "[redacted secret]"),
             )
             .finish()
     }

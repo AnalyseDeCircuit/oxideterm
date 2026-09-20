@@ -809,6 +809,7 @@ impl VisualTestContext {
         modifiers: Modifiers,
     ) {
         self.simulate_event(MouseMoveEvent {
+            relative_delta: None,
             position,
             modifiers,
             pressed_button: button.into(),

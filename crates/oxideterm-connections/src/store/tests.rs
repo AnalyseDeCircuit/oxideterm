@@ -177,10 +177,7 @@ mod tests {
         }
     }
 
-    fn standalone_sftp_request(
-        id: &str,
-        auth: SavedAuth,
-    ) -> SaveStandaloneSftpProfileRequest {
+    fn standalone_sftp_request(id: &str, auth: SavedAuth) -> SaveStandaloneSftpProfileRequest {
         SaveStandaloneSftpProfileRequest {
             id: Some(id.to_string()),
             name: "Archive SFTP".to_string(),
@@ -372,7 +369,12 @@ mod tests {
         );
         snapshot.records[0].notes = Some("Synced metadata".to_string());
         snapshot.records[0].updated_at += Duration::seconds(1);
-        assert_eq!(store.apply_standalone_sftp_profiles_snapshot(snapshot).unwrap(), 1);
+        assert_eq!(
+            store
+                .apply_standalone_sftp_profiles_snapshot(snapshot)
+                .unwrap(),
+            1
+        );
         let loaded_after_sync = store
             .load_standalone_sftp_profile_runtime_secrets("sftp-1")
             .unwrap();
@@ -381,7 +383,10 @@ mod tests {
             store.standalone_sftp_profiles()[0].auth.gssapi_options(),
             Some((Some("host/sftp.example.test"), true))
         );
-        assert_eq!(loaded_after_sync.proxy_chain[0].as_ref().unwrap(), HOP_SECRET);
+        assert_eq!(
+            loaded_after_sync.proxy_chain[0].as_ref().unwrap(),
+            HOP_SECRET
+        );
         assert_eq!(
             loaded_after_sync.upstream_proxy.as_ref().unwrap(),
             PROXY_SECRET
@@ -407,7 +412,10 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("connect_timeout_seconds");
-        legacy_value.as_object_mut().unwrap().remove("transfer_mode");
+        legacy_value
+            .as_object_mut()
+            .unwrap()
+            .remove("transfer_mode");
         legacy_value
             .as_object_mut()
             .unwrap()
@@ -546,24 +554,25 @@ mod tests {
 
         assert!(
             store
-                .set_terminal_highlight_rule_set(
-                    "conn-1",
-                    Some(" network-devices ".to_string())
-                )
+                .set_terminal_highlight_rule_set("conn-1", Some(" network-devices ".to_string()))
                 .unwrap()
         );
         assert_eq!(
-            store
-                .get("conn-1")
-                .and_then(|connection| connection.options.terminal.highlight_rule_set.as_deref()),
+            store.get("conn-1").and_then(|connection| connection
+                .options
+                .terminal
+                .highlight_rule_set
+                .as_deref()),
             Some("network-devices")
         );
 
         let reloaded = ConnectionStore::load(&path).unwrap();
         assert_eq!(
-            reloaded
-                .get("conn-1")
-                .and_then(|connection| connection.options.terminal.highlight_rule_set.as_deref()),
+            reloaded.get("conn-1").and_then(|connection| connection
+                .options
+                .terminal
+                .highlight_rule_set
+                .as_deref()),
             Some("network-devices")
         );
         let _ = fs::remove_file(path);
@@ -583,7 +592,10 @@ mod tests {
         let serialized = serde_json::to_value(&options).unwrap();
         assert_eq!(serialized["x11_forwarding"]["enabled"], true);
         assert_eq!(serialized["x11_forwarding"]["mode"], "trusted");
-        assert_eq!(serialized["x11_forwarding"]["untrusted_timeout_seconds"], 900);
+        assert_eq!(
+            serialized["x11_forwarding"]["untrusted_timeout_seconds"],
+            900
+        );
         let text = serialized.to_string();
         assert!(!text.contains("DISPLAY"));
         assert!(!text.contains("MIT-MAGIC-COOKIE-1"));
@@ -611,8 +623,7 @@ mod tests {
         let telnet_id = telnet.id.clone();
         store.data.telnet_profiles.push(telnet);
 
-        let mut standalone_sftp =
-            standalone_sftp_request("sftp-in-subtree", SavedAuth::Agent);
+        let mut standalone_sftp = standalone_sftp_request("sftp-in-subtree", SavedAuth::Agent);
         standalone_sftp.group = Some("Production/Core/SFTP".to_string());
         let standalone_sftp_id = store
             .upsert_standalone_sftp_profile(standalone_sftp)
@@ -645,7 +656,10 @@ mod tests {
                 .all(|group| !group_path_is_within(group, "Production"))
         );
         assert!(store.groups().contains(&"Live/Core".to_string()));
-        assert_eq!(store.get("ssh-in-subtree").unwrap().group.as_deref(), Some("Live/Core"));
+        assert_eq!(
+            store.get("ssh-in-subtree").unwrap().group.as_deref(),
+            Some("Live/Core")
+        );
         assert_eq!(
             store
                 .serial_profiles()
@@ -693,11 +707,7 @@ mod tests {
         assert!(reloaded.standalone_sftp_profiles()[0].group.is_none());
         assert!(reloaded.remote_desktop_profiles()[0].group.is_none());
         assert!(reloaded.groups().contains(&"Unrelated".to_string()));
-        assert!(
-            reloaded
-                .groups()
-                .contains(&"Production-Backup".to_string())
-        );
+        assert!(reloaded.groups().contains(&"Production-Backup".to_string()));
         let _ = fs::remove_file(store_path);
     }
 
@@ -897,14 +907,10 @@ mod tests {
         let mut save_request = request("conn-1", SavedAuth::Agent);
         save_request.proxy_command = Some(SavedProxyCommand {
             keychain_id: None,
-            plaintext_command: Some(SecretString::from(
-                "helper --token proxy-command-secret",
-            )),
+            plaintext_command: Some(SecretString::from("helper --token proxy-command-secret")),
         });
 
-        let (_, runtime_secrets) = store
-            .upsert_with_runtime_secrets(save_request)
-            .unwrap();
+        let (_, runtime_secrets) = store.upsert_with_runtime_secrets(save_request).unwrap();
         let connection = store.get("conn-1").unwrap();
         let saved_command = connection.proxy_command.as_ref().unwrap();
         let keychain_id = saved_command.keychain_id.clone().unwrap();
@@ -921,10 +927,9 @@ mod tests {
         assert!(persisted.contains(&keychain_id));
         assert!(!persisted.contains("proxy-command-secret"));
         assert!(!format!("{saved_command:?}").contains("proxy-command-secret"));
-        let decoded: SavedProxyCommand = serde_json::from_str(
-            r#"{"keychain_id":"reference","command":"proxy-command-secret"}"#,
-        )
-        .unwrap();
+        let decoded: SavedProxyCommand =
+            serde_json::from_str(r#"{"keychain_id":"reference","command":"proxy-command-secret"}"#)
+                .unwrap();
         assert!(decoded.plaintext_command.is_none());
 
         store.delete("conn-1").unwrap();
@@ -1095,10 +1100,6 @@ mod tests {
 
         assert_eq!(store.get_connection_password("conn-1").unwrap(), "secret");
     }
-
-
-
-
 
     #[test]
     fn legacy_plaintext_password_and_passphrase_are_migrated() {
@@ -1531,7 +1532,6 @@ mod tests {
         assert!(saved.contains("\"privilege_credentials\""));
         assert!(!saved.contains("sudo-secret"));
     }
-
 
     #[test]
     fn legacy_sudo_privilege_prompt_fragments_are_displayed_as_current_defaults() {
@@ -2098,12 +2098,18 @@ mod tests {
         let mut store = ConnectionStore::load(&path).unwrap();
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
         let now = Utc::now();
-        store.data.groups.push("checkpoint-group-marker".to_string());
+        store
+            .data
+            .groups
+            .push("checkpoint-group-marker".to_string());
         store.data.recent.push("conn-1".to_string());
-        store.data.connection_tombstones.push(DeletedConnectionTombstone {
-            id: "deleted-connection-marker".to_string(),
-            deleted_at: now,
-        });
+        store
+            .data
+            .connection_tombstones
+            .push(DeletedConnectionTombstone {
+                id: "deleted-connection-marker".to_string(),
+                deleted_at: now,
+            });
         store.data.managed_ssh_keys.push(ManagedSshKey {
             id: "managed-key-marker".to_string(),
             secret_id: "managed-secret-reference".to_string(),
@@ -2162,11 +2168,19 @@ mod tests {
 
         store.data.groups.push("prepared".to_string());
         store.save().unwrap();
-        assert!(!fs::read_to_string(&path).unwrap().contains("futureCompatibleMarker"));
+        assert!(
+            !fs::read_to_string(&path)
+                .unwrap()
+                .contains("futureCompatibleMarker")
+        );
 
         store.restore_checkpoint(&checkpoint).unwrap();
         assert_eq!(fs::read(&path).unwrap(), original_file);
-        assert!(fs::read_to_string(&path).unwrap().contains("must-survive-rollback"));
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("must-survive-rollback")
+        );
         let _ = fs::remove_file(path);
     }
 
@@ -2274,7 +2288,12 @@ mod tests {
         drop(prepared);
 
         assert!(target.get("conn-1").is_none());
-        assert!(ConnectionStore::load(&path).unwrap().get("conn-1").is_none());
+        assert!(
+            ConnectionStore::load(&path)
+                .unwrap()
+                .get("conn-1")
+                .is_none()
+        );
         assert_eq!(
             target.keychain.get(&keychain_id).unwrap(),
             "prepared-drop-secret"
@@ -2650,10 +2669,7 @@ mod tests {
         );
         assert_eq!(value["telnet_profiles"][0]["icon"], "network");
         assert_eq!(value["telnet_profiles"][0]["color"], "#86efac");
-        assert_eq!(
-            value["telnet_profiles"][0]["terminal"]["encoding"],
-            "big5"
-        );
+        assert_eq!(value["telnet_profiles"][0]["terminal"]["encoding"], "big5");
         assert_eq!(
             value["telnet_profiles"][0]["icon_background_color"],
             "#052e16"
@@ -2719,25 +2735,20 @@ mod tests {
 
         assert!(
             store
-                .set_serial_profile_line_endings(
-                    &profile.id,
-                    Some(SerialLineEnding::CrLf),
-                    None,
-                )
+                .set_serial_profile_line_endings(&profile.id, Some(SerialLineEnding::CrLf), None,)
                 .unwrap()
         );
         assert!(
             store
-                .set_serial_profile_line_endings(
-                    &profile.id,
-                    None,
-                    Some(SerialLineEnding::Lf),
-                )
+                .set_serial_profile_line_endings(&profile.id, None, Some(SerialLineEnding::Lf),)
                 .unwrap()
         );
 
         let snapshot = store.export_serial_profiles_snapshot().unwrap();
-        assert_eq!(snapshot.records[0].input_line_ending, SerialLineEnding::CrLf);
+        assert_eq!(
+            snapshot.records[0].input_line_ending,
+            SerialLineEnding::CrLf
+        );
         assert_eq!(snapshot.records[0].output_line_ending, SerialLineEnding::Lf);
 
         let reloaded = ConnectionStore::load(store.path()).unwrap();
@@ -3243,16 +3254,15 @@ mod tests {
         assert!(store.delete_remote_desktop_profile(&profile.id).unwrap());
         assert!(store.keychain.get_optional(&reference).unwrap().is_none());
 
-        let invalid_result =
-            store.upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
-                id: Some("remote-invalid".to_string()),
-                name: String::new(),
-                protocol: RemoteDesktopProtocol::Vnc,
-                host: "vnc.example.com".to_string(),
-                port: 5900,
-                credential: Some(SecretString::from("rejected-secret")),
-                ..SaveRemoteDesktopProfileRequest::default()
-            });
+        let invalid_result = store.upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
+            id: Some("remote-invalid".to_string()),
+            name: String::new(),
+            protocol: RemoteDesktopProtocol::Vnc,
+            host: "vnc.example.com".to_string(),
+            port: 5900,
+            credential: Some(SecretString::from("rejected-secret")),
+            ..SaveRemoteDesktopProfileRequest::default()
+        });
         assert!(invalid_result.is_err());
         assert!(
             store
@@ -3288,10 +3298,10 @@ mod tests {
                 security_policy:
                     oxideterm_remote_desktop::RemoteDesktopVncSecurityPolicy::AllowLegacy,
                 session_mode: oxideterm_remote_desktop::RemoteDesktopVncSessionMode::Exclusive,
-                image_quality:
-                    oxideterm_remote_desktop::RemoteDesktopVncImageQuality::BestQuality,
+                image_quality: oxideterm_remote_desktop::RemoteDesktopVncImageQuality::BestQuality,
                 compression: oxideterm_remote_desktop::RemoteDesktopVncCompression::High,
             },
+            spice: Default::default(),
         };
         let created = store
             .upsert_remote_desktop_profile(SaveRemoteDesktopProfileRequest {
@@ -3304,7 +3314,7 @@ mod tests {
                 domain: Some("EXAMPLE".to_string()),
                 credential: Some(SecretString::from("original-secret")),
                 read_only: true,
-                session_options: initial_options,
+                session_options: initial_options.clone(),
                 ..SaveRemoteDesktopProfileRequest::default()
             })
             .unwrap();
@@ -3372,9 +3382,7 @@ mod tests {
                 .is_none()
         );
 
-        store
-            .upsert(request("ssh-move", SavedAuth::Agent))
-            .unwrap();
+        store.upsert(request("ssh-move", SavedAuth::Agent)).unwrap();
         assert_eq!(
             store
                 .move_session_assets_to_group(
@@ -3391,7 +3399,9 @@ mod tests {
             2
         );
         assert_eq!(
-            store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
+            store
+                .get("ssh-move")
+                .and_then(|connection| connection.group.as_deref()),
             Some("Moved")
         );
         assert_eq!(
@@ -3405,9 +3415,7 @@ mod tests {
     #[test]
     fn move_session_assets_to_group_includes_every_saved_profile_type() {
         let mut store = load_empty_store("move-all-session-assets");
-        store
-            .upsert(request("ssh-move", SavedAuth::Agent))
-            .unwrap();
+        store.upsert(request("ssh-move", SavedAuth::Agent)).unwrap();
         let serial = store
             .upsert_serial_profile(SaveSerialProfileRequest {
                 id: Some("serial-move".to_string()),
@@ -3461,7 +3469,9 @@ mod tests {
             6
         );
         assert_eq!(
-            store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
+            store
+                .get("ssh-move")
+                .and_then(|connection| connection.group.as_deref()),
             Some("Moved")
         );
         assert_eq!(

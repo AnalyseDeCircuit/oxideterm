@@ -14,6 +14,7 @@ use crate::RemoteDesktopProtocol;
 pub const REMOTE_DESKTOP_PROVIDER_MANIFEST: &str = "remote_desktop_provider.json";
 const BUILTIN_RDP_PROVIDER_ID: &str = "builtin-rdp";
 const BUILTIN_VNC_PROVIDER_ID: &str = "builtin-vnc";
+const BUILTIN_SPICE_PROVIDER_ID: &str = "builtin-spice";
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -194,6 +195,11 @@ fn builtin_provider_manifest_with_mode(
             "Built-in VNC Helper",
             "oxideterm-vnc-helper",
         ),
+        RemoteDesktopProtocol::Spice => (
+            BUILTIN_SPICE_PROVIDER_ID,
+            "Bundled OxideSpice Helper",
+            "oxide-spice-helper",
+        ),
     };
     let mut args = vec!["--stdio".to_string()];
     if fake_preview {
@@ -228,7 +234,10 @@ fn builtin_provider_capabilities(
         clipboard_files: true,
         // VNC exposes playback when the server confirms the QEMU Audio extension.
         audio_playback: true,
-        audio_capture: matches!(protocol, RemoteDesktopProtocol::Rdp),
+        audio_capture: matches!(
+            protocol,
+            RemoteDesktopProtocol::Rdp | RemoteDesktopProtocol::Spice
+        ),
         // Both bundled clients can request dynamic size and monitor topology;
         // negotiated server support is reported separately per session.
         multi_monitor: true,
@@ -243,6 +252,7 @@ pub fn builtin_provider_registry()
     RemoteDesktopProviderRegistry::from_manifests([
         builtin_provider_manifest(RemoteDesktopProtocol::Rdp),
         builtin_provider_manifest(RemoteDesktopProtocol::Vnc),
+        builtin_provider_manifest(RemoteDesktopProtocol::Spice),
     ])
 }
 
@@ -251,6 +261,7 @@ pub fn builtin_preview_provider_registry()
     RemoteDesktopProviderRegistry::from_manifests([
         builtin_preview_provider_manifest(RemoteDesktopProtocol::Rdp),
         builtin_preview_provider_manifest(RemoteDesktopProtocol::Vnc),
+        builtin_preview_provider_manifest(RemoteDesktopProtocol::Spice),
     ])
 }
 

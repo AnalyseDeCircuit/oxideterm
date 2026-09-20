@@ -2928,6 +2928,11 @@ impl Window {
         self.mouse_position
     }
 
+    /// Locks the platform pointer until the returned owner is dropped or the window loses focus.
+    pub fn capture_relative_mouse(&self) -> anyhow::Result<Box<dyn crate::PlatformMouseCapture>> {
+        self.platform_window.capture_relative_mouse()
+    }
+
     /// Captures the pointer for the given hitbox. While captured, all mouse move and mouse up
     /// events will be routed to listeners that check this hitbox's `is_hovered` status,
     /// regardless of actual hit testing. This enables drag operations that continue
@@ -5626,6 +5631,7 @@ impl Window {
                         });
                     }
                     PlatformInput::MouseMove(MouseMoveEvent {
+                        relative_delta: None,
                         position,
                         pressed_button: Some(MouseButton::Left),
                         modifiers: Modifiers::default(),
@@ -5634,6 +5640,7 @@ impl Window {
                 FileDropEvent::Pending { position } => {
                     self.mouse_position = position;
                     PlatformInput::MouseMove(MouseMoveEvent {
+                        relative_delta: None,
                         position,
                         pressed_button: Some(MouseButton::Left),
                         modifiers: Modifiers::default(),
@@ -6929,6 +6936,7 @@ impl Window {
     #[cfg(any(test, feature = "test-support"))]
     pub fn simulate_mouse_move(&mut self, position: Point<Pixels>, cx: &mut App) {
         let event = PlatformInput::MouseMove(MouseMoveEvent {
+            relative_delta: None,
             position,
             modifiers: self.modifiers,
             pressed_button: None,
@@ -7859,6 +7867,7 @@ mod tests {
                 );
                 window.dispatch_event(
                     MouseMoveEvent {
+                        relative_delta: None,
                         position: point(px(20.), px(20.)),
                         pressed_button: Some(MouseButton::Left),
                         modifiers: Default::default(),
@@ -7887,6 +7896,7 @@ mod tests {
         let update_result = cx.update_window(successful.window, |_, window, cx| {
             window.dispatch_event(
                 MouseMoveEvent {
+                    relative_delta: None,
                     position: outside_position,
                     pressed_button: Some(MouseButton::Left),
                     modifiers: Default::default(),
@@ -8015,6 +8025,7 @@ mod tests {
         let update_result = cx.update_window(cancelled.window, |_, window, cx| {
             window.dispatch_event(
                 MouseMoveEvent {
+                    relative_delta: None,
                     position: outside_position,
                     pressed_button: Some(MouseButton::Left),
                     modifiers: Default::default(),
@@ -8052,6 +8063,7 @@ mod tests {
         let update_result = cx.update_window(removed.window, |_, window, cx| {
             window.dispatch_event(
                 MouseMoveEvent {
+                    relative_delta: None,
                     position: outside_position,
                     pressed_button: Some(MouseButton::Left),
                     modifiers: Default::default(),
@@ -8074,6 +8086,7 @@ mod tests {
             for x_position in [-1., -2.] {
                 window.dispatch_event(
                     MouseMoveEvent {
+                        relative_delta: None,
                         position: point(px(x_position), px(20.)),
                         pressed_button: Some(MouseButton::Left),
                         modifiers: Default::default(),

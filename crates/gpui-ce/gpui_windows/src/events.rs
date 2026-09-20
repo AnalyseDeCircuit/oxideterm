@@ -13,7 +13,7 @@ use windows::{
         UI::{
             Controls::*,
             HiDpi::*,
-            Input::{Ime::*, KeyboardAndMouse::*},
+            Input::{Ime::*, KeyboardAndMouse::*, *},
             WindowsAndMessaging::*,
         },
     },
@@ -206,6 +206,7 @@ impl WindowsWindowInner {
             WM_SETCURSOR => self.handle_set_cursor(handle, lparam),
             WM_SETTINGCHANGE => self.handle_system_settings_changed(handle, wparam, lparam),
             WM_INPUTLANGCHANGE => self.handle_input_language_changed(),
+            WM_INPUT => self.handle_relative_mouse(lparam),
             WM_SHOWWINDOW => self.handle_window_visibility_changed(handle, wparam),
             WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(lparam),
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
@@ -460,6 +461,7 @@ impl WindowsWindowInner {
         };
         let scale_factor = self.state.scale_factor.get();
         let input = PlatformInput::MouseMove(MouseMoveEvent {
+            relative_delta: None,
             position: logical_point(x, y, scale_factor),
             pressed_button,
             modifiers: current_modifiers(),
@@ -953,6 +955,40 @@ impl WindowsWindowInner {
         }
     }
 
+    fn handle_relative_mouse(&self, lparam: LPARAM) -> Option<isize> {
+        if !self.state.relative_mouse_active.get() {
+            return None;
+        }
+        let mut input = RAWINPUT::default();
+        let mut length = std::mem::size_of::<RAWINPUT>() as u32;
+        let read = unsafe {
+            GetRawInputData(
+                HRAWINPUT(lparam.0 as *mut _),
+                RID_INPUT,
+                Some((&mut input as *mut RAWINPUT).cast()),
+                &mut length,
+                std::mem::size_of::<RAWINPUTHEADER>() as u32,
+            )
+        };
+        if read == u32::MAX || input.header.dwType != RIM_TYPEMOUSE.0 {
+            return None;
+        }
+        let mouse = unsafe { input.data.mouse };
+        if mouse.usFlags.0 & MOUSE_MOVE_ABSOLUTE.0 == 0
+            && let Some(mut callback) = self.state.callbacks.input.take()
+        {
+            callback(PlatformInput::MouseMove(MouseMoveEvent {
+                position: self.state.relative_mouse_position.get(),
+                relative_delta: Some(point(px(mouse.lLastX as f32), px(mouse.lLastY as f32))),
+                pressed_button: self.state.captured_mouse_button.get(),
+                modifiers: current_modifiers(),
+            }));
+            self.state.callbacks.input.set(Some(callback));
+        }
+        // DefWindowProc must release the foreground raw-input buffer.
+        None
+    }
+
     fn handle_activate_msg(self: &Rc<Self>, wparam: WPARAM) -> Option<isize> {
         let activated = wparam.loword() > 0;
 
@@ -969,6 +1005,7 @@ impl WindowsWindowInner {
         let this = self.clone();
 
         if !activated {
+            this.state.release_relative_mouse();
             this.state.cursor_visible.store(true, Ordering::Relaxed);
         }
 
@@ -1179,6 +1216,7 @@ impl WindowsWindowInner {
         };
         unsafe { ScreenToClient(handle, &mut cursor_point).ok().log_err() };
         let input = PlatformInput::MouseMove(MouseMoveEvent {
+            relative_delta: None,
             position: logical_point(cursor_point.x as f32, cursor_point.y as f32, scale_factor),
             pressed_button: None,
             modifiers: current_modifiers(),
@@ -1340,7 +1378,9 @@ impl WindowsWindowInner {
         {
             return None;
         }
-        let cursor = if self.state.cursor_visible.load(Ordering::Relaxed) {
+        let cursor = if !self.state.relative_mouse_active.get()
+            && self.state.cursor_visible.load(Ordering::Relaxed)
+        {
             self.state.current_cursor.get()
         } else {
             None
