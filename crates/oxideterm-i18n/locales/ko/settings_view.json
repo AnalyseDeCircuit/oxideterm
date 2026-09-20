@@ -575,6 +575,8 @@
         "local_terminals": "로컬 터미널",
         "saved_connections": "선택한 저장된 연결",
         "no_saved_connections": "사용 가능한 저장된 연결이 없습니다.",
+        "search_connections": "저장된 연결 검색",
+        "no_matching_connections": "일치하는 저장된 연결이 없습니다.",
         "scope_picker_done": "완료",
         "shell_execution": "명시적 셸 작업 허용",
         "shell_execution_hint": "원격 출력이 로컬 셸 명령에 삽입될 수 있습니다. 신뢰하는 규칙과 호스트에만 이 옵션을 사용하세요.",

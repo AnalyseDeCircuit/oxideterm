@@ -575,6 +575,8 @@
         "local_terminals": "本地终端",
         "saved_connections": "指定保存连接",
         "no_saved_connections": "没有可用的已保存连接。",
+        "search_connections": "搜索已保存连接",
+        "no_matching_connections": "没有匹配的已保存连接。",
         "scope_picker_done": "完成",
         "shell_execution": "允许显式 Shell 动作",
         "shell_execution_hint": "远端输出可能被替换进本机 Shell 命令。仅对可信规则和主机启用。",

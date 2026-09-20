@@ -575,6 +575,8 @@
         "local_terminals": "Terminal cục bộ",
         "saved_connections": "Các kết nối đã lưu được chọn",
         "no_saved_connections": "Không có kết nối đã lưu nào.",
+        "search_connections": "Tìm kết nối đã lưu",
+        "no_matching_connections": "Không có kết nối đã lưu phù hợp.",
         "scope_picker_done": "Xong",
         "shell_execution": "Cho phép hành động shell tường minh",
         "shell_execution_hint": "Đầu ra từ xa có thể được chèn vào lệnh shell cục bộ. Chỉ bật tùy chọn này cho các quy tắc và máy chủ mà bạn tin cậy.",

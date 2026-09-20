@@ -575,6 +575,8 @@
         "local_terminals": "Lokale Terminals",
         "saved_connections": "Ausgewählte gespeicherte Verbindungen",
         "no_saved_connections": "Keine gespeicherten Verbindungen verfügbar.",
+        "search_connections": "Gespeicherte Verbindungen suchen",
+        "no_matching_connections": "Keine passenden gespeicherten Verbindungen.",
         "scope_picker_done": "Fertig",
         "shell_execution": "Explizite Shell-Aktionen zulassen",
         "shell_execution_hint": "Remote-Ausgaben können in einen lokalen Shell-Befehl eingesetzt werden. Aktivieren Sie dies nur für Regeln und Hosts, denen Sie vertrauen.",

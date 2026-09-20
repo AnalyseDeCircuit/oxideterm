@@ -575,6 +575,8 @@
         "local_terminals": "Terminali locali",
         "saved_connections": "Connessioni salvate selezionate",
         "no_saved_connections": "Nessuna connessione salvata disponibile.",
+        "search_connections": "Cerca connessioni salvate",
+        "no_matching_connections": "Nessuna connessione salvata corrispondente.",
         "scope_picker_done": "Fine",
         "shell_execution": "Consenti azioni shell esplicite",
         "shell_execution_hint": "L’output remoto può essere inserito in un comando shell locale. Abilita questa opzione solo per regole e host attendibili.",

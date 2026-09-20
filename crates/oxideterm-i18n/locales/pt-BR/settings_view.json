@@ -575,6 +575,8 @@
         "local_terminals": "Terminais locais",
         "saved_connections": "Conexões salvas selecionadas",
         "no_saved_connections": "Nenhuma conexão salva disponível.",
+        "search_connections": "Pesquisar conexões salvas",
+        "no_matching_connections": "Nenhuma conexão salva correspondente.",
         "scope_picker_done": "Concluído",
         "shell_execution": "Permitir ações explícitas do shell",
         "shell_execution_hint": "A saída remota pode ser inserida em um comando de shell local. Ative esta opção somente para regras e hosts confiáveis.",

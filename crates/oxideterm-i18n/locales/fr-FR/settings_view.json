@@ -575,6 +575,8 @@
         "local_terminals": "Terminaux locaux",
         "saved_connections": "Connexions enregistrées sélectionnées",
         "no_saved_connections": "Aucune connexion enregistrée disponible.",
+        "search_connections": "Rechercher des connexions enregistrées",
+        "no_matching_connections": "Aucune connexion enregistrée correspondante.",
         "scope_picker_done": "Terminé",
         "shell_execution": "Autoriser les actions shell explicites",
         "shell_execution_hint": "La sortie distante peut être insérée dans une commande shell locale. Activez cette option uniquement pour les règles et les hôtes auxquels vous faites confiance.",

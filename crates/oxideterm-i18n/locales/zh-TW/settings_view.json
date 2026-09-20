@@ -575,6 +575,8 @@
         "local_terminals": "本機終端",
         "saved_connections": "指定已儲存連線",
         "no_saved_connections": "沒有可用的已儲存連線。",
+        "search_connections": "搜尋已儲存連線",
+        "no_matching_connections": "沒有符合的已儲存連線。",
         "scope_picker_done": "完成",
         "shell_execution": "允許明確 Shell 動作",
         "shell_execution_hint": "遠端輸出可能會替換到本機 Shell 命令中。僅對受信任的規則和主機啟用。",

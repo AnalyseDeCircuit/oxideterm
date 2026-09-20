@@ -575,6 +575,8 @@
         "local_terminals": "ローカルターミナル",
         "saved_connections": "選択した保存済み接続",
         "no_saved_connections": "保存済み接続はありません。",
+        "search_connections": "保存済み接続を検索",
+        "no_matching_connections": "一致する保存済み接続はありません。",
         "scope_picker_done": "完了",
         "shell_execution": "明示的なシェルアクションを許可",
         "shell_execution_hint": "リモート出力がローカルのシェルコマンドに埋め込まれる場合があります。信頼できるルールとホストに対してのみ有効にしてください。",

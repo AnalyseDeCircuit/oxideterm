@@ -575,6 +575,8 @@
         "local_terminals": "Local terminals",
         "saved_connections": "Selected saved connections",
         "no_saved_connections": "No saved connections are available.",
+        "search_connections": "Search saved connections",
+        "no_matching_connections": "No matching saved connections.",
         "scope_picker_done": "Done",
         "shell_execution": "Allow explicit shell actions",
         "shell_execution_hint": "Remote output may be substituted into a local shell command. Enable this only for rules and hosts you trust.",

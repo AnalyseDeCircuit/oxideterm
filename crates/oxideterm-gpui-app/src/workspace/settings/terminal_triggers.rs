@@ -16,6 +16,41 @@ const TERMINAL_TRIGGER_COMPACT_FIELD_BASIS: f32 = 180.0;
 const TERMINAL_TRIGGER_SIDEBAR_WIDTH: f32 = 260.0;
 const TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT: f32 = 520.0;
 
+fn terminal_trigger_connection_list(
+    rows: Vec<AnyElement>,
+    scroll: &gpui::ScrollHandle,
+) -> AnyElement {
+    div()
+        .id("terminal-trigger-connections")
+        .relative()
+        .w_full()
+        .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
+        // The adjacent rule list must not share this viewport's element state or scroll handle.
+        .child(
+            div()
+                .id("terminal-trigger-connections-scroll")
+                .w_full()
+                .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
+                .overflow_y_scroll()
+                .track_scroll(scroll)
+                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .child(div().w_full().flex().flex_col().gap(px(4.0)).children(rows)),
+        )
+        .vertical_scrollbar(scroll)
+        .into_any_element()
+}
+
+fn filter_terminal_trigger_connections(
+    options: Vec<(SavedConnectionRef, String)>,
+    query: &str,
+) -> Vec<(SavedConnectionRef, String)> {
+    let query = query.trim().to_lowercase();
+    options
+        .into_iter()
+        .filter(|(_, label)| label.to_lowercase().contains(&query))
+        .collect()
+}
+
 fn is_terminal_trigger_input(input: SettingsInput) -> bool {
     matches!(
         input,
@@ -28,6 +63,7 @@ fn is_terminal_trigger_input(input: SettingsInput) -> bool {
             | SettingsInput::TerminalTriggerWorkingDirectory
             | SettingsInput::TerminalTriggerDelayMs
             | SettingsInput::TerminalTriggerCooldownMs
+            | SettingsInput::TerminalTriggerConnectionSearch
     )
 }
 
@@ -36,6 +72,8 @@ pub(in crate::workspace) struct TerminalTriggersSettingsState {
     pub(in crate::workspace) snapshot: TerminalTriggersSnapshot,
     editor: Option<TerminalTrigger>,
     scope_picker_open: bool,
+    scope_picker_query: String,
+    scope_picker_scroll: gpui::ScrollHandle,
     error_key: Option<&'static str>,
 }
 
@@ -49,6 +87,8 @@ impl TerminalTriggersSettingsState {
                     snapshot,
                     editor,
                     scope_picker_open: false,
+                    scope_picker_query: String::new(),
+                    scope_picker_scroll: gpui::ScrollHandle::new(),
                     error_key: None,
                 }
             }
@@ -57,6 +97,8 @@ impl TerminalTriggersSettingsState {
                 snapshot: default_snapshot(),
                 editor: None,
                 scope_picker_open: false,
+                scope_picker_query: String::new(),
+                scope_picker_scroll: gpui::ScrollHandle::new(),
                 error_key: Some("settings_view.terminal.triggers.load_failed"),
             },
         }
@@ -246,6 +288,9 @@ impl TerminalTriggersSettingsState {
     }
 
     fn editor_input_value(&self, input: SettingsInput) -> Option<String> {
+        if input == SettingsInput::TerminalTriggerConnectionSearch {
+            return Some(self.scope_picker_query.clone());
+        }
         let trigger = self.editor.as_ref()?;
         match input {
             SettingsInput::TerminalTriggerName => Some(trigger.name.clone()),
@@ -298,6 +343,14 @@ impl TerminalTriggersSettingsState {
     }
 
     fn apply_editor_input(&mut self, input: SettingsInput, value: &str) -> bool {
+        if input == SettingsInput::TerminalTriggerConnectionSearch {
+            if self.scope_picker_query != value {
+                self.scope_picker_query = value.to_string();
+                self.scope_picker_scroll
+                    .set_offset(gpui::point(px(0.0), px(0.0)));
+            }
+            return true;
+        }
         let Some(trigger) = self.editor.as_mut() else {
             return false;
         };
@@ -519,6 +572,8 @@ impl WorkspaceApp {
         if let Some(trigger) = self.terminal_triggers.editor.as_mut() {
             trigger.scope = scope;
             self.terminal_triggers.scope_picker_open = open_picker;
+            self.terminal_triggers.scope_picker_query.clear();
+            self.terminal_triggers.scope_picker_scroll = gpui::ScrollHandle::new();
         }
     }
 
@@ -1592,6 +1647,10 @@ impl WorkspaceApp {
     fn terminal_trigger_scope_picker(&self, cx: &mut Context<Self>) -> AnyElement {
         let options = self.terminal_trigger_saved_connection_options();
         let total_count = options.len();
+        let options = filter_terminal_trigger_connections(
+            options,
+            &self.terminal_triggers.scope_picker_query,
+        );
         let selected_count = self
             .terminal_triggers
             .editor
@@ -1601,23 +1660,19 @@ impl WorkspaceApp {
                 _ => None,
             })
             .unwrap_or(0);
-        let mut list = div()
-            .w_full()
-            .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
-            .overflow_y_scrollbar()
-            .flex()
-            .flex_col()
-            .gap(px(4.0));
+        let mut rows = Vec::new();
         if options.is_empty() {
-            list = list.child(
+            rows.push(
                 div()
                     .py(px(20.0))
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(
-                        self.i18n
-                            .t("settings_view.terminal.triggers.no_saved_connections"),
-                    ),
+                    .child(self.i18n.t(if total_count == 0 {
+                        "settings_view.terminal.triggers.no_saved_connections"
+                    } else {
+                        "settings_view.terminal.triggers.no_matching_connections"
+                    }))
+                    .into_any_element(),
             );
         } else {
             for (reference, label) in options {
@@ -1632,7 +1687,7 @@ impl WorkspaceApp {
                         _ => false,
                     });
                 let toggled = reference.clone();
-                list = list.child(
+                rows.push(
                     div()
                         .w_full()
                         .min_w(px(0.0))
@@ -1676,7 +1731,8 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }),
                             ),
-                        ),
+                        )
+                        .into_any_element(),
                 );
             }
         }
@@ -1722,13 +1778,23 @@ impl WorkspaceApp {
                             ButtonVariant::Default,
                             cx.listener(|this, _event, _window, cx| {
                                 this.terminal_triggers.scope_picker_open = false;
+                                this.clear_terminal_trigger_input_focus();
                                 cx.notify();
                             }),
                         ),
                     ),
             )
+            .child(self.terminal_trigger_labeled_input(
+                "settings_view.terminal.triggers.search_connections",
+                SettingsInput::TerminalTriggerConnectionSearch,
+                self.terminal_triggers.scope_picker_query.clone(),
+                cx,
+            ))
             .child(self.card_separator())
-            .child(list)
+            .child(terminal_trigger_connection_list(
+                rows,
+                &self.terminal_triggers.scope_picker_scroll,
+            ))
             .into_any_element()
     }
 
@@ -1793,11 +1859,182 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
 
+    struct ConnectionListFixture {
+        page: gpui::ListState,
+        connections_scroll: gpui::ScrollHandle,
+    }
+
+    impl ConnectionListFixture {
+        fn new() -> Self {
+            Self {
+                page: tauri_virtual_list_state(
+                    1,
+                    gpui::ListAlignment::Top,
+                    TauriVirtualListSpec::new(px(260.0), 2),
+                ),
+                connections_scroll: gpui::ScrollHandle::new(),
+            }
+        }
+    }
+
+    impl Render for ConnectionListFixture {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let connections_scroll = self.connections_scroll.clone();
+            tauri_virtual_list(
+                self.page.clone(),
+                TauriVirtualListSpec::new(px(260.0), 2),
+                move |_, _, _| {
+                    let rows = (0..29)
+                        .map(|index| {
+                            div()
+                                .w_full()
+                                .p(px(10.0))
+                                .flex()
+                                .items_center()
+                                .child(div().h(px(20.0)).child(format!("Connection {index}")))
+                                .debug_selector(move || format!("connection-{index}"))
+                                .into_any_element()
+                        })
+                        .collect();
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_start()
+                        .gap(px(20.0))
+                        .child(
+                            div().w(px(120.0)).flex_none().child(
+                                div()
+                                    .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
+                                    .overflow_y_scrollbar()
+                                    .child(div().h(px(80.0)).child("Rules")),
+                            ),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .child(terminal_trigger_connection_list(rows, &connections_scroll)),
+                        )
+                },
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn saved_connection_picker_scrolls_to_last_connection(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| ConnectionListFixture::new());
+        cx.simulate_resize(gpui::size(px(600.0), px(700.0)));
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        let first = cx.debug_bounds("connection-0").unwrap();
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(px(300.0), px(250.0)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-2_000.0))),
+            ..Default::default()
+        });
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        let last = cx.debug_bounds("connection-28").unwrap();
+        assert!(cx.debug_bounds("connection-0").unwrap().top() < first.top());
+        assert!(last.top() >= px(0.0));
+        assert!(last.bottom() <= px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT));
+        assert_eq!(last.size.height, px(40.0));
+    }
+
+    #[gpui::test]
+    fn saved_connection_picker_scrollbar_drags_to_last_connection(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| ConnectionListFixture::new());
+        cx.simulate_resize(gpui::size(px(600.0), px(700.0)));
+        for _ in 0..2 {
+            cx.update(|window, app| {
+                window.refresh();
+                window.draw(app).clear(app);
+            });
+        }
+        let grab = gpui::point(px(596.0), px(10.0));
+        cx.simulate_mouse_down(grab, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(
+            gpui::point(grab.x, px(30.0)),
+            MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        let end = gpui::point(grab.x, px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT));
+        cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::default());
+        cx.update(|window, app| {
+            window.draw(app).clear(app);
+        });
+        let last = cx.debug_bounds("connection-28").unwrap();
+        assert!(last.top() >= px(0.0));
+        assert!(
+            last.bottom() <= px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT),
+            "last connection: {last:?}"
+        );
+        assert_eq!(last.size.height, px(40.0));
+    }
+
     fn state() -> (tempfile::TempDir, TerminalTriggersSettingsState) {
         let directory = tempfile::tempdir().expect("trigger settings directory");
         let settings_path = directory.path().join("settings.json");
         let state = TerminalTriggersSettingsState::load(&settings_path);
         (directory, state)
+    }
+
+    #[test]
+    fn connection_search_filters_names_and_protocols_without_changing_selection() {
+        let options = [
+            (SavedConnectionKind::Ssh, "production", "SSH · Production"),
+            (SavedConnectionKind::Mosh, "staging", "Mosh · Staging"),
+            (SavedConnectionKind::Serial, "console", "Serial · 控制台"),
+        ]
+        .into_iter()
+        .map(|(kind, id, label)| {
+            (
+                SavedConnectionRef {
+                    kind,
+                    id: id.into(),
+                },
+                label.to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+        let (_directory, mut state) = state();
+        state.new_rule();
+        let selected = TerminalTriggerScope::SavedConnections {
+            connections: vec![options[0].0.clone(), options[2].0.clone()],
+        };
+        state.editor.as_mut().unwrap().scope = selected.clone();
+        for (query, expected) in [
+            (" PROD ", vec!["production"]),
+            ("mosh", vec!["staging"]),
+            ("控制", vec!["console"]),
+            ("missing", vec![]),
+            ("", vec!["production", "staging", "console"]),
+        ] {
+            state
+                .scope_picker_scroll
+                .set_offset(gpui::point(px(0.0), px(-400.0)));
+            assert!(
+                state.apply_editor_input(SettingsInput::TerminalTriggerConnectionSearch, query)
+            );
+            let matches =
+                filter_terminal_trigger_connections(options.clone(), &state.scope_picker_query);
+            assert_eq!(
+                matches
+                    .iter()
+                    .map(|(reference, _)| reference.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "query: {query}"
+            );
+            assert_eq!(state.editor.as_ref().unwrap().scope, selected);
+            assert_eq!(
+                state.scope_picker_scroll.offset(),
+                gpui::point(px(0.0), px(0.0))
+            );
+        }
     }
 
     #[test]
