@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — Máy chủ của bạn. Một không gian làm việc." width="920">
+</p>
+
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
@@ -9,7 +13,6 @@
   <br>
   <strong>Không dùng Electron. Không đóng gói WebView. Không thu thập dữ liệu đo từ xa. Không thuê bao. Ưu tiên BYOK. SSH thuần Rust không dùng OpenSSL/libssh2.</strong>
 </p>
-
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-2.0.30-blue" alt="Version">
@@ -25,10 +28,6 @@
 
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="Tổng quan tính năng của OxideTerm" width="920">
 </p>
 
 ---
@@ -156,7 +155,6 @@ Không có ranh giới tuần tự hóa giữa giao diện và phần nền SSH/
 
 ### SSH Rust thuần — russh (ring)
 
-
 - **Ngăn xếp SSH không dùng OpenSSL/libssh2** — `ring` cung cấp mật mã SSH
 - SSH2 đầy đủ: trao đổi khóa, kênh, phân hệ SFTP, chuyển tiếp cổng
 - ChaCha20-Poly1305 / AES-GCM, khóa Ed25519/RSA/ECDSA
@@ -164,7 +162,6 @@ Không có ranh giới tuần tự hóa giữa giao diện và phần nền SSH/
 - ProxyJump nhiều bước nhảy với xác thực độc lập ở từng bước
 
 ### Kết nối lại thông minh với Grace Period
-
 
 1. Phát hiện SSH keepalive timeout mà không bị JavaScript timer throttling
 2. Chụp lại bảng terminal, truyền tải SFTP, chuyển tiếp và tệp IDE
@@ -174,7 +171,6 @@ Không có ranh giới tuần tự hóa giữa giao diện và phần nền SSH/
 Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### SSH pool kết nối và node routing
-
 
 - Ở chế độ mặc định, một SSH connection vật lý có thể phục vụ terminal, SFTP, chuyển tiếp cổng và IDE; terminal có thể dùng connection riêng khi chính sách yêu cầu
 - Mỗi kết nối đi qua `connecting → active → idle → link_down → reconnecting`
@@ -230,7 +226,6 @@ Nhánh gốc giữ phần mở rộng và bề mặt hỗ trợ trong ranh giớ
 
 ### Chuyển tiếp cổng — I/O không khóa
 
-
 - Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
 - Một task `ssh_io` sở hữu mỗi SSH Channel, tránh `Arc<Mutex<Channel>>`
 - Reconnect auto-restore, báo cáo kết thúc và hết thời gian nhàn rỗi
@@ -245,7 +240,6 @@ trzsz tiếp tục dùng terminal stream, không cần port phụ hoặc remote 
 - Transfer hai chiều, hỗ trợ thư mục, limits có thể cấu hình
 
 ### Export `.oxide` mã hóa
-
 
 - **ChaCha20-Poly1305 AEAD** authenticated encryption
 - **Argon2id KDF**: 256 MB memory cost, 4 iterations, tăng chi phí GPU brute-force

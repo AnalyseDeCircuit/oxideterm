@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — サーバー管理をひとつのワークスペースに" width="920">
+</p>
+
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
@@ -9,7 +13,6 @@
   <br>
   <strong>Electron 不使用。 WebView の同梱なし。テレメトリなし。サブスクリプションなし。BYOK 優先。OpenSSL/libssh2 に依存しない純 Rust SSH。</strong>
 </p>
-
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-2.0.30-blue" alt="Version">
@@ -25,10 +28,6 @@
 
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm の機能概要" width="920">
 </p>
 
 ---
@@ -152,7 +151,6 @@ UI と SSH/ターミナルバックエンドの間にシリアライズ境界は
 
 ### 純粋な Rust SSH — russh (ring)
 
-
 - **SSH スタックは OpenSSL/libssh2 に非依存** — SSH 暗号処理には `ring` を使用
 - 完整 SSH2: 鍵交換、チャネル、SFTP サブシステム、ポート転送
 - ChaCha20-Poly1305 / AES-GCM、Ed25519/RSA/ECDSA 鍵
@@ -160,7 +158,6 @@ UI と SSH/ターミナルバックエンドの間にシリアライズ境界は
 - 各ホップで独立して認証する多段 ProxyJump
 
 ### Grace Period 付きスマート再接続
-
 
 1. JavaScript timer throttling なしで SSH keepalive timeout を検出
 2. ターミナルペイン、SFTP 転送、転送、IDE ファイルをスナップショット
@@ -170,7 +167,6 @@ UI と SSH/ターミナルバックエンドの間にシリアライズ境界は
 Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → resume-transfers → restore-ide → verify → done`
 
 ### SSH 接続プールとノードルーティング
-
 
 - デフォルトでは 1 つの物理 SSH connection をターミナル、SFTP、ポート転送、IDE が共有し、必要に応じてターミナルは専用 connection を使える
 - UI は `nodeId` でコマンドを出し、`NodeRouter` がアクティブな `connectionId` をアトミックに解決
@@ -225,7 +221,6 @@ UI は GPUI で直接描画され、DOM/CSS/JavaScript rendering pipeline はあ
 
 ### ポート転送 — ロックフリー I/O
 
-
 - Local `-L`、Remote `-R`、Dynamic SOCKS5 `-D`
 - 単一の `ssh_io` task が各 SSH Channel を所有し、`Arc<Mutex<Channel>>` を避ける
 - 再接続 auto-restore、停止報告、アイドルタイムアウト
@@ -240,7 +235,6 @@ trzsz は引き続き terminal stream を使い、追加 port や remote agent �
 - 双方向 transfer、directory support、configurable limits
 
 ### `.oxide` 暗号化エクスポート
-
 
 - **ChaCha20-Poly1305 AEAD** authenticated encryption
 - **Argon2id KDF**: 256 MB memory cost、4 iterations により GPU brute-force cost を上げる

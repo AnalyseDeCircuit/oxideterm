@@ -1156,12 +1156,13 @@ impl RagStore {
         Ok(())
     }
 
-    fn run_bm25_rebuild_worker(&self) {
+    fn run_bm25_rebuild_worker(self) {
+        let runtime = self.bm25_index.clone();
         loop {
-            let rebuild_generation = self.bm25_index.requested_generation.load(Ordering::SeqCst);
-            if let Ok(mut state) = self.bm25_index.state.lock() {
+            let rebuild_generation = runtime.requested_generation.load(Ordering::SeqCst);
+            if let Ok(mut state) = runtime.state.lock() {
                 state.status = Bm25IndexStatus::Rebuilding;
-                self.bm25_index.changed.notify_all();
+                runtime.changed.notify_all();
             } else {
                 return;
             }
@@ -1178,17 +1179,17 @@ impl RagStore {
                     "forced BM25 rebuild failure".to_string(),
                 ))
             } else {
-                crate::rag::bm25::reindex_all(self, None, None)
+                crate::rag::bm25::reindex_all(&self, None, None)
             };
-            let requested_generation = self.bm25_index.requested_generation.load(Ordering::SeqCst);
-            let Ok(mut state) = self.bm25_index.state.lock() else {
+            let requested_generation = runtime.requested_generation.load(Ordering::SeqCst);
+            let Ok(mut state) = runtime.state.lock() else {
                 return;
             };
             if requested_generation != rebuild_generation {
                 // A save landed while the snapshot was rebuilding. The stale result may have
                 // committed briefly, so immediately replace it with the newest database state.
                 state.status = Bm25IndexStatus::Pending;
-                self.bm25_index.changed.notify_all();
+                runtime.changed.notify_all();
                 drop(state);
                 continue;
             }
@@ -1196,8 +1197,11 @@ impl RagStore {
                 Ok(_) => Bm25IndexStatus::Ready,
                 Err(error) => Bm25IndexStatus::Failed(error.to_string()),
             };
+            // Release the worker's database handle before publishing completion so callers
+            // can drop their store and immediately reopen the committed database.
+            drop(self);
             state.worker_running = false;
-            self.bm25_index.changed.notify_all();
+            runtime.changed.notify_all();
             return;
         }
     }

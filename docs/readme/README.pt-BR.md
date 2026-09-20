@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — Seus servidores. Um espaço de trabalho." width="920">
+</p>
+
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
@@ -9,7 +13,6 @@
   <br>
   <strong>Sem Electron. Sem WebView incorporada. Sem telemetria. Sem assinatura. BYOK primeiro. SSH puro em Rust sem OpenSSL/libssh2.</strong>
 </p>
-
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-2.0.30-blue" alt="Versão">
@@ -25,10 +28,6 @@
 
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="Visão geral dos recursos do OxideTerm" width="920">
 </p>
 
 ---
@@ -156,7 +155,6 @@ Não existe fronteira de serialização entre UI e backend SSH/terminal. Os byte
 
 ### SSH puro em Rust — russh (ring)
 
-
 - **Sem OpenSSL/libssh2 na pilha SSH** — `ring` fornece a criptografia SSH
 - SSH2 completo: troca de chaves, canais, subsistema SFTP, encaminhamento de portas
 - ChaCha20-Poly1305 / AES-GCM, chaves Ed25519/RSA/ECDSA
@@ -164,7 +162,6 @@ Não existe fronteira de serialização entre UI e backend SSH/terminal. Os byte
 - ProxyJump multi-hop com autenticação independente em cada salto
 
 ### Smart Reconnect com Grace Period
-
 
 1. Detectar SSH keepalive timeout sem JavaScript timer throttling
 2. Fazer instantâneo de painéis de terminal, transferências SFTP, encaminhamentos e arquivos IDE
@@ -174,7 +171,6 @@ Não existe fronteira de serialização entre UI e backend SSH/terminal. Os byte
 Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### Pool de conexões SSH e roteamento por nó
-
 
 - No modo padrão, uma conexão SSH física pode atender terminais, SFTP, encaminhamentos de portas e IDE; o terminal pode usar uma conexão dedicada quando a política exigir
 - Cada conexão passa por `connecting → active → idle → link_down → reconnecting`
@@ -230,7 +226,6 @@ Extensões e superfícies de suporte seguem limites explícitos definidos em Rus
 
 ### Port forwarding — Lock-Free I/O
 
-
 - Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
 - Um único task `ssh_io` possui cada SSH Channel e evita `Arc<Mutex<Channel>>`
 - Auto-restore após reconnect, relatório de encerramento e tempo limite de inatividade
@@ -245,7 +240,6 @@ trzsz continua usando o stream do terminal, sem porta extra ou agent remoto:
 - Transferência bidirecional, suporte a diretórios, limites configuráveis
 
 ### Export `.oxide` criptografado
-
 
 - **ChaCha20-Poly1305 AEAD** authenticated encryption
 - **Argon2id KDF**: 256 MB memory cost, 4 iterations, eleva o custo de brute force por GPU

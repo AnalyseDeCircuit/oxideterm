@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — 在一个工作区中管理你的服务器" width="920">
+</p>
+
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
@@ -9,7 +13,6 @@
   <br>
   <strong>不使用 Electron。 不捆绑 WebView。不采集遥测。无需订阅。BYOK 优先。纯 Rust SSH，不依赖 OpenSSL/libssh2。</strong>
 </p>
-
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-2.0.30-blue" alt="版本">
@@ -25,10 +28,6 @@
 
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm 功能概览" width="920">
 </p>
 
 ---
@@ -156,7 +155,6 @@ GPUI 渲染循环
 
 ### 纯 Rust SSH — russh (ring)
 
-
 - **SSH 栈不依赖 OpenSSL/libssh2**：SSH 密码学能力由 `ring` 提供
 - 完整 SSH2：密钥交换、channel、SFTP 子系统和端口转发
 - ChaCha20-Poly1305 / AES-GCM、Ed25519/RSA/ECDSA 密钥
@@ -164,7 +162,6 @@ GPUI 渲染循环
 - 多跳 ProxyJump，每一跳独立认证
 
 ### Grace Period 智能重连
-
 
 1. 通过 SSH keepalive 检测连接超时，没有 JavaScript timer throttle
 2. 快照终端 pane、SFTP 传输、端口转发和 IDE 文件状态
@@ -174,7 +171,6 @@ GPUI 渲染循环
 Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
 
 ### SSH 连接池与节点路由
-
 
 - 默认模式下，一个物理 SSH 连接可被 terminal、SFTP、port forward 和 IDE 共享；终端按策略也可以使用独占连接
 - 每条连接都有 `connecting → active → idle → link_down → reconnecting` 状态机
@@ -230,7 +226,6 @@ OxideSens 采用 BYOK 模式，并在进程内构建上下文：
 
 ### 端口转发 — 无锁 I/O
 
-
 - Local `-L`、Remote `-R`、Dynamic SOCKS5 `-D`
 - SSH Channel 由单一 `ssh_io` task 持有，避免 `Arc<Mutex<Channel>>`
 - 支持重连自动恢复、死亡上报和空闲超时
@@ -245,7 +240,6 @@ trzsz 继续走终端数据流，不需要额外端口或远端 agent：
 - 支持双向传输、目录传输和可配置限制
 
 ### `.oxide` 加密导出
-
 
 - **ChaCha20-Poly1305 AEAD** 认证加密
 - **Argon2id KDF**：256 MB memory cost、4 iterations，提升 GPU 暴力破解成本

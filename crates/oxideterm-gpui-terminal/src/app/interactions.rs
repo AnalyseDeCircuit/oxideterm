@@ -4511,12 +4511,12 @@ mod tests {
                         .write_protocol_bytes(b"\x12")
                         .map_err(|e| e.to_string())?;
                     session.write_text(query).map_err(|e| e.to_string())?;
-                    let mut snapshot = wait_for_real_pty_search_state(session, true)?;
+                    let mut snapshot = wait_for_real_pty_search_state(session, true, &command)?;
                     if accept_first {
                         session
                             .write_protocol_bytes(b"\x05")
                             .map_err(|e| e.to_string())?;
-                        snapshot = wait_for_real_pty_search_state(session, false)?;
+                        snapshot = wait_for_real_pty_search_state(session, false, &command)?;
                     }
                     let (start, end) =
                         active_input_block_bounds(&snapshot).ok_or("missing active input")?;
@@ -4570,17 +4570,35 @@ mod tests {
     fn wait_for_real_pty_search_state(
         session: &mut TerminalSession,
         searching: bool,
+        command: &str,
     ) -> Result<TerminalSnapshot, String> {
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             session.read_pending();
             let snapshot = session.snapshot();
-            if history_search_command_range(&snapshot).is_some() == searching {
-                return Ok(snapshot);
+            // A PTY read can contain only the search prompt, or only the first part of
+            // its dismissal. Wait for the recalled command as well as the mode change.
+            if history_search_command_range(&snapshot).is_some() == searching
+                && let Some((start, end)) = active_input_block_bounds(&snapshot)
+            {
+                // Wide glyph spacers and Readline's wrap padding are layout, not input.
+                // Exact command contents are checked by executing the edited result below.
+                let input = snapshot.lines[start..=end]
+                    .iter()
+                    .map(TerminalRow::text)
+                    .collect::<String>();
+                let input = input.split_whitespace().collect::<String>();
+                let expected = command.split_whitespace().collect::<String>();
+                if input.ends_with(&expected) {
+                    return Ok(snapshot);
+                }
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        Err("timed out waiting for history search redraw".into())
+        Err(format!(
+            "timed out waiting for history search redraw (searching={searching}, command={command:?}); screen={:?}",
+            session.buffer_text()
+        ))
     }
 
     #[cfg(unix)]

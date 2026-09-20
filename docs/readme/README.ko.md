@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — 하나의 작업 공간에서 서버 관리" width="920">
+</p>
+
 <h1 align="center">⚡ OxideTerm</h1>
 
 <p align="center">
@@ -9,7 +13,6 @@
   <br>
   <strong>Electron 미사용. WebView 번들 없음. 텔레메트리 없음. 구독 없음. BYOK 우선. OpenSSL/libssh2 없는 순수 Rust SSH.</strong>
 </p>
-
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-2.0.30-blue" alt="Version">
@@ -25,10 +28,6 @@
 
 <p align="center">
   <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm 기능 개요" width="920">
 </p>
 
 ---
@@ -152,7 +151,6 @@ UI와 SSH/터미널 백엔드 사이에는 직렬화 경계가 없습니다. 터
 
 ### 순수 Rust SSH — russh (ring)
 
-
 - **SSH 스택에 OpenSSL/libssh2 없음** — SSH 암호화는 `ring`으로 제공
 - 전체 SSH2: 키 교환, 채널, SFTP 서브시스템, 포트 포워딩
 - ChaCha20-Poly1305 / AES-GCM, Ed25519/RSA/ECDSA 키
@@ -160,7 +158,6 @@ UI와 SSH/터미널 백엔드 사이에는 직렬화 경계가 없습니다. 터
 - 각 홉에서 독립적으로 인증하는 다중 홉 ProxyJump
 
 ### Grace Period 기반 스마트 재연결
-
 
 1. JavaScript timer throttling 없이 SSH keepalive timeout 감지
 2. 터미널 패널, SFTP 전송, 포워딩, IDE 파일 스냅샷
@@ -170,7 +167,6 @@ UI와 SSH/터미널 백엔드 사이에는 직렬화 경계가 없습니다. 터
 Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-포워딩 → resume-transfers → restore-ide → verify → done`
 
 ### SSH 연결 풀 및 노드 라우팅
-
 
 - 기본 모드에서는 하나의 물리 SSH connection이 터미널 패널, SFTP, 포트 포워딩, IDE work를 공유하며, 터미널은 필요할 때 전용 connection을 사용할 수 있음
 - 각 연결은 `connecting → active → idle → link_down → reconnecting` 상태를 이동
@@ -226,7 +222,6 @@ UI는 GPUI로 직접 그려지며 DOM/CSS/JavaScript rendering pipeline이 없�
 
 ### 포트 포워딩 — 잠금 없는 I/O
 
-
 - Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
 - 하나의 `ssh_io` task가 각 SSH Channel을 소유하여 `Arc<Mutex<Channel>>` 회피
 - 재연결 auto-restore, 종료 보고, 유휴 시간 초과
@@ -241,7 +236,6 @@ trzsz는 계속 terminal stream을 사용하며 extra port나 remote agent가 �
 - bidirectional transfer, directory support, configurable limits
 
 ### `.oxide` 암호화 내보내기
-
 
 - **ChaCha20-Poly1305 AEAD** authenticated encryption
 - **Argon2id KDF**: 256 MB memory cost, 4 iterations로 GPU brute-force cost 증가
