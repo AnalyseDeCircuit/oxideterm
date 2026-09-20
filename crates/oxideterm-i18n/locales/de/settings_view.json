@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "Aktuelle Aufgabe beenden",
         "terminal.killTask": "Aktuelle Aufgabe zwangsweise beenden",
         "terminal.aiSubmit": "Anfrage senden / Antwort ausführen",
-        "terminal.aiInsert": "Antwort ins Terminal einfügen"
+        "terminal.aiInsert": "Antwort ins Terminal einfügen",
+        "terminal.commandOutline": "Befehlsübersicht",
+        "terminal.pasteEdit": "Einfügen und bearbeiten",
+        "terminal.textTools": "Textwerkzeuge",
+        "terminal.extractArchive": "Entpackbefehl erzeugen",
+        "terminal.temporaryMarkers": "Temporäre Markierungen"
       },
       "scope_editor": "Editor",
       "scope_sftp": "SFTP",

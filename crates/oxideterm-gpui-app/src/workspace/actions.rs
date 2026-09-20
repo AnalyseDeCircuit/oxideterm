@@ -650,6 +650,26 @@ impl WorkspaceApp {
                 self.toggle_terminal_ai_inline_panel(window, cx);
             }
             "terminal.recording" => self.toggle_active_terminal_recording(cx),
+            "terminal.commandOutline" => {
+                if let Some(pane) = self.active_pane(cx) {
+                    pane.update(cx, |pane, cx| pane.toggle_command_outline(cx));
+                }
+            }
+            "terminal.pasteEdit" => {
+                if let Some(pane) = self.active_pane(cx) {
+                    pane.update(cx, |pane, cx| pane.open_paste_editor(true, window, cx));
+                }
+            }
+            "terminal.textTools" | "terminal.extractArchive" => {
+                if let Some(pane) = self.active_pane(cx) {
+                    pane.update(cx, |pane, cx| pane.inspect_selected_text(window, cx));
+                }
+            }
+            "terminal.temporaryMarkers" => {
+                if let Some(pane) = self.active_pane(cx) {
+                    pane.update(cx, |pane, cx| pane.toggle_temporary_markers(cx));
+                }
+            }
             "terminal.toggleFreeTypeMode" => self.toggle_free_type_mode(cx),
             "terminal.closePanel" => self.close_terminal_panel(window, cx),
             "split.horizontal" => self.split_active_pane(SplitDirection::Horizontal, window, cx),

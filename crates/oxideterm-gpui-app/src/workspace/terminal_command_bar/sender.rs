@@ -10,6 +10,7 @@ use crate::workspace::terminal_command_sender::{
     TerminalCommandSenderFailure, TerminalCommandSenderId, TerminalCommandSenderStatus,
     TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
 };
+use oxideterm_gpui_ui::button::{ButtonOptions, ButtonVariant, button_with};
 use oxideterm_terminal::{TerminalSenderInputMode, TerminalSenderPacing};
 use zeroize::Zeroizing;
 
@@ -35,6 +36,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(panel) = self.render_source_sender_panel(window, cx) {
+            return panel;
+        }
         let theme = self.tokens.ui;
         let (sender_visible, sender_expanded) = {
             let sender = self.terminal_command_sender.read(cx);
@@ -71,7 +75,7 @@ impl WorkspaceApp {
             .flex_col()
             .border_t_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg))
+            .bg(self.workspace_chrome_background(theme.bg))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_terminal_command_sender_resize(event, window, cx);
             }))
@@ -127,6 +131,141 @@ impl WorkspaceApp {
             )
             .child(self.render_terminal_command_sender_controls(&active, &targets, cx))
             .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_source_sender_panel(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        use crate::workspace::terminal_command_sender::{
+            TERMINAL_SENDER_DEFAULT_HEIGHT, TerminalSourceSenderPresentation,
+        };
+        let window_id = window.window_handle().window_id();
+        let panes = self.tab_host.read(cx).panes_in_window(window_id);
+        let sender = self.terminal_command_sender.read(cx);
+        let documents = sender.source_documents(&panes);
+        let presentation = sender.window_drafts.get(&window_id);
+        let active = presentation
+            .and_then(|state| documents.iter().find(|doc| doc.id == state.active))
+            .or_else(|| documents.last())?;
+        let active_id = active.id;
+        let viewport_height = f32::from(window.viewport_size().height);
+        let height = presentation
+            .map(|state| state.height)
+            .unwrap_or(TERMINAL_SENDER_DEFAULT_HEIGHT)
+            .min(viewport_height * 0.65);
+        let mut tabs = div().flex().flex_wrap().gap(px(4.0));
+        for document in &documents {
+            let id = document.id;
+            let editor = document.editor.clone();
+            tabs = tabs.child(
+                button_with(
+                    &self.tokens,
+                    format!("#{}", id.0),
+                    ButtonOptions {
+                        variant: if id == active_id {
+                            ButtonVariant::Secondary
+                        } else {
+                            ButtonVariant::Ghost
+                        },
+                        ..Default::default()
+                    },
+                )
+                .id(SharedString::from(format!("source-sender-{}", id.0)))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.terminal_command_sender.update(cx, |sender, cx| {
+                        sender.window_drafts.insert(
+                            window_id,
+                            TerminalSourceSenderPresentation {
+                                active: id,
+                                height,
+                                resize: None,
+                            },
+                        );
+                        cx.notify();
+                    });
+                    window.focus(&editor.focus_handle(cx), cx);
+                })),
+            );
+        }
+        tabs = tabs.child(
+            button_with(
+                &self.tokens,
+                self.i18n.t("terminal.reading.close"),
+                ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    ..Default::default()
+                },
+            )
+            .id("source-sender-close")
+            .on_click(cx.listener(move |this, _, _, cx| {
+                this.terminal_command_sender.update(cx, |sender, cx| {
+                    sender.remove_document(active_id, cx);
+                });
+            })),
+        );
+        let targets = self.terminal_command_sender_target_entries(cx);
+        Some(
+            div()
+                .relative()
+                .flex_none()
+                .h(px(height))
+                .min_h_0()
+                .flex()
+                .flex_col()
+                .bg(self.workspace_chrome_background(self.tokens.ui.bg_panel))
+                .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                    this.terminal_command_sender.update(cx, |sender, cx| {
+                        if let Some(state) = sender.window_drafts.get_mut(&window_id)
+                            && let Some((start_y, start_height)) = state.resize
+                        {
+                            if event.dragging() {
+                                state.height = (start_height + start_y
+                                    - f32::from(event.position.y))
+                                .clamp(180.0, (viewport_height * 0.65).max(180.0));
+                            } else {
+                                state.resize = None;
+                            }
+                            cx.notify();
+                        }
+                    });
+                }))
+                .child(
+                    div()
+                        .h(px(6.0))
+                        .flex_none()
+                        .cursor_row_resize()
+                        .bg(rgb(self.tokens.ui.border))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                this.terminal_command_sender.update(cx, |sender, cx| {
+                                    sender.window_drafts.insert(
+                                        window_id,
+                                        TerminalSourceSenderPresentation {
+                                            active: active_id,
+                                            height,
+                                            resize: Some((f32::from(event.position.y), height)),
+                                        },
+                                    );
+                                    cx.notify();
+                                });
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+                .child(tabs)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .overflow_hidden()
+                        .child(active.editor.clone()),
+                )
+                .child(self.render_terminal_command_sender_controls(active, &targets, cx))
+                .into_any_element(),
+        )
     }
 
     fn render_compact_terminal_command_sender(
@@ -531,7 +670,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .bg(self.workspace_chrome_background(self.tokens.ui.bg_panel))
             .child(tab_list)
             .child(task_actions)
             .into_any_element()
@@ -626,8 +765,8 @@ impl WorkspaceApp {
                     .child(div().truncate().child(current_target_label))
                     .into_any_element()
             });
-        let selected_targets = (snapshot.target_scope
-            == TerminalCommandSenderTargetScope::Selected)
+        let selected_targets = (snapshot.source_pane.is_none()
+            && snapshot.target_scope == TerminalCommandSenderTargetScope::Selected)
             .then(|| self.render_terminal_sender_target_list(snapshot, targets, cx));
         let selected_group = (snapshot.target_scope == TerminalCommandSenderTargetScope::Group)
             .then(|| self.render_terminal_sender_group_list(snapshot, cx));
@@ -645,7 +784,22 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t("terminal.sender.targets")),
             )
-            .child(self.render_terminal_sender_scope_control(snapshot, selected_target_count, cx))
+            .when(snapshot.source_pane.is_none(), |row| {
+                row.child(self.render_terminal_sender_scope_control(
+                    snapshot,
+                    selected_target_count,
+                    cx,
+                ))
+            })
+            .when_some(snapshot.source_pane, |row, pane_id| {
+                row.child(
+                    targets
+                        .iter()
+                        .find(|(target, _, _)| target.pane_id == pane_id)
+                        .map(|(_, label, _)| label.clone())
+                        .unwrap_or_else(|| self.i18n.t("terminal.sender.error_targets")),
+                )
+            })
             .when_some(target_context, |row, context| row.child(context))
             .when_some(selected_targets, |row, target_list| {
                 row.child(
@@ -694,7 +848,7 @@ impl WorkspaceApp {
             .flex_none()
             .border_t_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .bg(self.workspace_chrome_background(self.tokens.ui.bg_panel))
             .child(
                 div()
                     .h(px(TERMINAL_SENDER_PROGRESS_HEIGHT))

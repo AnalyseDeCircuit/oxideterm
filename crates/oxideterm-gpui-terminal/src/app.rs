@@ -58,8 +58,12 @@ use oxideterm_terminal_recording::{
 mod image_cache;
 mod ime;
 mod interactions;
+mod markers;
+mod outline;
+mod paste_editor;
 mod render;
 mod scrollbar;
+mod text_tools;
 
 use crate::modem_worker::{
     ModemPromptSelection, ModemWorkerEvent, ModemWorkerJob, ModemWorkerProgress,
@@ -97,6 +101,11 @@ struct TmuxSeparatorDrag {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalShortcut {
+    CommandOutline,
+    PasteEdit,
+    TextTools,
+    ExtractArchive,
+    TemporaryMarkers,
     Copy,
     Paste,
     Terminate,
@@ -477,8 +486,13 @@ pub struct TerminalPane {
     metrics: TerminalMetrics,
     metrics_dirty: bool,
     selection: Option<TerminalSelection>,
-    pending_paste: Option<String>,
-    pending_paste_prefix: Option<Vec<u8>>,
+    outline: outline::CommandOutline,
+    markers: markers::PaneMarkers,
+    hover_inspection: Option<text_tools::HoverInspection>,
+    paste_editor: Option<paste_editor::PasteEditor>,
+    pending_sender_text: Option<Zeroizing<String>>,
+    pending_paste: Option<Zeroizing<String>>,
+    pending_paste_prefix: Option<Zeroizing<Vec<u8>>>,
     // The pane observes only its session's capability and never stores the sandbox path.
     kitty_file_transmission: Option<KittyFileTransmissionControl>,
     kitty_file_transmission_confirm_open: bool,
@@ -633,6 +647,11 @@ pub enum TerminalContextAction {
     FillCommandBarFromSelection,
     OpenSearch,
     OpenSessionTriggers,
+    OpenSenderDraft,
+    SaveTemporaryMarker,
+    OpenPasteEditor,
+    InspectText,
+    ExtractArchive,
 }
 
 #[derive(Clone, Debug)]
@@ -1177,6 +1196,11 @@ impl TerminalPane {
             metrics,
             metrics_dirty: false,
             selection: None,
+            outline: outline::CommandOutline::default(),
+            markers: markers::PaneMarkers::default(),
+            hover_inspection: None,
+            paste_editor: None,
+            pending_sender_text: None,
             pending_paste: None,
             pending_paste_prefix: None,
             kitty_file_transmission,
@@ -1869,6 +1893,7 @@ impl TerminalPane {
         self.background_image_cache
             .set_byte_limit(preferences.render_policy.image_cache_bytes);
         self.preferences = preferences;
+        self.refresh_reading_editors(cx);
         // Font resolution is stable across output frames and changes only with typography
         // preferences, so defer the next measurement until the pane is rendered again.
         self.metrics_dirty |= metrics_changed;
@@ -2311,6 +2336,7 @@ impl TerminalPane {
     }
 
     fn mark_terminal_content_changed(&mut self, cx: &mut Context<Self>) {
+        self.hover_inspection = None;
         self.selection_highlight_cache = None;
         self.terminal_content_revision = self.terminal_content_revision.wrapping_add(1).max(1);
         self.search_cache = None;
@@ -2740,8 +2766,9 @@ impl TerminalPane {
             return;
         }
         if self.settings.paste_protection && paste_needs_confirmation(&text) {
-            self.pending_paste = Some(text);
-            self.pending_paste_prefix = (!prefix.is_empty()).then(|| prefix.to_vec());
+            self.pending_paste = Some(Zeroizing::new(text));
+            self.pending_paste_prefix =
+                (!prefix.is_empty()).then(|| Zeroizing::new(prefix.to_vec()));
             cx.notify();
             return;
         }
@@ -3674,7 +3701,7 @@ impl TerminalPane {
         };
         self.observe_current_directory_submitted_command(&command, cx);
         if self.shell_integration_status.detected
-            || !self.settings.command_marks_user_input_observed
+            || (!self.settings.command_marks_user_input_observed && !self.outline.open)
         {
             return;
         }

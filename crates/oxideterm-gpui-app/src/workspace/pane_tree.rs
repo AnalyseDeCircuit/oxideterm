@@ -367,8 +367,13 @@ impl WorkspaceApp {
             self.clear_ime_selection();
         }
         self.search.remove(*pane_id);
-        self.tab_host
-            .update(cx, |tab_host, _cx| tab_host.remove_terminal_pane(*pane_id))
+        let removed = self
+            .tab_host
+            .update(cx, |tab_host, _cx| tab_host.remove_terminal_pane(*pane_id));
+        let live = self.tab_host.read(cx).panes().keys().copied().collect();
+        self.terminal_command_sender
+            .update(cx, |sender, cx| sender.retain_live_targets(&live, cx));
+        removed
     }
 
     pub(super) fn queue_auto_close_terminal_session(

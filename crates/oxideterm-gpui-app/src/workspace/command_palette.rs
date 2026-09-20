@@ -2500,6 +2500,36 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             action: PaletteAction::ToggleTerminalPerformance,
         },
         keybinding_command(
+            "cmd:pasteEdit",
+            "terminal.reading.paste_edit",
+            "terminal.pasteEdit",
+            LucideIcon::ListChecks,
+        ),
+        keybinding_command(
+            "cmd:textTools",
+            "terminal.reading.tools",
+            "terminal.textTools",
+            LucideIcon::ListChecks,
+        ),
+        keybinding_command(
+            "cmd:extractArchive",
+            "terminal.reading.archive",
+            "terminal.extractArchive",
+            LucideIcon::ListChecks,
+        ),
+        keybinding_command(
+            "cmd:temporaryMarkers",
+            "terminal.reading.markers",
+            "terminal.temporaryMarkers",
+            LucideIcon::ListChecks,
+        ),
+        keybinding_command(
+            "cmd:command_outline",
+            "terminal.reading.outline",
+            "terminal.commandOutline",
+            LucideIcon::ListChecks,
+        ),
+        keybinding_command(
             "cmd:toggle_free_type_mode",
             "command_palette.cmd_toggle_free_type_mode",
             "terminal.toggleFreeTypeMode",

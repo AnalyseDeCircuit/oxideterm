@@ -113,6 +113,7 @@ struct TerminalCommandSenderResizeDrag {
 #[derive(Clone)]
 pub(super) struct TerminalCommandSenderDocumentSnapshot {
     pub(super) id: TerminalCommandSenderId,
+    pub(super) source_pane: Option<PaneId>,
     pub(super) editor: Entity<TextEditorView>,
     pub(super) input_mode: TerminalSenderInputMode,
     pub(super) pacing: TerminalSenderPacing,
@@ -130,6 +131,7 @@ pub(super) struct TerminalCommandSenderDocumentSnapshot {
 }
 
 struct TerminalCommandSenderDocument {
+    source_pane: Option<PaneId>,
     id: TerminalCommandSenderId,
     editor: Entity<TextEditorView>,
     compact_draft: Zeroizing<String>,
@@ -155,6 +157,7 @@ impl TerminalCommandSenderDocument {
     fn snapshot(&self) -> TerminalCommandSenderDocumentSnapshot {
         TerminalCommandSenderDocumentSnapshot {
             id: self.id,
+            source_pane: self.source_pane,
             editor: self.editor.clone(),
             input_mode: self.input_mode,
             pacing: self.pacing,
@@ -178,16 +181,28 @@ struct TerminalCommandSenderRunTarget {
     pane: WeakEntity<TerminalPane>,
 }
 
-/// Owns sender documents, target snapshots, timers, cancellation, and progress.
-pub(super) struct TerminalCommandSenderEntity {
+#[derive(Clone)]
+struct TerminalSenderPresentation {
     layout: TerminalCommandSenderLayout,
     compact_focused: bool,
     compact_suggestions_open: bool,
     compact_suggestion_highlighted: Option<usize>,
     panel_height: f32,
     resize_drag: Option<TerminalCommandSenderResizeDrag>,
-    documents: Vec<TerminalCommandSenderDocument>,
     active_document_id: TerminalCommandSenderId,
+}
+
+pub(super) struct TerminalSourceSenderPresentation {
+    pub(super) active: TerminalCommandSenderId,
+    pub(super) height: f32,
+    pub(super) resize: Option<(f32, f32)>,
+}
+
+/// Owns sender documents, target snapshots, timers, cancellation, and progress.
+pub(super) struct TerminalCommandSenderEntity {
+    main: TerminalSenderPresentation,
+    pub(super) window_drafts: HashMap<gpui::WindowId, TerminalSourceSenderPresentation>,
+    documents: Vec<TerminalCommandSenderDocument>,
     active_tasks: HashMap<TerminalCommandSenderId, Task<()>>,
     target_owners: HashMap<PaneId, TerminalCommandSenderId>,
     next_document_id: u64,
@@ -215,14 +230,17 @@ impl TerminalCommandSenderEntity {
             cx,
         );
         Self {
-            layout: TerminalCommandSenderLayout::Compact,
-            compact_focused: false,
-            compact_suggestions_open: false,
-            compact_suggestion_highlighted: None,
-            panel_height: TERMINAL_SENDER_DEFAULT_HEIGHT,
-            resize_drag: None,
+            main: TerminalSenderPresentation {
+                layout: TerminalCommandSenderLayout::Compact,
+                compact_focused: false,
+                compact_suggestions_open: false,
+                compact_suggestion_highlighted: None,
+                panel_height: TERMINAL_SENDER_DEFAULT_HEIGHT,
+                resize_drag: None,
+                active_document_id: first_id,
+            },
+            window_drafts: HashMap::new(),
             documents: vec![first],
-            active_document_id: first_id,
             active_tasks: HashMap::new(),
             target_owners: HashMap::new(),
             next_document_id: 2,
@@ -231,6 +249,58 @@ impl TerminalCommandSenderEntity {
             editor_context_menu_labels,
             editor_tokens: tokens,
         }
+    }
+
+    pub(super) fn add_source_document(
+        &mut self,
+        pane_id: PaneId,
+        window_id: gpui::WindowId,
+        text: Zeroizing<String>,
+        cx: &mut Context<Self>,
+    ) -> Entity<TextEditorView> {
+        let id = TerminalCommandSenderId(self.next_document_id);
+        self.next_document_id += 1;
+        let mut document = Self::new_document(
+            id,
+            self.editor_tokens,
+            &self.expanded_editor_placeholder,
+            &self.editor_context_menu_labels,
+            EditorPresentation::Document,
+            cx,
+        );
+        document.source_pane = Some(pane_id);
+        document.target_scope = TerminalCommandSenderTargetScope::Selected;
+        document.selected_targets.insert(pane_id);
+        let editor = document.editor.clone();
+        editor.update(cx, |editor, cx| {
+            editor.replace_text_external(text.to_string(), cx)
+        });
+        self.documents.push(document);
+        self.window_drafts.insert(
+            window_id,
+            TerminalSourceSenderPresentation {
+                active: id,
+                height: TERMINAL_SENDER_DEFAULT_HEIGHT,
+                resize: None,
+            },
+        );
+        cx.notify();
+        editor
+    }
+
+    pub(super) fn source_documents(
+        &self,
+        panes: &HashSet<PaneId>,
+    ) -> Vec<TerminalCommandSenderDocumentSnapshot> {
+        self.documents
+            .iter()
+            .filter(|document| {
+                document
+                    .source_pane
+                    .is_some_and(|pane| panes.contains(&pane))
+            })
+            .map(TerminalCommandSenderDocument::snapshot)
+            .collect()
     }
 
     fn new_document(
@@ -258,6 +328,7 @@ impl TerminalCommandSenderEntity {
             editor
         });
         TerminalCommandSenderDocument {
+            source_pane: None,
             id,
             editor,
             compact_draft: Zeroizing::new(String::new()),
@@ -281,36 +352,36 @@ impl TerminalCommandSenderEntity {
     }
 
     pub(super) fn is_expanded(&self) -> bool {
-        self.layout == TerminalCommandSenderLayout::Expanded
+        self.main.layout == TerminalCommandSenderLayout::Expanded
     }
 
     pub(super) fn is_visible(&self) -> bool {
-        self.layout != TerminalCommandSenderLayout::Hidden
+        self.main.layout != TerminalCommandSenderLayout::Hidden
     }
 
     pub(super) fn toggle_visible(&mut self, cx: &mut Context<Self>) -> bool {
-        let next_layout = self.layout.toggled_visibility();
+        let next_layout = self.main.layout.toggled_visibility();
         self.sync_text_for_layout_change(next_layout, cx);
-        self.layout = next_layout;
-        self.compact_focused = false;
+        self.main.layout = next_layout;
+        self.main.compact_focused = false;
         self.dismiss_compact_suggestions();
         // Hiding changes presentation only; documents and running jobs stay owned here.
-        self.resize_drag = None;
+        self.main.resize_drag = None;
         self.sync_editor_presentation(cx);
         cx.notify();
         self.is_visible()
     }
 
     pub(super) fn set_expanded(&mut self, expanded: bool, cx: &mut Context<Self>) {
-        let next_layout = self.layout.with_expanded(expanded);
-        if self.layout == next_layout {
+        let next_layout = self.main.layout.with_expanded(expanded);
+        if self.main.layout == next_layout {
             return;
         }
         self.sync_text_for_layout_change(next_layout, cx);
-        self.layout = next_layout;
-        self.compact_focused = false;
+        self.main.layout = next_layout;
+        self.main.compact_focused = false;
         self.dismiss_compact_suggestions();
-        self.resize_drag = None;
+        self.main.resize_drag = None;
         self.sync_editor_presentation(cx);
         cx.notify();
     }
@@ -322,27 +393,28 @@ impl TerminalCommandSenderEntity {
     pub(super) fn document_snapshots(&self) -> Vec<TerminalCommandSenderDocumentSnapshot> {
         self.documents
             .iter()
+            .filter(|document| document.source_pane.is_none())
             .map(TerminalCommandSenderDocument::snapshot)
             .collect()
     }
 
     pub(super) fn active_document_snapshot(&self) -> Option<TerminalCommandSenderDocumentSnapshot> {
-        self.document(self.active_document_id)
+        self.document(self.main.active_document_id)
             .map(TerminalCommandSenderDocument::snapshot)
     }
 
     pub(super) fn active_document_id(&self) -> TerminalCommandSenderId {
-        self.active_document_id
+        self.main.active_document_id
     }
 
     pub(super) fn compact_focused(&self) -> bool {
-        self.compact_focused
+        self.main.compact_focused
     }
 
     pub(super) fn set_compact_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        let focused = focused && self.layout == TerminalCommandSenderLayout::Compact;
-        if self.compact_focused != focused {
-            self.compact_focused = focused;
+        let focused = focused && self.main.layout == TerminalCommandSenderLayout::Compact;
+        if self.main.compact_focused != focused {
+            self.main.compact_focused = focused;
             if !focused {
                 self.dismiss_compact_suggestions();
             }
@@ -351,11 +423,11 @@ impl TerminalCommandSenderEntity {
     }
 
     pub(super) fn compact_suggestions_open(&self) -> bool {
-        self.compact_suggestions_open
+        self.main.compact_suggestions_open
     }
 
     pub(super) fn compact_suggestion_highlighted(&self) -> Option<usize> {
-        self.compact_suggestion_highlighted
+        self.main.compact_suggestion_highlighted
     }
 
     pub(super) fn move_compact_suggestion_selection(
@@ -372,34 +444,36 @@ impl TerminalCommandSenderEntity {
         }
         let last = suggestions_len.saturating_sub(1);
         let next = if move_down {
-            self.compact_suggestion_highlighted
+            self.main
+                .compact_suggestion_highlighted
                 .map(|index| index.saturating_add(1).min(last))
                 .unwrap_or(0)
         } else {
-            self.compact_suggestion_highlighted
+            self.main
+                .compact_suggestion_highlighted
                 .map(|index| index.saturating_sub(1))
                 .unwrap_or(last)
         };
-        self.compact_suggestions_open = true;
-        self.compact_suggestion_highlighted = Some(next);
+        self.main.compact_suggestions_open = true;
+        self.main.compact_suggestion_highlighted = Some(next);
         cx.notify();
         Some(next)
     }
 
     pub(super) fn dismiss_compact_suggestions(&mut self) -> bool {
-        let had_highlight = self.compact_suggestion_highlighted.take().is_some();
-        let changed = self.compact_suggestions_open || had_highlight;
-        self.compact_suggestions_open = false;
+        let had_highlight = self.main.compact_suggestion_highlighted.take().is_some();
+        let changed = self.main.compact_suggestions_open || had_highlight;
+        self.main.compact_suggestions_open = false;
         changed
     }
 
     pub(super) fn active_compact_draft(&self) -> Option<&str> {
-        self.document(self.active_document_id)
+        self.document(self.main.active_document_id)
             .map(|document| document.compact_draft.as_str())
     }
 
     pub(super) fn active_compact_viewport(&self) -> Option<TextInputViewport> {
-        self.document(self.active_document_id)
+        self.document(self.main.active_document_id)
             .map(|document| document.compact_viewport.clone())
     }
 
@@ -506,10 +580,14 @@ impl TerminalCommandSenderEntity {
         sender_id: TerminalCommandSenderId,
         cx: &mut Context<Self>,
     ) {
-        if self.active_document_id == sender_id || self.document(sender_id).is_none() {
+        if self.main.active_document_id == sender_id
+            || self
+                .document(sender_id)
+                .is_none_or(|document| document.source_pane.is_some())
+        {
             return;
         }
-        self.active_document_id = sender_id;
+        self.main.active_document_id = sender_id;
         self.dismiss_compact_suggestions();
         cx.notify();
     }
@@ -526,10 +604,10 @@ impl TerminalCommandSenderEntity {
                 &self.compact_editor_placeholder
             },
             &self.editor_context_menu_labels,
-            self.layout.editor_presentation(),
+            self.main.layout.editor_presentation(),
             cx,
         ));
-        self.active_document_id = sender_id;
+        self.main.active_document_id = sender_id;
         cx.notify();
         sender_id
     }
@@ -539,7 +617,17 @@ impl TerminalCommandSenderEntity {
         sender_id: TerminalCommandSenderId,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.documents.len() == 1 {
+        if self.documents.len() == 1
+            || (self
+                .document(sender_id)
+                .is_some_and(|doc| doc.source_pane.is_none())
+                && self
+                    .documents
+                    .iter()
+                    .filter(|doc| doc.source_pane.is_none())
+                    .count()
+                    == 1)
+        {
             return false;
         }
         self.cancel_task(sender_id);
@@ -551,9 +639,16 @@ impl TerminalCommandSenderEntity {
             return false;
         };
         self.documents.remove(index);
-        if self.active_document_id == sender_id {
-            let next_index = index.min(self.documents.len().saturating_sub(1));
-            self.active_document_id = self.documents[next_index].id;
+        self.window_drafts
+            .retain(|_, state| state.active != sender_id);
+        if self.main.active_document_id == sender_id {
+            if let Some(document) = self
+                .documents
+                .iter()
+                .find(|document| document.source_pane.is_none())
+            {
+                self.main.active_document_id = document.id;
+            }
         }
         cx.notify();
         true
@@ -670,6 +765,12 @@ impl TerminalCommandSenderEntity {
     ) {
         if self
             .document(sender_id)
+            .is_some_and(|document| document.source_pane.is_some())
+        {
+            return;
+        }
+        if self
+            .document(sender_id)
             .is_some_and(|document| document.status == TerminalCommandSenderStatus::Running)
         {
             return;
@@ -690,6 +791,12 @@ impl TerminalCommandSenderEntity {
         pane_id: PaneId,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .document(sender_id)
+            .is_some_and(|document| document.source_pane.is_some())
+        {
+            return;
+        }
         if self
             .document(sender_id)
             .is_some_and(|document| document.status == TerminalCommandSenderStatus::Running)
@@ -715,6 +822,12 @@ impl TerminalCommandSenderEntity {
     ) {
         if self
             .document(sender_id)
+            .is_some_and(|document| document.source_pane.is_some())
+        {
+            return;
+        }
+        if self
+            .document(sender_id)
             .is_some_and(|document| document.status == TerminalCommandSenderStatus::Running)
         {
             return;
@@ -734,6 +847,19 @@ impl TerminalCommandSenderEntity {
         live_panes: &HashSet<PaneId>,
         cx: &mut Context<Self>,
     ) {
+        let closed: Vec<_> = self
+            .documents
+            .iter()
+            .filter(|document| {
+                document
+                    .source_pane
+                    .is_some_and(|pane| !live_panes.contains(&pane))
+            })
+            .map(|document| document.id)
+            .collect();
+        for id in closed {
+            self.remove_document(id, cx);
+        }
         let mut changed = false;
         for document in &mut self.documents {
             let previous = document.selected_targets.len();
@@ -762,7 +888,7 @@ impl TerminalCommandSenderEntity {
         if document.status == TerminalCommandSenderStatus::Running {
             return false;
         }
-        let input = if self.is_expanded() {
+        let input = if document.source_pane.is_some() || self.is_expanded() {
             Zeroizing::new(document.editor.read(cx).buffer().text())
         } else {
             Zeroizing::new(document.compact_draft.to_string())
@@ -1023,12 +1149,12 @@ impl TerminalCommandSenderEntity {
 
     fn editable_active_document_id(&mut self, cx: &mut Context<Self>) -> TerminalCommandSenderId {
         if self
-            .document(self.active_document_id)
+            .document(self.main.active_document_id)
             .is_some_and(|document| document.status == TerminalCommandSenderStatus::Running)
         {
             self.add_document(cx)
         } else {
-            self.active_document_id
+            self.main.active_document_id
         }
     }
 
@@ -1051,11 +1177,11 @@ impl TerminalCommandSenderEntity {
     }
 
     pub(super) fn panel_height_for_viewport(&self, viewport_height: f32) -> f32 {
-        adjusted_sender_panel_height(self.panel_height, 0.0, viewport_height)
+        adjusted_sender_panel_height(self.main.panel_height, 0.0, viewport_height)
     }
 
     pub(super) fn is_resizing(&self) -> bool {
-        self.resize_drag.is_some()
+        self.main.resize_drag.is_some()
     }
 
     pub(super) fn start_resize(
@@ -1065,8 +1191,8 @@ impl TerminalCommandSenderEntity {
         cx: &mut Context<Self>,
     ) {
         let current_height = self.panel_height_for_viewport(viewport_height);
-        self.panel_height = current_height;
-        self.resize_drag = Some(TerminalCommandSenderResizeDrag {
+        self.main.panel_height = current_height;
+        self.main.resize_drag = Some(TerminalCommandSenderResizeDrag {
             start_cursor_y: cursor_y,
             start_height: current_height,
         });
@@ -1080,7 +1206,7 @@ impl TerminalCommandSenderEntity {
         dragging: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(drag) = self.resize_drag else {
+        let Some(drag) = self.main.resize_drag else {
             return;
         };
         if !dragging {
@@ -1092,14 +1218,14 @@ impl TerminalCommandSenderEntity {
             f32::from(cursor_y - drag.start_cursor_y),
             viewport_height,
         );
-        if (next_height - self.panel_height).abs() >= f32::EPSILON {
-            self.panel_height = next_height;
+        if (next_height - self.main.panel_height).abs() >= f32::EPSILON {
+            self.main.panel_height = next_height;
             cx.notify();
         }
     }
 
     pub(super) fn finish_resize(&mut self, cx: &mut Context<Self>) {
-        if self.resize_drag.take().is_some() {
+        if self.main.resize_drag.take().is_some() {
             cx.notify();
         }
     }
@@ -1107,9 +1233,9 @@ impl TerminalCommandSenderEntity {
     pub(super) fn reset_height(&mut self, viewport_height: f32, cx: &mut Context<Self>) {
         let height =
             adjusted_sender_panel_height(TERMINAL_SENDER_DEFAULT_HEIGHT, 0.0, viewport_height);
-        let changed = (height - self.panel_height).abs() >= f32::EPSILON;
-        self.panel_height = height;
-        self.resize_drag = None;
+        let changed = (height - self.main.panel_height).abs() >= f32::EPSILON;
+        self.main.panel_height = height;
+        self.main.resize_drag = None;
         if changed {
             cx.notify();
         }
@@ -1146,8 +1272,12 @@ impl TerminalCommandSenderEntity {
         } else {
             self.compact_editor_placeholder.clone()
         };
-        let presentation = self.layout.editor_presentation();
-        for document in &self.documents {
+        let presentation = self.main.layout.editor_presentation();
+        for document in self
+            .documents
+            .iter()
+            .filter(|document| document.source_pane.is_none())
+        {
             document.editor.update(cx, |editor, cx| {
                 editor.set_presentation(presentation, cx);
                 editor.set_placeholder(Some(placeholder.clone()), cx);
@@ -1161,17 +1291,25 @@ impl TerminalCommandSenderEntity {
         cx: &mut Context<Self>,
     ) {
         // The rendered surface is the sole live editor; layout boundaries transfer its draft.
-        if self.layout == TerminalCommandSenderLayout::Expanded
+        if self.main.layout == TerminalCommandSenderLayout::Expanded
             && next_layout != TerminalCommandSenderLayout::Expanded
         {
-            for document in &mut self.documents {
+            for document in self
+                .documents
+                .iter_mut()
+                .filter(|document| document.source_pane.is_none())
+            {
                 document.compact_draft = Zeroizing::new(document.editor.read(cx).buffer().text());
                 document.compact_viewport = TextInputViewport::default();
             }
-        } else if self.layout != TerminalCommandSenderLayout::Expanded
+        } else if self.main.layout != TerminalCommandSenderLayout::Expanded
             && next_layout == TerminalCommandSenderLayout::Expanded
         {
-            for document in &self.documents {
+            for document in self
+                .documents
+                .iter()
+                .filter(|document| document.source_pane.is_none())
+            {
                 let text = document.compact_draft.to_string();
                 document.editor.update(cx, |editor, cx| {
                     editor.replace_text_external(text, cx);
@@ -1247,6 +1385,95 @@ mod tests {
             paste: "Paste".to_string(),
             select_all: "Select all".to_string(),
         }
+    }
+
+    struct SenderTestRoot;
+    impl gpui::Render for SenderTestRoot {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut Context<Self>,
+        ) -> impl gpui::IntoElement {
+            gpui::div()
+        }
+    }
+
+    #[gpui::test]
+    fn source_drafts_keep_window_content_targets_and_global_layout_independent(
+        cx: &mut TestAppContext,
+    ) {
+        let main = cx.add_window(|_, _| SenderTestRoot).window_id();
+        let detached = cx.add_window(|_, _| SenderTestRoot).window_id();
+        let sender = cx.new(|cx| {
+            TerminalCommandSenderEntity::new(
+                default_tokens(),
+                "Command".into(),
+                "Commands".into(),
+                test_context_menu_labels(),
+                cx,
+            )
+        });
+        sender.update(cx, |sender, cx| {
+            sender.replace_active_compact_text("global original".into(), cx);
+            let first = sender.add_source_document(
+                PaneId(10),
+                main,
+                Zeroizing::new("first draft".into()),
+                cx,
+            );
+            let second = sender.add_source_document(
+                PaneId(20),
+                detached,
+                Zeroizing::new("second draft".into()),
+                cx,
+            );
+            first.update(cx, |editor, cx| {
+                editor.replace_text_external("edited first", cx)
+            });
+            let first_id = sender.window_drafts[&main].active;
+            let second_id = sender.window_drafts[&detached].active;
+            sender.set_target_scope(first_id, TerminalCommandSenderTargetScope::All, cx);
+            sender.toggle_selected_target(first_id, PaneId(20), cx);
+            sender.set_expanded(true, cx);
+            sender.set_expanded(false, cx);
+            assert_eq!(sender.active_compact_draft(), Some("global original"));
+            assert_eq!(first.read(cx).buffer().text(), "edited first");
+            assert_eq!(second.read(cx).buffer().text(), "second draft");
+            assert_eq!(
+                sender.document(first_id).unwrap().selected_targets,
+                HashSet::from([PaneId(10)])
+            );
+            assert_eq!(
+                sender
+                    .source_documents(&HashSet::from([PaneId(10), PaneId(20)]))
+                    .iter()
+                    .map(|doc| doc.id)
+                    .collect::<Vec<_>>(),
+                [first_id, second_id]
+            );
+            assert_eq!(
+                sender
+                    .source_documents(&HashSet::from([PaneId(20)]))
+                    .iter()
+                    .map(|doc| doc.id)
+                    .collect::<Vec<_>>(),
+                [second_id]
+            );
+            sender.retain_live_targets(&HashSet::from([PaneId(20)]), cx);
+            assert!(!sender.start(first_id, Some(PaneId(20)), vec![], cx));
+            assert_eq!(
+                sender
+                    .source_documents(&HashSet::from([PaneId(10), PaneId(20)]))
+                    .iter()
+                    .map(|doc| doc.id)
+                    .collect::<Vec<_>>(),
+                [second_id]
+            );
+            assert_eq!(
+                sender.document(second_id).unwrap().status,
+                TerminalCommandSenderStatus::Idle
+            );
+        });
     }
 
     #[test]

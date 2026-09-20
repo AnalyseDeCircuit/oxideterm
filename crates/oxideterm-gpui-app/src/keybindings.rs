@@ -856,6 +856,36 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             KeyCombo::plain("tab"),
         ),
     ]);
+    actions.push(def(
+        "terminal.commandOutline",
+        ActionScope::Terminal,
+        KeyCombo::plain(""),
+        KeyCombo::plain(""),
+    ));
+    actions.push(def(
+        "terminal.pasteEdit",
+        ActionScope::Terminal,
+        KeyCombo::plain(""),
+        KeyCombo::plain(""),
+    ));
+    actions.push(def(
+        "terminal.textTools",
+        ActionScope::Terminal,
+        KeyCombo::plain(""),
+        KeyCombo::plain(""),
+    ));
+    actions.push(def(
+        "terminal.extractArchive",
+        ActionScope::Terminal,
+        KeyCombo::plain(""),
+        KeyCombo::plain(""),
+    ));
+    actions.push(def(
+        "terminal.temporaryMarkers",
+        ActionScope::Terminal,
+        KeyCombo::plain(""),
+        KeyCombo::plain(""),
+    ));
     actions
 });
 
@@ -896,6 +926,7 @@ pub(crate) fn effective_combo(
 ) -> Option<KeyCombo> {
     override_binding(&definition.id, overrides, side)
         .unwrap_or_else(|| Some(definition.default_combo(side).clone()))
+        .filter(|combo| !combo.key.is_empty())
 }
 
 fn effective_combos(
@@ -2072,6 +2103,14 @@ pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &m
     use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
     let mut bindings = Vec::new();
     for (id, action) in [
+        ("terminal.commandOutline", TerminalShortcut::CommandOutline),
+        ("terminal.pasteEdit", TerminalShortcut::PasteEdit),
+        ("terminal.textTools", TerminalShortcut::TextTools),
+        ("terminal.extractArchive", TerminalShortcut::ExtractArchive),
+        (
+            "terminal.temporaryMarkers",
+            TerminalShortcut::TemporaryMarkers,
+        ),
         ("terminal.copy", TerminalShortcut::Copy),
         ("terminal.paste", TerminalShortcut::Paste),
         ("terminal.copyAlternate", TerminalShortcut::Copy),

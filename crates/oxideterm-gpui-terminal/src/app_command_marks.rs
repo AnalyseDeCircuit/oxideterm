@@ -59,10 +59,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         let command = command.trim();
-        if command.is_empty()
-            || (!self.settings.command_marks_enabled
-                && source != TerminalCommandMarkDetectionSource::Ai)
-        {
+        if command.is_empty() {
             return None;
         }
         let (mode, snapshot) = {
@@ -111,7 +108,6 @@ impl TerminalPane {
         cx.notify();
         Some(command_id)
     }
-
 }
 impl TerminalPane {
     fn absolute_cursor_line(&self) -> usize {
@@ -206,10 +202,7 @@ impl TerminalPane {
             .map(|mark| mark.command_id.clone())
     }
 
-    pub(crate) fn next_command_mark_id_after_line(
-        &self,
-        absolute_line: usize,
-    ) -> Option<String> {
+    pub(crate) fn next_command_mark_id_after_line(&self, absolute_line: usize) -> Option<String> {
         if !self.settings.command_marks_enabled {
             return None;
         }
@@ -446,7 +439,6 @@ impl TerminalPane {
             self.hovered_command_mark_id = None;
         }
     }
-
 }
 fn now_millis() -> u64 {
     SystemTime::now()
@@ -872,8 +864,22 @@ fn is_simple_cd_shell_meta(ch: char) -> bool {
     // evaluation. Leave those to OSC7/shell integration instead of guessing.
     matches!(
         ch,
-        ';' | '|' | '&' | '<' | '>' | '`' | '$' | '(' | ')' | '{' | '}' | '*'
-            | '?' | '[' | ']' | '!' | '#'
+        ';' | '|'
+            | '&'
+            | '<'
+            | '>'
+            | '`'
+            | '$'
+            | '('
+            | ')'
+            | '{'
+            | '}'
+            | '*'
+            | '?'
+            | '['
+            | ']'
+            | '!'
+            | '#'
     )
 }
 
@@ -888,8 +894,7 @@ fn resolve_cd_target(
         || target == "--"
         || target.chars().any(char::is_control)
         || (target.starts_with('~')
-            && (!tilde_expansion_allowed
-                || (target != "~" && !target.starts_with("~/"))))
+            && (!tilde_expansion_allowed || (target != "~" && !target.starts_with("~/"))))
     {
         return None;
     }
@@ -958,10 +963,12 @@ fn normalize_posix_display_path(path: &str) -> Option<String> {
 
 #[cfg(test)]
 mod input_tracker_tests {
-    use super::{TerminalInputTracker, command_mark_allows_cwd_fallback, cwd_after_simple_cd_command};
+    use super::{
+        TerminalInputTracker, command_mark_allows_cwd_fallback, cwd_after_simple_cd_command,
+    };
 
     #[test]
-fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
+    fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         let mut tracker = TerminalInputTracker::default();
 
         assert_eq!(tracker.apply_bytes(b"pwd"), None);
@@ -1021,11 +1028,7 @@ fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
                 Some("/home/lipsc"),
                 Some("/home/lipsc/.oxideterm"),
             ),
-            (
-                "cd ..",
-                Some("/home/lipsc/OxideTerm"),
-                Some("/home/lipsc"),
-            ),
+            ("cd ..", Some("/home/lipsc/OxideTerm"), Some("/home/lipsc")),
             ("cd", Some("/home/lipsc"), None),
             (
                 "cd 'dir with spaces'",
@@ -1048,7 +1051,10 @@ fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         ];
 
         for (command, cwd, expected) in cases {
-            assert_eq!(cwd_after_simple_cd_command(command, cwd).as_deref(), expected);
+            assert_eq!(
+                cwd_after_simple_cd_command(command, cwd).as_deref(),
+                expected
+            );
         }
     }
 

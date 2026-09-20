@@ -684,7 +684,19 @@ impl TextEditorView {
         self.replace_all_selections_with_caret(normalize_editor_text(text.into()), cx);
     }
 
-    /// Exposes undo to embedding surfaces without bypassing editor history bookkeeping.
+    /// Embedding surfaces can associate undoable formatting metadata with this revision.
+    pub fn push_undo_checkpoint(&mut self, cx: &mut Context<Self>) -> u64 {
+        self.buffer
+            .apply_transaction(EditTransaction::single(TextEdit::new(
+                TextRange::new(BufferOffset::ZERO, BufferOffset::ZERO),
+                String::new(),
+            )))
+            .expect("empty edit at the document start is valid");
+        cx.notify();
+        self.buffer.content_revision()
+    }
+
+    /// Exposes undo without bypassing editor history bookkeeping.
     pub fn undo_external(&mut self, cx: &mut Context<Self>) {
         if self.read_only {
             return;

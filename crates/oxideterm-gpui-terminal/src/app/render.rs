@@ -6,6 +6,7 @@ use gpui::{
     ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, anchored, deferred, div,
     point, prelude::*, px, rgb, rgba,
 };
+use oxideterm_gpui_ui::button::{ButtonOptions, ButtonSize, ButtonVariant, button_with};
 use oxideterm_gpui_ui::confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
@@ -40,13 +41,12 @@ const MAX_SNAPSHOT_DEFER_DURATION: std::time::Duration = std::time::Duration::fr
 
 const PASTE_PREVIEW_TEXT_RADIUS: f32 = 4.0;
 const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
-const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 13.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 19.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
 const TERMINAL_MODEM_SUBMENU_ACTION_COUNT: f32 = 6.0;
-const TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM: f32 = 9.0;
+const TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM: f32 = 14.0;
 const TERMINAL_CONTEXT_MENU_SEPARATORS_BEFORE_MODEM: f32 = 2.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
 const SERIAL_CONTROL_BAR_HEIGHT: f32 = 34.0;
@@ -354,6 +354,8 @@ impl Render for TerminalPane {
             (!candidates.is_empty())
                 .then(|| self.render_terminal_autosuggest_overlay(candidates, terminal_top, cx))
         };
+        let reading_highlights = self.effective_reading_highlights();
+        let text_inspection = self.render_text_inspection(window, cx);
         let terminal_element = TerminalElement::new_with_images_and_bidi(
             snapshot,
             rendered_images,
@@ -387,6 +389,7 @@ impl Render for TerminalPane {
             hovered_command_mark_id,
         )
         .highlight_rules(self.preferences.highlight_rules.clone())
+        .pane_highlights(reading_highlights)
         .transient_command_highlight(
             self.command_context_highlighting_enabled
                 .then(|| self.command_fact_ledger.transient_command_highlight())
@@ -413,6 +416,15 @@ impl Render for TerminalPane {
         .layout_cache(self.layout_cache.clone());
         let accepts_external_path_drop =
             cfg!(target_os = "macos") && self.session_kind() == TerminalSessionKind::LocalPty;
+        let outline = self
+            .outline
+            .open
+            .then(|| self.render_command_outline(terminal_top, window, cx));
+        let outline_width = if self.outline.open {
+            self.outline.width
+        } else {
+            0.0
+        };
         div()
             .id("terminal-pane")
             .size_full()
@@ -516,11 +528,12 @@ impl Render for TerminalPane {
                     // The element's inset bounds are shared by painting, hit testing and PTY sizing.
                     .top(px(terminal_top + self.preferences.padding_vertical))
                     .left(px(self.preferences.padding_horizontal))
-                    .right(px(self.preferences.padding_horizontal))
+                    .right(px(self.preferences.padding_horizontal + outline_width))
                     .bottom(px(self.preferences.padding_vertical))
                     .overflow_hidden()
                     .child(terminal_element),
             )
+            .when_some(outline, |pane, outline| pane.child(outline))
             .when(self.is_serial_transport(), |pane| {
                 pane.child(self.render_serial_control_bar(cx))
             })
@@ -533,13 +546,23 @@ impl Render for TerminalPane {
             .when_some(self.tmux_prompt.clone(), |pane, prompt| {
                 pane.child(self.render_tmux_prompt_overlay(&prompt, cx))
             })
-            .when_some(self.pending_paste.clone(), |pane, paste| {
-                pane.child(self.render_paste_confirm_overlay(&paste, cx))
-            })
+            .when_some(
+                self.pending_paste
+                    .clone()
+                    .filter(|_| self.paste_editor.is_none()),
+                |pane, paste| pane.child(self.render_paste_confirm_overlay(&paste, cx)),
+            )
             .when(
                 self.kitty_file_transmission_confirm_open && self.pending_paste.is_none(),
                 |pane| pane.child(self.render_kitty_file_transmission_confirm(cx)),
             )
+            .children(text_inspection)
+            .when(self.markers.open, |pane| {
+                pane.child(self.render_markers(window, cx))
+            })
+            .when(self.paste_editor.is_some(), |pane| {
+                pane.child(self.render_paste_editor(window, cx))
+            })
             .when_some(self.modem_progress.clone(), |pane, transfer| {
                 pane.child(self.render_modem_progress_overlay(transfer, cx))
             })
@@ -1693,6 +1716,43 @@ impl TerminalPane {
                     cx,
                 ))
                 .child(self.render_terminal_context_menu_item(
+                    self.preferences.reading_labels.tools.clone(),
+                    !menu.has_selection,
+                    |pane, _, window, cx| pane.inspect_selected_text(window, cx),
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    self.preferences.reading_labels.archive.clone(),
+                    self.archive_context_path().is_none(),
+                    |pane, _, window, cx| {
+                        if let Some(path) = pane.archive_context_path() {
+                            pane.open_archive_editor(path.to_string(), window, cx);
+                        }
+                    },
+                    cx,
+                ))
+                .when(
+                    menu.has_selection
+                        && self
+                            .selected_text_snapshot()
+                            .is_some_and(|text| !text.contains(['\r', '\n'])),
+                    |menu| {
+                        menu.child(self.render_marker_colors(
+                            self.selected_text_snapshot().map(zeroize::Zeroizing::new),
+                            cx,
+                        ))
+                    },
+                )
+                .child(self.render_terminal_context_menu_item(
+                    self.preferences.reading_labels.markers.clone(),
+                    false,
+                    |pane, _, _, cx| {
+                        pane.dismiss_terminal_context_menu(cx);
+                        pane.toggle_temporary_markers(cx);
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
                     paste_label,
                     false,
                     |this, _event, _window, cx| {
@@ -1757,6 +1817,21 @@ impl TerminalPane {
                     false,
                     |this, _event, _window, cx| {
                         this.request_context_action(TerminalContextAction::OpenSearch, false, cx);
+                    },
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    self.preferences.reading_labels.paste_edit.clone(),
+                    false,
+                    |pane, _, window, cx| pane.open_paste_editor(true, window, cx),
+                    cx,
+                ))
+                .child(self.render_terminal_context_menu_item(
+                    self.preferences.reading_labels.outline.clone(),
+                    false,
+                    |pane, _, _, cx| {
+                        pane.dismiss_terminal_context_menu(cx);
+                        pane.toggle_command_outline(cx);
                     },
                     cx,
                 ))
@@ -2179,7 +2254,7 @@ impl TerminalPane {
         let _copied = self.copy_selection_to_clipboard_if_present(cx);
     }
 
-    fn request_context_action(
+    pub(super) fn request_context_action(
         &mut self,
         action: TerminalContextAction,
         requires_selection: bool,
@@ -2474,6 +2549,43 @@ impl TerminalPane {
 
         let cancel_label = self.preferences.paste_labels.cancel.clone();
         let paste_label = self.preferences.paste_labels.paste.clone();
+        let button_options = ButtonOptions {
+            size: ButtonSize::Sm,
+            ..Default::default()
+        };
+        let cancel_button = button_with(
+            &self.theme.tokens,
+            cancel_label,
+            ButtonOptions {
+                variant: ButtonVariant::Ghost,
+                ..button_options
+            },
+        )
+        .id("paste-confirm-cancel")
+        .debug_selector(|| "paste-confirm-cancel".into())
+        .on_click(cx.listener(|pane, _, _, cx| pane.cancel_pending_paste(cx)));
+        let edit_button = button_with(
+            &self.theme.tokens,
+            self.preferences.reading_labels.edit.clone(),
+            ButtonOptions {
+                variant: ButtonVariant::Secondary,
+                ..button_options
+            },
+        )
+        .id("paste-confirm-edit")
+        .debug_selector(|| "paste-confirm-edit".into())
+        .on_click(cx.listener(|pane, _, window, cx| pane.open_paste_editor(false, window, cx)));
+        let paste_button = button_with(
+            &self.theme.tokens,
+            paste_label,
+            ButtonOptions {
+                variant: ButtonVariant::Default,
+                ..button_options
+            },
+        )
+        .id("paste-confirm-submit")
+        .debug_selector(|| "paste-confirm-submit".into())
+        .on_click(cx.listener(|pane, _, _, cx| pane.confirm_pending_paste(cx)));
         div()
             .absolute()
             .top_0()
@@ -2484,9 +2596,15 @@ impl TerminalPane {
             .items_center()
             .justify_center()
             .bg(rgba(0x00000033))
+            .p(px(16.0))
             .child(
                 div()
+                    .debug_selector(|| "paste-confirm-dialog".into())
                     .w(px(448.0))
+                    .max_w_full()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
                     .rounded(px(PASTE_CONFIRM_DIALOG_RADIUS))
                     .border_1()
                     .border_color(rgba(0xeab30880))
@@ -2520,13 +2638,17 @@ impl TerminalPane {
                     .child(preview)
                     .child(
                         div()
+                            .w_full()
+                            .min_w_0()
                             .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(16.0))
+                            .flex_col()
+                            .gap(px(self.theme.tokens.spacing.two))
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
                                     .flex()
+                                    .flex_wrap()
                                     .items_center()
                                     .text_size(px(12.0))
                                     .text_color(rgb(0x9ca3af))
@@ -2542,40 +2664,16 @@ impl TerminalPane {
                             )
                             .child(
                                 div()
+                                    .w_full()
+                                    .min_w_0()
                                     .flex()
-                                    .gap(px(8.0))
-                                    .child(
-                                        div()
-                                            .px(px(12.0))
-                                            .py(px(4.0))
-                                            .text_size(px(12.0))
-                                            .text_color(rgb(0x9ca3af))
-                                            .cursor_pointer()
-                                            .child(cancel_label)
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.cancel_pending_paste(cx);
-                                                }),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .rounded(px(PASTE_CONFIRM_BUTTON_RADIUS))
-                                            .bg(rgb(0xca8a04))
-                                            .px(px(12.0))
-                                            .py(px(4.0))
-                                            .text_size(px(12.0))
-                                            .text_color(rgb(0xffffff))
-                                            .cursor_pointer()
-                                            .child(paste_label)
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.confirm_pending_paste(cx);
-                                                }),
-                                            ),
-                                    ),
+                                    .items_center()
+                                    .justify_end()
+                                    .flex_wrap()
+                                    .gap(px(self.theme.tokens.spacing.two))
+                                    .child(cancel_button)
+                                    .child(edit_button)
+                                    .child(paste_button),
                             ),
                     ),
             )
@@ -2660,6 +2758,68 @@ mod tests {
         terminal_cursor_shape_for_render, terminal_pane_base_is_transparent,
         terminal_visual_bell_overlay_color,
     };
+
+    #[gpui::test]
+    fn paste_confirmation_buttons_stay_inside_the_dialog_at_narrow_widths(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::{TerminalPane, TerminalUiPreferences};
+        use gpui::px;
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(
+                80,
+                24,
+                TerminalUiPreferences::default(),
+                window,
+                cx,
+            )
+            .unwrap()
+        });
+        for (width, labels, text_size) in [
+            (640.0, ["取消", "编辑", "粘贴"], 12.0),
+            (320.0, ["取消", "编辑", "粘贴"], 18.0),
+            (360.0, ["Abbrechen", "Bearbeiten", "Einfügen"], 18.0),
+        ] {
+            cx.simulate_resize(gpui::size(px(width), px(480.0)));
+            pane.update(cx, |pane, cx| {
+                pane.pending_paste = Some(zeroize::Zeroizing::new(
+                    "one\ntwo\nthree\nfour\nfive\nsix".into(),
+                ));
+                pane.preferences.paste_labels.cancel = labels[0].into();
+                pane.preferences.reading_labels.edit = labels[1].into();
+                pane.preferences.paste_labels.paste = labels[2].into();
+                pane.theme.tokens.metrics.ui_text_xs = text_size;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let dialog = cx
+                .debug_bounds("paste-confirm-dialog")
+                .expect("visible confirmation");
+            assert!(
+                dialog.left() >= px(0.0) && dialog.right() <= px(width),
+                "dialog exceeds {width}px viewport: {dialog:?}"
+            );
+            let mut previous: Option<gpui::Bounds<gpui::Pixels>> = None;
+            for selector in [
+                "paste-confirm-cancel",
+                "paste-confirm-edit",
+                "paste-confirm-submit",
+            ] {
+                let button = cx.debug_bounds(selector).expect("visible action");
+                assert!(
+                    dialog.contains(&button.origin) && dialog.contains(&button.bottom_right()),
+                    "{selector} exceeds dialog at {width}px: {button:?} outside {dialog:?}"
+                );
+                if let Some(previous) = previous {
+                    assert!(
+                        button.left() >= previous.right() || button.top() >= previous.bottom(),
+                        "action targets overlap at {width}px"
+                    );
+                }
+                previous = Some(button);
+            }
+        }
+    }
 
     #[test]
     fn terminal_pane_base_keeps_window_background_visible_during_visual_bell() {

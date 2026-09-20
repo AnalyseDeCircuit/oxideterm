@@ -425,16 +425,21 @@ impl WorkspaceApp {
         &self,
         tab_id: TabId,
         root_pane: &PaneNode,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Detached windows share terminal pane entities with the workspace, but
-        // the command bar still uses the main active-tab pipeline. Keep the
-        // first detachable surface pane-only so commands cannot target the
-        // wrong tab while the UI ownership model is being made window-aware.
         div()
             .size_full()
-            .relative()
-            .child(self.render_pane_tree_for_tab(Some(tab_id), root_pane, cx))
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(self.render_pane_tree_for_tab(Some(tab_id), root_pane, cx)),
+            )
+            .children(self.render_source_sender_panel(window, cx))
             .into_any_element()
     }
 }

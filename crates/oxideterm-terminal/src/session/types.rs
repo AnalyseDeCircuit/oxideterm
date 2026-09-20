@@ -254,6 +254,15 @@ pub trait TerminalSessionBackend: Send {
     fn command_output_text(&self, _mark: &TerminalCommandMark) -> String {
         String::new()
     }
+
+    fn command_output_text_with_limits(
+        &self,
+        _mark: &TerminalCommandMark,
+        _max_lines: usize,
+        _max_bytes: usize,
+    ) -> String {
+        String::new()
+    }
     fn snapshot(&self) -> TerminalSnapshot;
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         let _ = previous;

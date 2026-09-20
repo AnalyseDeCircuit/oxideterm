@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "現在のタスクを終了",
         "terminal.killTask": "現在のタスクを強制終了",
         "terminal.aiSubmit": "プロンプトを送信／応答を実行",
-        "terminal.aiInsert": "応答をターミナルに挿入"
+        "terminal.aiInsert": "応答をターミナルに挿入",
+        "terminal.commandOutline": "コマンド一覧",
+        "terminal.pasteEdit": "貼り付けて編集",
+        "terminal.textTools": "テキストツール",
+        "terminal.extractArchive": "展開コマンドを生成",
+        "terminal.temporaryMarkers": "一時マーカー"
       },
       "scope_editor": "エディター",
       "scope_sftp": "SFTP",

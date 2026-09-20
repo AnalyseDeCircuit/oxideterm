@@ -297,6 +297,11 @@ impl TextBuffer {
         })
     }
 
+    /// Stable content identity restored by undo and redo, including metadata checkpoints.
+    pub fn content_revision(&self) -> u64 {
+        self.content_revision
+    }
+
     pub fn apply_transaction(&mut self, transaction: EditTransaction) -> Result<(), EditorError> {
         if transaction.is_empty() {
             return Ok(());

@@ -29,7 +29,7 @@ use crate::app::{
 };
 use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
-use crate::terminal_view::highlight::{TerminalHighlightLayout, terminal_highlights_for_rows};
+use crate::terminal_view::highlight::TerminalHighlightLayout;
 use crate::terminal_view::links::*;
 use crate::terminal_view::selection::TerminalSelection;
 use crate::terminal_view::semantic::{
@@ -70,6 +70,7 @@ pub(crate) struct TerminalElement {
     selected_command_mark_id: Option<String>,
     hovered_command_mark_id: Option<String>,
     highlight_rules: Arc<[TerminalHighlightRule]>,
+    pane_highlights: Option<Arc<Vec<super::highlight::RuntimeHighlightRule>>>,
     highlight_rules_signature: u64,
     transient_command_highlight: Option<TransientCommandHighlight>,
     transient_command_highlight_signature: u64,
@@ -540,6 +541,7 @@ impl TerminalElement {
             selected_command_mark_id: None,
             hovered_command_mark_id: None,
             highlight_rules: Arc::from([]),
+            pane_highlights: None,
             highlight_rules_signature: 0,
             transient_command_highlight: None,
             transient_command_highlight_signature: 0,
@@ -570,6 +572,21 @@ impl TerminalElement {
     ) -> Self {
         self.highlight_rules = rules.into();
         self.highlight_rules_signature = terminal_highlight_rules_signature(&self.highlight_rules);
+        self
+    }
+
+    pub(crate) fn pane_highlights(
+        mut self,
+        rules: Option<Arc<Vec<super::highlight::RuntimeHighlightRule>>>,
+    ) -> Self {
+        if let Some(rules) = &rules {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            for rule in rules.iter() {
+                hash_highlight_rules(std::slice::from_ref(&rule.source), &mut hasher);
+            }
+            self.highlight_rules_signature = hasher.finish();
+        }
+        self.pane_highlights = rules;
         self
     }
 
@@ -1019,9 +1036,10 @@ impl TerminalElement {
                     .into_color(),
             )
         });
-        let mut layout = terminal_highlights_for_rows(
+        let mut layout = super::highlight::terminal_highlights_for_rows_with_compiled(
             &self.snapshot,
             &self.highlight_rules,
+            self.pane_highlights.as_ref(),
             transient,
             rows.clone(),
         );

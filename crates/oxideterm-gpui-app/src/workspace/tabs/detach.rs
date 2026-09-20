@@ -1544,7 +1544,9 @@ impl WorkspaceApp {
             }
             (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
             (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, window, cx),
-            (_, Some(root_pane)) => self.render_detached_terminal_surface(tab_id, root_pane, cx),
+            (_, Some(root_pane)) => {
+                self.render_detached_terminal_surface(tab_id, root_pane, window, cx)
+            }
             _ => self.render_empty_workspace(f32::from(window.viewport_size().width), cx),
         }
     }

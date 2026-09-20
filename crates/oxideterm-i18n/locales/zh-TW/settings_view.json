@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "終止目前任務",
         "terminal.killTask": "強制結束目前任務",
         "terminal.aiSubmit": "傳送提示／執行回覆",
-        "terminal.aiInsert": "將回覆插入終端機"
+        "terminal.aiInsert": "將回覆插入終端機",
+        "terminal.commandOutline": "命令大綱",
+        "terminal.pasteEdit": "貼上並編輯",
+        "terminal.textTools": "文字工具",
+        "terminal.extractArchive": "產生解壓縮命令",
+        "terminal.temporaryMarkers": "暫時標記"
       },
       "scope_editor": "編輯器",
       "scope_sftp": "SFTP",

@@ -307,6 +307,20 @@ impl WorkspaceApp {
                                 ))
                             })
                             .child(self.terminal_command_action_button(
+                                LucideIcon::LayoutList,
+                                rgb(theme.text_muted),
+                                false,
+                                None,
+                                "terminal-command-outline",
+                                self.i18n.t("terminal.reading.outline"),
+                                |this, _, _, cx| {
+                                    if let Some(pane) = this.active_pane(cx) {
+                                        pane.update(cx, |pane, cx| pane.toggle_command_outline(cx));
+                                    }
+                                },
+                                cx,
+                            ))
+                            .child(self.terminal_command_action_button(
                                 LucideIcon::ListChecks,
                                 if command_sender_expanded {
                                     rgb(theme.accent)

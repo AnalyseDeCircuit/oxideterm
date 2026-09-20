@@ -554,6 +554,16 @@ impl TerminalSession {
         self.backend.command_output_text(mark)
     }
 
+    pub fn command_output_text_with_limits(
+        &self,
+        mark: &TerminalCommandMark,
+        max_lines: usize,
+        max_bytes: usize,
+    ) -> String {
+        self.backend
+            .command_output_text_with_limits(mark, max_lines, max_bytes)
+    }
+
     pub fn snapshot(&self) -> TerminalSnapshot {
         self.backend.snapshot()
     }

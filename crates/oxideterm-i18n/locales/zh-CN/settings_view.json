@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "终止当前任务",
         "terminal.killTask": "强制结束当前任务",
         "terminal.aiSubmit": "发送提示／执行回答",
-        "terminal.aiInsert": "将回答插入终端"
+        "terminal.aiInsert": "将回答插入终端",
+        "terminal.commandOutline": "命令大纲",
+        "terminal.pasteEdit": "粘贴并编辑",
+        "terminal.textTools": "文本工具",
+        "terminal.extractArchive": "生成解压命令",
+        "terminal.temporaryMarkers": "临时标记"
       },
       "scope_editor": "编辑器",
       "scope_sftp": "SFTP",

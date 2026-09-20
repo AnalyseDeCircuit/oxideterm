@@ -513,6 +513,9 @@ impl WorkspaceApp {
     ) -> bool {
         let released = self.window_registry.release(registration, window_id);
         if released {
+            self.terminal_command_sender.update(cx, |sender, _cx| {
+                sender.window_drafts.remove(&window_id);
+            });
             self.schedule_window_effect_delivery(cx);
         }
         released

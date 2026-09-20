@@ -144,6 +144,17 @@ pub(in crate::workspace) enum TabCloseConfirmKeyAction {
 }
 
 impl WorkspaceTabHostEntity {
+    pub(in crate::workspace) fn panes_in_window(
+        &self,
+        window_id: gpui::WindowId,
+    ) -> HashSet<PaneId> {
+        self.pane_window_affinities
+            .iter()
+            .filter(|(_, affinity)| affinity.current.window_id() == window_id)
+            .map(|(pane, _)| *pane)
+            .collect()
+    }
+
     pub(in crate::workspace) fn new() -> Self {
         Self {
             tabs: Vec::new(),

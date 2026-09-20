@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "Terminer la tâche courante",
         "terminal.killTask": "Forcer l’arrêt de la tâche courante",
         "terminal.aiSubmit": "Envoyer la demande / exécuter la réponse",
-        "terminal.aiInsert": "Insérer la réponse dans le terminal"
+        "terminal.aiInsert": "Insérer la réponse dans le terminal",
+        "terminal.commandOutline": "Liste des commandes",
+        "terminal.pasteEdit": "Coller et modifier",
+        "terminal.textTools": "Outils de texte",
+        "terminal.extractArchive": "Générer la commande d’extraction",
+        "terminal.temporaryMarkers": "Marques temporaires"
       },
       "scope_editor": "Éditeur",
       "scope_sftp": "SFTP",

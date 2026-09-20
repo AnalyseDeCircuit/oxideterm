@@ -857,6 +857,16 @@ impl TerminalSessionBackend for TelnetSession {
         command_output_text_from_term(&term, mark)
     }
 
+    fn command_output_text_with_limits(
+        &self,
+        mark: &TerminalCommandMark,
+        max_lines: usize,
+        max_bytes: usize,
+    ) -> String {
+        let term = self.term.lock();
+        command_output_text_from_term_with_limits(&term, mark, max_lines, max_bytes)
+    }
+
     fn buffer_text(&self) -> String {
         let term = self.term.lock();
         terminal_buffer_text_from_term(&term, self.resize.cols)

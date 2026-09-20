@@ -461,6 +461,100 @@ impl WorkspaceApp {
             )]))
             .child(semantic_card)
             .child(rules_card)
+            .when_some(
+                self.settings_workspace
+                    .read(cx)
+                    .pending_highlight_marker
+                    .as_ref(),
+                |card, (text, _, _)| {
+                    use oxideterm_gpui_ui::button::{ButtonOptions, ButtonVariant, button_with};
+                    card.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.0))
+                            .child(self.i18n.t("terminal.reading.select_rule_set"))
+                            .child(div().truncate().child(text.to_string()))
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap(px(8.0))
+                                    .child(
+                                        button_with(
+                                            &self.tokens,
+                                            self.i18n.t("terminal.reading.save_rule"),
+                                            ButtonOptions {
+                                                disabled: add_disabled,
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .id("save-temporary-highlight")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                if this
+                                                    .settings_store
+                                                    .settings()
+                                                    .terminal
+                                                    .effective_highlight_rules()
+                                                    .len()
+                                                    >= MAX_HIGHLIGHT_RULES
+                                                {
+                                                    return;
+                                                }
+                                                let draft = this.settings_workspace.update(
+                                                    cx,
+                                                    |settings, cx| {
+                                                        let draft = settings
+                                                            .pending_highlight_marker
+                                                            .take();
+                                                        cx.notify();
+                                                        draft
+                                                    },
+                                                );
+                                                if let Some((text, background, foreground)) = draft
+                                                {
+                                                    this.add_highlight_preset(
+                                                        vec![create_default_highlight_rule(
+                                                            |rule| {
+                                                                rule.pattern = text.to_string();
+                                                                rule.is_regex = false;
+                                                                rule.case_sensitive = true;
+                                                                rule.background = Some(background);
+                                                                rule.foreground = Some(foreground);
+                                                            },
+                                                        )],
+                                                        cx,
+                                                    );
+                                                }
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        button_with(
+                                            &self.tokens,
+                                            self.i18n.t("terminal.reading.cancel"),
+                                            ButtonOptions {
+                                                variant: ButtonVariant::Ghost,
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .id("cancel-temporary-highlight")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.settings_workspace.update(
+                                                    cx,
+                                                    |settings, cx| {
+                                                        settings.pending_highlight_marker = None;
+                                                        cx.notify();
+                                                    },
+                                                );
+                                            }),
+                                        ),
+                                    ),
+                            ),
+                    )
+                },
+            )
             .into_any_element()
     }
 

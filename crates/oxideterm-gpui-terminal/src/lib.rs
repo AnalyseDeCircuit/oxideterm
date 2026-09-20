@@ -1,4 +1,8 @@
 mod app;
+mod reading_labels;
+mod reading_tools;
+pub use reading_labels::TerminalReadingLabels;
+pub use reading_tools::{ExtractionShell, extraction_command};
 mod background_cache;
 mod command_facts;
 mod image_budget;

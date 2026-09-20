@@ -116,6 +116,7 @@ pub struct TerminalUiPreferences {
     pub background: Option<TerminalBackgroundPreferences>,
     pub transparent_background: bool,
     pub processing_failed_message: String,
+    pub reading_labels: crate::TerminalReadingLabels,
     pub paste_labels: TerminalPasteLabels,
     pub kitty_file_transmission_labels: TerminalKittyFileTransmissionLabels,
     pub autosuggest_labels: TerminalAutosuggestLabels,
@@ -238,6 +239,7 @@ impl Default for TerminalUiPreferences {
             transparent_background: false,
             processing_failed_message:
                 "Terminal processing stopped. Reconnect this session to continue.".into(),
+            reading_labels: crate::TerminalReadingLabels::default(),
             paste_labels: TerminalPasteLabels::default(),
             kitty_file_transmission_labels: TerminalKittyFileTransmissionLabels::default(),
             autosuggest_labels: TerminalAutosuggestLabels::default(),

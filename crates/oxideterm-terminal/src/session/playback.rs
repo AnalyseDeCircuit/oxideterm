@@ -186,6 +186,19 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         std::mem::take(&mut self.pending_events)
     }
 
+    fn command_output_text(&self, mark: &TerminalCommandMark) -> String {
+        command_output_text_from_term(&self.term.lock(), mark)
+    }
+
+    fn command_output_text_with_limits(
+        &self,
+        mark: &TerminalCommandMark,
+        max_lines: usize,
+        max_bytes: usize,
+    ) -> String {
+        command_output_text_from_term_with_limits(&self.term.lock(), mark, max_lines, max_bytes)
+    }
+
     fn write_input(&mut self, _bytes: &[u8]) -> Result<()> {
         Ok(())
     }

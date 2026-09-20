@@ -21,6 +21,63 @@ impl WorkspaceApp {
         };
 
         match action {
+            TerminalContextAction::OpenPasteEditor => {
+                source_pane.update(cx, |pane, cx| pane.open_paste_editor(true, window, cx));
+                true
+            }
+            TerminalContextAction::InspectText | TerminalContextAction::ExtractArchive => {
+                source_pane.update(cx, |pane, cx| pane.inspect_selected_text(window, cx));
+                true
+            }
+
+            TerminalContextAction::SaveTemporaryMarker => {
+                let Some(draft) = source_pane.update(cx, |pane, _| pane.take_marker_rule_draft())
+                else {
+                    return false;
+                };
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.pending_highlight_marker = Some(draft);
+                    settings.set_active_tab(SettingsTab::Terminal, cx);
+                    settings.set_terminal_page(
+                        oxideterm_settings_model::TerminalSettingsPage::Highlight,
+                        cx,
+                    );
+                });
+                if let Some(main) = self
+                    .window_registry
+                    .handle_for_role(window_registry::WindowRole::Main)
+                    && main.window_id() != window.window_handle().window_id()
+                {
+                    cx.spawn(async move |workspace, cx| {
+                        let _ = cx.update_window(main, |_, window, cx| {
+                            let _ = workspace.update(cx, |workspace, cx| {
+                                window.activate_window();
+                                workspace.open_settings(window, cx);
+                            });
+                        });
+                    })
+                    .detach();
+                } else {
+                    self.open_settings(window, cx);
+                }
+                true
+            }
+            TerminalContextAction::OpenSenderDraft => {
+                let Some(text) = source_pane.update(cx, |pane, _| pane.take_sender_draft()) else {
+                    return false;
+                };
+                let editor = self.terminal_command_sender.update(cx, |sender, cx| {
+                    sender.add_source_document(
+                        pane_id,
+                        window.window_handle().window_id(),
+                        text,
+                        cx,
+                    )
+                });
+                window.focus(&editor.focus_handle(cx), cx);
+                cx.notify();
+                true
+            }
             TerminalContextAction::OpenSearch => {
                 self.open_search(window, cx);
                 true

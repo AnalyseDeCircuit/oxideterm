@@ -62,30 +62,55 @@ struct MatchCandidate<'a> {
 }
 
 #[derive(Clone)]
-struct RuntimeHighlightRule {
-    source: TerminalHighlightRule,
+pub(crate) struct RuntimeHighlightRule {
+    pub(crate) source: TerminalHighlightRule,
     matcher: RuntimeHighlightMatcher,
 }
 
 #[derive(Clone)]
 enum RuntimeHighlightMatcher {
     Literal {
-        needle: String,
+        needle: zeroize::Zeroizing<String>,
         case_sensitive: bool,
     },
     Regex(regex::Regex),
 }
 
-pub(crate) fn terminal_highlights_for_rows(
+pub(crate) fn compile_pane_highlights(
+    base: &[TerminalHighlightRule],
+    temporary: Vec<TerminalHighlightRule>,
+) -> Arc<Vec<RuntimeHighlightRule>> {
+    // Temporary text never enters the process-wide rule cache and is not trimmed or capped as a settings rule.
+    let mut compiled = compiled_runtime_rules(base).as_ref().clone();
+    compiled.extend(temporary.into_iter().filter_map(|source| {
+        runtime_matcher(&source).map(|matcher| RuntimeHighlightRule { source, matcher })
+    }));
+    compiled.sort_by(|left, right| right.source.priority.cmp(&left.source.priority));
+    Arc::new(compiled)
+}
+
+impl Drop for RuntimeHighlightRule {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        self.source.pattern.zeroize();
+    }
+}
+
+pub(crate) fn terminal_highlights_for_rows_with_compiled(
     snapshot: &TerminalSnapshot,
     rules: &[TerminalHighlightRule],
+    compiled: Option<&Arc<Vec<RuntimeHighlightRule>>>,
     transient: Option<(&TransientCommandHighlight, Hsla)>,
     rows: Range<usize>,
 ) -> TerminalHighlightLayout {
-    if rows.is_empty() || (!rules.iter().any(|rule| rule.enabled) && transient.is_none()) {
+    if rows.is_empty()
+        || (compiled.is_none() && !rules.iter().any(|rule| rule.enabled) && transient.is_none())
+    {
         return TerminalHighlightLayout::empty();
     }
-    let rules = compiled_runtime_rules(rules);
+    let rules = compiled
+        .cloned()
+        .unwrap_or_else(|| compiled_runtime_rules(rules));
     if rules.is_empty() && transient.is_none() {
         return TerminalHighlightLayout::empty();
     }
@@ -267,11 +292,11 @@ fn build_runtime_rules(rules: &[TerminalHighlightRule]) -> Vec<RuntimeHighlightR
 fn runtime_matcher(rule: &TerminalHighlightRule) -> Option<RuntimeHighlightMatcher> {
     if !rule.is_regex {
         return Some(RuntimeHighlightMatcher::Literal {
-            needle: if rule.case_sensitive {
+            needle: zeroize::Zeroizing::new(if rule.case_sensitive {
                 rule.pattern.clone()
             } else {
                 rule.pattern.to_lowercase()
-            },
+            }),
             case_sensitive: rule.case_sensitive,
         });
     }
@@ -285,7 +310,7 @@ fn runtime_matcher(rule: &TerminalHighlightRule) -> Option<RuntimeHighlightMatch
     (!regex.is_match("")).then_some(RuntimeHighlightMatcher::Regex(regex))
 }
 
-pub(super) fn logical_line_range(snapshot: &TerminalSnapshot, row: usize) -> Option<Range<usize>> {
+pub(crate) fn logical_line_range(snapshot: &TerminalSnapshot, row: usize) -> Option<Range<usize>> {
     if row >= snapshot.lines.len() {
         return None;
     }

@@ -1,5 +1,5 @@
 mod element;
-mod highlight;
+pub(crate) mod highlight;
 mod input;
 mod links;
 mod selection;

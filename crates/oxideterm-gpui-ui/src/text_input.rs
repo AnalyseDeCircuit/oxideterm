@@ -182,6 +182,28 @@ impl Element for TextInputAnchorProbe {
     }
 }
 
+/// The same control chrome hosts either the workspace input renderer or an embedded editor.
+pub fn text_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
+    let theme = tokens.ui;
+    div()
+        .h(px(tokens.metrics.ui_control_height))
+        .px(px(tokens.metrics.ui_control_padding_x))
+        .flex()
+        .items_center()
+        .rounded(px(tokens.radii.md))
+        .bg(rgba((theme.bg << 8) | 0x80))
+        .border_1()
+        .border_color(if focused {
+            rgb(theme.accent)
+        } else {
+            rgb(theme.border)
+        })
+        .text_size(px(tokens.metrics.ui_text_sm))
+        .text_color(rgb(theme.text))
+        .cursor(CursorStyle::IBeam)
+        .overflow_hidden()
+}
+
 pub fn text_input(tokens: &ThemeTokens, view: TextInputView<'_>) -> Div {
     text_input_with_content_align_and_viewport(
         tokens,
@@ -316,20 +338,7 @@ fn text_input_with_content_align_and_viewport(
             && !ghost.is_empty()
     });
 
-    div()
-        .h(px(tokens.metrics.ui_control_height))
-        .px(px(tokens.metrics.ui_control_padding_x))
-        .flex()
-        .items_center()
-        .rounded(px(tokens.radii.md))
-        .bg(rgba((theme.bg << 8) | 0x80))
-        .border_1()
-        .border_color(if view.focused {
-            rgb(theme.accent)
-        } else {
-            rgb(theme.border)
-        })
-        .text_size(px(tokens.metrics.ui_text_sm))
+    text_input_frame(tokens, view.focused)
         .text_color(if visually_empty {
             rgb(theme.text_muted)
         } else {

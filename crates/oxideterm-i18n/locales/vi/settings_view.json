@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "Kết thúc tác vụ hiện tại",
         "terminal.killTask": "Buộc kết thúc tác vụ hiện tại",
         "terminal.aiSubmit": "Gửi yêu cầu / thực thi phản hồi",
-        "terminal.aiInsert": "Chèn phản hồi vào terminal"
+        "terminal.aiInsert": "Chèn phản hồi vào terminal",
+        "terminal.commandOutline": "Danh sách lệnh",
+        "terminal.pasteEdit": "Dán và chỉnh sửa",
+        "terminal.textTools": "Công cụ văn bản",
+        "terminal.extractArchive": "Tạo lệnh giải nén",
+        "terminal.temporaryMarkers": "Đánh dấu tạm thời"
       },
       "scope_editor": "Trình soạn thảo",
       "scope_sftp": "SFTP",

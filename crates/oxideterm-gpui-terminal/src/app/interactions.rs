@@ -1,3 +1,4 @@
+use super::TerminalContextAction;
 use std::{
     env,
     sync::Arc,
@@ -83,6 +84,15 @@ impl TerminalPane {
 
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
         let key = event.keystroke.key.as_str();
+        if self.paste_editor.is_some() || self.markers.open {
+            if key == "escape" {
+                self.paste_editor = None;
+                self.markers.open = false;
+                self.cancel_pending_paste(cx);
+                cx.notify();
+            }
+            return true;
+        }
         let modifiers = event.keystroke.modifiers;
 
         if self.tmux_prompt.is_some() {
@@ -181,6 +191,29 @@ impl TerminalPane {
         let bindings = cx.try_global::<TerminalKeybindings>();
         let legacy = bindings.is_none();
         let configured = bindings.and_then(|bindings| bindings.resolve(&event.keystroke));
+        match configured {
+            Some(TerminalShortcut::CommandOutline) => {
+                self.toggle_command_outline(cx);
+                return true;
+            }
+            Some(TerminalShortcut::TemporaryMarkers) => {
+                self.toggle_temporary_markers(cx);
+                return true;
+            }
+            Some(TerminalShortcut::PasteEdit) => {
+                self.request_context_action(TerminalContextAction::OpenPasteEditor, false, cx);
+                return true;
+            }
+            Some(TerminalShortcut::TextTools) => {
+                self.request_context_action(TerminalContextAction::InspectText, false, cx);
+                return true;
+            }
+            Some(TerminalShortcut::ExtractArchive) => {
+                self.request_context_action(TerminalContextAction::ExtractArchive, false, cx);
+                return true;
+            }
+            _ => {}
+        }
         if matches!(
             configured,
             Some(TerminalShortcut::Terminate | TerminalShortcut::Kill)
@@ -450,6 +483,9 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        if self.hover_inspection.take().is_some() {
+            cx.notify();
+        }
         // Terminal menu payloads include row-local command marks and target
         // points; any scroll makes that semantic snapshot stale.
         if self.context_menu.take().is_some() {
@@ -1647,6 +1683,19 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if let Some((start, width)) = self.outline.resize {
+            if event.dragging() {
+                let available = self
+                    .bounds
+                    .map(|bounds| f32::from(bounds.size.width) + self.outline.width)
+                    .unwrap_or(600.0);
+                self.outline.width = (width + start - f32::from(event.position.x))
+                    .clamp(100.0, (available * 0.6).max(100.0));
+                cx.notify();
+                return;
+            }
+            self.outline.resize = None;
+        }
         if self.tmux_selection_pending {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Move(event.clone()));
@@ -1693,6 +1742,15 @@ impl TerminalPane {
         let hovered_link = can_hover_terminal_content
             .then(|| self.link_at_position(event.position))
             .flatten();
+        self.update_text_inspection(
+            event.position,
+            can_hover_terminal_content
+                && hovered_link.is_none()
+                && self.context_menu.is_none()
+                && self.paste_editor.is_none()
+                && !self.markers.open,
+            cx,
+        );
         let can_hover_command_marks = can_hover_terminal_content
             && command_mark_ui_available(self.settings.command_marks_enabled, mode);
         let hovered_command_mark_id = can_hover_command_marks

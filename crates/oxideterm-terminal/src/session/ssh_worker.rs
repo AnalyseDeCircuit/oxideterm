@@ -864,6 +864,18 @@ impl TerminalSessionBackend for SshPtySession {
         self.shared.core.lock().command_output_text(mark)
     }
 
+    fn command_output_text_with_limits(
+        &self,
+        mark: &TerminalCommandMark,
+        max_lines: usize,
+        max_bytes: usize,
+    ) -> String {
+        self.shared
+            .core
+            .lock()
+            .command_output_text_with_limits(mark, max_lines, max_bytes)
+    }
+
     fn buffer_text(&self) -> String {
         self.shared.core.lock().buffer_text()
     }

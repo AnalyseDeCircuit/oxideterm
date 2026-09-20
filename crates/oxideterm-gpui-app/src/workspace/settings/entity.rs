@@ -374,6 +374,7 @@ pub(in crate::workspace) enum SettingsNavigationDraftAction {
 
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
+    pub(in crate::workspace) pending_highlight_marker: Option<(Zeroizing<String>, String, String)>,
     route: SettingsRouteState,
     external_store_watch: Option<ExternalStoreWatch>,
     external_store_watch_task: Option<Task<()>>,
@@ -523,6 +524,7 @@ impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
 impl SettingsWorkspaceEntity {
     pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            pending_highlight_marker: None,
             route: SettingsRouteState::default(),
             external_store_watch: None,
             external_store_watch_task: None,

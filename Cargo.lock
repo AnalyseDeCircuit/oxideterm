@@ -7938,6 +7938,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "image",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-ui",
  "oxideterm-modem-transfer",
  "oxideterm-render-policy",

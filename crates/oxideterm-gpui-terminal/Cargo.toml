@@ -11,6 +11,7 @@ version.workspace = true
 bench = []
 
 [dependencies]
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 anyhow.workspace = true
 async-channel.workspace = true
 chrono.workspace = true

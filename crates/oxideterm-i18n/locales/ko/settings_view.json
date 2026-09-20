@@ -1783,7 +1783,12 @@
         "terminal.terminateTask": "현재 작업 종료",
         "terminal.killTask": "현재 작업 강제 종료",
         "terminal.aiSubmit": "프롬프트 전송 / 응답 실행",
-        "terminal.aiInsert": "응답을 터미널에 삽입"
+        "terminal.aiInsert": "응답을 터미널에 삽입",
+        "terminal.commandOutline": "명령 개요",
+        "terminal.pasteEdit": "붙여넣고 편집",
+        "terminal.textTools": "텍스트 도구",
+        "terminal.extractArchive": "압축 해제 명령 생성",
+        "terminal.temporaryMarkers": "임시 표시"
       },
       "scope_editor": "편집기",
       "scope_sftp": "SFTP",

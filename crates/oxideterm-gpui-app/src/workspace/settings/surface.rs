@@ -107,6 +107,7 @@ impl WorkspaceApp {
         self.terminal_triggers.cancel_edit();
         self.close_settings_select();
         self.settings_workspace.update(cx, |settings, cx| {
+            settings.pending_highlight_marker = None;
             settings.close_navigation_editor(cx);
             settings.close_settings_search(true, cx);
         });
