@@ -258,6 +258,25 @@ impl Render for DetachedTabWindow {
                     cx.propagate();
                 }
             }))
+            .map(|root| {
+                let workspace = self.session.read(cx);
+                if !self.ready || workspace.app_lock.locked {
+                    return root;
+                }
+                let Some(session) = workspace.remote_desktop_session_entity(tab_id, cx) else {
+                    return root;
+                };
+                remote_desktop::remote_desktop_keyboard_capture(
+                    root,
+                    session,
+                    workspace
+                        .settings_store
+                        .settings()
+                        .keybindings
+                        .overrides
+                        .clone(),
+                )
+            })
             .child(window_shell::render_resizable_window_content(
                 content, window,
             ))

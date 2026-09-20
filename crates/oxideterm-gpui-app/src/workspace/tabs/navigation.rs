@@ -303,14 +303,11 @@ impl WorkspaceApp {
     }
 
     fn focus_active_tab_keyboard_owner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self
-            .active_tab(cx)
-            .is_some_and(|tab| tab.kind == TabKind::RemoteDesktop)
-        {
+        if let Some(tab_id) = self.active_remote_desktop_tab_id(cx) {
             // Remote desktop tabs are keyboard owners. Activating the tab must
             // release stale Workspace input fields even before the user clicks
             // inside the remote framebuffer.
-            self.focus_remote_desktop_keyboard(window, cx);
+            self.focus_remote_desktop_keyboard(tab_id, window, cx);
         } else {
             self.focus_active_pane(window, cx);
         }

@@ -60,6 +60,7 @@ mod vendor_files;
 mod view;
 mod worker;
 
+pub(in crate::workspace) use interaction::remote_desktop_keyboard_capture;
 pub(in crate::workspace) use public_mcp::RemoteDesktopPublicClipboardSnapshot;
 
 use certificate::*;

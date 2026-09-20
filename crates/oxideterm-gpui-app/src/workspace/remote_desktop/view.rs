@@ -486,7 +486,7 @@ impl WorkspaceApp {
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.needs_active_pane_focus = false;
-        self.focus_remote_desktop_keyboard(window, cx);
+        self.focus_remote_desktop_keyboard(tab_id, window, cx);
         self.reveal_active_tab(window, cx);
         if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
             let initial_scale_factor = remote_desktop_scale_factor_percent(window.scale_factor());
@@ -557,7 +557,7 @@ impl WorkspaceApp {
                     ) {
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(window, cx);
+                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -573,7 +573,7 @@ impl WorkspaceApp {
                     ) {
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(window, cx);
+                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -589,7 +589,7 @@ impl WorkspaceApp {
                     ) {
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(window, cx);
+                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -605,7 +605,7 @@ impl WorkspaceApp {
                     ) {
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(window, cx);
+                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
                     cx.stop_propagation();
                 }),
             )
@@ -621,7 +621,7 @@ impl WorkspaceApp {
                     ) {
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(window, cx);
+                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
                     cx.stop_propagation();
                 }),
             )

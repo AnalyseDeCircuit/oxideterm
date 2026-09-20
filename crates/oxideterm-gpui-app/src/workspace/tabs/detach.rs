@@ -33,6 +33,19 @@ const TAB_HANDOFF_VIEWPORT_MARGIN: f32 = 8.0;
 const TAB_HANDOFF_POINTER_OFFSET_Y: f32 = 14.0;
 const TAB_HANDOFF_CORNER_RADIUS: f32 = 16.0;
 
+fn detached_tab_window_root(
+    background_color: gpui::Rgba,
+    background: Option<AnyElement>,
+    content: AnyElement,
+) -> gpui::Div {
+    div()
+        .size_full()
+        .relative()
+        .bg(background_color)
+        .when_some(background, |root, background| root.child(background))
+        .child(content)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct TabWindowHandoffRect {
     left: f32,
@@ -1396,27 +1409,31 @@ impl WorkspaceApp {
             cx,
         );
         let has_background_image = self.background_surface_active(tab_background_key(&tab_kind));
-        let titlebar_visible = self.window_titlebar_visible(window);
+        let window_background_layer =
+            self.render_workspace_window_background(window_background, window, cx);
+        let has_window_background = window_background_layer.is_some();
 
         let window_content = div()
             .size_full()
             .relative()
             .flex()
             .flex_col()
-            .bg(oxideterm_gpui_ui::color_for_background(
-                self.tokens.ui.bg,
-                has_background_image,
-                0xd9,
-            ))
-            .when(titlebar_visible, |root| {
-                root.child(self.render_detached_tab_title_bar(
-                    tab_id,
-                    title.clone(),
+            // Tab surfaces own their tint above a window-scoped image, just as in the main window.
+            .when(!has_window_background, |root| {
+                root.bg(oxideterm_gpui_ui::color_for_background(
+                    self.tokens.ui.bg,
                     has_background_image,
-                    window,
-                    cx,
+                    0xd9,
                 ))
             })
+            // Returning a detached tab is a workspace action and remains available in fullscreen.
+            .child(self.render_detached_tab_title_bar(
+                tab_id,
+                title.clone(),
+                has_background_image,
+                window,
+                cx,
+            ))
             .child(div().flex_1().min_h(px(0.0)).child(content))
             .when_some(
                 self.render_detached_tab_return_drag_preview(tab_id, window, cx),
@@ -1457,29 +1474,25 @@ impl WorkspaceApp {
         let settings_select_overlay = self.render_settings_select_overlay(window, cx);
 
         // Keep the native window base opaque while its workspace content fades in.
-        div()
-            .size_full()
-            .relative()
-            .track_focus(&self.focus_handle)
-            .bg(oxideterm_gpui_ui::color_for_background(
-                self.tokens.ui.bg,
-                has_background_image,
-                0xd9,
-            ))
-            .child(window_content)
-            .when_some(entry_handoff, |root, handoff| root.child(handoff))
-            // Detached tabs use their own native window root as the modal portal.
-            .children(tab_window_modals)
-            .when(self.mermaid_zoom.is_some(), |root| {
-                root.child(self.render_mermaid_zoom_modal(window, cx))
-            })
-            .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
-            .child(WorkspaceImeElement::new(
-                cx.entity(),
-                self.focus_handle.clone(),
-                window.window_handle().window_id(),
-            ))
-            .into_any_element()
+        detached_tab_window_root(
+            rgb(self.tokens.ui.bg),
+            window_background_layer,
+            window_content,
+        )
+        .track_focus(&self.focus_handle)
+        .when_some(entry_handoff, |root, handoff| root.child(handoff))
+        // Detached tabs use their own native window root as the modal portal.
+        .children(tab_window_modals)
+        .when(self.mermaid_zoom.is_some(), |root| {
+            root.child(self.render_mermaid_zoom_modal(window, cx))
+        })
+        .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
+        .child(WorkspaceImeElement::new(
+            cx.entity(),
+            self.focus_handle.clone(),
+            window.window_handle().window_id(),
+        ))
+        .into_any_element()
     }
 
     fn render_detached_tab_content(
@@ -1547,8 +1560,10 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let button_layout = sidebar::client_titlebar_button_layout(cx);
         let supported_controls = window.window_controls();
+        let show_window_controls = self.window_titlebar_visible(window);
         div()
             .h(px(self.tokens.metrics.titlebar_height))
+            .flex_none()
             .w_full()
             .flex()
             .items_center()
@@ -1561,10 +1576,15 @@ impl WorkspaceApp {
             ))
             // Linux controls must begin at the configured edge; keep the
             // existing traffic-light/title inset on the other desktop shells.
-            .when(!cfg!(target_os = "linux"), |bar| bar.pl(px(72.0)))
+            .when(!cfg!(target_os = "linux") && show_window_controls, |bar| {
+                bar.pl(px(72.0))
+            })
+            .when(!show_window_controls, |bar| {
+                bar.pl(px(self.tokens.spacing.three))
+            })
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(theme.text))
-            .when(cfg!(target_os = "linux"), |bar| {
+            .when(cfg!(target_os = "linux") && show_window_controls, |bar| {
                 bar.child(self.render_client_titlebar_controls(
                     button_layout.left,
                     supported_controls,
@@ -1585,35 +1605,45 @@ impl WorkspaceApp {
                     .occlude()
                     // Windows moves client-decorated windows through native
                     // HTCAPTION handling; consuming mouse-down in GPUI blocks it.
-                    .when(cfg!(target_os = "windows"), |region| {
-                        region.window_control_area(gpui::WindowControlArea::Drag)
-                    })
-                    .when(!cfg!(target_os = "windows"), |region| {
-                        region
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                    if sidebar::handle_window_drag_mouse_down(event, window) {
+                    .when(
+                        cfg!(target_os = "windows") && show_window_controls,
+                        |region| region.window_control_area(gpui::WindowControlArea::Drag),
+                    )
+                    .when(
+                        !cfg!(target_os = "windows") && show_window_controls,
+                        |region| {
+                            region
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        if sidebar::handle_window_drag_mouse_down(event, window) {
+                                            cx.stop_propagation();
+                                            return;
+                                        }
+                                        this.start_detached_tab_return_drag(
+                                            tab_id, event, window, cx,
+                                        );
                                         cx.stop_propagation();
-                                        return;
-                                    }
-                                    this.start_detached_tab_return_drag(tab_id, event, window, cx);
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .on_mouse_move(cx.listener(
-                                move |this, event: &MouseMoveEvent, window, cx| {
-                                    this.update_detached_tab_return_drag(tab_id, event, window, cx);
-                                },
-                            ))
-                            .on_mouse_up(
-                                MouseButton::Left,
-                                cx.listener(move |this, event: &MouseUpEvent, window, cx| {
-                                    this.finish_detached_tab_return_drag(tab_id, event, window, cx);
-                                    cx.stop_propagation();
-                                }),
-                            )
-                    })
+                                    }),
+                                )
+                                .on_mouse_move(cx.listener(
+                                    move |this, event: &MouseMoveEvent, window, cx| {
+                                        this.update_detached_tab_return_drag(
+                                            tab_id, event, window, cx,
+                                        );
+                                    },
+                                ))
+                                .on_mouse_up(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, event: &MouseUpEvent, window, cx| {
+                                        this.finish_detached_tab_return_drag(
+                                            tab_id, event, window, cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                        },
+                    )
                     .child(div().min_w(px(0.0)).truncate().child(title)),
             )
             .child(
@@ -1642,7 +1672,7 @@ impl WorkspaceApp {
                     ),
             )
             .when(
-                cfg!(any(target_os = "windows", target_os = "linux")),
+                cfg!(any(target_os = "windows", target_os = "linux")) && show_window_controls,
                 |bar| {
                     bar.child(self.render_detached_client_titlebar_controls(
                         button_layout.right,
@@ -1653,7 +1683,7 @@ impl WorkspaceApp {
                 },
             )
             .when(
-                cfg!(target_os = "linux") && supported_controls.window_menu,
+                cfg!(target_os = "linux") && show_window_controls && supported_controls.window_menu,
                 |bar| {
                     bar.on_mouse_down(MouseButton::Right, |event, window, cx| {
                         window.show_window_menu(event.position);
@@ -1719,6 +1749,63 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct BackgroundWindow {
+        background: Entity<Option<&'static str>>,
+        _observation: Subscription,
+    }
+
+    impl Render for BackgroundWindow {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let background = self.background.read(cx).map(|name| {
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .debug_selector(move || name.into())
+                    .into_any_element()
+            });
+            detached_tab_window_root(
+                rgb(0x101010),
+                background,
+                div()
+                    .size_full()
+                    .debug_selector(|| "tab-content".into())
+                    .into_any_element(),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn detached_window_background_changes_and_clears_across_windows(cx: &mut gpui::TestAppContext) {
+        let background = cx.new(|_| Some("first-background"));
+        let mut windows = Vec::new();
+        for _ in 0..2 {
+            let source = background.clone();
+            let window = cx.add_window(move |_, cx| BackgroundWindow {
+                _observation: window_shell::observe_window_session(&source, cx),
+                background: source,
+            });
+            windows.push(gpui::VisualTestContext::from_window(window.into(), cx));
+        }
+        for selected in [Some("first-background"), Some("second-background"), None] {
+            background.update(cx, |background, cx| {
+                *background = selected;
+                cx.notify();
+            });
+            cx.run_until_parked();
+            for window in &mut windows {
+                let content = window.debug_bounds("tab-content").unwrap();
+                for name in ["first-background", "second-background"] {
+                    assert_eq!(
+                        window.debug_bounds(name),
+                        (selected == Some(name)).then_some(content)
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn return_insertion_index_follows_the_pointer_between_tab_midpoints() {

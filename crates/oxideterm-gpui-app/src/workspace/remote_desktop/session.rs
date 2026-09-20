@@ -1161,6 +1161,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn focus_remote_desktop_keyboard(
         &mut self,
+        tab_id: TabId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1179,9 +1180,7 @@ impl WorkspaceApp {
         self.clear_ai_sidebar_keyboard_focus(cx);
         changed |= ai_focus_changed;
 
-        if let Some(tab_id) = self.active_remote_desktop_tab_id(cx) {
-            self.sync_remote_desktop_lock_keys(tab_id, window.capslock(), cx);
-        }
+        self.sync_remote_desktop_lock_keys(tab_id, window.capslock(), cx);
         window.focus(&self.focus_handle, cx);
         if changed {
             cx.notify();
