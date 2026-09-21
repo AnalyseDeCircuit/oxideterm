@@ -725,6 +725,12 @@ pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOp
         .opacity(opacity)
         // Icon buttons appear all over toolbars; disabled/loading must be
         // visible at the primitive level even when the caller owns the action.
+        .when(tokens.motion.enabled && !disabled, |button| {
+            button.hover_background_transition(
+                crate::motion::duration(tokens, crate::motion::MotionDuration::Micro)
+                    .min(std::time::Duration::from_millis(100)),
+            )
+        })
         .cursor(if disabled {
             CursorStyle::OperationNotAllowed
         } else {
@@ -879,6 +885,12 @@ fn button_base(tokens: &ThemeTokens, options: ButtonOptions, has_background: boo
         // Tauri/shadcn disabled buttons use opacity plus disabled pointer
         // semantics. Keep the shared primitive from advertising clickability
         // when feature code intentionally omits the mouse handler.
+        .when(tokens.motion.enabled && !options.disabled, |button| {
+            button.hover_background_transition(
+                crate::motion::duration(tokens, crate::motion::MotionDuration::Micro)
+                    .min(std::time::Duration::from_millis(100)),
+            )
+        })
         .cursor(if options.disabled {
             CursorStyle::OperationNotAllowed
         } else {

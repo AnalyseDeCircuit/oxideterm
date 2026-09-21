@@ -22,6 +22,7 @@ pub struct SegmentedControlOptions {
 pub enum SegmentedControlLayout {
     Fill,
     Compact { width: f32 },
+    Underline { width: f32 },
 }
 
 impl SegmentedControlOptions {
@@ -43,6 +44,11 @@ impl SegmentedControlOptions {
 
     pub const fn has_background_image(mut self, has_background_image: bool) -> Self {
         self.has_background_image = has_background_image;
+        self
+    }
+
+    pub const fn underline(mut self, width: f32) -> Self {
+        self.layout = SegmentedControlLayout::Underline { width };
         self
     }
 
@@ -102,6 +108,11 @@ pub fn segmented_control(
         .w(relative(item_width))
         .rounded(px(tokens.radii.md));
     let indicator = match options.layout {
+        SegmentedControlLayout::Underline { .. } => indicator
+            .top(gpui::auto())
+            .h(px(2.0))
+            .rounded_none()
+            .bg(rgb(tokens.ui.accent)),
         SegmentedControlLayout::Fill => indicator.bg(rgba((tokens.ui.accent << 8) | 0x26)),
         SegmentedControlLayout::Compact { .. } => indicator
             .border_1()
@@ -161,7 +172,7 @@ pub fn segmented_control(
             .shadow(theme_card_shadow(tokens))
             .p(px(8.0))
             .child(inner),
-        SegmentedControlLayout::Compact { width } => {
+        SegmentedControlLayout::Compact { width } | SegmentedControlLayout::Underline { width } => {
             div().flex_none().w(px(width)).max_w_full().child(inner)
         }
     }
@@ -218,6 +229,27 @@ pub fn segmented_control_item_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn selection_motion_follows_all_four_profiles() {
+        use oxideterm_theme::{UiMotion, UiMotionProfile, default_tokens};
+
+        for (profile, expected) in [
+            (UiMotionProfile::Off, None),
+            (UiMotionProfile::Reduced, Some((120, false))),
+            (UiMotionProfile::Normal, Some((200, true))),
+            (UiMotionProfile::Fast, Some((110, true))),
+        ] {
+            let mut tokens = default_tokens();
+            tokens.motion = UiMotion::from_profile(profile);
+            assert_eq!(
+                segmented_control_motion(&tokens)
+                    .map(|motion| (motion.duration.as_millis(), motion.spatial)),
+                expected,
+                "{profile:?}"
+            );
+        }
+    }
+
     #[test]
     fn settled_transition_suppresses_stale_previous_index_motion() {
         let settled = SegmentedControlOptions::new(3, 0, 5);

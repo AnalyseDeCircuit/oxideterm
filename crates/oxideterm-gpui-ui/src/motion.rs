@@ -6,6 +6,12 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+mod auto_height;
+pub use auto_height::auto_height;
+
+mod sidebar;
+pub use sidebar::SidebarMotion;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MotionDuration {
     Micro,
@@ -443,6 +449,71 @@ mod tests {
                 false,
             ))
         }
+    }
+
+    struct SidebarLayoutBench {
+        expanded: bool,
+        motion: SidebarMotion,
+    }
+
+    impl Render for SidebarLayoutBench {
+        fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+            let content = div()
+                .flex()
+                .flex_col()
+                .children((0..40).map(|_| div().h(px(24.0)).child("Session · connected")));
+            let viewport = div()
+                .h_full()
+                .flex_none()
+                .overflow_hidden()
+                .child(content.w(px(280.0)).flex_none());
+            div()
+                .size_full()
+                .flex()
+                .child(self.motion.animate(
+                    &oxideterm_theme::default_tokens(),
+                    "sidebar-layout-bench",
+                    viewport,
+                    |element, width| element.w(px(width)),
+                ))
+                .child(div().flex_1().h_full())
+        }
+    }
+
+    #[gpui::test]
+    #[ignore = "manual headless sidebar layout benchmark"]
+    fn sidebar_layout_benchmark(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| SidebarLayoutBench {
+            expanded: false,
+            motion: SidebarMotion::new(0.0),
+        });
+        cx.simulate_resize(size(px(1200.0), px(800.0)));
+        let mut samples = Vec::new();
+        for cycle in 0..40 {
+            view.update(cx, |view, cx| {
+                view.expanded = cycle % 2 == 0;
+                view.motion
+                    .retarget(if view.expanded { 280.0 } else { 0.0 });
+                cx.notify();
+            });
+            for _ in 0..14 {
+                cx.executor().advance_clock(Duration::from_millis(16));
+                let started = std::time::Instant::now();
+                cx.update(|window, cx| {
+                    window.draw(cx).clear(cx);
+                });
+                if cycle >= 10 {
+                    samples.push(started.elapsed().as_nanos());
+                }
+            }
+        }
+        samples.sort_unstable();
+        println!(
+            "sidebar-layout frames={} median_ns={} p95_ns={}",
+            samples.len(),
+            samples[samples.len() / 2],
+            samples[samples.len() * 95 / 100]
+        );
     }
 
     #[test]

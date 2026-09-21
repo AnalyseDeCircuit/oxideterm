@@ -28,6 +28,7 @@ use crate::{
 };
 use collections::HashMap;
 use gpui_util::ResultExt;
+use palette::IntoColor;
 use refineable::Refineable;
 use smallvec::SmallVec;
 use std::{
@@ -839,6 +840,13 @@ pub trait InteractiveElement: Sized {
             "hover style already set"
         );
         self.interactivity().hover_style = Some(Box::new(f(StyleRefinement::default())));
+        self
+    }
+
+    /// Animate solid hover background colors on elements with stable IDs.
+    /// Geometry, focus, active styles and event dispatch remain immediate.
+    fn hover_background_transition(mut self, duration: Duration) -> Self {
+        self.interactivity().hover_background_transition = Some(duration);
         self
     }
 
@@ -2108,6 +2116,7 @@ pub struct Interactivity {
     pub(crate) in_focus_style: Option<Box<StyleRefinement>>,
     pub(crate) focus_visible_style: Option<Box<StyleRefinement>>,
     pub(crate) hover_style: Option<Box<StyleRefinement>>,
+    pub(crate) hover_background_transition: Option<Duration>,
     pub(crate) group_hover_style: Option<GroupStyle>,
     pub(crate) active_style: Option<Box<StyleRefinement>>,
     pub(crate) group_active_style: Option<GroupStyle>,
@@ -3360,7 +3369,7 @@ impl Interactivity {
     fn compute_style_internal(
         &self,
         hitbox: Option<&Hitbox>,
-        element_state: Option<&mut InteractiveElementState>,
+        mut element_state: Option<&mut InteractiveElementState>,
         window: &mut Window,
         cx: &mut App,
     ) -> Style {
@@ -3409,6 +3418,9 @@ impl Interactivity {
             }
 
             if let Some(hover_style) = self.hover_style.as_ref() {
+                let idle_background = self
+                    .hover_background_transition
+                    .and_then(|_| style.background.clone());
                 let is_hovered = if let Some(hitbox) = hitbox {
                     hitbox.is_hovered(window)
                 } else if let Some(element_state) = element_state.as_ref() {
@@ -3423,6 +3435,47 @@ impl Interactivity {
 
                 if is_hovered {
                     style.refine(hover_style);
+                }
+                if let (Some(duration), Some(state)) = (
+                    self.hover_background_transition,
+                    element_state.as_deref_mut(),
+                ) {
+                    let idle = idle_background
+                        .as_ref()
+                        .and_then(|fill| fill.color())
+                        .and_then(|bg| bg.as_solid());
+                    let mut hovered_style = Style::default();
+                    hovered_style.refine(hover_style);
+                    let hovered = hovered_style
+                        .background
+                        .as_ref()
+                        .and_then(|fill| fill.color())
+                        .and_then(|bg| bg.as_solid());
+                    if let Some(hovered) =
+                        hovered.filter(|_| idle_background.is_none() || idle.is_some())
+                    {
+                        let idle = idle.unwrap_or_else(|| crate::hsla(0.0, 0.0, 0.0, 0.0));
+                        let now = cx.background_executor().now();
+                        let transition = state.hover_background.get_or_insert_with(|| {
+                            Box::new(HoverBackgroundTransition::new(idle, hovered, now))
+                        });
+                        let color = transition.sample(
+                            idle,
+                            hovered,
+                            is_hovered,
+                            now,
+                            duration,
+                            cx.reduce_motion(),
+                        );
+                        style.background = Some(crate::Fill::from(color));
+                        if transition.running(now, duration) && !cx.reduce_motion() {
+                            window.request_animation_frame();
+                        }
+                    } else {
+                        state.hover_background = None;
+                    }
+                } else if let Some(state) = element_state.as_deref_mut() {
+                    state.hover_background = None;
                 }
             }
         }
@@ -3562,6 +3615,7 @@ pub struct InteractiveElementState {
     pub(crate) focus_handle: Option<FocusHandle>,
     pub(crate) clicked_state: Option<Rc<RefCell<ElementClickedState>>>,
     pub(crate) hover_state: Option<Rc<RefCell<ElementHoverState>>>,
+    hover_background: Option<Box<HoverBackgroundTransition>>,
     pub(crate) hover_listener_state: Option<Rc<RefCell<bool>>>,
     pub(crate) pending_mouse_down: Option<Rc<RefCell<Option<MouseDownEvent>>>>,
     /// Set to the window's [`focus_generation`](crate::Window::focus_generation)
@@ -3575,6 +3629,80 @@ pub struct InteractiveElementState {
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
     ongoing_scroll: Option<Rc<RefCell<OngoingScroll>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
+}
+
+struct HoverBackgroundTransition {
+    idle: crate::Hsla,
+    hovered: crate::Hsla,
+    from: f32,
+    target: f32,
+    current: f32,
+    started_at: scheduler::Instant,
+}
+
+impl HoverBackgroundTransition {
+    fn new(idle: crate::Hsla, hovered: crate::Hsla, now: scheduler::Instant) -> Self {
+        Self {
+            idle,
+            hovered,
+            from: 0.0,
+            target: 0.0,
+            current: 0.0,
+            started_at: now,
+        }
+    }
+
+    fn running(&self, now: scheduler::Instant, duration: Duration) -> bool {
+        self.from != self.target && now.saturating_duration_since(self.started_at) < duration
+    }
+
+    fn sample(
+        &mut self,
+        idle: crate::Hsla,
+        hovered: crate::Hsla,
+        active: bool,
+        now: scheduler::Instant,
+        duration: Duration,
+        reduced: bool,
+    ) -> crate::Hsla {
+        let target = if active { 1.0 } else { 0.0 };
+        if reduced || duration.is_zero() || idle != self.idle || hovered != self.hovered {
+            self.from = target;
+            self.target = target;
+            self.current = target;
+            self.idle = idle;
+            self.hovered = hovered;
+        } else {
+            let progress = (now.saturating_duration_since(self.started_at).as_secs_f32()
+                / duration.as_secs_f32())
+            .min(1.0);
+            self.current = self.from + (self.target - self.from) * (1.0 - (1.0 - progress).powi(3));
+            if self.target != target {
+                self.from = self.current;
+                self.target = target;
+                self.started_at = now;
+            }
+        }
+        let from: crate::Rgba = idle.into_color();
+        let to: crate::Rgba = hovered.into_color();
+        let t = self.current;
+        let a = from.alpha * (1.0 - t) + to.alpha * t;
+        // Premultiplication keeps transparent idle backgrounds from darkening on entry.
+        let mix = |start: f32, end: f32| {
+            if a > 0.0 {
+                (start * from.alpha * (1.0 - t) + end * to.alpha * t) / a
+            } else {
+                0.0
+            }
+        };
+        crate::Rgba::new(
+            mix(from.red, to.red),
+            mix(from.green, to.green),
+            mix(from.blue, to.blue),
+            a,
+        )
+        .into_color()
+    }
 }
 
 /// Whether or not the element or a group that contains it is clicked by the mouse.
@@ -4335,6 +4463,89 @@ mod tests {
         TestAppContext, canvas, util::FluentBuilder as _,
     };
     use std::{cell::Cell, rc::Weak};
+
+    #[gpui::test]
+    fn hover_background_interpolates_reverses_and_preserves_active_style(cx: &mut TestAppContext) {
+        struct HoverProbe {
+            state: Rc<RefCell<InteractiveElementState>>,
+            color: Rc<Cell<crate::Rgba>>,
+        }
+        impl Render for HoverProbe {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let state = self.state.clone();
+                let color = self.color.clone();
+                canvas(
+                    move |_, window, cx| {
+                        let mut button = div()
+                            .id("button")
+                            .hover(|style| style.bg(crate::rgb(0xffffff)))
+                            .active(|style| style.bg(crate::rgb(0xff0000)))
+                            .hover_background_transition(Duration::from_millis(100));
+                        let style = button.interactivity().compute_style_internal(
+                            None,
+                            Some(&mut state.borrow_mut()),
+                            window,
+                            cx,
+                        );
+                        color.set(
+                            style
+                                .background
+                                .unwrap()
+                                .color()
+                                .unwrap()
+                                .as_solid()
+                                .unwrap()
+                                .into_color(),
+                        );
+                    },
+                    |_, _, _, _| {},
+                )
+                .size_full()
+            }
+        }
+        let hovered = Rc::new(RefCell::new(ElementHoverState::default()));
+        let clicked = Rc::new(RefCell::new(ElementClickedState::default()));
+        let state = Rc::new(RefCell::new(InteractiveElementState {
+            hover_state: Some(hovered.clone()),
+            clicked_state: Some(clicked.clone()),
+            ..Default::default()
+        }));
+        let drawn = Rc::new(Cell::new(crate::rgba(0)));
+        let (_, cx) = cx.add_window_view(|_, _| HoverProbe {
+            state: state.clone(),
+            color: drawn.clone(),
+        });
+        let color = |cx: &mut crate::VisualTestContext| -> crate::Rgba {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            drawn.get()
+        };
+        assert_eq!(color(cx).alpha, 0.0);
+        hovered.borrow_mut().element = true;
+        assert_eq!(color(cx).alpha, 0.0);
+        cx.executor().advance_clock(Duration::from_millis(50));
+        let halfway = color(cx);
+        assert!((halfway.alpha - 0.875).abs() < 0.0001);
+        assert_eq!((halfway.red, halfway.green, halfway.blue), (1.0, 1.0, 1.0));
+        hovered.borrow_mut().element = false;
+        assert_eq!(color(cx), halfway);
+        cx.executor().advance_clock(Duration::from_millis(50));
+        assert!((color(cx).alpha - 0.109375).abs() < 0.0001);
+        clicked.borrow_mut().element = true;
+        assert_eq!(color(cx), crate::rgb(0xff0000));
+        clicked.borrow_mut().element = false;
+        cx.update(|_, cx| cx.set_reduce_motion(true));
+        assert_eq!(color(cx).alpha, 0.0);
+        hovered.borrow_mut().element = true;
+        assert_eq!(color(cx), crate::rgb(0xffffff));
+        assert!(
+            !state
+                .borrow()
+                .hover_background
+                .as_ref()
+                .unwrap()
+                .running(cx.executor().now(), Duration::from_millis(100))
+        );
+    }
 
     struct GroupHoverTestView {
         render_count: Rc<Cell<usize>>,
