@@ -1605,20 +1605,14 @@ fn render_blockquote_with_code_actions(
     div()
         .flex()
         .flex_row()
-        .child(
-            // Left border strip
-            div()
-                .w(px(opts.blockquote_border_width))
-                .bg(accent)
-                .rounded(px(tokens.radii.sm))
-                .flex_shrink_0(),
-        )
+        .bg(style::code_bg_color(tokens, opts))
+        .border_l(px(opts.blockquote_border_width))
+        .border_color(accent)
+        .rounded(px(tokens.radii.sm))
         .child(
             div()
                 .flex_1()
                 .pl(px(opts.list_indent))
-                .bg(style::code_bg_color(tokens, opts))
-                .rounded(px(tokens.radii.sm))
                 .when_some(kind, |content, kind| {
                     content.child(render_callout_label(kind, accent, tokens, opts))
                 })
@@ -1650,19 +1644,14 @@ fn render_selectable_blockquote(
     div()
         .flex()
         .flex_row()
-        .child(
-            div()
-                .w(px(opts.blockquote_border_width))
-                .bg(accent)
-                .rounded(px(tokens.radii.sm))
-                .flex_shrink_0(),
-        )
+        .bg(style::code_bg_color(tokens, opts))
+        .border_l(px(opts.blockquote_border_width))
+        .border_color(accent)
+        .rounded(px(tokens.radii.sm))
         .child(
             div()
                 .flex_1()
                 .pl(px(opts.list_indent))
-                .bg(style::code_bg_color(tokens, opts))
-                .rounded(px(tokens.radii.sm))
                 .when_some(kind, |content, kind| {
                     content.child(render_callout_label(kind, accent, tokens, opts))
                 })
