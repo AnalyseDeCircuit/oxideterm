@@ -445,9 +445,11 @@ impl WorkspaceApp {
                 .padding(oxideterm_gpui_ui::SurfacePadding::None)
                 .has_background_image(has_background),
         );
-        // Compact shortcuts and full session cards share project chrome while
-        // retaining the radius that communicates their different hierarchy.
-        surface.rounded(px(radius))
+        surface
+            .rounded(px(radius))
+            .shadow_none()
+            .border_color(self.workspace_chrome_divider())
+            .bg(theme_bg(self.tokens.ui.bg, has_background))
     }
 
     pub(super) fn session_manager_display_items(&self, cx: &App) -> Vec<SessionManagerDisplayItem> {
@@ -865,7 +867,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(rgba((theme.accent << 8) | MANAGER_RECENT_ACCENT_BG_ALPHA))
+                    .bg(rgba((theme.accent << 8) | 0x1a))
                     .child(Self::render_lucide_icon(
                         item.icon(),
                         MANAGER_RECENT_ICON_GLYPH_SIZE,
@@ -966,6 +968,10 @@ impl WorkspaceApp {
                 .contains(target)
         });
         self.session_manager_card_surface(self.tokens.radii.lg, has_background)
+            .when(is_selected, |card| {
+                card.bg(rgba((theme.accent << 8) | 0x12))
+            })
+            .hover(|card| card.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
             .min_w(px(260.0))
             .flex_grow_1()
             .flex_basis(px(320.0))
@@ -1414,7 +1420,7 @@ impl WorkspaceApp {
             .w_full()
             .min_w(px(0.0))
             .border_b_1()
-            .border_color(theme_border_half(theme.border, has_background))
+            .border_color(self.workspace_chrome_divider())
             .px_3()
             .py_2()
             .pl(px(depth as f32 * 24.0 + 12.0))
@@ -1654,13 +1660,25 @@ impl WorkspaceApp {
             .w_full()
             .min_w(px(0.0))
             .border_b_1()
-            .border_color(theme_border_half(theme.border, has_background))
+            .border_color(self.workspace_chrome_divider())
             .px_3()
             .py_2()
             .pl(px(depth as f32 * 24.0 + 12.0))
             .flex()
             .items_center()
             .gap(px(self.tokens.spacing.three))
+            .relative()
+            .when(is_selected, |row| {
+                row.bg(rgba((theme.accent << 8) | 0x12)).child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(2.0))
+                        .bg(rgb(theme.accent)),
+                )
+            })
             .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
             .on_mouse_down(
                 MouseButton::Left,

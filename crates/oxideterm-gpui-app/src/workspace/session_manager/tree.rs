@@ -25,7 +25,7 @@ impl WorkspaceApp {
             .px_3()
             .py_2()
             .border_b_1()
-            .border_color(theme_border(theme.border, has_background))
+            .border_color(self.workspace_chrome_divider())
             .bg(theme_bg(theme.bg, has_background))
             .child(
                 div()
@@ -43,7 +43,7 @@ impl WorkspaceApp {
                 self.render_toolbar_button(
                     LucideIcon::Plus,
                     self.i18n.t("sessionManager.toolbar.new_connection"),
-                    ButtonVariant::Default,
+                    ButtonVariant::Ghost,
                     has_background,
                     show_primary_labels,
                     cx.listener(|this, _event, window, cx| {
@@ -56,6 +56,9 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_none()
+                    .border_l_1()
+                    .border_color(self.workspace_chrome_divider())
+                    .pl(px(8.0))
                     .child(self.render_session_manager_sort_trigger(
                         has_background,
                         show_secondary_labels,
@@ -65,6 +68,9 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_none()
+                    .border_l_1()
+                    .border_color(self.workspace_chrome_divider())
+                    .pl(px(8.0))
                     .child(self.render_session_manager_view_mode_trigger(
                         has_background,
                         show_secondary_labels,
@@ -94,7 +100,7 @@ impl WorkspaceApp {
                             self.render_session_manager_button(
                                 LucideIcon::FolderInput,
                                 self.i18n.t("sessionManager.batch.move_to_group"),
-                                ButtonVariant::Outline,
+                                ButtonVariant::Ghost,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.session_manager.update(cx, |manager, cx| {
                                         manager.show_batch_move = !manager.show_batch_move;
@@ -114,7 +120,7 @@ impl WorkspaceApp {
                             self.render_session_manager_button(
                                 LucideIcon::Trash2,
                                 self.i18n.t("sessionManager.batch.delete"),
-                                ButtonVariant::Outline,
+                                ButtonVariant::Ghost,
                                 cx.listener(|this, _event, _window, cx| {
                                     this.request_delete_selected_connections(cx);
                                     cx.stop_propagation();
@@ -141,11 +147,7 @@ impl WorkspaceApp {
         let trigger = self.render_toolbar_button(
             current_mode.icon(),
             self.i18n.t(current_mode.label_key()),
-            if menu_open {
-                ButtonVariant::Default
-            } else {
-                ButtonVariant::Outline
-            },
+            ButtonVariant::Ghost,
             has_background,
             show_label,
             cx.listener(move |this, _event, _window, cx| {
@@ -159,7 +161,7 @@ impl WorkspaceApp {
         // trigger measurement and avoiding pointer-coordinate drift.
         select_anchor_probe(
             SelectAnchorId::SessionManagerViewMode,
-            trigger,
+            trigger.when(menu_open, |trigger| trigger.underline()),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_select_anchor(anchor, cx);
@@ -188,11 +190,7 @@ impl WorkspaceApp {
         let trigger = self.render_toolbar_button(
             direction.icon(),
             label,
-            if menu_open {
-                ButtonVariant::Default
-            } else {
-                ButtonVariant::Outline
-            },
+            ButtonVariant::Ghost,
             has_background,
             show_label,
             cx.listener(move |this, _event, _window, cx| {
@@ -204,7 +202,7 @@ impl WorkspaceApp {
 
         select_anchor_probe(
             SelectAnchorId::SessionManagerSort,
-            trigger,
+            trigger.when(menu_open, |trigger| trigger.underline()),
             move |anchor, _window, cx| {
                 let _ = workspace.update(cx, |this, cx| {
                     this.update_select_anchor(anchor, cx);

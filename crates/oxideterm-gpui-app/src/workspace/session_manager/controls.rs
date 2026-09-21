@@ -9,8 +9,6 @@ impl WorkspaceApp {
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> gpui::Div {
         let theme = self.tokens.ui;
-        // Tauri batch actions are normal shadcn Buttons. Keep the local icon
-        // placement, but route activation through the shared toolbar guard.
         self.workspace_toolbar_action_button(
             label,
             Some(Self::render_lucide_icon(icon, 14.0, rgb(theme.text))),
@@ -18,7 +16,7 @@ impl WorkspaceApp {
                 button: ButtonOptions {
                     variant,
                     size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
+                    radius: ButtonRadius::Sm,
                     disabled: false,
                 },
                 icon_position: ToolbarButtonIconPosition::Trailing,
@@ -51,7 +49,7 @@ impl WorkspaceApp {
                 button: ButtonOptions {
                     variant,
                     size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
+                    radius: ButtonRadius::Sm,
                     disabled: false,
                 },
                 has_background,
@@ -120,70 +118,75 @@ impl WorkspaceApp {
         let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
         self.text_input_with_workspace_ime(
             input_target,
-            div()
-                .h(px(32.0))
-                .w_full()
-                .px_3()
-                .flex()
-                .items_center()
-                .gap(px(8.0))
-                .rounded(px(self.tokens.radii.md))
-                .border_1()
-                .border_color(if active {
-                    rgb(theme.accent)
-                } else {
-                    theme_border_half(theme.border, has_background)
-                })
-                .bg(theme_input_bg(theme.bg, has_background))
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(if visually_empty {
-                    rgb(theme.text_muted)
-                } else {
-                    rgb(theme.text)
-                })
-                .when(target == SessionManagerInput::Search, |input| {
-                    input.child(Self::render_lucide_icon(
-                        LucideIcon::Search,
-                        16.0,
-                        rgb(theme.text_muted),
+            (if target == SessionManagerInput::Search {
+                self.sidebar_search_row(theme_bg(theme.bg, has_background))
+            } else {
+                div()
+            })
+            .h(px(32.0))
+            .w_full()
+            .px_3()
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(if active {
+                rgb(theme.accent)
+            } else {
+                theme_border_half(theme.border, has_background)
+            })
+            .bg(theme_input_bg(theme.bg, has_background))
+            .text_size(px(self.tokens.metrics.ui_text_sm))
+            .text_color(if visually_empty {
+                rgb(theme.text_muted)
+            } else {
+                rgb(theme.text)
+            })
+            .when(target == SessionManagerInput::Search, |input| {
+                input
+                    .h(px(36.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_0()
+                    .border_b_1()
+                    .border_color(if active {
+                        rgb(theme.accent)
+                    } else {
+                        self.workspace_chrome_divider()
+                    })
+                    .bg(theme_bg(theme.bg, has_background))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .overflow_hidden()
+                    .when(active && visually_empty, |input| {
+                        input.child(text_caret(&self.tokens, self.input_caret.visible()))
+                    })
+                    .child(text_input_value_segments(
+                        &self.tokens,
+                        &text,
+                        visually_empty,
+                        selection_range,
+                        caret_offset,
+                        self.input_caret.visible(),
                     ))
-                })
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.0))
-                        .flex()
-                        .items_center()
-                        .overflow_hidden()
-                        .when(active && visually_empty, |input| {
-                            input.child(text_caret(&self.tokens, self.input_caret.visible()))
-                        })
-                        .child(text_input_value_segments(
-                            &self.tokens,
-                            &text,
-                            visually_empty,
-                            selection_range,
-                            caret_offset,
-                            self.input_caret.visible(),
-                        ))
-                        .when(active && !marked_text.is_empty(), |input| {
-                            input.child(
-                                div()
-                                    .underline()
-                                    .text_color(rgb(theme.text))
-                                    .child(marked_text),
-                            )
-                        })
-                        .when(
-                            active
-                                && !visually_empty
-                                && !shows_selection
-                                && !shows_positioned_caret,
-                            |input| {
-                                input.child(text_caret(&self.tokens, self.input_caret.visible()))
-                            },
-                        ),
-                ),
+                    .when(active && !marked_text.is_empty(), |input| {
+                        input.child(
+                            div()
+                                .underline()
+                                .text_color(rgb(theme.text))
+                                .child(marked_text),
+                        )
+                    })
+                    .when(
+                        active && !visually_empty && !shows_selection && !shows_positioned_caret,
+                        |input| input.child(text_caret(&self.tokens, self.input_caret.visible())),
+                    ),
+            ),
             move |this, cx| {
                 this.session_manager.update(cx, |manager, cx| {
                     manager.focused_input = Some(target);
