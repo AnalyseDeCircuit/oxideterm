@@ -619,7 +619,7 @@ pub fn select_panel_popup_with_max_height(
     width: f32,
     max_height: f32,
 ) -> Stateful<Div> {
-    select_popup_with_max_height(tokens, width, max_height).bg(rgb(tokens.ui.bg_panel))
+    select_popup_with_max_height(tokens, width, max_height)
 }
 
 pub fn select_overlay_popup(tokens: &ThemeTokens, width: f32) -> Stateful<Div> {

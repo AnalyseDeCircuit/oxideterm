@@ -56,28 +56,17 @@ fn ai_sticky_prompt_overlay(
                         cx,
                     );
                 });
-                Some((content, (size.height + displacement).max(px(0.0))))
+                Some(content)
             })();
             (list, sticky)
         },
         move |bounds, (mut list, sticky), window, cx| {
-            // Clip only message painting, not its layout. The header can remain
-            // transparent without revealing answer text or shifting scroll anchors.
-            let covered = sticky
-                .as_ref()
-                .map_or(px(0.0), |(_, height)| *height)
-                .min(bounds.size.height);
-            let message_bounds = gpui::Bounds::from_corners(
-                bounds.origin + gpui::point(px(0.0), covered),
-                bounds.bottom_right(),
-            );
-            window.with_content_mask(
-                Some(gpui::ContentMask {
-                    bounds: message_bounds,
-                }),
-                |window| list.paint(window, cx),
-            );
-            if let Some((mut content, _)) = sticky {
+            // The material samples the already-painted list. Its opaque fallback
+            // covers the same region when the render profile disables blur.
+            window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+                list.paint(window, cx);
+            });
+            if let Some(mut content) = sticky {
                 window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
                     content.paint(window, cx)
                 });
@@ -162,23 +151,26 @@ impl WorkspaceApp {
                 oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
             });
         Some(
-            div()
-                .w_full()
-                .px(px(tokens.spacing.three))
-                .py(px(tokens.spacing.two))
-                .bg(self.context_sidebar_content_background(tokens.ui.bg))
-                .border_b_1()
-                .border_color(self.workspace_chrome_divider())
-                .occlude()
-                .on_scroll_wheel(
-                    cx.listener(move |_, event: &gpui::ScrollWheelEvent, _, cx| {
-                        wheel_state.scroll_by(-event.delta.pixel_delta(px(20.0)).y);
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(button)
-                .into_any_element(),
+            material_surface(
+                &tokens,
+                div(),
+                MaterialRole::StickyHeader,
+            )
+            .w_full()
+            .px(px(tokens.spacing.three))
+            .py(px(tokens.spacing.two))
+            .border_b_1()
+            .border_color(self.workspace_chrome_divider())
+            .occlude()
+            .on_scroll_wheel(
+                cx.listener(move |_, event: &gpui::ScrollWheelEvent, _, cx| {
+                    wheel_state.scroll_by(-event.delta.pixel_delta(px(20.0)).y);
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .child(button)
+            .into_any_element(),
         )
     }
 }
@@ -241,20 +233,24 @@ mod sticky_prompt_tests {
                     shown.set(Some(prompt.message_index));
                     let state = state.clone();
                     Some(
-                        div()
-                            .id("sticky-question")
-                            .w_full()
-                            .h(px(60.0))
-                            .debug_selector(|| "sticky-question".into())
-                            .child(format!("Question {}", prompt.message_index))
-                            .on_click(move |_, window, _| {
-                                state.scroll_to(ListOffset {
-                                    item_ix: prompt.list_index,
-                                    offset_in_item: px(0.0),
-                                });
-                                window.refresh();
-                            })
-                            .into_any_element(),
+                        material_surface(
+                            &oxideterm_theme::default_tokens(),
+                            div(),
+                            MaterialRole::StickyHeader,
+                        )
+                        .id("sticky-question")
+                        .w_full()
+                        .h(px(60.0))
+                        .debug_selector(|| "sticky-question".into())
+                        .child(format!("Question {}", prompt.message_index))
+                        .on_click(move |_, window, _| {
+                            state.scroll_to(ListOffset {
+                                item_ix: prompt.list_index,
+                                offset_in_item: px(0.0),
+                            });
+                            window.refresh();
+                        })
+                        .into_any_element(),
                     )
                 },
             );
@@ -293,8 +289,8 @@ mod sticky_prompt_tests {
             assert_eq!(shown.get(), expected, "row={row} offset={offset}");
             assert_eq!(
                 paint_top.get(),
-                top.map_or(0.0, |top| 60.0 + top),
-                "answer must not paint through the transparent header"
+                0.0,
+                "the material needs the list painted underneath before sampling"
             );
             assert_eq!(
                 cx.debug_bounds("sticky-question")

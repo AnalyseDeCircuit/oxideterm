@@ -19,6 +19,40 @@ const SEMANTIC_SURFACE_STRONG_BORDER_ALPHA: u32 = 0x99;
 const SEMANTIC_SURFACE_ACTIVE_ALPHA: u32 = 0x33;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MaterialRole {
+    StickyHeader,
+    Popover,
+    Dialog,
+}
+
+/// Only overlapping surfaces sample the framebuffer; fixed panels retain their cached wallpaper.
+pub fn material_surface(tokens: &ThemeTokens, surface: Div, role: MaterialRole) -> Div {
+    let (color, opacity, blur) = match role {
+        MaterialRole::StickyHeader => (tokens.ui.bg, tokens.metrics.sidebar_vibrancy_alpha, 8.0),
+        MaterialRole::Popover => (
+            tokens.ui.bg_elevated,
+            tokens.metrics.panel_vibrancy_alpha,
+            12.0,
+        ),
+        // The modal backdrop already blurs the window. A second pass inside the dialog
+        // would compound both its tint and the cost of sampling the framebuffer.
+        MaterialRole::Dialog => (
+            tokens.ui.bg_elevated,
+            tokens.metrics.panel_vibrancy_alpha,
+            0.0,
+        ),
+    };
+    if crate::modal::backdrop_blur_allowed() {
+        surface
+            .when(blur > 0.0, |surface| surface.backdrop_blur(px(blur)))
+            .bg(rgba((color << 8) | (opacity * 255.0).round() as u32))
+    } else {
+        // A translucent fallback would reveal sharp content underneath floating text.
+        surface.bg(rgb(color))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ThemeElevationSpec {
     panel_border_alpha: u32,
     card_border_alpha: u32,
@@ -117,7 +151,10 @@ pub fn semantic_surface(tokens: &ThemeTokens, options: SurfaceOptions) -> Div {
     match options.kind {
         SurfaceKind::Inspector => theme_card_surface_shadow(surface, tokens),
         SurfaceKind::ElevatedPopover | SurfaceKind::TerminalOverlay => {
-            theme_overlay_surface_shadow(surface, tokens)
+            theme_overlay_surface_shadow(
+                material_surface(tokens, surface, MaterialRole::Popover),
+                tokens,
+            )
         }
         _ => surface,
     }

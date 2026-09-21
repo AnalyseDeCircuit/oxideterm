@@ -1,6 +1,6 @@
 use gpui::{
     AnyElement, AnyView, App, AppContext, Context, Div, ParentElement, Render, Styled, Window, div,
-    prelude::*, px, rgb, rgba,
+    prelude::*, px, rgb,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -55,11 +55,10 @@ pub fn tooltip_surface(
     shortcut: Option<String>,
 ) -> Div {
     let label = label.into();
-    div()
+    crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Popover)
         .rounded(px(tokens.radii.xs))
         .border_1()
         .border_color(rgb(tokens.ui.border))
-        .bg(rgba((tokens.ui.bg_elevated << 8) | 0xf2))
         .px(px(tokens.metrics.ui_tooltip_padding_x))
         .py(px(tokens.metrics.ui_tooltip_padding_y))
         .text_size(px(tokens.metrics.ui_text_xs))

@@ -200,16 +200,16 @@ mod tests {
 }
 
 pub fn ai_context_popover(tokens: &ThemeTokens) -> Div {
-    let popover = div()
-        .w(px(AI_CONTEXT_POPOVER_WIDTH))
-        .overflow_hidden()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
-        .bg(rgb(tokens.ui.bg_panel))
-        // Keep wheel input local to the popover, matching browser popover
-        // scroll chaining rules even when the compact panel has no scrollbar.
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+    let popover =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Popover)
+            .w(px(AI_CONTEXT_POPOVER_WIDTH))
+            .overflow_hidden()
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
+            // Keep wheel input local to the popover, matching browser popover
+            // scroll chaining rules even when the compact panel has no scrollbar.
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
     crate::surface::theme_overlay_surface_shadow(popover, tokens)
 }
 
@@ -331,21 +331,21 @@ pub fn ai_model_selector_trigger(
 }
 
 pub fn ai_model_selector_panel(tokens: &ThemeTokens, up: bool) -> Div {
-    let panel = div()
-        .absolute()
-        .left_0()
-        .right_0()
-        .when(up, |panel| panel.bottom_full().mb(px(tokens.spacing.one)))
-        .when(!up, |panel| panel.top_full().mt(px(tokens.spacing.one)))
-        .overflow_hidden()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(bg_alpha(
-            tokens,
-            tokens.ui.border,
-            AI_CHAT_INPUT_BORDER_ALPHA,
-        ))
-        .bg(rgb(tokens.ui.bg_panel));
+    let panel =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Popover)
+            .absolute()
+            .left_0()
+            .right_0()
+            .when(up, |panel| panel.bottom_full().mb(px(tokens.spacing.one)))
+            .when(!up, |panel| panel.top_full().mt(px(tokens.spacing.one)))
+            .overflow_hidden()
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(bg_alpha(
+                tokens,
+                tokens.ui.border,
+                AI_CHAT_INPUT_BORDER_ALPHA,
+            ));
     crate::surface::theme_overlay_surface_shadow(panel, tokens)
 }
 

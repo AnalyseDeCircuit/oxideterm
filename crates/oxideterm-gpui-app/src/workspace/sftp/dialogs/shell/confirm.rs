@@ -24,14 +24,13 @@ impl WorkspaceApp {
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "sftp-editor-close-confirm-presence",
-                div()
+                material_surface(&self.tokens, div(), MaterialRole::Dialog)
                     .w(px(SFTP_DIALOG_WIDTH_SM))
                     .max_w(relative(0.9))
                     .overflow_hidden()
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_SUBTLE_ALPHA))
-                    .bg(rgb(theme.bg_elevated))
                     .shadow(vec![gpui::BoxShadow {
                         inset: false,
                         color: rgba(SFTP_DIALOG_SHADOW_ALPHA).into_color(),

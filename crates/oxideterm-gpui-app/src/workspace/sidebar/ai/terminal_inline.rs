@@ -221,7 +221,7 @@ impl WorkspaceApp {
             .top(px(placement.top))
             .left(px(placement.left))
             .child(
-                div()
+                material_surface(&self.tokens, div(), MaterialRole::Popover)
                     .relative()
                     .w(px(AI_INLINE_PANEL_WIDTH))
                     .rounded(px(self.tokens.radii.md))
@@ -231,7 +231,6 @@ impl WorkspaceApp {
                     .overflow_hidden()
                     .border_1()
                     .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_elevated))
                     .shadow_lg()
                     .when(panel_loading, |panel| {
                         panel.child(

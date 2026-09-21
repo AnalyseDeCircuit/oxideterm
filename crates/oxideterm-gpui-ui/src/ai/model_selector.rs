@@ -24,7 +24,7 @@ const MODEL_SELECTOR_OPEN_BG_ALPHA: u32 = 0x1a; // Tauri bg-theme-accent/10.
 const MODEL_SELECTOR_PROVIDER_BORDER_ALPHA: u32 = 0x33; // Tauri border-theme-border/20.
 const MODEL_SELECTOR_ACTIVE_CHIP_BG_ALPHA: u32 = 0x66; // Tauri bg-theme-bg-hover/40.
 const MODEL_SELECTOR_ACTIVE_CHIP_TEXT_ALPHA: f32 = 0.80; // Tauri text-theme-text-muted/80.
-const MODEL_SELECTOR_MODELS_BG_ALPHA: u32 = 0xe6; // Tauri bg-theme-bg-panel/90.
+const MODEL_SELECTOR_MODELS_BG_ALPHA: u32 = 0x26; // Group tint stays below the shared popover material.
 const MODEL_SELECTOR_MODEL_ACTIVE_TEXT_ALPHA: f32 = 0.85; // Tauri text-theme-text/85.
 const MODEL_SELECTOR_MODEL_INACTIVE_TEXT_ALPHA: f32 = 0.70; // Tauri text-theme-text-muted/70.
 const MODEL_SELECTOR_NO_KEY_TEXT_ALPHA: u32 = 0xcc; // Tauri text-amber-400/80.
@@ -136,18 +136,18 @@ pub fn ai_model_selector_dropdown(
     tokens: &ThemeTokens,
     placement: AiModelSelectorPlacement,
 ) -> Div {
-    let panel = div()
-        .w(px(MODEL_SELECTOR_DROPDOWN_WIDTH))
-        .overflow_hidden()
-        .rounded(px(tokens.radii.lg))
-        .border_1()
-        .border_color(rgb(tokens.ui.border))
-        .bg(rgb(tokens.ui.bg_elevated))
-        // Tauri dropdown menus are wheel boundaries: scrolling over the model
-        // selector must never move the chat/sidebar underneath the overlay.
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
-        .when(placement == AiModelSelectorPlacement::Down, |panel| panel)
-        .when(placement == AiModelSelectorPlacement::Up, |panel| panel);
+    let panel =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Popover)
+            .w(px(MODEL_SELECTOR_DROPDOWN_WIDTH))
+            .overflow_hidden()
+            .rounded(px(tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            // Tauri dropdown menus are wheel boundaries: scrolling over the model
+            // selector must never move the chat/sidebar underneath the overlay.
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .when(placement == AiModelSelectorPlacement::Down, |panel| panel)
+            .when(placement == AiModelSelectorPlacement::Up, |panel| panel);
     crate::surface::theme_overlay_surface_shadow(panel, tokens)
 }
 
@@ -230,7 +230,6 @@ pub fn ai_model_selector_provider_header(
             tokens.ui.border,
             MODEL_SELECTOR_PROVIDER_BORDER_ALPHA,
         ))
-        .bg(rgb(tokens.ui.bg_elevated))
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.one + tokens.spacing.one / 2.0))
         .when(first, |header| {

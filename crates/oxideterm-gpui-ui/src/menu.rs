@@ -1,35 +1,31 @@
-use gpui::{CursorStyle, Div, IntoElement, ParentElement, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{CursorStyle, Div, IntoElement, ParentElement, Styled, div, prelude::*, px, rgb};
 use oxideterm_theme::ThemeTokens;
 
 use crate::surface::theme_overlay_surface_shadow;
-
-const MENU_SURFACE_ALPHA: u32 = 0xf2;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MenuChromeSpec {
     pub surface_radius: f32,
     pub item_radius: f32,
-    pub surface_alpha: u32,
 }
 
 pub(crate) fn menu_chrome_spec(tokens: &ThemeTokens) -> MenuChromeSpec {
     MenuChromeSpec {
         surface_radius: tokens.radii.md,
         item_radius: tokens.radii.xs,
-        surface_alpha: MENU_SURFACE_ALPHA,
     }
 }
 
 pub(crate) fn menu_surface_chrome(tokens: &ThemeTokens) -> Div {
     let chrome = menu_chrome_spec(tokens);
     // All floating menu variants share one elevation and corner contract.
-    let surface = div()
-        .overflow_hidden()
-        .rounded(px(chrome.surface_radius))
-        .border_1()
-        .border_color(rgb(tokens.ui.border))
-        .bg(rgba((tokens.ui.bg_elevated << 8) | chrome.surface_alpha))
-        .text_color(rgb(tokens.ui.text));
+    let surface =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Popover)
+            .overflow_hidden()
+            .rounded(px(chrome.surface_radius))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            .text_color(rgb(tokens.ui.text));
     theme_overlay_surface_shadow(surface, tokens)
 }
 

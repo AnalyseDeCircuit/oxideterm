@@ -34,14 +34,35 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let (sender_visible, sender_expanded) = {
-            let sender = self.terminal_command_sender.read(cx);
-            (sender.is_visible(), sender.is_expanded())
+        let sender = self.terminal_command_sender.read(cx);
+        let target_height = if !sender.is_visible() {
+            0.0
+        } else if sender.is_expanded() {
+            sender.panel_height_for_viewport(f32::from(window.viewport_size().height))
+        } else {
+            TERMINAL_SENDER_COMPACT_HEIGHT
         };
-        if !sender_visible {
-            return div().into_any_element();
+        let mut tokens = self.tokens;
+        if sender.is_resizing() {
+            tokens.motion.spatial_enabled = false;
         }
+        oxideterm_gpui_ui::motion::auto_height(
+            &tokens,
+            "terminal-command-sender-height",
+            Some(self.render_terminal_command_sender_content(window, cx)),
+        )
+        .target_height(target_height)
+        .overflow_when_settled()
+        .into_any_element()
+    }
+
+    fn render_terminal_command_sender_content(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let sender_expanded = self.terminal_command_sender.read(cx).is_expanded();
         let Some(active) = self
             .terminal_command_sender
             .read(cx)
@@ -269,11 +290,19 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     )
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::ChevronRight,
-                        16.0,
-                        rgb(theme.text_muted),
-                    ))
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(TERMINAL_SENDER_COMPACT_EDITOR_HEIGHT))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::ChevronRight,
+                                16.0,
+                                rgb(theme.text_muted),
+                            )),
+                    )
                     .child(
                         div()
                             .flex_1()

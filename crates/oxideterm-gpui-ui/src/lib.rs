@@ -70,12 +70,12 @@ pub use state::{
     state_icon_box, state_notice, state_primary_action, state_shell, state_title,
 };
 pub use surface::{
-    SurfaceChrome, SurfaceKind, SurfaceOptions, SurfacePadding, color_for_background,
+    MaterialRole, SurfaceChrome, SurfaceKind, SurfaceOptions, SurfacePadding, color_for_background,
     color_for_background_or_alpha, color_with_alpha, color_with_background_scaled_alpha,
-    scale_alpha_byte, semantic_surface, surface_chrome, surface_padding_px, tauri_card_shadow,
-    tauri_card_surface, tauri_glass_surface_shadow, theme_card_shadow, theme_card_surface,
-    theme_card_surface_shadow, theme_glass_card_background_alpha, theme_overlay_shadow,
-    theme_overlay_surface_shadow,
+    material_surface, scale_alpha_byte, semantic_surface, surface_chrome, surface_padding_px,
+    tauri_card_shadow, tauri_card_surface, tauri_glass_surface_shadow, theme_card_shadow,
+    theme_card_surface, theme_card_surface_shadow, theme_glass_card_background_alpha,
+    theme_overlay_shadow, theme_overlay_surface_shadow,
 };
 pub use table::{
     TauriTableCellOptions, TauriTableCellStyle, TauriTableColors, TauriTableMetrics,

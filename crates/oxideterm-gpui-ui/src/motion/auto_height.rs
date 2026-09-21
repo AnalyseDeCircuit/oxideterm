@@ -1,7 +1,7 @@
 use super::{MotionDuration, duration, ease_out_cubic};
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement,
-    LayoutId, ParentElement, Pixels, Styled, Window, div, px,
+    LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px,
 };
 use oxideterm_theme::ThemeTokens;
 use std::{cell::RefCell, rc::Rc};
@@ -21,6 +21,8 @@ pub struct AutoHeight {
     tokens: ThemeTokens,
     content: Option<AnyElement>,
     rendered: Option<AnyElement>,
+    target_height: Option<f32>,
+    overflow_when_settled: bool,
 }
 
 pub fn auto_height(
@@ -33,6 +35,22 @@ pub fn auto_height(
         tokens: *tokens,
         content,
         rendered: None,
+        target_height: None,
+        overflow_when_settled: false,
+    }
+}
+
+impl AutoHeight {
+    /// Explicit panel geometry keeps content mounted while the viewport closes.
+    pub fn target_height(mut self, height: f32) -> Self {
+        self.target_height = Some(height.max(0.0));
+        self
+    }
+
+    /// In-flow completion menus may extend outside the settled panel.
+    pub fn overflow_when_settled(mut self) -> Self {
+        self.overflow_when_settled = true;
+        self
     }
 }
 
@@ -69,7 +87,7 @@ impl Element for AutoHeight {
             self.tokens.motion.enabled && self.tokens.motion.spatial_enabled && !cx.reduce_motion();
         let now = cx.background_executor().now();
         let mut current = state.borrow_mut();
-        let running = if let Some(started_at) = current.started_at {
+        let mut running = if let Some(started_at) = current.started_at {
             let progress = (now - started_at).as_secs_f32()
                 / duration(&self.tokens, MotionDuration::Micro)
                     .as_secs_f32()
@@ -83,24 +101,45 @@ impl Element for AutoHeight {
         } else {
             false
         };
+        if let Some(target) = self.target_height {
+            if !animated {
+                current.from = target;
+                current.target = target;
+                current.current = target;
+                current.started_at = None;
+                running = false;
+            } else if (target - current.target).abs() > 0.1 {
+                current.from = current.current;
+                current.target = target;
+                current.started_at = Some(now);
+                running = true;
+            }
+        }
         let height = current.current;
         drop(current);
         if animated && running {
             window.request_animation_frame();
         }
         let measured = state.clone();
+        let target_height = self.target_height;
         let region = div()
             .w_full()
             .flex_none()
             .flex()
             .flex_col()
-            .overflow_hidden()
+            .when(
+                !self.overflow_when_settled || running || height <= 0.0,
+                |region| region.overflow_hidden(),
+            )
             .children(
                 self.content
                     .take()
                     .map(|content| div().w_full().flex_none().flex().flex_col().child(content)),
             )
             .on_children_prepainted(move |bounds, window, cx| {
+                if target_height.is_some() {
+                    return;
+                }
                 let height = bounds
                     .first()
                     .map_or(0.0, |bounds| f32::from(bounds.size.height));
@@ -118,7 +157,7 @@ impl Element for AutoHeight {
                 }
             });
         // Keep the child ID path stable while height changes, preserving keyboard focus.
-        let mut region = if animated {
+        let mut region = if animated || target_height.is_some() {
             region.h(px(height))
         } else {
             region
@@ -240,6 +279,132 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(96.0));
     }
+    struct SenderRegion {
+        height: f32,
+        tokens: ThemeTokens,
+        popup_clicks: Rc<std::cell::Cell<usize>>,
+    }
+
+    impl Render for SenderRegion {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let clicks = self.popup_clicks.clone();
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(div().h(px(80.0)).flex_none())
+                .child(
+                    auto_height(
+                        &self.tokens,
+                        "sender",
+                        Some(
+                            div()
+                                .relative()
+                                .h(px(200.0))
+                                .flex_none()
+                                .debug_selector(|| "sender-content".into())
+                                .child(
+                                    div()
+                                        .id("completion")
+                                        .absolute()
+                                        .top(px(-20.0))
+                                        .left_0()
+                                        .size(px(20.0))
+                                        .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+                                )
+                                .into_any_element(),
+                        ),
+                    )
+                    .target_height(self.height)
+                    .overflow_when_settled(),
+                )
+                .child(div().h(px(20.0)).debug_selector(|| "after-sender".into()))
+        }
+    }
+
+    #[gpui::test]
+    fn sender_height_retains_content_reverses_and_restores_completion_hit_testing(
+        cx: &mut TestAppContext,
+    ) {
+        use oxideterm_theme::UiMotionProfile;
+        let clicks = Rc::new(std::cell::Cell::new(0));
+        let (view, cx) = cx.add_window_view(|_, _| SenderRegion {
+            height: 0.0,
+            tokens: oxideterm_theme::default_tokens(),
+            popup_clicks: clicks.clone(),
+        });
+        cx.simulate_resize(size(px(400.0), px(400.0)));
+        for profile in [
+            UiMotionProfile::Normal,
+            UiMotionProfile::Fast,
+            UiMotionProfile::Reduced,
+            UiMotionProfile::Off,
+        ] {
+            view.update(cx, |view, cx| {
+                view.height = 0.0;
+                view.tokens.apply_motion(UiMotionProfile::Off);
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let before = clicks.get();
+            cx.simulate_click(gpui::point(px(10.0), px(70.0)), gpui::Modifiers::default());
+            assert_eq!(
+                clicks.get(),
+                before,
+                "hidden completion must not intercept clicks"
+            );
+            view.update(cx, |view, cx| {
+                view.height = 32.0;
+                view.tokens.apply_motion(profile);
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let animated = matches!(profile, UiMotionProfile::Normal | UiMotionProfile::Fast);
+            assert_eq!(
+                cx.debug_bounds("after-sender").unwrap().top(),
+                px(if animated { 80.0 } else { 112.0 })
+            );
+            if animated {
+                let half = if profile == UiMotionProfile::Fast {
+                    35
+                } else {
+                    60
+                };
+                cx.executor().advance_clock(Duration::from_millis(half));
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                assert_eq!(cx.debug_bounds("after-sender").unwrap().top(), px(108.0));
+                view.update(cx, |view, cx| {
+                    view.height = 0.0;
+                    cx.notify();
+                });
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                assert_eq!(
+                    cx.debug_bounds("sender-content").unwrap().size.height,
+                    px(200.0)
+                );
+                cx.executor().advance_clock(Duration::from_millis(half));
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                let closing_top = cx.debug_bounds("after-sender").unwrap().top();
+                assert!(closing_top > px(80.0) && closing_top < px(108.0));
+                view.update(cx, |view, cx| {
+                    view.height = 32.0;
+                    cx.notify();
+                });
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                assert_eq!(cx.debug_bounds("after-sender").unwrap().top(), closing_top);
+                cx.executor().advance_clock(Duration::from_millis(120));
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert_eq!(cx.debug_bounds("after-sender").unwrap().top(), px(112.0));
+            cx.simulate_click(gpui::point(px(10.0), px(70.0)), gpui::Modifiers::default());
+            assert_eq!(
+                clicks.get(),
+                before + 1,
+                "settled completion must remain clickable above the sender"
+            );
+        }
+    }
+
     #[gpui::test]
     #[ignore = "manual bounded composer layout benchmark"]
     fn composer_layout_benchmark(cx: &mut TestAppContext) {

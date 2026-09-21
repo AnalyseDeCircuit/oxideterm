@@ -3,7 +3,9 @@ use gpui::{
     px, rgb, rgba,
 };
 use oxideterm_gpui_ui::{
+    MaterialRole,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
+    material_surface,
     modal::dismissible_dialog_backdrop,
 };
 use oxideterm_ssh::{HostKeyStatus, SshConfig, remove_host_key};
@@ -314,12 +316,11 @@ impl WorkspaceApp {
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "host-key-dialog-transition",
-                div()
+                material_surface(&self.tokens, div(), MaterialRole::Dialog)
                     .w(px(480.0))
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_elevated))
                     .shadow_lg()
                     .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {

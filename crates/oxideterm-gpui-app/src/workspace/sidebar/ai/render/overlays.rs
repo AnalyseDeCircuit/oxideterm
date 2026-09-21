@@ -361,14 +361,13 @@ impl WorkspaceApp {
                     cx.notify();
                 }))));
         }
-        div()
+        material_surface(&self.tokens, div(), MaterialRole::Popover)
             .w(px(dropdown_width))
             .h(px(dropdown_height))
             .relative()
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
             // Keep rounded clipping on a shell separate from the inner scroll
             // owner; setting overflow-hidden on the scroll owner disables it.
@@ -673,13 +672,12 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn render_ai_chat_menu(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
+        material_surface(&self.tokens, div(), MaterialRole::Popover)
             .w(px(AI_CHAT_MENU_WIDTH))
             .py(px(2.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
             .child(self.render_ai_chat_menu_item(
                 LucideIcon::Archive,

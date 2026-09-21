@@ -1312,7 +1312,6 @@ impl WorkspaceApp {
                     .flex_col()
                     .overflow_hidden()
                     .rounded(px(self.tokens.radii.md))
-                    .bg(rgb(self.tokens.ui.bg))
                     .child(
                         div()
                             .h(px(COMMAND_PALETTE_INPUT_HEIGHT))

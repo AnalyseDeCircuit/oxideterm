@@ -16,8 +16,8 @@ impl WorkspaceApp {
             .gap(px(6.0))
             .min_w_0()
             .px(px(12.0))
-            .pt(px(self.tokens.spacing.two + self.tokens.spacing.one / 2.0))
-            .pb(px(self.tokens.spacing.one / 2.0))
+            // A shorter footer lets the chat body lower the divider together with its controls.
+            .pt(px(self.tokens.spacing.one))
             .border_t_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
             .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
@@ -294,6 +294,8 @@ window.focus(&this.focus_handle, cx);
             &self.tokens,
             self.context_sidebar_content_background(self.tokens.ui.bg),
         )
+        // The toolbar owns the spacing above the composer.
+        .pt(px(0.0))
         .relative()
         .when_some(
             self.render_ai_acp_authentication_prompt(cx),
@@ -600,13 +602,12 @@ window.focus(&this.focus_handle, cx);
 
     pub(in crate::workspace) fn render_ai_safety_menu(&self, cx: &mut Context<Self>) -> AnyElement {
         // Tauri DropdownMenuContent uses w-64 and opens upward from the compact status bar.
-        let menu = div()
+        let menu = material_surface(&self.tokens, div(), MaterialRole::Popover)
             .w(px(256.0))
             .overflow_hidden()
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
             // Safety mode dropdown follows the same menu wheel boundary as
             // Tauri DropdownMenuContent.

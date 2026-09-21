@@ -1042,7 +1042,7 @@ impl WorkspaceApp {
             .py_2()
             .border_b_1()
             .border_color(rgb(theme.border))
-            .bg(rgb(theme.bg_card))
+            // The sidebar body already owns the background tint.
             .overflow_hidden();
 
         breadcrumb = breadcrumb.child(

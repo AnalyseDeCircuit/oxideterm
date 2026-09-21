@@ -144,7 +144,7 @@ impl WorkspaceApp {
                         // padded body content. Full-height preview/editor/diff shells
                         // let header, body, and footer own every edge so GPUI's
                         // rectangular overflow mask cannot expose a second corner color.
-                        dialog.bg(rgb(theme.bg_elevated))
+                        material_surface(&self.tokens, dialog, MaterialRole::Dialog)
                     })
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {

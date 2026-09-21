@@ -52,7 +52,7 @@ impl WorkspaceApp {
             )
         };
         let popup = context_menu_event_boundary(
-            div()
+            material_surface(&self.tokens, div(), MaterialRole::Popover)
                 .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
                 .max_h(px(max_height))
                 .overflow_hidden()
@@ -60,11 +60,6 @@ impl WorkspaceApp {
                 .rounded(px(self.tokens.radii.sm))
                 .border_1()
                 .border_color(file_manager_border(theme.border, has_background))
-                .bg(file_manager_panel_bg(
-                    theme.bg_elevated,
-                    has_background,
-                    0xf2,
-                ))
                 .shadow_lg(),
         )
         .when_some(menu.file.clone(), |menu_el, file| {
@@ -537,7 +532,7 @@ impl WorkspaceApp {
                 }),
             )
             .child(
-                div()
+                material_surface(&self.tokens, div(), MaterialRole::Dialog)
                     .w(px(width.min(f32::from(window.viewport_size().width) - 32.0)))
                     .max_h(px(
                         (f32::from(window.viewport_size().height) * 0.86).max(240.0)
@@ -558,11 +553,6 @@ impl WorkspaceApp {
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
-                    .bg(file_manager_panel_bg(
-                        self.tokens.ui.bg_elevated,
-                        has_background,
-                        0xf2,
-                    ))
                     .shadow_lg()
                     .child(
                         div()
@@ -718,7 +708,7 @@ impl WorkspaceApp {
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "file-manager-properties-transition",
-                div()
+                material_surface(&self.tokens, div(), MaterialRole::Dialog)
                     .w(px(width.max(280.0)))
                     .max_h(px(
                         (f32::from(window.viewport_size().height) * 0.86).max(240.0)
@@ -737,11 +727,6 @@ impl WorkspaceApp {
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
-                    .bg(file_manager_panel_bg(
-                        theme.bg_elevated,
-                        has_background,
-                        0xf2,
-                    ))
                     .shadow_lg()
                     .child(
                         div()

@@ -23,16 +23,16 @@ pub enum AiInlineNoticeKind {
 }
 
 pub fn ai_inline_panel_shell(tokens: &ThemeTokens, left: f32, top: f32) -> Div {
-    let panel = div()
-        .absolute()
-        .w(px(AI_INLINE_PANEL_WIDTH))
-        .left(px(left))
-        .top(px(top))
-        .overflow_hidden()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(rgb(tokens.ui.border))
-        .bg(rgb(tokens.ui.bg_elevated));
+    let panel =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Popover)
+            .absolute()
+            .w(px(AI_INLINE_PANEL_WIDTH))
+            .left(px(left))
+            .top(px(top))
+            .overflow_hidden()
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgb(tokens.ui.border));
     crate::surface::theme_overlay_surface_shadow(panel, tokens)
 }
 

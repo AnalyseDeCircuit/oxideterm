@@ -54,7 +54,7 @@ impl WorkspaceApp {
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "oxide-export-dialog-transition",
-                div()
+                material_surface(&self.tokens, div(), MaterialRole::Dialog)
                     .w(px(OXIDE_MODAL_WIDTH))
                     .max_h(relative(OXIDE_MODAL_MAX_HEIGHT_RATIO))
                     .flex()
@@ -62,7 +62,6 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.lg))
                     .border_1()
                     .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_panel))
                     .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();

@@ -118,13 +118,12 @@ impl WorkspaceApp {
         let selected = self.active_ai_reasoning_level(provider, &model, cx);
         let mut levels = vec![AiReasoningLevel::Auto];
         levels.extend(capability.levels);
-        let mut menu = div()
+        let mut menu = material_surface(&self.tokens, div(), MaterialRole::Popover)
             .w(px(AI_REASONING_MENU_WIDTH))
             .overflow_hidden()
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
             .shadow_lg()
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
             .py(px(self.tokens.spacing.one))

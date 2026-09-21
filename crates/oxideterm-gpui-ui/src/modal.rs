@@ -73,6 +73,10 @@ pub fn set_tauri_backdrop_blur_allowed(allowed: bool) {
     TAURI_BACKDROP_BLUR_ALLOWED.store(allowed, Ordering::Relaxed);
 }
 
+pub(crate) fn backdrop_blur_allowed() -> bool {
+    TAURI_BACKDROP_BLUR_ALLOWED.load(Ordering::Relaxed)
+}
+
 pub fn backdrop_source_effect(role: TauriBackdropRole) -> TauriBackdropEffect {
     let blur_px = match role {
         // Tauri DialogOverlay always includes linuxBackdropBlurClass("backdrop-blur-sm");
@@ -104,7 +108,7 @@ pub fn backdrop_effect_with_blur_allowed(
 }
 
 pub fn backdrop_effect(role: TauriBackdropRole) -> TauriBackdropEffect {
-    backdrop_effect_with_blur_allowed(role, TAURI_BACKDROP_BLUR_ALLOWED.load(Ordering::Relaxed))
+    backdrop_effect_with_blur_allowed(role, backdrop_blur_allowed())
 }
 
 pub fn backdrop_color(role: TauriBackdropRole) -> Rgba {
@@ -262,13 +266,12 @@ pub fn rounded_shell_child_radius(radius: f32) -> f32 {
 
 pub fn dialog_content(tokens: &ThemeTokens) -> Div {
     let theme = tokens.ui;
-    div()
+    crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
         .w(px(tokens.metrics.modal_width))
         .rounded(px(tokens.radii.md))
         .overflow_hidden()
         .border_1()
         .border_color(rgb(theme.border))
-        .bg(rgb(theme.bg_elevated))
 }
 
 pub fn modal_header(tokens: &ThemeTokens, title: String, subtitle: String) -> AnyElement {
@@ -291,7 +294,7 @@ pub fn dialog_header(tokens: &ThemeTokens) -> Div {
         // children need matching corners so painted header backgrounds cannot
         // show rectangular pixels outside the shell radius.
         .rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
-        .bg(rgb(theme.bg_panel))
+        .bg(rgba((theme.bg_panel << 8) | 0x26))
         .border_b_1()
         .border_color(rgb(theme.border))
 }
@@ -340,5 +343,5 @@ pub fn dialog_footer(tokens: &ThemeTokens) -> Div {
         // Mirrors browser clipping for the footer background at the bottom
         // edge of shared DialogContent surfaces.
         .rounded_b(px(rounded_shell_child_radius(tokens.radii.md)))
-        .bg(rgb(theme.bg_panel))
+        .bg(rgba((theme.bg_panel << 8) | 0x26))
 }
