@@ -814,11 +814,21 @@ impl AiWorkspaceEntity {
         self.knowledge_window_activation_subscription = Some(knowledge_activation);
     }
 
+    fn anchor_chat_before_disclosure(&self) {
+        // Manual disclosures grow below the clicked header; they are not new
+        // messages and must not pull the viewport along with the list tail.
+        let list = &self.chat_ui.message_list_state;
+        let top = list.logical_scroll_top();
+        list.pause_following_tail();
+        list.scroll_to(top);
+    }
+
     pub(in crate::workspace) fn toggle_thinking_expansion(
         &mut self,
         key: String,
         default_expanded: bool,
     ) {
+        self.anchor_chat_before_disclosure();
         let current = self
             .chat_ui
             .thinking_expansion_state
@@ -829,6 +839,7 @@ impl AiWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn toggle_tool_call_expansion(&mut self, key: String) {
+        self.anchor_chat_before_disclosure();
         if !self.chat_ui.tool_call_expansion_state.remove(&key) {
             self.chat_ui.tool_call_expansion_state.insert(key);
         }
@@ -4942,6 +4953,77 @@ impl AiModelWorkspaceState {
 pub(in crate::workspace) mod entity_tests {
     use super::*;
     use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn manual_disclosure_keeps_header_position_while_content_grows(cx: &mut TestAppContext) {
+        use gpui::{FollowMode, ListAlignment, ListState, point, px, size};
+        struct DisclosureViewport {
+            state: ListState,
+            expanded: bool,
+        }
+        impl gpui::Render for DisclosureViewport {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let expanded = self.expanded;
+                div().size_full().child(
+                    gpui::list(self.state.clone(), move |index, _, _| {
+                        div()
+                            .w_full()
+                            .h(px(if index == 0 {
+                                400.0
+                            } else if expanded {
+                                500.0
+                            } else {
+                                100.0
+                            }))
+                            .into_any_element()
+                    })
+                    .size_full(),
+                )
+            }
+        }
+        for tool in [false, true] {
+            let entity = cx.new(|cx| {
+                AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+            });
+            let state = ListState::new(2, ListAlignment::Top, px(0.0));
+            state.set_follow_mode(FollowMode::Tail);
+            entity.update(cx, |ai, _| ai.chat_ui.message_list_state = state.clone());
+            let view = cx.new(|_| DisclosureViewport {
+                state: state.clone(),
+                expanded: false,
+            });
+            let window = cx.add_empty_window();
+            let draw = |expanded: bool, cx: &mut gpui::VisualTestContext| {
+                view.update(cx, |view, _| view.expanded = expanded);
+                let view = view.clone();
+                cx.draw(
+                    point(px(0.0), px(0.0)),
+                    size(px(300.0), px(300.0)),
+                    move |_, _| view.into_any_element(),
+                );
+            };
+            let mut window = window;
+            draw(false, &mut window);
+            let header_y = state.bounds_for_item(1).unwrap().top();
+            assert_eq!(header_y, px(200.0));
+            for expanded in [true, false] {
+                entity.update(&mut *window, |ai, _| {
+                    if tool {
+                        ai.toggle_tool_call_expansion("message:tool".into());
+                    } else {
+                        ai.toggle_thinking_expansion("message:thinking".into(), false);
+                    }
+                });
+                state.remeasure_items(1..2);
+                draw(expanded, &mut window);
+                assert_eq!(
+                    state.bounds_for_item(1).unwrap().top(),
+                    header_y,
+                    "tool={tool}, expanded={expanded}"
+                );
+            }
+        }
+    }
     use std::sync::atomic::AtomicUsize;
 
     pub(in crate::workspace) fn queued_turn(id: &str) -> AiQueuedChatTurn {
