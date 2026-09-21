@@ -16,7 +16,8 @@ impl WorkspaceApp {
             .gap(px(6.0))
             .min_w_0()
             .px(px(12.0))
-            .py(px(6.0))
+            .pt(px(self.tokens.spacing.two + self.tokens.spacing.one / 2.0))
+            .pb(px(self.tokens.spacing.one / 2.0))
             .border_t_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
             .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
@@ -298,12 +299,17 @@ window.focus(&this.focus_handle, cx);
             self.render_ai_acp_authentication_prompt(cx),
             |root, prompt| root.child(prompt),
         )
-        .when(self.ai_should_show_context_chips(cx), |root| {
-            root.child(self.render_ai_context_chips(cx))
-        })
-        .when_some(self.render_ai_message_queue(cx), |root, queue| {
-            root.child(queue)
-        })
+        .child(oxideterm_gpui_ui::motion::auto_height(
+            &self.tokens,
+            "ai-context-region",
+            self.ai_should_show_context_chips(cx)
+                .then(|| self.render_ai_context_chips(cx)),
+        ))
+        .child(oxideterm_gpui_ui::motion::auto_height(
+            &self.tokens,
+            "ai-queue-region",
+            self.render_ai_message_queue(cx),
+        ))
         .child(frame)
         .into_any_element()
     }
@@ -371,7 +377,9 @@ window.focus(&this.focus_handle, cx);
                     cx,
                 ));
             }
-            block = block.child(
+            block = block.child(oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                gpui::SharedString::from(format!("ai-queue-row-{conversation}-{id}")),
                 div()
                     .w_full()
                     .min_w_0()
@@ -393,7 +401,8 @@ window.focus(&this.focus_handle, cx);
                             .child(model),
                     )
                     .child(actions),
-            );
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            ));
         }
         Some(
             div()
@@ -1169,20 +1178,24 @@ window.focus(&this.focus_handle, cx);
                                 .border_color(rgba((self.tokens.ui.border << 8) | 0x1a)),
                         )
                         .child(
-                            div().px(px(12.0)).py(px(8.0)).child(
+                            div()
+                                .border_t_1()
+                                .border_color(self.workspace_chrome_divider())
+                                .px(px(12.0))
+                                .py(px(8.0))
+                                .child(
                                 div()
                                     .w_full()
                                     .flex()
                                     .items_center()
                                     .justify_center()
                                     .gap(px(6.0))
-                                    .rounded(px(self.tokens.radii.md))
+                                    .rounded_none()
                                     .px(px(12.0))
                                     .py(px(6.0))
                                     .text_size(px(11.0))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(self.tokens.ui.text))
-                                    .bg(rgba((self.tokens.ui.border << 8) | 0x1a))
                                     .cursor_pointer()
                                     .hover(|style| {
                                         style.bg(rgba((self.tokens.ui.border << 8) | 0x33))
@@ -1511,7 +1524,9 @@ window.focus(&this.focus_handle, cx);
     ) -> AnyElement {
         let mut chips = ai_chat_input_chips(&self.tokens);
         if self.ai_active_terminal_context_available(cx) {
-            chips = chips.child(
+            chips = chips.child(oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                "ai-terminal-context-enter",
                 ai_context_chip(
                     &self.tokens,
                     self.i18n.t("ai.input.context"),
@@ -1537,10 +1552,13 @@ window.focus(&this.focus_handle, cx);
                         cx.notify();
                     }),
                 ),
-            );
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            ));
         }
         if self.ai_active_tab_has_split_panes(cx) && self.ai_entity.read(cx).chat_ui().include_context {
-            chips = chips.child(
+            chips = chips.child(oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                "ai-split-context-enter",
                 ai_context_chip(
                     &self.tokens,
                     self.i18n.t("ai.input.panes"),
@@ -1566,24 +1584,35 @@ window.focus(&this.focus_handle, cx);
                         cx.notify();
                     }),
                 ),
-            );
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            ));
         }
         if self.ai_has_ide_context(cx) {
-            chips = chips.child(ai_context_chip(
+            chips = chips.child(oxideterm_gpui_ui::motion::fade_in(
                 &self.tokens,
-                self.i18n.t("ai.input.ide_context"),
-                AiTone::Emerald,
-                true,
-                Self::render_lucide_icon(LucideIcon::Code2, 12.0, rgb(self.tokens.ui.success)),
+                "ai-ide-context-enter",
+                ai_context_chip(
+                    &self.tokens,
+                    self.i18n.t("ai.input.ide_context"),
+                    AiTone::Emerald,
+                    true,
+                    Self::render_lucide_icon(LucideIcon::Code2, 12.0, rgb(self.tokens.ui.success)),
+                ),
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
             ));
         }
         if self.ai_has_sftp_context(cx) {
-            chips = chips.child(ai_context_chip(
+            chips = chips.child(oxideterm_gpui_ui::motion::fade_in(
                 &self.tokens,
-                self.i18n.t("ai.input.sftp_context"),
-                AiTone::Orange,
-                true,
-                Self::render_lucide_icon(LucideIcon::FolderOpen, 12.0, rgb(self.tokens.ui.warning)),
+                "ai-sftp-context-enter",
+                ai_context_chip(
+                    &self.tokens,
+                    self.i18n.t("ai.input.sftp_context"),
+                    AiTone::Orange,
+                    true,
+                    Self::render_lucide_icon(LucideIcon::FolderOpen, 12.0, rgb(self.tokens.ui.warning)),
+                ),
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
             ));
         }
         chips.into_any_element()

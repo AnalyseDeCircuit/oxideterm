@@ -75,6 +75,7 @@
       "collapse": "Thu gọn"
     },
     "active_sessions": "Phiên hoạt động",
+    "active_session_count": "Phiên đang hoạt động: {{count}}",
     "no_sessions": "Không có phiên",
     "add_new_connection": "Nhấn + để thêm kết nối",
     "host_gpu": {
@@ -723,6 +724,7 @@
       "no_sessions": "Không có phiên",
       "click_to_add": "Nhấn + để thêm kết nối",
       "actions": {
+        "open_session": "Mở phiên",
         "new_terminal": "Terminal mới",
         "sftp": "SFTP",
         "disconnect": "Ngắt kết nối",

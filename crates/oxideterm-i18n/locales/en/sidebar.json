@@ -75,6 +75,7 @@
       "collapse": "Collapse"
     },
     "active_sessions": "Active Sessions",
+    "active_session_count": "Active sessions: {{count}}",
     "no_sessions": "No Sessions",
     "add_new_connection": "Click + to add a new connection",
     "host_gpu": {
@@ -723,6 +724,7 @@
       "no_sessions": "No Sessions",
       "click_to_add": "Click + to add a new connection",
       "actions": {
+        "open_session": "Open Session",
         "new_terminal": "New Terminal",
         "sftp": "SFTP",
         "port_forwarding": "Port Forwarding",

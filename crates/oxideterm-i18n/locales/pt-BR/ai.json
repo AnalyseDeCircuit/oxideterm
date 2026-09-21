@@ -62,6 +62,7 @@
       "notification_body": "Finalizada após {{count}} execuções."
     },
     "chat": {
+      "back_to_question": "Voltar à pergunta",
       "header": "Chat",
       "get_started": "Começar com OxideSens",
       "title": "OxideSens",

@@ -610,7 +610,10 @@ impl TextEditorView {
             .bg(
                 if is_selected_line && self.presentation == EditorPresentation::Document {
                     rgba((self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA)
-                } else if is_current_line && self.presentation == EditorPresentation::Document {
+                } else if is_current_line
+                    && self.settings.highlight_current_line
+                    && self.presentation == EditorPresentation::Document
+                {
                     rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_LINE_ACCENT_ALPHA)
                 } else {
                     rgba(self.appearance.background_hex << 8)
@@ -795,13 +798,14 @@ impl TextEditorView {
         cx: &mut Context<Self>,
     ) -> Div {
         let line = display_row.line;
-        let text_hex = if is_current_line && display_row.is_first {
-            self.appearance.background_hex
-        } else if is_selected_line {
-            self.appearance.text_hex
-        } else {
-            self.appearance.muted_text_hex
-        };
+        let text_hex =
+            if is_current_line && display_row.is_first && self.settings.highlight_current_line {
+                self.appearance.background_hex
+            } else if is_selected_line {
+                self.appearance.text_hex
+            } else {
+                self.appearance.muted_text_hex
+            };
         let mut fold_icon = div()
             .w(px(CM_FOLD_ICON_WIDTH))
             .h(px(line_height))
@@ -836,16 +840,18 @@ impl TextEditorView {
             .items_center()
             .justify_end()
             .pr(px(self.metrics.gutter_padding_x))
-            .bg(if is_current_line && display_row.is_first {
-                rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
-            } else if is_selected_line {
-                self.editor_panel_background(self.appearance.gutter_background_hex)
-                    .blend(&rgba(
-                        (self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA,
-                    ))
-            } else {
-                self.editor_panel_background(self.appearance.gutter_background_hex)
-            })
+            .bg(
+                if is_current_line && display_row.is_first && self.settings.highlight_current_line {
+                    rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
+                } else if is_selected_line {
+                    self.editor_panel_background(self.appearance.gutter_background_hex)
+                        .blend(&rgba(
+                            (self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA,
+                        ))
+                } else {
+                    self.editor_panel_background(self.appearance.gutter_background_hex)
+                },
+            )
             .text_color(rgb(text_hex))
             .child(fold_icon)
             .child(if display_row.is_first {

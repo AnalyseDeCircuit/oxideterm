@@ -4,7 +4,7 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::{button::tauri_focus_visible_ring, modal::rounded_shell_child_radius};
+use crate::button::tauri_focus_visible_ring;
 
 use super::tokens::*;
 
@@ -148,12 +148,6 @@ pub fn ai_chat_input_root_with_background(tokens: &ThemeTokens, background: Rgba
         .flex_none()
         .overflow_hidden()
         .bg(background)
-        .border_t_1()
-        .border_color(bg_alpha(
-            tokens,
-            tokens.ui.border,
-            AI_CHAT_INPUT_BORDER_ALPHA,
-        ))
         .px(px(tokens.spacing.three))
         .py(px(tokens.spacing.two + tokens.spacing.one / 2.0))
 }
@@ -168,13 +162,14 @@ pub fn ai_chat_input_chips(tokens: &ThemeTokens) -> Div {
 }
 
 pub fn ai_chat_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
-    let frame = div()
+    // The frame owns the only input surface; editor and footer remain transparent.
+    div()
         .relative()
         .w_full()
         .min_w_0()
         .flex()
         .flex_col()
-        .rounded(px(tokens.radii.md))
+        .rounded(px(tokens.radii.sm))
         .border_1()
         .border_color(if focused {
             bg_alpha(tokens, tokens.ui.accent, AI_CHAT_INPUT_BORDER_ALPHA)
@@ -185,9 +180,7 @@ pub fn ai_chat_input_frame(tokens: &ThemeTokens, focused: bool) -> Div {
             tokens,
             tokens.ui.bg_panel,
             AI_CHAT_INPUT_PANEL_ALPHA,
-        ));
-    // Focus changes the border role; elevation remains a stable card cue.
-    crate::surface::theme_card_surface_shadow(frame, tokens)
+        ))
 }
 
 pub fn ai_chat_input_editor(tokens: &ThemeTokens, editor: impl IntoElement) -> Div {
@@ -214,14 +207,10 @@ pub fn ai_chat_input_footer(
         .flex()
         .items_center()
         .justify_between()
-        .px(px(tokens.spacing.two))
-        .py(px(tokens.spacing.one))
-        .border_t_1()
-        .border_color(bg_alpha(
-            tokens,
-            tokens.ui.border,
-            AI_CHAT_INPUT_FOOTER_BORDER_ALPHA,
-        ))
+        .gap(px(tokens.spacing.two))
+        .px(px(tokens.spacing.three))
+        .pt(px(tokens.spacing.one))
+        .pb(px(tokens.spacing.two))
         .child(leading)
         .child(trailing)
 }
@@ -386,24 +375,14 @@ pub fn ai_message_time(tokens: &ThemeTokens, label: impl Into<String>, user: boo
         .child(label.into())
 }
 
-pub fn ai_message_model_badge(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
+pub fn ai_message_model_label(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
     div()
+        .min_w_0()
         .max_w(px(180.0))
         .truncate()
-        .rounded(px(tokens.radii.sm))
-        .border_1()
-        .border_color(bg_alpha(
-            tokens,
-            tokens.ui.border,
-            AI_CHAT_INPUT_BORDER_ALPHA,
-        ))
-        .bg(bg_alpha(
-            tokens,
-            tokens.ui.bg_panel,
-            AI_MODEL_BADGE_BG_ALPHA,
-        ))
-        .px(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-        .py(px(tokens.spacing.one / 2.0))
+        .border_l_1()
+        .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
+        .pl(px(tokens.spacing.two))
         .text_size(px(AI_TEXT_10))
         .font_weight(FontWeight::MEDIUM)
         .text_color(muted_text(tokens, 0.45))
@@ -512,31 +491,29 @@ pub fn ai_thinking_compact(
         .flex()
         .items_center()
         .gap(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-        .rounded(px(tokens.radii.md))
-        .px(px(tokens.spacing.two))
+        .rounded(px(tokens.radii.sm))
+        .px(px(tokens.spacing.one))
         .py(px(tokens.spacing.one))
         .text_size(px(AI_TEXT_11))
-        .text_color(muted_text(tokens, AI_MUTED_TEXT_60_ALPHA))
+        .text_color(rgb(tokens.ui.text_muted))
         .cursor_pointer()
         .hover(|style| {
             style
-                .bg(rgb(tokens.ui.bg_sunken))
+                .bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_HOVER_BG_ALPHA))
                 .text_color(rgb(tokens.ui.text_muted))
         })
+        .child(chevron_icon)
         .child(brain_icon)
         .child(label.into())
-        .child(chevron_icon)
 }
 
 pub fn ai_thinking_block(tokens: &ThemeTokens, expanded: bool) -> Div {
     div()
-        .mb(px(tokens.spacing.three))
+        .mb(px(tokens.spacing.one))
+        .min_w_0()
         .overflow_hidden()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(bg_alpha(tokens, tokens.ui.border, 0x33))
-        .bg(bg_alpha(tokens, tokens.ui.bg_sunken, 0x80))
-        .when(!expanded, |block| block)
+        .rounded(px(tokens.radii.sm))
+        .when(expanded, |block| block.mb(px(tokens.spacing.two)))
 }
 
 pub fn ai_thinking_header(
@@ -550,19 +527,17 @@ pub fn ai_thinking_header(
         .w_full()
         .flex()
         .items_center()
-        .gap(px(tokens.spacing.two))
-        .px(px(tokens.spacing.three))
-        .py(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-        // The thinking header can paint a hover background flush to the top of
-        // a rounded block; own the top radius like CSS overflow clipping would.
-        .rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
+        .gap(px(tokens.spacing.one + tokens.spacing.one / 2.0))
+        .px(px(tokens.spacing.one))
+        .py(px(tokens.spacing.one))
+        .rounded(px(tokens.radii.sm))
         .text_size(px(AI_TEXT_11))
         .font_weight(FontWeight::MEDIUM)
-        .text_color(muted_text(tokens, AI_MUTED_TEXT_70_ALPHA))
+        .text_color(rgb(tokens.ui.text_muted))
         .cursor_pointer()
         .hover(|style| {
             style
-                .bg(bg_alpha(tokens, tokens.ui.bg_sunken, 0xcc))
+                .bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_HOVER_BG_ALPHA))
                 .text_color(rgb(tokens.ui.text_muted))
         })
         .child(chevron_icon)
@@ -588,8 +563,11 @@ pub fn ai_thinking_content(
         .id(id)
         .max_h(px(AI_THINKING_MAX_HEIGHT))
         .overflow_y_scroll()
-        .px(px(tokens.spacing.three))
-        .pb(px(tokens.spacing.three))
+        .ml(px(tokens.spacing.two))
+        .border_l_1()
+        .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
+        .px(px(tokens.spacing.two))
+        .py(px(tokens.spacing.one))
         .text_size(px(AI_TEXT_12))
         .line_height(px(20.0))
         .text_color(muted_text(tokens, AI_MUTED_TEXT_80_ALPHA))

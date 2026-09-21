@@ -62,6 +62,7 @@
       "notification_body": "{{count}}회 실행 후 종료되었습니다."
     },
     "chat": {
+      "back_to_question": "질문으로 돌아가기",
       "header": "채팅",
       "get_started": "OxideSens 시작하기",
       "title": "OxideSens",

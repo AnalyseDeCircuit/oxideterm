@@ -62,6 +62,7 @@
       "notification_body": "任务在运行 {{count}} 次后结束。"
     },
     "chat": {
+      "back_to_question": "回到提问",
       "title": "OxideSens",
       "header": "聊天",
       "get_started": "开始使用 OxideSens",

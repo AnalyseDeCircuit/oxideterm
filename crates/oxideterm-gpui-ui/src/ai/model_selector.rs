@@ -19,7 +19,6 @@ const MODEL_SELECTOR_REFRESH_ICON_SIZE: f32 = 10.0; // Tauri refresh w-2.5 h-2.5
 const MODEL_SELECTOR_STATUS_DOT_SIZE: f32 = 8.0; // Tauri local status w-2 h-2.
 const MODEL_SELECTOR_ACTIVE_CHECK_SIZE: f32 = 12.0; // Tauri Check w-3 h-3.
 const MODEL_SELECTOR_PROVIDER_TOP_RULE_HEIGHT: f32 = 2.0; // Tauri h-[2px].
-const MODEL_SELECTOR_SEARCH_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg/50.
 const MODEL_SELECTOR_SEARCH_BORDER_ALPHA: u32 = 0x80; // Tauri border-theme-border/50.
 const MODEL_SELECTOR_OPEN_BG_ALPHA: u32 = 0x1a; // Tauri bg-theme-accent/10.
 const MODEL_SELECTOR_PROVIDER_BORDER_ALPHA: u32 = 0x33; // Tauri border-theme-border/20.
@@ -154,7 +153,7 @@ pub fn ai_model_selector_dropdown(
 
 pub fn ai_model_selector_search_bar(
     tokens: &ThemeTokens,
-    search_icon: impl IntoElement,
+    focused: bool,
     input: impl IntoElement,
     clear_button: Option<AnyElement>,
 ) -> Div {
@@ -167,27 +166,16 @@ pub fn ai_model_selector_search_bar(
                 .flex()
                 .items_center()
                 .gap(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-                .rounded(px(tokens.radii.md))
+                .rounded(px(tokens.radii.xs))
                 .border_1()
-                .border_color(bg_alpha(
-                    tokens,
-                    tokens.ui.border,
-                    MODEL_SELECTOR_SEARCH_BORDER_ALPHA,
-                ))
-                .bg(bg_alpha(
-                    tokens,
-                    tokens.ui.bg,
-                    MODEL_SELECTOR_SEARCH_BG_ALPHA,
-                ))
+                .border_color(if focused {
+                    rgb(tokens.ui.accent)
+                } else {
+                    rgba(0x00000000)
+                })
+                .bg(rgba(0x00000000))
                 .px(px(tokens.spacing.two))
                 .py(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-                .child(
-                    div()
-                        .flex_none()
-                        .size(px(MODEL_SELECTOR_SEARCH_ICON_SIZE))
-                        .text_color(rgb(tokens.ui.text_muted))
-                        .child(search_icon),
-                )
                 .child(div().min_w_0().flex_1().child(input))
                 .when_some(clear_button, |bar, clear_button| {
                     bar.child(

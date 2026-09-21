@@ -75,6 +75,7 @@
       "collapse": "折叠"
     },
     "active_sessions": "活动会话",
+    "active_session_count": "{{count}} 个活动会话",
     "no_sessions": "暂无会话",
     "add_new_connection": "点击 + 添加新连接",
     "host_gpu": {
@@ -723,6 +724,7 @@
       "no_sessions": "暂无会话",
       "click_to_add": "点击 + 添加新连接",
       "actions": {
+        "open_session": "打开会话",
         "new_terminal": "新建终端",
         "sftp": "SFTP",
         "port_forwarding": "端口转发",

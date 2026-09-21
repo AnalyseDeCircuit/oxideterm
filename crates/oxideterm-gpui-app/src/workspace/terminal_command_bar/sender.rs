@@ -14,7 +14,6 @@ use oxideterm_terminal::{TerminalSenderInputMode, TerminalSenderPacing};
 use zeroize::Zeroizing;
 
 const TERMINAL_SENDER_CONTROL_HEIGHT: f32 = 28.0;
-const TERMINAL_SENDER_COMPACT_HEIGHT: f32 = 32.0;
 const TERMINAL_SENDER_PANEL_PADDING: f32 = 8.0;
 const TERMINAL_SENDER_COMPACT_HORIZONTAL_PADDING: f32 = 12.0;
 const TERMINAL_SENDER_COMPACT_EDITOR_HEIGHT: f32 = 24.0;
@@ -70,7 +69,7 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .border_t_1()
-            .border_color(rgb(theme.border))
+            .border_color(self.workspace_chrome_divider())
             .bg(rgb(theme.bg))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_terminal_command_sender_resize(event, window, cx);
@@ -448,11 +447,7 @@ impl WorkspaceApp {
                     } else {
                         rgba(0x00000000)
                     })
-                    .bg(if active {
-                        rgb(self.tokens.ui.bg_hover)
-                    } else {
-                        rgba(0x00000000)
-                    })
+                    .bg(rgba(0x00000000))
                     .cursor_pointer()
                     .text_size(px(11.0))
                     .text_color(foreground)
@@ -530,8 +525,8 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(8.0))
             .border_b_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .border_color(self.workspace_chrome_divider())
+            .bg(rgb(self.tokens.ui.bg))
             .child(tab_list)
             .child(task_actions)
             .into_any_element()
@@ -560,12 +555,12 @@ impl WorkspaceApp {
             .filter(|(target, _, _)| snapshot.selected_targets.contains(&target.pane_id))
             .count();
         let current_target_label = self.terminal_command_active_target_label(cx);
-        let status_tone = match snapshot.status {
-            TerminalCommandSenderStatus::Completed => StatusTone::Success,
-            TerminalCommandSenderStatus::Failed => StatusTone::Error,
-            TerminalCommandSenderStatus::Running => StatusTone::Accent,
-            TerminalCommandSenderStatus::Stopped => StatusTone::Warning,
-            TerminalCommandSenderStatus::Idle => StatusTone::Neutral,
+        let status_color = match snapshot.status {
+            TerminalCommandSenderStatus::Completed => self.tokens.ui.success,
+            TerminalCommandSenderStatus::Failed => self.tokens.ui.error,
+            TerminalCommandSenderStatus::Running => self.tokens.ui.accent,
+            TerminalCommandSenderStatus::Stopped => self.tokens.ui.warning,
+            TerminalCommandSenderStatus::Idle => self.tokens.ui.text_muted,
         };
         let format_controls = div()
             .w_full()
@@ -666,47 +661,56 @@ impl WorkspaceApp {
                 ),
                 |row| row.child(div().flex_1().min_w(px(8.0))),
             )
-            .child(status_pill(
-                &self.tokens,
-                status_label,
-                StatusPillOptions::new(status_tone).compact(),
-            ))
-            .child(
-                monospace_datum(
-                    &self.tokens,
-                    format!(
-                        "{}/{} · {} {} · {} {}",
-                        snapshot.completed_units,
-                        snapshot.total_units,
-                        self.i18n.t("terminal.sender.accepted"),
-                        snapshot.accepted_writes,
-                        self.i18n.t("terminal.sender.skipped"),
-                        snapshot.skipped_writes
-                    ),
-                    Some(settings_mono_font_family(self.settings_store.settings())),
-                    MonospaceDatumOptions::new(MonospaceDatumTone::Muted).text_size(10.0),
-                )
-                .whitespace_nowrap(),
+            .when(
+                snapshot.status != TerminalCommandSenderStatus::Idle,
+                |row| {
+                    row.child(
+                        div()
+                            .flex_none()
+                            .text_size(px(11.0))
+                            .text_color(rgb(status_color))
+                            .child(status_label),
+                    )
+                    .child(
+                        monospace_datum(
+                            &self.tokens,
+                            format!(
+                                "{}/{} · {} {} · {} {}",
+                                snapshot.completed_units,
+                                snapshot.total_units,
+                                self.i18n.t("terminal.sender.accepted"),
+                                snapshot.accepted_writes,
+                                self.i18n.t("terminal.sender.skipped"),
+                                snapshot.skipped_writes
+                            ),
+                            Some(settings_mono_font_family(self.settings_store.settings())),
+                            MonospaceDatumOptions::new(MonospaceDatumTone::Muted).text_size(10.0),
+                        )
+                        .whitespace_nowrap(),
+                    )
+                },
             )
             .child(self.terminal_sender_run_button(sender_id, running, cx));
 
         div()
             .flex_none()
             .border_t_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_panel))
-            .child(
-                div()
-                    .h(px(TERMINAL_SENDER_PROGRESS_HEIGHT))
-                    .w_full()
-                    .bg(rgb(self.tokens.ui.border))
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative((progress_percent / 100.0).clamp(0.0, 1.0)))
-                            .bg(rgb(self.tokens.ui.accent)),
-                    ),
-            )
+            .border_color(self.workspace_chrome_divider())
+            .bg(rgb(self.tokens.ui.bg))
+            .when(snapshot.total_units > 0, |panel| {
+                panel.child(
+                    div()
+                        .h(px(TERMINAL_SENDER_PROGRESS_HEIGHT))
+                        .w_full()
+                        .bg(self.workspace_chrome_divider())
+                        .child(
+                            div()
+                                .h_full()
+                                .w(relative((progress_percent / 100.0).clamp(0.0, 1.0)))
+                                .bg(rgb(self.tokens.ui.accent)),
+                        ),
+                )
+            })
             .child(
                 div()
                     .min_h(px(40.0))
@@ -722,7 +726,7 @@ impl WorkspaceApp {
                     .px(px(TERMINAL_SENDER_PANEL_PADDING))
                     .py(px(4.0))
                     .border_t_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
+                    .border_color(self.workspace_chrome_divider())
                     .flex()
                     .items_center()
                     .child(target_controls),
@@ -737,6 +741,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let sender_id = snapshot.id;
         let active_index = usize::from(snapshot.input_mode == TerminalSenderInputMode::Hex);
+        let control_id = "terminal-sender-mode";
+        let previous_index = self
+            .segmented_control_user_previous_index(control_id, active_index)
+            .unwrap_or(active_index);
+        let transition_active =
+            self.segmented_control_user_transition_active(control_id, active_index);
+        let can_change = snapshot.status != TerminalCommandSenderStatus::Running;
         let items = [TerminalSenderInputMode::Text, TerminalSenderInputMode::Hex]
             .into_iter()
             .enumerate()
@@ -750,9 +761,21 @@ impl WorkspaceApp {
                     label,
                     index == active_index,
                 )
+                .rounded_none()
+                .px(px(8.0))
+                .py(px(4.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
+                        if can_change && index != active_index {
+                            this.begin_user_segmented_control_transition_from(
+                                control_id,
+                                active_index,
+                                index,
+                                cx,
+                            );
+                        }
                         this.terminal_command_sender.update(cx, |sender, cx| {
                             sender.set_input_mode(sender_id, mode, cx);
                         });
@@ -765,8 +788,9 @@ impl WorkspaceApp {
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             ("terminal-sender-mode", sender_id.0),
-            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, active_index, 2)
-                .compact(TERMINAL_SENDER_MODE_CONTROL_WIDTH),
+            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 2)
+                .user_transition_active(transition_active)
+                .underline(TERMINAL_SENDER_MODE_CONTROL_WIDTH),
             items,
         )
         .into_any_element()
@@ -779,6 +803,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let sender_id = snapshot.id;
         let active_index = usize::from(snapshot.pacing == TerminalSenderPacing::Character);
+        let control_id = "terminal-sender-pacing";
+        let previous_index = self
+            .segmented_control_user_previous_index(control_id, active_index)
+            .unwrap_or(active_index);
+        let transition_active =
+            self.segmented_control_user_transition_active(control_id, active_index);
+        let can_change = snapshot.status != TerminalCommandSenderStatus::Running;
         let items = [TerminalSenderPacing::Line, TerminalSenderPacing::Character]
             .into_iter()
             .enumerate()
@@ -797,9 +828,21 @@ impl WorkspaceApp {
                     label,
                     index == active_index,
                 )
+                .rounded_none()
+                .px(px(8.0))
+                .py(px(4.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
+                        if can_change && index != active_index {
+                            this.begin_user_segmented_control_transition_from(
+                                control_id,
+                                active_index,
+                                index,
+                                cx,
+                            );
+                        }
                         this.terminal_command_sender.update(cx, |sender, cx| {
                             sender.set_pacing(sender_id, pacing, cx);
                         });
@@ -812,8 +855,9 @@ impl WorkspaceApp {
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             ("terminal-sender-pacing", sender_id.0),
-            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, active_index, 2)
-                .compact(TERMINAL_SENDER_PACING_CONTROL_WIDTH),
+            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 2)
+                .user_transition_active(transition_active)
+                .underline(TERMINAL_SENDER_PACING_CONTROL_WIDTH),
             items,
         )
         .into_any_element()
@@ -832,6 +876,13 @@ impl WorkspaceApp {
             TerminalCommandSenderTargetScope::Selected => 2,
             TerminalCommandSenderTargetScope::Group => 3,
         };
+        let control_id = "terminal-sender-scope";
+        let previous_index = self
+            .segmented_control_user_previous_index(control_id, active_index)
+            .unwrap_or(active_index);
+        let transition_active =
+            self.segmented_control_user_transition_active(control_id, active_index);
+        let can_change = snapshot.status != TerminalCommandSenderStatus::Running;
         let items = [
             TerminalCommandSenderTargetScope::Current,
             TerminalCommandSenderTargetScope::All,
@@ -854,9 +905,21 @@ impl WorkspaceApp {
                 ),
             };
             oxideterm_gpui_ui::segmented_control_item(&self.tokens, label, index == active_index)
+                .rounded_none()
+                .px(px(8.0))
+                .py(px(4.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
+                        if can_change && index != active_index {
+                            this.begin_user_segmented_control_transition_from(
+                                control_id,
+                                active_index,
+                                index,
+                                cx,
+                            );
+                        }
                         this.terminal_command_sender.update(cx, |sender, cx| {
                             sender.set_target_scope(sender_id, scope, cx);
                         });
@@ -869,8 +932,9 @@ impl WorkspaceApp {
         oxideterm_gpui_ui::segmented_control(
             &self.tokens,
             ("terminal-sender-scope", sender_id.0),
-            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, active_index, 4)
-                .compact(TERMINAL_SENDER_SCOPE_CONTROL_WIDTH),
+            oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 4)
+                .user_transition_active(transition_active)
+                .underline(TERMINAL_SENDER_SCOPE_CONTROL_WIDTH),
             items,
         )
         .into_any_element()
@@ -989,7 +1053,7 @@ impl WorkspaceApp {
             .w(px(1.0))
             .h(px(18.0))
             .flex_none()
-            .bg(rgba((self.tokens.ui.border << 8) | 0x99))
+            .bg(self.workspace_chrome_divider())
             .into_any_element()
     }
 
@@ -1005,9 +1069,9 @@ impl WorkspaceApp {
             .h(px(TERMINAL_SENDER_CONTROL_HEIGHT))
             .flex()
             .items_center()
-            .rounded(px(self.tokens.radii.sm))
+            .rounded(px(self.tokens.radii.xs))
             .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0xb3))
+            .border_color(self.workspace_chrome_divider())
             .bg(rgb(self.tokens.ui.bg))
             .overflow_hidden()
             .child(
@@ -1211,11 +1275,18 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn focus_terminal_command_sender_editor(
-        &self,
+        &mut self,
         sender_id: TerminalCommandSenderId,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        for control_id in [
+            "terminal-sender-mode",
+            "terminal-sender-pacing",
+            "terminal-sender-scope",
+        ] {
+            self.segmented_control_user_motion.clear(control_id);
+        }
         let editor = self
             .terminal_command_sender
             .read(cx)

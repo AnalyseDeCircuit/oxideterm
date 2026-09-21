@@ -1,7 +1,6 @@
 use super::*;
 
 const SETTINGS_SEARCH_RESULT_LIMIT: usize = 40;
-const SETTINGS_SEARCH_INPUT_HEIGHT: f32 = 36.0;
 
 #[derive(Clone, Debug)]
 struct SettingsSearchResult {
@@ -1044,71 +1043,69 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let settings = self.settings_workspace.read(cx);
         let query = settings.settings_search_query();
-        let focused =
-            settings.settings_entity_focused_input() == Some(SettingsInput::SettingsSearch);
         let target = WorkspaceImeTarget::Settings(SettingsInput::SettingsSearch);
         let workspace = cx.entity();
-        let search_input =
-            self.text_input_with_workspace_ime(
-                target,
-                text_input(
-                    &self.tokens,
-                    TextInputView {
-                        value: query,
-                        placeholder: self.i18n.t("settings_view.search.placeholder"),
-                        focused,
-                        caret_visible: self.input_caret.visible(),
-                        secret: false,
-                        selected_all: false,
-                        selected_range: self.ime_selected_range_for_target(target, cx),
-                        marked_text: self.marked_text_for_target(target, cx),
+        // The navigation surface already owns its image tint; do not stack a second one.
+        let search_input = self
+            .sidebar_search_row(rgba(0x00000000))
+            .child(
+                self.text_input_with_workspace_ime(
+                    target,
+                    text_input(
+                        &self.tokens,
+                        TextInputView {
+                            value: query,
+                            placeholder: self.i18n.t("settings_view.search.placeholder"),
+                            focused: settings.settings_entity_focused_input()
+                                == Some(SettingsInput::SettingsSearch),
+                            caret_visible: self.input_caret.visible(),
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target, cx),
+                            marked_text: self.marked_text_for_target(target, cx),
+                        },
+                    )
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .px_0()
+                    .border_0()
+                    .rounded_none()
+                    .bg(rgba(0x00000000))
+                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                    .line_height(px(20.0)),
+                    |this, cx| {
+                        this.focus_settings_input(SettingsInput::SettingsSearch, String::new(), cx);
                     },
-                )
-                .relative()
-                .w_full()
-                .h(px(SETTINGS_SEARCH_INPUT_HEIGHT))
-                .pl(px(34.0))
-                .pr(px(if query.is_empty() { 12.0 } else { 34.0 }))
-                .child(div().absolute().left(px(12.0)).top(px(10.0)).child(
-                    Self::render_lucide_icon(
-                        LucideIcon::Search,
-                        15.0,
-                        rgb(self.tokens.ui.text_muted),
-                    ),
+                    cx,
+                ),
+            )
+            .when(!query.is_empty(), |input| {
+                let clear_workspace = workspace.clone();
+                input.child(self.workspace_tooltip_icon_button(
+                    LucideIcon::X,
+                    13.0,
+                    rgb(self.tokens.ui.text_muted),
+                    IconButtonOptions {
+                        hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                        ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
+                    },
+                    self.i18n.t("settings_view.search.clear"),
+                    "settings-search-clear",
+                    true,
+                    move |_event, _window, cx| {
+                        let _ = clear_workspace.update(cx, |this, cx| {
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.clear_settings_search_query(cx);
+                            });
+                            this.clear_ime_selection();
+                            this.show_active_input_caret(cx);
+                        });
+                        cx.stop_propagation();
+                    },
+                    workspace.clone(),
                 ))
-                .when(!query.is_empty(), |input| {
-                    let clear_workspace = workspace.clone();
-                    input.child(div().absolute().right(px(6.0)).top(px(4.0)).child(
-                        self.workspace_tooltip_icon_button(
-                            LucideIcon::X,
-                            13.0,
-                            rgb(self.tokens.ui.text_muted),
-                            IconButtonOptions {
-                                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                                ..IconButtonOptions::opaque_toolbar(28.0, ButtonRadius::Sm)
-                            },
-                            self.i18n.t("settings_view.search.clear"),
-                            "settings-search-clear",
-                            true,
-                            move |_event, _window, cx| {
-                                let _ = clear_workspace.update(cx, |this, cx| {
-                                    this.settings_workspace.update(cx, |settings, cx| {
-                                        settings.clear_settings_search_query(cx);
-                                    });
-                                    this.clear_ime_selection();
-                                    this.show_active_input_caret(cx);
-                                });
-                                cx.stop_propagation();
-                            },
-                            workspace.clone(),
-                        ),
-                    ))
-                }),
-                |this, cx| {
-                    this.focus_settings_input(SettingsInput::SettingsSearch, String::new(), cx);
-                },
-                cx,
-            );
+            });
         let results = settings_search_results(&self.i18n, query)
             .into_iter()
             .filter(|result| {
@@ -1123,6 +1120,7 @@ impl WorkspaceApp {
             .size_full()
             .min_h(px(0.0))
             .selectable_overflow_y_scroll(&result_scroll)
+            .pt_3()
             .px_2()
             .pb_3()
             .flex()
@@ -1206,7 +1204,7 @@ impl WorkspaceApp {
             .min_h(px(0.0))
             .flex()
             .flex_col()
-            .child(div().flex_none().px_3().pb_3().child(search_input))
+            .child(search_input)
             .child(
                 div()
                     .flex_1()

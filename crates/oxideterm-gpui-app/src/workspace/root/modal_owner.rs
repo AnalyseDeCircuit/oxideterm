@@ -886,6 +886,21 @@ impl WorkspaceApp {
         let Some(owner) = self.active_window_modal_owner(cx) else {
             return false;
         };
+        // Exiting search dialogs still own input until their backdrop is removed.
+        // Route only their reopen shortcut; do not start a new IME composition.
+        if owner == ActiveWindowModalOwner::CommandPalette
+            && self.command_palette.read(cx).is_closing()
+        {
+            self.handle_command_palette_key(event, window, cx);
+            return true;
+        }
+        if owner == ActiveWindowModalOwner::Shortcuts
+            && self.shortcuts_modal.presence.phase()
+                == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+        {
+            self.handle_shortcuts_modal_key(event, cx);
+            return true;
+        }
         if owner == ActiveWindowModalOwner::QuickCommandsManager
             && self.quick_command_text_editor_focused(window, cx)
             && !matches!(event.keystroke.key.as_str(), "escape" | "tab")

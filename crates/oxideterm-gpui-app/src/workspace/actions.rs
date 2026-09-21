@@ -498,6 +498,8 @@ impl WorkspaceApp {
         let entering = !settings.sidebar_ui.zen_mode;
         settings.sidebar_ui.zen_mode = entering;
         if entering {
+            self.sidebar_motion.settle(0.0);
+            self.context_sidebar_motion.settle(0.0);
             self.sidebar_collapsed = true;
             self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
             self.context_sidebar_motion_generation =
@@ -860,6 +862,7 @@ impl WorkspaceApp {
             if event.keystroke.key == "escape" {
                 self.session_search_query.clear();
                 self.session_search_open = false;
+                self.begin_disclosure_motion("session-search".into(), false, cx);
                 self.clear_ime_selection();
                 cx.notify();
             }

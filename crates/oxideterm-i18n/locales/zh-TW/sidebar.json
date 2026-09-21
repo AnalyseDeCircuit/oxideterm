@@ -75,6 +75,7 @@
       "collapse": "收起"
     },
     "active_sessions": "使用中的工作階段",
+    "active_session_count": "{{count}} 個作用中工作階段",
     "no_sessions": "無工作階段",
     "add_new_connection": "按 + 新增連線",
     "host_gpu": {
@@ -723,6 +724,7 @@
       "no_sessions": "無工作階段",
       "click_to_add": "按 + 新增連線",
       "actions": {
+        "open_session": "開啟工作階段",
         "new_terminal": "新終端機",
         "sftp": "SFTP",
         "disconnect": "斷開",

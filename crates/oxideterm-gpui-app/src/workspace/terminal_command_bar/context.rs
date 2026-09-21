@@ -52,6 +52,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn terminal_command_context_chip_slot(
+        &self,
         max_width: f32,
         chip: AnyElement,
     ) -> AnyElement {
@@ -62,7 +63,17 @@ impl WorkspaceApp {
             .max_w(px(max_width))
             .flex_initial()
             .overflow_hidden()
-            .child(chip)
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.one))
+            .child(
+                div()
+                    .w(px(1.0))
+                    .h(px(12.0))
+                    .flex_none()
+                    .bg(self.workspace_chrome_divider()),
+            )
+            .child(div().min_w(px(0.0)).overflow_hidden().child(chip))
             .into_any_element()
     }
 
@@ -88,10 +99,6 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | 0x66))
-            .bg(rgba((theme.bg_hover << 8) | 0x4d))
             .text_color(rgb(theme.text_muted))
             .id(tooltip_id)
             .on_mouse_move({
@@ -150,16 +157,9 @@ impl WorkspaceApp {
                 &self.tokens,
                 ContextChipOptions::new()
                     .max_width(TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH)
-                    .border_color(if active {
-                        rgba((theme.accent << 8) | 0x99)
-                    } else {
-                        rgba((theme.border << 8) | 0x80)
-                    })
-                    .background_color(if active {
-                        rgba((theme.accent << 8) | 0x1f)
-                    } else {
-                        rgba((theme.bg_hover << 8) | 0x66)
-                    })
+                    .radius(ButtonRadius::Sm)
+                    .border_color(rgba(0x00000000))
+                    .background_color(rgba(0x00000000))
                     .text_color(foreground)
                     .hover_background_color(rgb(theme.bg_hover)),
                 Some(Self::render_lucide_icon(
@@ -744,16 +744,9 @@ impl WorkspaceApp {
                 &self.tokens,
                 ContextChipOptions::new()
                     .max_width(TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH)
-                    .border_color(if active {
-                        rgba((self.tokens.ui.accent << 8) | 0x99)
-                    } else {
-                        rgba(0x22c55e4d)
-                    })
-                    .background_color(if active {
-                        rgba((self.tokens.ui.accent << 8) | 0x1f)
-                    } else {
-                        rgba(0x22c55e1a)
-                    })
+                    .radius(ButtonRadius::Sm)
+                    .border_color(rgba(0x00000000))
+                    .background_color(rgba(0x00000000))
                     .text_color(foreground)
                     .hover_background_color(rgba(0x22c55e26)),
                 Some(Self::render_lucide_icon(
@@ -825,8 +818,6 @@ impl WorkspaceApp {
             trailing.push(
                 div()
                     .flex_none()
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgba(0x082f4933))
                     .px(px(4.0))
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .child(task_count.to_string())
@@ -840,16 +831,9 @@ impl WorkspaceApp {
                 &self.tokens,
                 ContextChipOptions::new()
                     .max_width(TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH)
-                    .border_color(if active {
-                        rgba((theme.accent << 8) | 0x99)
-                    } else {
-                        rgba(0x38bdf84d)
-                    })
-                    .background_color(if active {
-                        rgba((theme.accent << 8) | 0x1f)
-                    } else {
-                        rgba(0x38bdf81a)
-                    })
+                    .radius(ButtonRadius::Sm)
+                    .border_color(rgba(0x00000000))
+                    .background_color(rgba(0x00000000))
                     .text_color(foreground)
                     .hover_background_color(rgba(0x38bdf826)),
                 Some(Self::render_lucide_icon(

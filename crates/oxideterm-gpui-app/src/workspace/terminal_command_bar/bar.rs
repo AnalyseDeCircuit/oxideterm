@@ -203,19 +203,19 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .when(cwd_supported, |row| {
-                                row.child(Self::terminal_command_context_chip_slot(
+                                row.child(self.terminal_command_context_chip_slot(
                                     TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
                                     self.render_terminal_cwd_chip(cwd_snapshot, cx),
                                 ))
                             })
                             .when_some(git_snapshot, |row, snapshot| {
-                                row.child(Self::terminal_command_context_chip_slot(
+                                row.child(self.terminal_command_context_chip_slot(
                                     TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
                                     self.render_terminal_git_chip(snapshot, cx),
                                 ))
                             })
                             .when_some(project_snapshot, |row, snapshot| {
-                                row.child(Self::terminal_command_context_chip_slot(
+                                row.child(self.terminal_command_context_chip_slot(
                                     TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH,
                                     self.render_terminal_project_chip(snapshot, cx),
                                 ))

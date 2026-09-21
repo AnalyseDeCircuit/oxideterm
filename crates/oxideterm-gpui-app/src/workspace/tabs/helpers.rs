@@ -2,11 +2,12 @@ use chrono::{DateTime, Utc};
 use oxideterm_connections::ConnectionStore;
 use oxideterm_remote_desktop::RemoteDesktopProtocol;
 
-const WELCOME_STACKED_LAYOUT_MAX_WIDTH: f32 = 800.0;
+pub(super) const WELCOME_PAGE_PADDING: f32 = 24.0;
+const WELCOME_WORKBENCH_MIN_ROW_WIDTH: f32 = 800.0;
 
-/// Keeps the start-page breakpoint testable without coupling it to GPUI rendering.
+/// The breakpoint uses card space, excluding the page gutters.
 pub(super) fn welcome_layout_is_stacked(available_width: f32) -> bool {
-    available_width < WELCOME_STACKED_LAYOUT_MAX_WIDTH
+    available_width - 2.0 * WELCOME_PAGE_PADDING < WELCOME_WORKBENCH_MIN_ROW_WIDTH
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

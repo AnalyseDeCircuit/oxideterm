@@ -248,7 +248,7 @@ window.focus(&this.focus_handle, cx);
         });
         ai_model_selector_search_bar(
             &self.tokens,
-            Self::render_lucide_icon(LucideIcon::Search, 12.0, rgb(self.tokens.ui.text_muted)),
+            focused,
             input,
             clear,
         )

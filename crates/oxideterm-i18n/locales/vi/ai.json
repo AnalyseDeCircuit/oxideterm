@@ -62,6 +62,7 @@
       "notification_body": "Đã kết thúc sau {{count}} lần chạy."
     },
     "chat": {
+      "back_to_question": "Quay lại câu hỏi",
       "header": "Trò chuyện",
       "get_started": "Bắt đầu với OxideSens",
       "title": "OxideSens",

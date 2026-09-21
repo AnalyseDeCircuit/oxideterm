@@ -249,10 +249,12 @@ impl TerminalCommandSenderEntity {
                 soft_wrap: false,
                 indentation_markers: false,
                 highlight_special_chars: false,
+                highlight_current_line: false,
                 placeholder: Some(placeholder),
                 ..EditorSettings::default()
             };
             editor.set_settings(settings, cx);
+            editor.set_border_visible(false);
             editor.set_presentation(presentation, cx);
             editor.set_context_menu_labels(context_menu_labels);
             editor

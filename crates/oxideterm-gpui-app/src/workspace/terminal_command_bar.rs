@@ -53,6 +53,7 @@ const TERMINAL_PROJECT_MENU_MARGIN: f32 = 12.0;
 const TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH: f32 = 260.0; // Keep context chips compact beside command-bar actions.
 const TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH: f32 = 240.0; // Project labels are shorter than cwd/git labels in Tauri.
 const TERMINAL_COMMAND_TOOLBAR_HEIGHT: f32 = 32.0;
+pub(in crate::workspace) const TERMINAL_SENDER_COMPACT_HEIGHT: f32 = 32.0;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 
 #[derive(Clone, Debug, Eq, PartialEq)]

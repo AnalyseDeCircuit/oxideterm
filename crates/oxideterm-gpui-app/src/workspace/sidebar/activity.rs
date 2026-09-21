@@ -35,7 +35,7 @@ impl WorkspaceApp {
             .flex_col()
             .items_center()
             .border_r_1()
-            .border_color(rgb(theme.border));
+            .border_color(self.workspace_chrome_divider());
 
         bar = bar.child(
             div()
@@ -50,7 +50,7 @@ impl WorkspaceApp {
                 // matches the adjacent sidebar and workspace tab bars exactly.
                 .bg(self.workspace_chrome_background(theme.bg))
                 .border_b_1()
-                .border_color(rgb(theme.border))
+                .border_color(self.workspace_chrome_divider())
                 .child(
                     div()
                         .id("activity-sidebar-toggle")
@@ -147,10 +147,16 @@ impl WorkspaceApp {
         for (section, icon) in top_items_after_plugins {
             primary_items = primary_items.child(self.render_activity_icon(section, icon, cx));
         }
-        // App lock is a global action rather than a selectable panel. Keep it
-        // directly below Host Tools as the final primary activity action.
-        if self.settings_store.settings().sidebar_ui.show_app_lock_icon {
-            primary_items = primary_items.child(self.render_app_lock_activity_icon(cx));
+        // The sessions footer owns the lock action while visible. Keep the rail
+        // entry reachable when that footer is hidden or another panel is selected.
+        if self.settings_store.settings().sidebar_ui.show_app_lock_icon
+            && (self.sidebar_collapsed
+                || self.effective_sidebar_panel_section() != SidebarSection::Sessions)
+        {
+            primary_items =
+                primary_items.child(div().mb(px(self.tokens.metrics.activity_icon_gap)).child(
+                    self.render_app_lock_button(self.tokens.metrics.activity_icon_size, cx),
+                ));
         }
 
         let mut bottom = div().relative().flex().flex_col().items_center().child(

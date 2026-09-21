@@ -196,7 +196,7 @@ impl WorkspaceApp {
         if let Some(error) = self.ai_entity.read(cx).chat_initialization_error().copied() {
             return self.render_ai_sidebar_initialization_error(error, cx);
         }
-        let Some((conversation_id, items, signatures)) = ({
+        let Some((conversation_id, items, signatures, prompts, message_end)) = ({
             let ai = self.ai_entity.read(cx);
             let conversation = ai.conversation_state().active_conversation();
             conversation.and_then(|conversation| {
@@ -221,6 +221,7 @@ impl WorkspaceApp {
                     .messages
                     .iter()
                     .rposition(|message| message.role == AiChatRole::Assistant);
+                let mut prompts = Vec::new();
                 let mut signature_cache = chat_ui.message_signature_cache.borrow_mut();
                 signature_cache.select_conversation(&conversation.id);
                 for (index, message) in conversation.messages.iter().enumerate() {
@@ -232,12 +233,19 @@ impl WorkspaceApp {
                             ^ page.and_then(|page| page.body_revisions.get(&message.id)).copied().unwrap_or_default().rotate_left(24),
                         chat_ui.thinking_expansion_state.get(&message.id),
                     );
+                    if message.role == AiChatRole::User {
+                        prompts.push(AiStickyPrompt {
+                            list_index: items.len(),
+                            message_index: index,
+                        });
+                    }
                     items.push(AiChatListItem::Message {
                         index,
                         last_assistant: last_assistant_index == Some(index),
                     });
-                    signatures.push(signature);
+                    signatures.push(signature ^ self.disclosure_motions.message_signature(&message.id));
                 }
+                let message_end = items.len();
                 if page.is_some_and(|page| page.after.is_some()) {
                     items.push(AiChatListItem::HistoryPage { older: false });
                     signatures.push(0x686973746f727902);
@@ -252,7 +260,7 @@ impl WorkspaceApp {
                 }
                 items.push(AiChatListItem::BottomSpacer);
                 signatures.push(ai_chat_bottom_spacer_signature());
-                Some((conversation.id.clone(), items, signatures))
+                Some((conversation.id.clone(), items, signatures, prompts, message_end))
             })
         }) else {
             return self.render_ai_sidebar_empty_chat(cx);
@@ -265,7 +273,7 @@ impl WorkspaceApp {
         let state = self.ai_entity.read(cx).chat_ui().message_list_state.clone();
         let viewport = self.ai_chat_list_viewport_snapshot(cx);
         let scrollbar = oxideterm_gpui_ui::scroll::Scrollbar::for_list(&state).id("ai-chat-scrollbar");
-        let list = tauri_virtual_list(state, virtual_spec, move |index, _window, cx| {
+        let list = tauri_virtual_list(state.clone(), virtual_spec, move |index, _window, cx| {
             let Some(item) = items.get(index).cloned() else {
                 return div().into_any_element();
             };
@@ -276,7 +284,11 @@ impl WorkspaceApp {
         })
         .w_full()
         .h_full();
-        div().relative().size_full().min_h_0().child(list).child(scrollbar).into_any_element()
+        let entity = cx.entity();
+        let sticky = ai_sticky_prompt_overlay(list.into_any_element(), state, prompts, message_end, move |prompt, _, cx| {
+            entity.update(cx, |this, cx| this.render_ai_sticky_prompt(&conversation_id, prompt, cx))
+        });
+        div().relative().size_full().min_h_0().child(sticky).child(scrollbar).into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_chat_list_item(

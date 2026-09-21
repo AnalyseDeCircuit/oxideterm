@@ -1261,13 +1261,7 @@ impl WorkspaceApp {
             )
         };
         let target = WorkspaceImeTarget::FileManager(input);
-        div()
-            .h(px(32.0))
-            .px(px(8.0))
-            .py(px(4.0))
-            .border_b_1()
-            .border_color(file_manager_border(theme.border, has_background))
-            .bg(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
+        self.sidebar_search_row(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
             .child(
                 self.text_input_with_workspace_ime(
                     target,
@@ -1284,8 +1278,15 @@ impl WorkspaceApp {
                             marked_text: self.marked_text_for_target(target, cx),
                         },
                     )
-                    .h(px(24.0))
-                    .bg(file_manager_bg(theme.bg_sunken, has_background)),
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .px_0()
+                    .border_0()
+                    .rounded_none()
+                    .bg(rgba(0x00000000))
+                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                    .line_height(px(20.0)),
                     |this, cx| {
                         this.file_manager.update(cx, |file_manager, cx| {
                             file_manager.focused_input = Some(FileManagerInput::Filter);

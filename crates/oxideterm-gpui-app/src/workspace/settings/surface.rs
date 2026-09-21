@@ -831,7 +831,7 @@ impl WorkspaceApp {
                 .flex_none()
                 .h(px(48.0))
                 .px(px(20.0))
-                .mb(px(12.0))
+                .when(!settings_search_open, |header| header.mb(px(12.0)))
                 .flex()
                 .items_center()
                 .justify_between()
@@ -1312,6 +1312,9 @@ impl WorkspaceApp {
         });
         // Monitoring settings own recurring remote shells and page-scoped GPU work.
         self.apply_host_tool_monitoring_settings(cx);
+        if !self.tokens.motion.enabled {
+            self.disclosure_motions.clear();
+        }
         self.sidebar_collapsed = settings.sidebar_ui.collapsed;
         self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
         self.context_sidebar_motion_generation =
@@ -1347,6 +1350,17 @@ impl WorkspaceApp {
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_chat_sidebar_width(ai_sidebar_width);
         });
+        self.sidebar_motion.settle(if self.sidebar_rendered {
+            self.sidebar_panel_width()
+        } else {
+            0.0
+        });
+        self.context_sidebar_motion
+            .settle(if self.context_sidebar_rendered {
+                ai_sidebar_width
+            } else {
+                0.0
+            });
         let panes = self
             .tab_host
             .read(cx)

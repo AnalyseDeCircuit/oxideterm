@@ -2904,6 +2904,11 @@ impl WorkspaceApp {
                 cx.notify();
             }
             WorkspaceImeTarget::ShortcutsModalSearch => {
+                if self.shortcuts_modal.presence.phase()
+                    == oxideterm_gpui_ui::motion::ExitPhase::Exiting
+                {
+                    return;
+                }
                 replace_utf16(&mut self.shortcuts_modal.query, replacement_range, text);
                 self.shortcuts_modal.scroll_handle = gpui::UniformListScrollHandle::new();
                 self.show_active_input_caret(cx);

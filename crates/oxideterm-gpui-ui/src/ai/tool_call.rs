@@ -1,17 +1,15 @@
 use gpui::{
     Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, ScrollHandle,
     ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement, Styled, div, prelude::*,
-    px, rgb, rgba,
+    px, rgb,
 };
 use oxideterm_theme::ThemeTokens;
-
-use crate::modal::rounded_shell_child_radius;
 
 use super::tokens::*;
 
 pub fn ai_tool_block(tokens: &ThemeTokens) -> Div {
     div()
-        .my(px(tokens.spacing.two))
+        .my(px(tokens.spacing.one))
         .flex()
         .flex_col()
         .gap(px(tokens.spacing.one))
@@ -70,18 +68,14 @@ pub fn ai_tool_item(tokens: &ThemeTokens, call: &AiToolCallView) -> Div {
         AiTone::Amber
     };
     div()
+        .min_w_0()
         .overflow_hidden()
-        .rounded(px(tokens.radii.md))
-        .border_1()
-        .border_color(if pending {
-            tone_border(tokens, pending_tone, 0x66)
-        } else {
-            bg_alpha(tokens, tokens.ui.border, 0x33)
-        })
-        .bg(if pending {
-            tone_bg(tokens, pending_tone, AI_TOOL_BG_ALPHA)
-        } else {
-            rgba(0x00000000)
+        .rounded(px(tokens.radii.sm))
+        // Approval remains distinct; ordinary calls share the message surface.
+        .when(pending, |item| {
+            item.border_1()
+                .border_color(tone_border(tokens, pending_tone, 0x66))
+                .bg(tone_bg(tokens, pending_tone, AI_TOOL_BG_ALPHA))
         })
 }
 
@@ -96,29 +90,28 @@ pub fn ai_tool_item_header(
     div()
         .w_full()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-        .px(px(tokens.spacing.two))
-        .py(px(tokens.spacing.one + tokens.spacing.one / 2.0))
-        // The header hover background touches the tool-call card edge. When
-        // collapsed it is the whole card; when expanded it only owns the top
-        // edge, matching browser overflow clipping without square remnants.
+        .px(px(tokens.spacing.one))
+        .py(px(tokens.spacing.one))
+        .rounded(px(tokens.radii.sm))
         .when(expanded, |header| {
-            header.rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
-        })
-        .when(!expanded, |header| {
-            header.rounded(px(rounded_shell_child_radius(tokens.radii.md)))
+            header.bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_CHIP_BG_ALPHA))
         })
         .text_size(px(AI_TEXT_11))
         .cursor_pointer()
         .hover(|style| style.bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_HOVER_BG_ALPHA)))
+        .child(chevron_icon)
         .child(status_icon)
         .child(tool_icon)
         .child(
             div()
-                .flex_none()
+                .min_w_0()
+                .max_w_full()
+                .truncate()
                 .font_weight(FontWeight::MEDIUM)
-                .text_color(muted_text(tokens, AI_MUTED_TEXT_70_ALPHA))
+                .text_color(rgb(tokens.ui.text_muted))
                 .child(call.name.clone()),
         )
         .child(ai_tool_badge(
@@ -151,11 +144,10 @@ pub fn ai_tool_item_header(
                 div()
                     .flex_none()
                     .text_size(px(AI_TEXT_9))
-                    .text_color(muted_text(tokens, AI_MUTED_TEXT_30_ALPHA))
+                    .text_color(rgb(tokens.ui.text_muted))
                     .child(duration),
             )
         })
-        .child(chevron_icon)
 }
 
 pub fn ai_tool_badge(tokens: &ThemeTokens, tone: AiTone, label: impl Into<String>) -> Div {
@@ -163,13 +155,9 @@ pub fn ai_tool_badge(tokens: &ThemeTokens, tone: AiTone, label: impl Into<String
         .flex()
         .items_center()
         .flex_none()
-        .rounded(px(tokens.radii.xs))
-        .border_1()
-        .border_color(tone_border(tokens, tone, AI_CHIP_BORDER_ALPHA))
-        .bg(tone_bg(tokens, tone, AI_CHIP_BG_ALPHA))
-        .px(px(tokens.spacing.one))
-        .py(px(tokens.spacing.one / 2.0))
-        .text_size(px(AI_TEXT_9))
+        .min_w_0()
+        .max_w_full()
+        .text_size(px(AI_TEXT_10))
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(tone_color(tokens, tone)))
         .child(label.into())
@@ -180,12 +168,8 @@ pub fn ai_tool_neutral_badge(tokens: &ThemeTokens, label: impl Into<String>) -> 
         .flex()
         .items_center()
         .flex_none()
-        .rounded(px(tokens.radii.xs))
-        .border_1()
-        .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
-        .bg(bg_alpha(tokens, tokens.ui.bg, AI_HEADER_BORDER_ALPHA))
-        .px(px(tokens.spacing.one))
-        .py(px(tokens.spacing.one / 2.0))
+        .min_w_0()
+        .max_w_full()
         .text_size(px(AI_TEXT_9))
         .font_weight(FontWeight::MEDIUM)
         .text_color(muted_text(tokens, AI_MUTED_TEXT_60_ALPHA))

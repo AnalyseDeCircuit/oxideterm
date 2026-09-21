@@ -6,13 +6,17 @@ use std::{collections::HashSet, ops::Range, sync::Arc};
 use gpui::{Context, Task, UniformListScrollHandle};
 use oxideterm_connections::{SshConfigHost, list_ssh_config_hosts};
 use oxideterm_editor_core::utf16::replace_utf16;
+use oxideterm_gpui_ui::motion::{ExitPhase, ExitPresence};
 use oxideterm_workspace::{CommandPaletteMode as PaletteMode, parse_command_palette_query};
+use std::time::Duration;
 
 use super::{PaletteExecution, PaletteItem};
 
 /// Immutable palette state consumed by the window renderer.
 #[derive(Clone)]
 pub(super) struct CommandPaletteView {
+    pub(super) phase: ExitPhase,
+    pub(super) motion_generation: usize,
     pub(super) raw_query: String,
     pub(super) mode: PaletteMode,
     pub(super) scroll_handle: UniformListScrollHandle,
@@ -22,6 +26,9 @@ pub(super) struct CommandPaletteView {
 /// Owns command-palette interaction state and SSH-config discovery lifetime.
 pub(in crate::workspace) struct CommandPaletteEntity {
     open: bool,
+    presence: ExitPresence,
+    exit_task: Option<Task<()>>,
+    motion_generation: usize,
     raw_query: String,
     mode: PaletteMode,
     selected_index: usize,
@@ -38,6 +45,9 @@ impl CommandPaletteEntity {
     pub(in crate::workspace) fn new(runtime: Arc<tokio::runtime::Runtime>) -> Self {
         Self {
             open: false,
+            presence: ExitPresence::visible(),
+            exit_task: None,
+            motion_generation: 0,
             raw_query: String::new(),
             mode: PaletteMode::All,
             selected_index: 0,
@@ -53,6 +63,8 @@ impl CommandPaletteEntity {
 
     pub(super) fn view(&self) -> CommandPaletteView {
         CommandPaletteView {
+            phase: self.presence.phase(),
+            motion_generation: self.motion_generation,
             raw_query: self.raw_query.clone(),
             mode: self.mode,
             scroll_handle: self.scroll_handle.clone(),
@@ -86,6 +98,9 @@ impl CommandPaletteEntity {
         existing_names: HashSet<String>,
         cx: &mut Context<Self>,
     ) {
+        self.exit_task = None;
+        self.presence.reopen();
+        self.motion_generation = self.motion_generation.wrapping_add(1);
         self.open = true;
         self.reset_interaction();
         if auto_load_hosts {
@@ -98,7 +113,38 @@ impl CommandPaletteEntity {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn is_closing(&self) -> bool {
+        self.presence.phase() == ExitPhase::Exiting
+    }
+
+    pub(in crate::workspace) fn begin_close(&mut self, delay: Duration, cx: &mut Context<Self>) {
+        if !self.open {
+            return;
+        }
+        let Some(generation) = self.presence.begin_exit() else {
+            return;
+        };
+        self.invalidate_load();
+        self.ssh_config_hosts_loading = false;
+        if delay.is_zero() {
+            self.close(cx);
+            return;
+        }
+        // The entity keeps its existing view until fade-out ends; reopening cancels this task.
+        let timer = cx.background_executor().timer(delay);
+        self.exit_task = Some(cx.spawn(async move |weak, cx| {
+            timer.await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.presence.finish_exit(generation) {
+                    this.close(cx);
+                }
+            });
+        }));
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn close(&mut self, cx: &mut Context<Self>) {
+        self.exit_task = None;
         self.invalidate_load();
         self.open = false;
         self.reset_interaction();
@@ -128,7 +174,7 @@ impl CommandPaletteEntity {
         text: &str,
         cx: &mut Context<Self>,
     ) -> bool {
-        if text.is_empty() {
+        if self.is_closing() || text.is_empty() {
             return false;
         }
         self.raw_query.push_str(text);
@@ -138,7 +184,7 @@ impl CommandPaletteEntity {
     }
 
     pub(in crate::workspace) fn pop_query(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.raw_query.pop().is_none() {
+        if self.is_closing() || self.raw_query.pop().is_none() {
             return false;
         }
         self.finish_query_change();
@@ -152,6 +198,9 @@ impl CommandPaletteEntity {
         text: &str,
         cx: &mut Context<Self>,
     ) {
+        if self.is_closing() {
+            return;
+        }
         replace_utf16(&mut self.raw_query, replacement_range, text);
         self.finish_query_change();
         cx.notify();
@@ -203,7 +252,7 @@ impl CommandPaletteEntity {
         index: usize,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.selected_index == index {
+        if self.is_closing() || self.selected_index == index {
             return false;
         }
         self.selected_index = index;
@@ -214,29 +263,27 @@ impl CommandPaletteEntity {
     pub(super) fn take_selected_action(
         &mut self,
         items: &[PaletteItem],
+        close_delay: Duration,
         cx: &mut Context<Self>,
     ) -> Option<PaletteExecution> {
         let item = items.get(self.selected_index)?;
-        self.take_item_action(item, cx)
+        self.take_item_action(item, close_delay, cx)
     }
 
     pub(super) fn take_item_action(
         &mut self,
         item: &PaletteItem,
+        close_delay: Duration,
         cx: &mut Context<Self>,
     ) -> Option<PaletteExecution> {
-        if !self.open || item.disabled {
+        if !self.open || self.is_closing() || item.disabled {
             return None;
         }
         let execution = PaletteExecution {
             id: item.id.clone(),
             action: item.action.clone(),
         };
-        self.invalidate_load();
-        self.open = false;
-        self.reset_interaction();
-        self.ssh_config_hosts_loading = false;
-        cx.notify();
+        self.begin_close(close_delay, cx);
         Some(execution)
     }
 
@@ -406,6 +453,47 @@ mod tests {
         });
     }
 
+    #[gpui::test]
+    fn animated_close_keeps_the_view_then_clears_it_and_reopen_cancels_close(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
+        entity.update(cx, |entity, cx| {
+            entity.open(false, HashSet::new(), cx);
+            entity.push_query_text("> terminal", cx);
+            entity.begin_close(Duration::from_millis(200), cx);
+            assert!(entity.is_open());
+            assert!(entity.is_closing());
+            entity.replace_query_utf16(None, "ignored", cx);
+            assert_eq!(entity.query(), "> terminal");
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(100));
+        entity.update(cx, |entity, cx| {
+            assert_eq!(entity.query(), "> terminal");
+            entity.open(false, HashSet::new(), cx);
+            entity.push_query_text("new query", cx);
+        });
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            assert!(entity.is_open());
+            assert!(!entity.is_closing());
+            assert_eq!(entity.query(), "new query");
+            entity.begin_close(Duration::from_millis(200), cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            assert!(!entity.is_open());
+            assert_eq!(entity.query(), "");
+            entity.open(false, HashSet::new(), cx);
+            entity.begin_close(Duration::ZERO, cx);
+            assert!(!entity.is_open());
+        });
+    }
+
     struct DropSignal(Arc<AtomicBool>);
 
     impl Drop for DropSignal {
@@ -439,7 +527,11 @@ mod tests {
         let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
         entity.update(cx, |entity, cx| {
             entity.open(false, HashSet::new(), cx);
-            assert!(entity.take_item_action(&palette_item(true), cx).is_none());
+            assert!(
+                entity
+                    .take_item_action(&palette_item(true), Duration::ZERO, cx)
+                    .is_none()
+            );
             assert!(entity.is_open());
         });
     }
@@ -451,11 +543,17 @@ mod tests {
             entity.open(false, HashSet::new(), cx);
             let item = palette_item(false);
             let execution = entity
-                .take_item_action(&item, cx)
+                .take_item_action(&item, Duration::from_millis(200), cx)
                 .expect("enabled palette action");
             assert_eq!(execution.id, "cmd:test");
+            assert!(entity.is_open());
+            assert!(entity.is_closing());
             assert!(matches!(execution.action, PaletteAction::ReloadWindow));
-            assert!(entity.take_item_action(&item, cx).is_none());
+            assert!(
+                entity
+                    .take_item_action(&item, Duration::from_millis(200), cx)
+                    .is_none()
+            );
         });
     }
 }

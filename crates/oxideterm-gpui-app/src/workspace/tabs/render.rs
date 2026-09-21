@@ -1,6 +1,6 @@
 use super::helpers::{
-    WelcomeRecentConnection, WelcomeRecentKind, WelcomeRecentTarget, effective_shortcut_label,
-    welcome_layout_is_stacked, welcome_recent_connections,
+    WELCOME_PAGE_PADDING, WelcomeRecentConnection, WelcomeRecentKind, WelcomeRecentTarget,
+    effective_shortcut_label, welcome_layout_is_stacked, welcome_recent_connections,
 };
 use super::*;
 
@@ -85,7 +85,7 @@ impl WorkspaceApp {
             .relative()
             .overflow_hidden()
             .border_b_1()
-            .border_color(rgb(theme.border))
+            .border_color(self.workspace_chrome_divider())
             .bg(self.workspace_chrome_background(theme.bg));
 
         // Tauri's scroll container measures the full inline-flex tab row as
@@ -239,7 +239,7 @@ impl WorkspaceApp {
                 .border_color(if show_reconnect_progress {
                     rgb(theme.warning)
                 } else {
-                    rgb(theme.border)
+                    self.workspace_chrome_divider()
                 })
                 .bg(self.workspace_chrome_background(if active {
                     theme.bg_panel
@@ -614,7 +614,7 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(self.tokens.metrics.tab_gap))
             .border_r_1()
-            .border_color(rgb(theme.border))
+            .border_color(self.workspace_chrome_divider())
             .bg(self.workspace_chrome_background(if exiting.was_active {
                 theme.bg_panel
             } else {
@@ -985,7 +985,7 @@ impl WorkspaceApp {
                             .flex_col()
                             .items_center()
                             .justify_center()
-                            .px(px(24.0))
+                            .px(px(WELCOME_PAGE_PADDING))
                             .py(px(24.0))
                             .child(
                                 div()
@@ -1142,25 +1142,15 @@ impl WorkspaceApp {
     }
 
     fn render_welcome_workbench(&self, stacked: bool, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_stretch()
-            .justify_center()
-            .gap(px(16.0))
-            .when(stacked, |workbench| workbench.flex_col())
-            .when(!stacked, |workbench| workbench.flex_wrap())
-            .child(self.render_welcome_recent_connections(stacked, cx))
-            .child(self.render_welcome_guidance(stacked, cx))
-            .into_any_element()
+        welcome_workbench_layout(
+            stacked,
+            self.render_welcome_recent_connections(cx),
+            self.render_welcome_guidance(cx),
+        )
+        .into_any_element()
     }
 
-    fn render_welcome_recent_connections(
-        &self,
-        stacked: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn render_welcome_recent_connections(&self, cx: &mut Context<Self>) -> gpui::Div {
         const RECENT_CONNECTION_LIMIT: usize = 4;
 
         let theme = self.tokens.ui;
@@ -1184,16 +1174,6 @@ impl WorkspaceApp {
         // The start page uses borders and fill for grouping; extra elevation
         // makes the three peer surfaces feel heavier than the brand above.
         .shadow_none()
-        .min_w(px(360.0))
-        .flex_1()
-        .flex_basis(px(540.0))
-        .when(stacked, |surface| {
-            surface
-                .w_full()
-                .max_w_full()
-                .min_w(px(0.0))
-                .flex_basis(gpui::auto())
-        })
         .flex()
         .flex_col()
         .gap(px(12.0))
@@ -1250,7 +1230,7 @@ impl WorkspaceApp {
             );
         }
 
-        surface.into_any_element()
+        surface
     }
 
     fn render_welcome_recent_empty(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -1364,7 +1344,7 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_welcome_guidance(&self, stacked: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome_guidance(&self, cx: &mut Context<Self>) -> gpui::Div {
         let theme = self.tokens.ui;
         let has_background = self.window_background_preferences().is_some();
         oxideterm_gpui_ui::semantic_surface(
@@ -1374,17 +1354,6 @@ impl WorkspaceApp {
                 .has_background_image(has_background),
         )
         .shadow_none()
-        .min_w(px(260.0))
-        .max_w(px(344.0))
-        .flex_1()
-        .flex_basis(px(300.0))
-        .when(stacked, |surface| {
-            surface
-                .w_full()
-                .max_w_full()
-                .min_w(px(0.0))
-                .flex_basis(gpui::auto())
-        })
         .flex()
         .flex_col()
         .gap(px(8.0))
@@ -1431,7 +1400,6 @@ impl WorkspaceApp {
             WelcomeToolAction::CloudSync,
             cx,
         ))
-        .into_any_element()
     }
 
     fn render_welcome_tool_row(
@@ -1612,5 +1580,91 @@ impl WorkspaceApp {
             )
             .child(self.i18n.t(label_key))
             .into_any_element()
+    }
+}
+
+fn welcome_workbench_layout(stacked: bool, recent: gpui::Div, guidance: gpui::Div) -> gpui::Div {
+    let recent = recent
+        .min_w(px(360.0))
+        .flex_1()
+        .flex_basis(px(540.0))
+        .when(stacked, |surface| {
+            surface.w_full().max_w_full().min_w(px(0.0)).flex_none()
+        });
+    let guidance = guidance
+        .min_w(px(260.0))
+        .max_w(px(344.0))
+        .flex_1()
+        .flex_basis(px(300.0))
+        .when(stacked, |surface| {
+            surface.w_full().max_w_full().min_w(px(0.0)).flex_none()
+        });
+    div()
+        .w_full()
+        .flex()
+        .flex_row()
+        .items_stretch()
+        .justify_center()
+        .gap(px(16.0))
+        .when(stacked, |workbench| workbench.flex_col())
+        .child(recent)
+        .child(guidance)
+}
+
+#[cfg(test)]
+mod welcome_layout_tests {
+    use super::*;
+    use gpui::{Render, TestAppContext, size};
+
+    struct WelcomeLayout;
+    impl Render for WelcomeLayout {
+        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().px(px(WELCOME_PAGE_PADDING)).child(
+                welcome_workbench_layout(
+                    welcome_layout_is_stacked(f32::from(window.viewport_size().width)),
+                    div().h(px(100.0)).debug_selector(|| "recent".into()),
+                    div().h(px(120.0)).debug_selector(|| "guidance".into()),
+                )
+                .max_w(px(920.0))
+                .debug_selector(|| "workbench".into()),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn welcome_cards_resize_as_one_layout(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| WelcomeLayout);
+        // Exercise both sides of the breakpoint, the previous accidental-wrap range,
+        // and the reverse resize direction used while dragging either sidebar.
+        for (width, stacked) in [
+            (1000.0, false),
+            (900.0, false),
+            (870.0, false),
+            (848.0, false),
+            (847.0, true),
+            (800.0, true),
+            (420.0, true),
+            (870.0, false),
+        ] {
+            cx.simulate_resize(size(px(width), px(800.0)));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let frame = cx.debug_bounds("workbench").unwrap();
+            let recent = cx.debug_bounds("recent").unwrap();
+            let guidance = cx.debug_bounds("guidance").unwrap();
+            if stacked {
+                assert_eq!(recent.origin.x, frame.origin.x, "width={width}");
+                assert_eq!(guidance.origin.x, frame.origin.x, "width={width}");
+                assert_eq!(recent.size.width, frame.size.width, "width={width}");
+                assert_eq!(guidance.size.width, frame.size.width, "width={width}");
+                assert!(guidance.origin.y >= recent.bottom(), "width={width}");
+            } else {
+                assert_eq!(
+                    recent.origin.y, guidance.origin.y,
+                    "cards unexpectedly wrapped at width={width}"
+                );
+                assert!(recent.right() < guidance.origin.x, "width={width}");
+                assert!(guidance.right() <= frame.right(), "width={width}");
+            }
+        }
     }
 }

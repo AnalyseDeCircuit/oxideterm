@@ -11,6 +11,7 @@ pub struct EditorSettings {
     pub find_case_sensitive: bool,
     pub find_whole_word: bool,
     pub highlight_special_chars: bool,
+    pub highlight_current_line: bool,
     pub indentation_markers: bool,
     pub placeholder: Option<String>,
 }
@@ -25,6 +26,7 @@ impl Default for EditorSettings {
             find_case_sensitive: false,
             find_whole_word: false,
             highlight_special_chars: true,
+            highlight_current_line: true,
             indentation_markers: true,
             placeholder: Some("...".to_string()),
         }

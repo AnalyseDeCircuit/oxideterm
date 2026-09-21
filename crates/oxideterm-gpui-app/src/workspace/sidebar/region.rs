@@ -69,18 +69,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let expanded_width = self.sidebar_panel_width();
-        let expanded = !self.sidebar_collapsed;
+        self.sidebar_motion.retarget(if self.sidebar_collapsed {
+            0.0
+        } else {
+            expanded_width
+        });
         let content = div()
             .flex_none()
             .w(px(expanded_width))
             .h_full()
             .child(self.render_sidebar_region(window, cx));
-        oxideterm_gpui_ui::motion::horizontal_reveal(
+        self.sidebar_motion.animate(
             &self.tokens,
             "workspace-left-sidebar-motion",
-            content,
-            expanded_width,
-            expanded,
+            div().h_full().flex_none().overflow_hidden().child(content),
+            |viewport, width| viewport.w(px(width)),
         )
     }
 
@@ -89,18 +92,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let expanded_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
-        let expanded = self.context_sidebar_visible();
+        self.context_sidebar_motion
+            .retarget(if self.context_sidebar_visible() {
+                expanded_width
+            } else {
+                0.0
+            });
         let content = div()
             .flex_none()
             .w(px(expanded_width))
             .h_full()
             .child(self.render_context_right_sidebar_frame(cx));
-        oxideterm_gpui_ui::motion::horizontal_reveal(
+        self.context_sidebar_motion.animate(
             &self.tokens,
             "workspace-right-sidebar-motion",
-            content,
-            expanded_width,
-            expanded,
+            div().h_full().flex_none().overflow_hidden().child(content),
+            |viewport, width| viewport.w(px(width)),
         )
     }
 
@@ -172,7 +179,7 @@ impl WorkspaceApp {
                             // cannot fall through to a scrollable tool body.
                             .occlude()
                             .border_b_1()
-                            .border_color(rgb(theme.border))
+                            .border_color(self.workspace_chrome_divider())
                             // Keep the title and collapse button in one real
                             // horizontal flex row. The region width is owned by
                             // the parent frame, so this row must never infer a
@@ -236,13 +243,26 @@ impl WorkspaceApp {
                             // Keep the sidebar tint below the titlebar so the
                             // translucent chrome is composited exactly once.
                             .bg(self.workspace_sidebar_background(theme.bg))
-                            .child(match self.active_context_sidebar_panel {
-                                ContextSidebarPanel::Assistant => {
-                                    self.render_ai_sidebar_content(cx)
-                                }
-                                ContextSidebarPanel::HostTools => {
-                                    self.render_host_tools_context_panel(cx)
-                                }
+                            .child({
+                                let content = match self.active_context_sidebar_panel {
+                                    ContextSidebarPanel::Assistant => {
+                                        self.render_ai_sidebar_content(cx)
+                                    }
+                                    ContextSidebarPanel::HostTools => {
+                                        self.render_host_tools_context_panel(cx)
+                                    }
+                                };
+                                oxideterm_gpui_ui::motion::fade_in(
+                                    &self.tokens,
+                                    match self.active_context_sidebar_panel {
+                                        ContextSidebarPanel::Assistant => "context-panel-assistant",
+                                        ContextSidebarPanel::HostTools => {
+                                            "context-panel-host-tools"
+                                        }
+                                    },
+                                    div().size_full().child(content),
+                                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                                )
                             }),
                     ),
             )
@@ -255,8 +275,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let seam = self.tokens.metrics.activity_bar_width + self.sidebar_panel_width();
-        sidebar_resize_hotzone_chrome(
+        let activity_width = self.tokens.metrics.activity_bar_width;
+        let hotzone = sidebar_resize_hotzone_chrome(
             "workspace-left-sidebar-resize-hotzone",
             if self.sidebar_resizing {
                 rgb(theme.accent)
@@ -265,7 +285,6 @@ impl WorkspaceApp {
             },
             true,
         )
-        .left(px(sidebar_resize_hotzone_origin(seam)))
         .top(px(top_offset))
         .bottom_0()
         .on_mouse_down(
@@ -281,8 +300,13 @@ impl WorkspaceApp {
                 this.sidebar_resize_hotzone_hovered = *hovered;
                 cx.notify();
             }
-        }))
-        .into_any_element()
+        }));
+        self.sidebar_motion.animate(
+            &self.tokens,
+            "left-sidebar-edge-motion",
+            hotzone,
+            move |edge, width| edge.left(px(sidebar_resize_hotzone_origin(activity_width + width))),
+        )
     }
 
     pub(in crate::workspace) fn render_context_right_sidebar_resize_hotzone(
@@ -291,18 +315,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        sidebar_resize_hotzone_chrome(
+        let hotzone = sidebar_resize_hotzone_chrome(
             "context-right-sidebar-resize-hotzone",
             if self.ai_entity.read(cx).chat_ui().sidebar_resizing {
                 rgb(theme.accent)
             } else {
-                rgb(theme.border)
+                self.workspace_chrome_divider()
             },
             false,
         )
-        .right(px(sidebar_resize_hotzone_origin(
-            self.ai_entity.read(cx).chat_ui().sidebar_width,
-        )))
         .top(px(top_offset))
         .bottom_0()
         .on_mouse_down(
@@ -318,8 +339,13 @@ impl WorkspaceApp {
                 this.sidebar_resize_hotzone_hovered = *hovered;
                 cx.notify();
             }
-        }))
-        .into_any_element()
+        }));
+        self.context_sidebar_motion.animate(
+            &self.tokens,
+            "right-sidebar-edge-motion",
+            hotzone,
+            |edge, width| edge.right(px(sidebar_resize_hotzone_origin(width))),
+        )
     }
 
     pub(in crate::workspace) fn render_context_sidebar_panel_title(
@@ -374,12 +400,26 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .border_r_1()
-            .border_color(rgb(theme.border))
+            .border_color(self.workspace_chrome_divider())
             .child(self.render_sidebar_header(cx))
             .when(
                 self.effective_sidebar_panel_section() == SidebarSection::Sessions
-                    && self.session_search_open,
-                |panel| panel.child(self.render_session_search_input(cx)),
+                    && self
+                        .disclosure_motions
+                        .retained("session-search", self.session_search_open),
+                |panel| {
+                    panel.child(
+                        self.disclosure_motions.render(
+                            "session-search",
+                            &self.tokens,
+                            div()
+                                .flex_none()
+                                .overflow_hidden()
+                                .child(self.render_session_search_input(cx)),
+                            Some(36.0),
+                        ),
+                    )
+                },
             )
             .child(
                 div()
@@ -388,10 +428,14 @@ impl WorkspaceApp {
                     .w_full()
                     .flex()
                     .flex_col()
-                    // Keep the body on the lighter sidebar tint while the
-                    // fixed header independently matches workspace chrome.
-                    .bg(self.workspace_sidebar_background(theme.bg_panel))
+                    // Match the activity bar and context sidebar base surface
+                    // so the full-height navigation body does not read as a card.
+                    .bg(self.workspace_sidebar_background(theme.bg))
                     .child(self.render_sidebar_content(window, cx)),
+            )
+            .when(
+                self.effective_sidebar_panel_section() == SidebarSection::Sessions,
+                |sidebar| sidebar.child(self.render_active_sessions_footer(cx)),
             )
             .into_any_element()
     }
@@ -438,7 +482,7 @@ impl WorkspaceApp {
             // without stacking it over the sidebar body's translucent tint.
             .bg(self.workspace_chrome_background(theme.bg))
             .border_b_1()
-            .border_color(rgb(theme.border))
+            .border_color(self.workspace_chrome_divider())
             .px_2()
             .child(
                 self.render_window_drag_content_region(

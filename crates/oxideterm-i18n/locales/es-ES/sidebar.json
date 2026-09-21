@@ -75,6 +75,7 @@
       "collapse": "Contraer"
     },
     "active_sessions": "Sesiones activas",
+    "active_session_count": "Sesiones activas: {{count}}",
     "no_sessions": "Sin sesiones",
     "add_new_connection": "Haz clic en + para añadir una nueva conexión",
     "host_gpu": {
@@ -723,6 +724,7 @@
       "no_sessions": "Sin sesiones",
       "click_to_add": "Haz clic en + para añadir una nueva conexión",
       "actions": {
+        "open_session": "Abrir sesión",
         "new_terminal": "Nuevo terminal",
         "sftp": "SFTP",
         "disconnect": "Desconectar",

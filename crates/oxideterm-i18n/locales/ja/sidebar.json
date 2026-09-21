@@ -75,6 +75,7 @@
       "collapse": "折りたたむ"
     },
     "active_sessions": "アクティブなセッション",
+    "active_session_count": "アクティブなセッション：{{count}}",
     "no_sessions": "セッションなし",
     "add_new_connection": "+ をクリックして新しい接続を追加",
     "host_gpu": {
@@ -723,6 +724,7 @@
       "no_sessions": "セッションなし",
       "click_to_add": "+ をクリックして新しい接続を追加",
       "actions": {
+        "open_session": "セッションを開く",
         "new_terminal": "新しいターミナル",
         "sftp": "SFTP",
         "disconnect": "切断",

@@ -243,6 +243,21 @@ pub(in crate::workspace) enum WorkspaceContextMenuDismissal {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn sidebar_search_row(&self, background: Rgba) -> gpui::Div {
+        div()
+            .w_full()
+            .min_w_0()
+            .flex_none()
+            .h(px(36.0))
+            .px_3()
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.one))
+            .border_b_1()
+            .border_color(self.workspace_chrome_divider())
+            .bg(background)
+    }
+
     pub(in crate::workspace) fn workspace_tooltip_icon_button(
         &self,
         icon: LucideIcon,

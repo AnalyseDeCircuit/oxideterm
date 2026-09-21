@@ -540,8 +540,9 @@ impl WorkspaceApp {
         true
     }
 
-    pub(in crate::workspace) fn render_app_lock_activity_icon(
+    pub(in crate::workspace) fn render_app_lock_button(
         &self,
+        button_size: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -558,19 +559,16 @@ impl WorkspaceApp {
                 rgb(theme.text),
             ),
             oxideterm_gpui_ui::button::IconButtonOptions {
-                size: self.tokens.metrics.activity_icon_size,
+                size: button_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,
-                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
-                    self.tokens.metrics.activity_icon_size,
-                )
+                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(button_size)
             },
         );
         button
             .id("activity-app-lock")
             .relative()
-            .mb(px(self.tokens.metrics.activity_icon_gap))
             .on_mouse_move(
                 cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
                     this.queue_workspace_tooltip(

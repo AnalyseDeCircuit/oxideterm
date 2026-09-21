@@ -49,6 +49,7 @@ mod root {
     pub(super) mod tests;
     pub(super) mod window_state;
 }
+mod disclosure_motion;
 mod selectable_text;
 mod selection_motion;
 mod session_icons;
@@ -192,7 +193,7 @@ use oxideterm_gpui_ui::{
     text_input::{TextInputView, text_input},
     toast::{ToastVariant, ToastView, toast_action, toast_close},
     toaster::toaster,
-    tooltip::tooltip_content,
+    tooltip::tooltip_surface,
 };
 use oxideterm_i18n::{I18n, Locale};
 use oxideterm_ide_fs::NodeAgentIdeFileSystem;
@@ -589,9 +590,12 @@ pub(super) enum ConfirmKeyboardAction {
     Handled,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct ShortcutsModalState {
     open: bool,
+    presence: oxideterm_gpui_ui::motion::ExitPresence,
+    motion_generation: usize,
+    exit_task: Option<Task<()>>,
     query: String,
     scroll_handle: UniformListScrollHandle,
 }
@@ -797,15 +801,18 @@ pub(crate) struct WorkspaceApp {
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,
     _plugin_entity_subscription: Subscription,
     split_drag: Option<SplitDrag>,
+    disclosure_motions: disclosure_motion::DisclosureMotions,
     sidebar_resizing: bool,
     embedded_sftp_sidebar_resizing: bool,
     sidebar_resize_hotzone_hovered: bool,
     sidebar_collapsed: bool,
     sidebar_rendered: bool,
     sidebar_motion_generation: u64,
+    sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
     sidebar_width: f32,
     context_sidebar_rendered: bool,
     context_sidebar_motion_generation: u64,
+    context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
     acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
     skill_registry: std::sync::Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
@@ -893,6 +900,7 @@ pub(crate) struct WorkspaceApp {
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     expanded_ssh_nodes: HashSet<NodeId>,
+    expanded_standalone_connections: HashSet<String>,
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
     forwarding: Entity<forwards::ForwardingWorkspaceEntity>,

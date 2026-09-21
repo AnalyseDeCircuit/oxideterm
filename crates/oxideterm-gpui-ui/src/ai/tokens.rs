@@ -25,7 +25,6 @@ pub(super) const AI_PRE_BG_ALPHA: u32 = 0x99; // Tauri bg-theme-bg/60.
 pub(super) const AI_TOOL_BG_ALPHA: u32 = 0x0d; // Tauri pending approval bg-*-500/5.
 pub(super) const AI_TOOL_APPROVAL_BG_ALPHA: u32 = 0x33; // Tauri bg-green/red-500/20.
 pub(super) const AI_TOOL_APPROVAL_HOVER_ALPHA: u32 = 0x4d; // Tauri hover:bg-green/red-500/30.
-pub(super) const AI_MODEL_BADGE_BG_ALPHA: u32 = 0x8c; // Tauri bg-theme-bg-panel/55.
 pub(super) const AI_CONTEXT_BAR_BG_ALPHA: u32 = 0x33; // Tauri bg-theme-border/20.
 
 pub(super) const AI_INPUT_TEXT_SIZE: f32 = 13.0; // Tauri textarea text-[13px].

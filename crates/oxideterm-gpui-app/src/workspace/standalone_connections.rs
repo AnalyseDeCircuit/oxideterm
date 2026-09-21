@@ -288,6 +288,7 @@ impl WorkspaceApp {
         if let Some(surface) = surface {
             self.close_standalone_connection_surface(surface, window, cx);
         }
+        self.expanded_standalone_connections.remove(connection_id);
         self.standalone_connections.remove(connection_id);
         cx.notify();
     }

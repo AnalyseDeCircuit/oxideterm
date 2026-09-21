@@ -89,7 +89,6 @@ pub(in crate::workspace) struct SessionStatusStyle {
     icon: LucideIcon,
     text_color: u32,
     dot_color: u32,
-    opacity: f32,
     ring: bool,
 }
 

@@ -87,7 +87,7 @@ impl UserSegmentedControlMotionState {
         true
     }
 
-    fn clear(&mut self, control_id: &'static str) {
+    pub(super) fn clear(&mut self, control_id: &'static str) {
         self.active_transitions.remove(control_id);
     }
 

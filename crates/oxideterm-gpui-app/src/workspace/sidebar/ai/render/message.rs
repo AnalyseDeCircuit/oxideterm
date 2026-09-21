@@ -358,17 +358,19 @@ impl WorkspaceApp {
                 .rfind(|part| !part.is_empty())
                 .unwrap_or(model)
                 .to_string();
-            header = header.child(ai_message_model_badge(&self.tokens, model_label));
+            header = header.child(ai_message_model_label(&self.tokens, model_label));
         }
-        header = header.child(ai_message_time(
-            &self.tokens,
-            time_label(
-                message.timestamp_ms,
-                &self.i18n.t("ai.chat.today"),
-                &self.i18n.t("ai.chat.yesterday"),
-            ),
-            user,
-        ));
+        if user {
+            header = header.child(ai_message_time(
+                &self.tokens,
+                time_label(
+                    message.timestamp_ms,
+                    &self.i18n.t("ai.chat.today"),
+                    &self.i18n.t("ai.chat.yesterday"),
+                ),
+                user,
+            ));
+        }
         let structured_parts = ai_turn_parts(message);
         let has_structured_parts = structured_parts.is_some_and(|parts| !parts.is_empty());
         let thinking_content = (!has_structured_parts)
@@ -399,7 +401,9 @@ impl WorkspaceApp {
         if let Some(thinking_content) = thinking_content {
             let compact = self.settings_store.settings().ai.thinking_style
                 == AiThinkingStyle::Compact
-                && !thinking_expanded;
+                && !self
+                    .disclosure_motions
+                    .retained(&format!("ai:{}:thinking", message.id), thinking_expanded);
             if compact {
                 let thinking_message_id = message.id.clone();
                 body = body.child(
@@ -429,12 +433,11 @@ impl WorkspaceApp {
                         cx.listener(move |this, _event, _window, cx| {
                             let default_expanded =
                                 this.settings_store.settings().ai.thinking_default_expanded;
-                            this.ai_entity.update(cx, |ai, _cx| {
-                                ai.toggle_thinking_expansion(
-                                    thinking_message_id.clone(),
-                                    default_expanded,
-                                );
-                            });
+                            this.toggle_ai_thinking_with_motion(
+                                thinking_message_id.clone(),
+                                default_expanded,
+                                cx,
+                            );
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -466,12 +469,11 @@ impl WorkspaceApp {
                     cx.listener(move |this, _event, _window, cx| {
                         let default_expanded =
                             this.settings_store.settings().ai.thinking_default_expanded;
-                        this.ai_entity.update(cx, |ai, _cx| {
-                            ai.toggle_thinking_expansion(
-                                thinking_message_id.clone(),
-                                default_expanded,
-                            );
-                        });
+                        this.toggle_ai_thinking_with_motion(
+                            thinking_message_id.clone(),
+                            default_expanded,
+                            cx,
+                        );
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -479,13 +481,24 @@ impl WorkspaceApp {
                 body = body.child(
                     ai_thinking_block(&self.tokens, thinking_expanded)
                         .child(thinking_header)
-                        .when(thinking_expanded, |block| {
-                            block.child(ai_thinking_content(
-                                &self.tokens,
-                                ("ai-thinking", ai_message_element_seed(&message.id)),
-                                thinking_content.to_string(),
-                            ))
-                        }),
+                        .when(
+                            self.disclosure_motions.retained(
+                                &format!("ai:{}:thinking", message.id),
+                                thinking_expanded,
+                            ),
+                            |block| {
+                                block.child(self.disclosure_motions.render(
+                                    &format!("ai:{}:thinking", message.id),
+                                    &self.tokens,
+                                    div().child(ai_thinking_content(
+                                        &self.tokens,
+                                        ("ai-thinking", ai_message_element_seed(&message.id)),
+                                        thinking_content.to_string(),
+                                    )),
+                                    None,
+                                ))
+                            },
+                        ),
                 );
             }
         }
@@ -1194,7 +1207,9 @@ impl WorkspaceApp {
             .copied()
             .unwrap_or_else(|| self.settings_store.settings().ai.thinking_default_expanded);
         let compact = self.settings_store.settings().ai.thinking_style == AiThinkingStyle::Compact
-            && !thinking_expanded;
+            && !self
+                .disclosure_motions
+                .retained(&format!("ai:{thinking_key}:thinking"), thinking_expanded);
         if compact {
             let toggle_key = thinking_key.clone();
             return ai_thinking_compact(
@@ -1216,9 +1231,7 @@ impl WorkspaceApp {
                 cx.listener(move |this, _event, _window, cx| {
                     let default_expanded =
                         this.settings_store.settings().ai.thinking_default_expanded;
-                    this.ai_entity.update(cx, |ai, _cx| {
-                        ai.toggle_thinking_expansion(toggle_key.clone(), default_expanded);
-                    });
+                    this.toggle_ai_thinking_with_motion(toggle_key.clone(), default_expanded, cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -1246,22 +1259,29 @@ impl WorkspaceApp {
             MouseButton::Left,
             cx.listener(move |this, _event, _window, cx| {
                 let default_expanded = this.settings_store.settings().ai.thinking_default_expanded;
-                this.ai_entity.update(cx, |ai, _cx| {
-                    ai.toggle_thinking_expansion(toggle_key.clone(), default_expanded);
-                });
+                this.toggle_ai_thinking_with_motion(toggle_key.clone(), default_expanded, cx);
                 cx.stop_propagation();
                 cx.notify();
             }),
         );
         ai_thinking_block(&self.tokens, thinking_expanded)
             .child(header)
-            .when(thinking_expanded, |block| {
-                block.child(ai_thinking_content(
-                    &self.tokens,
-                    ("ai-thinking", ai_message_element_seed(&thinking_key)),
-                    text.to_string(),
-                ))
-            })
+            .when(
+                self.disclosure_motions
+                    .retained(&format!("ai:{thinking_key}:thinking"), thinking_expanded),
+                |block| {
+                    block.child(self.disclosure_motions.render(
+                        &format!("ai:{thinking_key}:thinking"),
+                        &self.tokens,
+                        div().child(ai_thinking_content(
+                            &self.tokens,
+                            ("ai-thinking", ai_message_element_seed(&thinking_key)),
+                            text.to_string(),
+                        )),
+                        None,
+                    ))
+                },
+            )
             .into_any_element()
     }
 
@@ -1310,14 +1330,16 @@ impl WorkspaceApp {
         message: &AiChatMessage,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut block = ai_tool_block(&self.tokens).child(ai_tool_heading(
-            &self.tokens,
-            format!(
-                "{} ({})",
-                self.i18n.t("ai.tool_use.heading"),
-                message.tool_calls.len()
-            ),
-        ));
+        let mut block = ai_tool_block(&self.tokens).when(message.tool_calls.len() > 1, |block| {
+            block.child(ai_tool_heading(
+                &self.tokens,
+                format!(
+                    "{} ({})",
+                    self.i18n.t("ai.tool_use.heading"),
+                    message.tool_calls.len()
+                ),
+            ))
+        });
         let should_condense = message.tool_calls.len() >= 5;
         let split_at = if should_condense {
             message.tool_calls.len().saturating_sub(3)
@@ -1557,9 +1579,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
-                        this.ai_entity.update(cx, |ai, _cx| {
-                            ai.toggle_tool_call_expansion(header_key.clone());
-                        });
+                        this.toggle_ai_tool_with_motion(header_key.clone(), cx);
                         cx.stop_propagation();
                         cx.notify();
                     }),
@@ -1649,8 +1669,14 @@ impl WorkspaceApp {
                         )),
                 );
             }
-            if expanded {
-                item = item.child(details);
+            let motion_key = format!("ai:{expansion_key}:tool");
+            if self.disclosure_motions.retained(&motion_key, expanded) {
+                item = item.child(self.disclosure_motions.render(
+                    &motion_key,
+                    &self.tokens,
+                    details,
+                    None,
+                ));
             }
 
             if status == AiToolStatus::Error

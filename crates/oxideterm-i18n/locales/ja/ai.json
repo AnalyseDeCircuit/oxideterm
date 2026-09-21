@@ -62,6 +62,7 @@
       "notification_body": "{{count}} 回の実行後に終了しました。"
     },
     "chat": {
+      "back_to_question": "質問に戻る",
       "header": "チャット",
       "get_started": "OxideSens を始める",
       "title": "OxideSens",
