@@ -259,8 +259,13 @@ impl Render for DetachedTabWindow {
                 }
             }))
             .map(|root| {
+                // Window creation can paint this root while its Workspace is leased.
+                // Check readiness before reading the shared keyboard-capture owner.
+                if !self.ready {
+                    return root;
+                }
                 let workspace = self.session.read(cx);
-                if !self.ready || workspace.app_lock.locked {
+                if workspace.app_lock.locked {
                     return root;
                 }
                 let Some(session) = workspace.remote_desktop_session_entity(tab_id, cx) else {
