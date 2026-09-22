@@ -616,6 +616,7 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
+            .child(self.render_terminal_sender_control_divider())
             .child(self.render_terminal_sender_stepper(
                 self.i18n.t("terminal.sender.repeat"),
                 format!("{}×", snapshot.repeat_count),
@@ -1098,10 +1099,6 @@ impl WorkspaceApp {
             .h(px(TERMINAL_SENDER_CONTROL_HEIGHT))
             .flex()
             .items_center()
-            .rounded(px(self.tokens.radii.xs))
-            .border_1()
-            .border_color(self.workspace_chrome_divider())
-            .bg(rgb(self.tokens.ui.bg))
             .overflow_hidden()
             .child(
                 div()

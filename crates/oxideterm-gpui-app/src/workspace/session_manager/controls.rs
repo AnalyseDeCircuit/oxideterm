@@ -146,7 +146,7 @@ impl WorkspaceApp {
             .when(target == SessionManagerInput::Search, |input| {
                 input
                     .h(px(36.0))
-                    .rounded(px(self.tokens.radii.md))
+                    .rounded(px(0.0))
                     .border_0()
                     .border_b_1()
                     .border_color(if active {
@@ -154,7 +154,7 @@ impl WorkspaceApp {
                     } else {
                         self.workspace_chrome_divider()
                     })
-                    .bg(theme_bg(theme.bg, has_background))
+                    .bg(rgba(0x00000000))
             })
             .child(
                 div()
