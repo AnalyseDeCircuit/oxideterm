@@ -38,7 +38,7 @@ pub fn command_palette_match(
     searchable_value: &str,
     query: &str,
 ) -> Option<CommandPaletteMatch> {
-    if query.is_empty() {
+    if query.trim().is_empty() {
         return Some(CommandPaletteMatch {
             score: 1.0,
             highlights: Vec::new(),
@@ -47,17 +47,26 @@ pub fn command_palette_match(
 
     let searchable_value = searchable_value.to_lowercase();
     let normalized_query = query.to_lowercase();
-    if searchable_value.contains(&normalized_query) {
-        return Some(CommandPaletteMatch {
-            score: 1.0,
-            highlights: substring_highlights(label, &normalized_query).unwrap_or_default(),
-        });
+    let mut result = CommandPaletteMatch {
+        score: 1.0,
+        highlights: Vec::new(),
+    };
+    // Each term must match, but separators and term order need not match the label.
+    for term in normalized_query.split_whitespace() {
+        if searchable_value.contains(term) {
+            result
+                .highlights
+                .extend(substring_highlights(label, term).unwrap_or_default());
+        } else {
+            result
+                .highlights
+                .extend(subsequence_highlights(label, term)?);
+            result.score = 0.5;
+        }
     }
-
-    subsequence_highlights(label, &normalized_query).map(|highlights| CommandPaletteMatch {
-        score: 0.5,
-        highlights,
-    })
+    result.highlights.sort_unstable();
+    result.highlights.dedup();
+    Some(result)
 }
 
 fn substring_highlights(label: &str, normalized_query: &str) -> Option<Vec<usize>> {
@@ -152,6 +161,71 @@ mod tests {
         assert_eq!(
             command_palette_match("Open Settings", "open settings preferences", "xyz"),
             None
+        );
+    }
+
+    #[test]
+    fn multiple_keywords_require_every_term_regardless_of_order_or_separator() {
+        let names = [
+            "xxxxx-xxxxxxxxxxx-user_prod",
+            "xxxxx-xxxxxxxxxxx-user_test",
+            "xxxxx-xxxxxxxxxxx-order_prod",
+            "xxxxx-xxxxxxxxxxx-order_test",
+            "yyyyy-yyyyyyyyyyyyyyyyy-aaaa-bbb",
+            "service-user-extra-prod",
+        ];
+        for query in [
+            "user prod",
+            "prod user",
+            " USER \t prod  ",
+            "user\u{3000}prod",
+        ] {
+            let matches: Vec<_> = names
+                .iter()
+                .copied()
+                .filter(|name| command_palette_match(name, name, query).is_some())
+                .collect();
+            assert_eq!(matches, vec![names[0], names[5]], "query={query:?}");
+        }
+        assert_eq!(
+            command_palette_match(names[0], names[0], "user missing"),
+            None
+        );
+    }
+
+    #[test]
+    fn keyword_highlights_merge_label_matches_and_allow_other_search_fields() {
+        assert_eq!(
+            command_palette_match(
+                "user_prod",
+                "user_prod operator@db.example ssh",
+                "prod ssh user user"
+            ),
+            Some(CommandPaletteMatch {
+                score: 1.0,
+                highlights: vec![0, 1, 2, 3, 5, 6, 7, 8]
+            }),
+        );
+        assert_eq!(
+            command_palette_match("user_prod", "user_prod ssh", "usr prod"),
+            Some(CommandPaletteMatch {
+                score: 0.5,
+                highlights: vec![0, 1, 3, 5, 6, 7, 8]
+            }),
+        );
+        assert_eq!(
+            command_palette_match("İnfo 设置", "İnfo 设置", "设置 i"),
+            Some(CommandPaletteMatch {
+                score: 1.0,
+                highlights: vec![0, 5, 6]
+            }),
+        );
+        assert_eq!(
+            command_palette_match("user_prod", "user_prod", " \t "),
+            Some(CommandPaletteMatch {
+                score: 1.0,
+                highlights: vec![]
+            }),
         );
     }
 

@@ -1297,7 +1297,7 @@ impl WorkspaceApp {
                 },
             )
             .when(self.command_palette.read(cx).is_open(), |root| {
-                root.child(self.render_command_palette(cx))
+                root.child(self.render_command_palette(window, cx))
             })
             .when(self.version_migration.open, |root| {
                 root.child(self.render_version_migration_modal(window, cx))
