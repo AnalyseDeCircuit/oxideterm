@@ -1586,36 +1586,96 @@ impl WorkspaceApp {
                 ),
             );
 
-            let argument_text = pretty_tool_json_or_raw(&arguments);
-            let argument_content = if status == AiToolStatus::PendingApproval {
-                self.render_selectable_text(
+            let command_preview = (status == AiToolStatus::PendingApproval)
+                .then(|| arguments_value.as_ref().and_then(ai_tool_command_preview))
+                .flatten();
+            let argument_text = command_preview
+                .as_ref()
+                .map(|(_, parameters)| parameters.clone())
+                .unwrap_or_else(|| pretty_tool_json_or_raw(&arguments));
+            let mut details = ai_tool_details(&self.tokens);
+            if let Some((command, _)) = command_preview {
+                let command = Arc::new(command);
+                let label = self.i18n.t("terminal.command_bar.command");
+                let content = self.render_selectable_styled_text_in_group(
+                    crate::workspace::selectable_text::selectable_document_group_id(),
                     crate::workspace::selectable_text::selectable_text_id(
-                        "ai-tool-approval",
-                        &expansion_key,
+                        "ai-tool-command", &expansion_key,
                     ),
-                    argument_text,
-                    self.tokens.ui.text_muted,
+                    0,
+                    command.as_str().to_owned().into(),
+                    vec![gpui::TextRun {
+                        len: command.len(),
+                        font: gpui::font(tool_mono_font.clone()),
+                        color: rgb(self.tokens.ui.text).into_color(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                        letter_spacing: None,
+                    }],
                     cx,
-                )
-                .into_any_element()
-            } else {
-                div().child(argument_text).into_any_element()
-            };
-            let mut details = ai_tool_details(&self.tokens).child(
-                div()
-                    .child(ai_tool_section_label(
-                        &self.tokens,
-                        self.i18n.t("ai.tool_use.arguments"),
-                        None,
-                    ))
-                    .child(ai_tool_args_pre(
-                        &self.tokens,
-                        ("ai-tool-args", ai_message_element_seed(&id)),
-                        argument_content,
-                        tool_mono_font.clone(),
-                        &args_scroll,
-                    )),
-            );
+                );
+                let tokens = self.tokens;
+                let font = tool_mono_font.clone();
+                details = details.child(
+                    div()
+                        .child(ai_tool_section_label(&self.tokens, label.clone(), None))
+                        .child(
+                            ai_tool_args_pre(
+                                &self.tokens,
+                                ("ai-tool-command", ai_message_element_seed(&id)),
+                                content,
+                                tool_mono_font.clone(),
+                                &args_scroll,
+                            )
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .hoverable_tooltip(move |_, cx| {
+                                cx.new(|_| AiCommandPreview {
+                                    tokens,
+                                    label: label.clone(),
+                                    command: command.clone(),
+                                    font: font.clone(),
+                                    scroll: gpui::ScrollHandle::new(),
+                                })
+                                .into()
+                            }),
+                        ),
+                );
+            }
+            if !argument_text.is_empty() {
+                let argument_content = if status == AiToolStatus::PendingApproval {
+                    self.render_selectable_text(
+                        crate::workspace::selectable_text::selectable_text_id(
+                            "ai-tool-approval",
+                            &expansion_key,
+                        ),
+                        argument_text,
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )
+                    .into_any_element()
+                } else {
+                    div().child(argument_text).into_any_element()
+                };
+                let parameters_scroll =
+                    self.selectable_text_scroll_handle(format!("ai-tool-parameters:{expansion_key}"));
+                details = details.child(
+                    div()
+                        .child(ai_tool_section_label(
+                            &self.tokens,
+                            self.i18n.t("ai.tool_use.arguments"),
+                            None,
+                        ))
+                        .child(ai_tool_args_pre(
+                            &self.tokens,
+                            ("ai-tool-args", ai_message_element_seed(&id)),
+                            argument_content,
+                            tool_mono_font.clone(),
+                            &parameters_scroll,
+                        )),
+                );
+            }
             if let Some(result) = result {
                 if let Some(policy_decision) = result.pointer("/meta/policyDecision") {
                     details = details.child(
@@ -2743,4 +2803,192 @@ pub(in crate::workspace) fn pretty_tool_json_or_raw(value: &str) -> String {
         .ok()
         .and_then(|parsed| serde_json::to_string_pretty(&parsed).ok())
         .unwrap_or_else(|| value.to_string())
+}
+
+// Decode only the JSON string boundary. Shell escapes inside the command are executable text.
+fn ai_tool_command_preview(
+    value: &serde_json::Value,
+) -> Option<(zeroize::Zeroizing<String>, String)> {
+    let object = value.as_object()?;
+    let command = object.get("command")?.as_str()?;
+    if command.is_empty() {
+        return None;
+    }
+    let parameters = object
+        .iter()
+        .filter(|(key, _)| key.as_str() != "command")
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<serde_json::Map<_, _>>();
+    let parameters = if parameters.is_empty() {
+        String::new()
+    } else {
+        serde_json::to_string_pretty(&parameters).unwrap_or_default()
+    };
+    Some((zeroize::Zeroizing::new(command.to_owned()), parameters))
+}
+
+struct AiCommandPreview {
+    tokens: oxideterm_theme::ThemeTokens,
+    label: String,
+    command: Arc<zeroize::Zeroizing<String>>,
+    font: gpui::SharedString,
+    scroll: gpui::ScrollHandle,
+}
+
+impl gpui::Render for AiCommandPreview {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let margin = px(self.tokens.spacing.three);
+        let width = (window.viewport_size().width - margin * 2.0)
+            .max(px(1.0))
+            .min(px(720.0));
+        let height = (window.viewport_size().height - margin * 2.0)
+            .max(px(1.0))
+            .min(px(420.0));
+        let header_height = self.tokens.metrics.ui_tooltip_padding_y * 2.0
+            + self.tokens.metrics.ui_text_xs * 1.5
+            + self.tokens.spacing.two;
+        // Native hoverable tooltips mount at the window layer, outside transcript scroll masks.
+        oxideterm_gpui_ui::tooltip::tooltip_surface(&self.tokens, self.label.clone(), None)
+            .id("ai-command-preview")
+            .debug_selector(|| "ai-command-preview".into())
+            .w(width)
+            .max_h(height)
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(
+                oxideterm_gpui_ui::ai::ai_tool_pre(
+                    &self.tokens,
+                    "ai-command-preview-code",
+                    self.command.as_str().to_owned(),
+                    f32::from((height - px(header_height)).max(px(1.0))),
+                    self.font.clone(),
+                    &self.scroll,
+                )
+                .debug_selector(|| "ai-command-preview-code".into())
+                .w_full()
+                .min_w_0()
+                .bg(gpui::transparent_black())
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(self.tokens.ui.text)),
+            )
+    }
+}
+
+#[cfg(test)]
+mod command_preview_tests {
+    use super::*;
+
+    struct PreviewHost {
+        preview: gpui::Entity<AiCommandPreview>,
+    }
+
+    impl gpui::Render for PreviewHost {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let preview = self.preview.clone();
+            div().size_full().child(
+                div()
+                    .id("preview-scroll-host")
+                    .debug_selector(|| "preview-scroll-host".into())
+                    .w(px(180.0))
+                    .h(px(70.0))
+                    .overflow_y_scroll()
+                    .child(
+                        div()
+                            .id("preview-trigger")
+                            .w_full()
+                            .h(px(40.0))
+                            .child("Command")
+                            .hoverable_tooltip(move |_, _| preview.clone().into()),
+                    )
+                    .child(div().h(px(500.0))),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn command_preview_floats_outside_chat_and_scrolls_within_window(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let scroll = gpui::ScrollHandle::new();
+        let (_, cx) = cx.add_window_view(|_, cx| PreviewHost {
+            preview: cx.new(|_| AiCommandPreview {
+                tokens: oxideterm_theme::default_tokens(),
+                label: "Command".into(),
+                command: Arc::new(zeroize::Zeroizing::new(
+                    (0..100)
+                        .map(|i| format!("printf 'line {i}\\n'\n"))
+                        .collect(),
+                )),
+                font: "monospace".into(),
+                scroll: scroll.clone(),
+            }),
+        });
+        cx.simulate_resize(gpui::size(px(600.0), px(450.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.simulate_mouse_move(gpui::point(px(20.0), px(20.0)), cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let popup = cx
+            .debug_bounds("ai-command-preview")
+            .expect("hover preview");
+        let host = cx.debug_bounds("preview-scroll-host").unwrap();
+        assert!(popup.size.width > host.size.width && popup.bottom() > host.bottom());
+        assert!(popup.right() <= px(600.0) && popup.bottom() <= px(450.0));
+        let body = cx.debug_bounds("ai-command-preview-code").unwrap();
+        cx.update(|window, cx| window.simulate_mouse_move(body.center(), cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: body.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-120.0))),
+            ..Default::default()
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            scroll.offset().y,
+            px(-120.0),
+            "scroll inside the hover preview"
+        );
+        assert!(
+            cx.debug_bounds("ai-command-preview").is_some(),
+            "moving into the preview must keep it open"
+        );
+        cx.simulate_resize(gpui::size(px(300.0), px(240.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let popup = cx.debug_bounds("ai-command-preview").unwrap();
+        assert!(popup.left() >= px(0.0) && popup.top() >= px(0.0));
+        assert!(popup.right() <= px(300.0) && popup.bottom() <= px(240.0));
+    }
+
+    #[test]
+    fn command_preview_decodes_json_once_and_preserves_other_arguments() {
+        let value: serde_json::Value = serde_json::from_str(r#"{"command":"cat <<'EOF'\n  printf '%s\\n' \"hello\"\nEOF","cwd":"/tmp/project","timeout_secs":60}"#).unwrap();
+        let (command, parameters) = ai_tool_command_preview(&value).unwrap();
+        assert_eq!(
+            command.as_str(),
+            "cat <<'EOF'\n  printf '%s\\n' \"hello\"\nEOF"
+        );
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&parameters).unwrap(),
+            serde_json::json!({"cwd":"/tmp/project","timeout_secs":60})
+        );
+        assert_eq!(
+            value["command"],
+            command.as_str(),
+            "preview must not rewrite the command to execute"
+        );
+        for value in [
+            serde_json::json!({"query":"test"}),
+            serde_json::json!({"command":["ls"]}),
+            serde_json::json!({"command":""}),
+        ] {
+            assert!(ai_tool_command_preview(&value).is_none());
+        }
+    }
 }
