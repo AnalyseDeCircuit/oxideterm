@@ -376,9 +376,9 @@ impl WorkspaceApp {
             - NEW_CONNECTION_MODAL_VIEWPORT_MARGIN * 2.0)
             .max(TAURI_EDIT_MODAL_WIDTH);
         let modal_width = requested_modal_width.min(available_modal_width);
-        // This is a long, continuously scrolling surface. A full-window
-        // backdrop filter would run GPU blur and composite passes for every
-        // scroll frame, so retain the dialog tint without the live blur.
+        // A long scrolling form uses an opaque theme surface: underlying text
+        // must not bleed through, and live backdrop blur would add GPU work
+        // to every scroll frame.
         modal_backdrop(dialog_backdrop_color())
             .on_mouse_down(
                 MouseButton::Left,
@@ -395,6 +395,7 @@ impl WorkspaceApp {
                     &self.tokens,
                     "new-connection-form-enter",
                     modal_container(&self.tokens)
+                .bg(rgb(theme.bg_elevated))
                 .w(px(modal_width))
                 .max_h(px(modal_max_height))
                 .flex()
