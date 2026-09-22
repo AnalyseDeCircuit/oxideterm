@@ -391,14 +391,6 @@ impl WorkspaceApp {
         self.native_plugin_card_surface(has_background)
             .flex()
             .flex_col()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(theme.text))
-                    .child(self.i18n.t("plugin.manager_title").to_uppercase()),
-            )
             .child(
                 div()
                     .flex()
@@ -847,12 +839,16 @@ impl WorkspaceApp {
                             )),
                     ),
             )
-            .child(self.render_native_plugin_manager_icon_input(
-                LucideIcon::Search,
-                SettingsInput::NativePluginMarketplaceSearch,
-                self.i18n.t("plugin.search_placeholder"),
-                cx,
-            ));
+            .child(
+                self.render_native_plugin_manager_icon_input(
+                    LucideIcon::Search,
+                    SettingsInput::NativePluginMarketplaceSearch,
+                    self.i18n.t("plugin.search_placeholder"),
+                    cx,
+                )
+                .w_full()
+                .flex_none(),
+            );
 
         if visible_entries.is_empty() {
             let (icon, message, color) = match load_state {
@@ -993,14 +989,20 @@ impl WorkspaceApp {
             .and_then(native_plugin_safe_https_url);
         let mut actions = Vec::with_capacity(2);
         if let Some(homepage) = homepage {
-            actions.push(self.render_native_plugin_manager_button(
-                LucideIcon::ExternalLink,
-                self.i18n.t("plugin.marketplace_homepage"),
-                false,
-                move |_event, _window, cx| {
-                    cx.open_url(&homepage);
-                },
-            ));
+            actions.push(
+                self.render_native_plugin_action_button(
+                    LucideIcon::ExternalLink,
+                    self.i18n.t("plugin.marketplace_homepage"),
+                    false,
+                    move |_event, _window, cx| {
+                        cx.open_url(&homepage);
+                    },
+                )
+                .px(px(10.0))
+                .py(px(7.0))
+                .min_h(px(self.tokens.metrics.ui_button_sm_height))
+                .into_any_element(),
+            );
         }
         actions.push(self.render_native_plugin_manager_button(
             action_icon,
@@ -1036,11 +1038,18 @@ impl WorkspaceApp {
             .child(action_slot_row(
                 &self.tokens,
                 ActionSlotRowOptions::new().align_start().gap(12.0),
-                Some(Self::render_lucide_icon(
-                    LucideIcon::Puzzle,
-                    18.0,
-                    rgb(theme.accent),
-                )),
+                Some(
+                    div()
+                        .h(px(self.tokens.metrics.ui_button_sm_height))
+                        .flex()
+                        .items_center()
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Puzzle,
+                            18.0,
+                            rgb(theme.accent),
+                        ))
+                        .into_any_element(),
+                ),
                 div()
                     .min_w(px(0.0))
                     .flex()
@@ -1050,6 +1059,7 @@ impl WorkspaceApp {
                         div()
                             .flex()
                             .flex_wrap()
+                            .min_h(px(self.tokens.metrics.ui_button_sm_height))
                             .items_center()
                             .gap(px(8.0))
                             .child(
@@ -1061,6 +1071,7 @@ impl WorkspaceApp {
                             )
                             .child(
                                 div()
+                                    .flex_none()
                                     .rounded(px(self.tokens.radii.sm))
                                     .bg(plugin_manager_theme_alpha(
                                         theme.accent,
@@ -1198,12 +1209,17 @@ impl WorkspaceApp {
                     .flex_wrap()
                     .items_center()
                     .gap(px(8.0))
-                    .child(self.render_native_plugin_manager_icon_input(
-                        LucideIcon::Download,
-                        SettingsInput::NativePluginInstallUrl,
-                        self.i18n.t("plugin.url_placeholder"),
-                        cx,
-                    ))
+                    // The wrapping basis belongs to this horizontal form, not the shared input.
+                    .child(
+                        self.render_native_plugin_manager_icon_input(
+                            LucideIcon::Download,
+                            SettingsInput::NativePluginInstallUrl,
+                            self.i18n.t("plugin.url_placeholder"),
+                            cx,
+                        )
+                        .flex_1()
+                        .flex_basis(px(PLUGIN_MANAGER_INLINE_INPUT_BASIS)),
+                    )
                     .child(div().ml_auto().flex_none().child(
                         self.render_native_plugin_manager_button(
                             LucideIcon::Download,
@@ -1356,12 +1372,16 @@ impl WorkspaceApp {
             .flex_wrap()
             .items_center()
             .gap(px(12.0))
-            .child(self.render_native_plugin_manager_icon_input(
-                LucideIcon::Search,
-                SettingsInput::NativePluginRegistryUrl,
-                "https://example.com/registry.json".to_string(),
-                cx,
-            ))
+            .child(
+                self.render_native_plugin_manager_icon_input(
+                    LucideIcon::Search,
+                    SettingsInput::NativePluginRegistryUrl,
+                    "https://example.com/registry.json".to_string(),
+                    cx,
+                )
+                .flex_1()
+                .flex_basis(px(PLUGIN_MANAGER_INLINE_INPUT_BASIS)),
+            )
             .child(
                 div()
                     .ml_auto()
@@ -1384,7 +1404,7 @@ impl WorkspaceApp {
         label: String,
         disabled: bool,
         listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
-    ) -> AnyElement {
+    ) -> Div {
         let theme = self.tokens.ui;
         let text_color = theme.text_muted;
         let hover_bg = rgb(theme.bg_panel);
@@ -1424,7 +1444,6 @@ impl WorkspaceApp {
                 }),
             ))
             .child(label)
-            .into_any_element()
     }
 
     fn render_native_plugin_row_icon_button(
@@ -1493,14 +1512,10 @@ impl WorkspaceApp {
         input: SettingsInput,
         placeholder: String,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Div {
         let theme = self.tokens.ui;
         div()
             .relative()
-            .flex_1()
-            // The basis creates a wrapping breakpoint while min-width zero
-            // still lets the wrapped input fit exceptionally narrow panes.
-            .flex_basis(px(PLUGIN_MANAGER_INLINE_INPUT_BASIS))
             .min_w(px(0.0))
             .max_w_full()
             .child(
@@ -1511,7 +1526,6 @@ impl WorkspaceApp {
                     .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.text_muted))),
             )
             .child(self.render_native_plugin_manager_text_input(input, placeholder, cx))
-            .into_any_element()
     }
 
     fn render_native_plugin_manager_text_input(
@@ -1986,7 +2000,7 @@ impl WorkspaceApp {
             div()
                 .w_full()
                 .flex()
-                .items_center()
+                .items_start()
                 .justify_between()
                 .gap(px(16.0))
                 .child(
@@ -1998,11 +2012,14 @@ impl WorkspaceApp {
                         .min_w(px(0.0))
                         .overflow_hidden()
                         .flex()
-                        .items_center()
+                        .items_start()
                         .gap(px(12.0))
                         .child(
                             div()
                                 .flex_shrink_0()
+                                .h(px(PLUGIN_MANAGER_ROW_ACTION_SIZE))
+                                .flex()
+                                .items_center()
                                 .text_color(rgb(theme.text_muted))
                                 .cursor(CursorStyle::PointingHand)
                                 .on_mouse_down(
@@ -2046,6 +2063,7 @@ impl WorkspaceApp {
                                 .child(
                                     div()
                                         .flex()
+                                        .min_h(px(PLUGIN_MANAGER_ROW_ACTION_SIZE))
                                         .items_center()
                                         .gap(px(8.0))
                                         .child(
@@ -2059,6 +2077,7 @@ impl WorkspaceApp {
                                         )
                                         .child(
                                             div()
+                                                .flex_none()
                                                 .rounded(px(self.tokens.radii.sm))
                                                 .bg(plugin_manager_theme_alpha(
                                                     theme.accent,
