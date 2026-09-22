@@ -1,5 +1,10 @@
 {
   "terminal": {
+    "autosuggest": {
+      "matches": "{{count}} 筆符合",
+      "navigation_hint": "{{select}} 選擇 · {{run}} 執行 · 點擊填入",
+      "dismiss_hint": "{{dismiss}} 關閉 · {{remove}} 移除"
+    },
     "processing_failed": "終端處理已停止，請重新連線此工作階段。",
     "local_terminal": "本機終端機",
     "tmux": {

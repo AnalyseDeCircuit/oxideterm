@@ -1,5 +1,10 @@
 {
   "terminal": {
+    "autosuggest": {
+      "matches": "{{count}} matches",
+      "navigation_hint": "{{select}} select · {{run}} run · Click fill",
+      "dismiss_hint": "{{dismiss}} close · {{remove}} remove"
+    },
     "processing_failed": "Terminal processing stopped. Reconnect this session to continue.",
     "local_terminal": "Local Terminal",
     "tmux": {

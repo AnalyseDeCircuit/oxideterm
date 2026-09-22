@@ -7,7 +7,7 @@ use std::{
 
 use oxideterm_terminal::{
     TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
-    TerminalCommandMarkDetectionSource,
+    TerminalCommandMarkDetectionSource, terminal_autosuggest_fuzzy_score,
 };
 use parking_lot::Mutex;
 
@@ -496,32 +496,47 @@ fn autosuggest_candidates_for_records(
         return Vec::new();
     }
 
-    let mut candidates_by_command = HashMap::<&str, TerminalAutosuggestCandidate>::new();
+    let mut candidates_by_command = HashMap::<&str, (f64, TerminalAutosuggestCandidate)>::new();
     for record in records {
-        if !record.command.starts_with(query) || record.command == query {
+        if record.command == query {
             continue;
         }
-        let candidate = candidates_by_command
-            .entry(&record.command)
-            .or_insert_with(|| TerminalAutosuggestCandidate {
-                command: record.command.clone(),
-                use_count: 0,
-                last_used_at: record.finished_at,
-            });
+        let candidate = match candidates_by_command.entry(&record.command) {
+            std::collections::hash_map::Entry::Occupied(entry) => &mut entry.into_mut().1,
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let score = terminal_autosuggest_fuzzy_score(&record.command, query);
+                if score <= 0.0 {
+                    continue;
+                }
+                &mut entry
+                    .insert((
+                        score,
+                        TerminalAutosuggestCandidate {
+                            command: record.command.clone(),
+                            use_count: 0,
+                            last_used_at: record.finished_at,
+                        },
+                    ))
+                    .1
+            }
+        };
         candidate.use_count = candidate.use_count.saturating_add(1);
         candidate.last_used_at = candidate.last_used_at.max(record.finished_at);
     }
 
     let mut candidates = candidates_by_command.into_values().collect::<Vec<_>>();
-    candidates.sort_by(|left, right| {
-        right
-            .use_count
-            .cmp(&left.use_count)
+    candidates.sort_by(|(left_score, left), (right_score, right)| {
+        right_score
+            .total_cmp(left_score)
+            .then_with(|| right.use_count.cmp(&left.use_count))
             .then_with(|| right.last_used_at.cmp(&left.last_used_at))
             .then_with(|| left.command.cmp(&right.command))
     });
     candidates.truncate(limit);
     candidates
+        .into_iter()
+        .map(|(_, candidate)| candidate)
+        .collect()
 }
 
 fn trim_autosuggest_records(records: &mut Vec<TerminalAutosuggestCommandRecord>) {
@@ -748,6 +763,47 @@ mod tests {
                 .autosuggest_records()
                 .iter()
                 .all(|record| record.command != "docker ps")
+        );
+    }
+
+    #[test]
+    fn suggestions_rank_match_quality_before_activity_and_deduplicate_commands() {
+        let history = SharedTerminalCommandHistory::from_commands(vec![
+            "git status".into(),
+            "git status".into(),
+            "echo gts".into(),
+            "GTS-cache".into(),
+            "gts-tool".into(),
+            "docker ps".into(),
+        ]);
+        let state = TerminalAutosuggestInputState {
+            value: "gts".into(),
+            cursor_index: 3,
+            is_cursor_at_end: true,
+        };
+        let candidates = history.candidates(&state, 8);
+        assert_eq!(
+            candidates
+                .iter()
+                .map(|item| item.command.as_str())
+                .collect::<Vec<_>>(),
+            ["gts-tool", "GTS-cache", "echo gts", "git status"]
+        );
+        assert_eq!(candidates[3].use_count, 2);
+        assert_eq!(
+            history
+                .candidates(
+                    &TerminalAutosuggestInputState {
+                        value: "git status".into(),
+                        cursor_index: 10,
+                        is_cursor_at_end: true,
+                    },
+                    8
+                )
+                .iter()
+                .map(|item| item.command.as_str())
+                .collect::<Vec<_>>(),
+            Vec::<&str>::new()
         );
     }
 

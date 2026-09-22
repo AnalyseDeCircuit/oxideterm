@@ -375,12 +375,18 @@ pub struct TerminalNotice {
 #[derive(Clone, Debug)]
 pub struct TerminalAutosuggestLabels {
     pub history_source: String,
+    pub matches: String,
+    pub navigation_hint: String,
+    pub dismiss_hint: String,
 }
 
 impl Default for TerminalAutosuggestLabels {
     fn default() -> Self {
         Self {
             history_source: "history".to_string(),
+            matches: "{{count}} matches".into(),
+            navigation_hint: "{{select}} select · {{run}} run · Click fill".into(),
+            dismiss_hint: "{{dismiss}} close · {{remove}} remove".into(),
         }
     }
 }

@@ -1,5 +1,10 @@
 {
   "terminal": {
+    "autosuggest": {
+      "matches": "{{count}} 件の候補",
+      "navigation_hint": "{{select}} 選択 · {{run}} 実行 · クリックで入力",
+      "dismiss_hint": "{{dismiss}} 閉じる · {{remove}} 削除"
+    },
     "processing_failed": "端末の処理が停止しました。このセッションに再接続してください。",
     "local_terminal": "ローカルターミナル",
     "tmux": {

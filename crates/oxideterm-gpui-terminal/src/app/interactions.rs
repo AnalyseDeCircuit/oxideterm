@@ -343,6 +343,8 @@ impl TerminalPane {
                         .map(|index| (index + 1) % candidates.len())
                         .unwrap_or(0),
                 );
+                self.autosuggest_scroll
+                    .scroll_to_item(self.autosuggest_selected_index.unwrap_or(0));
                 cx.notify();
                 true
             }
@@ -352,6 +354,8 @@ impl TerminalPane {
                         .map(|index| index.checked_sub(1).unwrap_or(candidates.len() - 1))
                         .unwrap_or(candidates.len() - 1),
                 );
+                self.autosuggest_scroll
+                    .scroll_to_item(self.autosuggest_selected_index.unwrap_or(0));
                 cx.notify();
                 true
             }
@@ -369,13 +373,8 @@ impl TerminalPane {
                     self.autosuggest_selected_index = None;
                     return false;
                 };
-                let removed_from_shared_history = self.command_history.remove(&candidate.command);
-                self.command_fact_ledger
-                    .remove_autosuggest_command(&candidate.command);
-                if removed_from_shared_history {
-                    self.autosuggest_selected_index = None;
-                    cx.notify();
-                }
+                let command = Zeroizing::new(candidate.command.clone());
+                self.remove_terminal_autosuggest_command(&command, cx);
                 true
             }
             "enter" if !modifiers.shift && !modifiers.alt => {
@@ -3004,11 +3003,41 @@ fn free_type_selection_move_bytes(
     Some(bytes)
 }
 
+pub(super) fn terminal_autosuggest_edit_bytes(
+    state: &TerminalAutosuggestInputState,
+    command: &str,
+    execute: bool,
+    mode: TermMode,
+) -> Option<Zeroizing<Vec<u8>>> {
+    if !state.is_cursor_at_end || state.cursor_index != state.value.len() {
+        return None;
+    }
+    let mut bytes = if let Some(suffix) = command.strip_prefix(&state.value) {
+        Zeroizing::new(suffix.as_bytes().to_vec())
+    } else {
+        if !free_type_selected_text_can_be_command_input(command) {
+            return None;
+        }
+        // Reuse the terminal's bounded line-editing protocol; never assume Ctrl+U
+        // is bound to whole-line replacement in the remote shell.
+        let mut bytes = Zeroizing::new(free_type_current_command_delete_bytes(state, mode)?);
+        bytes.extend_from_slice(command.as_bytes());
+        bytes
+    };
+    if execute {
+        bytes.push(b'\r');
+    }
+    Some(bytes)
+}
+
 fn free_type_current_command_delete_bytes(
     input_state: &TerminalAutosuggestInputState,
     mode: TermMode,
 ) -> Option<Vec<u8>> {
-    let delete_count = command_cursor_step_count(&input_state.value);
+    // ZLE may erase one scalar while Readline erases a whole grapheme. At the
+    // command end, scalar-count backspaces clear both: extra deletes stop at
+    // the line boundary rather than leaving a combining character's base.
+    let delete_count = input_state.value.chars().count();
     if delete_count > TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS {
         return None;
     }
@@ -3266,6 +3295,45 @@ mod tests {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
         }
+    }
+
+    #[test]
+    fn autosuggest_fill_preserves_prefixes_and_replaces_fuzzy_queries_without_executing() {
+        for (query, candidate, expected) in [
+            ("git", "git status", b" status".as_slice()),
+            ("gts", "git status", b"\x08\x08\x08git status".as_slice()),
+            ("设置", "echo 设置", "\u{8}\u{8}echo 设置".as_bytes()),
+            ("e\u{301}", "echo", b"\x08\x08echo".as_slice()),
+        ] {
+            let state = TerminalAutosuggestInputState {
+                value: query.into(),
+                cursor_index: query.len(),
+                is_cursor_at_end: true,
+            };
+            let bytes =
+                terminal_autosuggest_edit_bytes(&state, candidate, false, TermMode::empty())
+                    .unwrap();
+            assert_eq!(bytes.as_slice(), expected);
+            let mut tracker = super::super::TerminalInputTracker::default();
+            tracker.apply_bytes(query.as_bytes());
+            assert_eq!(tracker.apply_bytes(&bytes), None);
+            assert_eq!(tracker.state().value, candidate);
+            let execute =
+                terminal_autosuggest_edit_bytes(&state, candidate, true, TermMode::empty())
+                    .unwrap();
+            tracker.reset();
+            tracker.apply_bytes(query.as_bytes());
+            assert_eq!(tracker.apply_bytes(&execute).as_deref(), Some(candidate));
+        }
+        let mid_line = TerminalAutosuggestInputState {
+            value: "gts".into(),
+            cursor_index: 1,
+            is_cursor_at_end: false,
+        };
+        assert!(
+            terminal_autosuggest_edit_bytes(&mid_line, "git status", true, TermMode::empty())
+                .is_none()
+        );
     }
 
     #[gpui::test]
@@ -4484,6 +4552,18 @@ mod tests {
         .ok_or_else(|| "Free Type move bytes were not generated".to_string())?;
         submit_real_pty_command(session, move_command, &move_bytes)?;
         wait_for_real_pty_text(session, "OT_MOVE:efabcd")?;
+        for (index, query) in ["gts", "设置", "e\u{301}"].into_iter().enumerate() {
+            let state = TerminalAutosuggestInputState {
+                value: query.into(),
+                cursor_index: query.len(),
+                is_cursor_at_end: true,
+            };
+            let command = format!("printf 'OT_FUZZY_%s\\n' {index}");
+            let edit = terminal_autosuggest_edit_bytes(&state, &command, false, session.mode())
+                .ok_or("suggestion edit bytes were not generated")?;
+            submit_real_pty_command(session, query, &edit)?;
+            wait_for_real_pty_text(session, &format!("OT_FUZZY_{index}"))?;
+        }
         if case.mode_name == "emacs" && matches!(case.shell_id, "bash" | "zsh") {
             validate_history_search_click_in_real_pty(session)?;
         }

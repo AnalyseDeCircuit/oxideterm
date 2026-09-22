@@ -1,5 +1,10 @@
 {
   "terminal": {
+    "autosuggest": {
+      "matches": "{{count}} 条匹配",
+      "navigation_hint": "{{select}} 选择 · {{run}} 执行 · 单击填充",
+      "dismiss_hint": "{{dismiss}} 关闭 · {{remove}} 移除"
+    },
     "processing_failed": "终端处理已停止，请重新连接此会话。",
     "local_terminal": "本地终端",
     "tmux": {

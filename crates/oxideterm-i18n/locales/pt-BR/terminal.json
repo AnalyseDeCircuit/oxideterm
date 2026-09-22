@@ -1,5 +1,10 @@
 {
   "terminal": {
+    "autosuggest": {
+      "matches": "{{count}} resultados",
+      "navigation_hint": "{{select}} selecionar · {{run}} executar · Clique preencher",
+      "dismiss_hint": "{{dismiss}} fechar · {{remove}} remover"
+    },
     "processing_failed": "O processamento do terminal foi interrompido. Reconecte esta sessão para continuar.",
     "local_terminal": "Terminal local",
     "tmux": {

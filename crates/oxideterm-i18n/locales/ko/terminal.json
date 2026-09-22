@@ -1,5 +1,10 @@
 {
   "terminal": {
+    "autosuggest": {
+      "matches": "후보 {{count}}개",
+      "navigation_hint": "{{select}} 선택 · {{run}} 실행 · 클릭하여 입력",
+      "dismiss_hint": "{{dismiss}} 닫기 · {{remove}} 제거"
+    },
     "processing_failed": "터미널 처리가 중지되었습니다. 계속하려면 이 세션에 다시 연결하세요.",
     "local_terminal": "로컬 터미널",
     "tmux": {

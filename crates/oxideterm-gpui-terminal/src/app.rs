@@ -528,6 +528,7 @@ pub struct TerminalPane {
     // Shell integration opens this boundary at a prompt and command submission closes it.
     autosuggest_prompt_active: bool,
     autosuggest_selected_index: Option<usize>,
+    autosuggest_scroll: gpui::ScrollHandle,
     autosuggest_dismissed_query: Option<String>,
     privilege_prompt_tracker: PrivilegePromptTracker,
     privilege_prompt_expiry_generation: u64,
@@ -1231,6 +1232,7 @@ impl TerminalPane {
             command_history: preferences.command_history.clone(),
             autosuggest_prompt_active: false,
             autosuggest_selected_index: None,
+            autosuggest_scroll: gpui::ScrollHandle::new(),
             autosuggest_dismissed_query: None,
             privilege_prompt_tracker: PrivilegePromptTracker::default(),
             privilege_prompt_expiry_generation: 0,
@@ -1685,20 +1687,27 @@ impl TerminalPane {
         append_enter: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let state = self.input_tracker.state();
-        let Some(suffix) = command.strip_prefix(&state.value) else {
+        let Some(state) = self.input_tracker.tracked_state() else {
             return false;
         };
-        let mut bytes =
-            Zeroizing::new(Vec::with_capacity(suffix.len() + usize::from(append_enter)));
-        bytes.extend_from_slice(suffix.as_bytes());
-        if append_enter {
-            bytes.push(b'\r');
-        }
+        let mode = self.terminal.lock().mode();
+        let Some(bytes) =
+            interactions::terminal_autosuggest_edit_bytes(&state, command, append_enter, mode)
+        else {
+            return false;
+        };
         self.autosuggest_selected_index = None;
         self.autosuggest_dismissed_query = Some(command.to_string());
         self.send_user_protocol_bytes(&bytes, cx);
         true
+    }
+
+    fn remove_terminal_autosuggest_command(&mut self, command: &str, cx: &mut Context<Self>) {
+        self.command_history.remove(command);
+        self.command_fact_ledger.remove_autosuggest_command(command);
+        self.autosuggest_selected_index = None;
+        self.autosuggest_scroll.scroll_to_top_of_item(0);
+        cx.notify();
     }
 
     fn terminal_ghost_text(&self) -> Option<String> {
@@ -3739,6 +3748,7 @@ impl TerminalPane {
         }
         let next_state = self.input_tracker.state();
         if next_state != previous_state {
+            self.autosuggest_scroll.scroll_to_top_of_item(0);
             self.autosuggest_selected_index = None;
             self.autosuggest_dismissed_query = None;
         }

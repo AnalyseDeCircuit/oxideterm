@@ -2,9 +2,9 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, ExternalPaths,
-    FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, anchored, deferred, div,
-    point, prelude::*, px, rgb, rgba,
+    FocusHandle, Focusable, FontWeight, IntoColor, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, anchored,
+    deferred, div, point, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 use oxideterm_gpui_ui::context_menu::{
@@ -13,7 +13,7 @@ use oxideterm_gpui_ui::context_menu::{
     context_menu_item_with_shortcut, context_menu_separator,
     context_menu_separator_height_estimate, context_menu_sub_content, context_menu_sub_trigger,
 };
-use oxideterm_gpui_ui::menu::{MenuItemKind, menu_content, menu_item, menu_label};
+use oxideterm_gpui_ui::menu::menu_content;
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
 use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::scroll::ScrollableElement;
@@ -23,7 +23,6 @@ use oxideterm_terminal::{
     TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSessionKind,
     TerminalSnapshot, TmuxAction, TmuxUiState,
 };
-use unicode_width::UnicodeWidthStr;
 
 use super::{
     BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL, ImageRenderCache, ModemProgressState,
@@ -54,7 +53,107 @@ const TMUX_CONTROL_BAR_HEIGHT: f32 = 34.0;
 const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
 // Keep diagnostic chrome away from the prompt and command text at the left edge.
 const TERMINAL_PERFORMANCE_OVERLAY_INSET: f32 = 8.0;
-const TERMINAL_AUTOSUGGEST_MAX_WIDTH: f32 = 520.0;
+const TERMINAL_AUTOSUGGEST_MAX_WIDTH: f32 = 440.0;
+
+fn terminal_autosuggest_hints(labels: &TerminalAutosuggestLabels, macos: bool) -> (String, String) {
+    let (select, run, remove) = if macos {
+        ("⌥↑/↓", "Return", "⇧⌦")
+    } else {
+        ("Alt+↑/↓", "Enter", "Shift+Delete")
+    };
+    (
+        labels
+            .navigation_hint
+            .replace("{{select}}", select)
+            .replace("{{run}}", run),
+        labels
+            .dismiss_hint
+            .replace("{{dismiss}}", "Esc")
+            .replace("{{remove}}", remove),
+    )
+}
+
+fn terminal_autosuggest_bounds(
+    anchor: super::TerminalCursorAnchor,
+    terminal_top: f32,
+    desired_height: f32,
+) -> Option<gpui::Bounds<gpui::Pixels>> {
+    let margin = 8.0;
+    let gap = 4.0;
+    let width = (anchor.container_width - margin * 2.0).min(TERMINAL_AUTOSUGGEST_MAX_WIDTH);
+    let below = (anchor.container_height - anchor.y - anchor.line_height - gap - margin).max(0.0);
+    let above = (anchor.y - gap - margin).max(0.0);
+    let use_below = below >= desired_height || below >= above;
+    let height = desired_height.min(if use_below { below } else { above });
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let left = anchor.x.clamp(
+        margin,
+        (anchor.container_width - width - margin).max(margin),
+    );
+    let top = terminal_top
+        + if use_below {
+            anchor.y + anchor.line_height + gap
+        } else {
+            anchor.y - gap - height
+        };
+    Some(gpui::Bounds::new(
+        point(px(left), px(top)),
+        gpui::size(px(width), px(height)),
+    ))
+}
+
+fn terminal_autosuggest_highlight_ranges(
+    command: &str,
+    query: &str,
+) -> Vec<std::ops::Range<usize>> {
+    // GPUI highlights use UTF-8 byte offsets. Preserve the original character's
+    // range when Unicode lowercasing expands it into multiple code points.
+    let mut normalized = zeroize::Zeroizing::new(String::new());
+    let mut source_ranges = Vec::new();
+    for (start, ch) in command.char_indices() {
+        for lower in ch.to_lowercase() {
+            normalized.push(lower);
+            source_ranges.push(start..start + ch.len_utf8());
+        }
+    }
+    let query = zeroize::Zeroizing::new(query.to_lowercase());
+    let matched: Vec<_> = if let Some(start) = normalized.find(query.as_str()) {
+        let first = normalized[..start].chars().count();
+        source_ranges
+            .iter()
+            .skip(first)
+            .take(query.chars().count())
+            .cloned()
+            .collect()
+    } else {
+        let mut remaining = query.chars().peekable();
+        normalized
+            .chars()
+            .zip(&source_ranges)
+            .filter_map(|(ch, range)| {
+                if remaining.peek() == Some(&ch) {
+                    remaining.next();
+                    Some(range.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+    let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    for range in matched {
+        if let Some(last) = ranges.last_mut()
+            && range.start <= last.end
+        {
+            last.end = last.end.max(range.end);
+        } else {
+            ranges.push(range);
+        }
+    }
+    ranges
+}
 
 fn quote_posix_shell_word(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
@@ -572,78 +671,212 @@ impl TerminalPane {
             return div().into_any_element();
         };
         let tokens = &self.theme.tokens;
-        let popup_margin = tokens.spacing.two;
-        let popup_gap = tokens.spacing.one;
-        let row_height = tokens.metrics.ui_button_sm_height;
-        let popup_padding = tokens.metrics.ui_menu_padding;
-        let header_height = tokens.metrics.ui_text_sm + tokens.metrics.ui_menu_item_padding_y * 2.0;
-        let widest_command_cells = candidates
+        let labels = &self.preferences.autosuggest_labels;
+        let (navigation_hint, dismiss_hint) =
+            terminal_autosuggest_hints(labels, cfg!(target_os = "macos"));
+        let query = zeroize::Zeroizing::new(self.input_tracker.state().value);
+        let row_height = tokens.metrics.ui_text_sm + tokens.metrics.ui_menu_item_padding_y * 2.0;
+        let header_height = 28.0;
+        let footer_height = 44.0;
+        let has_long_command = candidates
             .iter()
-            .map(|candidate| UnicodeWidthStr::width(candidate.command.as_str()))
-            .max()
-            .unwrap_or_default();
-        let available_width = (anchor.container_width - popup_margin * 2.0).max(0.0);
-        let desired_width = widest_command_cells as f32 * anchor.char_width
-            + tokens.metrics.ui_menu_item_padding_x * 2.0
-            + popup_padding * 2.0;
-        let popup_width = desired_width
-            .max(tokens.metrics.ui_menu_min_width.min(available_width))
-            .min(TERMINAL_AUTOSUGGEST_MAX_WIDTH.min(available_width));
-        let query_width = UnicodeWidthStr::width(self.input_tracker.state().value.as_str()) as f32
-            * anchor.char_width;
-        let preferred_left = anchor.x - query_width;
-        let max_left = (anchor.container_width - popup_width - popup_margin).max(popup_margin);
-        let popup_left = preferred_left.max(popup_margin).min(max_left);
-        let popup_height =
-            header_height + row_height * candidates.len() as f32 + popup_padding * 2.0;
-        let cursor_top = terminal_top + anchor.y;
-        let container_height = terminal_top + anchor.container_height;
-        let max_top = (container_height - popup_height - popup_margin).max(popup_margin);
-        let popup_top = if cursor_top - popup_height - popup_gap >= popup_margin {
-            cursor_top - popup_height - popup_gap
-        } else {
-            (cursor_top + anchor.line_height + popup_gap).min(max_top)
+            .any(|candidate| candidate.command.chars().count() > 48);
+        let desired_height = header_height
+            + footer_height
+            + row_height * candidates.len() as f32
+            + if has_long_command { 64.0 } else { 0.0 };
+        let Some(bounds) =
+            terminal_autosuggest_bounds(anchor, terminal_top, desired_height.min(360.0))
+        else {
+            return div().into_any_element();
         };
-        let selected_index = self
+        let height = f32::from(bounds.size.height);
+        if height < header_height + footer_height + row_height {
+            return div().into_any_element();
+        }
+        // Reserve detail space for this result set, so changing selection never moves the rows.
+        let preview_height =
+            if has_long_command && height >= header_height + footer_height + row_height + 64.0 {
+                64.0
+            } else {
+                0.0
+            };
+        let selected = self
             .autosuggest_selected_index
             .filter(|index| *index < candidates.len());
-        let mut list = menu_content(tokens)
-            .w(px(popup_width))
-            .min_w(px(0.0))
-            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation())
-            .child(menu_label(
-                tokens,
-                self.preferences.autosuggest_labels.history_source.clone(),
-                false,
-            ));
-        for (index, candidate) in candidates.into_iter().enumerate() {
-            let command = candidate.command;
-            let command_for_click = command.clone();
-            list = list.child(
-                menu_item(tokens, command, MenuItemKind::Plain, false, false)
+        let preview =
+            (preview_height > 0.0).then(|| candidates[selected.unwrap_or(0)].command.clone());
+        let mut rows = div()
+            .id("terminal-autosuggest-list")
+            .w_full()
+            .h(px(height
+                - header_height
+                - footer_height
+                - preview_height
+                - 2.0))
+            .flex_none()
+            .overflow_y_scroll()
+            .track_scroll(&self.autosuggest_scroll);
+        for (index, candidate) in candidates.iter().enumerate() {
+            let active = selected == Some(index);
+            let fill_command = zeroize::Zeroizing::new(candidate.command.clone());
+            let remove_command = zeroize::Zeroizing::new(candidate.command.clone());
+            let highlights = terminal_autosuggest_highlight_ranges(&candidate.command, &query)
+                .into_iter()
+                .map(|range| {
+                    (
+                        range,
+                        gpui::HighlightStyle {
+                            color: Some(rgb(tokens.ui.accent).into_color()),
+                            ..Default::default()
+                        },
+                    )
+                });
+            rows = rows.child(
+                div()
                     .id(("terminal-autosuggest-row", index))
+                    .group("terminal-autosuggest-row")
+                    .w_full()
                     .h(px(row_height))
-                    .min_w_0()
-                    .truncate()
-                    .when(selected_index == Some(index), |row| {
-                        row.bg(rgb(tokens.ui.bg_active))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .px(px(10.0))
+                    .border_l_2()
+                    .border_color(if active {
+                        rgb(tokens.ui.accent)
+                    } else {
+                        rgba(0x00000000)
                     })
+                    .bg(if active {
+                        rgb(tokens.ui.bg_active)
+                    } else {
+                        rgba(0x00000000)
+                    })
+                    .text_size(px(tokens.metrics.ui_text_sm))
+                    .line_height(px(20.0))
+                    .cursor_pointer()
                     .hover(|row| row.bg(rgb(tokens.ui.bg_hover)))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.fill_terminal_autosuggest_command(&command_for_click, false, cx);
+                        cx.listener(move |this, _, _, cx| {
+                            this.fill_terminal_autosuggest_command(&fill_command, false, cx);
                             cx.stop_propagation();
                         }),
+                    )
+                    .child(
+                        gpui::svg()
+                            .path("lucide/history.svg")
+                            .size(px(14.0))
+                            .flex_none()
+                            .text_color(rgb(tokens.ui.text_muted)),
+                    )
+                    .child(
+                        div().flex_1().min_w_0().truncate().child(
+                            gpui::StyledText::new(candidate.command.clone())
+                                .with_highlights(highlights),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .id(("terminal-autosuggest-remove", index))
+                            .size(px(20.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(tokens.radii.sm))
+                            .when(!active, |button| {
+                                button
+                                    .invisible()
+                                    .group_hover("terminal-autosuggest-row", |style| {
+                                        style.visible()
+                                    })
+                            })
+                            .hover(|button| button.bg(rgb(tokens.ui.bg_hover)))
+                            .child(
+                                gpui::svg()
+                                    .path("lucide/trash-2.svg")
+                                    .size(px(13.0))
+                                    .text_color(rgb(tokens.ui.text_muted)),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.remove_terminal_autosuggest_command(&remove_command, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
                     ),
             );
         }
-
+        let menu = menu_content(tokens)
+            .p_0()
+            .w(bounds.size.width)
+            .min_w_0()
+            .h(bounds.size.height)
+            .flex()
+            .flex_col()
+            .line_height(px(18.0))
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .h(px(header_height))
+                    .flex_none()
+                    .px(px(12.0))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .border_b_1()
+                    .border_color(rgb(tokens.ui.border))
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .text_color(rgb(tokens.ui.text_muted))
+                    .child(labels.history_source.clone())
+                    .child(
+                        labels
+                            .matches
+                            .replace("{{count}}", &candidates.len().to_string()),
+                    ),
+            )
+            .child(rows)
+            .when_some(preview, |menu, command| {
+                menu.child(
+                    div()
+                        .id(("terminal-autosuggest-preview", selected.unwrap_or(0)))
+                        .h(px(preview_height))
+                        .flex_none()
+                        .w_full()
+                        .overflow_y_scroll()
+                        .border_t_1()
+                        .border_color(rgb(tokens.ui.border))
+                        .px(px(12.0))
+                        .py(px(6.0))
+                        .text_size(px(tokens.metrics.ui_text_xs))
+                        .whitespace_normal()
+                        .child(div().w_full().child(command)),
+                )
+            })
+            .child(
+                div()
+                    .h(px(footer_height))
+                    .flex_none()
+                    .w_full()
+                    .overflow_hidden()
+                    .border_t_1()
+                    .border_color(rgb(tokens.ui.border))
+                    .px(px(12.0))
+                    .py(px(4.0))
+                    .text_size(px(10.0))
+                    .line_height(px(16.0))
+                    .text_color(rgb(tokens.ui.text_muted))
+                    .child(div().truncate().child(navigation_hint))
+                    .child(div().truncate().child(dismiss_hint)),
+            );
         div()
             .absolute()
-            .left(px(popup_left))
-            .top(px(popup_top))
-            .child(overlay_content_boundary(list))
+            .left(bounds.origin.x)
+            .top(bounds.origin.y)
+            .child(overlay_content_boundary(menu))
             .into_any_element()
     }
 
@@ -2651,6 +2884,7 @@ fn terminal_background_object_fit(fit: TerminalBackgroundFit) -> ObjectFit {
 
 #[cfg(test)]
 mod tests {
+    use gpui::AppContext;
     use std::path::PathBuf;
 
     use oxideterm_terminal::TerminalCursorShape;
@@ -2660,6 +2894,143 @@ mod tests {
         terminal_cursor_shape_for_render, terminal_pane_base_is_transparent,
         terminal_visual_bell_overlay_color,
     };
+
+    struct AutosuggestTestView {
+        pane: gpui::Entity<super::TerminalPane>,
+    }
+
+    impl gpui::Render for AutosuggestTestView {
+        fn render(
+            &mut self,
+            window: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::prelude::*;
+            let size = window.viewport_size();
+            let overlay = self.pane.update(cx, |pane, cx| {
+                pane.bounds = Some(gpui::Bounds::new(
+                    gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                    size,
+                ));
+                let candidates = pane
+                    .command_history
+                    .candidates(&pane.input_tracker.state(), 8);
+                pane.render_terminal_autosuggest_overlay(candidates, 0.0, cx)
+            });
+            gpui::div().size_full().relative().child(overlay)
+        }
+    }
+
+    #[gpui::test]
+    fn autosuggest_native_list_scrolls_keyboard_selection_into_view(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let mut preferences = crate::terminal_ui::TerminalUiPreferences::default();
+            preferences.command_history = crate::SharedTerminalCommandHistory::from_commands(
+                (0..8)
+                    .map(|index| format!("git show {}-{index}", "project".repeat(12)))
+                    .collect(),
+            );
+            let pane = cx.new(|cx| {
+                super::TerminalPane::new_recording_playback(80, 24, preferences, window, cx)
+                    .unwrap()
+            });
+            pane.update(cx, |pane, _| {
+                pane.input_tracker.apply_bytes(b"git");
+            });
+            AutosuggestTestView { pane }
+        });
+        cx.simulate_resize(gpui::size(gpui::px(400.0), gpui::px(500.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let pane = cx.update(|_, cx| view.read(cx).pane.clone());
+        let scroll = cx.update(|_, cx| pane.read(cx).autosuggest_scroll.clone());
+        assert!(scroll.max_offset().y > gpui::px(0.0));
+        pane.update(cx, |pane, cx| {
+            pane.autosuggest_selected_index = Some(7);
+            pane.autosuggest_scroll.scroll_to_item(7);
+            cx.notify();
+        });
+        view.update(cx, |_, cx| cx.notify());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let last = scroll.bounds_for_item(7).unwrap();
+        let bottom = last.bottom() + scroll.offset().y;
+        assert!(
+            bottom <= scroll.bounds().bottom(),
+            "selected command must remain visible"
+        );
+        assert!(scroll.offset().y < gpui::px(0.0));
+        assert_eq!(scroll.max_offset().x, gpui::px(0.0));
+    }
+
+    #[test]
+    fn autosuggest_hints_use_platform_key_names_in_localized_templates() {
+        let labels = crate::terminal_ui::TerminalAutosuggestLabels {
+            navigation_hint: "{{select}} 选择 · {{run}} 执行 · 单击填充".into(),
+            dismiss_hint: "{{dismiss}} 关闭 · {{remove}} 移除".into(),
+            ..Default::default()
+        };
+        assert_eq!(
+            super::terminal_autosuggest_hints(&labels, true),
+            (
+                "⌥↑/↓ 选择 · Return 执行 · 单击填充".into(),
+                "Esc 关闭 · ⇧⌦ 移除".into(),
+            )
+        );
+        assert_eq!(
+            super::terminal_autosuggest_hints(&labels, false),
+            (
+                "Alt+↑/↓ 选择 · Enter 执行 · 单击填充".into(),
+                "Esc 关闭 · Shift+Delete 移除".into(),
+            )
+        );
+    }
+
+    #[test]
+    fn autosuggest_matches_highlight_original_utf8_ranges() {
+        for (command, query, expected) in [
+            ("git status", "gts", vec![0..1, 2..3, 4..5]),
+            ("git status", "status", vec![4..10]),
+            ("İnfo 设置", "i", vec![0..2]),
+            ("İnfo 设置", "设置", vec![6..12]),
+        ] {
+            assert_eq!(
+                super::terminal_autosuggest_highlight_ranges(command, query),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn autosuggest_popup_fits_the_pane_and_never_covers_the_input_line() {
+        let anchor = super::super::TerminalCursorAnchor {
+            x: 120.0,
+            y: 20.0,
+            line_height: 16.0,
+            char_width: 8.0,
+            container_width: 600.0,
+            container_height: 400.0,
+        };
+        let below = super::terminal_autosuggest_bounds(anchor, 30.0, 200.0).unwrap();
+        assert_eq!(below.origin, gpui::point(gpui::px(120.0), gpui::px(70.0)));
+        let bottom = super::super::TerminalCursorAnchor { y: 380.0, ..anchor };
+        let above = super::terminal_autosuggest_bounds(bottom, 30.0, 200.0).unwrap();
+        assert_eq!(above.bottom(), gpui::px(406.0));
+        let narrow = super::super::TerminalCursorAnchor {
+            x: 240.0,
+            y: 60.0,
+            container_width: 250.0,
+            container_height: 120.0,
+            ..anchor
+        };
+        let constrained = super::terminal_autosuggest_bounds(narrow, 30.0, 200.0).unwrap();
+        assert_eq!(
+            constrained.origin,
+            gpui::point(gpui::px(8.0), gpui::px(38.0))
+        );
+        assert_eq!(
+            constrained.size,
+            gpui::size(gpui::px(234.0), gpui::px(48.0))
+        );
+    }
 
     #[test]
     fn terminal_pane_base_keeps_window_background_visible_during_visual_bell() {

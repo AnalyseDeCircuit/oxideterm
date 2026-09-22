@@ -1249,6 +1249,9 @@ impl WorkspaceApp {
             },
             autosuggest_labels: TerminalAutosuggestLabels {
                 history_source: self.i18n.t("terminal.command_bar.source_history"),
+                matches: self.i18n.t("terminal.autosuggest.matches"),
+                navigation_hint: self.i18n.t("terminal.autosuggest.navigation_hint"),
+                dismiss_hint: self.i18n.t("terminal.autosuggest.dismiss_hint"),
             },
             command_selection_labels: TerminalCommandSelectionLabels {
                 actions: self.i18n.t("terminal.command_selection.actions"),
