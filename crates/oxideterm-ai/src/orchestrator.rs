@@ -119,7 +119,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                     "handle_id": { "type": "string", "maxLength": 64, "description": "Current terminal handle from list_targets/select_target." },
                     "command": { "type": "string", "maxLength": MAX_COMMAND_CHARS, "description": "Shell command to run." },
                     "cwd": { "type": "string", "maxLength": MAX_PATH_CHARS, "description": "Optional working directory." },
-                    "timeout_secs": { "type": "number", "minimum": 1, "maximum": 1800, "description": "Observation budget in seconds, up to 1800. The host waits for completion by default; reaching the observation deadline never proves termination." },
+                    "timeout_secs": { "type": "number", "minimum": 1, "maximum": 1800, "description": "Observation budget in seconds, up to 1800. Visible terminals yield output or state within 30 seconds; owned backend processes retain the requested budget. An observation deadline never proves termination." },
                     "await_output": { "type": "boolean", "description": "For terminal-session targets, wait for output. Default: true." },
                 },
                 "required": ["handle_id", "command"],
@@ -160,7 +160,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "wait_terminal_output",
-            "Wait on a visible terminal until output changes, contains a literal string, reaches an input prompt, enters or leaves a TUI, or a tracked command completes.",
+            "Observe a visible terminal for output changes, literal text, input prompts, TUI transitions, or tracked completion. A command wait can yield an output snapshot or restored shell prompt without a confirmed exit; inspect terminalObservation. Each visible-terminal observation lasts at most 30 seconds and never interrupts the command.",
             json!({
                 "type": "object",
                 "properties": {
@@ -169,7 +169,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
                     "text": { "type": "string", "maxLength": MAX_QUERY_CHARS, "description": "Literal text required by the contains condition." },
                     "command_id": { "type": "string", "maxLength": 128, "description": "Command identifier returned by run_command." },
                     "case_sensitive": { "type": "boolean", "description": "Whether contains matching is case-sensitive. Default: true." },
-                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 1800, "description": "Observation deadline. Command completion defaults to 1800 seconds; other conditions default to 30 seconds." },
+                    "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 1800, "description": "Requested observation deadline, default 30 seconds. Visible-terminal waits yield within 30 seconds even for longer requests; call again to keep observing." },
                     "max_chars": { "type": "integer", "minimum": 200, "maximum": 12000, "description": "Maximum returned terminal text. Default: 4000." }
                 },
                 "required": ["handle_id", "condition"],
@@ -178,7 +178,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
         tool(
             "get_terminal_command_status",
-            "Read reliable command lifecycle and exit status from the terminal command ledger. A command remains running until its tracked mark closes.",
+            "Read command lifecycle and exit status. shell_ready means the prompt returned without a confirmed exit; only completed records establish tracked completion.",
             json!({
                 "type": "object",
                 "properties": {

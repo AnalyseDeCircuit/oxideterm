@@ -533,6 +533,7 @@ pub struct TerminalPane {
     privilege_prompt_expiry_generation: u64,
     privilege_prompt_expiry_task: Option<gpui::Task<()>>,
     command_fact_ledger: CommandFactLedger,
+    ai_command_prompt: Option<AiCommandPrompt>,
     recorder: Option<TerminalRecorder>,
     session_log: Option<TerminalSessionLog>,
     last_session_log_path: Option<std::path::PathBuf>,
@@ -1235,6 +1236,7 @@ impl TerminalPane {
             privilege_prompt_expiry_generation: 0,
             privilege_prompt_expiry_task: None,
             command_fact_ledger: CommandFactLedger::default(),
+            ai_command_prompt: None,
             recorder: None,
             session_log,
             last_session_log_path: None,
@@ -4898,6 +4900,105 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[gpui::test]
+    fn ai_command_without_end_event_recovers_input_only_after_fresh_prompt(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    80,
+                    4,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            // The outer shell advertised integration before entering a nested host.
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"\x1b]133;A\x07outer@jump:~$ \x1b]133;B\x07");
+            pane.tick(cx);
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"ssh inner\r\ninner@host:~$ ");
+            pane.tick(cx);
+            assert!(pane.shell_integration_status().detected);
+            let id = pane
+                .begin_command_mark(
+                    "pip install example",
+                    TerminalCommandMarkDetectionSource::Ai,
+                    cx,
+                )
+                .unwrap();
+            pane.last_terminal_activity = Instant::now() - Duration::from_secs(1);
+            assert!(pane.ai_command_input_pending());
+            pane.terminal.lock().feed_recording_output(
+                b"pip install example\r\nInstalling /\rInstalling -\rInstalling \\",
+            );
+            pane.tick(cx);
+            pane.last_terminal_activity = Instant::now() - Duration::from_secs(1);
+            assert!(
+                pane.ai_command_input_pending(),
+                "quiet progress output must not free input"
+            );
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"\r\ninner@host:~$");
+            pane.tick(cx);
+            // Recording injection bypasses the live PTY drain's activity clock.
+            pane.last_terminal_activity = Instant::now();
+            assert!(
+                !pane.ai_command_prompt_returned(&id),
+                "prompt must settle first"
+            );
+            pane.terminal.lock().feed_recording_output(b" ");
+            pane.tick(cx);
+            pane.last_terminal_activity = Instant::now() - Duration::from_secs(1);
+            assert!(pane.ai_command_prompt_returned(&id));
+            assert!(!pane.ai_command_input_pending());
+            let record = pane
+                .ai_command_records()
+                .into_iter()
+                .find(|record| record.command_id == id)
+                .unwrap();
+            assert_eq!(
+                (record.status, record.exit_code),
+                (crate::TerminalCommandFactStatus::Open, None)
+            );
+            // A later command owns a new prompt boundary; old evidence cannot release it.
+            let next = pane
+                .begin_command_mark("cd /tmp", TerminalCommandMarkDetectionSource::Ai, cx)
+                .unwrap();
+            assert!(!pane.ai_command_prompt_returned(&id));
+            assert!(pane.ai_command_input_pending());
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"cd /tmp\r\ninner@host:/tmp$ ");
+            pane.tick(cx);
+            pane.last_terminal_activity = Instant::now() - Duration::from_secs(1);
+            assert!(pane.ai_command_prompt_returned(&next));
+            pane.terminal.lock().scroll_lines(1);
+            assert_eq!(pane.terminal.lock().snapshot().display_offset, 1);
+            assert!(
+                pane.ai_command_prompt_returned(&next),
+                "scrollback viewing must not hide the live prompt"
+            );
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"\x1b[?1049hinner@host:/tmp$ ");
+            pane.tick(cx);
+            pane.last_terminal_activity = Instant::now() - Duration::from_secs(1);
+            assert!(
+                pane.ai_command_input_pending(),
+                "alternate-screen applications own their input"
+            );
+        });
     }
 
     #[test]

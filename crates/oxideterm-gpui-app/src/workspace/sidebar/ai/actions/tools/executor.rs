@@ -1698,6 +1698,9 @@ impl AiOrchestratorRuntimeSnapshot {
                 envelope.insert(key.to_string(), serde_json::json!(value));
             }
         }
+        if let Some(observation) = safe_data.get("terminalObservation") {
+            envelope.insert("terminalObservation".to_string(), observation.clone());
+        }
         // Tauri omits `data` when an action did not provide it. Preserve that
         // shape so models do not learn data=null as a meaningful result.
         if !safe_data.is_null() && !data_is_internal_waiting_hint {

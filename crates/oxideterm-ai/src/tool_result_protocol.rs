@@ -100,6 +100,7 @@ pub fn ai_tool_result_model_content(result: &AiExecutedToolResult) -> String {
         "waitingForInput",
         "inputWaitReason",
         "tuiState",
+        "terminalObservation",
     ] {
         if let Some(value) = envelope.get(key) {
             payload.insert(key.to_string(), value.clone());

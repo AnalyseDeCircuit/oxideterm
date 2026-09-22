@@ -104,6 +104,17 @@ impl TerminalPane {
             finished_at: None,
         };
         let command_id = mark.command_id.clone();
+        // Retain only the current AI command's prompt, independently of the exit ledger.
+        self.ai_command_prompt = if source == TerminalCommandMarkDetectionSource::Ai {
+            let live = self.terminal.lock().snapshot_with_display_offset(0, self.snapshot.rows);
+            Some(AiCommandPrompt {
+                command_id: command_id.clone(),
+                start_line: live.scrollback_lines.saturating_add(live.cursor_row),
+                prompt: ai_idle_prompt(&live),
+            })
+        } else {
+            None
+        };
         self.command_fact_ledger.create_from_mark(&mark);
         self.command_marks.push(mark);
         self.command_marks_render_cache_dirty = true;
@@ -1058,5 +1069,108 @@ fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         assert!(command_mark_allows_cwd_fallback(Some(0)));
         assert!(!command_mark_allows_cwd_fallback(Some(1)));
         assert!(!command_mark_allows_cwd_fallback(Some(127)));
+    }
+}
+
+// A returned prompt is evidence that input is available, not an exit status.
+struct AiCommandPrompt {
+    command_id: String,
+    start_line: usize,
+    prompt: Option<zeroize::Zeroizing<String>>,
+}
+
+impl AiCommandPrompt {
+    fn returned(&self, snapshot: &TerminalSnapshot, quiet: Duration, blocked: bool) -> bool {
+        if blocked || quiet < Duration::from_millis(750) {
+            return false;
+        }
+        let line = snapshot
+            .scrollback_lines
+            .saturating_add(snapshot.cursor_row);
+        if line <= self.start_line {
+            return false;
+        }
+        let Some(expected) = self.prompt.as_deref() else {
+            return false;
+        };
+        let Some(current) = ai_idle_prompt(snapshot) else {
+            return false;
+        };
+        if expected.as_str() == current.as_str() {
+            return true;
+        }
+        // A directory change may change PS1; require the same user/host and terminator.
+        fn identity(prompt: &str) -> Option<(&str, char)> {
+            let (host, _) = prompt.split_once(':')?;
+            if !host.contains('@') || host.chars().any(char::is_whitespace) {
+                return None;
+            }
+            let suffix = prompt.chars().last()?;
+            matches!(suffix, '$' | '#').then_some((host, suffix))
+        }
+        identity(expected).is_some_and(|id| Some(id) == identity(&current))
+    }
+}
+
+fn ai_idle_prompt(snapshot: &TerminalSnapshot) -> Option<zeroize::Zeroizing<String>> {
+    if snapshot.display_offset != 0 || snapshot.cursor_col == 0 {
+        return None;
+    }
+    let row = snapshot.lines.get(snapshot.cursor_row)?;
+    if row
+        .cells
+        .iter()
+        .skip(snapshot.cursor_col)
+        .any(|cell| !cell.ch.is_whitespace())
+    {
+        return None;
+    }
+    let mut text = zeroize::Zeroizing::new(String::new());
+    for cell in row.cells.iter().take(snapshot.cursor_col) {
+        text.push(cell.ch);
+        text.push_str(cell.zerowidth());
+    }
+    let len = text.trim_end().len();
+    text.truncate(len);
+    // Do not mistake continuation prompts or credential/menu questions for a shell.
+    if text.is_empty()
+        || text.as_str() == ">"
+        || text.len() > 512
+        || !text.ends_with(['$', '#', '%', '>', '❯', '➜', 'λ', '›', '»'])
+    {
+        return None;
+    }
+    Some(text)
+}
+
+impl TerminalPane {
+    pub fn ai_command_prompt_returned(&self, command_id: &str) -> bool {
+        let Some(prompt) = self
+            .ai_command_prompt
+            .as_ref()
+            .filter(|prompt| prompt.command_id == command_id)
+        else {
+            return false;
+        };
+        let blocked = self.ai_waiting_for_secret()
+            || self.ai_screen_is_alternate_buffer()
+            || !self.ai_accepts_input();
+        // Rendering may defer its snapshot while the pane is hidden; observe the live emulator.
+        prompt.returned(
+            &self
+                .terminal
+                .lock()
+                .snapshot_with_display_offset(0, self.snapshot.rows),
+            self.last_terminal_activity.elapsed(),
+            blocked,
+        )
+    }
+
+    pub fn ai_command_input_pending(&self) -> bool {
+        self.ai_command_prompt.as_ref().is_some_and(|prompt| {
+            self.ai_command_status(&prompt.command_id)
+                == Some(crate::TerminalCommandFactStatus::Open)
+                && !self.ai_command_prompt_returned(&prompt.command_id)
+        })
     }
 }
