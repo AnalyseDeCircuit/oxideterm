@@ -1269,23 +1269,22 @@ impl WorkspaceApp {
             // feature should not leave an orphaned popover around.
             self.close_terminal_cwd_picker(cx);
         }
-        if let Some(group_id) = self.terminal.read(cx).selected_broadcast_group_id() {
-            if settings
-                .terminal
-                .broadcast_groups
-                .iter()
-                .any(|group| group.id == group_id)
+        let saved_group_ids = settings
+            .terminal
+            .broadcast_groups
+            .iter()
+            .map(|group| group.id)
+            .collect();
+        self.terminal.update(cx, |terminal, _| {
+            // Settings refresh cannot recruit new windows into an already-running group.
+            terminal.sync_groups_mut().retain_groups(&saved_group_ids);
+            if terminal
+                .selected_broadcast_group_id()
+                .is_some_and(|id| !saved_group_ids.contains(&id))
             {
-                let targets = self.resolve_terminal_broadcast_group(group_id, cx);
-                self.terminal.update(cx, |terminal, _cx| {
-                    terminal.refresh_selected_broadcast_group(group_id, &targets);
-                });
-            } else {
-                self.terminal.update(cx, |terminal, _cx| {
-                    terminal.clear_selected_broadcast_group();
-                });
+                terminal.clear_selected_broadcast_group();
             }
-        }
+        });
         self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
             settings.connection_pool.idle_timeout_secs as u64,
         )));

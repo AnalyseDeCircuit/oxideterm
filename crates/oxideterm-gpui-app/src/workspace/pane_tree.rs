@@ -89,9 +89,6 @@ impl TerminalInputBroadcastRoute {
         let Some(terminal) = self.terminal.upgrade() else {
             return;
         };
-        if !terminal.read(cx).broadcast_enabled() {
-            return;
-        }
 
         let (live_panes, mut candidates) = {
             let tab_host = tab_host.read(cx);
@@ -109,10 +106,7 @@ impl TerminalInputBroadcastRoute {
 
         let targets = terminal.update(cx, |terminal, _cx| {
             terminal.retain_live_broadcast_targets(&live_panes);
-            if !terminal.broadcast_enabled() {
-                return Vec::new();
-            }
-            terminal.filter_broadcast_targets(candidates)
+            terminal.filter_broadcast_targets(self.source_pane_id, candidates)
         });
         for pane_id in targets {
             let session_id = tab_host
@@ -367,6 +361,9 @@ impl WorkspaceApp {
             self.clear_ime_selection();
         }
         self.search.remove(*pane_id);
+        self.terminal.update(cx, |terminal, _| {
+            terminal.sync_groups_mut().remove(*pane_id)
+        });
         self.tab_host
             .update(cx, |tab_host, _cx| tab_host.remove_terminal_pane(*pane_id))
     }
@@ -786,6 +783,12 @@ impl WorkspaceApp {
                 let Some(pane) = self.tab_host.read(cx).panes().get(pane_id).cloned() else {
                     return div().size_full().into_any_element();
                 };
+                let sync_header = self.render_terminal_sync_member_header(*pane_id, cx);
+                let terminal_top = if sync_header.is_some() {
+                    terminal_command_bar::TERMINAL_SYNC_HEADER_HEIGHT
+                } else {
+                    0.0
+                };
                 div()
                     .id(("workspace-pane", pane_id.0))
                     .size_full()
@@ -822,10 +825,11 @@ impl WorkspaceApp {
                             }
                         }),
                     )
+                    .children(sync_header)
                     .child(
                         div()
                             .absolute()
-                            .top_0()
+                            .top(px(terminal_top))
                             .left_0()
                             .right_0()
                             .bottom_0()

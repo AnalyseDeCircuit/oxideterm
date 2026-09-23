@@ -472,6 +472,7 @@
       "execute": "Executar"
     },
     "sender": {
+      "group_hint": "Os grupos de conexões salvos selecionam todos os terminais correspondentes. O isolamento na sincronização interativa não altera esses destinos explícitos.",
       "task": "Envio",
       "placeholder": "Digite comandos ou bytes hexadecimais...",
       "show": "Mostrar envio de comandos",
@@ -508,10 +509,18 @@
       "error_busy": "Um destino está em uso por outro envio"
     },
     "broadcast": {
-      "groups": "Grupos de transmissão",
+      "members_hint": "Selecione os terminais e ative a sincronização. Novos terminais não entram automaticamente. Remova um terminal do grupo atual antes de movê-lo.",
+      "isolate_member": "Isolar",
+      "resume_member": "Retomar",
+      "pause_group": "Pausar",
+      "start_group": "Ativar sincronização",
+      "sync_isolated": "Isolado",
+      "sync_disabled": "Pausado",
+      "sync_enabled": "Sincronizando",
+      "groups": "Grupos de sincronização",
       "create_group": "Novo grupo",
       "no_groups": "Nenhum grupo nomeado",
-      "temporary_group": "Seleção temporária",
+      "temporary_group": "Grupo temporário",
       "group_name_placeholder": "Nome do grupo",
       "group_members": "Membros do grupo",
       "unsaved_target": "Não salva",

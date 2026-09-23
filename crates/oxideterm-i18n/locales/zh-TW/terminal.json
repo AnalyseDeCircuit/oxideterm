@@ -472,6 +472,7 @@
       "execute": "執行"
     },
     "sender": {
+      "group_hint": "儲存的連線群組會選取所有符合的終端窗格；互動同步中的臨時隔離不會改變此處指定的傳送目標。",
       "task": "傳送器",
       "placeholder": "輸入命令或十六進位位元組……",
       "show": "顯示命令傳送器",
@@ -508,10 +509,18 @@
       "error_busy": "目標正由另一個傳送工作使用"
     },
     "broadcast": {
-      "groups": "廣播群組",
+      "members_hint": "選擇個別終端後啟用同步，新開終端不會自動加入。移動終端前，請先將其移出原群組。",
+      "isolate_member": "臨時隔離",
+      "resume_member": "恢復同步",
+      "pause_group": "暫停同步",
+      "start_group": "啟用同步",
+      "sync_isolated": "已隔離",
+      "sync_disabled": "已暫停",
+      "sync_enabled": "同步中",
+      "groups": "同步群組",
       "create_group": "新增群組",
       "no_groups": "尚無命名群組",
-      "temporary_group": "暫時選擇",
+      "temporary_group": "臨時同步群組",
       "group_name_placeholder": "群組名稱",
       "group_members": "群組成員",
       "unsaved_target": "未儲存",

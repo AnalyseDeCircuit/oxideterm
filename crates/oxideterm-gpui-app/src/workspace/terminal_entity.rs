@@ -39,9 +39,7 @@ enum TerminalGitProbeDelivery {
 #[derive(Default)]
 /// Keeps broadcast selection semantics together so stale targets cannot widen a command.
 struct TerminalBroadcastState {
-    enabled: bool,
-    // Named groups resolve to a runtime snapshot so membership never owns connection startup.
-    targets: HashSet<PaneId>,
+    groups: super::terminal_sync_groups::TerminalSyncGroups,
     selected_group_id: Option<uuid::Uuid>,
     group_editor: Option<TerminalBroadcastGroupEditor>,
     menu_open: bool,
@@ -172,7 +170,9 @@ impl WorkspaceTerminalEntity {
     }
 
     pub(in crate::workspace) fn broadcast_enabled(&self) -> bool {
-        self.broadcast.enabled
+        self.broadcast
+            .groups
+            .enabled(self.broadcast.selected_group_id)
     }
 
     pub(in crate::workspace) fn broadcast_menu_open(&self) -> bool {
@@ -183,12 +183,16 @@ impl WorkspaceTerminalEntity {
         self.cast_player.is_some()
     }
 
-    pub(in crate::workspace) fn broadcast_targets_empty(&self) -> bool {
-        self.broadcast.targets.is_empty()
+    pub(in crate::workspace) fn sync_groups(
+        &self,
+    ) -> &super::terminal_sync_groups::TerminalSyncGroups {
+        &self.broadcast.groups
     }
 
-    pub(in crate::workspace) fn broadcast_target_selected(&self, pane_id: PaneId) -> bool {
-        self.broadcast.targets.contains(&pane_id)
+    pub(in crate::workspace) fn sync_groups_mut(
+        &mut self,
+    ) -> &mut super::terminal_sync_groups::TerminalSyncGroups {
+        &mut self.broadcast.groups
     }
 
     pub(in crate::workspace) fn selected_broadcast_group_id(&self) -> Option<uuid::Uuid> {
@@ -241,12 +245,9 @@ impl WorkspaceTerminalEntity {
     }
 
     pub(in crate::workspace) fn toggle_broadcast(&mut self) {
-        self.broadcast.enabled = if self.broadcast.enabled {
-            false
-        } else {
-            self.broadcast.selected_group_id.is_none() || !self.broadcast.targets.is_empty()
-        };
-        self.broadcast.menu_open = false;
+        self.broadcast
+            .groups
+            .toggle_enabled(self.broadcast.selected_group_id);
     }
 
     pub(in crate::workspace) fn select_broadcast_group(
@@ -254,30 +255,14 @@ impl WorkspaceTerminalEntity {
         group_id: uuid::Uuid,
         targets: &[PaneId],
     ) {
+        self.broadcast.groups.initialize(Some(group_id), targets);
         self.broadcast.selected_group_id = Some(group_id);
-        self.broadcast.targets.clear();
-        self.broadcast.targets.extend(targets.iter().copied());
-        self.broadcast.enabled = !self.broadcast.targets.is_empty();
     }
 
     pub(in crate::workspace) fn clear_selected_broadcast_group(&mut self) {
+        // Selecting the temporary group does not stop any named group.
         self.broadcast.selected_group_id = None;
-        self.broadcast.targets.clear();
-        self.broadcast.enabled = false;
-    }
-
-    pub(in crate::workspace) fn refresh_selected_broadcast_group(
-        &mut self,
-        group_id: uuid::Uuid,
-        targets: &[PaneId],
-    ) {
-        if self.broadcast.selected_group_id != Some(group_id) {
-            return;
-        }
-        let was_enabled = self.broadcast.enabled;
-        self.broadcast.targets.clear();
-        self.broadcast.targets.extend(targets.iter().copied());
-        self.broadcast.enabled = was_enabled && !self.broadcast.targets.is_empty();
+        self.broadcast.groups.initialize(None, &[]);
     }
 
     pub(in crate::workspace) fn dismiss_broadcast_menu(&mut self) -> bool {
@@ -292,19 +277,17 @@ impl WorkspaceTerminalEntity {
     }
 
     pub(in crate::workspace) fn toggle_broadcast_target(&mut self, pane_id: PaneId) {
-        self.broadcast.selected_group_id = None;
-        if !self.broadcast.targets.remove(&pane_id) {
-            self.broadcast.targets.insert(pane_id);
+        let group = self.broadcast.selected_group_id;
+        if self
+            .broadcast
+            .groups
+            .member(pane_id)
+            .is_some_and(|member| member.group == group)
+        {
+            self.broadcast.groups.remove(pane_id);
+        } else {
+            self.broadcast.groups.add(group, pane_id);
         }
-        self.broadcast.enabled = !self.broadcast.targets.is_empty();
-        self.broadcast.menu_open = true;
-    }
-
-    pub(in crate::workspace) fn set_broadcast_targets(&mut self, targets: &[PaneId]) {
-        self.broadcast.selected_group_id = None;
-        self.broadcast.targets.clear();
-        self.broadcast.targets.extend(targets.iter().copied());
-        self.broadcast.enabled = !self.broadcast.targets.is_empty();
         self.broadcast.menu_open = true;
     }
 
@@ -312,32 +295,19 @@ impl WorkspaceTerminalEntity {
         &mut self,
         live_panes: &HashSet<PaneId>,
     ) {
-        self.broadcast
-            .targets
-            .retain(|pane_id| live_panes.contains(pane_id));
-        if self.broadcast.targets.is_empty() {
-            // An explicitly empty selection means "all" only while enabled.
-            // Disable after pruning so closed targets never widen the command.
-            self.broadcast.enabled = false;
-        }
+        self.broadcast.groups.retain_panes(live_panes);
     }
 
     pub(in crate::workspace) fn filter_broadcast_targets(
         &self,
+        source: PaneId,
         candidates: Vec<PaneId>,
     ) -> Vec<PaneId> {
-        if self.broadcast.targets.is_empty() {
-            if self.broadcast.selected_group_id.is_some() {
-                Vec::new()
-            } else {
-                candidates
-            }
-        } else {
-            candidates
-                .into_iter()
-                .filter(|pane_id| self.broadcast.targets.contains(pane_id))
-                .collect()
-        }
+        let targets: HashSet<_> = self.broadcast.groups.targets(source).into_iter().collect();
+        candidates
+            .into_iter()
+            .filter(|pane| targets.contains(pane))
+            .collect()
     }
 
     pub(in crate::workspace) fn project_snapshot(
@@ -1142,27 +1112,35 @@ pub(super) mod tests {
     }
 
     #[gpui::test]
-    fn named_broadcast_group_never_widens_after_targets_close(cx: &mut TestAppContext) {
+    fn selecting_another_group_does_not_retarget_input_and_closed_members_never_widen_it(
+        cx: &mut TestAppContext,
+    ) {
         let terminal = new_terminal_entity(cx);
-        let group_id = uuid::Uuid::new_v4();
-        let target = PaneId(42);
-
-        terminal.update(cx, |terminal, _cx| {
-            terminal.select_broadcast_group(group_id, &[target]);
-            assert!(terminal.broadcast_enabled());
-            terminal.toggle_broadcast();
+        let first = uuid::Uuid::from_u128(1);
+        let second = uuid::Uuid::from_u128(2);
+        let [a, b, c, d, outside] = [1, 2, 3, 4, 5].map(PaneId);
+        terminal.update(cx, |terminal, _| {
+            terminal.select_broadcast_group(first, &[a, b]);
             assert!(!terminal.broadcast_enabled());
-            assert_eq!(terminal.selected_broadcast_group_id(), Some(group_id));
             terminal.toggle_broadcast();
-            assert!(terminal.broadcast_enabled());
-            terminal.retain_live_broadcast_targets(&HashSet::new());
-            assert!(!terminal.broadcast_enabled());
-            assert!(
-                terminal
-                    .filter_broadcast_targets(vec![PaneId(7)])
-                    .is_empty()
+            terminal.select_broadcast_group(second, &[c, d]);
+            terminal.toggle_broadcast();
+            assert_eq!(terminal.selected_broadcast_group_id(), Some(second));
+            assert_eq!(
+                terminal.filter_broadcast_targets(a, vec![b, c, d, outside]),
+                vec![b]
             );
-            assert_eq!(terminal.selected_broadcast_group_id(), Some(group_id));
+            assert_eq!(
+                terminal.filter_broadcast_targets(c, vec![a, b, d, outside]),
+                vec![d]
+            );
+            assert_eq!(
+                terminal.filter_broadcast_targets(outside, vec![a, b, c, d]),
+                vec![]
+            );
+            terminal.retain_live_broadcast_targets(&HashSet::from([a, outside]));
+            assert_eq!(terminal.filter_broadcast_targets(a, vec![outside]), vec![]);
+            assert!(!terminal.broadcast_enabled());
         });
     }
 

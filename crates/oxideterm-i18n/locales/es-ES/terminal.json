@@ -472,6 +472,7 @@
       "execute": "Ejecutar"
     },
     "sender": {
+      "group_hint": "Los grupos de conexiones guardados seleccionan todos los terminales coincidentes. El aislamiento de la sincronización interactiva no cambia estos destinos explícitos.",
       "task": "Emisor",
       "placeholder": "Introduce comandos o bytes hexadecimales...",
       "show": "Mostrar emisor de comandos",
@@ -508,10 +509,18 @@
       "error_busy": "Otro emisor está usando un destino"
     },
     "broadcast": {
-      "groups": "Grupos de difusión",
+      "members_hint": "Selecciona terminales concretos y activa la sincronización. Los nuevos terminales no se unen automáticamente. Quita un terminal de su grupo actual antes de moverlo.",
+      "isolate_member": "Aislar",
+      "resume_member": "Reanudar",
+      "pause_group": "Pausar",
+      "start_group": "Activar sincronización",
+      "sync_isolated": "Aislado",
+      "sync_disabled": "En pausa",
+      "sync_enabled": "Sincronizando",
+      "groups": "Grupos de sincronización",
       "create_group": "Nuevo grupo",
       "no_groups": "Aún no hay grupos con nombre",
-      "temporary_group": "Selección temporal",
+      "temporary_group": "Grupo temporal",
       "group_name_placeholder": "Nombre del grupo",
       "group_members": "Miembros del grupo",
       "unsaved_target": "No guardada",

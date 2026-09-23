@@ -61,19 +61,13 @@ impl WorkspaceApp {
         let can_split = self.can_split_active_pane(cx);
         let broadcast_targets =
             self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)), cx);
-        let (broadcast_enabled, broadcast_targets_empty) = {
-            let terminal = self.terminal.read(cx);
-            (
-                terminal.broadcast_enabled(),
-                terminal.broadcast_targets_empty(),
-            )
-        };
+        let broadcast_enabled = active_pane_id
+            .and_then(|pane| self.terminal.read(cx).sync_groups().member(pane))
+            .is_some_and(|member| {
+                !member.isolated && self.terminal.read(cx).sync_groups().enabled(member.group)
+            });
         let broadcast_label = if broadcast_enabled {
-            if broadcast_targets_empty {
-                self.i18n.t("terminal.command_bar.all_targets")
-            } else {
-                format!("{}", broadcast_targets.len())
-            }
+            broadcast_targets.len().to_string()
         } else {
             String::new()
         };
@@ -903,18 +897,6 @@ impl WorkspaceApp {
             .read(cx)
             .broadcast_group_editor()
             .map(|(kind, value)| (kind, value.to_string()));
-        let selectable = entries
-            .iter()
-            .filter(|entry| Some(entry.pane_id) != active_pane_id)
-            .map(|entry| entry.pane_id)
-            .collect::<Vec<_>>();
-        let all_selected = !selectable.is_empty() && {
-            let terminal = self.terminal.read(cx);
-            selectable
-                .iter()
-                .all(|pane_id| terminal.broadcast_target_selected(*pane_id))
-        };
-        let broadcast_enabled = self.terminal.read(cx).broadcast_enabled();
         let anchor_left = self
             .select_anchors
             .get(&SelectAnchorId::TerminalBroadcastMenu)
@@ -1031,7 +1013,12 @@ impl WorkspaceApp {
         for group in &groups {
             let group_id = group.id;
             let selected = selected_group_id == Some(group_id);
-            let member_count = self.resolve_terminal_broadcast_group(group_id, cx).len();
+            let member_count = self
+                .terminal
+                .read(cx)
+                .sync_groups()
+                .panes(Some(group_id))
+                .len();
             let name = group.name.clone();
             menu = menu.child(
                 div()
@@ -1050,6 +1037,18 @@ impl WorkspaceApp {
                         div().size(px(12.0)).into_any_element()
                     })
                     .child(div().flex_1().truncate().child(name))
+                    .child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.accent))
+                            .child(self.i18n.t(
+                                if self.terminal.read(cx).sync_groups().enabled(Some(group_id)) {
+                                    "terminal.broadcast.sync_enabled"
+                                } else {
+                                    "terminal.broadcast.sync_disabled"
+                                },
+                            )),
+                    )
                     .child(
                         div()
                             .text_size(px(10.0))
@@ -1204,248 +1203,216 @@ impl WorkspaceApp {
             );
         }
 
+        let enabled = self.terminal.read(cx).broadcast_enabled();
+        let selected_count = self
+            .terminal
+            .read(cx)
+            .sync_groups()
+            .panes(selected_group_id)
+            .len();
         menu = menu.child(
             div()
-                .mt(px(4.0))
-                .pt(px(6.0))
                 .border_t_1()
-                .border_color(rgba((theme.border << 8) | 0x99))
+                .border_color(rgb(theme.border))
+                .mt(px(4.0))
+                .p(px(6.0))
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(self.i18n.t("terminal.broadcast.group_members"))
+                .child(self.terminal_sync_action_button(
+                    self.i18n.t(if enabled {
+                        "terminal.broadcast.pause_group"
+                    } else {
+                        "terminal.broadcast.start_group"
+                    }),
+                    selected_count > 0,
+                    |this, _, _, cx| {
+                        this.terminal
+                            .update(cx, |terminal, _| terminal.toggle_broadcast());
+                        cx.stop_propagation();
+                        cx.notify();
+                    },
+                    cx,
+                )),
+        );
+        menu = menu.child(
+            div()
                 .px(px(6.0))
-                .py(px(4.0))
+                .pb(px(6.0))
                 .text_size(px(11.0))
                 .text_color(rgb(theme.text_muted))
-                .child(if selected_group_id.is_some() {
-                    self.i18n.t("terminal.broadcast.group_members")
-                } else {
-                    self.i18n.t("terminal.broadcast.select_targets")
-                }),
+                .child(self.i18n.t("terminal.broadcast.members_hint")),
         );
-
-        if let Some(group_id) = selected_group_id {
-            // Membership editing follows the active terminal surface; closed members stay
-            // persisted but cannot cause a connection to open.
-            if entries.is_empty() {
-                menu = menu.child(
+        if entries.is_empty() {
+            menu = menu.child(
+                div()
+                    .p(px(8.0))
+                    .child(self.i18n.t("terminal.broadcast.no_targets")),
+            );
+        }
+        for entry in entries {
+            let pane_id = entry.pane_id;
+            let member = self.terminal.read(cx).sync_groups().member(pane_id);
+            let checked = member.is_some_and(|member| member.group == selected_group_id);
+            let other_group = member.filter(|member| member.group != selected_group_id);
+            let row = div()
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .px(px(8.0))
+                .py(px(5.0))
+                .child(if checked {
+                    Self::render_lucide_icon(LucideIcon::Check, 12.0, rgb(theme.accent))
+                } else {
+                    div().size(px(12.0)).into_any_element()
+                })
+                .child(div().flex_1().min_w_0().truncate().child(entry.label))
+                .child(
                     div()
-                        .px(px(8.0))
-                        .py(px(12.0))
-                        .text_align(gpui::TextAlign::Center)
+                        .flex_none()
+                        .text_size(px(10.0))
                         .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("terminal.broadcast.no_targets")),
-                );
-            } else {
-                let selected_members = groups
-                    .iter()
-                    .find(|group| group.id == group_id)
-                    .map(|group| group.members.as_slice())
-                    .unwrap_or_default();
-                for entry in entries {
-                    let target = entry.saved_connection;
-                    let checked = target
-                        .as_ref()
-                        .is_some_and(|target| selected_members.contains(target));
-                    let unavailable = target.is_none();
-                    let badge = match entry.kind {
-                        TabKind::LocalTerminal => self.i18n.t("terminal.typeLocal"),
-                        TabKind::SshTerminal => self.i18n.t("terminal.typeSsh"),
-                        TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
-                        _ => String::new(),
-                    };
-                    menu = menu.child(
-                        self.render_terminal_broadcast_menu_action(
-                            div()
-                                .h(px(30.0))
-                                .flex()
-                                .items_center()
-                                .gap(px(8.0))
-                                .px(px(8.0))
-                                .rounded(px(self.tokens.radii.md))
-                                .child(if checked {
-                                    Self::render_lucide_icon(
-                                        LucideIcon::Check,
-                                        12.0,
-                                        rgb(theme.accent),
-                                    )
+                        .child(format!("#{}", pane_id.0)),
+                )
+                .when(Some(pane_id) == active_pane_id, |row| {
+                    row.child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.accent))
+                            .child(self.i18n.t("terminal.broadcast.current")),
+                    )
+                })
+                .when_some(other_group, |row, member| {
+                    row.child(
+                        div()
+                            .text_size(px(10.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.terminal_sync_group_name(member.group)),
+                    )
+                })
+                .when(checked, |row| {
+                    row.child(
+                        self.terminal_sync_action_button(
+                            self.i18n
+                                .t(if member.is_some_and(|member| member.isolated) {
+                                    "terminal.broadcast.resume_member"
                                 } else {
-                                    div().size(px(12.0)).into_any_element()
-                                })
-                                .child(div().flex_1().truncate().child(entry.label))
-                                .when(!badge.is_empty(), |row| {
-                                    row.child(
-                                        div()
-                                            .px(px(5.0))
-                                            .py(px(1.0))
-                                            .rounded(px(self.tokens.radii.md))
-                                            .text_size(px(10.0))
-                                            .text_color(rgb(theme.text_muted))
-                                            .bg(rgba((theme.bg_panel << 8) | 0x99))
-                                            .child(badge),
-                                    )
-                                })
-                                .when(unavailable, |row| {
-                                    row.child(
-                                        div()
-                                            .text_size(px(10.0))
-                                            .text_color(rgb(theme.text_muted))
-                                            .child(
-                                                self.i18n.t("terminal.broadcast.unsaved_target"),
-                                            ),
-                                    )
+                                    "terminal.broadcast.isolate_member"
                                 }),
-                            unavailable,
-                            false,
-                            Some(rgb(theme.bg_hover)),
-                            move |this, _event, _window, cx| {
-                                if let Some(target) = target.clone() {
-                                    this.toggle_terminal_broadcast_group_member(
-                                        group_id, target, cx,
-                                    );
-                                }
+                            true,
+                            move |this, _, _, cx| {
+                                this.toggle_terminal_sync_isolation(pane_id, cx);
+                                cx.stop_propagation();
                             },
                             cx,
                         ),
-                    );
-                }
-            }
-        } else if entries.len() <= 1 {
-            menu = menu.child(
-                div()
-                    .px(px(8.0))
-                    .py(px(12.0))
-                    .text_align(gpui::TextAlign::Center)
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("terminal.broadcast.no_targets")),
-            );
-        } else {
-            for entry in entries {
-                let pane_id = entry.pane_id;
-                let label = entry.label;
-                let kind = entry.kind;
-                let is_current = Some(pane_id) == active_pane_id;
-                let checked = self.terminal.read(cx).broadcast_target_selected(pane_id);
-                let badge = match kind {
-                    TabKind::LocalTerminal => self.i18n.t("terminal.typeLocal"),
-                    TabKind::SshTerminal => self.i18n.t("terminal.typeSsh"),
-                    TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
-                    _ => String::new(),
-                };
-                let row_color = if is_current {
-                    rgb(theme.text_muted)
-                } else {
-                    rgb(theme.text)
-                };
-                let row = div()
-                    .h(px(30.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .px(px(8.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .text_color(row_color)
-                    .child(if checked {
-                        Self::render_lucide_icon(LucideIcon::Check, 12.0, rgb(theme.accent))
-                    } else if is_current {
-                        div()
-                            .size(px(12.0))
-                            .rounded_full()
-                            .bg(rgb(theme.accent))
-                            .into_any_element()
-                    } else {
-                        div().size(px(12.0)).into_any_element()
-                    })
-                    .child(div().flex_1().truncate().child(label))
-                    .when(!badge.is_empty(), |row| {
-                        row.child(
-                            div()
-                                .px(px(5.0))
-                                .py(px(1.0))
-                                .rounded(px(self.tokens.radii.md))
-                                .text_size(px(10.0))
-                                .text_color(rgb(theme.text_muted))
-                                .bg(rgba((theme.bg_panel << 8) | 0x99))
-                                .child(badge),
-                        )
-                    })
-                    .when(is_current, |row| {
-                        row.child(
-                            div()
-                                .px(px(5.0))
-                                .py(px(1.0))
-                                .rounded(px(self.tokens.radii.md))
-                                .text_size(px(10.0))
-                                .text_color(rgb(theme.accent))
-                                .bg(rgba((theme.accent << 8) | 0x26))
-                                .child(self.i18n.t("terminal.broadcast.current")),
-                        )
-                    });
-                // Broadcast rows are checkbox-style menu items. Keep current
-                // pane disabled through the shared menu action guard.
-                let row = self.render_terminal_broadcast_menu_action(
-                    row,
-                    is_current,
-                    false,
-                    Some(rgb(theme.bg_hover)),
-                    move |this, _event, _window, cx| {
-                        this.terminal.update(cx, |terminal, _cx| {
-                            terminal.toggle_broadcast_target(pane_id);
-                        });
-                    },
-                    cx,
-                );
-                menu = menu.child(row);
-            }
-
-            let select_all_disabled = selectable.is_empty();
-            let select_all_label = div()
-                .text_size(px(11.0))
-                .text_color(rgb(theme.text_muted))
-                .child(if all_selected {
-                    self.i18n.t("terminal.broadcast.deselect_all")
-                } else {
-                    self.i18n.t("terminal.broadcast.select_all")
+                    )
                 });
-            menu = menu.child(
-                div()
-                    .mt(px(4.0))
-                    .pt(px(6.0))
-                    .border_t_1()
-                    .border_color(rgba((theme.border << 8) | 0x99))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(px(6.0))
-                    .child(self.workspace_context_menu_persistent_styled_action(
-                        select_all_label,
-                        select_all_disabled,
-                        false,
-                        ContextMenuActionableStyle {
-                            hover_background: None,
-                            hover_text_color: Some(rgb(theme.accent)),
-                        },
-                        move |this, _event, _window, cx| {
-                            this.terminal.update(cx, |terminal, _cx| {
-                                let targets = if all_selected {
-                                    &[][..]
-                                } else {
-                                    selectable.as_slice()
-                                };
-                                terminal.set_broadcast_targets(targets);
-                            });
-                        },
-                        cx,
-                    ))
-                    .when(broadcast_enabled, |footer| {
-                        footer.child(
-                            div()
-                                .text_size(px(10.0))
-                                .text_color(rgb(theme.accent))
-                                .child(self.i18n.t("terminal.broadcast.target_count")),
-                        )
-                    }),
-            );
+            menu = menu.child(self.render_terminal_broadcast_menu_action(
+                row,
+                other_group.is_some(),
+                false,
+                Some(rgb(theme.bg_hover)),
+                move |this, _, _, cx| {
+                    this.toggle_terminal_broadcast_group_member(pane_id, cx);
+                },
+                cx,
+            ));
         }
 
         menu.into_any_element()
+    }
+
+    pub(in crate::workspace) fn terminal_sync_action_button(
+        &self,
+        label: String,
+        enabled: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.workspace_toolbar_action_button(
+            label,
+            None,
+            oxideterm_gpui_ui::button::ToolbarButtonOptions {
+                button: oxideterm_gpui_ui::button::ButtonOptions {
+                    variant: oxideterm_gpui_ui::button::ButtonVariant::Ghost,
+                    disabled: !enabled,
+                    ..Default::default()
+                },
+                height: Some(22.0),
+                padding_x: Some(6.0),
+                ..Default::default()
+            },
+            cx.listener(listener),
+        )
+    }
+
+    pub(in crate::workspace) fn render_terminal_sync_member_header(
+        &self,
+        pane_id: PaneId,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let member = self.terminal.read(cx).sync_groups().member(pane_id)?;
+        let enabled = self.terminal.read(cx).sync_groups().enabled(member.group);
+        let theme = self.tokens.ui;
+        let state = if member.isolated {
+            "terminal.broadcast.sync_isolated"
+        } else if enabled {
+            "terminal.broadcast.sync_enabled"
+        } else {
+            "terminal.broadcast.sync_disabled"
+        };
+        Some(
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(px(TERMINAL_SYNC_HEADER_HEIGHT))
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .bg(self.workspace_chrome_background(theme.bg))
+                .border_b_1()
+                .border_color(self.workspace_chrome_divider())
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(if member.isolated {
+                    theme.warning
+                } else if enabled {
+                    theme.accent
+                } else {
+                    theme.text_muted
+                }))
+                .child(Self::render_lucide_icon(
+                    LucideIcon::Radio,
+                    12.0,
+                    rgb(theme.accent),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(self.terminal_sync_group_name(member.group)),
+                )
+                .child(div().flex_none().child(self.i18n.t(state)))
+                .child(self.terminal_sync_action_button(
+                    self.i18n.t(if member.isolated {
+                        "terminal.broadcast.resume_member"
+                    } else {
+                        "terminal.broadcast.isolate_member"
+                    }),
+                    true,
+                    move |this, _, _, cx| {
+                        this.toggle_terminal_sync_isolation(pane_id, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .into_any_element(),
+        )
     }
 
     pub(super) fn render_terminal_broadcast_menu_action(
@@ -1457,9 +1424,7 @@ impl WorkspaceApp {
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
-        // Tauri broadcast target rows are Radix menu items with a disabled
-        // current-terminal row. Keep native hover/cursor and action blocking
-        // coupled to the shared context-menu guard.
+        // A pane owned by another group stays disabled until explicitly removed there.
         // Persistent menu rows still use one shared cx.listener wrapper so
         // toggling targets cannot re-enter WorkspaceApp during the click.
         self.workspace_context_menu_persistent_styled_action(

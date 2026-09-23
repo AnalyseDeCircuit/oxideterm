@@ -472,6 +472,7 @@
       "execute": "Exécuter"
     },
     "sender": {
+      "group_hint": "Les groupes de connexions enregistrés ciblent tous les terminaux correspondants. L’isolation de la synchronisation interactive ne modifie pas ces cibles explicites.",
       "task": "Émetteur",
       "placeholder": "Saisissez des commandes ou des octets hexadécimaux...",
       "show": "Afficher l’émetteur de commandes",
@@ -508,10 +509,18 @@
       "error_busy": "Une cible est utilisée par un autre émetteur"
     },
     "broadcast": {
-      "groups": "Groupes de diffusion",
+      "members_hint": "Sélectionnez les terminaux, puis activez la synchronisation. Les nouveaux terminaux ne sont pas ajoutés automatiquement. Retirez un terminal de son groupe actuel avant de le déplacer.",
+      "isolate_member": "Isoler",
+      "resume_member": "Reprendre",
+      "pause_group": "Suspendre",
+      "start_group": "Activer",
+      "sync_isolated": "Isolé",
+      "sync_disabled": "En pause",
+      "sync_enabled": "Synchronisation active",
+      "groups": "Groupes de synchronisation",
       "create_group": "Nouveau groupe",
       "no_groups": "Aucun groupe nommé",
-      "temporary_group": "Sélection temporaire",
+      "temporary_group": "Groupe temporaire",
       "group_name_placeholder": "Nom du groupe",
       "group_members": "Membres du groupe",
       "unsaved_target": "Non enregistrée",

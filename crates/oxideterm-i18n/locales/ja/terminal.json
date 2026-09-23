@@ -472,6 +472,7 @@
       "execute": "実行"
     },
     "sender": {
+      "group_hint": "保存済みの接続グループは、一致するすべての端末ペインを対象にします。対話同期での一時分離は、ここで指定した送信先には影響しません。",
       "task": "送信",
       "placeholder": "コマンドまたは16進バイトを入力...",
       "show": "コマンド送信を表示",
@@ -508,10 +509,18 @@
       "error_busy": "送信先は別の送信タスクで使用中です"
     },
     "broadcast": {
-      "groups": "ブロードキャストグループ",
+      "members_hint": "対象の端末を選択して同期を有効にします。新しい端末は自動参加しません。別のグループに移す前に現在のグループから外してください。",
+      "isolate_member": "一時的に分離",
+      "resume_member": "同期を再開",
+      "pause_group": "同期を一時停止",
+      "start_group": "同期を有効化",
+      "sync_isolated": "分離中",
+      "sync_disabled": "一時停止中",
+      "sync_enabled": "同期中",
+      "groups": "同期グループ",
       "create_group": "新しいグループ",
       "no_groups": "名前付きグループはありません",
-      "temporary_group": "一時選択",
+      "temporary_group": "一時同期グループ",
       "group_name_placeholder": "グループ名",
       "group_members": "グループメンバー",
       "unsaved_target": "未保存",

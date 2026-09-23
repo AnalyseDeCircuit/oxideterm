@@ -1060,8 +1060,16 @@ impl WorkspaceApp {
             );
         }
         div()
-            .overflow_x_scrollbar()
-            .child(group_row)
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(div().overflow_x_scrollbar().child(group_row))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("terminal.sender.group_hint")),
+            )
             .into_any_element()
     }
 

@@ -472,6 +472,7 @@
       "execute": "Thực thi"
     },
     "sender": {
+      "group_hint": "Nhóm kết nối đã lưu chọn mọi cửa sổ terminal phù hợp. Cách ly trong đồng bộ tương tác không thay đổi các đích gửi được chỉ định ở đây.",
       "task": "Trình gửi",
       "placeholder": "Nhập lệnh hoặc byte thập lục phân...",
       "show": "Hiện trình gửi lệnh",
@@ -508,10 +509,18 @@
       "error_busy": "Một đích đang được tác vụ gửi khác sử dụng"
     },
     "broadcast": {
-      "groups": "Nhóm phát lệnh",
+      "members_hint": "Chọn từng phiên terminal rồi bật đồng bộ. Phiên mới không tự động tham gia. Hãy xóa phiên khỏi nhóm hiện tại trước khi chuyển nhóm.",
+      "isolate_member": "Cách ly",
+      "resume_member": "Tiếp tục đồng bộ",
+      "pause_group": "Tạm dừng",
+      "start_group": "Bật đồng bộ",
+      "sync_isolated": "Đã cách ly",
+      "sync_disabled": "Đã tạm dừng",
+      "sync_enabled": "Đang đồng bộ",
+      "groups": "Nhóm đồng bộ",
       "create_group": "Nhóm mới",
       "no_groups": "Chưa có nhóm được đặt tên",
-      "temporary_group": "Lựa chọn tạm thời",
+      "temporary_group": "Nhóm đồng bộ tạm thời",
       "group_name_placeholder": "Tên nhóm",
       "group_members": "Thành viên nhóm",
       "unsaved_target": "Chưa lưu",

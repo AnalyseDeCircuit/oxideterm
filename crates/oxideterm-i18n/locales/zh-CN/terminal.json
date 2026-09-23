@@ -73,6 +73,7 @@
       "source_quick_command": "快捷命令"
     },
     "sender": {
+      "group_hint": "保存的连接组会选中所有匹配的终端窗格；交互同步中的临时隔离不改变此处指定的发送目标。",
       "task": "发送器",
       "placeholder": "输入命令或十六进制字节……",
       "show": "显示命令发送器",
@@ -109,10 +110,18 @@
       "error_busy": "目标正在被另一个发送任务使用"
     },
     "broadcast": {
-      "groups": "广播组",
+      "members_hint": "选择具体终端后启用同步，新开终端不会自动加入。移动终端前，请先将其移出原组。",
+      "isolate_member": "临时隔离",
+      "resume_member": "恢复同步",
+      "pause_group": "暂停同步",
+      "start_group": "启用同步",
+      "sync_isolated": "已隔离",
+      "sync_disabled": "已暂停",
+      "sync_enabled": "同步中",
+      "groups": "同步组",
       "create_group": "新建组",
       "no_groups": "暂无命名组",
-      "temporary_group": "临时选择",
+      "temporary_group": "临时同步组",
       "group_name_placeholder": "组名称",
       "group_members": "组成员",
       "unsaved_target": "未保存",

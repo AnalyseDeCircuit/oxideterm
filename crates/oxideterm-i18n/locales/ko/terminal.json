@@ -472,6 +472,7 @@
       "execute": "실행"
     },
     "sender": {
+      "group_hint": "저장된 연결 그룹은 일치하는 모든 터미널 창을 대상으로 합니다. 대화형 동기화의 임시 격리는 여기서 지정한 전송 대상에 영향을 주지 않습니다.",
       "task": "송신기",
       "placeholder": "명령 또는 16진수 바이트 입력...",
       "show": "명령 송신기 표시",
@@ -508,10 +509,18 @@
       "error_busy": "대상이 다른 송신 작업에서 사용 중입니다"
     },
     "broadcast": {
-      "groups": "브로드캐스트 그룹",
+      "members_hint": "개별 터미널을 선택한 후 동기화를 켜세요. 새 터미널은 자동으로 참여하지 않습니다. 터미널을 옮기려면 먼저 기존 그룹에서 제거하세요.",
+      "isolate_member": "임시 격리",
+      "resume_member": "동기화 재개",
+      "pause_group": "동기화 일시 중지",
+      "start_group": "동기화 켜기",
+      "sync_isolated": "격리됨",
+      "sync_disabled": "일시 중지됨",
+      "sync_enabled": "동기화 중",
+      "groups": "동기화 그룹",
       "create_group": "새 그룹",
       "no_groups": "이름이 지정된 그룹이 없습니다",
-      "temporary_group": "임시 선택",
+      "temporary_group": "임시 동기화 그룹",
       "group_name_placeholder": "그룹 이름",
       "group_members": "그룹 구성원",
       "unsaved_target": "저장되지 않음",

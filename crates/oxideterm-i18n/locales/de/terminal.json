@@ -472,6 +472,7 @@
       "execute": "Ausführen"
     },
     "sender": {
+      "group_hint": "Gespeicherte Verbindungsgruppen wählen alle passenden Terminalfenster aus. Die Isolation bei interaktiver Synchronisation ändert diese expliziten Ziele nicht.",
       "task": "Sender",
       "placeholder": "Befehle oder Hexadezimalbytes eingeben...",
       "show": "Befehlssender anzeigen",
@@ -508,10 +509,18 @@
       "error_busy": "Ein Ziel wird von einem anderen Sender verwendet"
     },
     "broadcast": {
-      "groups": "Broadcast-Gruppen",
+      "members_hint": "Einzelne Terminals auswählen und dann die Synchronisation aktivieren. Neue Terminals treten nicht automatisch bei. Vor dem Wechsel ein Terminal aus seiner bisherigen Gruppe entfernen.",
+      "isolate_member": "Isolieren",
+      "resume_member": "Fortsetzen",
+      "pause_group": "Pausieren",
+      "start_group": "Synchronisieren",
+      "sync_isolated": "Isoliert",
+      "sync_disabled": "Pausiert",
+      "sync_enabled": "Synchronisiert",
+      "groups": "Synchronisationsgruppen",
       "create_group": "Neue Gruppe",
       "no_groups": "Noch keine benannten Gruppen",
-      "temporary_group": "Temporäre Auswahl",
+      "temporary_group": "Temporäre Synchronisationsgruppe",
       "group_name_placeholder": "Gruppenname",
       "group_members": "Gruppenmitglieder",
       "unsaved_target": "Nicht gespeichert",
