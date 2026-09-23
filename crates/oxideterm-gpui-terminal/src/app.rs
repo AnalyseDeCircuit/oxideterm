@@ -4913,7 +4913,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn ai_command_without_end_event_recovers_input_only_after_fresh_prompt(cx: &mut TestAppContext) {
+    fn ai_command_without_end_event_recovers_input_only_after_fresh_prompt(
+        cx: &mut TestAppContext,
+    ) {
         let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
         let pane = cx.update(|window, cx| {
             cx.new(|cx| {
