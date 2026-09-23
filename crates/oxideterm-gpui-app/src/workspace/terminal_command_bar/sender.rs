@@ -227,6 +227,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.blur_terminal_quick_commands_input(cx);
                     this.terminal_command_sender.update(cx, |sender, cx| {
                         sender.set_compact_focused(true, cx);
                     });
@@ -331,23 +332,9 @@ impl WorkspaceApp {
                         .hover(move |style| style.bg(rgb(theme.bg_hover)))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
-                                // Compact mode restores the original
-                                // quick-command affordance without creating
-                                // a second command draft.
-                                this.terminal.update(cx, |terminal, _cx| {
-                                    terminal.quick_commands.toggle_open()
-                                });
-                                this.terminal_command_sender.update(cx, |sender, cx| {
-                                    sender.set_compact_focused(false, cx);
-                                });
-                                this.dismiss_terminal_broadcast_menu(cx);
-                                this.dismiss_terminal_recording_menu();
-                                this.close_terminal_cwd_picker(cx);
-                                this.close_terminal_git_branch_picker(cx);
-                                this.close_terminal_project_panel(cx);
+                            cx.listener(|this, _event, window, cx| {
+                                this.toggle_terminal_quick_commands_panel(window, cx);
                                 cx.stop_propagation();
-                                cx.notify();
                             }),
                         )
                         .child(Self::render_lucide_icon(
@@ -1280,6 +1267,17 @@ impl WorkspaceApp {
         })
     }
 
+    pub(in crate::workspace) fn ensure_terminal_command_sender_visible(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.terminal_command_sender.update(cx, |sender, cx| {
+            if !sender.is_visible() {
+                sender.toggle_visible(cx);
+            }
+        });
+    }
+
     pub(in crate::workspace) fn replace_terminal_command_sender_text(
         &mut self,
         text: String,
@@ -1332,6 +1330,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.blur_terminal_quick_commands_input(cx);
         let expanded = self.terminal_command_sender.read(cx).is_expanded();
         if expanded {
             self.focus_terminal_command_sender_editor(sender_id, window, cx);
@@ -1535,6 +1534,7 @@ impl WorkspaceApp {
     ) {
         let terminal_settings = &self.settings_store.settings().terminal;
         let command_bar_enabled = terminal_settings.command_bar.enabled;
+        let quick_commands_enabled = terminal_settings.command_bar.quick_commands_enabled;
         let font_family = settings_mono_font_family(self.settings_store.settings()).to_string();
         let font_size = terminal_settings.font_size as f32;
         let line_height = terminal_settings.line_height as f32;
@@ -1556,6 +1556,10 @@ impl WorkspaceApp {
                 sender.stop_all(cx);
             }
         });
+        if !command_bar_enabled || !quick_commands_enabled {
+            // Removing the dock's owning surface also releases any parameter draft and IME target.
+            self.close_terminal_quick_commands_panel(cx);
+        }
     }
 
     pub(in crate::workspace) fn render_terminal_quick_bar(

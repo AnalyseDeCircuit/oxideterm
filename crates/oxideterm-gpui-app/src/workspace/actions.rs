@@ -217,12 +217,12 @@ mod terminal_search_tests {
 
 fn terminal_tab_capture_blocked_by_workspace_ui(
     active_ime_target: bool,
-    quick_commands_open: bool,
+    quick_commands_focused: bool,
 ) -> bool {
     // Text inputs, command palettes, and quick commands own Tab semantics while
     // they are active. The terminal fallback only handles the platform
     // focus-traversal path that would otherwise swallow a real terminal Tab.
-    active_ime_target || quick_commands_open
+    active_ime_target || quick_commands_focused
 }
 
 impl WorkspaceApp {
@@ -374,7 +374,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.close_terminal_quick_commands_popover(cx);
+        self.blur_terminal_quick_commands_input(cx);
         self.focus_search_pane(pane_id, cx);
         self.search.open(pane_id);
         window.focus(&self.focus_handle, cx);
@@ -727,12 +727,6 @@ impl WorkspaceApp {
             return true;
         }
 
-        if self.terminal.read(cx).quick_commands.is_open() {
-            self.close_terminal_quick_commands_popover(cx);
-            cx.notify();
-            return true;
-        }
-
         if self.close_terminal_cwd_picker(cx) {
             cx.notify();
             return true;
@@ -762,13 +756,24 @@ impl WorkspaceApp {
     pub(super) fn handle_terminal_command_overlay_escape(
         &mut self,
         event: &KeyDownEvent,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if event.keystroke.key.as_str() != "escape" || event.keystroke.modifiers.platform {
             return false;
         }
 
-        self.close_terminal_command_overlays(cx)
+        if self.close_terminal_command_overlays(cx) {
+            return true;
+        }
+        // A dock must not consume Escape from a focused shell or terminal application.
+        if self.focus_handle.is_focused(window) && self.terminal.read(cx).quick_commands.is_open() {
+            self.close_terminal_quick_commands_panel(cx);
+            self.focus_active_pane(window, cx);
+            cx.notify();
+            return true;
+        }
+        false
     }
 
     pub(super) fn toggle_terminal_broadcast(&mut self, cx: &mut Context<Self>) {
@@ -809,9 +814,9 @@ impl WorkspaceApp {
         let should_open = !self.terminal.read(cx).broadcast_menu_open();
         self.dismiss_terminal_broadcast_menu(cx);
         if should_open {
+            self.blur_terminal_quick_commands_input(cx);
             self.dismiss_terminal_recording_menu();
             self.dismiss_terminal_highlight_popover();
-            self.close_terminal_quick_commands_popover(cx);
             self.close_terminal_cwd_picker(cx);
             self.close_terminal_git_branch_picker(cx);
             self.close_terminal_project_panel(cx);
@@ -1024,7 +1029,7 @@ impl WorkspaceApp {
             return;
         }
 
-        if self.handle_terminal_command_overlay_escape(event, cx) {
+        if self.handle_terminal_command_overlay_escape(event, window, cx) {
             return;
         }
 
@@ -1120,7 +1125,11 @@ impl WorkspaceApp {
 
         if terminal_tab_capture_blocked_by_workspace_ui(
             self.active_ime_target(cx).is_some(),
-            self.terminal.read(cx).quick_commands.is_open(),
+            self.terminal
+                .read(cx)
+                .quick_commands
+                .focused_input()
+                .is_some(),
         ) {
             return false;
         }
@@ -1891,6 +1900,7 @@ impl WorkspaceApp {
                     || !prepared.unavailable_targets.is_empty()
             });
         if needs_dialog || prepared.is_err() {
+            self.prepare_terminal_quick_commands_panel(window, cx);
             self.terminal.update(cx, |terminal, _cx| {
                 terminal.quick_commands.request_execution(command.clone())
             });

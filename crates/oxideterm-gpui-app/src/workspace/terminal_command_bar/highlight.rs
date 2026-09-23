@@ -151,8 +151,8 @@ impl WorkspaceApp {
     pub(super) fn toggle_terminal_highlight_popover(&mut self, cx: &mut Context<Self>) {
         self.terminal_highlight_popover_open = !self.terminal_highlight_popover_open;
         if self.terminal_highlight_popover_open {
+            self.blur_terminal_quick_commands_input(cx);
             self.dismiss_terminal_recording_menu();
-            self.close_terminal_quick_commands_popover(cx);
             self.dismiss_terminal_broadcast_menu(cx);
             self.close_terminal_cwd_picker(cx);
             self.close_terminal_git_branch_picker(cx);

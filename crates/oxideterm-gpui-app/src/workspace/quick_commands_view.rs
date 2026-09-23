@@ -13,12 +13,10 @@ use gpui::{
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, EditorSettings, TextEditorView};
 use oxideterm_gpui_ui::{
-    CommandPanelOptions, ConfirmDialogVariant, ConfirmDialogView, StatusPillOptions, StatusTone,
-    SurfacePadding, command_panel,
+    ConfirmDialogVariant, ConfirmDialogView, StatusPillOptions, StatusTone,
     confirm::confirm_dialog,
-    modal::{dismissible_dialog_backdrop, overlay_content_boundary, rounded_shell_child_radius},
+    modal::{dismissible_dialog_backdrop, overlay_content_boundary},
     scroll::ScrollableElement,
-    select::SelectAnchorId,
     status_pill,
     text_input::{TextInputView, text_input_with_viewport},
 };
@@ -59,14 +57,9 @@ fn quick_command_lucide_icon(icon: QuickCommandIcon) -> LucideIcon {
     }
 }
 
-const QUICK_COMMANDS_POPOVER_MAX_WIDTH: f32 = 680.0;
-const QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN: f32 = 12.0;
 const QUICK_COMMANDS_MANAGER_WIDTH: f32 = 1120.0;
 const QUICK_COMMANDS_MANAGER_HEIGHT: f32 = 720.0;
 const QUICK_COMMANDS_MANAGER_COMMAND_LIST_WIDTH: f32 = 360.0;
-const QUICK_COMMANDS_LIST_MAX_HEIGHT: f32 = 360.0;
-const QUICK_COMMANDS_CONTENT_MIN_HEIGHT: f32 = 300.0;
-const QUICK_COMMANDS_BODY_HEADER_HEIGHT: f32 = 49.0;
 const QUICK_COMMAND_CATEGORY_PICKER_MAX_HEIGHT: f32 = 72.0;
 
 fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
@@ -74,21 +67,6 @@ fn quick_command_icon_label_key(icon: QuickCommandIcon) -> String {
         "terminal.quick_commands.icon_{}",
         quick_command_icon_source_id(icon)
     )
-}
-
-fn quick_commands_popover_width_for_bar(command_bar_width: f32) -> f32 {
-    let available_width = command_bar_width - QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN * 2.0;
-    available_width.clamp(0.0, QUICK_COMMANDS_POPOVER_MAX_WIDTH)
-}
-
-fn quick_command_list_height(row_count: usize) -> f32 {
-    (row_count.max(1) as f32 * QUICK_COMMAND_LIST_ESTIMATED_HEIGHT)
-        .min(QUICK_COMMANDS_LIST_MAX_HEIGHT)
-}
-
-fn quick_commands_content_height(row_count: usize) -> f32 {
-    (QUICK_COMMANDS_BODY_HEADER_HEIGHT + quick_command_list_height(row_count))
-        .max(QUICK_COMMANDS_CONTENT_MIN_HEIGHT)
 }
 
 fn quick_command_editor_frame(
@@ -375,7 +353,7 @@ fn quick_command_row_signature(command: &QuickCommand) -> u64 {
 }
 
 #[derive(Clone)]
-struct QuickCommandsRenderSnapshot {
+pub(super) struct QuickCommandsRenderSnapshot {
     categories: Vec<QuickCommandCategory>,
     category_counts: HashMap<String, usize>,
     active_category: String,
@@ -458,6 +436,7 @@ impl TerminalQuickCommandsState {
             || self.store.focused_input.is_some()
             || self.store.highlighted_command.is_some();
         self.open = false;
+        self.panel.finish_resize();
         self.pinned = false;
         self.pending_execution = None;
         self.store.focused_input = None;
@@ -480,9 +459,15 @@ impl TerminalQuickCommandsState {
         // zeroizing owner is part of every completion path.
         self.pending_execution = None;
         self.open = self.pinned;
+        self.store.focused_input = None;
+        if !self.open {
+            self.panel.finish_resize();
+        }
     }
 
     pub(in crate::workspace) fn request_execution(&mut self, command: QuickCommand) {
+        self.editor_scroll = gpui::ScrollHandle::new();
+        self.store.focused_input = None;
         let parameter_values = command
             .parameters
             .iter()
@@ -496,6 +481,7 @@ impl TerminalQuickCommandsState {
     }
 
     fn cancel_execution(&mut self) -> bool {
+        self.store.focused_input = None;
         self.pending_execution.take().is_some()
     }
 
@@ -517,8 +503,9 @@ impl TerminalQuickCommandsState {
 
     fn open_manager(&mut self) {
         // The manager is a workspace modal with an independent lifecycle, so
-        // opening it must release every command-bar popover state first.
+        // opening it must release the dock and its pending execution first.
         self.open = false;
+        self.panel.finish_resize();
         self.pinned = false;
         self.pending_execution = None;
         self.pending_category_delete = None;
@@ -846,7 +833,7 @@ impl TerminalQuickCommandsState {
         true
     }
 
-    fn blur_input(&mut self) -> bool {
+    pub(in crate::workspace) fn blur_input(&mut self) -> bool {
         let was_focused = self.store.focused_input.take().is_some();
         was_focused
     }
@@ -1130,7 +1117,7 @@ impl TerminalQuickCommandsState {
 }
 
 impl WorkspaceApp {
-    fn quick_commands_render_snapshot(
+    pub(super) fn quick_commands_render_snapshot(
         &self,
         cx: &mut Context<Self>,
     ) -> QuickCommandsRenderSnapshot {
@@ -1145,12 +1132,32 @@ impl WorkspaceApp {
             .render_snapshot(&target_fields, protocol)
     }
 
-    pub(in crate::workspace) fn close_terminal_quick_commands_popover(
+    pub(in crate::workspace) fn blur_terminal_quick_commands_input(
+        &mut self,
+        cx: &mut App,
+    ) -> bool {
+        let changed = self
+            .terminal
+            .update(cx, |terminal, _| terminal.quick_commands.blur_input());
+        if changed {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+        }
+        changed
+    }
+
+    pub(in crate::workspace) fn close_terminal_quick_commands_panel(
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.terminal
-            .update(cx, |terminal, _cx| terminal.quick_commands.close())
+        let changed = self
+            .terminal
+            .update(cx, |terminal, _cx| terminal.quick_commands.close());
+        if changed {
+            self.ime_marked_text = None;
+            self.clear_ime_selection();
+        }
+        changed
     }
 
     pub(in crate::workspace) fn open_quick_commands_manager(
@@ -1235,6 +1242,7 @@ impl WorkspaceApp {
                 .quick_commands
                 .prepare_insertion(command, keep_open)
         });
+        self.ensure_terminal_command_sender_visible(cx);
         self.replace_terminal_command_sender_text(command, cx);
     }
 
@@ -1261,9 +1269,9 @@ impl WorkspaceApp {
                         self.terminal
                             .update(cx, |terminal, _cx| terminal.quick_commands.blur_input());
                     } else {
-                        // The compact launcher follows browser popover dismissal,
-                        // while the workspace manager keeps its own modal lifecycle.
-                        self.close_terminal_quick_commands_popover(cx);
+                        // Escape from the launcher returns input to the terminal.
+                        self.close_terminal_quick_commands_panel(cx);
+                        self.focus_active_pane(window, cx);
                     }
                     self.ime_marked_text = None;
                     cx.notify();
@@ -1316,7 +1324,9 @@ impl WorkspaceApp {
                             .prepare_highlighted_insertion(&target_fields, protocol)
                     });
                     if let Some(command) = command {
-                        self.replace_terminal_command_sender_text(command, cx);
+                        self.ensure_terminal_command_sender_visible(cx);
+                        let sender_id = self.replace_terminal_command_sender_text(command, cx);
+                        self.focus_terminal_command_sender_input(sender_id, window, cx);
                         cx.notify();
                     }
                     return;
@@ -1407,71 +1417,6 @@ impl WorkspaceApp {
             .quick_commands
             .input_value(input)
             .map(str::to_string)
-    }
-
-    pub(in crate::workspace) fn render_quick_commands_popover(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let snapshot = self.quick_commands_render_snapshot(cx);
-        let max_width = QUICK_COMMANDS_POPOVER_MAX_WIDTH;
-        let popover_width = self
-            .select_anchors
-            .get(&SelectAnchorId::TerminalCommandBar)
-            .map(|anchor| quick_commands_popover_width_for_bar(f32::from(anchor.bounds.size.width)))
-            .unwrap_or(max_width)
-            .min(max_width);
-        let mut popover = command_panel(
-            &self.tokens,
-            CommandPanelOptions::new()
-                .width(popover_width)
-                .max_height(520.0)
-                .padding(SurfacePadding::None)
-                .terminal_owned(),
-        )
-        .absolute()
-        .bottom(px(56.0))
-        .right(px(QUICK_COMMANDS_POPOVER_HORIZONTAL_MARGIN))
-        // The popover sits inside an occluding outside-dismiss backdrop.
-        // Mark the panel itself as occluding too, so category-row clicks
-        // are hit-tested against this event island instead of the backdrop.
-        .occlude()
-        // Tauri uses `w-[min(860px,calc(100%-1.5rem))]` on a child of
-        // TerminalCommandBar. Compute against the cached command-bar
-        // bounds so AI sidebar and window-width changes shrink the panel
-        // instead of clipping its left edge.
-        .max_w(px(max_width))
-        .text_size(px(self.tokens.metrics.ui_text_sm))
-        .font_family(settings_ui_font_family(
-            &self.settings_store.settings().appearance.ui_font_family,
-        ))
-        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-            cx.stop_propagation();
-        })
-        .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
-            cx.stop_propagation();
-        })
-        .on_scroll_wheel(|_, _, cx| {
-            // Match Tauri's popover scroll boundary: wheel input inside
-            // the quick command surface must not close the overlay or leak
-            // to the terminal behind it.
-            cx.stop_propagation();
-        });
-
-        let content_height = quick_commands_content_height(snapshot.visible_commands.len());
-        let sidebar = self.render_quick_command_category_sidebar(&snapshot, cx);
-        let body = self.render_quick_command_body(&snapshot, cx);
-        popover = popover.child(
-            div()
-                // command_panel is column-oriented; quick commands need their
-                // sidebar and body to share one explicit row-height owner.
-                .h(px(content_height))
-                .min_h(px(0.0))
-                .flex()
-                .child(sidebar)
-                .child(body),
-        );
-        popover.into_any_element()
     }
 
     pub(in crate::workspace) fn render_quick_commands_manager_modal(
@@ -1840,7 +1785,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_quick_command_category_sidebar(
+    pub(super) fn render_quick_command_category_sidebar(
         &self,
         snapshot: &QuickCommandsRenderSnapshot,
         cx: &mut Context<Self>,
@@ -1851,9 +1796,6 @@ impl WorkspaceApp {
             .h_full()
             .flex_none()
             .overflow_hidden()
-            .when(!snapshot.managing, |sidebar| {
-                sidebar.rounded_l(px(rounded_shell_child_radius(self.tokens.radii.lg)))
-            })
             .border_r_1()
             .border_color(rgba((theme.border << 8) | 0x99))
             .bg(rgba((theme.bg << 8) | 0x73))
@@ -1921,8 +1863,9 @@ impl WorkspaceApp {
                             .when(!snapshot.managing, |actions| {
                                 actions.child(self.quick_command_icon_button(
                                     LucideIcon::X,
-                                    |this, _event, _window, cx| {
-                                        this.close_terminal_quick_commands_popover(cx);
+                                    |this, _event, window, cx| {
+                                        this.close_terminal_quick_commands_panel(cx);
+                                        this.focus_active_pane(window, cx);
                                         cx.stop_propagation();
                                         cx.notify();
                                     },
@@ -2000,7 +1943,7 @@ impl WorkspaceApp {
                                 // Tauri renders category labels as plain spans inside
                                 // a button. Do not attach selectable-text mouse
                                 // handlers here; category clicks must stay inside
-                                // the popover instead of reaching outside-dismiss.
+                                // the category control instead of reaching workspace input blur.
                                 self.render_display_text_with_role(
                                     SelectableTextRole::NonSelectable,
                                     "quick-command-category-cell",
@@ -2081,7 +2024,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_quick_command_body(
+    pub(super) fn render_quick_command_body(
         &self,
         snapshot: &QuickCommandsRenderSnapshot,
         cx: &mut Context<Self>,
@@ -2091,9 +2034,6 @@ impl WorkspaceApp {
             .h_full()
             .min_w(px(0.0))
             .overflow_hidden()
-            .when(!snapshot.managing, |body| {
-                body.rounded_r(px(rounded_shell_child_radius(self.tokens.radii.lg)))
-            })
             .flex()
             .flex_col()
             .child(self.render_quick_command_toolbar(snapshot, cx));
@@ -2120,6 +2060,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         div()
+            .flex_none()
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -2376,9 +2317,9 @@ impl WorkspaceApp {
                 )
                 .into_any_element(),
         };
-        div()
-            .flex_1()
-            .min_h(px(0.0))
+        let form = div()
+            .w_full()
+            .flex_none()
             .p(px(12.0))
             .flex()
             .flex_col()
@@ -2403,42 +2344,48 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(self.i18n.t("terminal.quick_commands.preview")),
             )
+            .child(preview)
+            .into_any_element();
+        let footer = div()
+            .flex()
+            .justify_end()
+            .gap(px(8.0))
+            .child(self.quick_command_text_button(
+                self.i18n.t("terminal.quick_commands.cancel"),
+                true,
+                cx.listener(|this, _event, _window, cx| {
+                    this.cancel_terminal_quick_command_execution(cx);
+                    cx.stop_propagation();
+                }),
+            ))
             .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .overflow_y_scrollbar()
-                    .child(preview),
+                self.quick_command_text_button(
+                    self.i18n.t("terminal.quick_commands.run"),
+                    can_run,
+                    cx.listener(|this, _event, window, cx| {
+                        this.confirm_quick_command_execution(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .bg(if can_run {
+                    rgba((theme.accent << 8) | 0x26)
+                } else {
+                    rgba(0x00000000)
+                }),
             )
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap(px(8.0))
-                    .child(self.quick_command_text_button(
-                        self.i18n.t("terminal.quick_commands.cancel"),
-                        true,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.cancel_terminal_quick_command_execution(cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(
-                        self.quick_command_text_button(
-                            self.i18n.t("terminal.quick_commands.run"),
-                            can_run,
-                            cx.listener(|this, _event, window, cx| {
-                                this.confirm_quick_command_execution(window, cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .bg(if can_run {
-                            rgba((theme.accent << 8) | 0x26)
-                        } else {
-                            rgba(0x00000000)
-                        }),
-                    ),
-            )
+            .p(px(12.0))
+            .into_any_element();
+        let scroll = self.terminal.read(cx).quick_commands.editor_scroll.clone();
+        div()
+            .flex_1()
+            .min_h_0()
+            .overflow_hidden()
+            .child(quick_command_editor_frame(
+                form,
+                footer,
+                &scroll,
+                &self.tokens,
+            ))
             .into_any_element()
     }
 
@@ -2617,7 +2564,12 @@ impl WorkspaceApp {
                                     cx,
                                 );
                             }
-                            window.focus(&this.focus_handle, cx);
+                            if managing {
+                                window.focus(&this.focus_handle, cx);
+                            } else {
+                                let sender_id = this.terminal_command_sender.read(cx).active_document_id();
+                                this.focus_terminal_command_sender_input(sender_id, window, cx);
+                            }
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -3445,8 +3397,12 @@ impl WorkspaceApp {
                 field.font_family(settings_mono_font_family(self.settings_store.settings()))
             }),
             move |this, cx| {
+                this.close_terminal_command_overlays(cx);
                 this.terminal.update(cx, |terminal, _cx| {
                     terminal.quick_commands.set_focused_input(input)
+                });
+                this.terminal_command_sender.update(cx, |sender, cx| {
+                    sender.set_compact_focused(false, cx);
                 });
             },
             cx,
@@ -3694,6 +3650,51 @@ mod terminal_command_bar_quick_command_tests {
                 assert!(last.top() >= scroll.bounds().top());
                 assert!((last.bottom() - scroll.bounds().bottom()).abs() < px(1.0));
             }
+        }
+    }
+
+    #[test]
+    fn dock_blur_preserves_confirmation_and_explicit_close_clears_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut commands =
+            super::TerminalQuickCommandsState::load(&directory.path().join("settings.json"));
+        let command = oxideterm_quick_commands::default_quick_commands().remove(0);
+        commands.request_execution(command.clone());
+        commands.set_focused_input(super::QuickCommandInput::Search);
+        commands.blur_input();
+        assert!(commands.is_open());
+        assert_eq!(commands.focused_input(), None);
+        assert_eq!(
+            commands.pending_execution.as_ref().unwrap().command.id,
+            command.id
+        );
+        commands.close();
+        assert!(!commands.is_open());
+        assert!(commands.pending_execution.is_none());
+    }
+
+    #[test]
+    fn dock_pin_preserves_launcher_after_fill_and_execution_without_retaining_input_focus() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut commands =
+            super::TerminalQuickCommandsState::load(&directory.path().join("settings.json"));
+        for pinned in [false, true] {
+            commands.open = true;
+            commands.pinned = pinned;
+            commands.set_focused_input(super::QuickCommandInput::Search);
+            assert_eq!(
+                commands.prepare_insertion("printf 'hello'".into(), pinned),
+                "printf 'hello'"
+            );
+            assert_eq!(commands.is_open(), pinned);
+            assert_eq!(commands.focused_input(), None);
+            commands
+                .request_execution(oxideterm_quick_commands::default_quick_commands().remove(0));
+            commands.set_focused_input(super::QuickCommandInput::ParameterDefault(0));
+            commands.finish_execution();
+            assert_eq!(commands.is_open(), pinned);
+            assert_eq!(commands.focused_input(), None);
+            assert!(commands.pending_execution.is_none());
         }
     }
 

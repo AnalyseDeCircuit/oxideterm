@@ -280,6 +280,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn focus_active_pane(&mut self, window: &mut Window, cx: &mut App) {
+        self.blur_terminal_quick_commands_input(cx);
         if self.search.blur() {
             self.ime_marked_text = None;
             self.clear_ime_selection();

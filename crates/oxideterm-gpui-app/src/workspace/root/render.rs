@@ -502,7 +502,7 @@ impl WorkspaceApp {
                 } else if this.handle_terminal_git_branch_picker_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
-                } else if this.handle_terminal_command_overlay_escape(event, cx) {
+                } else if this.handle_terminal_command_overlay_escape(event, window, cx) {
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.handle_ai_inline_panel_key(event, window, cx) {
@@ -662,6 +662,7 @@ impl WorkspaceApp {
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
+                this.update_terminal_quick_commands_resize(event, cx);
                 this.update_split_drag(event, window, cx);
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
@@ -1352,7 +1353,8 @@ impl WorkspaceApp {
             Some(
                 browser_behavior::BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize
                 | browser_behavior::BrowserPointerCaptureOwner::SftpQueueResize
-                | browser_behavior::BrowserPointerCaptureOwner::TerminalCommandSenderResize,
+                | browser_behavior::BrowserPointerCaptureOwner::TerminalCommandSenderResize
+                | browser_behavior::BrowserPointerCaptureOwner::TerminalQuickCommandsResize,
             ) => CursorStyle::ResizeRow,
             _ => CursorStyle::ResizeColumn,
         };
@@ -1376,6 +1378,7 @@ impl WorkspaceApp {
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
+                this.update_terminal_quick_commands_resize(event, cx);
                 this.update_host_tools_tab_scrollbar_drag(event, cx);
                 cx.stop_propagation();
             }))
@@ -1404,6 +1407,7 @@ impl WorkspaceApp {
         self.finish_sftp_pane_resize(cx);
         self.finish_sftp_queue_resize(cx);
         self.finish_terminal_command_sender_resize(cx);
+        self.finish_terminal_quick_commands_resize(cx);
         self.finish_split_drag(cx);
         self.finish_settings_slider_drag(cx);
         self.finish_terminal_cast_seek_drag(cx);

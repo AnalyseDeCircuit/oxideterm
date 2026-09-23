@@ -124,6 +124,7 @@ pub(in crate::workspace) struct TerminalQuickCommandsState {
     pub(super) open: bool,
     pub(super) manager_open: bool,
     pub(super) pinned: bool,
+    pub(super) panel: panel::QuickCommandsPanelState,
     pub(super) pending_execution: Option<QuickCommandExecutionDraft>,
     pub(super) pending_category_delete: Option<QuickCommandCategoryDeletePrompt>,
     pub(super) list_state: ListState,
@@ -141,6 +142,7 @@ impl TerminalQuickCommandsState {
             open: false,
             manager_open: false,
             pinned: false,
+            panel: panel::QuickCommandsPanelState::default(),
             pending_execution: None,
             pending_category_delete: None,
             // User-defined command sets are unbounded, so the surface owns a
@@ -179,5 +181,8 @@ mod buttons;
 mod store;
 #[path = "quick_commands_view.rs"]
 mod view;
+
+#[path = "quick_commands_panel.rs"]
+mod panel;
 
 pub(in crate::workspace) use view::quick_command_input_uses_monospace;

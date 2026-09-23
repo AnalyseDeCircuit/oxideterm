@@ -122,14 +122,6 @@ impl WorkspaceApp {
             .px(px(12.0))
             .py(px(4.0))
             .shadow_lg()
-            .when(quick_commands_enabled && quick_commands_open, |bar| {
-                // Tauri renders QuickCommandsPopover as a child of the relative
-                // TerminalCommandBar (`absolute bottom-full right-3`). Keep the
-                // native popover on the same local coordinate owner; routing it
-                // through the root backdrop makes the existing bottom/right
-                // placement resolve against the wrong box.
-                bar.child(self.render_terminal_quick_commands_popover(cx))
-            })
             .when(self.terminal_highlight_popover_open, |bar| {
                 bar.child(self.render_terminal_highlight_popover(cx))
             })
@@ -185,6 +177,7 @@ impl WorkspaceApp {
                                         .terminal_command_sender
                                         .update(cx, |sender, cx| sender.toggle_visible(cx));
                                     if visible {
+                                        this.blur_terminal_quick_commands_input(cx);
                                         this.terminal_command_sender.update(cx, |sender, cx| {
                                             sender.set_compact_focused(true, cx);
                                         });
@@ -337,6 +330,7 @@ impl WorkspaceApp {
                                     let expanding =
                                         !this.terminal_command_sender.read(cx).is_expanded();
                                     if expanding {
+                                        this.close_terminal_quick_commands_panel(cx);
                                         this.close_terminal_command_overlays(cx);
                                         this.ime_marked_text = None;
                                     }
@@ -395,18 +389,9 @@ impl WorkspaceApp {
                                         }),
                                         "terminal-command-quick-commands",
                                         self.i18n.t("terminal.quick_commands.title"),
-                                        |this, _event, _window, cx| {
-                                            this.terminal.update(cx, |terminal, _cx| {
-                                                terminal.quick_commands.toggle_open()
-                                            });
-                                            this.dismiss_terminal_broadcast_menu(cx);
-                                            this.close_terminal_cwd_picker(cx);
-                                            this.close_terminal_git_branch_picker(cx);
-                                            this.close_terminal_project_panel(cx);
-                                            this.dismiss_terminal_recording_menu();
-                                            this.terminal_highlight_popover_open = false;
+                                        |this, _event, window, cx| {
+                                            this.toggle_terminal_quick_commands_panel(window, cx);
                                             cx.stop_propagation();
-                                            cx.notify();
                                         },
                                         cx,
                                     ))
@@ -704,20 +689,13 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_terminal_quick_commands_popover(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.render_quick_commands_popover(cx)
-    }
-
     fn toggle_terminal_recording_menu(&mut self, cx: &mut Context<Self>) {
         let should_open = !self.terminal_recording_menu_open;
         self.terminal_recording_menu_open = should_open;
         if should_open {
+            self.blur_terminal_quick_commands_input(cx);
             self.dismiss_terminal_broadcast_menu(cx);
             self.dismiss_terminal_highlight_popover();
-            self.close_terminal_quick_commands_popover(cx);
             self.close_terminal_cwd_picker(cx);
             self.close_terminal_git_branch_picker(cx);
             self.close_terminal_project_panel(cx);

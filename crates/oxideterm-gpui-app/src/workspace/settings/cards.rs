@@ -887,8 +887,7 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.terminal.read(cx).quick_commands.has_open_or_pending() {
-            self.close_terminal_quick_commands_popover(cx);
+        if self.blur_terminal_quick_commands_input(cx) {
             changed = true;
         }
         if self.close_terminal_git_branch_picker(cx) {
