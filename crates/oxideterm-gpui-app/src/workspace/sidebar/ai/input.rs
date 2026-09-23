@@ -260,14 +260,6 @@ window.focus(&this.focus_handle, cx);
                     cx,
                 ))
             })
-            .when(!self.ai_entity.read(cx).chat_is_loading(), |row| {
-                row.child(
-                    div()
-                        .text_size(px(9.0))
-                        .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x33))
-                        .child("SHIFT+ENTER"),
-                )
-            })
             .child(action.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

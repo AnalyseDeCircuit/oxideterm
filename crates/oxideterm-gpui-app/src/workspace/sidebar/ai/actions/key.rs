@@ -1,3 +1,34 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::workspace) enum AiChatPromptKeyAction {
+    Submit,
+    Newline,
+    Complete,
+}
+
+pub(in crate::workspace) fn ai_chat_prompt_key_action(
+    keystroke: &gpui::Keystroke,
+    overrides: &serde_json::Map<String, serde_json::Value>,
+    composing: bool,
+    autocomplete: bool,
+) -> Option<AiChatPromptKeyAction> {
+    if composing {
+        return None;
+    }
+    let modifiers = keystroke.modifiers;
+    let plain = !modifiers.platform && !modifiers.control && !modifiers.alt && !modifiers.shift;
+    // Unmodified Enter/Tab accept a visible completion before the composer can submit.
+    if autocomplete && plain && matches!(keystroke.key.as_str(), "enter" | "tab") {
+        return Some(AiChatPromptKeyAction::Complete);
+    }
+    if crate::keybindings::keystroke_matches_action(keystroke, "terminal.aiSubmit", overrides) {
+        return Some(AiChatPromptKeyAction::Submit);
+    }
+    if keystroke.key == "enter" && !modifiers.platform && !modifiers.control && !modifiers.alt {
+        return Some(AiChatPromptKeyAction::Newline);
+    }
+    None
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn handle_ai_sidebar_key(
         &mut self,
@@ -239,10 +270,42 @@ impl WorkspaceApp {
             }
             true
         } else if self.ai_entity.read(cx).chat_ui().input_focused {
-            if event.keystroke.modifiers.platform {
+            let autocomplete_len = self.ai_chat_autocomplete_items(cx).len();
+            let prompt_action = ai_chat_prompt_key_action(
+                &event.keystroke,
+                &self.settings_store.settings().keybindings.overrides,
+                self.marked_text_for_target(WorkspaceImeTarget::AiChatInput, cx)
+                    .is_some(),
+                autocomplete_len > 0,
+            );
+            if event.keystroke.modifiers.platform && prompt_action.is_none() {
                 return false;
             }
-            let autocomplete_len = self.ai_chat_autocomplete_items(cx).len();
+            match prompt_action {
+                Some(AiChatPromptKeyAction::Complete) => {
+                    let index = self
+                        .ai_entity
+                        .read(cx)
+                        .chat_ui()
+                        .autocomplete_index
+                        .min(autocomplete_len - 1);
+                    if let Some(candidate) = self.ai_chat_autocomplete_items(cx).get(index).cloned()
+                    {
+                        self.apply_ai_chat_autocomplete_candidate(&candidate, cx);
+                    }
+                    return true;
+                }
+                Some(AiChatPromptKeyAction::Submit) => {
+                    self.send_ai_chat_draft(cx);
+                    return true;
+                }
+                Some(AiChatPromptKeyAction::Newline) => {
+                    // The shared editor path replaces the selection and preserves the caret.
+                    self.handle_active_text_input_newline(&event.keystroke, cx);
+                    return true;
+                }
+                None => {}
+            }
             if autocomplete_len > 0 {
                 match event.keystroke.key.as_str() {
                     "down" | "arrowdown" => {
@@ -257,15 +320,6 @@ impl WorkspaceApp {
                             ai.move_chat_autocomplete(-1, autocomplete_len);
                         });
                         cx.notify();
-                        return true;
-                    }
-                    "tab" | "enter" if !event.keystroke.modifiers.shift => {
-                        let index = self.ai_entity.read(cx).chat_ui().autocomplete_index.min(autocomplete_len - 1);
-                        if let Some(candidate) =
-                            self.ai_chat_autocomplete_items(cx).get(index).cloned()
-                        {
-                            self.apply_ai_chat_autocomplete_candidate(&candidate, cx);
-                        }
                         return true;
                     }
                     "escape" => {
@@ -304,18 +358,6 @@ impl WorkspaceApp {
                     if changed {
                         cx.notify();
                     }
-                    true
-                }
-                "enter" if !event.keystroke.modifiers.shift => {
-                    self.send_ai_chat_draft(cx);
-                    true
-                }
-                "enter" => {
-                    self.ai_entity.update(cx, |ai, _cx| {
-                        ai.push_chat_draft_newline();
-                    });
-                    self.ime_marked_text = None;
-                    cx.notify();
                     true
                 }
                 "space" | " "
@@ -434,5 +476,99 @@ mod key_tests {
         assert!(!ai_text_input_space_inserts_literal(true, false, false));
         assert!(!ai_text_input_space_inserts_literal(false, true, false));
         assert!(!ai_text_input_space_inserts_literal(false, false, true));
+    }
+}
+
+#[cfg(test)]
+mod ai_chat_prompt_key_tests {
+    use super::{AiChatPromptKeyAction::*, ai_chat_prompt_key_action};
+    use crate::keybindings::{KeybindingSide, combo_from_keystroke, set_override};
+    use gpui::Keystroke;
+    use serde_json::Map;
+
+    #[test]
+    fn configured_send_key_controls_submit_and_newline() {
+        for (binding, cases) in [
+            (
+                None,
+                vec![
+                    ("enter", Some(Submit)),
+                    ("shift-enter", Some(Newline)),
+                    ("ctrl-enter", None),
+                ],
+            ),
+            (
+                Some("ctrl-enter"),
+                vec![
+                    ("enter", Some(Newline)),
+                    ("shift-enter", Some(Newline)),
+                    ("ctrl-enter", Some(Submit)),
+                ],
+            ),
+            (
+                Some("cmd-enter"),
+                vec![
+                    ("enter", Some(Newline)),
+                    ("cmd-enter", Some(Submit)),
+                    ("ctrl-enter", None),
+                ],
+            ),
+            (
+                Some("shift-enter"),
+                vec![("enter", Some(Newline)), ("shift-enter", Some(Submit))],
+            ),
+        ] {
+            let mut overrides = Map::new();
+            if let Some(binding) = binding {
+                set_override(
+                    &mut overrides,
+                    "terminal.aiSubmit",
+                    KeybindingSide::current(),
+                    combo_from_keystroke(&Keystroke::parse(binding).unwrap()).unwrap(),
+                );
+            }
+            for (key, expected) in cases {
+                assert_eq!(
+                    ai_chat_prompt_key_action(
+                        &Keystroke::parse(key).unwrap(),
+                        &overrides,
+                        false,
+                        false
+                    ),
+                    expected,
+                    "{key}, {overrides:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn composition_and_completion_do_not_accidentally_submit() {
+        let mut overrides = Map::new();
+        set_override(
+            &mut overrides,
+            "terminal.aiSubmit",
+            KeybindingSide::current(),
+            combo_from_keystroke(&Keystroke::parse("ctrl-enter").unwrap()).unwrap(),
+        );
+        for key in ["enter", "ctrl-enter", "shift-enter"] {
+            assert_eq!(
+                ai_chat_prompt_key_action(&Keystroke::parse(key).unwrap(), &overrides, true, true),
+                None,
+                "IME: {key}"
+            );
+        }
+        for (key, expected) in [
+            ("enter", Some(Complete)),
+            ("tab", Some(Complete)),
+            ("shift-enter", Some(Newline)),
+            ("ctrl-enter", Some(Submit)),
+        ] {
+            assert_eq!(
+                ai_chat_prompt_key_action(&Keystroke::parse(key).unwrap(), &overrides, false, true),
+                expected,
+                "completion: {key}"
+            );
+        }
     }
 }

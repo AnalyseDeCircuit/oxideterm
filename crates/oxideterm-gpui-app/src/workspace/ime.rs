@@ -2538,11 +2538,18 @@ impl WorkspaceApp {
         if !ime_target_accepts_newline(target) {
             return false;
         }
-        if matches!(
-            target,
-            WorkspaceImeTarget::AiChatInput | WorkspaceImeTarget::AiMessageEdit
-        ) && !keystroke.modifiers.shift
-        {
+        if target == WorkspaceImeTarget::AiChatInput {
+            use super::sidebar::{AiChatPromptKeyAction, ai_chat_prompt_key_action};
+            if ai_chat_prompt_key_action(
+                keystroke,
+                &self.settings_store.settings().keybindings.overrides,
+                self.marked_text_for_target(target, cx).is_some(),
+                !self.ai_chat_autocomplete_items(cx).is_empty(),
+            ) != Some(AiChatPromptKeyAction::Newline)
+            {
+                return false;
+            }
+        } else if target == WorkspaceImeTarget::AiMessageEdit && !keystroke.modifiers.shift {
             return false;
         }
         let Some(replacement_range) = self.ime_selection_range_for_target(target, cx) else {

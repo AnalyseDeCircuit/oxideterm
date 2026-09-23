@@ -199,9 +199,9 @@ pub(in crate::workspace) use titlebar::{
 };
 
 pub(in crate::workspace) use ai::{
-    AcpApplicationToolTurn, AiCompactionDelivery, AiCompactionDeliverySender, AiInlinePanelState,
-    AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender, ai_now_ms,
-    handle_acp_application_tool_call,
+    AcpApplicationToolTurn, AiChatPromptKeyAction, AiCompactionDelivery,
+    AiCompactionDeliverySender, AiInlinePanelState, AiStreamDelivery, AiStreamDeliveryEvent,
+    AiStreamDeliverySender, ai_chat_prompt_key_action, ai_now_ms, handle_acp_application_tool_call,
 };
 use helpers::*;
 pub(in crate::workspace) use state::{

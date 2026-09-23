@@ -573,10 +573,6 @@ impl AiWorkspaceEntity {
         changed
     }
 
-    pub(in crate::workspace) fn push_chat_draft_newline(&mut self) {
-        self.chat_ui.draft.push('\n');
-    }
-
     pub(in crate::workspace) fn pop_conversation_rename(&mut self) -> bool {
         self.chat_ui.renaming_conversation_draft.pop().is_some()
     }
