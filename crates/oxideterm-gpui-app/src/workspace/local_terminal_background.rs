@@ -17,7 +17,8 @@ impl WorkspaceApp {
         let Some(active_index) = self.active_tab_index(cx) else {
             return;
         };
-        if self.tabs(cx)[active_index].kind != TabKind::LocalTerminal {
+        if self.active_terminal_kind(cx) != Some(oxideterm_terminal::TerminalSessionKind::LocalPty)
+        {
             return;
         }
         let Some(active_pane_id) = self.tabs(cx)[active_index].active_pane_id else {

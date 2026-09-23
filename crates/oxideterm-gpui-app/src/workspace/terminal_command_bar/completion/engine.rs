@@ -50,7 +50,16 @@ impl WorkspaceApp {
         let tab_projection = self.active_tab(cx).map(|tab| {
             let session_id =
                 pane_id.and_then(|pane_id| tab.root_pane.as_ref()?.session_id_for_pane(pane_id));
-            (tab.id, tab.kind.clone(), tab.title.clone(), session_id)
+            (
+                tab.id,
+                pane_id
+                    .and_then(|id| self.terminal_tab_kind_for_pane(id, cx))
+                    .unwrap_or_else(|| tab.kind.clone()),
+                pane_id
+                    .map(|id| self.terminal_pane_label(id, cx))
+                    .unwrap_or_else(|| tab.title.clone()),
+                session_id,
+            )
         });
         let session_id = tab_projection
             .as_ref()

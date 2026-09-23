@@ -82,6 +82,17 @@ impl LocalPtySession {
         };
 
         let shell = local_config.shell.clone().unwrap_or_else(default_shell);
+        // Some PTY backends report a successful fork even when chdir or exec fails in the child.
+        // Reject known-invalid launch targets before a session can be registered by the caller.
+        if !shell.id.starts_with("wsl")
+            && local_config.cwd.as_ref().is_some_and(|path| !path.as_os_str().is_empty() && !path.is_dir())
+        {
+            anyhow::bail!("local terminal startup directory is unavailable");
+        }
+        if shell.path.is_absolute() && !shell.path.is_file() {
+            anyhow::bail!("local terminal shell executable is unavailable");
+        }
+
         let shell_program = shell.path.display().to_string();
         let terminal_env = oxideterm_terminal_env(&local_config, &shell);
         #[cfg(target_os = "windows")]
@@ -114,7 +125,7 @@ impl LocalPtySession {
             .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
             .or_else(|| env::current_dir().ok());
         #[cfg(target_os = "windows")]
-        let working_directory = if matches!(shell.id.as_str(), "powershell" | "pwsh") {
+        let working_directory = if shell.id.starts_with("wsl") || matches!(shell.id.as_str(), "powershell" | "pwsh") {
             None
         } else {
             cwd.clone()
@@ -128,7 +139,7 @@ impl LocalPtySession {
                 drain_on_exit: true,
                 env: launch.env,
                 #[cfg(target_os = "windows")]
-                escape_args: false,
+                escape_args: shell.id.starts_with("wsl"),
             },
             window_size(size),
             0,

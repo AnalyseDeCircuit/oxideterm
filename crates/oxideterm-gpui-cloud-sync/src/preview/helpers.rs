@@ -451,7 +451,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             let connections = preview
                 .connections_snapshot
                 .as_ref()
-                .map(|snapshot| snapshot.records.len())
+                .map(|snapshot| snapshot.record_count())
                 .unwrap_or(0);
             let forwards = preview
                 .forwards_snapshot

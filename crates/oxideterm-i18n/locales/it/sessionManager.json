@@ -132,7 +132,8 @@
       "cancel": "Annulla",
       "save": "Salva",
       "saving": "Salvataggio...",
-      "passphrase_hint": "Lascia vuoto per mantenere la passphrase salvata se il percorso della chiave non cambia."
+      "passphrase_hint": "Lascia vuoto per mantenere la passphrase salvata se il percorso della chiave non cambia.",
+      "brand_icon_hint": "I loghi delle distribuzioni mantengono i colori e le proporzioni originali."
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "Sessioni salvate",
       "expand_all": "Espandi tutto",
       "collapse_all": "Comprimi tutto"
+    },
+    "local_terminal_profiles": {
+      "delete": "Elimina sessione locale",
+      "delete_failed": "Impossibile eliminare la sessione locale",
+      "confirm_delete": "Eliminare la sessione locale «{{name}}»? I terminali attivi resteranno aperti."
     }
   }
 }

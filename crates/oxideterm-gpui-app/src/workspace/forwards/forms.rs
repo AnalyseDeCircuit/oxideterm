@@ -66,7 +66,7 @@ impl WorkspaceApp {
                             ForwardButtonVariant::Ghost,
                             true,
                             has_background,
-                            cx.listener(|this, _event, _window, cx| {
+                            self.forwarding_listener(cx, |this, _event, _window, cx| {
                                 this.begin_forward_create_form_exit(cx);
                                 this.forwarding
                                     .update(cx, |forwarding, _cx| forwarding.clear_error());
@@ -100,7 +100,7 @@ impl WorkspaceApp {
                 ForwardButtonVariant::Primary,
                 !pending,
                 has_background,
-                cx.listener(move |this, _event, _window, cx| {
+                self.forwarding_listener(cx, move |this, _event, _window, cx| {
                     this.submit_forward_create(tab_id, node_id.clone(), cx);
                     cx.stop_propagation();
                 }),
@@ -235,7 +235,7 @@ impl WorkspaceApp {
                                 ForwardButtonVariant::Ghost,
                                 true,
                                 has_background,
-                                cx.listener(|this, _event, _window, cx| {
+                                self.forwarding_listener(cx, |this, _event, _window, cx| {
                                     this.begin_forward_edit_form_exit(cx);
                                     cx.stop_propagation();
                                 }),
@@ -246,7 +246,7 @@ impl WorkspaceApp {
                                 ForwardButtonVariant::Primary,
                                 !pending,
                                 has_background,
-                                cx.listener(move |this, _event, _window, cx| {
+                                self.forwarding_listener(cx, move |this, _event, _window, cx| {
                                     this.submit_forward_edit(tab_id, node_id.clone(), cx);
                                     cx.stop_propagation();
                                 }),
@@ -329,13 +329,13 @@ impl WorkspaceApp {
                     .render_forward_ui_text(self.i18n.t("common.actions.confirm"))
                     .into_any_element(),
             },
-            cx.listener(|this, _event, _window, cx| {
+            self.forwarding_listener(cx, |this, _event, _window, cx| {
                 this.forwarding
                     .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
                 cx.notify();
                 cx.stop_propagation();
             }),
-            cx.listener(move |this, _event, _window, cx| {
+            self.forwarding_listener(cx, move |this, _event, _window, cx| {
                 this.forwarding
                     .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
                 this.start_forward_operation(
@@ -419,7 +419,7 @@ impl WorkspaceApp {
             .child(self.render_forward_ui_text(label))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                self.forwarding_listener(cx, move |this, _event, _window, cx| {
                     this.forwarding.update(cx, |forwarding, _cx| {
                         forwarding.select_forward_type(forward_type);
                     });
@@ -474,7 +474,7 @@ impl WorkspaceApp {
             .child(self.render_forward_ui_text(self.i18n.t("forwards.form.skip_check")))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
+                self.forwarding_listener(cx, |this, _event, _window, cx| {
                     this.forwarding.update(cx, |forwarding, _cx| {
                         forwarding.toggle_skip_health_check();
                     });
@@ -617,7 +617,12 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let focused = self.forwarding.read(cx).view().focused_input == Some(input);
         let value = self.forward_input_value(input, cx);
-        let target = WorkspaceImeTarget::Forwards(input);
+        let page = self
+            .forwarding
+            .read(cx)
+            .page_id()
+            .expect("forwarding input requires a page");
+        let target = WorkspaceImeTarget::Forwards(page, input);
         self.text_input_with_workspace_ime(
             target,
             div()
@@ -637,6 +642,10 @@ impl WorkspaceApp {
                     },
                 )),
             move |this, cx| {
+                if !this.forwarding.read(cx).has_page(page) {
+                    return;
+                }
+                let _scope = this.enter_forwarding_page(page, cx);
                 this.forwarding
                     .update(cx, |forwarding, _cx| forwarding.focus_input(input));
                 this.needs_active_pane_focus = false;

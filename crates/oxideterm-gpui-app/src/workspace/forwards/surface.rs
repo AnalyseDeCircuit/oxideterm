@@ -85,6 +85,8 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
+        self.forwarding
+            .update(cx, |state, _| state.select_page(tab_id));
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
         self.active_ssh_node_id = Some(node_id.clone());
@@ -113,6 +115,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let _scope = self.enter_forwarding_page(tab_id, cx);
         let theme = self.tokens.ui;
         let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
             return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
@@ -127,6 +130,10 @@ impl WorkspaceApp {
         let list_node_id = node_id.clone();
         div()
             .id("forwards-view-scroll")
+            .capture_any_mouse_down(cx.listener(move |this, _: &gpui::MouseDownEvent, _, cx| {
+                this.forwarding
+                    .update(cx, |state, _| state.select_page(tab_id));
+            }))
             .size_full()
             .font_family(settings_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
@@ -256,6 +263,7 @@ impl WorkspaceApp {
         node_id: NodeId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let _scope = self.enter_forwarding_page(tab_id, cx);
         let Some(section) = self.forwards_sections(cx).get(index).copied() else {
             return div().into_any_element();
         };
@@ -440,7 +448,7 @@ impl WorkspaceApp {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
                 ..ToolbarButtonOptions::default()
             },
-            cx.listener(move |this, _event, _window, cx| {
+            self.forwarding_listener(cx, move |this, _event, _window, cx| {
                 let action = match label_key {
                     "forwards.quick.jupyter" => ForwardingQuickAction::Jupyter,
                     "forwards.quick.tensorboard" => ForwardingQuickAction::Tensorboard,
@@ -523,7 +531,7 @@ impl WorkspaceApp {
                                     },
                                     true,
                                     has_background,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    self.forwarding_listener(cx, |this, _event, _window, cx| {
                                         let show_new_form =
                                             this.forwarding.read(cx).view().show_new_form;
                                         if show_new_form {
@@ -671,6 +679,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let _scope = self.enter_forwarding_page(tab_id, cx);
         let theme = self.tokens.ui;
         let (local, remote) = forward_addresses(&rule);
         let active = matches!(rule.status, ForwardStatus::Active);
@@ -835,7 +844,7 @@ impl WorkspaceApp {
                 ))
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
+                    self.forwarding_listener(cx, move |this, _event, _window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(address.clone()));
                         this.forwarding.update(cx, |forwarding, cx| {
                             forwarding.mark_forward_copied(

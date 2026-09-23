@@ -43,8 +43,7 @@ impl WorkspaceApp {
                 true
             }
             Some(ConfirmKeyboardAction::Confirm) => {
-                let active_tab = self.active_tab(cx);
-                let Some(tab_id) = active_tab.map(|tab| tab.id) else {
+                let Some(tab_id) = self.forwarding.read(cx).page_id() else {
                     return true;
                 };
                 let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
@@ -175,7 +174,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn dismiss_detected_port(&mut self, port: u16, cx: &mut Context<Self>) {
-        if let Some(tab_id) = self.active_tab_id(cx)
+        if let Some(tab_id) = self.forwarding.read(cx).page_id()
             && let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id)
         {
             self.forwarding.update(cx, |forwarding, _cx| {
@@ -492,8 +491,12 @@ impl WorkspaceApp {
                     result,
                 } => {
                     self.remember_forwarding_binding(binding);
-                    self.forwarding
-                        .update(cx, |forwarding, _cx| forwarding.finish_operation());
+                    let live_page = self.forwarding.read(cx).has_page(tab_id);
+                    let _scope = live_page.then(|| self.enter_forwarding_page(tab_id, cx));
+                    if live_page {
+                        self.forwarding
+                            .update(cx, |forwarding, _cx| forwarding.finish_operation());
+                    }
                     match result {
                         Ok(()) => {
                             if sync_saved_forwards_on_success {
@@ -713,11 +716,7 @@ impl WorkspaceApp {
     }
 
     fn forwards_tab_is_visible(&self, tab_id: TabId, cx: &App) -> bool {
-        super::forwarding_tab_mount_is_visible(
-            tab_id,
-            self.active_tab_id(cx),
-            self.tab_host.read(cx).is_detached(tab_id),
-        )
+        self.tab_host.read(cx).surface_is_visible(tab_id)
     }
 
     pub(in crate::workspace) fn forwarding_connection_id_for_node(
@@ -740,9 +739,20 @@ impl WorkspaceApp {
     }
 
     fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
-        self.forwarding.update(cx, |forwarding, _cx| {
-            forwarding.sync_active_port_detection(node_id);
-        });
+        let pages = self
+            .forwarding
+            .read(cx)
+            .tab_node_mappings()
+            .iter()
+            .filter(|(_, node)| *node == node_id)
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        for page in pages {
+            let _scope = self.enter_forwarding_page(page, cx);
+            self.forwarding.update(cx, |forwarding, _| {
+                forwarding.sync_active_port_detection(node_id)
+            });
+        }
     }
 
     pub(in crate::workspace) fn remember_forwarding_binding(

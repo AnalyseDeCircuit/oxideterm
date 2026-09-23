@@ -160,11 +160,7 @@ impl WorkspaceApp {
             let mut refs = BTreeMap::new();
             refs.insert("tabId".to_string(), tab.id.0.to_string());
             if let Some(session_id) = tab.root_pane.as_ref().and_then(|root| {
-                let mut pane_ids = Vec::new();
-                root.collect_pane_ids(&mut pane_ids);
-                pane_ids
-                    .into_iter()
-                    .find_map(|pane_id| root.session_id_for_pane(pane_id))
+                root.session_id_for_pane(tab.active_pane_id?)
             }) {
                 refs.insert("sessionId".to_string(), session_id.0.to_string());
             }
@@ -176,7 +172,7 @@ impl WorkspaceApp {
                 } else {
                     tab.title.clone()
                 },
-                state: if Some(tab.id) == self.active_tab_id(cx) {
+                state: if self.tab_host.read(cx).surface_is_visible(tab.id) {
                     "connected"
                 } else {
                     "available"
@@ -301,7 +297,6 @@ impl WorkspaceApp {
                     continue;
                 };
                 let serial_config = self.serial_terminal_configs.get(&session_id);
-                let is_local_terminal = tab.kind == TabKind::LocalTerminal;
                 let (
                     session_kind,
                     terminal_buffer,
@@ -320,6 +315,7 @@ impl WorkspaceApp {
                         pane.lifecycle().is_running(),
                     )
                 };
+                let is_local_terminal = session_kind == oxideterm_terminal::TerminalSessionKind::LocalPty;
                 let is_serial_terminal =
                     session_kind == oxideterm_terminal::TerminalSessionKind::Serial;
                 let is_telnet_terminal =
@@ -336,14 +332,15 @@ impl WorkspaceApp {
                 let mut refs = BTreeMap::new();
                 refs.insert("sessionId".to_string(), session_id.0.to_string());
                 refs.insert("tabId".to_string(), tab.id.0.to_string());
+                let pane_label = self.terminal_pane_label(pane_id, cx);
                 let label = if let Some(config) = serial_config {
                     format!("Serial {}", config.port_path)
                 } else if is_telnet_terminal {
-                    format!("Telnet {}", tab.title)
+                    format!("Telnet {} · #{}", pane_label, pane_id.0)
                 } else if is_local_terminal {
-                    format!("Local terminal {}", tab.title)
+                    format!("Local terminal {} · #{}", pane_label, pane_id.0)
                 } else {
-                    format!("SSH terminal {}", ai_short_id(&session_id.0.to_string()))
+                    format!("SSH terminal {} · #{}", pane_label, pane_id.0)
                 };
                 let metadata = if let Some(config) = serial_config {
                     serde_json::json!({
@@ -368,7 +365,7 @@ impl WorkspaceApp {
                     serde_json::json!({
                         "terminalType": terminal_type,
                         "shell": {
-                            "label": tab.title.clone(),
+                            "label": pane_label,
                         },
                     })
                 } else {
@@ -552,41 +549,18 @@ impl WorkspaceApp {
             };
         }
         let settings = self.settings_store.settings();
-        let active_tab_ref = self.active_tab_id(cx)
-            .and_then(|active_tab_id| self.tabs(cx).iter().find(|tab| tab.id == active_tab_id));
         let active_node_id = self
             .active_ssh_node_id
             .as_ref()
             .map(|node_id| node_id.0.clone());
-        let active_session_id = active_tab_ref
-            .and_then(|tab| tab.root_pane.as_ref())
-            .and_then(|root| {
-                let mut pane_ids = Vec::new();
-                root.collect_pane_ids(&mut pane_ids);
-                pane_ids
-                    .into_iter()
-                    .find_map(|pane_id| root.session_id_for_pane(pane_id))
+        let active_session_id = self.ai_active_terminal_session_id(cx)
+            .map(|session_id| session_id.0.to_string());
+        let active_tab = self.active_content_tab(cx).map(|tab| {
+            serde_json::json!({
+                "type": ai_tab_kind_label(&tab.kind),
+                "title": tab.title,
             })
-            .map(|session_id| session_id.0.to_string())
-            .or_else(|| {
-                self.active_ssh_node_id
-                    .as_ref()
-                    .and_then(|node_id| self.ssh_nodes.get(node_id))
-                    .and_then(|node| node.terminal_ids.first().copied())
-                    .map(|session_id| session_id.0.to_string())
-            });
-        let active_tab = self.active_tab_id(cx)
-            .and_then(|active_tab_id| {
-                self.tabs(cx)
-                    .iter()
-                    .find(|tab| tab.id == active_tab_id)
-                    .map(|tab| {
-                        serde_json::json!({
-                            "type": ai_tab_kind_label(&tab.kind),
-                            "title": tab.title,
-                        })
-                    })
-            });
+        });
         let active_node = self.active_ssh_node_id.as_ref().and_then(|node_id| {
             self.ssh_nodes.get(node_id).map(|node| {
                 serde_json::json!({
@@ -661,7 +635,7 @@ impl WorkspaceApp {
             active_tab,
             active_node,
             active_session_id,
-            active_tab_id: self.active_tab_id(cx)
+            active_tab_id: self.active_content_tab_id(cx)
                 .map(|tab_id| tab_id.0.to_string()),
             active_node_id,
             memory: ai_memory_settings_json(
@@ -3424,7 +3398,7 @@ impl WorkspaceApp {
                     "write",
                 );
             }
-            if self.tab_host.read(cx).is_outside_main_window(tab_id) {
+            if self.tab_host.read(cx).is_detached(tab_id) {
                 self.focus_detached_tab_window(tab_id, cx);
             } else {
                 self.set_main_window_active_tab(Some(tab_id), cx);

@@ -217,6 +217,7 @@ mod highlight;
 mod ide_page;
 mod local_terminal;
 use local_terminal::application_semantic_scheme_label;
+pub(in crate::workspace) use local_terminal::expand_local_terminal_cwd;
 mod navigation_editor;
 mod network_page;
 mod pages;

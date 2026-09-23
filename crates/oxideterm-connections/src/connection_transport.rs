@@ -104,11 +104,8 @@ pub fn transport_username_transition(
 }
 
 pub fn transport_is_persistable(transport: ConnectionTransport) -> bool {
-    // One-shot local surfaces are launch targets, not saved connection assets.
-    !matches!(
-        transport,
-        ConnectionTransport::LocalTerminal | ConnectionTransport::WslGraphics
-    )
+    // WSL graphics discovery is a launch surface without saved connection metadata.
+    !matches!(transport, ConnectionTransport::WslGraphics)
 }
 
 fn is_known_transport_default_port(port: &str) -> bool {
@@ -165,9 +162,7 @@ mod tests {
             ),
             Some(TransportUsernameTransition::Clear)
         );
-        assert!(!transport_is_persistable(
-            ConnectionTransport::LocalTerminal
-        ));
+        assert!(transport_is_persistable(ConnectionTransport::LocalTerminal));
         assert_eq!(
             transport_default_port(ConnectionTransport::LocalTerminal),
             None

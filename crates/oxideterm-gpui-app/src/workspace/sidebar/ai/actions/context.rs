@@ -61,8 +61,8 @@ impl WorkspaceApp {
             "- OxideTerm host OS (local application only): {}",
             ai_local_os_label()
         ));
-        if let Some(tab) = self.active_tab(cx) {
-            parts.push(format!("- Active tab: {}", ai_tab_kind_label(&tab.kind)));
+        if let Some(tab) = self.active_content_tab(cx) {
+            parts.push(format!("- Active page: {}", ai_tab_kind_label(&tab.kind)));
         }
         if let Some(cwd) = self.ai_active_cwd(cx) {
             parts.push(format!(
@@ -92,7 +92,7 @@ impl WorkspaceApp {
         }
         parts.push(String::new());
         parts.push("## Runtime State".to_string());
-        parts.push(format!("- Open tabs: {}", self.tabs(cx).len()));
+        parts.push(format!("- Open tabs: {}", self.tabs(cx).iter().filter(|tab| self.tab_host.read(cx).container_tab_id(tab.id) == tab.id).count()));
         parts.push(format!(
             "- Runtime terminal sessions: {}",
             self.tab_host.read(cx).panes().len()
@@ -340,17 +340,9 @@ impl WorkspaceApp {
     ) -> Option<String> {
         // This low-frequency context action snapshots at most four pane nodes
         // so terminal reads can mutably use the GPUI context without cloning a Tab.
-        let (root, active_pane_id, terminal_type) = self.active_tab(cx).and_then(|tab| {
-            Some((
-                tab.root_pane.as_ref()?.clone(),
-                tab.active_pane_id,
-                if tab.kind == TabKind::SshTerminal {
-                    "SSH"
-                } else {
-                    "Local"
-                },
-            ))
-        })?;
+        let (root, active_pane_id) = self
+            .active_tab(cx)
+            .and_then(|tab| Some((tab.root_pane.as_ref()?.clone(), tab.active_pane_id)))?;
         let mut pane_ids = Vec::new();
         root.collect_pane_ids(&mut pane_ids);
         if pane_ids.len() <= 1 {
@@ -378,9 +370,13 @@ impl WorkspaceApp {
             } else {
                 "Pane"
             };
-            parts.push(format!(
-                "=== {label} ({terminal_type}) — last {line_count} lines ==="
-            ));
+            let session_id = root.session_id_for_pane(pane_id)?;
+            let environment = self
+                .terminal_kind_for_pane(pane_id, cx)
+                .map(|kind| ai_terminal_environment(kind, ai_local_os_label()))
+                .unwrap_or_default();
+            let target = oxideterm_ai::sanitize_for_ai(&self.terminal_pane_label(pane_id, cx));
+            parts.push(format!("=== {label} #{} / session {} ({environment}; {target}) — last {line_count} lines ===", pane_id.0, session_id.0));
             parts.push(buffer);
             parts.push(String::new());
         }
@@ -444,7 +440,7 @@ impl WorkspaceApp {
             return None;
         }
         let active_ide_tab = self
-            .active_tab(cx)
+            .active_content_tab(cx)
             .and_then(|tab| (tab.kind == TabKind::Ide).then_some(tab.id));
         self.ide_workspace
             .read(cx)
@@ -458,9 +454,10 @@ impl WorkspaceApp {
         if !self.settings_store.settings().ai.context_sources.sftp {
             return None;
         }
-        let tab_id = self.active_tab(cx)?.id;
+        let tab_id = self.active_content_tab_id(cx)?;
         let node_id = self.sftp_tab_nodes.get(&tab_id)?.clone();
-        let sftp = self.sftp_view.read(cx);
+        let _scope = self.enter_sftp_surface(crate::workspace::sftp::SftpSurfaceId::Tab(tab_id));
+        let sftp = self.sftp_view().read(cx);
         let remote_path = sftp.current_remote_path().trim().to_string();
         if remote_path.is_empty() {
             return None;
@@ -474,7 +471,7 @@ impl WorkspaceApp {
         };
         matches!(
             tab.kind,
-            TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+            TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal | TabKind::Workspace
         )
             && tab
                 .active_pane_id
@@ -486,7 +483,7 @@ impl WorkspaceApp {
             .filter(|tab| {
                 matches!(
                     tab.kind,
-                    TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+                    TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal | TabKind::Workspace
                 )
             })
             .and_then(|tab| tab.root_pane.as_ref())
@@ -598,6 +595,7 @@ fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_
 
 pub(in crate::workspace) fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
     match kind {
+        TabKind::Workspace => "workspace",
         TabKind::LocalTerminal => "local_terminal",
         TabKind::SshTerminal => "terminal",
         TabKind::MoshTerminal => "mosh_terminal",

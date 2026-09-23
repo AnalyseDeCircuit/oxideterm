@@ -44,6 +44,16 @@ impl WorkspaceApp {
                 })
             })
             .count();
+        let local_count = self
+            .connection_store
+            .local_terminal_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
         let telnet_count = self
             .connection_store
             .telnet_profiles()
@@ -95,6 +105,7 @@ impl WorkspaceApp {
                     })
                 })
                 .count()
+            + local_count
             + serial_count
             + telnet_count
             + mosh_count
@@ -113,6 +124,11 @@ impl WorkspaceApp {
             }
         }
         for profile in self.connection_store.serial_profiles() {
+            if let Some(group) = profile.group.as_deref() {
+                add_group_path_segments(group, &mut paths);
+            }
+        }
+        for profile in self.connection_store.local_terminal_profiles() {
             if let Some(group) = profile.group.as_deref() {
                 add_group_path_segments(group, &mut paths);
             }
@@ -619,6 +635,31 @@ impl WorkspaceApp {
         });
     }
 
+    pub(super) fn request_delete_local_terminal_profile(
+        &mut self,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(profile) = self
+            .connection_store
+            .local_terminal_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            close_session_menu_state(session_manager);
+            session_manager.delete_confirm =
+                Some(SessionManagerDeleteConfirm::LocalTerminalProfile {
+                    id: profile.id,
+                    name: profile.name,
+                });
+            cx.notify();
+        });
+    }
+
     pub(super) fn request_delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
         let Some(profile) = self
             .connection_store
@@ -743,6 +784,9 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::SerialProfile { id, .. } => {
                 self.delete_serial_profile(&id, cx)
             }
+            SessionManagerDeleteConfirm::LocalTerminalProfile { id, .. } => {
+                self.delete_local_terminal_profile(&id, cx)
+            }
             SessionManagerDeleteConfirm::TelnetProfile { id, .. } => {
                 self.delete_telnet_profile(&id, cx)
             }
@@ -782,6 +826,39 @@ impl WorkspaceApp {
                 session_manager
                     .selected_items
                     .remove(&SessionManagerSelectionTarget::Serial(id.to_string()));
+            }
+            session_manager.set_status(Some(status), cx)
+        });
+        if changed {
+            self.queue_cloud_sync_dirty_refresh(cx);
+        }
+    }
+
+    pub(super) fn delete_local_terminal_profile(&mut self, id: &str, cx: &mut Context<Self>) {
+        let (status, changed) = match self.connection_store.delete_local_terminal_profile(id) {
+            Ok(true) => (
+                self.i18n.t("sessionManager.local_terminal_profiles.delete"),
+                true,
+            ),
+            Ok(false) => (
+                self.i18n
+                    .t("sessionManager.local_terminal_profiles.delete_failed"),
+                false,
+            ),
+            Err(error) => (
+                format!(
+                    "{}: {error}",
+                    self.i18n
+                        .t("sessionManager.local_terminal_profiles.delete_failed")
+                ),
+                false,
+            ),
+        };
+        self.session_manager.update(cx, |session_manager, cx| {
+            if changed {
+                session_manager.selected_items.remove(
+                    &SessionManagerSelectionTarget::LocalTerminal(id.to_string()),
+                );
             }
             session_manager.set_status(Some(status), cx)
         });
@@ -1275,6 +1352,15 @@ impl WorkspaceApp {
                         deleted += 1;
                     }
                 }
+                SessionManagerSelectionTarget::LocalTerminal(id) => {
+                    if self
+                        .connection_store
+                        .delete_local_terminal_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
                 SessionManagerSelectionTarget::Ftp(id) => {
                     match self.connection_store.delete_ftp_profile(&id) {
                         Ok(true) => deleted += 1,
@@ -1443,6 +1529,7 @@ impl WorkspaceApp {
     ) {
         let mut connection_ids = Vec::new();
         let mut serial_profile_ids = Vec::new();
+        let mut local_terminal_profile_ids = Vec::new();
         let mut telnet_profile_ids = Vec::new();
         let mut ftp_profile_ids = Vec::new();
         let mut mosh_profile_ids = Vec::new();
@@ -1456,6 +1543,9 @@ impl WorkspaceApp {
             match target {
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
+                SessionManagerSelectionTarget::LocalTerminal(id) => {
+                    local_terminal_profile_ids.push(id.clone())
+                }
                 SessionManagerSelectionTarget::Telnet(id) => telnet_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Ftp(id) => ftp_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Mosh(id) => mosh_profile_ids.push(id.clone()),
@@ -1470,6 +1560,7 @@ impl WorkspaceApp {
         let has_group_changes = !connection_ids.is_empty()
             || !ftp_profile_ids.is_empty()
             || !serial_profile_ids.is_empty()
+            || !local_terminal_profile_ids.is_empty()
             || !telnet_profile_ids.is_empty()
             || !mosh_profile_ids.is_empty()
             || !standalone_sftp_profile_ids.is_empty()
@@ -1487,6 +1578,7 @@ impl WorkspaceApp {
         match self.connection_store.move_session_assets_to_group(
             &connection_ids,
             &serial_profile_ids,
+            &local_terminal_profile_ids,
             &telnet_profile_ids,
             &mosh_profile_ids,
             &standalone_sftp_profile_ids,
@@ -1545,6 +1637,12 @@ impl WorkspaceApp {
             SessionManagerSelectionTarget::Serial(id) => self
                 .connection_store
                 .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == id.as_str())
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::LocalTerminal(id) => self
+                .connection_store
+                .local_terminal_profiles()
                 .iter()
                 .find(|profile| profile.id == id.as_str())
                 .map(|profile| profile.group.as_deref()),

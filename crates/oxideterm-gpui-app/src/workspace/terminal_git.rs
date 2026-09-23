@@ -1147,11 +1147,10 @@ impl WorkspaceApp {
         }
 
         let tab = self.active_tab(cx)?;
-        let tab_kind = tab.kind.clone();
         let pane_id = tab.active_pane_id?;
-        let scope = match tab_kind {
-            TabKind::LocalTerminal => GitProbeScope::Local,
-            TabKind::SshTerminal => {
+        let scope = match self.terminal_kind_for_pane(pane_id, cx)? {
+            oxideterm_terminal::TerminalSessionKind::LocalPty => GitProbeScope::Local,
+            oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let session_id = self.active_terminal_session_id(cx)?;
                 let node_id = self
                     .workspace_runtime

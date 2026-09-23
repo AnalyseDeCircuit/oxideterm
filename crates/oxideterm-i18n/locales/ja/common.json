@@ -1178,6 +1178,12 @@
     "hint_other": "Zen モード — Ctrl+Shift+Z で終了"
   },
   "tabbar": {
+    "drag_to_dock": "ドラッグしてドッキング",
+    "workspace": "ワークスペース",
+    "merge_into_horizontal": "「{{title}}」に結合（左右分割）",
+    "merge_into_vertical": "「{{title}}」に結合（上下分割）",
+    "move_pane_to_tab": "新しいタブに移動",
+    "move_pane_to_window": "新しいウィンドウに移動",
     "offline": "オフライン",
     "cancel_reconnect": "再接続をキャンセル",
     "reconnect": "再接続",
@@ -1294,5 +1300,13 @@
     "setup_pending": "ポータブルキーストアを作成しています...",
     "unlock_submit": "解除して続行",
     "unlock_pending": "ポータブルデータを解除しています..."
+  },
+  "local_session": {
+    "directory": "開始ディレクトリ",
+    "inherit_directory": "空欄の場合は設定の既定ディレクトリを使用",
+    "inherit_shell": "設定の既定シェルを使用",
+    "shell_unavailable": "保存されたシェルはこのデバイスで利用できません。セッションを編集してインストール済みのシェルを選択してください。",
+    "directory_unavailable": "開始ディレクトリがありません。セッションを編集して既存のディレクトリを選択してください。",
+    "name_required": "ローカルセッションを保存する名前を入力してください。"
   }
 }

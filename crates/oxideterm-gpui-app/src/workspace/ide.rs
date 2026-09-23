@@ -505,15 +505,26 @@ impl IdeOpenIntent {
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn sync_ide_surface_mount(&mut self, tab_id: TabId, cx: &mut App) {
+        let mut pages = Vec::new();
+        if let Some(root) = self
+            .tab_by_id(tab_id, cx)
+            .and_then(|tab| tab.root_pane.as_ref())
+        {
+            root.collect_page_ids(&mut pages);
+        }
+        for page in pages {
+            self.sync_ide_surface_mount(page, cx);
+        }
+
         let (outside_main_window, detached_window_open) = {
             let tab_host = self.tab_host.read(cx);
             (
-                tab_host.is_outside_main_window(tab_id),
+                tab_host.is_outside_main_window(tab_host.container_tab_id(tab_id)),
                 tab_host.is_detached(tab_id),
             )
         };
         let mount = ide_surface_mount_for_location(
-            self.active_tab_id(cx) == Some(tab_id),
+            self.tab_host.read(cx).surface_is_visible(tab_id),
             outside_main_window,
             detached_window_open,
         );
@@ -617,7 +628,11 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
-        if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
+        if !self
+            .tab_host
+            .read(cx)
+            .is_outside_main_window(self.tab_host.read(cx).container_tab_id(tab_id))
+        {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
@@ -733,7 +748,11 @@ impl WorkspaceApp {
             }
         };
 
-        if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
+        if !self
+            .tab_host
+            .read(cx)
+            .is_outside_main_window(self.tab_host.read(cx).container_tab_id(tab_id))
+        {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.active_surface = oxideterm_gpui_settings_view::ActiveSurface::Terminal;
         }
@@ -785,7 +804,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_ide_surface(&self, cx: &mut Context<Self>) -> AnyElement {
-        let Some(tab_id) = self.active_tab_id(cx) else {
+        let Some(tab_id) = self.active_content_tab_id(cx) else {
             return div().into_any_element();
         };
         self.render_ide_surface_for_tab(tab_id, cx)
@@ -856,7 +875,7 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<gpui::Entity<IdeSurface>> {
-        let tab_id = self.active_tab_id(cx)?;
+        let tab_id = self.active_content_tab_id(cx)?;
         let tab = self.tabs(cx).iter().find(|tab| tab.id == tab_id)?;
         (tab.kind == TabKind::Ide)
             .then(|| self.ide_workspace.read(cx).surface(tab_id))

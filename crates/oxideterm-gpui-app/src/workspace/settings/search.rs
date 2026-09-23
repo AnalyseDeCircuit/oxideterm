@@ -767,6 +767,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             &[
                 "settings_view.help.copyright",
                 "settings_view.help.legal_notice_description",
+                "settings_view.help.third_party_notices",
+                "settings_view.help.third_party_notices_description",
                 "settings_view.help.license",
             ],
         ),

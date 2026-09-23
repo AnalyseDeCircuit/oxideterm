@@ -127,7 +127,7 @@ pub fn build_local_snapshot(
         scope: scope.clone(),
         dirty,
         upload_units,
-        connections_record_count: connections_snapshot.records.len(),
+        connections_record_count: connections_snapshot.record_count(),
         forwards_record_count: forwards_snapshot.records.len(),
         quick_commands_record_count: quick_commands_snapshot.commands.len(),
         serial_profiles_record_count: serial_profiles_snapshot.records.len(),
@@ -135,7 +135,7 @@ pub fn build_local_snapshot(
         mosh_profiles_record_count: mosh_profiles_snapshot.records.len(),
         remote_desktop_profiles_record_count: remote_desktop_profiles_snapshot.records.len(),
         sensitive_credentials_record_count: if scope.sync_connections {
-            connections_snapshot.records.len()
+            connections_snapshot.record_count()
         } else {
             0
         } + connection_store.profile_credential_count(

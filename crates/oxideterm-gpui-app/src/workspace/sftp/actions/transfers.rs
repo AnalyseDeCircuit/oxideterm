@@ -331,7 +331,7 @@ impl SftpWorkspaceEntity {
 
 impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn queue_quick_scp_download(&mut self, cx: &mut Context<Self>) {
-        if !self.sftp_view.read(cx).editing_remote_path {
+        if !self.sftp_view().read(cx).editing_remote_path {
             // SCP cannot browse, so first place keyboard focus in the existing
             // remote path field and let the user provide one exact file path.
             self.start_sftp_path_edit(SftpPane::Remote, cx);
@@ -342,9 +342,11 @@ impl WorkspaceApp {
         };
         let conflict_action = self.settings_store.settings().sftp.conflict_action;
         let missing_path_error = self.i18n.t("sftp.scp.enter_remote_file_path_error");
-        let Some((pending_transfers, resolved_actions)) = self.sftp_view.update(cx, |sftp, cx| {
-            sftp.prepare_quick_scp_download(conflict_action, missing_path_error, cx)
-        }) else {
+        let Some((pending_transfers, resolved_actions)) =
+            self.sftp_view().update(cx, |sftp, cx| {
+                sftp.prepare_quick_scp_download(conflict_action, missing_path_error, cx)
+            })
+        else {
             return;
         };
         self.execute_sftp_pending_transfers(remote_id, pending_transfers, resolved_actions, cx);
@@ -431,13 +433,13 @@ impl WorkspaceApp {
         let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
             return;
         };
-        let Some(progress) = self.sftp_view.update(cx, |sftp, cx| {
+        let Some(progress) = self.sftp_view().update(cx, |sftp, cx| {
             sftp.take_incomplete_progress_for_resume(&transfer_id, cx)
         }) else {
             return;
         };
         let relay = progress.remote_relay.clone();
-        let Some(launch) = self.sftp_view.update(cx, |sftp, _cx| {
+        let Some(launch) = self.sftp_view().update(cx, |sftp, _cx| {
             sftp.prepare_reconnect_resume(remote_id, progress, true)
         }) else {
             return;
@@ -480,7 +482,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(progress) = self
-            .sftp_view
+            .sftp_view()
             .read(cx)
             .incomplete_transfers
             .iter()
@@ -497,7 +499,7 @@ impl WorkspaceApp {
             .get_standalone_sftp_profile(&relay.profile_id)
             .is_some_and(|profile| profile.updated_at.to_rfc3339() == relay.profile_revision);
         if !profile_revision_matches {
-            let tx = self.sftp_view.read(cx).worker_sender();
+            let tx = self.sftp_view().read(cx).worker_sender();
             let _ = tx.send(SftpWorkerResult::IncompleteTransferDiscarded {
                 transfer_id,
                 result: Err(self
@@ -509,7 +511,7 @@ impl WorkspaceApp {
         let destination_remote_id =
             SftpRemoteId::from_standalone_endpoint_id(relay.destination_endpoint_id.clone());
         let cleanup_owner = format!("discard-{}", progress.transfer_id);
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         let Some((backend, lease)) =
             self.acquire_sftp_transfer_backend(&destination_remote_id, &cleanup_owner)
         else {
@@ -551,7 +553,7 @@ impl WorkspaceApp {
     ) {
         let router = self.node_router.clone();
         let progress_store = self.sftp_progress_store.clone();
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             // Tauri's reconnect resume phase first best-effort opens SFTP for
@@ -579,7 +581,7 @@ impl WorkspaceApp {
         launch: SftpTransferLaunch,
         cx: &App,
     ) {
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         self.spawn_sftp_transfer_launch_with_sender(launch, tx);
     }
 
@@ -598,7 +600,7 @@ impl WorkspaceApp {
         secondary_remote_id: SftpRemoteId,
         cx: &App,
     ) {
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         let source_remote_id = match direction {
             SftpTransferDirection::Upload => primary_remote_id.clone(),
             SftpTransferDirection::Download => secondary_remote_id.clone(),
@@ -848,7 +850,7 @@ impl WorkspaceApp {
         protocol_override: Option<RemoteTransferProtocol>,
         cx: &App,
     ) {
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         self.spawn_sftp_transfer_task_with_sender(
             id,
             transfer_id,
@@ -1660,7 +1662,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(control) = self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, cx| sftp.set_transfer_state(id, state, cx))
         else {
             return;
@@ -1698,7 +1700,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(SftpTransferControl::Cancel(transfer_id)) = self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, cx| sftp.cancel_or_remove_transfer(id, cx))
         {
             self.sftp_transfer_manager.cancel(&transfer_id);
@@ -1717,7 +1719,7 @@ impl WorkspaceApp {
             .sftp_transfer_manager
             .interrupt_node(&node_id.0, error.clone());
         let mut changed = !transfer_ids_to_interrupt.is_empty();
-        changed |= self.sftp_view.update(cx, |sftp, cx| {
+        changed |= self.sftp_view().update(cx, |sftp, cx| {
             sftp.interrupt_transfers_by_remote(&SftpRemoteId::Node(node_id.clone()), &error, cx)
         });
         for transfer_id in transfer_ids_to_interrupt {

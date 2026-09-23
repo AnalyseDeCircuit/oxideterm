@@ -325,15 +325,18 @@ impl WorkspaceApp {
                                     ForwardButtonVariant::Ghost,
                                     true,
                                     has_background,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        this.create_local_forward_for_detected_port(
-                                            tab_id,
-                                            forward_node_id.clone(),
-                                            forward_port.clone(),
-                                            cx,
-                                        );
-                                        cx.stop_propagation();
-                                    }),
+                                    self.forwarding_listener(
+                                        cx,
+                                        move |this, _event, _window, cx| {
+                                            this.create_local_forward_for_detected_port(
+                                                tab_id,
+                                                forward_node_id.clone(),
+                                                forward_port.clone(),
+                                                cx,
+                                            );
+                                            cx.stop_propagation();
+                                        },
+                                    ),
                                 )
                                 .h(px(24.0))
                                 .px_2()
@@ -582,7 +585,7 @@ impl WorkspaceApp {
                         ForwardButtonVariant::Ghost,
                         true,
                         has_background,
-                        cx.listener(move |this, _event, _window, cx| {
+                        self.forwarding_listener(cx, move |this, _event, _window, cx| {
                             this.create_local_forward_for_detected_port(
                                 tab_id,
                                 node_id.clone(),

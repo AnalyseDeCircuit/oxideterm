@@ -8,7 +8,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (preview_loading, preview_error, preview_content) = {
-            let sftp_view = self.sftp_view.read(cx);
+            let sftp_view = self.sftp_view().read(cx);
             (
                 sftp_view.preview_loading,
                 sftp_view.preview_error.clone(),
@@ -38,7 +38,7 @@ impl WorkspaceApp {
                     .when(!uses_virtual_text, |scroll| {
                         scroll
                             .selectable_overflow_y_scroll(
-                                &self.sftp_view.read(cx).preview_document_scroll,
+                                &self.sftp_view().read(cx).preview_document_scroll,
                             )
                             .p(px(16.0))
                     })
@@ -55,7 +55,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (language, encoding, editor, editor_saving, editor_dirty, editor_last_atomic_write) = {
-            let sftp_view = self.sftp_view.read(cx);
+            let sftp_view = self.sftp_view().read(cx);
             (
                 sftp_view
                     .preview_editor_language
@@ -166,7 +166,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (save_error, network_error, retry_count) = {
-            let sftp_view = self.sftp_view.read(cx);
+            let sftp_view = self.sftp_view().read(cx);
             (
                 sftp_view.preview_editor_save_error.clone(),
                 sftp_view.preview_editor_network_error,
@@ -220,7 +220,7 @@ impl WorkspaceApp {
                             })
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
+                                self.sftp_listener(cx, |this, _event, _window, cx| {
                                     this.retry_sftp_preview_editor_save(cx);
                                     cx.stop_propagation();
                                     cx.notify();

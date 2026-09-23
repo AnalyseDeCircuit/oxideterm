@@ -841,24 +841,31 @@ impl TerminalPane {
     }
 
     pub fn new_local_with_config_and_preferences(
-        mut config: LocalPtyConfig,
+        config: LocalPtyConfig,
         preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<Self> {
+        let terminal = Self::local_shared_session(config, &preferences)?;
+        Self::from_session(terminal, preferences, window, cx)
+    }
+
+    pub fn local_shared_session(
+        mut config: LocalPtyConfig,
+        preferences: &TerminalUiPreferences,
+    ) -> Result<SharedTerminalSession> {
         config.current_directory_shell_integration =
             preferences.current_directory_awareness_enabled;
-        let terminal = Arc::new(Mutex::new(
+        Ok(Arc::new(Mutex::new(
             TerminalSession::local_with_config_graphics_and_encoding(
                 DEFAULT_COLS,
                 DEFAULT_ROWS,
                 config,
-                graphics_options_from_preferences(&preferences),
+                graphics_options_from_preferences(preferences),
                 preferences.terminal_encoding,
                 preferences.scrollback_lines,
             )?,
-        ));
-        Self::from_session(terminal, preferences, window, cx)
+        )))
     }
 
     pub fn new_ssh(
@@ -4228,6 +4235,20 @@ mod tests {
 
     use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    #[cfg(unix)]
+    #[test]
+    fn local_launch_returns_missing_directory_error_before_creating_a_view() {
+        let directory = tempfile::tempdir().unwrap();
+        let config = LocalPtyConfig {
+            shell: Some(oxideterm_terminal::ShellInfo::new("sh", "sh", "/bin/sh")),
+            cwd: Some(directory.path().join("missing-project")),
+            ..Default::default()
+        };
+        assert!(
+            TerminalPane::local_shared_session(config, &TerminalUiPreferences::default()).is_err()
+        );
+    }
 
     #[test]
     fn serial_output_is_coalesced_without_delaying_input_or_other_backends() {

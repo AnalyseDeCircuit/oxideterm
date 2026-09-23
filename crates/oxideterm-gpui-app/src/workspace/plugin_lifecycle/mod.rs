@@ -18,9 +18,8 @@ use oxideterm_sftp::BackgroundTransferState;
 use serde_json::{Value, json};
 
 use super::{
-    TabKind, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
-    TerminalSessionId, WorkspaceApp, WorkspaceOverlayIntent, plugin_entity, plugin_host,
-    plugin_runtime,
+    TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor, TerminalSessionId,
+    WorkspaceApp, WorkspaceOverlayIntent, plugin_entity, plugin_host, plugin_runtime,
 };
 
 mod host_api_snapshot;

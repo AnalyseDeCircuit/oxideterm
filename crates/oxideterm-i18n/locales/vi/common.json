@@ -1178,6 +1178,12 @@
     "hint_other": "Chế độ Zen — Nhấn Ctrl+Shift+Z để thoát"
   },
   "tabbar": {
+    "drag_to_dock": "Kéo để ghép",
+    "workspace": "Không gian làm việc",
+    "merge_into_horizontal": "Ghép vào “{{title}}” (cạnh nhau)",
+    "merge_into_vertical": "Ghép vào “{{title}}” (trên dưới)",
+    "move_pane_to_tab": "Chuyển sang thẻ mới",
+    "move_pane_to_window": "Chuyển sang cửa sổ mới",
     "offline": "Ngoại tuyến",
     "cancel_reconnect": "Hủy kết nối lại",
     "reconnect": "Kết nối lại",
@@ -1294,5 +1300,13 @@
     "setup_pending": "Đang tạo kho khóa portable...",
     "unlock_submit": "Mở khóa và tiếp tục",
     "unlock_pending": "Đang mở khóa dữ liệu portable..."
+  },
+  "local_session": {
+    "directory": "Thư mục khởi động",
+    "inherit_directory": "Dùng thư mục mặc định trong Cài đặt",
+    "inherit_shell": "Dùng shell mặc định trong Cài đặt",
+    "shell_unavailable": "Shell đã lưu không có trên thiết bị này. Hãy sửa phiên và chọn shell đã cài đặt.",
+    "directory_unavailable": "Thư mục khởi động không tồn tại. Hãy sửa phiên và chọn thư mục có sẵn.",
+    "name_required": "Nhập tên để lưu phiên cục bộ này."
   }
 }

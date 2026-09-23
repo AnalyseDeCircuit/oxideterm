@@ -390,12 +390,69 @@ impl LucideIcon {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct DistroIcon {
+    pub(crate) id: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) path: &'static str,
+    pub(crate) bytes: &'static [u8],
+}
+
+// Distribution artwork is bundled with source attribution and brand usage notes.
+pub(crate) const DISTRO_ICONS: &[DistroIcon] = &[
+    DistroIcon {
+        id: "ubuntu",
+        name: "Ubuntu",
+        path: "distro-icons/ubuntu.svg",
+        bytes: include_bytes!("../resources/distro-icons/ubuntu.svg"),
+    },
+    DistroIcon {
+        id: "archlinux",
+        name: "Arch Linux",
+        path: "distro-icons/archlinux.svg",
+        bytes: include_bytes!("../resources/distro-icons/archlinux.svg"),
+    },
+    DistroIcon {
+        id: "debian",
+        name: "Debian",
+        path: "distro-icons/debian.svg",
+        bytes: include_bytes!("../resources/distro-icons/debian.svg"),
+    },
+    DistroIcon {
+        id: "gentoo",
+        name: "Gentoo",
+        path: "distro-icons/gentoo.svg",
+        bytes: include_bytes!("../resources/distro-icons/gentoo.svg"),
+    },
+    DistroIcon {
+        id: "nixos",
+        name: "NixOS",
+        path: "distro-icons/nixos.svg",
+        bytes: include_bytes!("../resources/distro-icons/nixos.svg"),
+    },
+    DistroIcon {
+        id: "rocky",
+        name: "Rocky Linux",
+        path: "distro-icons/rocky.svg",
+        bytes: include_bytes!("../resources/distro-icons/rocky.svg"),
+    },
+    DistroIcon {
+        id: "linuxmint",
+        name: "Linux Mint",
+        path: "distro-icons/linuxmint.svg",
+        bytes: include_bytes!("../resources/distro-icons/linuxmint.svg"),
+    },
+];
+
 pub(crate) struct NativeAssets;
 
 impl AssetSource for NativeAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
         if let Some((_, face)) = SVG_FONTS.iter().find(|(name, _)| *name == path) {
             return face.load().map(|bytes| Some(Cow::Owned(bytes)));
+        }
+        if let Some(icon) = DISTRO_ICONS.iter().find(|icon| icon.path == path) {
+            return Ok(Some(Cow::Borrowed(icon.bytes)));
         }
         if let Some(bytes) = oxideterm_gpui_ui::file_icons::load_asset(path) {
             return Ok(Some(Cow::Borrowed(bytes)));
@@ -679,6 +736,37 @@ impl AssetSource for NativeAssets {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distribution_assets_render_in_color_through_the_native_image_pipeline() {
+        let assets = NativeAssets;
+        let renderer = gpui::SvgRenderer::new(std::sync::Arc::new(NativeAssets));
+        for icon in DISTRO_ICONS {
+            let bytes = assets
+                .load(icon.path)
+                .unwrap()
+                .expect("bundled distribution icon");
+            let svg = renderer.parse_svg(&bytes).unwrap();
+            let image = renderer
+                .render_parsed(
+                    &svg,
+                    gpui::SvgSize::Size(gpui::Size::new(
+                        gpui::DevicePixels(24),
+                        gpui::DevicePixels(24),
+                    )),
+                )
+                .unwrap();
+            assert!(
+                image.as_bytes(0).unwrap().chunks_exact(4).any(|pixel| {
+                    let brightest = pixel[0].max(pixel[1]).max(pixel[2]);
+                    let darkest = pixel[0].min(pixel[1]).min(pixel[2]);
+                    pixel[3] > 128 && brightest - darkest > 20
+                }),
+                "{} lost its brand colors",
+                icon.id
+            );
+        }
+    }
 
     #[test]
     fn svg_font_assets_are_loadable_and_keep_latin_and_cjk_coverage() {

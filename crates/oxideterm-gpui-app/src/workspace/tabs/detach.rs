@@ -15,15 +15,6 @@ const TAB_CONTEXT_MENU_RENAME_HEIGHT: f32 = 168.0;
 const TAB_CONTEXT_MENU_SPLIT_HEIGHT: f32 = 72.0;
 const TAB_CONTEXT_MENU_MARGIN: f32 = 8.0;
 
-fn terminal_session_kinds_can_merge(
-    source: Option<oxideterm_terminal::TerminalSessionKind>,
-    target: Option<oxideterm_terminal::TerminalSessionKind>,
-) -> bool {
-    // A tab has one transport contract, so a merge must not create mixed close or tool behavior.
-    source
-        .zip(target)
-        .is_some_and(|(source_kind, target_kind)| source_kind == target_kind)
-}
 const TAB_RENAME_DIALOG_WIDTH: f32 = 420.0;
 const TAB_HANDOFF_PREVIEW_WIDTH_EXTRA: f32 = 96.0;
 const TAB_HANDOFF_PREVIEW_MIN_WIDTH: f32 = 220.0;
@@ -192,21 +183,11 @@ impl WorkspaceApp {
         self.main_window_tabs.context_menu.take().is_some()
     }
 
-    fn terminal_tab_active_session_kind(
-        &self,
-        tab_id: TabId,
-        cx: &App,
-    ) -> Option<oxideterm_terminal::TerminalSessionKind> {
-        let tab = self.tab_by_id(tab_id, cx)?;
-        let pane_id = tab.active_pane_id?;
-        self.tab_host
-            .read(cx)
-            .panes()
-            .get(&pane_id)
-            .map(|pane| pane.read(cx).session_kind())
+    fn can_combine_tabs(&self, source: TabId, target: TabId, cx: &App) -> bool {
+        self.tab_host.read(cx).can_combine_pages(source, target)
     }
 
-    pub(in crate::workspace) fn merge_terminal_tab_into_active_split(
+    pub(in crate::workspace) fn merge_tab_into_active_split(
         &mut self,
         source_tab_id: TabId,
         direction: SplitDirection,
@@ -216,30 +197,118 @@ impl WorkspaceApp {
         let Some(target_tab_id) = self.active_tab_id(cx) else {
             return false;
         };
-        let same_session_kind = terminal_session_kinds_can_merge(
-            self.terminal_tab_active_session_kind(source_tab_id, cx),
-            self.terminal_tab_active_session_kind(target_tab_id, cx),
-        );
-        if !same_session_kind {
+        self.combine_tabs(source_tab_id, target_tab_id, direction, window, cx)
+    }
+
+    fn combine_tabs(
+        &mut self,
+        source_tab_id: TabId,
+        target_tab_id: TabId,
+        direction: SplitDirection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.combine_tabs_at(
+            source_tab_id,
+            target_tab_id,
+            None,
+            direction,
+            false,
+            window,
+            cx,
+        )
+    }
+
+    pub(in crate::workspace) fn combine_tabs_at(
+        &mut self,
+        source_tab_id: TabId,
+        target_tab_id: TabId,
+        target_pane: Option<PaneId>,
+        direction: SplitDirection,
+        before: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.can_combine_tabs(source_tab_id, target_tab_id, cx) {
             return false;
         }
-        let group_id = self.alloc_pane_id(cx);
-        let merged = self.tab_host.update(cx, |tab_host, _cx| {
-            tab_host.merge_terminal_tab_as_split(source_tab_id, target_tab_id, group_id, direction)
-        });
-        let Some(active_pane_id) = merged else {
+        let previous = self.active_tab_id(cx);
+        let Some((tab, removed)) = self.tab_host.update(cx, |host, _| {
+            if target_pane.is_none() && !before {
+                host.combine_pages(source_tab_id, target_tab_id, direction)
+            } else {
+                host.combine_pages_at(source_tab_id, target_tab_id, target_pane, direction, before)
+            }
+        }) else {
             return false;
         };
-
-        self.close_tab_context_menu();
-        self.set_main_window_active_tab(Some(target_tab_id), cx);
-        self.sync_active_tab_surface(cx);
-        self.needs_active_pane_focus = true;
-        if let Some(pane) = self.tab_host.read(cx).panes().get(&active_pane_id).cloned() {
-            pane.update(cx, |pane, cx| pane.focus(window, cx));
+        for id in removed {
+            self.ai_runtime_context
+                .update(cx, |runtime, _| runtime.revoke_app_surface(id));
         }
+        self.register_tab_surface(&tab, cx);
+        self.close_tab_context_menu();
+        self.apply_main_window_active_tab_change(previous, Some(tab.id), cx);
+        self.sync_active_tab_surface(cx);
+        self.focus_tab_terminal(tab.id, window, cx);
         cx.notify();
         true
+    }
+
+    pub(in crate::workspace) fn move_terminal_pane_out(
+        &mut self,
+        source_id: TabId,
+        pane_id: PaneId,
+        new_window: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(session_id) = self
+            .tab_by_id(source_id, cx)
+            .and_then(|tab| tab.root_pane.as_ref())
+            .and_then(|root| root.session_id_for_pane(pane_id))
+        else {
+            return;
+        };
+        let Some(kind) = self.terminal_tab_kind_for_pane(pane_id, cx) else {
+            return;
+        };
+        let Some(main_window) = self
+            .window_registry
+            .handle_for_role(window_registry::WindowRole::Main)
+        else {
+            return;
+        };
+        let tab_id = self.alloc_tab_id(cx);
+        let tab = Tab {
+            id: tab_id,
+            kind,
+            title: self.terminal_pane_label(pane_id, cx),
+            title_source: TabTitleSource::Static,
+            root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+            active_pane_id: Some(pane_id),
+        };
+        if !self.tab_host.update(cx, |host, _| {
+            host.move_terminal_pane_to_tab(source_id, pane_id, tab.clone(), main_window)
+        }) {
+            return;
+        }
+        self.register_tab_surface(&tab, cx);
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.sync_active_tab_surface(cx);
+        if new_window {
+            self.detach_tab_to_window(tab_id, None, window, cx);
+        } else if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
+            if main_window.window_id() == window.window_handle().window_id() {
+                pane.update(cx, |pane, cx| pane.focus(window, cx));
+            } else {
+                let _ = main_window.update(cx, |_, window, cx| {
+                    window.activate_window();
+                    pane.update(cx, |pane, cx| pane.focus(window, cx));
+                });
+            }
+        }
+        cx.notify();
     }
 
     pub(in crate::workspace) fn begin_tab_rename(
@@ -251,7 +320,10 @@ impl WorkspaceApp {
         let Some(title) = self.tab_by_id(tab_id, cx).and_then(|tab| {
             matches!(
                 tab.kind,
-                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+                TabKind::LocalTerminal
+                    | TabKind::SshTerminal
+                    | TabKind::MoshTerminal
+                    | TabKind::Workspace
             )
             .then(|| tab.title.clone())
         }) else {
@@ -469,7 +541,13 @@ impl WorkspaceApp {
         let exiting_visual = self.tab_exit_visual(tab_index, cx);
 
         self.sync_active_tab_surface(cx);
-        self.focus_active_pane(window, cx);
+        if self
+            .window_registry
+            .handle_for_role(window_registry::WindowRole::Main)
+            .is_some_and(|main| main.window_id() == window.window_handle().window_id())
+        {
+            self.focus_active_pane(window, cx);
+        }
 
         let session = cx.entity();
         let bounds = window.bounds();
@@ -626,6 +704,7 @@ impl WorkspaceApp {
                 cx,
             );
             self.detached_tab_return_drag = None;
+            self.split_drop_target = None;
             self.sync_active_tab_surface(cx);
             cx.notify();
         }
@@ -653,6 +732,7 @@ impl WorkspaceApp {
         });
         if let Some(transition) = transition {
             self.detached_tab_return_drag = None;
+            self.split_drop_target = None;
             self.finish_tab_removal(transition, None, None, cx);
         }
     }
@@ -662,6 +742,8 @@ impl WorkspaceApp {
         tab_id: TabId,
         cx: &mut Context<Self>,
     ) -> bool {
+        self.tab_host
+            .update(cx, |host, _| host.focus_content_page(tab_id));
         let Some(handle) = self.tab_host.read(cx).detached_window_handle(tab_id) else {
             return false;
         };
@@ -779,13 +861,18 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn start_detached_tab_return_drag(
         &mut self,
         tab_id: TabId,
+        native_window_move: bool,
         event: &MouseDownEvent,
         window: &Window,
         cx: &mut Context<Self>,
     ) {
         let screen_point = Self::detached_window_screen_point(window, event.position);
+        self.main_window_tabs.drag = None;
+        self.split_drop_target = None;
         self.detached_tab_return_drag = Some(DetachedTabReturnDrag {
             tab_id,
+            source_bounds: window.bounds(),
+            native_window_move,
             start_screen_x: f32::from(screen_point.x),
             start_screen_y: f32::from(screen_point.y),
             current_screen_x: f32::from(screen_point.x),
@@ -809,7 +896,19 @@ impl WorkspaceApp {
         if drag.tab_id != tab_id {
             return;
         }
+        if self
+            .tab_host
+            .read(cx)
+            .detached_window_handle(tab_id)
+            .is_some_and(|handle| handle.window_id() == window.window_handle().window_id())
+        {
+            drag.source_bounds = window.bounds();
+        }
 
+        if event.pressed_button != Some(MouseButton::Left) {
+            self.cancel_tab_merge_drag(cx);
+            return;
+        }
         let was_active = drag.active;
         let previous_placeholder = self.detached_tab_return_placeholder(cx);
         drag.current_screen_x = f32::from(screen_point.x);
@@ -820,6 +919,9 @@ impl WorkspaceApp {
         // so ordinary titlebar clicks do not accidentally dock the tab.
         drag.active = delta_x.hypot(delta_y) > TAB_DRAG_THRESHOLD_PX;
         self.detached_tab_return_drag = Some(drag);
+        if drag.active {
+            self.update_detached_split_destination(tab_id, screen_point, cx);
+        }
         let next_placeholder = self.detached_tab_return_placeholder(cx);
         if drag.active != was_active || previous_placeholder != next_placeholder {
             // Repaint only when the pointer crosses an insertion midpoint or
@@ -839,9 +941,16 @@ impl WorkspaceApp {
         let Some(drag) = self.detached_tab_return_drag.take() else {
             return false;
         };
-        if drag.tab_id != tab_id || !drag.active {
+        if drag.tab_id != tab_id
+            || !drag.active
+            || (!drag.native_window_move && drag.source_bounds.contains(&screen_point))
+        {
+            self.split_drop_target = None;
             cx.notify();
             return false;
+        }
+        if self.finish_tab_split_drop(tab_id, screen_point, window, cx) {
+            return true;
         }
         let should_return = self
             .main_window_tabbar_drop_bounds
@@ -1196,19 +1305,24 @@ impl WorkspaceApp {
         let renamable = self.tab_by_id(menu.tab_id, cx).is_some_and(|tab| {
             matches!(
                 tab.kind,
-                TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+                TabKind::LocalTerminal
+                    | TabKind::SshTerminal
+                    | TabKind::MoshTerminal
+                    | TabKind::Workspace
             )
         });
         let active_tab_id = self.active_tab_id(cx);
-        let can_split_into_active = active_tab_id.is_some_and(|active_tab_id| {
-            terminal_session_kinds_can_merge(
-                self.terminal_tab_active_session_kind(menu.tab_id, cx),
-                self.terminal_tab_active_session_kind(active_tab_id, cx),
-            ) && self
-                .tab_host
-                .read(cx)
-                .can_merge_terminal_tab_as_split(menu.tab_id, active_tab_id)
-        });
+        let can_split_into_active =
+            active_tab_id.is_some_and(|target| self.can_combine_tabs(menu.tab_id, target, cx));
+        let merge_targets = if active_tab_id == Some(menu.tab_id) {
+            self.tabs(cx)
+                .iter()
+                .filter(|tab| self.can_combine_tabs(menu.tab_id, tab.id, cx))
+                .map(|tab| (tab.id, self.tab_display_title(tab)))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
         self.tab_by_id(menu.tab_id, cx)?;
         let viewport = window.viewport_size();
         let mut menu_height = if renamable {
@@ -1219,7 +1333,9 @@ impl WorkspaceApp {
         if can_split_into_active {
             menu_height += TAB_CONTEXT_MENU_SPLIT_HEIGHT;
         }
-        let menu_width = if can_split_into_active {
+        menu_height += merge_targets.len() as f32 * TAB_CONTEXT_MENU_SPLIT_HEIGHT;
+        menu_height = menu_height.min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
+        let menu_width = if can_split_into_active || !merge_targets.is_empty() {
             TAB_CONTEXT_MENU_SPLIT_WIDTH
         } else {
             TAB_CONTEXT_MENU_WIDTH
@@ -1235,13 +1351,125 @@ impl WorkspaceApp {
         );
         let detached = self.tab_host.read(cx).is_detached(menu.tab_id);
         let menu_body = context_menu_event_boundary(
-            context_menu_content(&self.tokens)
-                .w(px(menu_width))
-                .when(renamable, |content| {
-                    content.child(
+            div().child(
+                context_menu_content(&self.tokens)
+                    .w(px(menu_width))
+                    .id("tab-context-menu-content")
+                    .max_h(px(menu_height))
+                    .overflow_y_scroll()
+                    .when(renamable, |content| {
+                        content.child(
+                            context_menu_item(
+                                &self.tokens,
+                                self.i18n.t("tabbar.rename_tab"),
+                                ContextMenuItemKind::Plain,
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.begin_tab_rename(menu.tab_id, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                    })
+                    .when(can_split_into_active, |content| {
+                        content
+                            .child(context_menu_separator(&self.tokens))
+                            .child(
+                                context_menu_item(
+                                    &self.tokens,
+                                    self.i18n.t("tabbar.split_into_active_horizontal"),
+                                    ContextMenuItemKind::Plain,
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, window, cx| {
+                                        this.merge_tab_into_active_split(
+                                            menu.tab_id,
+                                            SplitDirection::Horizontal,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                ),
+                            )
+                            .child(
+                                context_menu_item(
+                                    &self.tokens,
+                                    self.i18n.t("tabbar.split_into_active_vertical"),
+                                    ContextMenuItemKind::Plain,
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, window, cx| {
+                                        this.merge_tab_into_active_split(
+                                            menu.tab_id,
+                                            SplitDirection::Vertical,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                ),
+                            )
+                    })
+                    .children(
+                        merge_targets
+                            .into_iter()
+                            .flat_map(|(target, title)| {
+                                [SplitDirection::Horizontal, SplitDirection::Vertical]
+                                    .into_iter()
+                                    .map(move |direction| (target, title.clone(), direction))
+                            })
+                            .map(|(target, title, direction)| {
+                                context_menu_item(
+                                    &self.tokens,
+                                    self.i18n_replace(
+                                        match direction {
+                                            SplitDirection::Horizontal => {
+                                                "tabbar.merge_into_horizontal"
+                                            }
+                                            SplitDirection::Vertical => {
+                                                "tabbar.merge_into_vertical"
+                                            }
+                                        },
+                                        &[("title", title)],
+                                    ),
+                                    ContextMenuItemKind::Plain,
+                                    false,
+                                    false,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _, window, cx| {
+                                        this.combine_tabs(
+                                            menu.tab_id,
+                                            target,
+                                            direction,
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                            }),
+                    )
+                    .child(
                         context_menu_item(
                             &self.tokens,
-                            self.i18n.t("tabbar.rename_tab"),
+                            if detached {
+                                self.i18n.t("tabbar.return_to_main_window")
+                            } else {
+                                self.i18n.t("tabbar.detach_to_window")
+                            },
                             ContextMenuItemKind::Plain,
                             false,
                             false,
@@ -1249,101 +1477,35 @@ impl WorkspaceApp {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, window, cx| {
-                                this.begin_tab_rename(menu.tab_id, window, cx);
+                                this.close_tab_context_menu();
+                                if detached {
+                                    this.return_detached_tab_to_main(menu.tab_id, window, cx);
+                                } else {
+                                    this.detach_tab_to_window(menu.tab_id, None, window, cx);
+                                }
                                 cx.stop_propagation();
                             }),
                         ),
                     )
-                })
-                .when(can_split_into_active, |content| {
-                    content
-                        .child(context_menu_separator(&self.tokens))
-                        .child(
-                            context_menu_item(
-                                &self.tokens,
-                                self.i18n.t("tabbar.split_into_active_horizontal"),
-                                ContextMenuItemKind::Plain,
-                                false,
-                                false,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.merge_terminal_tab_into_active_split(
-                                        menu.tab_id,
-                                        SplitDirection::Horizontal,
-                                        window,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
+                    .child(context_menu_separator(&self.tokens))
+                    .child(
+                        context_menu_item(
+                            &self.tokens,
+                            self.i18n.t("tabbar.close_tab"),
+                            ContextMenuItemKind::Plain,
+                            false,
+                            false,
                         )
-                        .child(
-                            context_menu_item(
-                                &self.tokens,
-                                self.i18n.t("tabbar.split_into_active_vertical"),
-                                ContextMenuItemKind::Plain,
-                                false,
-                                false,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.merge_terminal_tab_into_active_split(
-                                        menu.tab_id,
-                                        SplitDirection::Vertical,
-                                        window,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                        )
-                })
-                .child(
-                    context_menu_item(
-                        &self.tokens,
-                        if detached {
-                            self.i18n.t("tabbar.return_to_main_window")
-                        } else {
-                            self.i18n.t("tabbar.detach_to_window")
-                        },
-                        ContextMenuItemKind::Plain,
-                        false,
-                        false,
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.close_tab_context_menu();
-                            if detached {
-                                this.return_detached_tab_to_main(menu.tab_id, window, cx);
-                            } else {
-                                this.detach_tab_to_window(menu.tab_id, None, window, cx);
-                            }
-                            cx.stop_propagation();
-                        }),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, window, cx| {
+                                this.close_tab_context_menu();
+                                this.request_close_tab_by_id(menu.tab_id, window, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
                     ),
-                )
-                .child(context_menu_separator(&self.tokens))
-                .child(
-                    context_menu_item(
-                        &self.tokens,
-                        self.i18n.t("tabbar.close_tab"),
-                        ContextMenuItemKind::Plain,
-                        false,
-                        false,
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.close_tab_context_menu();
-                            this.close_tab_by_id(menu.tab_id, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                ),
+            ),
         );
         let menu_body = overlay_content_boundary(menu_body);
 
@@ -1544,7 +1706,9 @@ impl WorkspaceApp {
             }
             (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
             (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, window, cx),
-            (_, Some(root_pane)) => self.render_detached_terminal_surface(tab_id, root_pane, cx),
+            (_, Some(root_pane)) => {
+                self.render_detached_terminal_surface(tab_id, root_pane, window, cx)
+            }
             _ => self.render_empty_workspace(f32::from(window.viewport_size().width), cx),
         }
     }
@@ -1594,6 +1758,15 @@ impl WorkspaceApp {
                     cx,
                 ))
             })
+            .child(self.terminal_sync_action_button(
+                self.i18n.t("tabbar.drag_to_dock"),
+                true,
+                move |this, event, window, cx| {
+                    this.start_detached_tab_return_drag(tab_id, false, event, window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
             .child(
                 div()
                     .id(("detached-tab-title-drag", tab_id.0))
@@ -1621,7 +1794,7 @@ impl WorkspaceApp {
                                             return;
                                         }
                                         this.start_detached_tab_return_drag(
-                                            tab_id, event, window, cx,
+                                            tab_id, true, event, window, cx,
                                         );
                                         cx.stop_propagation();
                                     }),
@@ -1837,27 +2010,5 @@ mod tests {
             detached_tab_surface_route(tab_id, &TabKind::Forwards),
             DetachedTabSurfaceRoute::Forwards(tab_id)
         );
-    }
-
-    #[test]
-    fn existing_terminal_merge_requires_matching_transport_kinds() {
-        use oxideterm_terminal::TerminalSessionKind;
-
-        assert!(terminal_session_kinds_can_merge(
-            Some(TerminalSessionKind::Serial),
-            Some(TerminalSessionKind::Serial),
-        ));
-        assert!(terminal_session_kinds_can_merge(
-            Some(TerminalSessionKind::SshPty),
-            Some(TerminalSessionKind::SshPty),
-        ));
-        assert!(!terminal_session_kinds_can_merge(
-            Some(TerminalSessionKind::Serial),
-            Some(TerminalSessionKind::LocalPty),
-        ));
-        assert!(!terminal_session_kinds_can_merge(
-            None,
-            Some(TerminalSessionKind::Serial),
-        ));
     }
 }

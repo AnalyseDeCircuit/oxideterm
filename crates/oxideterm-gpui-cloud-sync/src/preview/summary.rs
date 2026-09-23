@@ -392,7 +392,7 @@ pub fn cloud_sync_apply_diff_items(
             preview
                 .connections_snapshot
                 .as_ref()
-                .map_or(0, |snapshot| snapshot.records.len()),
+                .map_or(0, |snapshot| snapshot.record_count()),
         ),
     );
     push_apply_section_diff(

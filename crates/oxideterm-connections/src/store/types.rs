@@ -867,6 +867,41 @@ pub enum SerialLineEnding {
     None,
 }
 
+/// A reusable launch configuration, independent of any running PTY.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct LocalTerminalProfile {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_background_color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shell_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SaveLocalTerminalProfileRequest {
+    pub id: Option<String>,
+    pub name: String,
+    pub group: Option<String>,
+    pub icon: Option<String>,
+    pub color: Option<String>,
+    pub icon_background_color: Option<String>,
+    pub shell_id: Option<String>,
+    pub cwd: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SerialProfile {
     pub id: String,
@@ -1890,6 +1925,10 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub serial_profiles: Vec<SerialProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_terminal_profiles: Vec<LocalTerminalProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_terminal_tombstones: Vec<DeletedConnectionTombstone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub telnet_profiles: Vec<TelnetProfile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ftp_profiles: Vec<FtpProfile>,
@@ -1923,6 +1962,8 @@ impl Default for ConnectionStoreData {
             connection_tombstones: Vec::new(),
             managed_ssh_keys: Vec::new(),
             serial_profiles: Vec::new(),
+            local_terminal_profiles: Vec::new(),
+            local_terminal_tombstones: Vec::new(),
             telnet_profiles: Vec::new(),
             ftp_profiles: Vec::new(),
             ftp_tombstones: Vec::new(),
@@ -2044,6 +2085,22 @@ pub struct SavedConnectionsSyncSnapshot {
     pub revision: String,
     pub exported_at: String,
     pub records: Vec<SavedConnectionSyncRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_terminal_profiles: Vec<LocalTerminalProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub local_terminal_tombstones: Vec<DeletedConnectionTombstone>,
+}
+
+impl SavedConnectionsSyncSnapshot {
+    pub fn record_count(&self) -> usize {
+        self.records.len() + self.local_terminal_profiles.len() + self.local_terminal_tombstones.len()
+    }
+
+    pub fn record_ids(&self) -> impl Iterator<Item = &str> {
+        self.records.iter().map(|r| r.id.as_str())
+            .chain(self.local_terminal_profiles.iter().map(|p| p.id.as_str()))
+            .chain(self.local_terminal_tombstones.iter().map(|p| p.id.as_str()))
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

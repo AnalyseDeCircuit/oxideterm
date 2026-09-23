@@ -363,7 +363,7 @@
       "save_failed": "Échec de l'enregistrement",
       "transport_local_terminal": "Terminal local",
       "local_terminal_description": "Ouvrir un shell sur cet appareil avec les réglages actuels du terminal.",
-      "local_terminal_detail": "Cette session s’ouvre immédiatement et n’est pas ajoutée aux connexions enregistrées.",
+      "local_terminal_detail": "Enregistrez le shell et le répertoire de démarrage du projet. Chaque ouverture crée un terminal indépendant.",
       "local_terminal_open": "Ouvrir le terminal",
       "transport_ssh": "Hôte SSH",
       "advanced_group": "Connexions avancées",

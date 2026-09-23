@@ -132,7 +132,8 @@
       "cancel": "Annuler",
       "save": "Enregistrer",
       "saving": "Enregistrement...",
-      "passphrase_hint": "Laissez vide pour conserver la phrase secrète enregistrée lorsque le chemin de la clé ne change pas."
+      "passphrase_hint": "Laissez vide pour conserver la phrase secrète enregistrée lorsque le chemin de la clé ne change pas.",
+      "brand_icon_hint": "Les logos des distributions conservent leurs couleurs et proportions d’origine."
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "Sessions enregistrées",
       "expand_all": "Tout développer",
       "collapse_all": "Tout réduire"
+    },
+    "local_terminal_profiles": {
+      "delete": "Supprimer la session locale",
+      "delete_failed": "Impossible de supprimer la session locale",
+      "confirm_delete": "Supprimer la session locale « {{name}} » ? Les terminaux actifs resteront ouverts."
     }
   }
 }

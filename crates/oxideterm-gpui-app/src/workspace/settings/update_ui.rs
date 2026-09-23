@@ -67,7 +67,11 @@ impl WorkspaceApp {
                 .read(cx)
                 .confirm_snapshot()
                 .is_some_and(|snapshot| {
-                    matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice)
+                    matches!(
+                        snapshot.kind,
+                        WorkspaceOverlayConfirmKind::LegalNotice
+                            | WorkspaceOverlayConfirmKind::ThirdPartyNotices
+                    )
                 })
             || self
                 .overlay

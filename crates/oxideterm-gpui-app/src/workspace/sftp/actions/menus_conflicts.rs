@@ -355,7 +355,7 @@ impl WorkspaceApp {
             );
             return;
         };
-        let remote_directory = self.sftp_view.read(cx).remote_path.clone();
+        let remote_directory = self.sftp_view().read(cx).remote_path.clone();
         let archive_path = if file.path.is_empty() {
             join_sftp_path(&remote_directory, &file.name)
         } else {
@@ -381,7 +381,7 @@ impl WorkspaceApp {
         let Some(backend) = self.sftp_remote_backend(&remote_id) else {
             return;
         };
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         let toast = SftpMutationToast {
             success_title: self.i18n.t("sftp.toast.extract_complete"),
@@ -409,7 +409,7 @@ impl WorkspaceApp {
                 toast: Some(toast),
             });
         });
-        self.sftp_view
+        self.sftp_view()
             .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
     }
 
@@ -419,7 +419,7 @@ impl WorkspaceApp {
         direction: SftpTransferDirection,
         cx: &mut Context<Self>,
     ) {
-        let selected = self.sftp_view.read(cx).selected_transfer_names(pane);
+        let selected = self.sftp_view().read(cx).selected_transfer_names(pane);
         self.queue_sftp_named_transfers(pane, direction, selected, cx);
     }
 
@@ -437,7 +437,7 @@ impl WorkspaceApp {
             return;
         }
         let pending_transfers =
-            self.sftp_view
+            self.sftp_view()
                 .read(cx)
                 .pending_named_transfers(pane, direction, selected_names);
         if pending_transfers.is_empty() {
@@ -446,11 +446,11 @@ impl WorkspaceApp {
 
         let conflict_action = self.settings_store.settings().sftp.conflict_action;
         let conflicts = self
-            .sftp_view
+            .sftp_view()
             .read(cx)
             .transfer_conflicts(&pending_transfers);
         if !conflicts.is_empty() && conflict_action == oxideterm_settings::ConflictAction::Ask {
-            self.sftp_view.update(cx, |sftp, cx| {
+            self.sftp_view().update(cx, |sftp, cx| {
                 sftp.begin_transfer_conflicts(conflicts, pending_transfers, cx);
             });
             self.clear_sftp_selection(pane, cx);
@@ -541,14 +541,14 @@ impl WorkspaceApp {
             return;
         }
         let conflicts = self
-            .sftp_view
+            .sftp_view()
             .read(cx)
             .transfer_conflicts(&pending_transfers);
         if !conflicts.is_empty()
             && self.settings_store.settings().sftp.conflict_action
                 == oxideterm_settings::ConflictAction::Ask
         {
-            self.sftp_view.update(cx, |sftp, cx| {
+            self.sftp_view().update(cx, |sftp, cx| {
                 sftp.begin_transfer_conflicts(conflicts, pending_transfers, cx);
             });
             return;
@@ -580,7 +580,7 @@ impl WorkspaceApp {
         } else {
             self.transfer_protocol_for_remote(&remote_id)
         };
-        let launches = self.sftp_view.update(cx, |sftp, cx| {
+        let launches = self.sftp_view().update(cx, |sftp, cx| {
             sftp.prepare_transfer_launches(
                 remote_id.clone(),
                 pending_transfers,
@@ -632,7 +632,7 @@ impl WorkspaceApp {
             self.cancel_sftp_transfer_conflicts(cx);
             return;
         };
-        match self.sftp_view.update(cx, |sftp, cx| {
+        match self.sftp_view().update(cx, |sftp, cx| {
             sftp.resolve_transfer_conflict(resolution, cx)
         }) {
             SftpConflictDecision::Cancel => self.close_sftp_dialog(cx),
@@ -656,7 +656,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.sftp_view
+        self.sftp_view()
             .update(cx, |sftp, cx| sftp.cancel_transfer_conflicts(cx));
         self.close_sftp_dialog(cx);
     }

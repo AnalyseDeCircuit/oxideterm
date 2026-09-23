@@ -1569,7 +1569,7 @@ impl WorkspaceApp {
         groups
     }
 
-    pub(super) fn connection_form_group_is_ungrouped(&self, group: &str) -> bool {
+    pub(in crate::workspace) fn connection_form_group_is_ungrouped(&self, group: &str) -> bool {
         let group = group.trim();
         group.is_empty()
             || group == "Ungrouped"
@@ -2484,12 +2484,28 @@ impl WorkspaceApp {
         let preview_background = parse_rgb24_hex(background_color_value)
             .map(rgb)
             .unwrap_or_else(|| rgba((preview_color << 8) | 0x22));
-        let active_icon = session_icon_from_id(Some(icon_value)).unwrap_or(LucideIcon::Server);
+        let active_icon =
+            session_icon_from_id(Some(icon_value)).unwrap_or(LucideIcon::Server.into());
         let mut grid = div().flex().flex_wrap().gap(px(self.tokens.spacing.two));
 
-        for choice in SESSION_ICON_CHOICES {
-            let selected = icon_value.trim() == choice.id;
-            let icon_id = choice.id.to_string();
+        let choices = crate::assets::DISTRO_ICONS
+            .iter()
+            .map(|icon| {
+                (
+                    icon.id,
+                    icon.name,
+                    crate::workspace::session_icons::SessionIcon::Distro(icon),
+                )
+            })
+            .chain(
+                SESSION_ICON_CHOICES
+                    .iter()
+                    .map(|choice| (choice.id, choice.id, choice.icon.into())),
+            );
+        for (id, name, icon) in choices {
+            let selected = icon_value.trim() == id;
+            let icon_id = id.to_string();
+            let tokens = self.tokens;
             grid = grid.child(
                 div()
                     .size(px(38.0))
@@ -2509,8 +2525,26 @@ impl WorkspaceApp {
                         rgb(theme.bg)
                     })
                     .cursor_pointer()
-                    .child(Self::render_lucide_icon(
-                        choice.icon,
+                    .id(gpui::SharedString::from(format!(
+                        "session-icon-choice-{id}"
+                    )))
+                    .when(
+                        matches!(
+                            icon,
+                            crate::workspace::session_icons::SessionIcon::Distro(_)
+                        ),
+                        |button| {
+                            button.aria_label(name).tooltip(move |_, cx| {
+                                oxideterm_gpui_ui::tooltip::tooltip_view(
+                                    tokens,
+                                    name.to_owned(),
+                                    None,
+                                    cx,
+                                )
+                            })
+                        },
+                    )
+                    .child(icon.render(
                         18.0,
                         if selected {
                             rgb(theme.accent)
@@ -2556,11 +2590,7 @@ impl WorkspaceApp {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(Self::render_lucide_icon(
-                                    active_icon,
-                                    18.0,
-                                    rgb(preview_color),
-                                )),
+                                .child(active_icon.render(18.0, rgb(preview_color))),
                         )
                         .child(
                             button(
@@ -2606,6 +2636,20 @@ impl WorkspaceApp {
                                 ),
                             )
                         }),
+                )
+                .when(
+                    matches!(
+                        active_icon,
+                        crate::workspace::session_icons::SessionIcon::Distro(_)
+                    ),
+                    |content| {
+                        content.child(
+                            self.render_connection_hint(
+                                self.i18n
+                                    .t("sessionManager.edit_properties.brand_icon_hint"),
+                            ),
+                        )
+                    },
                 )
                 .when(expanded, |content| {
                     content.child(
@@ -2686,7 +2730,7 @@ impl WorkspaceApp {
                 false,
             ));
         }
-        // Local terminals are one-shot launch targets, so keep them after saved transports.
+        // Local profiles share the same saved-session entry point as remote transports.
         choices.push((
             NewConnectionTransport::LocalTerminal,
             self.i18n
@@ -2918,19 +2962,28 @@ impl WorkspaceApp {
     }
 
     pub(super) fn render_local_terminal_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
-        let selected_shell_id = self
+        let form = self
             .connection_form_state(cx)
             .form
             .as_ref()
-            .and_then(|form| form.local_shell_id.as_deref());
-        let resolved_shell = self.resolved_local_shell(selected_shell_id);
+            .expect("local form");
+        let name = form.name.clone();
+        let cwd = form.local_cwd.clone();
+        let group = form.group.clone();
+        let selected_shell_id = form.local_shell_id.as_deref();
+        let resolved_shell = match selected_shell_id {
+            Some(id) => self
+                .effective_local_shells_for_settings(self.settings_store.settings())
+                .into_iter()
+                .find(|shell| shell.id == id),
+            None => self.resolved_local_shell(None),
+        };
         let default_shell_id = self
             .settings_store
             .settings()
             .local_terminal
             .default_shell_id
             .as_deref();
-        let shells = self.effective_local_shells_for_settings(self.settings_store.settings());
         let selected_label = resolved_shell
             .as_ref()
             .map(|shell| {
@@ -2944,7 +2997,16 @@ impl WorkspaceApp {
                     shell.label.clone()
                 }
             })
-            .unwrap_or_else(|| self.i18n.t("settings_view.local_terminal.select_shell"));
+            .unwrap_or_else(|| {
+                selected_shell_id
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| self.i18n.t("local_session.inherit_shell"))
+            });
+        let selected_label = if selected_shell_id.is_none() {
+            self.i18n.t("local_session.inherit_shell")
+        } else {
+            selected_label
+        };
         let selected_path = resolved_shell.as_ref().map(|shell| {
             format!(
                 "{}: {}",
@@ -2963,7 +3025,7 @@ impl WorkspaceApp {
                     NewConnectionSelect::LocalShell,
                     selected_label,
                     resolved_shell.is_none(),
-                    shells.is_empty(),
+                    false,
                     cx,
                 ),
             ))
@@ -2972,9 +3034,33 @@ impl WorkspaceApp {
             })
             .into_any_element();
 
-        // Match the shared connection form hierarchy while keeping the one-shot
-        // local terminal choice compact and backed by application settings.
-        self.render_connection_form_section(ConnectionFormSection::LocalShell, shell_field, cx)
+        let content = div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(self.render_connection_field(
+                self.i18n.t("ssh.form.name"),
+                &name,
+                self.i18n.t("ssh.form.name_placeholder"),
+                NewConnectionField::Name,
+                false,
+                cx,
+            ))
+            .child(shell_field)
+            .child(self.render_connection_field(
+                self.i18n.t("local_session.directory"),
+                &cwd,
+                self.i18n.t("local_session.inherit_directory"),
+                NewConnectionField::LocalCwd,
+                false,
+                cx,
+            ))
+            .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx));
+        self.render_connection_form_section(
+            ConnectionFormSection::LocalShell,
+            content.into_any_element(),
+            cx,
+        )
     }
 
     pub(super) fn render_wsl_graphics_form_branch(&self, _cx: &mut Context<Self>) -> AnyElement {

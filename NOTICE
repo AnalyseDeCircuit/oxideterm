@@ -89,3 +89,12 @@ src-tauri/vendor/russh-0.59.0. That vendored copy is based on Eugeny's
 russh fork (https://github.com/Eugeny/russh), which in turn derives from
 Pierre-Étienne Meunier's Thrussh/Russh lineage. Original source copyright
 and license headers are preserved in the vendored files.
+
+Linux distribution icons
+Debian, Gentoo, NixOS, and Rocky Linux artwork is bundled under its respective
+Creative Commons license. Linux Mint artwork is used under the project-specific
+logo permission in its official FAQ. Ubuntu and Arch Linux artwork is displayed
+to identify matching systems, subject to their respective brand policies.
+See DISTRO-ICONS-NOTICE.md for sources, changes, file hashes, and trademark
+guidance. The complete CC BY 4.0, CC BY-SA 2.5, CC BY-SA 3.0, and CC BY-SA 4.0
+license texts accompany release packages.

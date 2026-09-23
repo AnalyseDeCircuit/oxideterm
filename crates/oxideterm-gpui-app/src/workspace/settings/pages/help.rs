@@ -11,6 +11,10 @@ pub(in crate::workspace) const HELP_LEGAL_URL: &str =
     "https://github.com/AnalyseDeCircuit/oxideterm/blob/main/LEGAL.md";
 pub(in crate::workspace) const HELP_LEGAL_MARKDOWN: &str =
     include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LEGAL.md"));
+const HELP_THIRD_PARTY_MARKDOWN: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../THIRD_PARTY_NOTICES.md"
+));
 
 // Product and library names stay untranslated so every locale uses their canonical spelling.
 pub(in crate::workspace) const HELP_TECH_BADGES: [(&str, u32); 9] = [
@@ -266,6 +270,17 @@ impl WorkspaceApp {
                 "license",
                 self.i18n.t("settings_view.help.license"),
                 self.tokens.ui.text_muted,
+                cx,
+            ))
+            .child(self.help_outline_button(
+                self.i18n.t("settings_view.help.third_party_notices"),
+                LucideIcon::BookOpen,
+                |this, _event, _window, cx| {
+                    this.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
+                    this.overlay.update(cx, |overlay, cx| {
+                        overlay.open_confirm(WorkspaceOverlayConfirmKind::ThirdPartyNotices, cx);
+                    });
+                },
                 cx,
             ))
             .into_any_element()
@@ -854,7 +869,11 @@ impl WorkspaceApp {
         let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
             return false;
         };
-        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice) {
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::LegalNotice
+                | WorkspaceOverlayConfirmKind::ThirdPartyNotices
+        ) {
             return false;
         }
         if snapshot.phase == oxideterm_gpui_ui::motion::ExitPhase::Exiting {
@@ -888,9 +907,17 @@ impl WorkspaceApp {
         let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
             return div().into_any_element();
         };
-        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::LegalNotice) {
+        if !matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::LegalNotice
+                | WorkspaceOverlayConfirmKind::ThirdPartyNotices
+        ) {
             return div().into_any_element();
         }
+        let third_party = matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::ThirdPartyNotices
+        );
         let mut options = self.localized_markdown_options();
         options.base_font_size = self.tokens.metrics.ui_text_sm;
         options.block_gap = 8.0;
@@ -915,11 +942,19 @@ impl WorkspaceApp {
                     dialog_header(&self.tokens)
                         .child(dialog_title(
                             &self.tokens,
-                            self.i18n.t("settings_view.help.disclaimer"),
+                            self.i18n.t(if third_party {
+                                "settings_view.help.third_party_notices"
+                            } else {
+                                "settings_view.help.disclaimer"
+                            }),
                         ))
                         .child(dialog_description(
                             &self.tokens,
-                            self.i18n.t("settings_view.help.legal_notice_description"),
+                            self.i18n.t(if third_party {
+                                "settings_view.help.third_party_notices_description"
+                            } else {
+                                "settings_view.help.legal_notice_description"
+                            }),
                         )),
                 )
                 .child(
@@ -932,7 +967,11 @@ impl WorkspaceApp {
                         .child(markdown_virtual_with_code_actions(
                             "settings-help-legal-notice-markdown",
                             &self.tokens,
-                            HELP_LEGAL_MARKDOWN,
+                            if third_party {
+                                HELP_THIRD_PARTY_MARKDOWN
+                            } else {
+                                HELP_LEGAL_MARKDOWN
+                            },
                             &options,
                             &self.settings_legal_notice_scroll,
                             &code_actions,

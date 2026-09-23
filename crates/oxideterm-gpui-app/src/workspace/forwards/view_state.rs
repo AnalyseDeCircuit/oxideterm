@@ -98,9 +98,15 @@ impl ForwardingWorkspaceEntity {
         }
         // The animation belongs to the forwarding Entity so closing the form
         // never schedules a reverse dependency through WorkspaceApp.
+        let page = self.page_id();
+        let timer = cx.background_executor().timer(delay);
         cx.spawn(async move |entity, cx| {
-            Timer::after(delay).await;
+            timer.await;
             let _ = entity.update(cx, |entity, cx| {
+                if page.is_some_and(|id| !entity.has_page(id)) {
+                    return;
+                }
+                let _scope = entity.enter_page(page);
                 if entity.finish_form_exit(generation, create_form) {
                     cx.notify();
                 }
@@ -216,9 +222,14 @@ impl ForwardingWorkspaceEntity {
         cx: &mut Context<Self>,
     ) {
         self.view.copied_forward_id = Some(forward_id.clone());
+        let page = self.page_id();
         cx.spawn(async move |entity, cx| {
             Timer::after(delay).await;
             let _ = entity.update(cx, |entity, cx| {
+                if page.is_some_and(|id| !entity.has_page(id)) {
+                    return;
+                }
+                let _scope = entity.enter_page(page);
                 if entity.view.copied_forward_id.as_deref() == Some(&forward_id) {
                     entity.view.copied_forward_id = None;
                     cx.notify();
@@ -230,7 +241,7 @@ impl ForwardingWorkspaceEntity {
     }
 
     pub(super) fn sync_active_port_detection(&mut self, node_id: &NodeId) {
-        let Some(state) = self.port_detection_by_node.get(node_id) else {
+        let Some(state) = self.port_detection_by_node.get(node_id).cloned() else {
             self.view.detected_ports.clear();
             self.view.new_ports.clear();
             self.view.has_scanned_ports = false;

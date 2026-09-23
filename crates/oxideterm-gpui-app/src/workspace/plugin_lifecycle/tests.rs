@@ -33,6 +33,8 @@ const TEST_CONNECTIONS_UPDATED_AT: &str = "2026-05-25T00:00:00Z";
 // Shared fixtures keep unrelated sync tests insulated from snapshot field additions.
 fn saved_connections_sync_fixture() -> SavedConnectionsSyncSnapshot {
     SavedConnectionsSyncSnapshot {
+        local_terminal_profiles: Vec::new(),
+        local_terminal_tombstones: Vec::new(),
         revision: TEST_CONNECTIONS_REVISION.to_string(),
         exported_at: TEST_CONNECTIONS_UPDATED_AT.to_string(),
         records: Vec::new(),

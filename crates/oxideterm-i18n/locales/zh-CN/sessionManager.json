@@ -132,7 +132,8 @@
       "cancel": "取消",
       "save": "保存",
       "saving": "保存中...",
-      "passphrase_hint": "密钥路径未变时，留空会保留已保存的口令。"
+      "passphrase_hint": "密钥路径未变时，留空会保留已保存的口令。",
+      "brand_icon_hint": "发行版标志保留原始颜色和比例。"
     },
     "serial_profiles": {
       "title": "串口配置",
@@ -198,6 +199,11 @@
       "list_header": "已保存会话",
       "expand_all": "展开全部",
       "collapse_all": "折叠全部"
+    },
+    "local_terminal_profiles": {
+      "delete": "删除本地会话",
+      "delete_failed": "无法删除本地会话",
+      "confirm_delete": "删除本地会话“{{name}}”？正在运行的终端会保留。"
     }
   }
 }

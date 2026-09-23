@@ -682,7 +682,7 @@ impl SftpTransferRowRenderer {
 impl WorkspaceApp {
     fn sftp_transfer_row_renderer(&self, _cx: &App) -> SftpTransferRowRenderer {
         SftpTransferRowRenderer {
-            sftp: self.sftp_view.clone(),
+            sftp: self.sftp_view().clone(),
             theme: self.tokens.ui,
             radius: self.tokens.radii.sm,
             mono_font: settings_mono_font_family(self.settings_store.settings()),
@@ -709,7 +709,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let (transfer_count, active_count, mut transfers) = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             let mut transfers = sftp
                 .transfers
                 .iter()
@@ -794,7 +794,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (active_count, has_completed, incomplete_count, show_incomplete, transfers_empty) = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             (
                 sftp.transfers
                     .iter()
@@ -881,8 +881,8 @@ impl WorkspaceApp {
                                                 ),
                                             ),
                                         false,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.sftp_view.update(cx, |sftp, cx| {
+                                        self.sftp_listener(cx, |this, _event, _window, cx| {
+                                            this.sftp_view().update(cx, |sftp, cx| {
                                                 sftp.show_incomplete = !sftp.show_incomplete;
                                                 cx.notify();
                                             });
@@ -909,8 +909,8 @@ impl WorkspaceApp {
                                     SFTP_TEXT_XS,
                                 )
                             },
-                            cx.listener(|this, _event, _window, cx| {
-                                this.sftp_view.update(cx, |sftp, cx| {
+                            self.sftp_listener(cx, |this, _event, _window, cx| {
+                                this.sftp_view().update(cx, |sftp, cx| {
                                     sftp.transfers
                                         .retain(|item| item.state != SftpTransferState::Completed);
                                     cx.notify();
@@ -948,7 +948,7 @@ impl WorkspaceApp {
                     })
                     .when(!transfers_empty, |body| {
                         self.sync_sftp_transfer_queue_list_state(cx);
-                        let state = self.sftp_view.read(cx).transfer_queue_list_state.clone();
+                        let state = self.sftp_view().read(cx).transfer_queue_list_state.clone();
                         let spec = self.sftp_transfer_queue_list_spec();
                         let renderer = self.sftp_transfer_row_renderer(cx);
                         body.child(tauri_virtual_list(
@@ -977,7 +977,7 @@ impl WorkspaceApp {
     }
 
     fn sync_sftp_transfer_queue_list_state(&self, cx: &App) {
-        let sftp = self.sftp_view.read(cx);
+        let sftp = self.sftp_view().read(cx);
         let signatures = sftp
             .transfers
             .iter()
@@ -1035,7 +1035,7 @@ impl WorkspaceApp {
                     |list| {
                         self.sync_sftp_incomplete_transfer_list_state(cx);
                         let state = self
-                            .sftp_view
+                            .sftp_view()
                             .read(cx)
                             .incomplete_transfer_list_state
                             .clone();
@@ -1068,7 +1068,7 @@ impl WorkspaceApp {
     }
 
     fn sftp_incomplete_transfer_list_item_count(&self, cx: &App) -> usize {
-        let sftp = self.sftp_view.read(cx);
+        let sftp = self.sftp_view().read(cx);
         sftp.incomplete_transfers.len() + usize::from(sftp.incomplete_load_inflight)
     }
 
@@ -1079,7 +1079,7 @@ impl WorkspaceApp {
     }
 
     fn sync_sftp_incomplete_transfer_list_state(&self, cx: &App) {
-        let sftp = self.sftp_view.read(cx);
+        let sftp = self.sftp_view().read(cx);
         let mut signatures = sftp
             .incomplete_transfers
             .iter()

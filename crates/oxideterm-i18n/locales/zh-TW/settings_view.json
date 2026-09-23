@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "更新代理使用的連接埠。",
       "update_proxy_no_proxy": "不走代理",
       "update_proxy_no_proxy_hint": "用逗號分隔不經過代理的主機。",
-      "update_proxy_legal_hint": "請遵守當地法律規定使用代理功能。"
+      "update_proxy_legal_hint": "請遵守當地法律規定使用代理功能。",
+      "third_party_notices": "第三方聲明",
+      "third_party_notices_description": "應用程式隨附的依賴與圖像資源署名，以及原始授權條款連結。"
     },
     "errors": {
       "create_group_failed": "無法建立群組：{{error}}",

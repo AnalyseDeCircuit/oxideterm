@@ -44,12 +44,15 @@ impl WorkspaceApp {
             .then(|| self.active_terminal_project_snapshot(cx))
             .flatten();
         let active_pane_id = self.active_pane_id(cx);
-        let is_local_terminal = self
-            .active_tab(cx)
-            .is_some_and(|tab| tab.kind == TabKind::LocalTerminal);
-        let split_controls_visible = self
-            .active_tab(cx)
-            .is_some_and(|tab| matches!(tab.kind, TabKind::LocalTerminal | TabKind::SshTerminal));
+        let is_local_terminal = self.active_terminal_kind(cx)
+            == Some(oxideterm_terminal::TerminalSessionKind::LocalPty);
+        let split_controls_visible = matches!(
+            self.active_terminal_kind(cx),
+            Some(
+                oxideterm_terminal::TerminalSessionKind::LocalPty
+                    | oxideterm_terminal::TerminalSessionKind::SshPty
+            )
+        );
         let can_configure_remote_integration = self.active_ssh_terminal_node_id(cx).is_some();
         let remote_integration_pending = self.remote_shell_integration_pending(cx);
         let remote_integration_tooltip_id = "terminal-command-configure-directory-tracking";
@@ -1365,10 +1368,8 @@ impl WorkspaceApp {
         };
         Some(
             div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
+                .w_full()
+                .flex_none()
                 .h(px(TERMINAL_SYNC_HEADER_HEIGHT))
                 .px(px(8.0))
                 .flex()

@@ -2,18 +2,18 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-09-16T05:36:48.130252Z
+Generated: 2026-09-23T15:47:26.994090Z
 
 ## Summary
 
-- MIT: 1091
-- Apache-2.0: 877
+- MIT: 1095
+- Apache-2.0: 879
 - Apache-2.0 WITH LLVM-exception: 59
 - Zlib: 45
 - BSD-3-Clause: 21
 - MPL-2.0: 20
 - Unicode-3.0: 19
-- ISC: 12
+- ISC: 13
 - BSD-2-Clause: 11
 - Unlicense: 9
 - CC0-1.0: 5
@@ -81,7 +81,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | anstyle-parse | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-parse |
 | anstyle-query | 1.1.5 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-query |
 | anstyle-wincon | 3.0.11 | MIT, Apache-2.0 | https://crates.io/crates/anstyle-wincon |
-| anyhow | 1.0.103 | MIT, Apache-2.0 | https://crates.io/crates/anyhow |
+| anyhow | 1.0.104 | MIT, Apache-2.0 | https://crates.io/crates/anyhow |
 | approx | 0.5.1 | Apache-2.0 | https://crates.io/crates/approx |
 | arbitrary | 1.4.2 | MIT, Apache-2.0 | https://crates.io/crates/arbitrary |
 | arg_enum_proc_macro | 0.3.4 | MIT | https://crates.io/crates/arg_enum_proc_macro |
@@ -109,7 +109,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | async-recursion | 1.1.1 | MIT, Apache-2.0 | https://crates.io/crates/async-recursion |
 | async-signal | 0.2.14 | Apache-2.0, MIT | https://crates.io/crates/async-signal |
 | async-task | 4.7.1 | Apache-2.0, MIT | https://crates.io/crates/async-task |
-| async-trait | 0.1.89 | MIT, Apache-2.0 | https://crates.io/crates/async-trait |
+| async-trait | 0.1.92 | MIT, Apache-2.0 | https://crates.io/crates/async-trait |
 | async_zip | 0.0.18 | MIT | https://crates.io/crates/async_zip |
 | atomic | 0.5.3 | Apache-2.0, MIT | https://crates.io/crates/atomic |
 | atomic-polyfill | 1.0.3 | MIT, Apache-2.0 | https://crates.io/crates/atomic-polyfill |
@@ -139,7 +139,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | bit-vec | 0.9.1 | Apache-2.0, MIT | https://crates.io/crates/bit-vec |
 | bit_field | 0.10.3 | Apache-2.0, MIT | https://crates.io/crates/bit_field |
 | bitflags | 1.3.2 | MIT, Apache-2.0 | https://crates.io/crates/bitflags |
-| bitflags | 2.11.1 | MIT, Apache-2.0 | https://crates.io/crates/bitflags |
+| bitflags | 2.13.2 | MIT, Apache-2.0 | https://crates.io/crates/bitflags |
 | bitstream-io | 4.10.0 | MIT, Apache-2.0 | https://crates.io/crates/bitstream-io |
 | bitvec | 1.0.1 | MIT | https://crates.io/crates/bitvec |
 | blake2 | 0.10.6 | MIT, Apache-2.0 | https://crates.io/crates/blake2 |
@@ -160,7 +160,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | bytemuck_derive | 1.10.2 | Zlib, Apache-2.0, MIT | https://crates.io/crates/bytemuck_derive |
 | byteorder | 1.5.0 | Unlicense, MIT | https://crates.io/crates/byteorder |
 | byteorder-lite | 0.1.0 | Unlicense, MIT | https://crates.io/crates/byteorder-lite |
-| bytes | 1.11.1 | MIT | https://crates.io/crates/bytes |
+| bytes | 1.12.1 | MIT | https://crates.io/crates/bytes |
 | calloop | 0.14.4 | MIT | https://crates.io/crates/calloop |
 | calloop-wayland-source | 0.4.1 | MIT | https://crates.io/crates/calloop-wayland-source |
 | cap-fs-ext | 3.4.5 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/cap-fs-ext |
@@ -183,7 +183,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | chacha20 | 0.9.1 | Apache-2.0, MIT | https://crates.io/crates/chacha20 |
 | chacha20poly1305 | 0.10.1 | Apache-2.0, MIT | https://crates.io/crates/chacha20poly1305 |
 | chardetng | 0.1.17 | Apache-2.0, MIT | https://crates.io/crates/chardetng |
-| chrono | 0.4.44 | MIT, Apache-2.0 | https://crates.io/crates/chrono |
+| chrono | 0.4.45 | MIT, Apache-2.0 | https://crates.io/crates/chrono |
 | ciborium | 0.2.2 | Apache-2.0 | https://crates.io/crates/ciborium |
 | ciborium-io | 0.2.2 | Apache-2.0 | https://crates.io/crates/ciborium-io |
 | ciborium-ll | 0.2.2 | Apache-2.0 | https://crates.io/crates/ciborium-ll |
@@ -271,7 +271,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | darling | 0.23.0 | MIT | https://crates.io/crates/darling |
 | darling_core | 0.23.0 | MIT | https://crates.io/crates/darling_core |
 | darling_macro | 0.23.0 | MIT | https://crates.io/crates/darling_macro |
-| dashmap | 6.1.0 | MIT | https://crates.io/crates/dashmap |
+| dashmap | 6.2.1 | MIT | https://crates.io/crates/dashmap |
 | dasp_sample | 0.11.0 | MIT, Apache-2.0 | https://crates.io/crates/dasp_sample |
 | data-encoding | 2.11.0 | MIT | https://crates.io/crates/data-encoding |
 | data-url | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/data-url |
@@ -365,18 +365,18 @@ This section is a review prompt for binary distribution; it does not replace leg
 | fs_extra | 1.3.0 | MIT | https://crates.io/crates/fs_extra |
 | funty | 2.0.0 | MIT | https://crates.io/crates/funty |
 | futf | 0.1.5 | MIT, Apache-2.0 | https://crates.io/crates/futf |
-| futures | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures |
-| futures-channel | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-channel |
+| futures | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures |
+| futures-channel | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-channel |
 | futures-concurrency | 7.7.1 | MIT, Apache-2.0 | https://crates.io/crates/futures-concurrency |
-| futures-core | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-core |
-| futures-executor | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-executor |
-| futures-io | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-io |
+| futures-core | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-core |
+| futures-executor | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-executor |
+| futures-io | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-io |
 | futures-lite | 1.13.0 | Apache-2.0, MIT | https://crates.io/crates/futures-lite |
 | futures-lite | 2.6.1 | Apache-2.0, MIT | https://crates.io/crates/futures-lite |
-| futures-macro | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-macro |
-| futures-sink | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-sink |
-| futures-task | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-task |
-| futures-util | 0.3.32 | MIT, Apache-2.0 | https://crates.io/crates/futures-util |
+| futures-macro | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-macro |
+| futures-sink | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-sink |
+| futures-task | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-task |
+| futures-util | 0.3.34 | MIT, Apache-2.0 | https://crates.io/crates/futures-util |
 | generic-array | 0.14.7 | MIT | https://crates.io/crates/generic-array |
 | generic-array | 1.4.1 | MIT | https://crates.io/crates/generic-array |
 | gethostname | 1.1.0 | Apache-2.0 | https://crates.io/crates/gethostname |
@@ -536,6 +536,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | khronos_api | 3.1.0 | Apache-2.0 | https://crates.io/crates/khronos_api |
 | kstring | 2.0.2 | MIT, Apache-2.0 | https://crates.io/crates/kstring |
 | kurbo | 0.13.1 | Apache-2.0, MIT | https://crates.io/crates/kurbo |
+| lazy-regex | 3.6.0 | MIT | https://crates.io/crates/lazy-regex |
+| lazy-regex-proc_macros | 3.6.0 | MIT | https://crates.io/crates/lazy-regex-proc_macros |
 | lazy_static | 1.5.0 | MIT, Apache-2.0 | https://crates.io/crates/lazy_static |
 | leak | 0.1.2 | Apache-2.0, MIT | https://crates.io/crates/leak |
 | leaky-cow | 0.1.1 | MIT, Apache-2.0 | https://crates.io/crates/leaky-cow |
@@ -561,7 +563,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | litemap | 0.8.2 | Unicode-3.0 | https://crates.io/crates/litemap |
 | litrs | 1.0.0 | MIT, Apache-2.0 | https://crates.io/crates/litrs |
 | lock_api | 0.4.14 | MIT, Apache-2.0 | https://crates.io/crates/lock_api |
-| log | 0.4.29 | MIT, Apache-2.0 | https://crates.io/crates/log |
+| log | 0.4.34 | MIT, Apache-2.0 | https://crates.io/crates/log |
 | loop9 | 0.1.5 | MIT | https://crates.io/crates/loop9 |
 | lyon | 1.0.19 | MIT, Apache-2.0 | https://crates.io/crates/lyon |
 | lyon_algorithms | 1.0.19 | MIT, Apache-2.0 | https://crates.io/crates/lyon_algorithms |
@@ -780,7 +782,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | r-efi | 5.3.0 | MIT, Apache-2.0, LGPL-2.1-or-later | https://crates.io/crates/r-efi |
 | r-efi | 6.0.0 | MIT, Apache-2.0, LGPL-2.1-or-later | https://crates.io/crates/r-efi |
 | radium | 0.7.0 | MIT | https://crates.io/crates/radium |
-| rand | 0.10.1 | MIT, Apache-2.0 | https://crates.io/crates/rand |
+| rand | 0.10.2 | MIT, Apache-2.0 | https://crates.io/crates/rand |
 | rand | 0.8.6 | MIT, Apache-2.0 | https://crates.io/crates/rand |
 | rand | 0.9.4 | MIT, Apache-2.0 | https://crates.io/crates/rand |
 | rand_chacha | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/rand_chacha |
@@ -855,6 +857,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | rustix-linux-procfs | 0.1.1 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/rustix-linux-procfs |
 | rustix-openpty | 0.2.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/rustix-openpty |
 | rustls | 0.23.40 | Apache-2.0, ISC, MIT | https://crates.io/crates/rustls |
+| rustls-native-certs | 0.8.4 | Apache-2.0, ISC, MIT | https://crates.io/crates/rustls-native-certs |
 | rustls-pki-types | 1.14.1 | MIT, Apache-2.0 | https://crates.io/crates/rustls-pki-types |
 | rustls-webpki | 0.103.13 | ISC | https://crates.io/crates/rustls-webpki |
 | rustversion | 1.0.22 | MIT, Apache-2.0 | https://crates.io/crates/rustversion |
@@ -882,11 +885,11 @@ This section is a review prompt for binary distribution; it does not replace leg
 | selectors | 0.38.0 | MPL-2.0 | https://crates.io/crates/selectors |
 | self_cell | 1.2.2 | Apache-2.0, GPL-2.0-only | https://crates.io/crates/self_cell |
 | semver | 1.0.28 | MIT, Apache-2.0 | https://crates.io/crates/semver |
-| serde | 1.0.228 | MIT, Apache-2.0 | https://crates.io/crates/serde |
+| serde | 1.0.229 | MIT, Apache-2.0 | https://crates.io/crates/serde |
 | serde-big-array | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/serde-big-array |
 | serde_bytes | 0.11.19 | MIT, Apache-2.0 | https://crates.io/crates/serde_bytes |
-| serde_core | 1.0.228 | MIT, Apache-2.0 | https://crates.io/crates/serde_core |
-| serde_derive | 1.0.228 | MIT, Apache-2.0 | https://crates.io/crates/serde_derive |
+| serde_core | 1.0.229 | MIT, Apache-2.0 | https://crates.io/crates/serde_core |
+| serde_derive | 1.0.229 | MIT, Apache-2.0 | https://crates.io/crates/serde_derive |
 | serde_derive_internals | 0.29.1 | MIT, Apache-2.0 | https://crates.io/crates/serde_derive_internals |
 | serde_fmt | 1.1.0 | Apache-2.0, MIT | https://crates.io/crates/serde_fmt |
 | serde_json | 1.0.149 | MIT, Apache-2.0 | https://crates.io/crates/serde_json |
@@ -949,6 +952,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | strum_macros | 0.27.2 | MIT | https://crates.io/crates/strum_macros |
 | strum_macros | 0.28.0 | MIT | https://crates.io/crates/strum_macros |
 | subtle | 2.6.1 | BSD-3-Clause | https://crates.io/crates/subtle |
+| suppaftp | 12.0.0 | MIT, Apache-2.0 | https://crates.io/crates/suppaftp |
 | svg_fmt | 0.4.5 | MIT, Apache-2.0 | https://crates.io/crates/svg_fmt |
 | svgtypes | 0.16.1 | Apache-2.0, MIT | https://crates.io/crates/svgtypes |
 | swash | 0.2.7 | Apache-2.0, MIT | https://crates.io/crates/swash |
@@ -988,9 +992,9 @@ This section is a review prompt for binary distribution; it does not replace leg
 | tendril | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/tendril |
 | termcolor | 1.4.1 | Unlicense, MIT | https://crates.io/crates/termcolor |
 | thiserror | 1.0.69 | MIT, Apache-2.0 | https://crates.io/crates/thiserror |
-| thiserror | 2.0.18 | MIT, Apache-2.0 | https://crates.io/crates/thiserror |
+| thiserror | 2.0.20 | MIT, Apache-2.0 | https://crates.io/crates/thiserror |
 | thiserror-impl | 1.0.69 | MIT, Apache-2.0 | https://crates.io/crates/thiserror-impl |
-| thiserror-impl | 2.0.18 | MIT, Apache-2.0 | https://crates.io/crates/thiserror-impl |
+| thiserror-impl | 2.0.20 | MIT, Apache-2.0 | https://crates.io/crates/thiserror-impl |
 | thread_local | 1.1.9 | MIT, Apache-2.0 | https://crates.io/crates/thread_local |
 | tiff | 0.11.3 | MIT | https://crates.io/crates/tiff |
 | time | 0.3.47 | MIT, Apache-2.0 | https://crates.io/crates/time |
@@ -1007,7 +1011,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | tokio-native-tls | 0.3.1 | MIT | https://crates.io/crates/tokio-native-tls |
 | tokio-rustls | 0.26.4 | MIT, Apache-2.0 | https://crates.io/crates/tokio-rustls |
 | tokio-stream | 0.1.18 | MIT | https://crates.io/crates/tokio-stream |
-| tokio-util | 0.7.18 | MIT | https://crates.io/crates/tokio-util |
+| tokio-util | 0.7.19 | MIT | https://crates.io/crates/tokio-util |
 | toml | 0.8.23 | MIT, Apache-2.0 | https://crates.io/crates/toml |
 | toml | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml |
 | toml_datetime | 0.6.11 | MIT, Apache-2.0 | https://crates.io/crates/toml_datetime |
@@ -1318,6 +1322,146 @@ This section is a review prompt for binary distribution; it does not replace leg
 | JetBrains Mono Subset | 4 | SIL Open Font License 1.1 | crates/oxideterm-gpui-app/resources/fonts/JetBrainsMono/OFL.txt |
 | Meslo Nerd Font Subset | 4 | Apache License 2.0 | crates/oxideterm-gpui-app/resources/fonts/Meslo/LICENSE.txt |
 | Maple Mono NF CN Subset | 4 | SIL Open Font License 1.1 | crates/oxideterm-gpui-app/resources/fonts/MapleMono/LICENSE.txt |
+
+## Distribution Icon Assets
+
+# Linux distribution icons
+
+OxideTerm bundles the original SVG files below solely to identify operating systems
+in connection controls. The artwork retains its own license; it is not relicensed
+under OxideTerm's code license. Logos and names remain the trademarks of their
+respective owners. Their inclusion does not imply sponsorship or endorsement.
+
+The SVGs listed below were retrieved on 2026-09-23. The Ubuntu and Arch Linux
+SVGs have only their root fill set to the colors recorded by Simple Icons; the
+other SVGs are unmodified. Display scaling preserves their original aspect
+ratios and colors. Unknown distributions use
+OxideTerm's generic icon instead of a related distribution's logo.
+
+## Ubuntu
+
+**Ubuntu Circle of Friends**, a trademark of Canonical Ltd. Displayed only to
+identify an Ubuntu system; OxideTerm is not affiliated with Canonical.
+
+- Project: https://ubuntu.com/
+- Original SVG: https://github.com/simple-icons/simple-icons/blob/b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76/icons/ubuntu.svg
+- Original icon source listed by Simple Icons: https://design.ubuntu.com/resources
+- Brand and trademark policy: https://canonical.com/legal/intellectual-property-policy
+- Simple Icons disclaimer: https://github.com/simple-icons/simple-icons/blob/b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76/DISCLAIMER.md
+- Change: added root fill `#E95420`, the Ubuntu color in Simple Icons' icon metadata.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/ubuntu.svg`.
+- SHA-256: `05908333dce000b0775603cdc3d14b4a7d315d3625c9fa0b374804d6753643c3`.
+
+Simple Icons' CC0 project license is not asserted as a license to Ubuntu's mark.
+
+## Arch Linux
+
+**Arch Linux icon**, a trademark of the Arch Linux project. Displayed only to
+identify an Arch Linux system; OxideTerm is not affiliated with the project.
+
+- Project: https://archlinux.org/
+- Original SVG: https://github.com/simple-icons/simple-icons/blob/b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76/icons/archlinux.svg
+- Official artwork: https://archlinux.org/art/
+- Trademark policy and logo guidelines: https://terms.archlinux.org/docs/trademark-policy/
+- Simple Icons disclaimer: https://github.com/simple-icons/simple-icons/blob/b86d5c9a0bdd4f3f5c30898a63654dd32f39fd76/DISCLAIMER.md
+- Change: added root fill `#1793D1`, the Arch Linux color in Simple Icons' icon metadata. The source SVG's trademark symbol remains in the path.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/archlinux.svg`.
+- SHA-256: `1d45fa365b8308aa408565a649e6646232d43e4ccbc02b106021b8b2dcd65a4d`.
+
+Simple Icons' CC0 project license is not asserted as a license to Arch Linux's mark.
+
+## Debian
+
+**Debian Open Use Logo (without wordmark)**, designed by Raul Silva.
+Copyright (c) 1999 Software in the Public Interest, Inc.
+
+- Project: https://www.debian.org/
+- Original SVG: https://www.debian.org/logos/openlogo-nd.svg
+- License evidence and usage guidance: https://www.debian.org/logos/
+- License selected from the offered alternatives: **CC BY-SA 3.0 Unported**.
+- License: https://creativecommons.org/licenses/by-sa/3.0/
+- Complete license supplied as `CC-BY-SA-3.0.txt`.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/debian.svg`.
+- SHA-256: `89a3ca1a1bc91610edcc637457e7275a159309f4621829b2a0170e28970cac20`.
+
+This is the Open Use Logo, not Debian's separate Restricted Use Logo.
+
+## Gentoo
+
+**Gentoo “g” signet**, copyright Gentoo Foundation and Lennart Andre Rolland.
+
+- Project: https://www.gentoo.org/
+- Original SVG: https://www.gentoo.org/assets/img/logo/gentoo-signet.svg
+- Artwork: https://www.gentoo.org/inside-gentoo/artwork/gentoo-logo.html
+- License evidence for this vector version: https://www.gentoo.org/inside-gentoo/artwork/gentoo-logo.html
+- Usage guidance: https://www.gentoo.org/inside-gentoo/foundation/name-logo-guidelines.html
+- License: **CC BY-SA 2.5 Generic**, https://creativecommons.org/licenses/by-sa/2.5/
+- Complete license supplied as `CC-BY-SA-2.5.txt`.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/gentoo.svg`.
+- SHA-256: `a6ee658fe701dc7efa42fc88644b02a9d188db49aded0784c4db1940583362f8`.
+
+The name/logo usage guidelines allow service and supported-platform identification
+without implying endorsement. The project link above provides the corresponding
+Gentoo website reference.
+
+## NixOS
+
+**NixOS snowflake logo**, original design by Simon Frankau, revised by Tim
+Cuthbertson. The official branding project also credits Daniel Baker for later
+revisions and is maintained by the NixOS Marketing Team.
+
+- Project: https://nixos.org/
+- Original SVG: https://github.com/NixOS/nixos-artwork/blob/9d2cdedd73d64a068214482902adea3d02783ba8/logo/nix-snowflake-colours.svg
+- License evidence and attribution: https://github.com/NixOS/branding/blob/4faef6a7eb6094d0543d4047bd19551b3a2edf48/README.md#license-and-attribution
+- Usage guidance: https://nixos.org/branding/
+- License: **CC BY 4.0 International**, https://creativecommons.org/licenses/by/4.0/
+- Complete license supplied as `CC-BY-4.0.txt`.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/nixos.svg`.
+- SHA-256: `e37b5a1c11e81496e9d46af04908951ada6babaa416d670aaae4934cce912eb2`.
+
+The branding repository explicitly confirms CC BY 4.0 for historical logo versions.
+
+## Rocky Linux
+
+**Rocky Linux primary icon**, Rocky Linux branding contributors / Rocky Enterprise
+Software Foundation. Rocky Linux is a trademark of the Rocky Enterprise Software
+Foundation. Used only to identify Rocky Linux systems, not to brand or endorse
+OxideTerm.
+
+- Project: https://rockylinux.org/
+- Original SVG: https://github.com/rocky-linux/branding/blob/24e0c11e596d983dbca28653c8b15e69aa45a652/logo/src/icon-primary.svg
+- License evidence: https://github.com/rocky-linux/branding/blob/24e0c11e596d983dbca28653c8b15e69aa45a652/README.md#license
+- Usage guidance: https://github.com/rocky-linux/brand-kit#trademark-usage-policy
+- License: **CC BY-SA 4.0 International**, https://creativecommons.org/licenses/by-sa/4.0/
+- Complete license supplied as `CC-BY-SA-4.0.txt`.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/rocky.svg`.
+- SHA-256: `ae166824dca5ec506404d89b79683f2285572fe7ae735856f56e887748dbcbca`.
+
+## Linux Mint
+
+**Linux Mint badge**, Linux Mint project.
+
+- Project: https://www.linuxmint.com/
+- Original SVG: https://github.com/linuxmint/brand-logo/blob/540ac3b08e987866d77a340f557f994c988ac2ae/badge.svg
+- Permission source: https://www.linuxmint.com/faq.php
+- Permission: **project-specific logo use permission**, under the FAQ question
+  “Can I use the Linux Mint logo and/or screenshots?”. The project permits logo
+  use and display in designs and documents, provided the use does not impersonate
+  Linux Mint or imply affiliation. This is not represented as a Creative Commons
+  or MIT license.
+- OxideTerm displays the unchanged badge solely as an operating-system identifier.
+  OxideTerm is not affiliated with or endorsed by Linux Mint.
+- Bundled file: `crates/oxideterm-gpui-app/resources/distro-icons/linuxmint.svg`.
+- SHA-256: `dee702dc5e28aafa4e6c033a6f7381b178036c460c7cfe9dc32c7fde0ccf0387`.
+
+## License texts
+
+The CC BY 4.0, CC BY-SA 2.5 and CC BY-SA 3.0 license texts are taken from the SPDX license-list-data collection:
+https://github.com/spdx/license-list-data/tree/main/text. Canonical Creative
+Commons license links are provided above. These asset licenses and any adaptation
+obligations apply to the artwork, separately from the surrounding application.
+
+The CC BY-SA 4.0 text is from the Rocky Linux branding repository LICENSE at commit `24e0c11e596d983dbca28653c8b15e69aa45a652`; only its final blank line was removed. Linux Mint’s project-specific permission is documented in its entry above.
 
 ## Notes
 

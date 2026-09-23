@@ -363,7 +363,7 @@
       "save_failed": "Verbindung speichern fehlgeschlagen",
       "transport_local_terminal": "Lokales Terminal",
       "local_terminal_description": "Eine lokale Shell mit den aktuellen Terminaleinstellungen öffnen.",
-      "local_terminal_detail": "Diese Sitzung wird sofort geöffnet und nicht zu den gespeicherten Verbindungen hinzugefügt.",
+      "local_terminal_detail": "Shell und Startverzeichnis eines Projekts speichern. Jedes Öffnen erstellt ein unabhängiges Terminal.",
       "local_terminal_open": "Terminal öffnen",
       "transport_ssh": "SSH-Host",
       "advanced_group": "Erweiterte Verbindungen",

@@ -132,7 +132,8 @@
       "cancel": "Hủy",
       "save": "Lưu",
       "saving": "Đang lưu...",
-      "passphrase_hint": "Để trống để giữ passphrase đã lưu khi đường dẫn key không đổi."
+      "passphrase_hint": "Để trống để giữ passphrase đã lưu khi đường dẫn key không đổi.",
+      "brand_icon_hint": "Biểu trưng bản phân phối giữ nguyên màu sắc và tỷ lệ gốc."
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "Phiên đã lưu",
       "expand_all": "Mở rộng tất cả",
       "collapse_all": "Thu gọn tất cả"
+    },
+    "local_terminal_profiles": {
+      "delete": "Xóa phiên cục bộ",
+      "delete_failed": "Không thể xóa phiên cục bộ",
+      "confirm_delete": "Xóa phiên cục bộ “{{name}}”? Các terminal đang chạy vẫn được giữ mở."
     }
   }
 }

@@ -122,10 +122,43 @@ impl Render for DetachedTabWindow {
         div()
             .id(("detached-tab-window", tab_id.0))
             .size_full()
+            .relative()
             .track_focus(&self.focus_handle)
+            .on_mouse_move(cx.listener(|detached, event: &MouseMoveEvent, window, cx| {
+                detached.session.update(cx, |session, cx| {
+                    session.update_detached_tab_return_drag(detached.tab_id, event, window, cx);
+                    if session.split_drag_belongs_to_tab(detached.tab_id) {
+                        session.update_split_drag(event, window, cx);
+                    }
+                });
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|detached, event: &MouseUpEvent, window, cx| {
+                    detached.session.update(cx, |session, cx| {
+                        session.finish_detached_tab_return_drag(detached.tab_id, event, window, cx);
+                        if session.split_drag_belongs_to_tab(detached.tab_id) {
+                            session.finish_split_drag(cx);
+                        }
+                    });
+                }),
+            )
             .capture_key_down(cx.listener(|detached, event: &KeyDownEvent, window, cx| {
                 let handled = detached.session.update(cx, |session, cx| {
+                    if event.keystroke.key == "escape" && session.cancel_tab_merge_drag(cx) {
+                        return true;
+                    }
                     let window_id = window.window_handle().window_id();
+                    if session.app_lock.locked {
+                        return false;
+                    }
+                    let page = session.tab_host.read(cx).focused_page_id(detached.tab_id);
+                    let kind = session.tab_by_id(page, cx).map(|tab| tab.kind.clone());
+                    let _sftp_scope = (kind == Some(TabKind::Sftp))
+                        .then(|| session.enter_sftp_surface(sftp::SftpSurfaceId::Tab(page)));
+                    let _forward_scope = (kind == Some(TabKind::Forwards))
+                        .then(|| session.enter_forwarding_page(page, cx));
+
                     if session
                         .mermaid_zoom
                         .as_ref()
@@ -190,6 +223,32 @@ impl Render for DetachedTabWindow {
                             }
                         }
                     }
+                    if !session.app_lock.locked
+                        && crate::keybindings::keystroke_matches_action(
+                            &event.keystroke,
+                            "terminal.aiPanel",
+                            &session.settings_store.settings().keybindings.overrides,
+                        )
+                    {
+                        session.toggle_terminal_ai_inline_panel(window, cx);
+                        return true;
+                    }
+                    if session.active_ime_target_for_window(window_id, cx)
+                        == Some(super::ime::WorkspaceImeTarget::AiInlinePrompt)
+                    {
+                        if session.defer_active_ime_key(&event.keystroke, window, cx) {
+                            return false;
+                        }
+                        if session.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+                            || session
+                                .handle_active_text_input_delete_selection(&event.keystroke, cx)
+                            || session.handle_active_text_input_transpose(&event.keystroke, cx)
+                            || session.handle_active_text_input_navigation(&event.keystroke, cx)
+                        {
+                            return true;
+                        }
+                        return session.handle_ai_inline_panel_key(event, window, cx);
+                    }
                     if matches!(
                         session.active_ime_target_for_window(window_id, cx),
                         Some(
@@ -230,6 +289,28 @@ impl Render for DetachedTabWindow {
                             return true;
                         }
                         return session.handle_knowledge_document_dialog_key(event, cx);
+                    }
+                    if matches!(kind, Some(TabKind::Sftp | TabKind::Forwards)) {
+                        if session.defer_active_ime_key(&event.keystroke, window, cx) {
+                            return false;
+                        }
+                        if session.handle_active_text_input_edit_shortcut(&event.keystroke, cx)
+                            || session
+                                .handle_active_text_input_delete_selection(&event.keystroke, cx)
+                            || session.handle_active_text_input_transpose(&event.keystroke, cx)
+                            || session.handle_active_text_input_navigation(&event.keystroke, cx)
+                        {
+                            return true;
+                        }
+                        if kind == Some(TabKind::Sftp) {
+                            return session.handle_sftp_key(event, window, cx);
+                        }
+                        if session.handle_forward_delete_confirm_key(event, cx)
+                            || session.handle_forward_edit_modal_key(event, cx)
+                        {
+                            return true;
+                        }
+                        return session.handle_forwards_key(event, cx);
                     }
                     let is_knowledge_window = session
                         .tabs(cx)
@@ -285,5 +366,18 @@ impl Render for DetachedTabWindow {
             .child(window_shell::render_resizable_window_content(
                 content, window,
             ))
+            .when(
+                self.ready
+                    && self
+                        .session
+                        .read(cx)
+                        .detached_tab_return_drag
+                        .is_some_and(|drag| drag.tab_id == tab_id),
+                |root| {
+                    root.child(self.session.update(cx, |workspace, cx| {
+                        workspace.render_tab_drag_capture(Some(tab_id), cx)
+                    }))
+                },
+            )
     }
 }

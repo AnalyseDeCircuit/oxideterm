@@ -24,6 +24,7 @@ pub(super) fn push_upload_connection_field_diffs(
     remote: Option<&SavedConnectionsSyncSnapshot>,
     local: &SavedConnectionsSyncSnapshot,
 ) {
+    push_local_terminal_profile_diffs(items, local, remote, None, &ConflictStrategy::Replace);
     let remote_records = remote
         .into_iter()
         .flat_map(|snapshot| snapshot.records.iter())
@@ -93,6 +94,7 @@ pub(super) fn push_connection_field_diffs(
     local: Option<&SavedConnectionsSyncSnapshot>,
     conflict_strategy: &ConflictStrategy,
 ) {
+    push_local_terminal_profile_diffs(items, remote, local, base, conflict_strategy);
     let base_records = base
         .into_iter()
         .flat_map(|snapshot| snapshot.records.iter())
@@ -663,5 +665,115 @@ pub(super) fn push_app_settings_field_diffs(
             status,
             fields,
         );
+    }
+}
+
+fn local_terminal_fields(
+    profile: &oxideterm_connections::LocalTerminalProfile,
+) -> [(&'static str, Option<String>); 7] {
+    [
+        (
+            "plugin.cloud_sync.diff_fields.name",
+            Some(profile.name.clone()),
+        ),
+        ("plugin.cloud_sync.diff_fields.group", profile.group.clone()),
+        (
+            "settings_view.local_terminal.select_shell",
+            profile.shell_id.clone(),
+        ),
+        ("local_session.directory", profile.cwd.clone()),
+        ("sessionManager.edit_properties.icon", profile.icon.clone()),
+        (
+            "sessionManager.edit_properties.color",
+            profile.color.clone(),
+        ),
+        (
+            "sessionManager.edit_properties.icon_background_color",
+            profile.icon_background_color.clone(),
+        ),
+    ]
+}
+
+fn push_local_terminal_profile_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    incoming: &SavedConnectionsSyncSnapshot,
+    local: Option<&SavedConnectionsSyncSnapshot>,
+    base: Option<&SavedConnectionsSyncSnapshot>,
+    strategy: &ConflictStrategy,
+) {
+    const SECTION: &str = "plugin.cloud_sync.settings.sync_connections";
+    for profile in &incoming.local_terminal_profiles {
+        let previous = local.and_then(|s| {
+            s.local_terminal_profiles
+                .iter()
+                .find(|p| p.id == profile.id)
+        });
+        let base_profile = base.and_then(|s| {
+            s.local_terminal_profiles
+                .iter()
+                .find(|p| p.id == profile.id)
+        });
+        let effective = match (base_profile, previous) {
+            (Some(base), Some(previous)) => {
+                merge_structured_model_fields(base, previous, profile, strategy)
+                    .ok()
+                    .flatten()
+            }
+            _ => None,
+        };
+        let effective = effective.as_ref().unwrap_or(profile);
+        let mut fields = Vec::new();
+        let old_fields = previous.map(local_terminal_fields);
+        let base_fields = base_profile.map(local_terminal_fields);
+        let remote_fields = local_terminal_fields(profile);
+        for (index, (label, value)) in local_terminal_fields(effective).into_iter().enumerate() {
+            if let (Some(base), Some(old)) = (&base_fields, &old_fields) {
+                push_merge_changed(
+                    &mut fields,
+                    label,
+                    base[index].1.clone(),
+                    old[index].1.clone(),
+                    remote_fields[index].1.clone(),
+                    value,
+                    strategy,
+                );
+            } else {
+                push_changed(
+                    &mut fields,
+                    label,
+                    old_fields.as_ref().and_then(|f| f[index].1.clone()),
+                    value,
+                );
+            }
+        }
+        push_non_empty_field_diff(
+            items,
+            SECTION,
+            profile.id.clone(),
+            profile.name.clone(),
+            if previous.is_some() {
+                CloudSyncFieldDiffStatus::Modified
+            } else {
+                CloudSyncFieldDiffStatus::Added
+            },
+            fields,
+        );
+    }
+    for tombstone in &incoming.local_terminal_tombstones {
+        let name = local
+            .and_then(|s| {
+                s.local_terminal_profiles
+                    .iter()
+                    .find(|p| p.id == tombstone.id)
+            })
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| tombstone.id.clone());
+        items.push(field_diff_item_with_key(
+            SECTION,
+            tombstone.id.clone(),
+            name,
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
     }
 }

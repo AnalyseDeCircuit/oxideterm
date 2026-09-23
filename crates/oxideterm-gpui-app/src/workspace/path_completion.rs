@@ -10,8 +10,8 @@ const PATH_COMPLETION_HOVER_ALPHA: u32 = 0x99;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum PathCompletionOwner {
     FileManager,
-    SftpLocal,
-    SftpRemote,
+    SftpLocal(sftp::SftpSurfaceId),
+    SftpRemote(sftp::SftpSurfaceId),
 }
 
 impl PathCompletionOwner {
@@ -20,16 +20,20 @@ impl PathCompletionOwner {
             Self::FileManager => {
                 WorkspaceImeTarget::FileManager(file_manager::FileManagerInput::Path)
             }
-            Self::SftpLocal => WorkspaceImeTarget::Sftp(sftp::SftpInput::LocalPath),
-            Self::SftpRemote => WorkspaceImeTarget::Sftp(sftp::SftpInput::RemotePath),
+            Self::SftpLocal(surface) => {
+                WorkspaceImeTarget::Sftp(surface, sftp::SftpInput::LocalPath)
+            }
+            Self::SftpRemote(surface) => {
+                WorkspaceImeTarget::Sftp(surface, sftp::SftpInput::RemotePath)
+            }
         }
     }
 
     fn popup_id(self) -> &'static str {
         match self {
             Self::FileManager => "file-manager-path-completion",
-            Self::SftpLocal => "sftp-local-path-completion",
-            Self::SftpRemote => "sftp-remote-path-completion",
+            Self::SftpLocal(_) => "sftp-local-path-completion",
+            Self::SftpRemote(_) => "sftp-remote-path-completion",
         }
     }
 }
@@ -377,8 +381,9 @@ impl WorkspaceApp {
                     state.suggestions().to_vec(),
                 )
             }
-            PathCompletionOwner::SftpLocal => {
-                let sftp = self.sftp_view.read(cx);
+            PathCompletionOwner::SftpLocal(surface) => {
+                let _scope = self.enter_sftp_surface(surface);
+                let sftp = self.sftp_view().read(cx);
                 let state = &sftp.local_path_completion;
                 (
                     state.is_visible(),
@@ -387,8 +392,9 @@ impl WorkspaceApp {
                     state.suggestions().to_vec(),
                 )
             }
-            PathCompletionOwner::SftpRemote => {
-                let sftp = self.sftp_view.read(cx);
+            PathCompletionOwner::SftpRemote(surface) => {
+                let _scope = self.enter_sftp_surface(surface);
+                let sftp = self.sftp_view().read(cx);
                 let state = &sftp.remote_path_completion;
                 (
                     state.is_visible(),
@@ -408,10 +414,18 @@ impl WorkspaceApp {
     ) {
         match owner {
             PathCompletionOwner::FileManager => self.accept_file_manager_path_completion(index, cx),
-            PathCompletionOwner::SftpLocal => {
+            PathCompletionOwner::SftpLocal(surface) => {
+                if !self.has_sftp_surface(surface) {
+                    return;
+                }
+                let _scope = self.enter_sftp_surface(surface);
                 self.accept_sftp_path_completion(sftp::SftpPane::Local, index, cx)
             }
-            PathCompletionOwner::SftpRemote => {
+            PathCompletionOwner::SftpRemote(surface) => {
+                if !self.has_sftp_surface(surface) {
+                    return;
+                }
+                let _scope = self.enter_sftp_surface(surface);
                 self.accept_sftp_path_completion(sftp::SftpPane::Remote, index, cx)
             }
         }

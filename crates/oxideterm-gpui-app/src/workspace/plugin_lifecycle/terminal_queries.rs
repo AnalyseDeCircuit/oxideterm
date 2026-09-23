@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use gpui::{App, Context};
 use serde_json::{Value, json};
 
-use super::{TabKind, TerminalSessionId, WorkspaceApp};
+use super::{TerminalSessionId, WorkspaceApp};
 use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
 use oxideterm_terminal::SerialSessionConfig;
 
@@ -73,16 +73,13 @@ pub(super) fn native_plugin_active_terminal_target(
     if let Some(config) = workspace.serial_terminal_configs.get(&session_id) {
         return native_plugin_serial_terminal_target(session_id, config);
     }
-    let terminal_type = workspace
-        .active_tab(cx)
-        .map(|tab| {
-            if tab.kind == TabKind::LocalTerminal {
-                "local_terminal"
-            } else {
-                "terminal"
-            }
-        })
-        .unwrap_or("terminal");
+    let terminal_type = if workspace.active_terminal_kind(cx)
+        == Some(oxideterm_terminal::TerminalSessionKind::LocalPty)
+    {
+        "local_terminal"
+    } else {
+        "terminal"
+    };
 
     if terminal_type == "local_terminal" {
         return json!({

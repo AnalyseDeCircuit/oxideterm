@@ -1178,6 +1178,12 @@
     "hint_other": "Zen 모드 — Ctrl+Shift+Z를 눌러 종료"
   },
   "tabbar": {
+    "drag_to_dock": "드래그하여 도킹",
+    "workspace": "작업 공간",
+    "merge_into_horizontal": "“{{title}}”에 합치기 (좌우 분할)",
+    "merge_into_vertical": "“{{title}}”에 합치기 (상하 분할)",
+    "move_pane_to_tab": "새 탭으로 이동",
+    "move_pane_to_window": "새 창으로 이동",
     "offline": "오프라인",
     "cancel_reconnect": "재연결 취소",
     "reconnect": "재연결",
@@ -1294,5 +1300,13 @@
     "setup_pending": "포터블 키 저장소를 만드는 중...",
     "unlock_submit": "잠금 해제하고 계속",
     "unlock_pending": "포터블 데이터를 잠금 해제하는 중..."
+  },
+  "local_session": {
+    "directory": "시작 디렉터리",
+    "inherit_directory": "비워 두면 설정의 기본 디렉터리 사용",
+    "inherit_shell": "설정의 기본 셸 사용",
+    "shell_unavailable": "저장된 셸을 이 기기에서 사용할 수 없습니다. 세션을 편집하여 설치된 셸을 선택하세요.",
+    "directory_unavailable": "시작 디렉터리가 없습니다. 세션을 편집하여 기존 디렉터리를 선택하세요.",
+    "name_required": "로컬 세션을 저장할 이름을 입력하세요."
   }
 }

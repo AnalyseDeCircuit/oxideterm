@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "Port des Update-Proxys.",
       "update_proxy_no_proxy": "Proxy umgehen fuer",
       "update_proxy_no_proxy_hint": "Durch Kommas getrennte Hosts, die den Proxy umgehen.",
-      "update_proxy_legal_hint": "Bitte verwenden Sie die Proxy-Funktion gemaess den geltenden lokalen Gesetzen."
+      "update_proxy_legal_hint": "Bitte verwenden Sie die Proxy-Funktion gemaess den geltenden lokalen Gesetzen.",
+      "third_party_notices": "Drittanbieterhinweise",
+      "third_party_notices_description": "Namensnennungen für enthaltene Abhängigkeiten und Grafiken mit Links zu den ursprünglichen Lizenzen."
     },
     "errors": {
       "create_group_failed": "Gruppe konnte nicht erstellt werden: {{error}}",

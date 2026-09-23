@@ -1076,6 +1076,7 @@ impl WorkspaceApp {
             .iter()
             .map(|tab| {
                 let detail = match tab.kind {
+                    TabKind::Workspace => self.i18n.t("tabbar.workspace"),
                     TabKind::LocalTerminal => self.i18n.t("layout.empty.new_local_terminal"),
                     TabKind::SshTerminal => self.i18n.t("command_palette.session_ssh_terminal"),
                     TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
@@ -2308,6 +2309,7 @@ fn command_palette_placeholder_key(mode: PaletteMode) -> &'static str {
 
 fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
     match kind {
+        TabKind::Workspace => LucideIcon::AppWindow,
         TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal => {
             LucideIcon::Terminal
         }

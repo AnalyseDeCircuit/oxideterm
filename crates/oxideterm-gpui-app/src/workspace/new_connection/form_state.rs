@@ -201,6 +201,7 @@ pub(in crate::workspace) enum ConnectionRouteTarget {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(in crate::workspace) enum NewConnectionField {
     Name,
+    LocalCwd,
     Host,
     Port,
     Username,
@@ -764,7 +765,9 @@ pub(in crate::workspace) struct NewConnectionForm {
     // Reauthentication submits into the existing logical session, never a second sidebar row.
     pub(in crate::workspace) standalone_connection_id: Option<String>,
     pub(in crate::workspace) transport: NewConnectionTransport,
-    /// Selects one discovered shell for this one-shot local terminal launch.
+    pub(in crate::workspace) local_profile_id: Option<String>,
+    pub(in crate::workspace) local_cwd: String,
+    /// Selects a discovered shell without retaining environment credentials.
     pub(in crate::workspace) local_shell_id: Option<String>,
     pub(in crate::workspace) name: String,
     pub(in crate::workspace) host: String,
@@ -1078,6 +1081,8 @@ impl Default for NewConnectionForm {
             standalone_connection_id: None,
             transport: NewConnectionTransport::Ssh,
             local_shell_id: None,
+            local_profile_id: None,
+            local_cwd: String::new(),
             name: String::new(),
             host: String::new(),
             port: SSH_DEFAULT_PORT_TEXT.to_string(),
@@ -1585,8 +1590,16 @@ pub(in crate::workspace) fn next_connection_field(
     forward: bool,
 ) -> NewConnectionField {
     if transport == NewConnectionTransport::LocalTerminal {
-        // A one-shot local terminal has no editable or persistable form fields.
-        return field;
+        let fields = [
+            NewConnectionField::Name,
+            NewConnectionField::LocalCwd,
+            NewConnectionField::Group,
+        ];
+        let index = fields
+            .iter()
+            .position(|candidate| *candidate == field)
+            .unwrap_or(0);
+        return fields[(index + if forward { 1 } else { fields.len() - 1 }) % fields.len()];
     }
     if transport == NewConnectionTransport::WslGraphics {
         return NewConnectionField::Name;
@@ -2013,6 +2026,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
 ) -> &mut String {
     match form.focused_field {
         NewConnectionField::Name => &mut form.name,
+        NewConnectionField::LocalCwd => &mut form.local_cwd,
         NewConnectionField::Host => &mut form.host,
         NewConnectionField::Port => &mut form.port,
         NewConnectionField::Username => &mut form.username,
@@ -2170,6 +2184,7 @@ pub(in crate::workspace) fn current_connection_field_mut(
 pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -> &str {
     match form.focused_field {
         NewConnectionField::Name => &form.name,
+        NewConnectionField::LocalCwd => &form.local_cwd,
         NewConnectionField::Host => &form.host,
         NewConnectionField::Port => &form.port,
         NewConnectionField::Username => &form.username,

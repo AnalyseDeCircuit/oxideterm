@@ -363,7 +363,7 @@
       "save_failed": "Failed to Save Connection",
       "transport_local_terminal": "Local Terminal",
       "local_terminal_description": "Open a shell on this device with the current terminal settings.",
-      "local_terminal_detail": "This session opens immediately and is not added to saved connections.",
+      "local_terminal_detail": "Save a shell and startup directory for a project. Open it repeatedly to create independent terminals.",
       "local_terminal_open": "Open Terminal",
       "transport_ssh": "SSH Host",
       "advanced_group": "Advanced Connections",

@@ -3383,6 +3383,7 @@ mod tests {
                     &[],
                     &[],
                     &[],
+                    &[],
                     std::slice::from_ref(&cleared.id),
                     &[],
                     Some("Moved"),
@@ -3408,6 +3409,10 @@ mod tests {
         store
             .upsert(request("ssh-move", SavedAuth::Agent))
             .unwrap();
+        let local = store.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            id: Some("local-move".into()), name: "Local project".into(),
+            cwd: Some("~/project".into()), ..Default::default()
+        }).unwrap();
         let serial = store
             .upsert_serial_profile(SaveSerialProfileRequest {
                 id: Some("serial-move".to_string()),
@@ -3450,6 +3455,7 @@ mod tests {
                 .move_session_assets_to_group(
                     &["ssh-move".to_string()],
                     std::slice::from_ref(&serial.id),
+                    std::slice::from_ref(&local.id),
                     std::slice::from_ref(&telnet.id),
                     std::slice::from_ref(&mosh.id),
                     std::slice::from_ref(&standalone_sftp.id),
@@ -3458,7 +3464,7 @@ mod tests {
                     Some("Moved"),
                 )
                 .unwrap(),
-            6
+            7
         );
         assert_eq!(
             store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
@@ -3500,6 +3506,7 @@ mod tests {
                 .and_then(|profile| profile.group.as_deref()),
             Some("Moved")
         );
+        assert_eq!(store.local_terminal_profiles()[0].group.as_deref(), Some("Moved"));
     }
 
     #[test]
@@ -3561,4 +3568,55 @@ mod tests {
                 .is_none()
         );
     }
+    #[test]
+    fn local_profiles_persist_sync_and_delete_without_syncing_usage() {
+        let mut source = load_empty_store("local-profile-source");
+        let mut target = load_empty_store("local-profile-target");
+        let profile = source.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            id: Some("project".into()), name: "Project".into(), group: Some("Work/Code".into()),
+            shell_id: Some("zsh".into()), cwd: Some("~/work/project".into()),
+            icon: Some("debian".into()), ..Default::default()
+        }).unwrap();
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+        source.mark_local_terminal_profile_used("project").unwrap();
+        assert_eq!(source.export_saved_connections_snapshot().unwrap().revision, snapshot.revision);
+        assert_eq!(snapshot.local_terminal_profiles, vec![profile.clone()]);
+        target.apply_saved_connections_snapshot(snapshot.clone(), SavedConnectionsConflictStrategy::Merge).unwrap();
+        assert_eq!(target.local_terminal_profiles(), &[profile.clone()]);
+        let reloaded = ConnectionStore::load(target.path.clone()).unwrap();
+        assert_eq!(reloaded.local_terminal_profiles()[0].cwd.as_deref(), Some("~/work/project"));
+        assert_eq!(reloaded.local_terminal_profiles()[0].icon.as_deref(), Some("debian"));
+        source.delete_local_terminal_profile("project").unwrap();
+        target.apply_saved_connections_snapshot(source.export_saved_connections_snapshot().unwrap(), SavedConnectionsConflictStrategy::Merge).unwrap();
+        assert!(target.local_terminal_profiles().is_empty());
+        target.apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace).unwrap();
+        assert!(target.local_terminal_profiles().is_empty(), "stale devices must not resurrect deleted profiles");
+        assert_eq!(target.export_saved_connections_snapshot().unwrap().local_terminal_tombstones[0].id, "project");
+    }
+
+    #[test]
+    fn local_profile_sync_keeps_newer_edits_and_rolls_back_invalid_batches() {
+        let mut store = load_empty_store("local-profile-conflict");
+        store.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            id: Some("project".into()), name: "Project".into(), cwd: Some("~/old".into()), ..Default::default()
+        }).unwrap();
+        let stale = store.export_saved_connections_snapshot().unwrap();
+        store.upsert_local_terminal_profile(SaveLocalTerminalProfileRequest {
+            id: Some("project".into()), name: "Project".into(), cwd: Some("~/new".into()), ..Default::default()
+        }).unwrap();
+        store.apply_saved_connections_snapshot(stale.clone(), SavedConnectionsConflictStrategy::Merge).unwrap();
+        assert_eq!(store.local_terminal_profiles()[0].cwd.as_deref(), Some("~/new"));
+        let before = fs::read(store.path()).unwrap();
+        let mut invalid = stale;
+        let mut bad = invalid.local_terminal_profiles[0].clone();
+        bad.id = "invalid".into(); bad.name.clear();
+        invalid.local_terminal_profiles.push(bad);
+        assert!(store.apply_saved_connections_snapshot(invalid, SavedConnectionsConflictStrategy::Replace).is_err());
+        assert_eq!(store.local_terminal_profiles()[0].cwd.as_deref(), Some("~/new"));
+        assert_eq!(fs::read(store.path()).unwrap(), before);
+        let legacy: SavedConnectionsSyncSnapshot = serde_json::from_str(r#"{"revision":"old","exportedAt":"2026-01-01T00:00:00Z","records":[]}"#).unwrap();
+        store.apply_saved_connections_snapshot(legacy, SavedConnectionsConflictStrategy::Replace).unwrap();
+        assert_eq!(store.local_terminal_profiles()[0].id, "project");
+    }
+
 }

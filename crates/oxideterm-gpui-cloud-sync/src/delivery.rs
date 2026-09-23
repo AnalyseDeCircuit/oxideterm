@@ -707,6 +707,12 @@ fn filter_structured_preview_for_selection(
     // Apply only selected structured records while preserving the downloaded preview metadata.
     if let Some(snapshot) = preview.connections_snapshot.as_mut() {
         snapshot
+            .local_terminal_profiles
+            .retain(|p| selection.selected_connection_ids.contains(&p.id));
+        snapshot
+            .local_terminal_tombstones
+            .retain(|p| selection.selected_connection_ids.contains(&p.id));
+        snapshot
             .records
             .retain(|record| selection.selected_connection_ids.contains(&record.id));
     }
@@ -961,6 +967,8 @@ mod tests {
             remote_metadata: Default::default(),
             manifest,
             connections_snapshot: Some(SavedConnectionsSyncSnapshot {
+                local_terminal_profiles: Vec::new(),
+                local_terminal_tombstones: Vec::new(),
                 revision: "empty-connections".to_string(),
                 exported_at: "2026-08-21T00:00:00Z".to_string(),
                 records: Vec::new(),

@@ -28,6 +28,7 @@ use super::quick_commands::{
 };
 use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
+use super::sidebar::{ai_input_soft_wrap_columns, ai_input_visual_lines};
 use super::terminal_git::TerminalGitPanelSection;
 use super::{PaneId, WorkspaceApp};
 use oxideterm_gpui_settings_view::SettingsInput;
@@ -141,7 +142,7 @@ pub(super) enum WorkspaceImeTarget {
     QuickCommand(QuickCommandInput),
     Settings(SettingsInput),
     SessionManager(SessionManagerInput),
-    Forwards(ForwardInput),
+    Forwards(super::TabId, ForwardInput),
     FileManager(FileManagerInput),
     Graphics(GraphicsInput),
     TabRename,
@@ -151,7 +152,7 @@ pub(super) enum WorkspaceImeTarget {
     AiConversationRename,
     AiMessageEdit,
     PluginControl { key: u64, secret: bool },
-    Sftp(SftpInput),
+    Sftp(crate::workspace::sftp::SftpSurfaceId, SftpInput),
     NewConnection(NewConnectionField),
     KeyboardInteractive(usize),
 }
@@ -516,7 +517,7 @@ impl WorkspaceImeTarget {
             Self::QuickCommand(input) => 500 + input.anchor_key(),
             Self::Settings(input) => 1_000 + input.anchor_key(),
             Self::SessionManager(input) => 1_500 + input.anchor_key(),
-            Self::Forwards(input) => 1_700 + input.anchor_key(),
+            Self::Forwards(page, input) => (1_u64 << 61) | (page.0 << 12) | input.anchor_key(),
             Self::FileManager(input) => 1_800 + input.anchor_key(),
             Self::Graphics(input) => 1_875 + input.anchor_key(),
             Self::TabRename => 1_890,
@@ -526,7 +527,14 @@ impl WorkspaceImeTarget {
             Self::AiMessageEdit => 1_898,
             Self::AiConversationRename => 1_899,
             Self::PluginControl { key, .. } => key.wrapping_add(10_000),
-            Self::Sftp(input) => 1_900 + input.anchor_key(),
+            Self::Sftp(surface, input) => {
+                (1_u64 << 62)
+                    | (match surface {
+                        crate::workspace::sftp::SftpSurfaceId::Sidebar => 0,
+                        crate::workspace::sftp::SftpSurfaceId::Tab(id) => id.0,
+                    } << 12)
+                    | input.anchor_key()
+            }
             Self::NewConnection(field) => 2_000 + field as u64,
             Self::KeyboardInteractive(index) => 3_000 + index as u64,
         };
@@ -1184,12 +1192,11 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::SessionManager(input));
         }
 
-        if self
-            .active_tab(cx)
-            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Forwards)
+        if let Some(page) = self.forwarding.read(cx).page_id()
+            && self.tab_host.read(cx).surface_is_visible(page)
             && let Some(input) = self.forwarding.read(cx).view().focused_input
         {
-            return Some(WorkspaceImeTarget::Forwards(input));
+            return Some(WorkspaceImeTarget::Forwards(page, input));
         }
 
         if self
@@ -1209,11 +1216,11 @@ impl WorkspaceApp {
         }
 
         if self.visible_sftp_remote_id(cx).is_some()
-            && let Some(input) = self.sftp_view.read(cx).focused_input()
+            && let Some(input) = self.sftp_view().read(cx).focused_input()
         {
             // The input owner may be a full SFTP tab or the embedded terminal
             // sidebar; visibility, not the active tab kind, defines ownership.
-            return Some(WorkspaceImeTarget::Sftp(input));
+            return Some(WorkspaceImeTarget::Sftp(self.sftp_surface_id(), input));
         }
 
         let terminal_inline_panel = self.ai_entity.read(cx).terminal_inline_panel();
@@ -1293,6 +1300,24 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Option<WorkspaceImeTarget> {
         let target = self.active_ime_target(cx)?;
+        if let WorkspaceImeTarget::Forwards(page, _) = target {
+            let owner = self
+                .tab_host
+                .read(cx)
+                .detached_window_handle(page)
+                .or_else(|| {
+                    self.window_registry
+                        .handle_for_role(super::window_registry::WindowRole::Main)
+                });
+            if owner.is_none_or(|handle| handle.window_id() != window_id) {
+                return None;
+            }
+        }
+        if let WorkspaceImeTarget::Sftp(surface, _) = target {
+            if self.sftp_surface_window(surface, cx) != Some(window_id) {
+                return None;
+            }
+        }
         let knowledge = self.knowledge_workspace.read(cx);
         let owner = match target {
             WorkspaceImeTarget::Search(pane_id) => self
@@ -1319,6 +1344,11 @@ impl WorkspaceApp {
             }
             _ => None,
         };
+        if target == WorkspaceImeTarget::AiInlinePrompt
+            && self.terminal_ai_inline_window(cx) != Some(window_id)
+        {
+            return None;
+        }
         if matches!(target, WorkspaceImeTarget::Search(_)) && owner != Some(window_id) {
             return None;
         }
@@ -1717,6 +1747,7 @@ impl WorkspaceApp {
                     position,
                     px(0.0),
                     window,
+                    cx,
                 ));
             }
             return Some(0);
@@ -1724,7 +1755,7 @@ impl WorkspaceApp {
         if position.x >= right {
             if ime_target_accepts_newline(target) {
                 return Some(self.multiline_ime_index_for_position(
-                    target, &text, bounds, position, width, window,
+                    target, &text, bounds, position, width, window, cx,
                 ));
             }
             return Some(text_len);
@@ -1740,7 +1771,7 @@ impl WorkspaceApp {
         .clamp(px(0.0), width);
         if ime_target_accepts_newline(target) {
             return Some(self.multiline_ime_index_for_position(
-                target, &text, bounds, position, relative_x, window,
+                target, &text, bounds, position, relative_x, window, cx,
             ));
         }
         Some(self.ime_index_for_relative_x(target, &text, relative_x, window))
@@ -1780,16 +1811,11 @@ impl WorkspaceApp {
         position: Point<Pixels>,
         relative_x: Pixels,
         window: &mut Window,
+        cx: &App,
     ) -> usize {
-        let lines = if ime_target_is_read_only(target) {
-            soft_wrapped_line_ranges_utf16(
-                text,
-                f32::from(bounds.size.width),
-                f32::from(bounds.size.height),
-            )
-        } else {
-            line_ranges_utf16(text)
-        };
+        let ai_wrap_columns = (target == WorkspaceImeTarget::AiChatInput)
+            .then(|| ai_input_soft_wrap_columns(self.ai_entity.read(cx).chat_ui().sidebar_width));
+        let lines = multiline_ime_line_ranges(target, text, bounds, ai_wrap_columns);
         if lines.is_empty() {
             return 0;
         }
@@ -1837,7 +1863,7 @@ impl WorkspaceApp {
             | WorkspaceImeTarget::AiConversationRename
             | WorkspaceImeTarget::KnowledgeSearch
             | WorkspaceImeTarget::AiMessageEdit
-            | WorkspaceImeTarget::Sftp(_)
+            | WorkspaceImeTarget::Sftp(_, _)
             | WorkspaceImeTarget::ReadOnlyText(_) => {
                 // These targets report an anchor around the painted text itself.
                 // Applying the shared form-control padding again makes hit testing
@@ -2226,7 +2252,11 @@ impl WorkspaceApp {
             WorkspaceImeTarget::SessionManager(input) => {
                 session_manager_ime_text(self.session_manager.read(cx), input)
             }
-            WorkspaceImeTarget::Forwards(input) => {
+            WorkspaceImeTarget::Forwards(page, input) => {
+                if !self.forwarding.read(cx).has_page(page) {
+                    return None;
+                }
+                let _scope = self.enter_forwarding_page(page, cx);
                 if self.forwarding.read(cx).view().focused_input == Some(input) {
                     Some(self.forward_input_value(input, cx).to_string())
                 } else {
@@ -2305,9 +2335,13 @@ impl WorkspaceApp {
                         .map(|value| ime_text_snapshot(target, value))
                 })
                 .flatten(),
-            WorkspaceImeTarget::Sftp(input) => {
-                if self.sftp_view.read(cx).focused_input() == Some(input) {
-                    Some(self.sftp_view.read(cx).input_value(input).to_string())
+            WorkspaceImeTarget::Sftp(surface, input) => {
+                if !self.has_sftp_surface(surface) {
+                    return None;
+                }
+                let _scope = self.enter_sftp_surface(surface);
+                if self.sftp_view().read(cx).focused_input() == Some(input) {
+                    Some(self.sftp_view().read(cx).input_value(input).to_string())
                 } else {
                     None
                 }
@@ -2443,11 +2477,16 @@ impl WorkspaceApp {
             WorkspaceImeTarget::FileManager(FileManagerInput::Path) => {
                 self.file_manager.read(cx).path_completion.is_visible()
             }
-            WorkspaceImeTarget::Sftp(SftpInput::LocalPath) => {
-                self.sftp_view.read(cx).local_path_completion.is_visible()
+            WorkspaceImeTarget::Sftp(surface, SftpInput::LocalPath) => {
+                let _scope = self.enter_sftp_surface(surface);
+                self.sftp_view().read(cx).local_path_completion.is_visible()
             }
-            WorkspaceImeTarget::Sftp(SftpInput::RemotePath) => {
-                self.sftp_view.read(cx).remote_path_completion.is_visible()
+            WorkspaceImeTarget::Sftp(surface, SftpInput::RemotePath) => {
+                let _scope = self.enter_sftp_surface(surface);
+                self.sftp_view()
+                    .read(cx)
+                    .remote_path_completion
+                    .is_visible()
             }
             _ => false,
         };
@@ -3125,7 +3164,11 @@ impl WorkspaceApp {
                     self.clear_session_selection_for_invisible_rows(cx);
                 }
             }
-            WorkspaceImeTarget::Forwards(input) => {
+            WorkspaceImeTarget::Forwards(page, input) => {
+                if !self.forwarding.read(cx).has_page(page) {
+                    return;
+                }
+                let _scope = self.enter_forwarding_page(page, cx);
                 if self.forwarding.read(cx).view().focused_input == Some(input) {
                     self.forwarding.update(cx, |forwarding, _cx| {
                         forwarding.replace_input_text(input, replacement_range, text);
@@ -3228,9 +3271,13 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
-            WorkspaceImeTarget::Sftp(input) => {
-                if self.sftp_view.read(cx).focused_input() == Some(input) {
-                    self.sftp_view.update(cx, |sftp, _cx| {
+            WorkspaceImeTarget::Sftp(surface, input) => {
+                if !self.has_sftp_surface(surface) {
+                    return;
+                }
+                let _scope = self.enter_sftp_surface(surface);
+                if self.sftp_view().read(cx).focused_input() == Some(input) {
+                    self.sftp_view().update(cx, |sftp, _cx| {
                         replace_utf16(sftp.input_value_mut(input), replacement_range, text);
                     });
                     if matches!(input, SftpInput::LocalPath | SftpInput::RemotePath) {
@@ -3308,6 +3355,7 @@ fn new_connection_field_value(
 ) -> Option<&str> {
     Some(match field {
         NewConnectionField::Name => &form.name,
+        NewConnectionField::LocalCwd => &form.local_cwd,
         NewConnectionField::Host => &form.host,
         NewConnectionField::Port => &form.port,
         NewConnectionField::Username => &form.username,
@@ -3410,6 +3458,7 @@ fn connection_field_value_mut(
 ) -> &mut String {
     match field {
         NewConnectionField::Name => &mut form.name,
+        NewConnectionField::LocalCwd => &mut form.local_cwd,
         NewConnectionField::Host => &mut form.host,
         NewConnectionField::Port => &mut form.port,
         NewConnectionField::Username => &mut form.username,
@@ -3698,6 +3747,30 @@ fn selection_anchor(selection: &WorkspaceImeSelection) -> usize {
     }
 }
 
+fn multiline_ime_line_ranges(
+    target: WorkspaceImeTarget,
+    text: &str,
+    bounds: Bounds<Pixels>,
+    ai_wrap_columns: Option<usize>,
+) -> Vec<Range<usize>> {
+    if target == WorkspaceImeTarget::AiChatInput {
+        // Mouse hit testing must use the same soft wraps as the painted chat draft.
+        return ai_input_visual_lines(text, ai_wrap_columns.expect("AI input wrap width"))
+            .into_iter()
+            .map(|line| line.utf16_range())
+            .collect();
+    }
+    if ime_target_is_read_only(target) {
+        soft_wrapped_line_ranges_utf16(
+            text,
+            f32::from(bounds.size.width),
+            f32::from(bounds.size.height),
+        )
+    } else {
+        line_ranges_utf16(text)
+    }
+}
+
 fn soft_wrapped_line_ranges_utf16(
     value: &str,
     max_width_px: f32,
@@ -3838,8 +3911,8 @@ fn path_completion_owns_vertical_navigation(
         && matches!(
             target,
             WorkspaceImeTarget::FileManager(FileManagerInput::Path)
-                | WorkspaceImeTarget::Sftp(SftpInput::LocalPath)
-                | WorkspaceImeTarget::Sftp(SftpInput::RemotePath)
+                | WorkspaceImeTarget::Sftp(_, SftpInput::LocalPath)
+                | WorkspaceImeTarget::Sftp(_, SftpInput::RemotePath)
         )
 }
 
@@ -3868,11 +3941,28 @@ mod tests {
         WorkspaceImeMarkedText, WorkspaceImeTarget, active_ime_should_defer_input_key,
         collapsed_copy_shortcut_is_owned_by_target, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, ime_target_is_secret, ime_text_snapshot,
-        keystroke_platform_text, keystroke_uses_text_edit_modifier,
+        keystroke_platform_text, keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
         platform_text_commit_is_duplicate, secret_ime_proxy, soft_wrapped_line_ranges_utf16,
         utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
     };
+
+    #[test]
+    fn ai_chat_hit_testing_uses_soft_wrapped_visual_lines() {
+        let bounds = gpui::Bounds {
+            origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+            size: gpui::size(gpui::px(120.0), gpui::px(60.0)),
+        };
+        let text = "abcdefghij😀klmn\nZ";
+        assert_eq!(
+            multiline_ime_line_ranges(WorkspaceImeTarget::AiChatInput, text, bounds, Some(12)),
+            vec![0..12, 12..16, 17..18],
+        );
+        assert_eq!(
+            multiline_ime_line_ranges(WorkspaceImeTarget::AiMessageEdit, text, bounds, None),
+            vec![0..16, 17..18],
+        );
+    }
 
     fn key(key: &str, key_char: Option<&str>, modifiers: Modifiers) -> Keystroke {
         Keystroke {
@@ -4278,8 +4368,14 @@ mod tests {
     fn visible_path_completion_owns_unmodified_vertical_navigation() {
         for target in [
             WorkspaceImeTarget::FileManager(FileManagerInput::Path),
-            WorkspaceImeTarget::Sftp(SftpInput::LocalPath),
-            WorkspaceImeTarget::Sftp(SftpInput::RemotePath),
+            WorkspaceImeTarget::Sftp(
+                crate::workspace::sftp::SftpSurfaceId::Sidebar,
+                SftpInput::LocalPath,
+            ),
+            WorkspaceImeTarget::Sftp(
+                crate::workspace::sftp::SftpSurfaceId::Sidebar,
+                SftpInput::RemotePath,
+            ),
         ] {
             assert!(path_completion_owns_vertical_navigation(
                 target, "arrowup", true, false,
@@ -4301,7 +4397,10 @@ mod tests {
             false,
         ));
         assert!(!path_completion_owns_vertical_navigation(
-            WorkspaceImeTarget::Sftp(SftpInput::RemotePath),
+            WorkspaceImeTarget::Sftp(
+                crate::workspace::sftp::SftpSurfaceId::Sidebar,
+                SftpInput::RemotePath
+            ),
             "left",
             true,
             false,

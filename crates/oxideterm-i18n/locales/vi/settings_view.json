@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "Cổng được proxy cập nhật sử dụng.",
       "update_proxy_no_proxy": "Bỏ qua proxy cho",
       "update_proxy_no_proxy_hint": "Các máy chủ phân tách bằng dấu phẩy sẽ không đi qua proxy.",
-      "update_proxy_legal_hint": "Vui lòng sử dụng tính năng proxy theo đúng luật pháp và quy định địa phương."
+      "update_proxy_legal_hint": "Vui lòng sử dụng tính năng proxy theo đúng luật pháp và quy định địa phương.",
+      "third_party_notices": "Thông báo bên thứ ba",
+      "third_party_notices_description": "Ghi công các thư viện và hình ảnh đi kèm, cùng liên kết đến giấy phép gốc."
     },
     "errors": {
       "create_group_failed": "Không thể tạo nhóm: {{error}}",

@@ -363,7 +363,7 @@
       "save_failed": "연결 저장 실패",
       "transport_local_terminal": "로컬 터미널",
       "local_terminal_description": "현재 터미널 설정으로 이 기기에서 셸을 엽니다.",
-      "local_terminal_detail": "이 세션은 즉시 열리며 저장된 연결에 추가되지 않습니다.",
+      "local_terminal_detail": "프로젝트의 셸과 시작 디렉터리를 저장합니다. 열 때마다 독립된 터미널을 만듭니다.",
       "local_terminal_open": "터미널 열기",
       "transport_ssh": "SSH 호스트",
       "advanced_group": "고급 연결",

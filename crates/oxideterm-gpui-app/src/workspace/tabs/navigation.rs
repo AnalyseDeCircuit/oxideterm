@@ -5,7 +5,7 @@ fn is_terminal_tab_kind(kind: &TabKind) -> bool {
     // Terminal focus and display behavior is transport-neutral.
     matches!(
         kind,
-        TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal
+        TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::MoshTerminal | TabKind::Workspace
     )
 }
 
@@ -146,11 +146,13 @@ impl WorkspaceApp {
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
-        if self
-            .tabs(cx)
-            .iter()
-            .any(|tab| tab.id == tab_id && !self.tab_host.read(cx).is_outside_main_window(tab.id))
-        {
+        if self.tabs(cx).iter().any(|tab| {
+            tab.id == tab_id
+                && !self
+                    .tab_host
+                    .read(cx)
+                    .is_outside_main_window(self.tab_host.read(cx).container_tab_id(tab.id))
+        }) {
             if self.active_tab_id(cx) != Some(tab_id)
                 && let Some(previous_tab_id) = self.active_tab_id(cx)
             {
@@ -176,13 +178,16 @@ impl WorkspaceApp {
         // but app-level utility tabs still light up their owning activity icon.
         // Keep terminal/SFTP/IDE ownership separate while syncing these sidebar
         // entry tabs so the selected icon frame follows the visible surface.
-        match self.active_tab(cx).map(|tab| &tab.kind) {
+        match self.active_content_tab(cx).map(|tab| &tab.kind) {
             Some(TabKind::Settings) => {
                 self.active_surface = ActiveSurface::Settings;
             }
             Some(TabKind::Forwards) => {
+                if let Some(id) = self.active_content_tab_id(cx) {
+                    self.forwarding.update(cx, |state, _| state.select_page(id));
+                }
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id(cx)
+                if let Some(active_tab_id) = self.active_content_tab_id(cx)
                     && let Some(node_id) = self.forwarding.read(cx).node_for_tab(active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -191,18 +196,35 @@ impl WorkspaceApp {
                 }
             }
             Some(TabKind::Sftp) => {
+                if let Some(id) = self.active_content_tab_id(cx) {
+                    self.sftp_focused_surface = SftpSurfaceId::Tab(id);
+                }
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id(cx) {
+                if let Some(active_tab_id) = self.active_content_tab_id(cx) {
                     if let Some(node_id) = self.sftp_tab_nodes.get(&active_tab_id).cloned() {
                         self.active_ssh_node_id = Some(node_id.clone());
                         self.expanded_ssh_nodes.insert(node_id.clone());
-                        self.activate_sftp_view_for_node(active_tab_id, &node_id, cx);
+                        let _scope = self.enter_sftp_surface(SftpSurfaceId::Tab(active_tab_id));
+                        if self.sftp_view().read(cx).current_surface_id
+                            != Some(SftpSurfaceId::Tab(active_tab_id))
+                        {
+                            self.activate_sftp_view_for_node(active_tab_id, &node_id, cx);
+                        } else {
+                            self.maybe_start_sftp_remote_load(cx);
+                        }
                     } else if let Some(binding) =
                         self.standalone_sftp_tabs.get(&active_tab_id).cloned()
                     {
                         self.active_ssh_node_id = None;
+                        let _scope = self.enter_sftp_surface(SftpSurfaceId::Tab(active_tab_id));
+                        if self.sftp_view().read(cx).current_surface_id
+                            == Some(SftpSurfaceId::Tab(active_tab_id))
+                        {
+                            self.maybe_start_sftp_remote_load(cx);
+                            return;
+                        }
                         let pair_mode = binding.secondary_endpoint_id.is_some();
-                        self.sftp_view.update(cx, |sftp, cx| {
+                        self.sftp_view().update(cx, |sftp, cx| {
                             if let Some(secondary_endpoint_id) = binding.secondary_endpoint_id {
                                 sftp.activate_pair_view(
                                     SftpSurfaceId::Tab(active_tab_id),
@@ -226,7 +248,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Ide) => {
                 self.active_surface = ActiveSurface::Terminal;
-                if let Some(active_tab_id) = self.active_tab_id(cx)
+                if let Some(active_tab_id) = self.active_content_tab_id(cx)
                     && let Some(node_id) = self.ide_workspace.read(cx).node_for_tab(active_tab_id)
                 {
                     self.active_ssh_node_id = Some(node_id.clone());
@@ -267,14 +289,14 @@ impl WorkspaceApp {
                 self.active_surface = ActiveSurface::Terminal;
             }
         }
-        if let Some(session_id) = self.active_terminal_session_id(cx)
-            && let Some(node_id) = self
+        if let Some(session_id) = self.active_terminal_session_id(cx) {
+            self.active_ssh_node_id = self
                 .workspace_runtime
                 .read(cx)
-                .ssh_terminal_node_id(session_id)
-        {
-            self.active_ssh_node_id = Some(node_id.clone());
-            self.expanded_ssh_nodes.insert(node_id);
+                .ssh_terminal_node_id(session_id);
+            if let Some(node_id) = self.active_ssh_node_id.as_ref() {
+                self.expanded_ssh_nodes.insert(node_id.clone());
+            }
         }
         self.activate_embedded_sftp_sidebar_if_visible(cx);
     }
@@ -409,6 +431,9 @@ impl WorkspaceApp {
         let Some(location) = self.tab_host.read(cx).terminal_location(session_id) else {
             return false;
         };
+        self.tab_host.update(cx, |host, _| {
+            host.set_active_pane(Some(location.tab_id), location.pane_id);
+        });
         if self
             .tab_host
             .read(cx)
@@ -417,12 +442,12 @@ impl WorkspaceApp {
             // A detached terminal already has a native window owner. Do not
             // mount the same terminal entity into the main window as well;
             // focus its existing owner so session-tree activation still works.
+            self.focus_tab_terminal(location.tab_id, window, cx);
+            cx.notify();
             return self.focus_detached_tab_window(location.tab_id, cx);
         }
         self.set_main_window_active_tab(Some(location.tab_id), cx);
-        self.tab_host.update(cx, |tab_host, _| {
-            tab_host.set_active_pane(Some(location.tab_id), location.pane_id);
-        });
+
         if let Some(node_id) = self
             .workspace_runtime
             .read(cx)
@@ -448,18 +473,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.focus_terminal_session(session_id, window, cx) {
+        let Some(location) = self.tab_host.read(cx).terminal_location(session_id) else {
             return;
-        }
-        let single_pane_tab = self
-            .active_tab(cx)
-            .and_then(|tab| tab.root_pane.as_ref())
-            .is_none_or(|root| root.pane_count() <= 1);
-        if single_pane_tab {
-            self.close_active_tab(window, cx);
-        } else {
-            self.close_active_pane(window, cx);
-        }
+        };
+        self.close_terminal_pane_in_tab(location.tab_id, location.pane_id, window, cx);
     }
 
     pub(in crate::workspace) fn request_disconnect_ssh_node(
@@ -614,9 +631,13 @@ impl WorkspaceApp {
         let Some(index) = self.tabs(cx).iter().position(|tab| tab.id == tab_id) else {
             return;
         };
-        if self.tabs(cx)[index].kind == TabKind::SshTerminal {
+        if self.terminal_tab_has_kind(tab_id, oxideterm_terminal::TerminalSessionKind::SshPty, cx) {
             if !self.ssh_close_confirmation_enabled() {
-                self.close_tab_at_index(index, window, cx);
+                self.request_local_terminal_close_check(
+                    LocalTerminalCloseCheck::Single { tab_id },
+                    window,
+                    cx,
+                );
                 return;
             }
             // Keep the transient choice scoped to the confirmation that owns it.
@@ -627,7 +648,11 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if self.tabs(cx)[index].kind == TabKind::LocalTerminal {
+        if self.terminal_tab_has_kind(
+            tab_id,
+            oxideterm_terminal::TerminalSessionKind::LocalPty,
+            cx,
+        ) {
             self.request_local_terminal_close_check(
                 LocalTerminalCloseCheck::Single { tab_id },
                 window,
@@ -712,9 +737,7 @@ impl WorkspaceApp {
 
     fn tab_close_ids_include_ssh_terminal(&self, tab_ids: &[TabId], cx: &App) -> bool {
         tab_ids.iter().any(|tab_id| {
-            self.tabs(cx)
-                .iter()
-                .any(|tab| tab.id == *tab_id && tab.kind == TabKind::SshTerminal)
+            self.terminal_tab_has_kind(*tab_id, oxideterm_terminal::TerminalSessionKind::SshPty, cx)
         })
     }
 
@@ -730,11 +753,7 @@ impl WorkspaceApp {
             let tab_host = self.tab_host.read(cx);
             tab_ids
                 .iter()
-                .filter_map(|tab_id| {
-                    self.tabs(cx)
-                        .iter()
-                        .find(|tab| tab.id == *tab_id && tab.kind == TabKind::LocalTerminal)
-                })
+                .filter_map(|tab_id| self.tabs(cx).iter().find(|tab| tab.id == *tab_id))
                 .filter_map(|tab| tab.root_pane.as_ref())
                 .flat_map(|root_pane| {
                     let mut pane_ids = Vec::new();
@@ -744,6 +763,9 @@ impl WorkspaceApp {
                 .filter(|pane_id| seen_panes.insert(*pane_id))
                 .filter_map(|pane_id| {
                     let pane = tab_host.panes().get(&pane_id)?.read(cx);
+                    if pane.session_kind() != oxideterm_terminal::TerminalSessionKind::LocalPty {
+                        return None;
+                    }
                     Some(TabCloseProcessProbe {
                         pane_id,
                         probe: pane.process_info_probe(),
@@ -888,7 +910,11 @@ impl WorkspaceApp {
     ) {
         match confirm {
             TabCloseConfirm::Single { tab_id } => {
-                self.close_tab_by_id(tab_id, window, cx);
+                self.request_local_terminal_close_check(
+                    LocalTerminalCloseCheck::Single { tab_id },
+                    window,
+                    cx,
+                );
             }
             TabCloseConfirm::LocalChildProcess { tab_id } => {
                 self.close_tab_by_id(tab_id, window, cx);
@@ -938,10 +964,11 @@ impl WorkspaceApp {
             index - 1
         };
         let next_pane_id = pane_ids[next_index];
+        self.blur_text_inputs(cx);
         self.tab_host.update(cx, |tab_host, _| {
             tab_host.set_active_pane(None, next_pane_id);
         });
-        self.activate_embedded_sftp_sidebar_if_visible(cx);
+        self.sync_active_tab_surface(cx);
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
         cx.notify();
@@ -977,6 +1004,19 @@ impl WorkspaceApp {
             previous_active_tab_id,
             next_active_tab_id,
         } = transition;
+        let mut pages = Vec::new();
+        if let Some(root) = &tab.root_pane {
+            root.collect_page_ids(&mut pages);
+        }
+        for page in pages {
+            let transition = self.tab_host.update(cx, |host, _| {
+                host.tab_index_by_id(page)
+                    .and_then(|index| host.remove_tab_at(index))
+            });
+            if let Some(transition) = transition {
+                self.finish_tab_removal(transition, None, window.as_deref_mut(), cx);
+            }
+        }
         // Final tab removal revokes focus authority before any deferred UI work
         // can observe a replacement tab with the same presentation kind.
         self.ai_runtime_context
@@ -1011,6 +1051,7 @@ impl WorkspaceApp {
         }
         // Tauri keeps node SFTP alive when the SFTP tab is closed; the tab is
         // only a view over the node-owned ConnectionEntry session.
+        self.close_sftp_page(tab.id);
         self.sftp_tab_nodes.remove(&tab.id);
         if let Some(binding) = self.standalone_sftp_tabs.remove(&tab.id) {
             let endpoint_ids =
@@ -1070,12 +1111,27 @@ impl WorkspaceApp {
             .is_some_and(|tab| is_terminal_tab_kind(&tab.kind));
         // A closed shell has no window to focus. The surviving main window
         // observes the session change and consumes needs_active_pane_focus.
-        if let Some(window) = window {
+        if let Some(window) = window.as_deref_mut() {
             self.focus_active_pane(window, cx);
             self.reveal_active_tab(window, cx);
         }
         if let Some(exiting_visual) = exiting_visual {
             self.begin_tab_visual_exit(exiting_visual, cx);
+        }
+        let empty = self
+            .tabs(cx)
+            .iter()
+            .filter(|tab| tab.kind == TabKind::Workspace && tab.root_pane.is_none())
+            .map(|tab| tab.id)
+            .collect::<Vec<_>>();
+        for id in empty {
+            let transition = self.tab_host.update(cx, |host, _| {
+                host.tab_index_by_id(id)
+                    .and_then(|index| host.remove_tab_at(index))
+            });
+            if let Some(transition) = transition {
+                self.finish_tab_removal(transition, None, window.as_deref_mut(), cx);
+            }
         }
         cx.notify();
     }
@@ -1152,14 +1208,35 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let tab_ids = self
+        let targets = self
             .tabs(cx)
             .iter()
             .filter(|tab| self.tab_belongs_to_node(tab, node_id, cx))
-            .map(|tab| tab.id)
+            .map(|tab| {
+                let panes = tab.root_pane.as_ref().map(|root| {
+                    let mut ids = Vec::new();
+                    root.collect_pane_ids(&mut ids);
+                    ids.into_iter()
+                        .filter(|pane| {
+                            root.session_id_for_pane(*pane).is_some_and(|session| {
+                                self.workspace_runtime
+                                    .read(cx)
+                                    .ssh_terminal_session_belongs_to_node(session, node_id)
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                });
+                (tab.id, panes)
+            })
             .collect::<Vec<_>>();
-        for tab_id in tab_ids {
-            self.close_tab_by_id(tab_id, window, cx);
+        for (tab_id, panes) in targets {
+            if let Some(panes) = panes {
+                for pane in panes {
+                    self.close_terminal_pane_in_tab(tab_id, pane, window, cx);
+                }
+            } else {
+                self.close_tab_by_id(tab_id, window, cx);
+            }
         }
     }
 
@@ -1493,11 +1570,14 @@ impl WorkspaceApp {
         };
         // Select on press: native chrome can consume release or cancel capture with a
         // buttonless move. Those events should cancel dragging, not tab navigation.
+        let destination_tab = self.active_tab_id(cx).filter(|id| *id != tab_id);
+        self.split_drop_target = None;
         self.set_active_tab(tab_id, window, cx);
         let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths, cx);
         self.main_window_tabs.drag = Some(TabDragState {
             tab_id,
             from_index: visible_index,
+            destination_tab,
             start_x,
             start_y,
             current_x: start_x,
@@ -1513,7 +1593,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn update_tab_drag(
         &mut self,
         event: &MouseMoveEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let Some(mut drag) = self.main_window_tabs.drag.clone() else {
@@ -1522,12 +1602,12 @@ impl WorkspaceApp {
         if event.pressed_button != Some(MouseButton::Left) {
             // Win32 can lose the matching mouse-up during a re-entrant native callback.
             // A buttonless move is authoritative and must release the logical tab capture.
-            self.main_window_tabs.drag = None;
-            cx.notify();
+            self.cancel_tab_merge_drag(cx);
             return;
         }
         let was_active = drag.active;
         let previous_mode = drag.mode.clone();
+        let previous_split_target = self.split_drop_target;
         let previous_drop_target_index = drag.drop_target_index;
         // Browser tab drags keep pointer capture after leaving the tab label;
         // the root mouse-up is responsible for finishing or cancelling.
@@ -1538,7 +1618,12 @@ impl WorkspaceApp {
         // Tauri uses a 10px pointer threshold for reorder. GPUI also needs the
         // browser strip axis check here so vertical drags do not become tab
         // reorders just because the root view is acting as pointer capture.
-        if tab_drag_is_detach(delta_x, delta_y, self.tokens.metrics.tabbar_height) {
+        let over_content = delta_x.hypot(delta_y) > TAB_DRAG_THRESHOLD_PX
+            && self.update_tab_split_destination(&mut drag, event, window, cx);
+        if over_content {
+            drag.active = true;
+            drag.mode = TabDragMode::Content;
+        } else if tab_drag_is_detach(delta_x, delta_y, self.tokens.metrics.tabbar_height) {
             drag.active = true;
             drag.mode = TabDragMode::Detach;
             drag.drop_target_index = drag.from_index;
@@ -1554,7 +1639,8 @@ impl WorkspaceApp {
         }
         let changed = drag.active != was_active
             || drag.mode != previous_mode
-            || drag.drop_target_index != previous_drop_target_index;
+            || drag.drop_target_index != previous_drop_target_index
+            || self.split_drop_target != previous_split_target;
         self.main_window_tabs.drag = Some(drag);
         if changed {
             // The tab strip renders activation and drop-target changes, not raw
@@ -1575,12 +1661,24 @@ impl WorkspaceApp {
         let Some(drag) = self.main_window_tabs.drag.take() else {
             return;
         };
+        if drag.active
+            && self.finish_tab_split_drop(
+                drag.tab_id,
+                event.position + window.bounds().origin,
+                window,
+                cx,
+            )
+        {
+            return;
+        }
+        self.split_drop_target = None;
         match drag.mode {
             TabDragMode::Detach => {
                 let handoff_origin = self.tab_detach_handoff_origin(&drag, window);
                 self.detach_tab_to_window(drag.tab_id, handoff_origin, window, cx);
             }
             TabDragMode::Reorder if drag.active => {
+                self.set_active_tab(drag.tab_id, window, cx);
                 let target_visible_index =
                     tab_reorder_target_visible_index(drag.from_index, drag.drop_target_index);
                 if self.move_tab_to_visible_index(drag.tab_id, target_visible_index, cx) {
@@ -1590,7 +1688,7 @@ impl WorkspaceApp {
                 }
             }
             // Selection already happened on press; release owns only drag completion.
-            TabDragMode::Pending | TabDragMode::Reorder => {}
+            TabDragMode::Pending | TabDragMode::Reorder | TabDragMode::Content => {}
         }
         cx.notify();
     }

@@ -363,7 +363,7 @@
       "save_failed": "Lưu kết nối thất bại",
       "transport_local_terminal": "Terminal cục bộ",
       "local_terminal_description": "Mở shell trên thiết bị này bằng cài đặt terminal hiện tại.",
-      "local_terminal_detail": "Phiên này được mở ngay và không được thêm vào các kết nối đã lưu.",
+      "local_terminal_detail": "Lưu shell và thư mục khởi động của dự án. Mỗi lần mở sẽ tạo một terminal độc lập.",
       "local_terminal_open": "Mở terminal",
       "transport_ssh": "Máy chủ SSH",
       "advanced_group": "Kết nối nâng cao",

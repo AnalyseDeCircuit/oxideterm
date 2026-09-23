@@ -75,7 +75,10 @@ fn tab_kind_allows_privilege_prompt_helper(tab_kind: &TabKind) -> bool {
     // Local shells use an app-level scope. SSH terminals are allowed only after
     // active_privilege_scope_credentials resolves the active terminal through
     // the node ownership maps, never through host/title/runtime heuristics.
-    matches!(tab_kind, TabKind::LocalTerminal | TabKind::SshTerminal)
+    matches!(
+        tab_kind,
+        TabKind::LocalTerminal | TabKind::SshTerminal | TabKind::Workspace
+    )
 }
 
 fn log_privilege_prompt_helper(args: std::fmt::Arguments<'_>) {

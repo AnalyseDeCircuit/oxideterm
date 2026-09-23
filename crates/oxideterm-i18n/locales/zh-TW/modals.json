@@ -363,7 +363,7 @@
       "save_failed": "儲存連線失敗",
       "transport_local_terminal": "本機終端",
       "local_terminal_description": "使用目前的終端設定在此裝置上開啟 Shell。",
-      "local_terminal_detail": "此工作階段會立即開啟，不會加入已儲存的連線。",
+      "local_terminal_detail": "儲存專案的 Shell 與啟動目錄。每次開啟都會建立獨立終端。",
       "local_terminal_open": "開啟終端",
       "transport_ssh": "SSH 主機",
       "advanced_group": "進階連線",

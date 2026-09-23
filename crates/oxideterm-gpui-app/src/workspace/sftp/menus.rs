@@ -21,7 +21,7 @@ impl WorkspaceApp {
         );
         let selected_count = self.sftp_selected_names(menu.pane, cx).len();
         let (remote_loading, pair_primary_loading) = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             (sftp.remote_loading, sftp.pair_primary_loading)
         };
         let pane_loading = match menu.pane {
@@ -122,7 +122,7 @@ impl WorkspaceApp {
                     let file = menu.file.clone();
                     move |this, _event, _window, cx| {
                         if let Some(file) = file.as_ref() {
-                            this.sftp_view.update(cx, |sftp, cx| {
+                            this.sftp_view().update(cx, |sftp, cx| {
                                 sftp.open_rename_dialog(menu.pane, file.name.clone(), cx);
                             });
                         }
@@ -141,7 +141,7 @@ impl WorkspaceApp {
                 has_background,
                 move |this, _event, _window, cx| {
                     let base = {
-                        let sftp = this.sftp_view.read(cx);
+                        let sftp = this.sftp_view().read(cx);
                         match menu.pane {
                             SftpPane::Local => sftp.local_path.clone(),
                             SftpPane::Remote => sftp.remote_path.clone(),
@@ -164,7 +164,7 @@ impl WorkspaceApp {
                 has_background,
                 move |this, _event, _window, cx| {
                     let files = this.sftp_selected_names(menu.pane, cx);
-                    this.sftp_view.update(cx, |sftp, cx| {
+                    this.sftp_view().update(cx, |sftp, cx| {
                         sftp.set_dialog(SftpDialog::Delete {
                             pane: menu.pane,
                             files,
@@ -189,7 +189,7 @@ impl WorkspaceApp {
             pane_loading,
             has_background,
             move |this, _event, _window, cx| {
-                this.sftp_view.update(cx, |sftp, cx| {
+                this.sftp_view().update(cx, |sftp, cx| {
                     sftp.open_new_folder_dialog(menu.pane, cx);
                 });
             },
@@ -223,7 +223,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let disabled = disabled
-            || self.sftp_view.read(cx).context_menu_presence.phase()
+            || self.sftp_view().read(cx).context_menu_presence.phase()
                 == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let color = if danger { SFTP_RED } else { theme.text };
         let item = div()
@@ -263,7 +263,7 @@ impl WorkspaceApp {
             // `cx.listener`. Passing another listener here re-enters WorkspaceApp
             // during the same mouse event and panics on menu actions like Preview.
             move |this, event, window, cx| {
-                this.sftp_view
+                this.sftp_view()
                     .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
                 listener(this, event, window, cx);
             },

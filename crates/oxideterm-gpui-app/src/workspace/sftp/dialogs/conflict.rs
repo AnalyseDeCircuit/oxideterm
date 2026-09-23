@@ -6,7 +6,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace::sftp) fn sftp_conflict_remaining_count(&self, cx: &App) -> usize {
-        self.sftp_view
+        self.sftp_view()
             .read(cx)
             .conflict_state
             .as_ref()
@@ -26,7 +26,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let Some((conflict, conflict_count, apply_all, target_path)) = ({
-            let sftp_view = self.sftp_view.read(cx);
+            let sftp_view = self.sftp_view().read(cx);
             sftp_view.conflict_state.as_ref().and_then(|state| {
                 state
                     .conflicts
@@ -152,8 +152,8 @@ impl WorkspaceApp {
                             oxideterm_gpui_ui::checkbox(&self.tokens, String::new(), apply_all)
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.sftp_view.update(cx, |sftp, cx| {
+                                    self.sftp_listener(cx, |this, _event, _window, cx| {
+                                        this.sftp_view().update(cx, |sftp, cx| {
                                             sftp.toggle_conflict_apply_all(cx);
                                         });
                                         cx.stop_propagation();
@@ -173,8 +173,8 @@ impl WorkspaceApp {
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        this.sftp_view.update(cx, |sftp, cx| {
+                                    self.sftp_listener(cx, |this, _event, _window, cx| {
+                                        this.sftp_view().update(cx, |sftp, cx| {
                                             sftp.toggle_conflict_apply_all(cx);
                                         });
                                         cx.stop_propagation();

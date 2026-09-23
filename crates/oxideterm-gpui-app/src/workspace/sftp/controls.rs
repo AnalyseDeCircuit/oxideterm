@@ -38,7 +38,7 @@ impl WorkspaceApp {
                     .child(self.render_sftp_text_button(
                         self.i18n.t("sftp.scp.download_path"),
                         false,
-                        cx.listener(|this, _event, _window, cx| {
+                        self.sftp_listener(cx, |this, _event, _window, cx| {
                             this.queue_quick_scp_download(cx);
                             cx.stop_propagation();
                             cx.notify();
@@ -47,8 +47,8 @@ impl WorkspaceApp {
                     .child(self.render_sftp_text_button(
                         self.i18n.t("sftp.preview.retry"),
                         false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.sftp_view.update(cx, |sftp, cx| {
+                        self.sftp_listener(cx, |this, _event, _window, cx| {
+                            this.sftp_view().update(cx, |sftp, cx| {
                                 sftp.init_error = None;
                                 cx.notify();
                             });
@@ -97,7 +97,7 @@ impl WorkspaceApp {
         self.render_sftp_icon_button(
             icon,
             self.i18n.t(label_key),
-            cx.listener(move |this, _event, _window, cx| {
+            self.sftp_listener(cx, move |this, _event, _window, cx| {
                 this.navigate_sftp_path(pane, target, cx);
                 cx.stop_propagation();
                 cx.notify();
@@ -114,7 +114,7 @@ impl WorkspaceApp {
         self.render_sftp_icon_button(
             LucideIcon::RefreshCw,
             self.i18n.t("sftp.toolbar.refresh"),
-            cx.listener(move |this, _event, _window, cx| {
+            self.sftp_listener(cx, move |this, _event, _window, cx| {
                 match pane {
                     SftpPane::Local => {
                         if this.sftp_pair_primary_remote_id(cx).is_some() {
@@ -125,9 +125,9 @@ impl WorkspaceApp {
                         }
                         // Local refresh only re-reads the visible directory and
                         // must not disturb the node-owned remote SFTP session.
-                        let path = this.sftp_view.read(cx).local_path.clone();
+                        let path = this.sftp_view().read(cx).local_path.clone();
                         let files = refreshed_local_files(&path);
-                        this.sftp_view.update(cx, |sftp, cx| {
+                        this.sftp_view().update(cx, |sftp, cx| {
                             sftp.local_files = files;
                             cx.notify();
                         });
@@ -169,7 +169,7 @@ impl WorkspaceApp {
                     SFTP_TEXT_XS,
                 )
             },
-            cx.listener(move |this, _event, _window, cx| {
+            self.sftp_listener(cx, move |this, _event, _window, cx| {
                 this.queue_sftp_transfers(pane, direction, cx);
                 cx.stop_propagation();
                 cx.notify();

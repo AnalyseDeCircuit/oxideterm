@@ -3207,6 +3207,7 @@ impl AiWorkspaceEntity {
         self.abort_terminal_inline_stream();
         let panel = &mut self.terminal_inline_panel;
         panel.open = true;
+        panel.target = None;
         panel.prompt.clear();
         panel.response.clear();
         panel.error = None;
@@ -3223,6 +3224,7 @@ impl AiWorkspaceEntity {
         self.abort_terminal_inline_stream();
         let panel = &mut self.terminal_inline_panel;
         panel.open = false;
+        panel.target = None;
         panel.prompt_focused = false;
         panel.loading = false;
         panel.error = None;

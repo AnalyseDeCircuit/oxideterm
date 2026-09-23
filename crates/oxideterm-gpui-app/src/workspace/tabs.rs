@@ -9,6 +9,7 @@ mod navigation;
 mod nodes;
 mod nodes_reconnect_helpers;
 mod render;
+pub(super) mod split_drop;
 mod state;
 
 pub(in crate::workspace) use entity::{

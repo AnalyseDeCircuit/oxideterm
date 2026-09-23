@@ -921,7 +921,7 @@ impl WorkspaceApp {
             changed = true;
         }
         if self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, cx| sftp.clear_input_focus(cx))
         {
             self.ime_marked_text = None;

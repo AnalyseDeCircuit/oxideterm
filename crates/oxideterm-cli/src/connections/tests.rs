@@ -71,6 +71,8 @@ fn filters_connections_by_common_fields() {
 #[test]
 fn snapshot_changes_describe_incoming_records() {
     let snapshot = SavedConnectionsSyncSnapshot {
+        local_terminal_profiles: Vec::new(),
+        local_terminal_tombstones: Vec::new(),
         revision: "rev".to_string(),
         exported_at: "2026-05-27T00:00:00Z".to_string(),
         records: vec![oxideterm_connections::SavedConnectionSyncRecord {

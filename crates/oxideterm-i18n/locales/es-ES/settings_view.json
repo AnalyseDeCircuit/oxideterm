@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "Puerto usado por el proxy de actualizaciones.",
       "update_proxy_no_proxy": "Omitir proxy para",
       "update_proxy_no_proxy_hint": "Hosts separados por comas que deben omitir el proxy.",
-      "update_proxy_legal_hint": "Usa la funcion de proxy de acuerdo con las leyes y normativas locales."
+      "update_proxy_legal_hint": "Usa la funcion de proxy de acuerdo con las leyes y normativas locales.",
+      "third_party_notices": "Avisos de terceros",
+      "third_party_notices_description": "Atribuciones de las dependencias e imágenes incluidas, con enlaces a sus licencias originales."
     },
     "errors": {
       "create_group_failed": "Error al crear grupo: {{error}}",

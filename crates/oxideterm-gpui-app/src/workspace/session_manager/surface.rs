@@ -266,6 +266,12 @@ impl WorkspaceApp {
                     .replace("{{name}}", name),
                 self.i18n.t("sessionManager.serial_profiles.delete"),
             ),
+            SessionManagerDeleteConfirm::LocalTerminalProfile { name, .. } => (
+                self.i18n
+                    .t("sessionManager.local_terminal_profiles.confirm_delete")
+                    .replace("{{name}}", name),
+                self.i18n.t("sessionManager.local_terminal_profiles.delete"),
+            ),
             SessionManagerDeleteConfirm::TelnetProfile { name, .. } => (
                 self.i18n
                     .t("sessionManager.telnet_profiles.confirm_delete")

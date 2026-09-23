@@ -50,13 +50,15 @@ mod components;
 mod entity;
 mod forms;
 mod helpers;
+mod pages;
 mod reconnect;
 mod runtime_service;
 mod surface;
 mod view_state;
 
 pub(in crate::workspace) use entity::{
-    ForwardingDeliveryIntent, ForwardingWorkspaceEntity, ForwardingWorkspaceEvent,
+    ForwardingDeliveryIntent, ForwardingPageScope, ForwardingWorkspaceEntity,
+    ForwardingWorkspaceEvent,
 };
 pub(in crate::workspace) use reconnect::{
     cleanup_reconnect_created_forwards, forward_restore_failure_label,
@@ -116,14 +118,6 @@ const TW_RED_900: u32 = 0x7f1d1d;
 const TW_RED_950: u32 = 0x450a0a;
 const TW_YELLOW_400: u32 = 0xfacc15;
 const TW_YELLOW_900: u32 = 0x713f12;
-
-fn forwarding_tab_mount_is_visible(
-    tab_id: TabId,
-    active_tab_id: Option<TabId>,
-    has_detached_window: bool,
-) -> bool {
-    active_tab_id == Some(tab_id) || has_detached_window
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub(super) enum ForwardInput {
@@ -223,20 +217,6 @@ impl Default for ForwardsViewState {
             last_port_scan_started: None,
             last_stats_refresh: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod visibility_tests {
-    use super::*;
-
-    #[test]
-    fn forwarding_tab_visibility_covers_main_detached_and_hidden_mounts() {
-        let tab_id = TabId(9);
-
-        assert!(forwarding_tab_mount_is_visible(tab_id, Some(tab_id), false));
-        assert!(forwarding_tab_mount_is_visible(tab_id, None, true));
-        assert!(!forwarding_tab_mount_is_visible(tab_id, None, false));
     }
 }
 

@@ -1178,6 +1178,12 @@
     "hint_other": "Zen 模式 — 按 Ctrl+Shift+Z 退出"
   },
   "tabbar": {
+    "drag_to_dock": "拖曳停靠",
+    "workspace": "工作區",
+    "merge_into_horizontal": "併入「{{title}}」（左右分割）",
+    "merge_into_vertical": "併入「{{title}}」（上下分割）",
+    "move_pane_to_tab": "移至新分頁",
+    "move_pane_to_window": "移至新視窗",
     "offline": "離線",
     "cancel_reconnect": "取消重新連線",
     "reconnect": "重新連線",
@@ -1294,5 +1300,13 @@
     "setup_pending": "正在建立可攜金鑰庫...",
     "unlock_submit": "解鎖並繼續",
     "unlock_pending": "正在解鎖可攜資料..."
+  },
+  "local_session": {
+    "directory": "啟動目錄",
+    "inherit_directory": "留空使用設定中的預設目錄",
+    "inherit_shell": "使用設定中的預設 Shell",
+    "shell_unavailable": "此裝置沒有此工作階段儲存的 Shell，請編輯並選擇已安裝的 Shell。",
+    "directory_unavailable": "啟動目錄不存在，請編輯工作階段並選擇有效目錄。",
+    "name_required": "請輸入名稱以儲存本機工作階段。"
   }
 }

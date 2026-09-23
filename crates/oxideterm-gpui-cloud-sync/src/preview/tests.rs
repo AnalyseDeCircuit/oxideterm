@@ -355,3 +355,34 @@ fn quick_command(id: &str, name: &str, command: &str) -> QuickCommand {
         updated_at: 1,
     }
 }
+
+#[test]
+fn local_profile_icon_change_appears_in_sync_preview() {
+    let before: SavedConnectionsSyncSnapshot = serde_json::from_value(serde_json::json!({
+        "revision": "before", "exportedAt": "2026-09-23T00:00:00Z", "records": [],
+        "localTerminalProfiles": [{
+            "id": "project", "name": "Project", "icon": "terminal",
+            "created_at": "2026-09-23T00:00:00Z", "updated_at": "2026-09-23T00:00:00Z"
+        }]
+    }))
+    .unwrap();
+    let mut after = before.clone();
+    after.local_terminal_profiles[0].icon = Some("debian".into());
+    let mut changes = Vec::new();
+    push_upload_connection_field_diffs(&mut changes, Some(&before), &after);
+    assert_eq!(
+        changes,
+        vec![CloudSyncFieldDiffItem {
+            section_label_key: "plugin.cloud_sync.settings.sync_connections",
+            item_key: "project".into(),
+            item_name: "Project".into(),
+            status: CloudSyncFieldDiffStatus::Modified,
+            fields: vec![CloudSyncFieldDiffField {
+                label_key: "sessionManager.edit_properties.icon",
+                before: Some("terminal".into()),
+                after: Some("debian".into()),
+                merge_outcome: None,
+            }],
+        }]
+    );
+}

@@ -35,6 +35,12 @@ pub(super) fn filter_saved_connection_snapshot(
 ) {
     if let Some(selected_ids) = selected_ids {
         snapshot
+            .local_terminal_profiles
+            .retain(|p| selected_ids.contains(&p.id));
+        snapshot
+            .local_terminal_tombstones
+            .retain(|p| selected_ids.contains(&p.id));
+        snapshot
             .records
             .retain(|record| selected_ids.contains(&record.id));
     }

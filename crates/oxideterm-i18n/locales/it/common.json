@@ -1178,6 +1178,12 @@
     "hint_other": "Modalità Zen — Premi Ctrl+Shift+Z per uscire"
   },
   "tabbar": {
+    "drag_to_dock": "Trascina per ancorare",
+    "workspace": "Area di lavoro",
+    "merge_into_horizontal": "Unisci a «{{title}}» (affiancati)",
+    "merge_into_vertical": "Unisci a «{{title}}» (sovrapposti)",
+    "move_pane_to_tab": "Sposta in una nuova scheda",
+    "move_pane_to_window": "Sposta in una nuova finestra",
     "offline": "Offline",
     "cancel_reconnect": "Annulla riconnessione",
     "reconnect": "Riconnetti",
@@ -1294,5 +1300,13 @@
     "setup_pending": "Creazione del keystore portatile...",
     "unlock_submit": "Sblocca e continua",
     "unlock_pending": "Sblocco dei dati portatili..."
+  },
+  "local_session": {
+    "directory": "Directory iniziale",
+    "inherit_directory": "Usa la directory predefinita delle impostazioni",
+    "inherit_shell": "Usa la shell predefinita delle impostazioni",
+    "shell_unavailable": "La shell salvata non è disponibile su questo dispositivo. Modifica la sessione e scegli una shell installata.",
+    "directory_unavailable": "La directory iniziale non è disponibile. Modifica la sessione e scegli una directory esistente.",
+    "name_required": "Inserisci un nome per salvare questa sessione locale."
   }
 }

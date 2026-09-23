@@ -13,7 +13,7 @@ impl WorkspaceApp {
                 language,
                 ..
             } if sftp_preview_is_markdown(language.as_deref(), mime_type.as_deref()) => {
-                if self.sftp_view.read(cx).preview_markdown_source_mode {
+                if self.sftp_view().read(cx).preview_markdown_source_mode {
                     self.render_sftp_preview_code(data, Some("markdown"), cx)
                 } else {
                     self.render_sftp_preview_markdown(data, cx)
@@ -77,7 +77,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let showing = offset.saturating_add(chunk_size).min(total_size);
-        let loading_more = self.sftp_view.read(cx).preview_hex_loading_more;
+        let loading_more = self.sftp_view().read(cx).preview_hex_loading_more;
         div()
             .flex()
             .flex_col()
@@ -146,7 +146,7 @@ impl WorkspaceApp {
                     self.render_sftp_text_button(
                         label,
                         false,
-                        cx.listener(move |this, _event, _window, cx| {
+                        self.sftp_listener(cx, move |this, _event, _window, cx| {
                             if !loading_more {
                                 this.load_more_sftp_preview_hex(cx);
                             }

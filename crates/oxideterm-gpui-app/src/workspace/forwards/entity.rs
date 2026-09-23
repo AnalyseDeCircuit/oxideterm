@@ -8,7 +8,11 @@ use crate::workspace::{
     FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT, VirtualListSignatureCache,
 };
 use gpui::{ListAlignment, ListState};
-use std::cell::RefCell;
+use std::{
+    cell::{Cell, RefCell},
+    ops::{Deref, DerefMut},
+    rc::Rc,
+};
 
 pub(in crate::workspace) enum ForwardingDeliveryIntent {
     Operation {
@@ -45,17 +49,16 @@ pub(in crate::workspace) enum ForwardingWorkspaceEvent {
 
 /// Owns forwarding UI delivery and sampling state without owning tunnel lifetime.
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
-    pub(super) view: ForwardsViewState,
+    pages: HashMap<TabId, ForwardingPageState>,
+    idle: ForwardingPageState,
+    dispatch_page: Rc<Cell<Option<TabId>>>,
+    selected_page: Option<TabId>,
     tab_nodes: HashMap<TabId, NodeId>,
     sampling_visible: bool,
     sampling_generation: u64,
     sampling_task: Option<gpui::Task<()>>,
     #[cfg(test)]
     sampling_tick_count: usize,
-    pub(super) section_list_state: ListState,
-    pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) table_row_list_state: ListState,
-    pub(super) table_row_list_cache: RefCell<VirtualListSignatureCache>,
     worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
     runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
@@ -66,48 +69,17 @@ pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     port_profiler_nodes: std::collections::HashSet<NodeId>,
 }
 
-impl ForwardingWorkspaceEntity {
-    #[cfg(test)]
-    pub(super) fn test_fixture() -> Self {
-        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
-        let (_runtime_tx, runtime_event_rx) = std::sync::mpsc::channel();
+pub(in crate::workspace) struct ForwardingPageState {
+    pub(super) view: ForwardsViewState,
+    pub(super) section_list_state: ListState,
+    pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
+    pub(super) table_row_list_state: ListState,
+    pub(super) table_row_list_cache: RefCell<VirtualListSignatureCache>,
+}
+impl ForwardingPageState {
+    fn new() -> Self {
         Self {
             view: ForwardsViewState::default(),
-            tab_nodes: HashMap::new(),
-            sampling_visible: false,
-            sampling_generation: 0,
-            sampling_task: None,
-            sampling_tick_count: 0,
-            section_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
-            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            table_row_list_state: ListState::new(0, ListAlignment::Top, px(0.0)),
-            table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            worker_tx,
-            worker_rx,
-            runtime_event_rx,
-            runtime_service: ForwardingRuntimeService::test_fixture(),
-            runtime_snapshots: HashMap::new(),
-            delivery_intents: VecDeque::new(),
-            port_detection_by_node: HashMap::new(),
-            port_profiler_nodes: std::collections::HashSet::new(),
-        }
-    }
-
-    pub(in crate::workspace) fn new(
-        worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
-        worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
-        runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
-        runtime_service: ForwardingRuntimeService,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let entity = Self {
-            view: ForwardsViewState::default(),
-            tab_nodes: HashMap::new(),
-            sampling_visible: false,
-            sampling_generation: 0,
-            sampling_task: None,
-            #[cfg(test)]
-            sampling_tick_count: 0,
             section_list_state: ListState::new(
                 FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -130,6 +102,109 @@ impl ForwardingWorkspaceEntity {
             )
             .measure_all(),
             table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
+}
+
+/// Synchronous UI dispatch selects a page; async completions must capture and re-enter its ID.
+pub(in crate::workspace) struct ForwardingPageScope {
+    slot: Rc<Cell<Option<TabId>>>,
+    previous: Option<TabId>,
+}
+impl Drop for ForwardingPageScope {
+    fn drop(&mut self) {
+        self.slot.set(self.previous);
+    }
+}
+impl Deref for ForwardingWorkspaceEntity {
+    type Target = ForwardingPageState;
+    fn deref(&self) -> &Self::Target {
+        match self.page_id() {
+            Some(id) => self
+                .pages
+                .get(&id)
+                .expect("forwarding dispatch requires a live page"),
+            None => &self.idle,
+        }
+    }
+}
+impl DerefMut for ForwardingWorkspaceEntity {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self.page_id() {
+            Some(id) => self
+                .pages
+                .get_mut(&id)
+                .expect("forwarding dispatch requires a live page"),
+            None => &mut self.idle,
+        }
+    }
+}
+
+impl ForwardingWorkspaceEntity {
+    pub(in crate::workspace) fn page_id(&self) -> Option<TabId> {
+        self.dispatch_page.get().or(self.selected_page)
+    }
+    pub(in crate::workspace) fn has_page(&self, id: TabId) -> bool {
+        self.pages.contains_key(&id)
+    }
+    pub(in crate::workspace) fn enter_page(&self, id: Option<TabId>) -> ForwardingPageScope {
+        ForwardingPageScope {
+            slot: self.dispatch_page.clone(),
+            previous: self.dispatch_page.replace(id),
+        }
+    }
+    pub(in crate::workspace) fn select_page(&mut self, id: TabId) {
+        if self.selected_page != Some(id) {
+            if let Some(previous) = self.selected_page.and_then(|id| self.pages.get_mut(&id)) {
+                previous.view.focused_input = None;
+            }
+            self.selected_page = Some(id);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_fixture() -> Self {
+        let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
+        let (_runtime_tx, runtime_event_rx) = std::sync::mpsc::channel();
+        Self {
+            pages: HashMap::new(),
+            idle: ForwardingPageState::new(),
+            dispatch_page: Rc::new(Cell::new(None)),
+            selected_page: None,
+            tab_nodes: HashMap::new(),
+            sampling_visible: false,
+            sampling_generation: 0,
+            sampling_task: None,
+            sampling_tick_count: 0,
+            worker_tx,
+            worker_rx,
+            runtime_event_rx,
+            runtime_service: ForwardingRuntimeService::test_fixture(),
+            runtime_snapshots: HashMap::new(),
+            delivery_intents: VecDeque::new(),
+            port_detection_by_node: HashMap::new(),
+            port_profiler_nodes: std::collections::HashSet::new(),
+        }
+    }
+
+    pub(in crate::workspace) fn new(
+        worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
+        worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
+        runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
+        runtime_service: ForwardingRuntimeService,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let entity = Self {
+            pages: HashMap::new(),
+            idle: ForwardingPageState::new(),
+            dispatch_page: Rc::new(Cell::new(None)),
+            selected_page: None,
+            tab_nodes: HashMap::new(),
+            sampling_visible: false,
+            sampling_generation: 0,
+            sampling_task: None,
+            #[cfg(test)]
+            sampling_tick_count: 0,
             worker_tx,
             worker_rx,
             runtime_event_rx,
@@ -230,6 +305,10 @@ impl ForwardingWorkspaceEntity {
         node_id: NodeId,
         _cx: &mut Context<Self>,
     ) {
+        self.pages
+            .entry(tab_id)
+            .or_insert_with(ForwardingPageState::new);
+        self.selected_page = Some(tab_id);
         self.tab_nodes.insert(tab_id, node_id.clone());
         self.refresh_runtime_snapshot(&node_id);
     }
@@ -237,6 +316,13 @@ impl ForwardingWorkspaceEntity {
     pub(in crate::workspace) fn unmap_tab(&mut self, tab_id: TabId) -> Option<NodeId> {
         // Removing a view mapping must not release the registry-owned tunnel.
         let removed = self.tab_nodes.remove(&tab_id);
+        self.pages.remove(&tab_id);
+        if self.dispatch_page.get() == Some(tab_id) {
+            self.dispatch_page.set(None);
+        }
+        if self.selected_page == Some(tab_id) {
+            self.selected_page = None;
+        }
         if let Some(node_id) = removed.as_ref()
             && !self.tab_nodes.values().any(|mapped| mapped == node_id)
         {
@@ -626,6 +712,53 @@ mod tests {
         let state = entity.port_detection_state(&node_id).unwrap();
         assert_eq!(state.connection_id.as_deref(), Some("connection-b"));
         assert!(state.new_ports.is_empty());
+    }
+
+    #[gpui::test]
+    fn page_form_exit_keeps_other_page_drafts_and_runtime_mapping(cx: &mut TestAppContext) {
+        let entity = cx.new(|_| ForwardingWorkspaceEntity::test_fixture());
+        let [a, b] = [TabId(1), TabId(2)];
+        entity.update(cx, |state, cx| {
+            for (id, port) in [(a, "8081"), (b, "8082")] {
+                state.map_tab_to_node(id, NodeId::new("shared-node"), cx);
+                let _scope = state.enter_page(Some(id));
+                state.open_create_form();
+                state.focus_input(ForwardInput::CreateBindPort);
+                state.replace_input_text(ForwardInput::CreateBindPort, None, port);
+            }
+            let _scope = state.enter_page(Some(a));
+            assert!(state.begin_create_form_exit(Duration::from_millis(100), cx));
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(120));
+        cx.run_until_parked();
+        entity.update(cx, |state, cx| {
+            {
+                let _scope = state.enter_page(Some(a));
+                assert!(!state.view().show_new_form);
+                assert_eq!(state.view().bind_port, "8081");
+            }
+            assert!(state.view().show_new_form);
+            assert_eq!(state.view().bind_port, "8082");
+            assert_eq!(
+                state.view().focused_input,
+                Some(ForwardInput::CreateBindPort)
+            );
+            {
+                let _scope = state.enter_page(Some(a));
+                state.open_create_form();
+                assert!(state.begin_create_form_exit(Duration::from_millis(100), cx));
+            }
+            state.unmap_tab(a);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(120));
+        cx.run_until_parked();
+        entity.read_with(cx, |state, _| {
+            assert_eq!(state.node_for_tab(b), Some(NodeId::new("shared-node")));
+            assert!(state.view().show_new_form);
+            assert_eq!(state.view().bind_port, "8082");
+        });
     }
 
     #[gpui::test]

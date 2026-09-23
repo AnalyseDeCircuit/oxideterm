@@ -447,6 +447,19 @@ class MacosDmgDetachTests(unittest.TestCase):
 
 
 class ReleaseDocumentTests(unittest.TestCase):
+    def test_distribution_artwork_matches_the_recorded_hashes(self) -> None:
+        import hashlib
+        import re
+
+        notice = (package_native.THIRD_PARTY_LICENSE_DIR / "DISTRO-ICONS-NOTICE.md").read_text()
+        assets = re.findall(r"Bundled file: `([^`]+)`\.\n- SHA-256: `([0-9a-f]+)`", notice)
+        self.assertEqual([Path(path).stem for path, _ in assets], ["ubuntu", "archlinux", "debian", "gentoo", "nixos", "rocky", "linuxmint"])
+        asset_directory = package_native.ROOT_DIR / "crates/oxideterm-gpui-app/resources/distro-icons"
+        self.assertEqual({Path(path).name for path, _ in assets}, {path.name for path in asset_directory.glob("*.svg")})
+        for path, expected_hash in assets:
+            with self.subTest(asset=path):
+                self.assertEqual(hashlib.sha256((package_native.ROOT_DIR / path).read_bytes()).hexdigest(), expected_hash)
+
     def test_release_documents_include_native_and_agent_notices(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory)
@@ -461,6 +474,11 @@ class ReleaseDocumentTests(unittest.TestCase):
                     "MATERIAL-ICON-THEME-LICENSE-MIT",
                     "MICROSOFT-TERMINAL-LICENSE-MIT",
                     "NOTICE",
+                    "DISTRO-ICONS-NOTICE.md",
+                    "CC-BY-SA-3.0.txt",
+                    "CC-BY-SA-4.0.txt",
+                    "CC-BY-SA-2.5.txt",
+                    "CC-BY-4.0.txt",
                     "README.md",
                     "THIRD_PARTY_NOTICES.md",
                     "AGENT_THIRD_PARTY_NOTICES.md",

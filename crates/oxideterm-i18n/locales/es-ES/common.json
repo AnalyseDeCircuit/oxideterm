@@ -1178,6 +1178,12 @@
     "hint_other": "Modo Zen — Pulsa Ctrl+Shift+Z para salir"
   },
   "tabbar": {
+    "drag_to_dock": "Arrastrar para acoplar",
+    "workspace": "Espacio de trabajo",
+    "merge_into_horizontal": "Combinar con «{{title}}» (lado a lado)",
+    "merge_into_vertical": "Combinar con «{{title}}» (apilado)",
+    "move_pane_to_tab": "Mover a nueva pestaña",
+    "move_pane_to_window": "Mover a nueva ventana",
     "offline": "Sin conexión",
     "cancel_reconnect": "Cancelar reconexión",
     "reconnect": "Reconectar",
@@ -1294,5 +1300,13 @@
     "setup_pending": "Creando el almacén de claves portátil...",
     "unlock_submit": "Desbloquear y continuar",
     "unlock_pending": "Desbloqueando los datos portátiles..."
+  },
+  "local_session": {
+    "directory": "Directorio inicial",
+    "inherit_directory": "Usar el directorio predeterminado de Configuración",
+    "inherit_shell": "Usar el shell predeterminado de Configuración",
+    "shell_unavailable": "El shell guardado no está disponible en este dispositivo. Edite la sesión para elegir un shell instalado.",
+    "directory_unavailable": "El directorio inicial no está disponible. Edite la sesión para elegir un directorio existente.",
+    "name_required": "Introduzca un nombre para guardar esta sesión local."
   }
 }

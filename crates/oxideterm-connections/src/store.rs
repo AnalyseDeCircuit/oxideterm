@@ -25,6 +25,7 @@ include!("store/connection_store.rs");
 include!("store/helpers.rs");
 include!("store/sync.rs");
 include!("store/ftp.rs");
+include!("store/local_terminal.rs");
 #[cfg(test)]
 include!("store/tests.rs");
 

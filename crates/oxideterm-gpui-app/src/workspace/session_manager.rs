@@ -16,8 +16,8 @@ use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{Div, EventEmitter, Pixels, Point, Rgba, Task, prelude::*, rgba};
 use oxideterm_connections::{
     AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
-    ConnectionStore, MoshProfile, ProxyHopDraft, RemoteDesktopProfile, SaveConnectionRequest,
-    SavedAuth, SavedConnection, SavedProxyCommand, SavedUpstreamProxyAuth,
+    ConnectionStore, LocalTerminalProfile, MoshProfile, ProxyHopDraft, RemoteDesktopProfile,
+    SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyCommand, SavedUpstreamProxyAuth,
     SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString,
     SerialProfile, SshConfigHost, TelnetProfile,
     oxide_file::{
@@ -280,6 +280,10 @@ pub(super) enum SessionManagerDeleteConfirm {
         id: String,
         name: String,
     },
+    LocalTerminalProfile {
+        id: String,
+        name: String,
+    },
     TelnetProfile {
         id: String,
         name: String,
@@ -308,6 +312,7 @@ pub(super) enum SessionManagerDeleteConfirm {
 pub(super) enum SessionManagerSelectionTarget {
     Connection(String),
     Serial(String),
+    LocalTerminal(String),
     Telnet(String),
     Ftp(String),
     Mosh(String),
@@ -338,6 +343,7 @@ impl SessionManagerDrag {
 pub(super) enum SessionManagerRowActionTarget {
     Connection(String),
     Serial(String),
+    LocalTerminal(String),
     Telnet(String),
     Ftp(String),
     Mosh(String),

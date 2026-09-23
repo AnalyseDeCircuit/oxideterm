@@ -293,76 +293,8 @@ impl WorkspaceApp {
         });
         let sftp_subscription = cx.subscribe(
             &sftp_view,
-            |workspace, _sftp, event: &sftp::SftpWorkspaceEvent, cx| {
-                match event {
-                    sftp::SftpWorkspaceEvent::WorkerEffectsReady(effects) => {
-                        workspace.handle_sftp_worker_effects(effects, cx);
-                    }
-                    sftp::SftpWorkspaceEvent::OpenFileRequested { pane, file } => {
-                        workspace.open_or_preview_sftp_file(*pane, file, cx);
-                    }
-                    sftp::SftpWorkspaceEvent::TransferStateRequested { id, state } => {
-                        workspace.set_sftp_transfer_state(*id, *state, cx);
-                    }
-                    sftp::SftpWorkspaceEvent::CancelOrRemoveTransferRequested { id } => {
-                        workspace.cancel_or_remove_sftp_transfer(*id, cx);
-                    }
-                    sftp::SftpWorkspaceEvent::ResumeIncompleteTransferRequested { transfer_id } => {
-                        workspace.resume_sftp_incomplete_transfer(transfer_id.clone(), cx);
-                    }
-                    sftp::SftpWorkspaceEvent::DiscardIncompleteTransferRequested {
-                        transfer_id,
-                    } => {
-                        workspace.discard_sftp_incomplete_transfer(transfer_id.clone(), cx);
-                    }
-                    sftp::SftpWorkspaceEvent::TooltipRequested { id, label, x, y } => {
-                        workspace.queue_workspace_tooltip(id, label, *x, *y, cx);
-                    }
-                    sftp::SftpWorkspaceEvent::TooltipCleared { id } => {
-                        workspace.clear_workspace_tooltip(id, cx);
-                    }
-                    sftp::SftpWorkspaceEvent::PreviewSaveRequested {
-                        path,
-                        content,
-                        encoding,
-                        line_ending,
-                        generation,
-                        delivery,
-                    } => {
-                        if !workspace.spawn_remote_sftp_preview_save(
-                            path.clone(),
-                            content.clone(),
-                            encoding.clone(),
-                            *line_ending,
-                            *generation,
-                            delivery.clone(),
-                            cx,
-                        ) {
-                            let _ = delivery.send(sftp::SftpWorkerResult::PreviewSaved {
-                                generation: *generation,
-                                path: path.clone(),
-                                content: content.clone(),
-                                network_error_message: workspace
-                                    .i18n
-                                    .t("sftp.errors.connection_lost"),
-                                result: Err("SFTP connection unavailable".to_string()),
-                            });
-                        }
-                    }
-                    sftp::SftpWorkspaceEvent::RemoteLoadReady {
-                        surface_id,
-                        remote_id,
-                        delivery,
-                    } => {
-                        workspace.request_visible_sftp_remote_load(
-                            *surface_id,
-                            remote_id.clone(),
-                            delivery.clone(),
-                            cx,
-                        );
-                    }
-                }
-                cx.notify();
+            |workspace, _, event: &sftp::SftpWorkspaceEvent, cx| {
+                workspace.handle_sftp_surface_event(sftp::SftpSurfaceId::Sidebar, event, cx);
             },
         );
         let terminal = cx.new(|cx| {
@@ -615,6 +547,8 @@ impl WorkspaceApp {
             detached_tab_return_handoff: None,
             next_tab_window_handoff_generation: 0,
             main_window_tabbar_drop_bounds: None,
+            split_drop_regions: Rc::new(RefCell::new(Vec::new())),
+            split_drop_target: None,
             pending_auto_close_terminal_sessions: HashSet::new(),
             auto_close_terminal_sessions_scheduled: false,
             tab_host,
@@ -864,6 +798,9 @@ impl WorkspaceApp {
             _ide_workspace_subscription: ide_workspace_subscription,
             knowledge_workspace,
             sftp_view,
+            sftp_pages: HashMap::new(),
+            sftp_dispatch_surface: Rc::new(Cell::new(None)),
+            sftp_focused_surface: sftp::SftpSurfaceId::Sidebar,
             _sftp_observation: sftp_observation,
             _sftp_subscription: sftp_subscription,
             graphics,
@@ -991,9 +928,14 @@ impl WorkspaceApp {
                 let root = tab.root_pane.as_ref()?;
                 root.contains_pane(pane_id).then(|| {
                     (
-                        tab_background_key(&tab.kind),
+                        tab_background_key(
+                            &self
+                                .terminal_tab_kind_for_pane(pane_id, cx)
+                                .unwrap_or_else(|| tab.kind.clone()),
+                        ),
                         root.session_id_for_pane(pane_id),
-                        tab.kind.clone(),
+                        self.terminal_tab_kind_for_pane(pane_id, cx)
+                            .unwrap_or_else(|| tab.kind.clone()),
                     )
                 })
             })

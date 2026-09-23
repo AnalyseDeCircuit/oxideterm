@@ -132,6 +132,8 @@ fn remote_desktop_apply_preserves_local_credentials_and_valid_gateway_refs() {
         remote_desktop_snapshot(Some("untrusted-remote-keychain-entry"), "remote.test");
     incoming.records[0].ssh_gateway_connection_id = Some("conn-1".to_string());
     let incoming_connections = oxideterm_connections::SavedConnectionsSyncSnapshot {
+        local_terminal_profiles: Vec::new(),
+        local_terminal_tombstones: Vec::new(),
         revision: "incoming-connections".to_string(),
         exported_at: "2026-07-26T00:00:00Z".to_string(),
         records: vec![connection_sync_record(
@@ -241,16 +243,22 @@ fn connection_merge_preserves_independent_full_option_changes() {
     remote_record.options.as_mut().unwrap().ssh_algorithms.mac =
         vec!["hmac-sha2-512-etm@openssh.com".to_string()];
     let base = SavedConnectionsSyncSnapshot {
+        local_terminal_profiles: Vec::new(),
+        local_terminal_tombstones: Vec::new(),
         revision: "base".to_string(),
         exported_at: "2026-01-01T00:00:00Z".to_string(),
         records: vec![base_record],
     };
     let local = SavedConnectionsSyncSnapshot {
+        local_terminal_profiles: Vec::new(),
+        local_terminal_tombstones: Vec::new(),
         revision: "local".to_string(),
         exported_at: "2026-01-01T00:00:00Z".to_string(),
         records: vec![local_record],
     };
     let mut remote = SavedConnectionsSyncSnapshot {
+        local_terminal_profiles: Vec::new(),
+        local_terminal_tombstones: Vec::new(),
         revision: "remote".to_string(),
         exported_at: "2026-01-01T00:00:00Z".to_string(),
         records: vec![remote_record],
@@ -500,4 +508,51 @@ async fn profile_credentials_upload_obeys_resource_selection_without_ssh_sync() 
         }
     }
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn local_profile_cloud_merge_and_selection_preserve_independent_edits() {
+    let now = Utc::now();
+    let profile = oxideterm_connections::LocalTerminalProfile {
+        id: "project".into(),
+        icon: None,
+        color: None,
+        icon_background_color: None,
+        name: "Project".into(),
+        group: None,
+        shell_id: Some("zsh".into()),
+        cwd: Some("~/base".into()),
+        created_at: now,
+        updated_at: now,
+        last_used_at: None,
+    };
+    let base = SavedConnectionsSyncSnapshot {
+        revision: "base".into(),
+        exported_at: now.to_rfc3339(),
+        records: vec![],
+        local_terminal_profiles: vec![profile],
+        local_terminal_tombstones: vec![],
+    };
+    let mut local = base.clone();
+    local.local_terminal_profiles[0].name = "Local name".into();
+    let mut remote = base.clone();
+    remote.local_terminal_profiles[0].cwd = Some("~/remote".into());
+    merge_connection_records(
+        &mut remote,
+        &base,
+        &local,
+        &ConflictStrategy::Merge,
+        &now.to_rfc3339(),
+    )
+    .unwrap();
+    assert_eq!(remote.local_terminal_profiles[0].name, "Local name");
+    assert_eq!(
+        remote.local_terminal_profiles[0].cwd.as_deref(),
+        Some("~/remote")
+    );
+    let mut excluded = remote.local_terminal_profiles[0].clone();
+    excluded.id = "excluded".into();
+    remote.local_terminal_profiles.push(excluded);
+    filter_saved_connection_snapshot(&mut remote, Some(&BTreeSet::from(["project".into()])));
+    assert_eq!(remote.record_ids().collect::<Vec<_>>(), ["project"]);
 }

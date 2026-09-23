@@ -58,6 +58,7 @@ pub(in crate::workspace) enum WorkspaceOverlayIntent {
 pub(in crate::workspace) enum WorkspaceOverlayConfirmKind {
     SettingsReset,
     LegalNotice,
+    ThirdPartyNotices,
     NativeUpdateReleaseNotes,
     NodeDisconnect {
         node_id: NodeId,
@@ -345,7 +346,8 @@ impl WorkspaceOverlayEntity {
                     WorkspaceOverlayConfirmKind::SettingsReset => {
                         WorkspaceOverlayConfirmOwnerKind::SettingsReset
                     }
-                    WorkspaceOverlayConfirmKind::LegalNotice => {
+                    WorkspaceOverlayConfirmKind::LegalNotice
+                    | WorkspaceOverlayConfirmKind::ThirdPartyNotices => {
                         WorkspaceOverlayConfirmOwnerKind::LegalNotice
                     }
                     WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes => {
@@ -435,6 +437,7 @@ impl WorkspaceOverlayEntity {
                     })
                 }
                 WorkspaceOverlayConfirmKind::LegalNotice
+                | WorkspaceOverlayConfirmKind::ThirdPartyNotices
                 | WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes => None,
             }
         } else {

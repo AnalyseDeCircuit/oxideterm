@@ -8,7 +8,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let mut opts = self.localized_markdown_options();
         let (preview_pane, preview_path, markdown_scroll) = {
-            let sftp_view = self.sftp_view.read(cx);
+            let sftp_view = self.sftp_view().read(cx);
             (
                 sftp_view.preview_pane,
                 sftp_view.preview_path.clone(),
@@ -46,7 +46,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (font_error, font_family, font_size) = {
-            let sftp_view = self.sftp_view.read(cx);
+            let sftp_view = self.sftp_view().read(cx);
             (
                 sftp_view.preview_font_error.clone(),
                 sftp_view.preview_font_family.clone(),
@@ -79,8 +79,8 @@ impl WorkspaceApp {
                     .child(self.render_sftp_font_size_button(
                         "-",
                         false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.sftp_view.update(cx, |sftp_view, cx| {
+                        self.sftp_listener(cx, |this, _event, _window, cx| {
+                            this.sftp_view().update(cx, |sftp_view, cx| {
                                 sftp_view.preview_font_size =
                                     (sftp_view.preview_font_size - 4.0).max(8.0);
                                 cx.notify();
@@ -99,8 +99,8 @@ impl WorkspaceApp {
                     .child(self.render_sftp_font_size_button(
                         "+",
                         false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.sftp_view.update(cx, |sftp_view, cx| {
+                        self.sftp_listener(cx, |this, _event, _window, cx| {
+                            this.sftp_view().update(cx, |sftp_view, cx| {
                                 sftp_view.preview_font_size =
                                     (sftp_view.preview_font_size + 4.0).min(120.0);
                                 cx.notify();
@@ -112,8 +112,8 @@ impl WorkspaceApp {
                         self.render_sftp_font_size_button(
                             format!("{size:.0}"),
                             (font_size - size).abs() < f32::EPSILON,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.sftp_view.update(cx, |sftp_view, cx| {
+                            self.sftp_listener(cx, move |this, _event, _window, cx| {
+                                this.sftp_view().update(cx, |sftp_view, cx| {
                                     sftp_view.preview_font_size = size;
                                     cx.notify();
                                 });
@@ -136,7 +136,7 @@ impl WorkspaceApp {
                     .id("sftp-font-preview-scroll")
                     .flex_1()
                     .selectable_overflow_y_scroll(
-                        &self.sftp_view.read(cx).font_preview_scroll,
+                        &self.sftp_view().read(cx).font_preview_scroll,
                     )
                     .p(px(24.0))
                     .bg(rgb(theme.bg_sunken))
@@ -279,7 +279,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace::sftp) fn sftp_preview_uses_virtual_text(&self, cx: &App) -> bool {
         matches!(
-            self.sftp_view.read(cx).preview_content.as_deref(),
+            self.sftp_view().read(cx).preview_content.as_deref(),
             Some(PreviewContent::Text { .. })
         )
     }
@@ -290,11 +290,11 @@ impl WorkspaceApp {
         language: Option<&str>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let existing_editor = self.sftp_view.read(cx).preview_editor.clone();
+        let existing_editor = self.sftp_view().read(cx).preview_editor.clone();
         let editor = existing_editor.unwrap_or_else(|| {
             let tokens = self.tokens;
             let runtime_settings = self.ide_runtime_settings();
-            let preview_path = self.sftp_view.read(cx).preview_path.clone();
+            let preview_path = self.sftp_view().read(cx).preview_path.clone();
             let name = preview_path
                 .as_deref()
                 .and_then(|path| std::path::Path::new(path).file_name())
@@ -327,7 +327,7 @@ impl WorkspaceApp {
                 editor.set_language(syntax_language, cx);
                 editor
             });
-            self.sftp_view.update(cx, |sftp, cx| {
+            self.sftp_view().update(cx, |sftp, cx| {
                 // The same editor entity becomes editable when the user chooses Edit.
                 sftp.preview_editor = Some(editor.clone());
                 cx.notify();

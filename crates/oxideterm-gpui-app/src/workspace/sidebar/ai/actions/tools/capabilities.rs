@@ -790,10 +790,6 @@ pub(in crate::workspace) fn trim_tail_chars(value: &str, max_chars: usize) -> St
     )
 }
 
-pub(in crate::workspace) fn ai_short_id(value: &str) -> String {
-    value.chars().take(8).collect()
-}
-
 pub(in crate::workspace) fn truncate_for_model(value: String, max_chars: usize) -> String {
     let char_count = value.chars().count();
     if char_count <= max_chars {

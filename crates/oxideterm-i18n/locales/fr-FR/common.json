@@ -1178,6 +1178,12 @@
     "hint_other": "Mode Zen — Appuyez sur Ctrl+Shift+Z pour quitter"
   },
   "tabbar": {
+    "drag_to_dock": "Glisser pour ancrer",
+    "workspace": "Espace de travail",
+    "merge_into_horizontal": "Fusionner avec « {{title}} » (côte à côte)",
+    "merge_into_vertical": "Fusionner avec « {{title}} » (superposés)",
+    "move_pane_to_tab": "Déplacer vers un nouvel onglet",
+    "move_pane_to_window": "Déplacer vers une nouvelle fenêtre",
     "offline": "Hors ligne",
     "cancel_reconnect": "Annuler la reconnexion",
     "reconnect": "Reconnecter",
@@ -1294,5 +1300,13 @@
     "setup_pending": "Création du coffre portable...",
     "unlock_submit": "Déverrouiller et continuer",
     "unlock_pending": "Déverrouillage des données portables..."
+  },
+  "local_session": {
+    "directory": "Répertoire de démarrage",
+    "inherit_directory": "Utiliser le répertoire par défaut des paramètres",
+    "inherit_shell": "Utiliser le shell par défaut des paramètres",
+    "shell_unavailable": "Le shell enregistré est indisponible sur cet appareil. Modifiez la session pour choisir un shell installé.",
+    "directory_unavailable": "Le répertoire de démarrage est indisponible. Modifiez la session pour choisir un répertoire existant.",
+    "name_required": "Saisissez un nom pour enregistrer cette session locale."
   }
 }

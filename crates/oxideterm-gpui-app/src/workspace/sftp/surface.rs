@@ -111,7 +111,7 @@ impl WorkspaceApp {
                 )
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
+                    self.sftp_listener(cx, move |this, _event, _window, cx| {
                         this.choose_sftp_presentation(preference, cx);
                         cx.stop_propagation();
                     }),
@@ -121,7 +121,7 @@ impl WorkspaceApp {
             dismissible_dialog_backdrop()
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
+                    self.sftp_listener(cx, |this, _event, _window, cx| {
                         this.sftp_presentation_request = None;
                         cx.stop_propagation();
                         cx.notify();
@@ -190,6 +190,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let _scope = self.enter_sftp_surface(SftpSurfaceId::Sidebar);
         let theme = self.tokens.ui;
         if self
             .active_tab(cx)
@@ -230,7 +231,7 @@ impl WorkspaceApp {
                 .child(self.render_sftp_icon_button(
                     LucideIcon::X,
                     self.i18n.t("sftp.preview.close"),
-                    cx.listener(|this, _event, _window, cx| {
+                    self.sftp_listener(cx, |this, _event, _window, cx| {
                         if let Some(node) = this.embedded_sftp_node_id.clone() {
                             this.close_embedded_sftp_for_node(&node, cx);
                         }
@@ -244,10 +245,10 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Micro,
         );
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.schedule_context_menu_exit(context_menu_exit_delay, cx);
         });
-        let snapshot = self.sftp_view.read(cx).surface_render_snapshot();
+        let snapshot = self.sftp_view().read(cx).surface_render_snapshot();
         let dialog_open = snapshot.dialog_open;
         let context_menu = snapshot.context_menu.clone();
         let node_title = self
@@ -303,7 +304,7 @@ impl WorkspaceApp {
                                 } else {
                                     "sftp.sidebar.pin"
                                 }),
-                                cx.listener(|this, _event, _window, cx| {
+                                self.sftp_listener(cx, |this, _event, _window, cx| {
                                     this.embedded_sftp_pinned = !this.embedded_sftp_pinned;
                                     this.activate_embedded_sftp_sidebar_if_visible(cx);
                                     cx.notify();
@@ -322,7 +323,7 @@ impl WorkspaceApp {
                             .child(self.render_sftp_icon_button(
                                 LucideIcon::Upload,
                                 self.i18n.t("sftp.context.upload"),
-                                cx.listener(|this, _event, _window, cx| {
+                                self.sftp_listener(cx, |this, _event, _window, cx| {
                                     this.browse_sftp_upload_files(cx);
                                     cx.stop_propagation();
                                 }),
@@ -331,34 +332,38 @@ impl WorkspaceApp {
                             .child(self.render_sftp_icon_button(
                                 LucideIcon::MoreVertical,
                                 self.i18n.t("sftp.sidebar.actions"),
-                                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                                    this.sftp_view.update(cx, |sftp, cx| {
-                                        let selected_file = sftp
-                                            .remote_last_selected
-                                            .as_ref()
-                                            .and_then(|name| {
-                                                sftp.remote_files
-                                                    .iter()
-                                                    .find(|file| &file.name == name)
-                                            })
-                                            .cloned();
-                                        sftp.open_context_menu(
-                                            SftpPane::Remote,
-                                            selected_file,
-                                            f32::from(event.position.x),
-                                            f32::from(event.position.y),
-                                            cx,
-                                        );
-                                    });
-                                    cx.stop_propagation();
-                                }),
+                                self.sftp_listener(
+                                    cx,
+                                    move |this, event: &MouseDownEvent, _window, cx| {
+                                        this.sftp_view().update(cx, |sftp, cx| {
+                                            let selected_file = sftp
+                                                .remote_last_selected
+                                                .as_ref()
+                                                .and_then(|name| {
+                                                    sftp.remote_files
+                                                        .iter()
+                                                        .find(|file| &file.name == name)
+                                                })
+                                                .cloned();
+                                            sftp.open_context_menu(
+                                                SftpPane::Remote,
+                                                selected_file,
+                                                f32::from(event.position.x),
+                                                f32::from(event.position.y),
+                                                cx,
+                                            );
+                                        });
+                                        cx.stop_propagation();
+                                    },
+                                ),
                                 cx.entity(),
                             ))
                             .child(self.render_sftp_icon_button(
                                 LucideIcon::ExternalLink,
                                 self.i18n.t("sftp.sidebar.open_tab"),
-                                cx.listener(move |this, _event, _window, cx| {
-                                    let current_path = this.sftp_view.read(cx).remote_path.clone();
+                                self.sftp_listener(cx, move |this, _event, _window, cx| {
+                                    let current_path =
+                                        this.sftp_view().read(cx).remote_path.clone();
                                     this.open_sftp_tab_surface(
                                         open_node_id.clone(),
                                         Some(current_path),
@@ -373,7 +378,7 @@ impl WorkspaceApp {
                             .child(self.render_sftp_icon_button(
                                 LucideIcon::X,
                                 self.i18n.t("sftp.preview.close"),
-                                cx.listener(move |this, _event, _window, cx| {
+                                self.sftp_listener(cx, move |this, _event, _window, cx| {
                                     this.close_embedded_sftp_for_node(&close_node_id, cx);
                                     cx.stop_propagation();
                                 }),
@@ -407,12 +412,17 @@ impl WorkspaceApp {
         }
         if !dialog_open
             && snapshot.focused_input == Some(SftpInput::RemotePath)
-            && let Some(completion) =
-                self.render_path_completion_overlay(PathCompletionOwner::SftpRemote, cx)
+            && let Some(completion) = self.render_path_completion_overlay(
+                PathCompletionOwner::SftpRemote(self.sftp_surface_id()),
+                cx,
+            )
         {
             root = root.child(completion);
         }
-        root.into_any_element()
+        root.capture_any_mouse_down(cx.listener(|this, _: &MouseDownEvent, _, cx| {
+            this.focus_sftp_surface(SftpSurfaceId::Sidebar, cx);
+        }))
+        .into_any_element()
     }
 
     fn render_sftp_sidebar_path_bar(
@@ -471,7 +481,7 @@ impl WorkspaceApp {
                         ))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _event, _window, cx| {
+                            self.sftp_listener(cx, |this, _event, _window, cx| {
                                 this.commit_sftp_path_input(SftpPane::Remote, cx);
                                 cx.stop_propagation();
                             }),
@@ -490,7 +500,7 @@ impl WorkspaceApp {
                 )
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
+                    self.sftp_listener(cx, |this, _event, window, cx| {
                         window.focus(&this.focus_handle, cx);
                         this.start_sftp_path_edit(SftpPane::Remote, cx);
                         cx.stop_propagation();
@@ -518,16 +528,27 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let _scope = self.enter_sftp_surface(SftpSurfaceId::Tab(tab_id));
         let theme = self.tokens.ui;
         let Some(remote_id) = self.sftp_remote_id_for_tab(tab_id) else {
             return self.render_empty_workspace(f32::from(window.viewport_size().width), cx);
         };
+        if self.sftp_view().read(cx).remote_load_pending
+            && !self.sftp_view().read(cx).remote_load_inflight
+        {
+            self.request_visible_sftp_remote_load(
+                SftpSurfaceId::Tab(tab_id),
+                remote_id.clone(),
+                self.sftp_view().read(cx).worker_sender(),
+                cx,
+            );
+        }
         let has_background = self.background_surface_active("sftp");
         let context_menu_exit_delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Micro,
         );
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.schedule_context_menu_exit(context_menu_exit_delay, cx);
         });
         let SftpSurfaceRenderSnapshot {
@@ -540,7 +561,7 @@ impl WorkspaceApp {
             context_menu,
             local,
             remote,
-        } = self.sftp_view.read(cx).surface_render_snapshot();
+        } = self.sftp_view().read(cx).surface_render_snapshot();
         let queue_height = self.sftp_queue_height_for_window(window, cx);
         let local_active = active_pane == SftpPane::Local;
         let remote_active = active_pane == SftpPane::Remote;
@@ -594,6 +615,7 @@ impl WorkspaceApp {
             _ => remote_title,
         };
 
+        let surface = self.sftp_view().clone();
         let mut root = div()
             .id("sftp-view")
             .size_full()
@@ -605,10 +627,10 @@ impl WorkspaceApp {
             .bg(sftp_bg(theme.bg, has_background))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
+                self.sftp_listener(cx, |this, _event, window, cx| {
                     window.focus(&this.focus_handle, cx);
                     let menu_changed = this
-                        .sftp_view
+                        .sftp_view()
                         .update(cx, |sftp, _cx| sftp.clear_context_menu_immediately());
                     if menu_changed {
                         // Ordinary pane clicks already repaint through their
@@ -692,15 +714,18 @@ impl WorkspaceApp {
                             .occlude()
                             .on_mouse_down(
                                 MouseButton::Left,
-                                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                                    if event.click_count >= 2 {
-                                        this.reset_sftp_pane_split(cx);
-                                    } else {
-                                        this.start_sftp_pane_resize(event, cx);
-                                    }
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                }),
+                                self.sftp_listener(
+                                    cx,
+                                    |this, event: &MouseDownEvent, window, cx| {
+                                        if event.click_count >= 2 {
+                                            this.reset_sftp_pane_split(cx);
+                                        } else {
+                                            this.start_sftp_pane_resize(event, cx);
+                                        }
+                                        window.prevent_default();
+                                        cx.stop_propagation();
+                                    },
+                                ),
                             ),
                     ),
             )
@@ -719,7 +744,7 @@ impl WorkspaceApp {
                     .occlude()
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                        self.sftp_listener(cx, |this, event: &MouseDownEvent, window, cx| {
                             if event.click_count >= 2 {
                                 this.reset_sftp_queue_height(window, cx);
                             } else {
@@ -736,8 +761,12 @@ impl WorkspaceApp {
         }
         if !dialog_open {
             let completion_owner = match focused_input {
-                Some(SftpInput::LocalPath) => Some(PathCompletionOwner::SftpLocal),
-                Some(SftpInput::RemotePath) => Some(PathCompletionOwner::SftpRemote),
+                Some(SftpInput::LocalPath) => {
+                    Some(PathCompletionOwner::SftpLocal(self.sftp_surface_id()))
+                }
+                Some(SftpInput::RemotePath) => {
+                    Some(PathCompletionOwner::SftpRemote(self.sftp_surface_id()))
+                }
                 _ => None,
             };
             if let Some(owner) = completion_owner
@@ -747,7 +776,25 @@ impl WorkspaceApp {
             }
         }
 
-        root.into_any_element()
+        let root =
+            root.capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                this.focus_sftp_surface(SftpSurfaceId::Tab(tab_id), cx);
+            }));
+        div()
+            .size_full()
+            .child(root)
+            .on_children_prepainted(move |bounds, _, cx| {
+                let Some(bounds) = bounds.first() else {
+                    return;
+                };
+                surface.update(cx, |sftp, cx| {
+                    if sftp.surface_size != Some(bounds.size) {
+                        sftp.surface_size = Some(bounds.size);
+                        cx.notify();
+                    }
+                });
+            })
+            .into_any_element()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -806,9 +853,9 @@ impl WorkspaceApp {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                self.sftp_listener(cx, move |this, _event, window, cx| {
                     window.focus(&this.focus_handle, cx);
-                    this.sftp_view.update(cx, |sftp, cx| {
+                    this.sftp_view().update(cx, |sftp, cx| {
                         if sftp.active_pane != pane {
                             sftp.active_pane = pane;
                             cx.notify();
@@ -910,7 +957,7 @@ impl WorkspaceApp {
             .child(self.render_sftp_icon_button(
                 LucideIcon::Pencil,
                 self.i18n.t("sftp.preview.edit"),
-                cx.listener(move |this, _event, _window, cx| {
+                self.sftp_listener(cx, move |this, _event, _window, cx| {
                     this.start_sftp_path_edit(pane, cx);
                     cx.stop_propagation();
                 }),
@@ -922,8 +969,8 @@ impl WorkspaceApp {
                 .child(self.render_sftp_icon_button(
                     LucideIcon::HardDrive,
                     self.i18n.t("sftp.toolbar.show_drives"),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.sftp_view.update(cx, |sftp, cx| {
+                    self.sftp_listener(cx, |this, _event, _window, cx| {
+                        this.sftp_view().update(cx, |sftp, cx| {
                             sftp.drives_scroll = ScrollHandle::new();
                             sftp.set_dialog(SftpDialog::Drives);
                             cx.notify();
@@ -935,7 +982,7 @@ impl WorkspaceApp {
                 .child(self.render_sftp_icon_button(
                     LucideIcon::FolderOpen,
                     self.i18n.t("sftp.toolbar.browse_folder"),
-                    cx.listener(|this, _event, _window, cx| {
+                    self.sftp_listener(cx, |this, _event, _window, cx| {
                         this.browse_sftp_local_folder(cx);
                         cx.stop_propagation();
                     }),
@@ -1046,7 +1093,7 @@ impl WorkspaceApp {
                         ))
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
+                            self.sftp_listener(cx, move |this, _event, _window, cx| {
                                 this.commit_sftp_path_input(pane, cx);
                                 cx.stop_propagation();
                             }),
@@ -1058,8 +1105,8 @@ impl WorkspaceApp {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                    this.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_listener(cx, move |this, event: &MouseDownEvent, _window, cx| {
+                    this.sftp_view().update(cx, |sftp, cx| {
                         let mut changed = false;
                         if sftp.active_pane != pane {
                             sftp.active_pane = pane;
@@ -1116,8 +1163,8 @@ impl WorkspaceApp {
             || (pane == SftpPane::Local && self.sftp_pair_primary_remote_id(cx).is_some());
         let segments = sftp_path_segments(path, pane_is_remote);
         let scroll_handle = match pane {
-            SftpPane::Local => self.sftp_view.read(cx).local_path_scroll.clone(),
-            SftpPane::Remote => self.sftp_view.read(cx).remote_path_scroll.clone(),
+            SftpPane::Local => self.sftp_view().read(cx).local_path_scroll.clone(),
+            SftpPane::Remote => self.sftp_view().read(cx).remote_path_scroll.clone(),
         };
         let mut inner = div()
             .flex_none()
@@ -1192,7 +1239,7 @@ impl WorkspaceApp {
                     ))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
+                        self.sftp_listener(cx, move |this, _event, _window, cx| {
                             this.set_sftp_path(pane, full_path.clone(), cx);
                             cx.stop_propagation();
                         }),
@@ -1213,11 +1260,12 @@ impl WorkspaceApp {
             .overflow_hidden()
             .track_scroll(&scroll_handle)
             .text_size(px(SFTP_TEXT_SM))
-            .on_scroll_wheel(
-                cx.listener(move |this, event: &ScrollWheelEvent, _window, cx| {
+            .on_scroll_wheel(self.sftp_listener(
+                cx,
+                move |this, event: &ScrollWheelEvent, _window, cx| {
                     this.handle_sftp_breadcrumb_scroll(pane, event, cx);
-                }),
-            )
+                },
+            ))
             .child(
                 // Track the direct content row so GPUI measures the real overflow width.
                 inner,
@@ -1345,7 +1393,7 @@ impl WorkspaceApp {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                self.sftp_listener(cx, move |this, _event, _window, cx| {
                     this.toggle_sftp_sort(pane, field, cx);
                     cx.stop_propagation();
                 }),
@@ -1406,8 +1454,8 @@ impl WorkspaceApp {
                         .child("×")
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.sftp_view.update(cx, |sftp, cx| {
+                            self.sftp_listener(cx, move |this, _event, _window, cx| {
+                                this.sftp_view().update(cx, |sftp, cx| {
                                     sftp.input_value_mut(input).clear();
                                     cx.notify();
                                 });
@@ -1418,8 +1466,8 @@ impl WorkspaceApp {
             })
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_listener(cx, move |this, _event, _window, cx| {
+                    this.sftp_view().update(cx, |sftp, cx| {
                         let mut changed = false;
                         if sftp.active_pane != pane {
                             sftp.active_pane = pane;
@@ -1448,7 +1496,7 @@ impl WorkspaceApp {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = WorkspaceImeTarget::Sftp(input);
+        let target = WorkspaceImeTarget::Sftp(self.sftp_surface_id(), input);
         let control = text_input(
             &self.tokens,
             TextInputView {
@@ -1475,7 +1523,7 @@ impl WorkspaceApp {
             target,
             control,
             move |this, cx| {
-                this.sftp_view.update(cx, |sftp, cx| {
+                this.sftp_view().update(cx, |sftp, cx| {
                     if let Some(pane) = pane {
                         sftp.active_pane = pane;
                     }

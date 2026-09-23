@@ -58,7 +58,7 @@ impl CloudSyncOperationService {
             manifest.sections.connections = Some(crate::StructuredObjectEntry {
                 revision: connections_revision,
                 path: path.clone(),
-                record_count: Some(snapshot.records.len()),
+                record_count: Some(snapshot.record_count()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {

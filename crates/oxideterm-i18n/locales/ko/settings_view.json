@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "업데이트 프록시가 사용하는 포트입니다.",
       "update_proxy_no_proxy": "프록시 제외 대상",
       "update_proxy_no_proxy_hint": "프록시를 거치지 않을 호스트를 쉼표로 구분해 입력합니다.",
-      "update_proxy_legal_hint": "프록시 기능은 현지 법률 및 규정을 준수하여 사용하세요."
+      "update_proxy_legal_hint": "프록시 기능은 현지 법률 및 규정을 준수하여 사용하세요.",
+      "third_party_notices": "타사 고지",
+      "third_party_notices_description": "포함된 의존성과 그래픽의 저작자 표시 및 원본 라이선스 링크입니다."
     },
     "errors": {
       "create_group_failed": "그룹 생성 실패: {{error}}",

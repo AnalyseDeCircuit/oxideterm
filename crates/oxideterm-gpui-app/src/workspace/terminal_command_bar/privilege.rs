@@ -8,18 +8,8 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
-        let Some(active_tab) = self.active_tab(cx) else {
-            log_privilege_prompt_helper(format_args!("scope unavailable: no active tab"));
-            return None;
-        };
-        match &active_tab.kind {
-            TabKind::LocalTerminal => {
-                if self.active_tab_has_serial_terminal(cx) {
-                    log_privilege_prompt_helper(format_args!(
-                        "scope unavailable: local tab is backed by a serial terminal"
-                    ));
-                    return None;
-                }
+        match self.active_terminal_kind(cx)? {
+            oxideterm_terminal::TerminalSessionKind::LocalPty => {
                 // Local shell sudo/su prompts have no SavedConnection owner. Use a
                 // dedicated store scope so secrets are never confused with SSH
                 // connection credentials.
@@ -34,7 +24,7 @@ impl WorkspaceApp {
                 ));
                 Some((connection_id, credentials))
             }
-            TabKind::SshTerminal => {
+            oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let Some(session_id) = self.active_terminal_session_id(cx) else {
                     log_privilege_prompt_helper(format_args!(
                         "scope unavailable: ssh tab has no active terminal session"
@@ -73,13 +63,7 @@ impl WorkspaceApp {
                 ));
                 Some((connection_id, credentials))
             }
-            tab_kind => {
-                log_privilege_prompt_helper(format_args!(
-                    "scope unavailable: tab_kind={}",
-                    tab_kind_privilege_scope_name(tab_kind)
-                ));
-                None
-            }
+            _ => None,
         }
     }
 
@@ -373,15 +357,17 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn render_terminal_surface(
-        &self,
+        &mut self,
         root_pane: &PaneNode,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let terminal = self.render_pane_tree(root_pane, cx);
+        let terminal = self.render_pane_tree(root_pane, window, cx);
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
-        if !self.settings_store.settings().terminal.command_bar.enabled {
+        if self.active_pane(cx).is_none()
+            || !self.settings_store.settings().terminal.command_bar.enabled
+        {
             return div()
                 .size_full()
                 .relative()
@@ -442,9 +428,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn render_detached_terminal_surface(
-        &self,
+        &mut self,
         tab_id: TabId,
         root_pane: &PaneNode,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Detached windows share terminal pane entities with the workspace, but
@@ -454,7 +441,7 @@ impl WorkspaceApp {
         div()
             .size_full()
             .relative()
-            .child(self.render_pane_tree_for_tab(Some(tab_id), root_pane, cx))
+            .child(self.render_pane_tree_for_tab(Some(tab_id), root_pane, window, cx))
             .into_any_element()
     }
 }

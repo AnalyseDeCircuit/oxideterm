@@ -8,7 +8,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let snapshot = self.sftp_view.read(cx).preview_audio.snapshot();
+        let snapshot = self.sftp_view().read(cx).preview_audio.snapshot();
         let name = std::path::Path::new(path)
             .file_name()
             .and_then(|name| name.to_str())
@@ -141,8 +141,9 @@ impl WorkspaceApp {
                                     SFTP_TEXT_XS,
                                 )
                             },
-                            cx.listener(move |this, _event, _window, cx| {
-                                let now = this.sftp_view.read(cx).preview_audio.snapshot().position;
+                            self.sftp_listener(cx, move |this, _event, _window, cx| {
+                                let now =
+                                    this.sftp_view().read(cx).preview_audio.snapshot().position;
                                 let next = now.saturating_sub(std::time::Duration::from_secs(15));
                                 this.seek_sftp_preview_audio(next, cx);
                                 cx.notify();
@@ -164,8 +165,8 @@ impl WorkspaceApp {
                                     SFTP_TEXT_XS,
                                 )
                             },
-                            cx.listener(move |this, _event, _window, cx| {
-                                let snapshot = this.sftp_view.read(cx).preview_audio.snapshot();
+                            self.sftp_listener(cx, move |this, _event, _window, cx| {
+                                let snapshot = this.sftp_view().read(cx).preview_audio.snapshot();
                                 let Some(duration) = snapshot.duration else {
                                     return;
                                 };
@@ -214,7 +215,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
         {
-            let video_surface = self.sftp_view.read(_cx).preview_video_surface.clone();
+            let video_surface = self.sftp_view().read(_cx).preview_video_surface.clone();
             let snapshot = video_surface.snapshot();
             let detail = snapshot
                 .error
@@ -226,7 +227,7 @@ impl WorkspaceApp {
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
-            let snapshot = self.sftp_view.read(_cx).preview_video_surface.snapshot();
+            let snapshot = self.sftp_view().read(_cx).preview_video_surface.snapshot();
             let detail = snapshot
                 .error
                 .unwrap_or_else(|| format!("{} backend is unavailable", snapshot.backend));
@@ -359,7 +360,7 @@ impl WorkspaceApp {
                 hover_text_color: None,
                 ..ToolbarButtonOptions::default()
             },
-            cx.listener(move |this, _event, _window, cx| {
+            self.sftp_listener(cx, move |this, _event, _window, cx| {
                 this.open_sftp_preview_external(&path, cx);
                 cx.stop_propagation();
                 cx.notify();

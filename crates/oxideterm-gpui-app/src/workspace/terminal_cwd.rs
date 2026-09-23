@@ -672,7 +672,7 @@ impl WorkspaceTerminalEntity {
     }
 }
 
-fn terminal_cwd_snapshot_from_pane(
+pub(in crate::workspace) fn terminal_cwd_snapshot_from_pane(
     scope: CurrentDirectoryScope,
     pane: &TerminalPane,
 ) -> Option<CurrentDirectorySnapshot> {
@@ -806,9 +806,9 @@ impl WorkspaceApp {
     ) -> Option<(CurrentDirectoryScope, PaneId)> {
         let tab = self.active_tab(cx)?;
         let pane_id = tab.active_pane_id?;
-        let scope = match tab.kind {
-            TabKind::LocalTerminal => CurrentDirectoryScope::Local,
-            TabKind::SshTerminal => {
+        let scope = match self.terminal_kind_for_pane(pane_id, cx)? {
+            oxideterm_terminal::TerminalSessionKind::LocalPty => CurrentDirectoryScope::Local,
+            oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let session_id = self.active_terminal_session_id(cx)?;
                 let node_id = self
                     .workspace_runtime

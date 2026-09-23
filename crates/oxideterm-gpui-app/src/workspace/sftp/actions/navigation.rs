@@ -9,7 +9,7 @@ impl WorkspaceApp {
     ) -> bool {
         let key = event.keystroke.key.as_str();
         if matches!(
-            self.sftp_view.read(cx).dialog,
+            self.sftp_view().read(cx).dialog,
             Some(SftpDialog::Editor { .. })
         ) {
             if crate::keybindings::keystroke_matches_action(
@@ -33,7 +33,7 @@ impl WorkspaceApp {
             return true;
         }
         let (dialog, focused_input) = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             (sftp.dialog.clone(), sftp.focused_input)
         };
         if dialog.is_some() && focused_input.is_none() {
@@ -45,7 +45,7 @@ impl WorkspaceApp {
                     &self.settings_store.settings().keybindings.overrides,
                 )
             {
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     sftp.preview_markdown_source_mode = !sftp.preview_markdown_source_mode;
                     cx.notify();
                 });
@@ -101,7 +101,7 @@ impl WorkspaceApp {
                         SftpInput::LocalPath => self.cancel_sftp_path_edit(SftpPane::Local, cx),
                         SftpInput::RemotePath => self.cancel_sftp_path_edit(SftpPane::Remote, cx),
                         _ => {
-                            self.sftp_view.update(cx, |sftp, cx| {
+                            self.sftp_view().update(cx, |sftp, cx| {
                                 sftp.focused_input = None;
                                 cx.notify();
                             });
@@ -141,7 +141,7 @@ impl WorkspaceApp {
             }
             return false;
         }
-        let active_pane = self.sftp_view.read(cx).active_pane;
+        let active_pane = self.sftp_view().read(cx).active_pane;
         let overrides = &self.settings_store.settings().keybindings.overrides;
         let action = [
             ("sftp.selectAll", "selectAll"),
@@ -173,22 +173,22 @@ impl WorkspaceApp {
         match command {
             "selectAll" => {
                 self.select_all_sftp_files(active_pane, cx);
-                self.sftp_view
+                self.sftp_view()
                     .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
                 cx.notify();
                 true
             }
             "editPath" => {
                 self.start_sftp_path_edit(active_pane, cx);
-                self.sftp_view
+                self.sftp_view()
                     .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
                 cx.notify();
                 true
             }
             "escape" => {
-                self.sftp_view
+                self.sftp_view()
                     .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     sftp.focused_input = None;
                     cx.notify();
                 });
@@ -222,7 +222,7 @@ impl WorkspaceApp {
             }
             "right" | "arrowright" => {
                 if active_pane == SftpPane::Local
-                    && !self.sftp_view.read(cx).local_selected.is_empty()
+                    && !self.sftp_view().read(cx).local_selected.is_empty()
                 {
                     self.queue_sftp_transfers(SftpPane::Local, SftpTransferDirection::Upload, cx);
                     cx.notify();
@@ -232,7 +232,7 @@ impl WorkspaceApp {
             }
             "left" | "arrowleft" => {
                 if active_pane == SftpPane::Remote
-                    && !self.sftp_view.read(cx).remote_selected.is_empty()
+                    && !self.sftp_view().read(cx).remote_selected.is_empty()
                 {
                     self.queue_sftp_transfers(
                         SftpPane::Remote,
@@ -247,7 +247,7 @@ impl WorkspaceApp {
             "delete" | "backspace" => {
                 let files = self.sftp_selected_names(active_pane, cx);
                 if !files.is_empty() {
-                    self.sftp_view.update(cx, |sftp, cx| {
+                    self.sftp_view().update(cx, |sftp, cx| {
                         sftp.set_dialog(SftpDialog::Delete {
                             pane: active_pane,
                             files,
@@ -261,7 +261,7 @@ impl WorkspaceApp {
             }
             "f2" | "F2" => {
                 if let Some(file) = self.single_selected_sftp_file(active_pane, cx) {
-                    self.sftp_view.update(cx, |sftp, cx| {
+                    self.sftp_view().update(cx, |sftp, cx| {
                         sftp.open_rename_dialog(active_pane, file.name, cx);
                     });
                     cx.notify();
@@ -294,14 +294,14 @@ impl WorkspaceApp {
         match pane {
             SftpPane::Local => {
                 if self.sftp_pair_primary_remote_id(cx).is_some() {
-                    self.sftp_view.update(cx, |sftp, cx| {
+                    self.sftp_view().update(cx, |sftp, cx| {
                         sftp.apply_pair_primary_path(path);
                         cx.notify();
                     });
                     self.request_sftp_pair_primary_load(cx);
                     return;
                 }
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     if let Some(remote_id) = sftp.current_remote_id.clone() {
                         sftp.local_path_by_remote.insert(remote_id, path.clone());
                     }
@@ -310,7 +310,7 @@ impl WorkspaceApp {
                 });
             }
             SftpPane::Remote => {
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     sftp.apply_remote_path(path);
                     cx.notify();
                 });
@@ -323,7 +323,7 @@ impl WorkspaceApp {
         // Tauri's editable SFTP path input cancels on DOM blur unless the Go
         // button takes focus. Native does not model that button focus target
         // yet, so Tab/Escape restore the current committed path explicitly.
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.cancel_path_edit(pane);
             cx.notify();
         });
@@ -339,7 +339,7 @@ impl WorkspaceApp {
             SftpInput::LocalPath => self.cancel_sftp_path_edit(SftpPane::Local, cx),
             SftpInput::RemotePath => self.cancel_sftp_path_edit(SftpPane::Remote, cx),
             SftpInput::LocalFilter | SftpInput::RemoteFilter | SftpInput::DialogValue => {
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     sftp.focused_input = None;
                     cx.notify();
                 });
@@ -354,7 +354,7 @@ impl WorkspaceApp {
         pane: SftpPane,
         cx: &mut Context<Self>,
     ) {
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.start_path_edit(pane);
             cx.notify();
         });
@@ -377,14 +377,14 @@ impl WorkspaceApp {
     }
 
     fn refresh_sftp_local_path_completion(&mut self, cx: &mut Context<Self>) {
-        let path_input = self.sftp_view.read(cx).local_path_input.clone();
+        let path_input = self.sftp_view().read(cx).local_path_input.clone();
         let Some(request) = local_path_completion_request(&path_input) else {
-            self.sftp_view
+            self.sftp_view()
                 .update(cx, |sftp, _cx| sftp.local_path_completion.dismiss());
             return;
         };
         let request = self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, _cx| sftp.local_path_completion.request(request));
         let Some((generation, parent_path)) = request else {
             return;
@@ -394,7 +394,7 @@ impl WorkspaceApp {
             .into_iter()
             .map(sftp_path_completion_candidate)
             .collect();
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.local_path_completion
                 .apply_entries(generation, &parent_path, entries);
             cx.notify();
@@ -402,21 +402,21 @@ impl WorkspaceApp {
     }
 
     fn refresh_sftp_remote_path_completion(&mut self, cx: &mut Context<Self>) {
-        let path_input = self.sftp_view.read(cx).remote_path_input.clone();
+        let path_input = self.sftp_view().read(cx).remote_path_input.clone();
         let Some(request) = remote_path_completion_request(&path_input) else {
-            self.sftp_view
+            self.sftp_view()
                 .update(cx, |sftp, _cx| sftp.remote_path_completion.dismiss());
             return;
         };
         let request = self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, _cx| sftp.remote_path_completion.request(request));
         let Some((generation, parent_path)) = request else {
             return;
         };
 
         let current_entries = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             (parent_path == sftp.remote_path && !sftp.remote_loading).then(|| {
                 sftp.remote_files
                     .iter()
@@ -426,7 +426,7 @@ impl WorkspaceApp {
             })
         };
         if let Some(entries) = current_entries {
-            self.sftp_view.update(cx, |sftp, cx| {
+            self.sftp_view().update(cx, |sftp, cx| {
                 sftp.remote_path_completion
                     .apply_entries(generation, &parent_path, entries);
                 cx.notify();
@@ -434,8 +434,8 @@ impl WorkspaceApp {
             return;
         }
 
-        let Some(remote_id) = self.sftp_view.read(cx).current_remote_id.clone() else {
-            self.sftp_view.update(cx, |sftp, cx| {
+        let Some(remote_id) = self.sftp_view().read(cx).current_remote_id.clone() else {
+            self.sftp_view().update(cx, |sftp, cx| {
                 sftp.remote_path_completion
                     .apply_entries(generation, &parent_path, Vec::new());
                 cx.notify();
@@ -445,7 +445,7 @@ impl WorkspaceApp {
         let Some(backend) = self.sftp_remote_backend(&remote_id) else {
             return;
         };
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
         runtime.spawn(async move {
             // Completion borrows a short-lived channel from the selected remote owner.
@@ -468,14 +468,14 @@ impl WorkspaceApp {
     }
 
     fn refresh_sftp_pair_primary_path_completion(&mut self, cx: &mut Context<Self>) {
-        let path_input = self.sftp_view.read(cx).local_path_input.clone();
+        let path_input = self.sftp_view().read(cx).local_path_input.clone();
         let Some(request) = remote_path_completion_request(&path_input) else {
-            self.sftp_view
+            self.sftp_view()
                 .update(cx, |sftp, _cx| sftp.local_path_completion.dismiss());
             return;
         };
         let request = self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, _cx| sftp.local_path_completion.request(request));
         let Some((generation, parent_path)) = request else {
             return;
@@ -486,7 +486,7 @@ impl WorkspaceApp {
         let Some(backend) = self.sftp_remote_backend(&remote_id) else {
             return;
         };
-        let tx = self.sftp_view.read(cx).worker_sender();
+        let tx = self.sftp_view().read(cx).worker_sender();
         self.forwarding_runtime.spawn(async move {
             let result = load_remote_sftp_completion_listing(backend, &parent_path)
                 .await
@@ -513,7 +513,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some((candidate, parent_path)) = ({
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             let state = match pane {
                 SftpPane::Local => &sftp.local_path_completion,
                 SftpPane::Remote => &sftp.remote_path_completion,
@@ -540,7 +540,7 @@ impl WorkspaceApp {
         self.set_sftp_path(pane, parent_path.clone(), cx);
         match pane {
             SftpPane::Local => {
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     if sftp
                         .local_files
                         .iter()
@@ -554,7 +554,7 @@ impl WorkspaceApp {
             }
             SftpPane::Remote => {
                 // The parent listing arrives asynchronously; apply selection with that result.
-                self.sftp_view.update(cx, |sftp, _cx| {
+                self.sftp_view().update(cx, |sftp, _cx| {
                     sftp.remote_path_completion_pending_selection =
                         Some((parent_path, candidate.name));
                 });
@@ -580,7 +580,7 @@ impl WorkspaceApp {
             SftpPane::Remote
         };
         let is_visible = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             match pane {
                 SftpPane::Local => sftp.local_path_completion.is_visible(),
                 SftpPane::Remote => sftp.remote_path_completion.is_visible(),
@@ -590,7 +590,7 @@ impl WorkspaceApp {
             return false;
         }
         match event.keystroke.key.as_str() {
-            "up" | "arrowup" => self.sftp_view.update(cx, |sftp, cx| {
+            "up" | "arrowup" => self.sftp_view().update(cx, |sftp, cx| {
                 let changed = match pane {
                     SftpPane::Local => sftp.local_path_completion.move_selection(-1),
                     SftpPane::Remote => sftp.remote_path_completion.move_selection(-1),
@@ -600,7 +600,7 @@ impl WorkspaceApp {
                 }
                 changed
             }),
-            "down" | "arrowdown" => self.sftp_view.update(cx, |sftp, cx| {
+            "down" | "arrowdown" => self.sftp_view().update(cx, |sftp, cx| {
                 let changed = match pane {
                     SftpPane::Local => sftp.local_path_completion.move_selection(1),
                     SftpPane::Remote => sftp.remote_path_completion.move_selection(1),
@@ -612,7 +612,7 @@ impl WorkspaceApp {
             }),
             "enter" | "tab" => {
                 let index = {
-                    let sftp = self.sftp_view.read(cx);
+                    let sftp = self.sftp_view().read(cx);
                     match pane {
                         SftpPane::Local => sftp.local_path_completion.selected_index(),
                         SftpPane::Remote => sftp.remote_path_completion.selected_index(),
@@ -622,7 +622,7 @@ impl WorkspaceApp {
                 true
             }
             "escape" => {
-                self.sftp_view.update(cx, |sftp, cx| {
+                self.sftp_view().update(cx, |sftp, cx| {
                     match pane {
                         SftpPane::Local => sftp.local_path_completion.dismiss(),
                         SftpPane::Remote => sftp.remote_path_completion.dismiss(),
@@ -642,8 +642,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let scroll_handle = match pane {
-            SftpPane::Local => self.sftp_view.read(cx).local_path_scroll.clone(),
-            SftpPane::Remote => self.sftp_view.read(cx).remote_path_scroll.clone(),
+            SftpPane::Local => self.sftp_view().read(cx).local_path_scroll.clone(),
+            SftpPane::Remote => self.sftp_view().read(cx).remote_path_scroll.clone(),
         };
         if let Some(changed) =
             scroll_breadcrumb_by_wheel(&scroll_handle, event, px(SFTP_PANE_HEADER_HEIGHT))
@@ -661,7 +661,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let path = {
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             match pane {
                 SftpPane::Local if sftp.pair_primary_remote_id.is_some() => {
                     normalize_remote_path(&sftp.local_path_input)
@@ -683,7 +683,7 @@ impl WorkspaceApp {
     ) {
         let next = match (pane, target) {
             (SftpPane::Local, "~") if self.sftp_pair_primary_remote_id(cx).is_some() => {
-                let sftp = self.sftp_view.read(cx);
+                let sftp = self.sftp_view().read(cx);
                 sftp.pair_primary_remote_id
                     .as_ref()
                     .and_then(|remote_id| sftp.remote_home_by_remote.get(remote_id))
@@ -692,7 +692,7 @@ impl WorkspaceApp {
             }
             (SftpPane::Local, "~") => home_path(),
             (SftpPane::Remote, "~") => {
-                let sftp = self.sftp_view.read(cx);
+                let sftp = self.sftp_view().read(cx);
                 sftp.current_remote_id
                     .as_ref()
                     .and_then(|remote_id| sftp.remote_home_by_remote.get(remote_id))
@@ -700,10 +700,10 @@ impl WorkspaceApp {
                     .unwrap_or_else(|| "/".to_string())
             }
             (SftpPane::Local, "..") => parent_path(
-                &self.sftp_view.read(cx).local_path,
+                &self.sftp_view().read(cx).local_path,
                 self.sftp_pair_primary_remote_id(cx).is_some(),
             ),
-            (SftpPane::Remote, "..") => parent_path(&self.sftp_view.read(cx).remote_path, true),
+            (SftpPane::Remote, "..") => parent_path(&self.sftp_view().read(cx).remote_path, true),
             _ => target.to_string(),
         };
         self.set_sftp_path(pane, next, cx);
@@ -715,7 +715,7 @@ impl WorkspaceApp {
         field: SftpSortField,
         cx: &mut Context<Self>,
     ) {
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.toggle_sort(pane, field);
             cx.notify();
         });
@@ -728,7 +728,7 @@ impl WorkspaceApp {
         y: f32,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.sftp_view
+        self.sftp_view()
             .update(cx, |sftp, _cx| sftp.update_drag(pane, x, y))
     }
 
@@ -741,7 +741,7 @@ impl WorkspaceApp {
         // keeps the candidate alive after the pointer leaves the file list, but
         // only pane-level move handlers may nominate a drop target.
         if self
-            .sftp_view
+            .sftp_view()
             .update(cx, |sftp, cx| sftp.update_drag_capture(position, cx))
         {
             cx.notify();
@@ -753,7 +753,7 @@ impl WorkspaceApp {
         pane: SftpPane,
         cx: &mut Context<Self>,
     ) -> bool {
-        let (drag, had_target) = self.sftp_view.update(cx, |sftp, _cx| {
+        let (drag, had_target) = self.sftp_view().update(cx, |sftp, _cx| {
             let drag = sftp.drag_state.take();
             let had_target = sftp.drag_over_pane.take().is_some();
             sftp.stop_drag_autoscroll();
@@ -794,7 +794,7 @@ impl WorkspaceApp {
         // Browser pointer capture always produces a terminal mouse-up. If the
         // user releases outside both panes, cancel the candidate so hover rings
         // and pending drag state cannot remain latched.
-        self.sftp_view
+        self.sftp_view()
             .update(cx, |sftp, _cx| sftp.cancel_drag_capture())
     }
 
@@ -803,12 +803,12 @@ impl WorkspaceApp {
         pane: SftpPane,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.sftp_view
+        self.sftp_view()
             .update(cx, |sftp, _cx| sftp.clear_selection(pane))
     }
 
     fn select_all_sftp_files(&mut self, pane: SftpPane, cx: &mut Context<Self>) {
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.select_all_files(pane);
             cx.notify();
         });
@@ -820,7 +820,7 @@ impl WorkspaceApp {
         delta: isize,
         cx: &mut Context<Self>,
     ) -> bool {
-        self.sftp_view
+        self.sftp_view()
             .update(cx, |sftp, _cx| sftp.move_selection(pane, delta))
     }
 
@@ -829,11 +829,11 @@ impl WorkspaceApp {
         pane: SftpPane,
         cx: &App,
     ) -> Vec<String> {
-        self.sftp_view.read(cx).selected_names(pane)
+        self.sftp_view().read(cx).selected_names(pane)
     }
 
     fn single_selected_sftp_file(&self, pane: SftpPane, cx: &App) -> Option<SftpFileEntry> {
-        self.sftp_view.read(cx).single_selected_file(pane)
+        self.sftp_view().read(cx).single_selected_file(pane)
     }
 }
 

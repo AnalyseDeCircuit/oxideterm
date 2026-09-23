@@ -1178,6 +1178,12 @@
     "hint_other": "Zen Mode — Press Ctrl+Shift+Z to exit"
   },
   "tabbar": {
+    "drag_to_dock": "Drag to dock",
+    "workspace": "Workspace",
+    "merge_into_horizontal": "Merge into “{{title}}” (side by side)",
+    "merge_into_vertical": "Merge into “{{title}}” (stacked)",
+    "move_pane_to_tab": "Move to new tab",
+    "move_pane_to_window": "Move to new window",
     "offline": "Offline",
     "cancel_reconnect": "Cancel reconnect",
     "reconnect": "Reconnect",
@@ -1294,5 +1300,13 @@
     "setup_pending": "Creating portable keystore...",
     "unlock_submit": "Unlock & continue",
     "unlock_pending": "Unlocking portable data..."
+  },
+  "local_session": {
+    "directory": "Startup directory",
+    "inherit_directory": "Use the default directory from Settings",
+    "inherit_shell": "Use the default shell from Settings",
+    "shell_unavailable": "The saved shell is unavailable on this device. Edit the session to choose an installed shell.",
+    "directory_unavailable": "The startup directory is unavailable. Edit the session to choose an existing directory.",
+    "name_required": "Enter a name to save this local session."
   }
 }

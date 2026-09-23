@@ -576,6 +576,16 @@ impl ConnectionStore {
                 profile.updated_at = now;
             }
         }
+        for profile in &mut self.data.local_terminal_profiles {
+            if profile
+                .group
+                .as_deref()
+                .is_some_and(|group| group_path_is_within(group, &name))
+            {
+                profile.group = None;
+                profile.updated_at = now;
+            }
+        }
         for profile in &mut self.data.telnet_profiles {
             if profile
                 .group
@@ -677,6 +687,17 @@ impl ConnectionStore {
                 updated += 1;
             }
         }
+        for profile in &mut self.data.local_terminal_profiles {
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
         for profile in &mut self.data.telnet_profiles {
             if let Some(renamed) = profile
                 .group
@@ -740,7 +761,7 @@ impl ConnectionStore {
     }
 
     pub fn move_to_group(&mut self, ids: &[String], group: Option<&str>) -> Result<usize> {
-        self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], &[], group)
+        self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], &[], &[], group)
     }
 
     /// Moves all saved Session Manager asset types in one metadata save.
@@ -748,6 +769,7 @@ impl ConnectionStore {
         &mut self,
         connection_ids: &[String],
         serial_profile_ids: &[String],
+        local_terminal_profile_ids: &[String],
         telnet_profile_ids: &[String],
         mosh_profile_ids: &[String],
         standalone_sftp_profile_ids: &[String],
@@ -757,6 +779,7 @@ impl ConnectionStore {
     ) -> Result<usize> {
         let group = normalize_optional_group_name(group)?;
         let connection_id_set = connection_ids.iter().collect::<HashSet<_>>();
+        let local_terminal_profile_id_set = local_terminal_profile_ids.iter().collect::<HashSet<_>>();
         let serial_profile_id_set = serial_profile_ids.iter().collect::<HashSet<_>>();
         let telnet_profile_id_set = telnet_profile_ids.iter().collect::<HashSet<_>>();
         let mosh_profile_id_set = mosh_profile_ids.iter().collect::<HashSet<_>>();
@@ -775,6 +798,13 @@ impl ConnectionStore {
         }
         for profile in &mut self.data.serial_profiles {
             if serial_profile_id_set.contains(&profile.id) {
+                profile.group = group.clone();
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
+        for profile in &mut self.data.local_terminal_profiles {
+            if local_terminal_profile_id_set.contains(&profile.id) {
                 profile.group = group.clone();
                 profile.updated_at = now;
                 updated += 1;
@@ -3453,6 +3483,7 @@ impl ConnectionStore {
         self.data.connection_tombstones =
             active_connection_tombstones(&self.data.connection_tombstones);
         self.data.ftp_tombstones = active_connection_tombstones(&self.data.ftp_tombstones);
+        self.data.local_terminal_tombstones = active_connection_tombstones(&self.data.local_terminal_tombstones);
         self.data
             .recent
             .retain(|recent_id| self.data.connections.iter().any(|conn| &conn.id == recent_id));
@@ -3501,6 +3532,7 @@ impl ConnectionStore {
                     .iter()
                     .filter_map(|profile| profile.group.clone()),
             )
+            .chain(self.data.local_terminal_profiles.iter().filter_map(|profile| profile.group.clone()))
             .collect::<Vec<_>>();
         for group in implicit_local_groups {
             if !self.data.groups.contains(&group) {
@@ -3517,6 +3549,7 @@ impl ConnectionStore {
         self.data
             .connections
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+        self.data.local_terminal_profiles.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         self.data
             .serial_profiles
             .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));

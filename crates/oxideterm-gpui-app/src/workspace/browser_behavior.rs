@@ -527,6 +527,7 @@ pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptu
             | BrowserPointerCaptureOwner::TerminalCommandSenderResize
             | BrowserPointerCaptureOwner::TerminalQuickCommandsResize
             | BrowserPointerCaptureOwner::HostToolsTabScrollbar
+            | BrowserPointerCaptureOwner::TabDrag
     )
 }
 
@@ -539,7 +540,7 @@ impl WorkspaceApp {
             return Some(BrowserPointerCaptureOwner::KnowledgeResize);
         }
         let host_tools_tab_scrollbar_dragging = self.host_tools_tab_scrollbar_drag_active(cx);
-        let sftp = self.sftp_view.read(cx);
+        let sftp = self.sftp_view().read(cx);
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {
             sidebar_resizing: self.sidebar_resizing,
             embedded_sftp_sidebar_resizing: self.embedded_sftp_sidebar_resizing,
@@ -720,6 +721,9 @@ mod tests {
         ));
         assert!(pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::HostToolsTabScrollbar
+        ));
+        assert!(pointer_capture_needs_workspace_overlay(
+            BrowserPointerCaptureOwner::TabDrag
         ));
         assert!(!pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::TextSelection

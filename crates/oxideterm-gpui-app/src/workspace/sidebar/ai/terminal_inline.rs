@@ -8,6 +8,7 @@ pub(in crate::workspace) const AI_INLINE_PANEL_LOADING_BAR_HEIGHT: f32 = 2.0;
 #[derive(Default)]
 pub(in crate::workspace) struct AiInlinePanelState {
     pub(in crate::workspace) open: bool,
+    pub(in crate::workspace) target: Option<(PaneId, TerminalSessionId)>,
     pub(in crate::workspace) prompt: String,
     pub(in crate::workspace) response: String,
     pub(in crate::workspace) error: Option<String>,
@@ -27,6 +28,31 @@ pub(in crate::workspace) struct AiInlinePanelPlacement {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn terminal_ai_inline_target_pane(
+        &self,
+        cx: &App,
+    ) -> Option<Entity<TerminalPane>> {
+        let (pane_id, session_id) = self.ai_entity.read(cx).terminal_inline_panel().target?;
+        self.tab_host
+            .read(cx)
+            .terminal_pane_for_target(pane_id, session_id)
+    }
+
+    pub(in crate::workspace) fn terminal_ai_inline_window(
+        &self,
+        cx: &App,
+    ) -> Option<gpui::WindowId> {
+        let (_, session_id) = self.ai_entity.read(cx).terminal_inline_panel().target?;
+        let host = self.tab_host.read(cx);
+        let location = host.terminal_location(session_id)?;
+        host.detached_window_handle(location.tab_id)
+            .or_else(|| {
+                self.window_registry
+                    .handle_for_role(crate::workspace::window_registry::WindowRole::Main)
+            })
+            .map(|handle| handle.window_id())
+    }
+
     fn terminal_ai_keybinding_label(&self, id: &str) -> Option<String> {
         crate::keybindings::action_definition(id)
             .and_then(|definition| {
@@ -56,14 +82,21 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(id) = self.active_pane_id(cx) {
-            self.hide_search(id, cx);
-        }
+        let Some(pane_id) = self.terminal_pane_for_window(window, cx) else {
+            return;
+        };
+        let Some(session_id) = self.session_id_for_pane(pane_id, cx) else {
+            return;
+        };
+        self.hide_search(pane_id, cx);
         self.close_terminal_command_overlays(cx);
         self.close_ai_model_selector(cx);
 
         let selection = self
-            .active_pane(cx)
+            .tab_host
+            .read(cx)
+            .panes()
+            .get(&pane_id)
             .and_then(|pane| pane.read(cx).selected_text_snapshot())
             .unwrap_or_default();
         let sanitized_selection = truncate_ai_inline_context(
@@ -72,6 +105,7 @@ impl WorkspaceApp {
         );
         self.ai_entity.update(cx, |ai, _cx| {
             ai.open_terminal_inline_panel(sanitized_selection);
+            ai.terminal_inline_panel_mut().target = Some((pane_id, session_id));
         });
 
         window.focus(&self.focus_handle, cx);
@@ -84,11 +118,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let pane = self.terminal_ai_inline_target_pane(cx);
+        let own_window =
+            self.terminal_ai_inline_window(cx) == Some(window.window_handle().window_id());
         self.ai_entity
             .update(cx, |ai, _cx| ai.close_terminal_inline_panel());
         self.ime_marked_text = None;
         self.close_ai_model_selector(cx);
-        self.focus_active_pane(window, cx);
+        if own_window && let Some(pane) = pane {
+            pane.update(cx, |pane, cx| pane.focus(window, cx));
+        }
         cx.notify();
     }
 
@@ -98,9 +137,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.terminal_ai_inline_window(cx) != Some(window.window_handle().window_id()) {
+            return false;
+        }
         let (panel_open, panel_loading, response_is_empty) = {
             let panel = self.ai_entity.read(cx).terminal_inline_panel();
-            (panel.open, panel.loading, panel.response.trim().is_empty())
+            (
+                panel.open && panel.prompt_focused,
+                panel.loading,
+                panel.response.trim().is_empty(),
+            )
         };
         let submit = crate::keybindings::keystroke_matches_action(
             &event.keystroke,
@@ -511,7 +557,7 @@ window.focus(&this.focus_handle, cx);
             AI_INLINE_PANEL_COLLAPSED_HEIGHT
         };
         let anchor = self
-            .active_pane(cx)
+            .terminal_ai_inline_target_pane(cx)
             .and_then(|pane| pane.read(cx).cursor_anchor());
         terminal_ai_inline_panel_placement(anchor, estimated_height)
     }
@@ -637,15 +683,15 @@ window.focus(&this.focus_handle, cx);
     }
 
     pub(in crate::workspace) fn send_terminal_ai_inline_prompt(&mut self, cx: &mut Context<Self>) {
-        let Some((prompt, selection)) = self
-            .ai_entity
-            .read(cx)
-            .terminal_inline_request_context()
+        let Some((prompt, selection)) = self.ai_entity.read(cx).terminal_inline_request_context()
         else {
             return;
         };
+        let Some(pane) = self.terminal_ai_inline_target_pane(cx) else {
+            return;
+        };
         let messages = terminal_ai_inline_messages(
-            terminal_ai_inline_os_context(self.active_tab(cx)),
+            terminal_ai_inline_os_context(pane.read(cx).session_kind()),
             selection,
             prompt,
         );
@@ -691,7 +737,7 @@ window.focus(&this.focus_handle, cx);
         if command.trim().is_empty() {
             return;
         }
-        if let Some(pane) = self.active_pane(cx) {
+        if let Some(pane) = self.terminal_ai_inline_target_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 pane.send_ai_input_bytes(command.as_bytes(), cx);
             });
@@ -710,7 +756,7 @@ window.focus(&this.focus_handle, cx);
         if command.trim().is_empty() {
             return;
         }
-        if let Some(pane) = self.active_pane(cx) {
+        if let Some(pane) = self.terminal_ai_inline_target_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 pane.begin_command_mark(
                     &command,
@@ -859,7 +905,7 @@ pub(in crate::workspace) fn terminal_ai_inline_panel_placement(
 }
 
 pub(in crate::workspace) fn terminal_ai_inline_os_context(
-    tab: Option<&oxideterm_workspace::Tab>,
+    kind: oxideterm_terminal::TerminalSessionKind,
 ) -> String {
     let local_os = if cfg!(target_os = "macos") {
         "macOS"
@@ -870,14 +916,20 @@ pub(in crate::workspace) fn terminal_ai_inline_os_context(
     } else {
         "Unknown"
     };
-    match tab.map(|tab| tab.kind.clone()) {
-        Some(oxideterm_workspace::TabKind::SshTerminal) => {
+    match kind {
+        oxideterm_terminal::TerminalSessionKind::SshPty => {
             format!("SSH terminal (remote OS unknown, local: {local_os})")
         }
-        Some(oxideterm_workspace::TabKind::MoshTerminal) => {
+        oxideterm_terminal::TerminalSessionKind::Mosh => {
             format!("Mosh terminal (remote OS unknown, local: {local_os})")
         }
-        _ => format!("Local terminal on {local_os}"),
+        oxideterm_terminal::TerminalSessionKind::LocalPty => {
+            format!("Local terminal on {local_os}")
+        }
+        oxideterm_terminal::TerminalSessionKind::Telnet => "Telnet (remote OS unknown)".into(),
+        oxideterm_terminal::TerminalSessionKind::Serial => {
+            "Serial device (command interface unknown)".into()
+        }
     }
 }
 

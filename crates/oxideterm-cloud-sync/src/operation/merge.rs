@@ -167,9 +167,37 @@ pub(super) fn merge_connection_records(
     conflict_strategy: &ConflictStrategy,
     merged_at: &str,
 ) -> Result<bool> {
+    let mut local_profiles_changed = false;
+    for remote_profile in &mut remote.local_terminal_profiles {
+        let Some(base_profile) = base
+            .local_terminal_profiles
+            .iter()
+            .find(|p| p.id == remote_profile.id)
+        else {
+            continue;
+        };
+        let Some(local_profile) = local
+            .local_terminal_profiles
+            .iter()
+            .find(|p| p.id == remote_profile.id)
+        else {
+            continue;
+        };
+        if let Some(mut merged) = merge_structured_model_fields(
+            base_profile,
+            local_profile,
+            remote_profile,
+            conflict_strategy,
+        )? {
+            merged.updated_at =
+                chrono::DateTime::parse_from_rfc3339(merged_at)?.with_timezone(&Utc);
+            *remote_profile = merged;
+            local_profiles_changed = true;
+        }
+    }
     let base_records = sync_records_by_id(&base.records);
     let local_records = sync_records_by_id(&local.records);
-    let mut changed = false;
+    let mut changed = local_profiles_changed;
     for remote_record in &mut remote.records {
         if remote_record.deleted {
             continue;

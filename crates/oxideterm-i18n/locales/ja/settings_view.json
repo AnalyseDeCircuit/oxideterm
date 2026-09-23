@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "アップデートプロキシで使用するポートです。",
       "update_proxy_no_proxy": "プロキシを使わない宛先",
       "update_proxy_no_proxy_hint": "プロキシを使わないホストをカンマ区切りで指定します。",
-      "update_proxy_legal_hint": "プロキシ機能は現地の法令に従って使用してください。"
+      "update_proxy_legal_hint": "プロキシ機能は現地の法令に従って使用してください。",
+      "third_party_notices": "第三者に関する表記",
+      "third_party_notices_description": "同梱の依存ライブラリと画像の帰属表示、および原ライセンスへのリンク。"
     },
     "errors": {
       "create_group_failed": "グループの作成に失敗しました: {{error}}",

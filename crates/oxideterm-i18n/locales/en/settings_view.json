@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "Port used by the update proxy.",
       "update_proxy_no_proxy": "Bypass Proxy For",
       "update_proxy_no_proxy_hint": "Comma-separated hosts that should bypass the proxy.",
-      "update_proxy_legal_hint": "Please use the proxy feature in compliance with local laws and regulations."
+      "update_proxy_legal_hint": "Please use the proxy feature in compliance with local laws and regulations.",
+      "third_party_notices": "Third-party notices",
+      "third_party_notices_description": "Bundled dependency and artwork attribution, with links to their original licenses."
     },
     "errors": {
       "create_group_failed": "Failed to create group: {{error}}",

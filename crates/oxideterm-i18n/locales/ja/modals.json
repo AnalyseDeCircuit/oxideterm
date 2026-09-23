@@ -363,7 +363,7 @@
       "save_failed": "接続の保存に失敗しました",
       "transport_local_terminal": "ローカルターミナル",
       "local_terminal_description": "現在のターミナル設定でこのデバイス上のシェルを開きます。",
-      "local_terminal_detail": "このセッションはすぐに開かれ、保存済み接続には追加されません。",
+      "local_terminal_detail": "プロジェクトのシェルと開始ディレクトリを保存します。開くたびに独立した端末を作成します。",
       "local_terminal_open": "ターミナルを開く",
       "transport_ssh": "SSH ホスト",
       "advanced_group": "高度な接続",

@@ -434,9 +434,6 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn active_ssh_terminal_node_id(&self, cx: &App) -> Option<NodeId> {
         let tab = self.active_tab(cx)?;
-        if tab.kind != TabKind::SshTerminal {
-            return None;
-        }
         let pane_id = tab.active_pane_id?;
         let session_id = tab.root_pane.as_ref()?.session_id_for_pane(pane_id)?;
         self.workspace_runtime

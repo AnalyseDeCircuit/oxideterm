@@ -363,7 +363,7 @@
       "save_failed": "Salvataggio connessione fallito",
       "transport_local_terminal": "Terminale locale",
       "local_terminal_description": "Apri una shell su questo dispositivo con le impostazioni attuali del terminale.",
-      "local_terminal_detail": "Questa sessione viene aperta subito e non viene aggiunta alle connessioni salvate.",
+      "local_terminal_detail": "Salva la shell e la directory iniziale del progetto. Ogni apertura crea un terminale indipendente.",
       "local_terminal_open": "Apri terminale",
       "transport_ssh": "Host SSH",
       "advanced_group": "Connessioni avanzate",

@@ -1178,6 +1178,12 @@
     "hint_other": "Zen-Modus — Drücken Sie Ctrl+Shift+Z zum Beenden"
   },
   "tabbar": {
+    "drag_to_dock": "Zum Andocken ziehen",
+    "workspace": "Arbeitsbereich",
+    "merge_into_horizontal": "Mit „{{title}}“ zusammenführen (nebeneinander)",
+    "merge_into_vertical": "Mit „{{title}}“ zusammenführen (übereinander)",
+    "move_pane_to_tab": "In neuen Tab verschieben",
+    "move_pane_to_window": "In neues Fenster verschieben",
     "offline": "Offline",
     "cancel_reconnect": "Wiederverbindung abbrechen",
     "reconnect": "Erneut verbinden",
@@ -1294,5 +1300,13 @@
     "setup_pending": "Portabler Keystore wird erstellt...",
     "unlock_submit": "Entsperren und fortfahren",
     "unlock_pending": "Portable Daten werden entsperrt..."
+  },
+  "local_session": {
+    "directory": "Startverzeichnis",
+    "inherit_directory": "Standardverzeichnis aus den Einstellungen verwenden",
+    "inherit_shell": "Standard-Shell aus den Einstellungen verwenden",
+    "shell_unavailable": "Die gespeicherte Shell ist auf diesem Gerät nicht verfügbar. Bearbeiten Sie die Sitzung und wählen Sie eine installierte Shell.",
+    "directory_unavailable": "Das Startverzeichnis ist nicht verfügbar. Wählen Sie in der Sitzung ein vorhandenes Verzeichnis.",
+    "name_required": "Geben Sie einen Namen zum Speichern der lokalen Sitzung ein."
   }
 }

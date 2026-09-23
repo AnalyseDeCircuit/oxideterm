@@ -1466,7 +1466,9 @@
       "update_proxy_port_hint": "更新代理使用的端口。",
       "update_proxy_no_proxy": "不走代理",
       "update_proxy_no_proxy_hint": "用逗号分隔不经过代理的主机。",
-      "update_proxy_legal_hint": "请遵守当地法律规定使用代理功能。"
+      "update_proxy_legal_hint": "请遵守当地法律规定使用代理功能。",
+      "third_party_notices": "第三方声明",
+      "third_party_notices_description": "随应用附带的依赖与图形资源署名，以及原始许可证链接。"
     },
     "errors": {
       "create_group_failed": "创建分组失败: {{error}}",

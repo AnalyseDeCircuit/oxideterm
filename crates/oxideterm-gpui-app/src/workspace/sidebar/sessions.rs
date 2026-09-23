@@ -64,6 +64,7 @@ pub(in crate::workspace) struct ActiveSessionSidebarRow {
     is_last: bool,
     has_children: bool,
     standalone_session: Option<StandaloneActiveSession>,
+    local_session: Option<TerminalSessionId>,
 }
 
 fn terminal_lifecycle_readiness(lifecycle: &TerminalLifecycle) -> ActiveSessionReadiness {
@@ -660,6 +661,7 @@ impl WorkspaceApp {
                     has_children: flat_node_child_counts
                         .get(&flat_node_id)
                         .is_some_and(|count| *count > 0),
+                    local_session: None,
                     standalone_session: None,
                 })
             })
@@ -672,6 +674,45 @@ impl WorkspaceApp {
                 .iter()
                 .map(|record| self.standalone_active_session_sidebar_row(record, cx)),
         );
+        let host = self.tab_host.read(cx);
+        let mut local_instances = host.local_sessions.iter().collect::<Vec<_>>();
+        local_instances.sort_by_key(|(id, _)| id.0);
+        rows.extend(local_instances.into_iter().filter_map(|(id, instance)| {
+            let location = host.terminal_location(*id)?;
+            let pane = host.panes().get(&location.pane_id)?.read(cx);
+            let title = format!(
+                "{} · {}",
+                self.i18n
+                    .t("modals.new_connection.transport_local_terminal"),
+                instance.title
+            );
+            let node_id = format!("local-terminal-{}", id.0);
+            Some(ActiveSessionSidebarRow {
+                node_id: NodeId::new(node_id.clone()),
+                parent_id: None,
+                saved_connection_id: None,
+                title: title.clone(),
+                host: instance
+                    .cwd
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_default(),
+                username: String::new(),
+                port: 0,
+                node_view: ActiveSessionNode {
+                    id: node_id,
+                    title,
+                    port: 0,
+                    terminal_ids: vec![*id],
+                    readiness: terminal_lifecycle_readiness(&pane.lifecycle()),
+                },
+                depth: 0,
+                is_last: true,
+                has_children: false,
+                standalone_session: None,
+                local_session: Some(*id),
+            })
+        }));
         rows
     }
 
@@ -826,6 +867,7 @@ impl WorkspaceApp {
             depth: 0,
             is_last: true,
             has_children: false,
+            local_session: None,
             standalone_session: Some(StandaloneActiveSession {
                 connection_id: record.id.clone(),
                 kind: record.kind,
@@ -857,6 +899,7 @@ impl WorkspaceApp {
             depth: 0,
             is_last: true,
             has_children: false,
+            local_session: None,
             standalone_session: Some(StandaloneActiveSession {
                 connection_id: record.id.clone(),
                 kind: record.kind,
@@ -1300,6 +1343,13 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(session_id) = row.local_session {
+            return self.render_active_session_focus_terminal(
+                session_id,
+                session_id.0 as usize,
+                cx,
+            );
+        }
         if row.standalone_session.is_some() {
             return self.render_standalone_session_sidebar_row(row, cx);
         }
@@ -1371,11 +1421,8 @@ impl WorkspaceApp {
                             rgb(status.text_color),
                         )
                     } else {
-                        Self::render_lucide_icon(
-                            status.icon,
-                            SESSION_TREE_ICON_SIZE,
-                            rgb(status.text_color),
-                        )
+                        self.node_session_icon(&row.node_id)
+                            .render(SESSION_TREE_ICON_SIZE, rgb(status.text_color))
                     })
                     .child(
                         div()
@@ -1538,10 +1585,36 @@ impl WorkspaceApp {
         } else {
             theme.text_muted
         };
-        let text = self
-            .i18n
-            .t("sessions.focused_list.terminal")
-            .replace("{{number}}", &index.to_string());
+        let text = if let Some(instance) = self.tab_host.read(cx).local_sessions.get(&session_id) {
+            format!(
+                "{} · {} #{}",
+                self.i18n
+                    .t("modals.new_connection.transport_local_terminal"),
+                instance.title,
+                session_id.0
+            )
+        } else {
+            self.i18n
+                .t("sessions.focused_list.terminal")
+                .replace("{{number}}", &index.to_string())
+        };
+
+        let icon = self
+            .tab_host
+            .read(cx)
+            .local_sessions
+            .get(&session_id)
+            .and_then(|instance| instance.profile_id.as_deref())
+            .and_then(|id| {
+                self.connection_store
+                    .local_terminal_profiles()
+                    .iter()
+                    .find(|profile| profile.id == id)
+            })
+            .and_then(|profile| {
+                super::super::session_icons::session_icon_from_id(profile.icon.as_deref())
+            })
+            .unwrap_or(LucideIcon::Terminal.into());
 
         div()
             .h(px(24.0))
@@ -1558,11 +1631,7 @@ impl WorkspaceApp {
             })
             .text_color(rgb(text_color))
             .hover(move |row| row.bg(rgb(theme.bg_hover)))
-            .child(Self::render_lucide_icon(
-                LucideIcon::Terminal,
-                12.0,
-                rgb(text_color),
-            ))
+            .child(icon.render(12.0, rgb(text_color)))
             .child(
                 div()
                     .flex_1()
@@ -1702,6 +1771,13 @@ impl WorkspaceApp {
         row: ActiveSessionSidebarRow,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(session_id) = row.local_session {
+            return self.render_active_session_focus_terminal(
+                session_id,
+                session_id.0 as usize,
+                cx,
+            );
+        }
         if row.standalone_session.is_some() {
             return self.render_standalone_session_sidebar_row(row, cx);
         }
@@ -2262,7 +2338,8 @@ impl WorkspaceApp {
                         row_text,
                     )
                 } else {
-                    Self::render_lucide_icon(LucideIcon::Server, SESSION_TREE_ICON_SIZE, muted_text)
+                    self.node_session_icon(&node_id)
+                        .render(SESSION_TREE_ICON_SIZE, muted_text)
                 }),
         )
         .child(
@@ -2674,6 +2751,7 @@ mod sorting_tests {
             depth: usize::from(parent.is_some()),
             is_last: false,
             has_children: false,
+            local_session: None,
             standalone_session: None,
         }
     }

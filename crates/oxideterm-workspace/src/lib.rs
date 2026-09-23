@@ -26,6 +26,7 @@ pub enum SplitDirection {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TabKind {
+    Workspace,
     LocalTerminal,
     SshTerminal,
     MoshTerminal,
@@ -131,6 +132,10 @@ impl PaneSplitChild {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PaneNode {
+    Page {
+        pane_id: PaneId,
+        tab_id: TabId,
+    },
     Leaf {
         pane_id: PaneId,
         session_id: TerminalSessionId,
@@ -150,9 +155,41 @@ impl PaneNode {
         }
     }
 
+    pub fn page_id_for_pane(&self, target: PaneId) -> Option<TabId> {
+        match self {
+            Self::Page { pane_id, tab_id } if *pane_id == target => Some(*tab_id),
+            Self::Group { children, .. } => children
+                .iter()
+                .find_map(|child| child.node.page_id_for_pane(target)),
+            _ => None,
+        }
+    }
+
+    pub fn page_pane(&self, target: TabId) -> Option<PaneId> {
+        match self {
+            Self::Page { pane_id, tab_id } if *tab_id == target => Some(*pane_id),
+            Self::Group { children, .. } => children
+                .iter()
+                .find_map(|child| child.node.page_pane(target)),
+            _ => None,
+        }
+    }
+
+    pub fn collect_page_ids(&self, pages: &mut Vec<TabId>) {
+        match self {
+            Self::Page { tab_id, .. } => pages.push(*tab_id),
+            Self::Group { children, .. } => {
+                for child in children {
+                    child.node.collect_page_ids(pages);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn pane_count(&self) -> usize {
         match self {
-            Self::Leaf { .. } => 1,
+            Self::Leaf { .. } | Self::Page { .. } => 1,
             Self::Group { children, .. } => {
                 children.iter().map(|child| child.node.pane_count()).sum()
             }
@@ -161,14 +198,14 @@ impl PaneNode {
 
     pub fn first_pane_id(&self) -> PaneId {
         match self {
-            Self::Leaf { pane_id, .. } => *pane_id,
+            Self::Leaf { pane_id, .. } | Self::Page { pane_id, .. } => *pane_id,
             Self::Group { children, .. } => children[0].node.first_pane_id(),
         }
     }
 
     pub fn contains_pane(&self, target: PaneId) -> bool {
         match self {
-            Self::Leaf { pane_id, .. } => *pane_id == target,
+            Self::Leaf { pane_id, .. } | Self::Page { pane_id, .. } => *pane_id == target,
             Self::Group { children, .. } => children
                 .iter()
                 .any(|child| child.node.contains_pane(target)),
@@ -181,7 +218,7 @@ impl PaneNode {
                 pane_id,
                 session_id,
             } if *session_id == target => Some(*pane_id),
-            Self::Leaf { .. } => None,
+            Self::Leaf { .. } | Self::Page { .. } => None,
             Self::Group { children, .. } => children
                 .iter()
                 .find_map(|child| child.node.pane_id_for_session(target)),
@@ -194,7 +231,7 @@ impl PaneNode {
                 pane_id,
                 session_id,
             } if *pane_id == target => Some(*session_id),
-            Self::Leaf { .. } => None,
+            Self::Leaf { .. } | Self::Page { .. } => None,
             Self::Group { children, .. } => children
                 .iter()
                 .find_map(|child| child.node.session_id_for_pane(target)),
@@ -217,7 +254,7 @@ impl PaneNode {
                 *session_id = new_session_id;
                 Some(old_pane_id)
             }
-            Self::Leaf { .. } => None,
+            Self::Leaf { .. } | Self::Page { .. } => None,
             Self::Group { children, .. } => children.iter_mut().find_map(|child| {
                 child
                     .node
@@ -228,7 +265,7 @@ impl PaneNode {
 
     pub fn collect_pane_ids(&self, panes: &mut Vec<PaneId>) {
         match self {
-            Self::Leaf { pane_id, .. } => panes.push(*pane_id),
+            Self::Leaf { pane_id, .. } | Self::Page { pane_id, .. } => panes.push(*pane_id),
             Self::Group { children, .. } => {
                 for child in children {
                     child.node.collect_pane_ids(panes);
@@ -240,6 +277,7 @@ impl PaneNode {
     pub fn collect_session_ids(&self, sessions: &mut Vec<TerminalSessionId>) {
         match self {
             Self::Leaf { session_id, .. } => sessions.push(*session_id),
+            Self::Page { .. } => {}
             Self::Group { children, .. } => {
                 for child in children {
                     child.node.collect_session_ids(sessions);
@@ -272,26 +310,39 @@ impl PaneNode {
         direction: SplitDirection,
         new_node: PaneNode,
     ) -> bool {
+        self.insert_beside(active_pane_id, group_id, direction, new_node, false)
+    }
+
+    /// The destination leaf and side are explicit so a drop never depends on current focus.
+    pub fn insert_beside(
+        &mut self,
+        active_pane_id: PaneId,
+        group_id: PaneId,
+        direction: SplitDirection,
+        new_node: PaneNode,
+        before: bool,
+    ) -> bool {
         match self {
-            Self::Leaf {
-                pane_id,
-                session_id,
-            } if *pane_id == active_pane_id => {
-                let old = Self::Leaf {
-                    pane_id: *pane_id,
-                    session_id: *session_id,
+            Self::Leaf { pane_id, .. } | Self::Page { pane_id, .. }
+                if *pane_id == active_pane_id =>
+            {
+                let old = self.clone();
+                let nodes = if before {
+                    [new_node, old]
+                } else {
+                    [old, new_node]
                 };
                 *self = Self::Group {
                     id: group_id,
                     direction,
-                    children: vec![
-                        PaneSplitChild::new(old, 50.0),
-                        PaneSplitChild::new(new_node, 50.0),
-                    ],
+                    children: nodes
+                        .into_iter()
+                        .map(|node| PaneSplitChild::new(node, 50.0))
+                        .collect(),
                 };
                 true
             }
-            Self::Leaf { .. } => false,
+            Self::Leaf { .. } | Self::Page { .. } => false,
             Self::Group { children, .. } => {
                 let Some(child) = children
                     .iter_mut()
@@ -301,19 +352,19 @@ impl PaneNode {
                 };
                 child
                     .node
-                    .split_active_with_node(active_pane_id, group_id, direction, new_node)
+                    .insert_beside(active_pane_id, group_id, direction, new_node, before)
             }
         }
     }
 
     pub fn close_pane(&mut self, target: PaneId) -> Option<PaneId> {
         match self {
-            Self::Leaf { .. } => None,
+            Self::Leaf { .. } | Self::Page { .. } => None,
             Self::Group { children, .. } => {
                 let mut removed = false;
                 let mut index = 0;
                 while index < children.len() {
-                    if matches!(&children[index].node, Self::Leaf { pane_id, .. } if *pane_id == target)
+                    if matches!(&children[index].node, Self::Leaf { pane_id, .. } | Self::Page { pane_id, .. } if *pane_id == target)
                     {
                         children.remove(index);
                         removed = true;
@@ -349,7 +400,7 @@ impl PaneNode {
 
     pub fn update_group_sizes(&mut self, group_id: PaneId, next_sizes: &[f32]) -> bool {
         match self {
-            Self::Leaf { .. } => false,
+            Self::Leaf { .. } | Self::Page { .. } => false,
             Self::Group { id, children, .. }
                 if *id == group_id && next_sizes.len() == children.len() =>
             {
@@ -367,7 +418,7 @@ impl PaneNode {
 
     pub fn reset_group_sizes(&mut self, group_id: PaneId) -> bool {
         match self {
-            Self::Leaf { .. } => false,
+            Self::Leaf { .. } | Self::Page { .. } => false,
             Self::Group { id, children, .. } if *id == group_id => {
                 // Reset only the addressed split group so nested pane ratios
                 // remain untouched when a sibling divider is double-clicked.
@@ -389,7 +440,7 @@ impl PaneNode {
                 &children.iter().map(|child| child.size).collect::<Vec<_>>(),
                 children.len(),
             ),
-            Self::Leaf { .. } => Vec::new(),
+            Self::Leaf { .. } | Self::Page { .. } => Vec::new(),
         }
     }
 }
@@ -514,6 +565,83 @@ mod tests {
     }
 
     #[test]
+    fn edge_insertion_preserves_the_destination_sibling_and_subtree_order() {
+        for direction in [SplitDirection::Horizontal, SplitDirection::Vertical] {
+            for before in [true, false] {
+                let left = PaneNode::leaf(PaneId(1), TerminalSessionId(11));
+                let right = PaneNode::leaf(PaneId(2), TerminalSessionId(22));
+                let page = PaneNode::Page {
+                    pane_id: PaneId(4),
+                    tab_id: TabId(44),
+                };
+                let mut tree = PaneNode::Group {
+                    id: PaneId(3),
+                    direction: SplitDirection::Horizontal,
+                    children: vec![
+                        PaneSplitChild::new(left.clone(), 30.0),
+                        PaneSplitChild::new(right.clone(), 70.0),
+                    ],
+                };
+                assert!(tree.insert_beside(PaneId(2), PaneId(5), direction, page.clone(), before));
+                let inserted = if before {
+                    vec![page.clone(), right.clone()]
+                } else {
+                    vec![right.clone(), page.clone()]
+                };
+                let expected = PaneNode::Group {
+                    id: PaneId(3),
+                    direction: SplitDirection::Horizontal,
+                    children: vec![
+                        PaneSplitChild::new(left, 30.0),
+                        PaneSplitChild::new(
+                            PaneNode::Group {
+                                id: PaneId(5),
+                                direction,
+                                children: inserted
+                                    .into_iter()
+                                    .map(|node| PaneSplitChild::new(node, 50.0))
+                                    .collect(),
+                            },
+                            70.0,
+                        ),
+                    ],
+                };
+                assert_eq!(tree, expected);
+                assert!(!tree.insert_beside(PaneId(99), PaneId(6), direction, page, before));
+                assert_eq!(tree, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn page_leaves_preserve_layout_without_becoming_terminal_sessions() {
+        let page = PaneNode::Page {
+            pane_id: PaneId(2),
+            tab_id: TabId(42),
+        };
+        let mut root = page.clone();
+        assert!(root.split_active(
+            PaneId(2),
+            PaneId(3),
+            SplitDirection::Vertical,
+            PaneId(1),
+            TerminalSessionId(7)
+        ));
+        let mut sessions = Vec::new();
+        root.collect_session_ids(&mut sessions);
+        assert_eq!(sessions, vec![TerminalSessionId(7)]);
+        assert_eq!(root.session_id_for_pane(PaneId(2)), None);
+        assert_eq!(root.page_id_for_pane(PaneId(1)), None);
+        assert_eq!(root.page_pane(TabId(42)), Some(PaneId(2)));
+        assert!(root.update_group_sizes(PaneId(3), &[30.0, 70.0]));
+        for (actual, expected) in root.split_sizes().into_iter().zip([30.0, 70.0]) {
+            assert!((actual - expected).abs() < 0.0001);
+        }
+        assert_eq!(root.close_pane(PaneId(1)), Some(PaneId(2)));
+        assert_eq!(root.single_child_replacement(), Some(page));
+    }
+
+    #[test]
     fn close_pane_collapses_group_to_remaining_leaf() {
         let (pane_a, pane_b, group, session_a, session_b) = ids();
         let mut node = PaneNode::Group {
@@ -619,7 +747,7 @@ mod tests {
                     vec![50.0, 50.0]
                 );
             }
-            PaneNode::Leaf { .. } => panic!("expected split group"),
+            PaneNode::Leaf { .. } | PaneNode::Page { .. } => panic!("expected split group"),
         }
     }
 }

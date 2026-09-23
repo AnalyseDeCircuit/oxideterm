@@ -1178,6 +1178,12 @@
     "hint_other": "Zen 模式 — 按 Ctrl+Shift+Z 退出"
   },
   "tabbar": {
+    "drag_to_dock": "拖拽停靠",
+    "workspace": "工作区",
+    "merge_into_horizontal": "并入“{{title}}”（左右分屏）",
+    "merge_into_vertical": "并入“{{title}}”（上下分屏）",
+    "move_pane_to_tab": "移至新标签",
+    "move_pane_to_window": "移至新窗口",
     "offline": "离线",
     "cancel_reconnect": "取消重连",
     "reconnect": "重新连接",
@@ -1294,5 +1300,13 @@
     "setup_pending": "正在创建便携密钥库...",
     "unlock_submit": "解锁并继续",
     "unlock_pending": "正在解锁便携数据..."
+  },
+  "local_session": {
+    "directory": "启动目录",
+    "inherit_directory": "留空使用设置中的默认目录",
+    "inherit_shell": "使用设置中的默认 Shell",
+    "shell_unavailable": "本机没有此会话保存的 Shell，请编辑会话并选择已安装的 Shell。",
+    "directory_unavailable": "启动目录不存在，请编辑会话并选择有效目录。",
+    "name_required": "请输入名称以保存本地会话。"
   }
 }

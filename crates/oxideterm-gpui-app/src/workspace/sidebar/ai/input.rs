@@ -1782,6 +1782,10 @@ impl AiInputVisualLine<'_> {
     pub(in crate::workspace) fn utf16_len(&self) -> usize {
         self.utf16_end.saturating_sub(self.utf16_start)
     }
+
+    pub(in crate::workspace) fn utf16_range(&self) -> std::ops::Range<usize> {
+        self.utf16_start..self.utf16_end
+    }
 }
 
 pub(in crate::workspace) const AI_INPUT_SOFT_WRAP_CHROME_PX: f32 = 56.0;

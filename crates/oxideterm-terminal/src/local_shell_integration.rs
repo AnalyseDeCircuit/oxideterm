@@ -44,6 +44,21 @@ pub(crate) fn prepare_local_shell_launch(
     mut env: HashMap<String, String>,
     default_args: Vec<String>,
 ) -> LocalShellLaunch {
+    let default_args = if shell.id.starts_with("wsl") {
+        let mut args = default_args;
+        if let Some(cwd) = config.cwd.as_ref() {
+            if let Some(index) = args.iter().position(|arg| arg == "--cd") {
+                if index + 1 < args.len() {
+                    args.remove(index + 1);
+                }
+                args.remove(index);
+            }
+            args.extend(["--cd".to_owned(), cwd.to_string_lossy().into_owned()]);
+        }
+        args
+    } else {
+        default_args
+    };
     // Editor adapters are passive files. Exposing their paths for every PTY
     // lets a user toggle Free Type Mode without restarting the shell, while
     // still requiring an explicit opt-in from the editor configuration.
@@ -437,6 +452,24 @@ mod tests {
         };
         let shell = ShellInfo::new(shell_id, shell_id, shell_id);
         (config, shell)
+    }
+
+    #[test]
+    fn wsl_project_directory_replaces_default_without_shell_interpolation() {
+        let (mut config, mut shell) = config_for("wsl-ubuntu");
+        config.cwd = Some("/home/user/project with spaces;echo ignored".into());
+        shell.args = vec!["-d".into(), "Ubuntu".into(), "--cd".into(), "~".into()];
+        let launch =
+            prepare_local_shell_launch(&config, &shell, HashMap::new(), shell.args.clone());
+        assert_eq!(
+            launch.args,
+            [
+                "-d",
+                "Ubuntu",
+                "--cd",
+                "/home/user/project with spaces;echo ignored"
+            ]
+        );
     }
 
     #[test]

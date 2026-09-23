@@ -21,6 +21,7 @@ fn tab_kind_icon(
     cx: &Context<WorkspaceApp>,
 ) -> LucideIcon {
     match kind {
+        TabKind::Workspace => LucideIcon::AppWindow,
         TabKind::LocalTerminal => LucideIcon::Square,
         TabKind::SshTerminal => LucideIcon::Terminal,
         TabKind::MoshTerminal => LucideIcon::Terminal,
@@ -784,7 +785,7 @@ impl WorkspaceApp {
 
     fn reconnect_node_id_for_tab(&self, tab: &Tab, cx: &App) -> Option<NodeId> {
         match tab.kind {
-            TabKind::SshTerminal => {
+            TabKind::SshTerminal | TabKind::LocalTerminal => {
                 if let Some(active_pane_id) = tab.active_pane_id
                     && let Some(session_id) = tab
                         .root_pane

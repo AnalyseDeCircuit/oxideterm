@@ -132,7 +132,8 @@
       "cancel": "취소",
       "save": "저장",
       "saving": "저장 중...",
-      "passphrase_hint": "키 경로가 변경되지 않은 경우 비워 두면 저장된 패스프레이즈를 유지합니다."
+      "passphrase_hint": "키 경로가 변경되지 않은 경우 비워 두면 저장된 패스프레이즈를 유지합니다.",
+      "brand_icon_hint": "배포판 로고는 원래 색상과 비율을 유지합니다."
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "저장된 세션",
       "expand_all": "모두 펼치기",
       "collapse_all": "모두 접기"
+    },
+    "local_terminal_profiles": {
+      "delete": "로컬 세션 삭제",
+      "delete_failed": "로컬 세션을 삭제하지 못했습니다",
+      "confirm_delete": "로컬 세션 “{{name}}”을 삭제할까요? 실행 중인 터미널은 유지됩니다."
     }
   }
 }

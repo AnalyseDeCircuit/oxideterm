@@ -231,7 +231,7 @@ impl WorkspaceApp {
         // borrows those handles only while applying a drag-autoscroll tick.
         let page_handles = {
             let file_manager = self.file_manager.read(cx);
-            let sftp = self.sftp_view.read(cx);
+            let sftp = self.sftp_view().read(cx);
             [
                 file_manager.preview_document_scroll.clone(),
                 file_manager.preview_metadata_scroll.clone(),

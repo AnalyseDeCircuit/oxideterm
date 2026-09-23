@@ -132,7 +132,8 @@
       "cancel": "Cancelar",
       "save": "Salvar",
       "saving": "Salvando...",
-      "passphrase_hint": "Deixe em branco para manter a frase secreta salva quando o caminho da chave não mudar."
+      "passphrase_hint": "Deixe em branco para manter a frase secreta salva quando o caminho da chave não mudar.",
+      "brand_icon_hint": "Os logotipos das distribuições mantêm suas cores e proporções originais."
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "Sessões salvas",
       "expand_all": "Expandir tudo",
       "collapse_all": "Recolher tudo"
+    },
+    "local_terminal_profiles": {
+      "delete": "Excluir sessão local",
+      "delete_failed": "Não foi possível excluir a sessão local",
+      "confirm_delete": "Excluir a sessão local “{{name}}”? Os terminais em execução permanecerão abertos."
     }
   }
 }

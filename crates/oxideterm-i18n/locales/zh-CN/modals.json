@@ -363,7 +363,7 @@
       "save_failed": "保存连接失败",
       "transport_local_terminal": "本地终端",
       "local_terminal_description": "使用当前终端设置在此设备上打开 Shell。",
-      "local_terminal_detail": "此会话将立即打开，不会添加到已保存连接。",
+      "local_terminal_detail": "保存项目的 Shell 和启动目录。每次打开都会创建独立终端。",
       "local_terminal_open": "打开终端",
       "transport_ssh": "SSH 主机",
       "advanced_group": "高级连接",

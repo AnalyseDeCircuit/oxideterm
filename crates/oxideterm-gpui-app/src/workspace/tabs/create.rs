@@ -345,17 +345,19 @@ impl WorkspaceApp {
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
         preference_overrides.apply_to(&mut preferences);
+        let instance = super::super::local_sessions::LocalTerminalInstance::new(
+            &terminal_config,
+            title.clone(),
+        );
+        let shared_session = TerminalPane::local_shared_session(terminal_config, &preferences)?;
         let pane = cx.new(|cx| {
-            TerminalPane::new_local_with_config_and_preferences(
-                terminal_config,
-                preferences,
-                window,
-                cx,
-            )
-            .expect("failed to initialize terminal pane")
-            .with_preference_overrides(preference_overrides)
+            TerminalPane::from_shared_session(shared_session.clone(), preferences, window, cx)
+                .expect("failed to initialize terminal view")
+                .with_preference_overrides(preference_overrides)
         });
-        let shared_session = pane.read(cx).shared_session();
+        self.tab_host.update(cx, |host, _| {
+            host.local_sessions.insert(session_id, instance);
+        });
 
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
         self.refresh_native_plugin_terminal_hooks(cx);

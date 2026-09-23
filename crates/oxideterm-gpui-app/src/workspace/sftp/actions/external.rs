@@ -50,22 +50,27 @@ impl WorkspaceApp {
         let Some(node_id) = self.visible_sftp_node_id(cx) else {
             return;
         };
-        let generation = self.sftp_view.read(cx).view_generation;
-        let remote_path = self.sftp_view.read(cx).remote_path.clone();
+        let generation = self.sftp_view().read(cx).view_generation;
+        let remote_path = self.sftp_view().read(cx).remote_path.clone();
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
             multiple: true,
             prompt: Some(SharedString::from(self.i18n.t("sftp.context.upload"))),
         });
+        let surface = self.sftp_surface_id();
         cx.spawn(async move |workspace, cx| {
             let Ok(Ok(Some(paths))) = receiver.await else {
                 return;
             };
             let _ = workspace.update(cx, |workspace, cx| {
+                if !workspace.has_sftp_surface(surface) {
+                    return;
+                }
+                let _scope = workspace.enter_sftp_surface(surface);
                 if workspace.visible_sftp_node_id(cx).as_ref() != Some(&node_id)
-                    || workspace.sftp_view.read(cx).view_generation != generation
-                    || workspace.sftp_view.read(cx).remote_path != remote_path
+                    || workspace.sftp_view().read(cx).view_generation != generation
+                    || workspace.sftp_view().read(cx).remote_path != remote_path
                 {
                     workspace.push_sftp_toast(
                         workspace.i18n.t("sftp.sidebar.upload_target_changed"),
@@ -96,7 +101,7 @@ impl WorkspaceApp {
                 self.i18n.t("sftp.toolbar.browse_folder"),
             )),
         });
-        self.sftp_view.update(cx, |sftp, cx| {
+        self.sftp_view().update(cx, |sftp, cx| {
             sftp.start_folder_picker(
                 async move {
                     let Ok(Ok(Some(paths))) = receiver.await else {

@@ -132,7 +132,8 @@
       "cancel": "Cancel",
       "save": "Save",
       "saving": "Saving...",
-      "passphrase_hint": "Leave blank to keep the saved passphrase when the key path is unchanged."
+      "passphrase_hint": "Leave blank to keep the saved passphrase when the key path is unchanged.",
+      "brand_icon_hint": "Distribution logos retain their original colors and proportions."
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "Saved sessions",
       "expand_all": "Expand all",
       "collapse_all": "Collapse all"
+    },
+    "local_terminal_profiles": {
+      "delete": "Delete local session",
+      "delete_failed": "Could not delete local session",
+      "confirm_delete": "Delete local session \"{{name}}\"? Running terminals will remain open."
     }
   }
 }

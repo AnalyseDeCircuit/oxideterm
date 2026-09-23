@@ -363,7 +363,7 @@
       "save_failed": "Error al guardar la conexión",
       "transport_local_terminal": "Terminal local",
       "local_terminal_description": "Abrir un shell en este dispositivo con la configuración actual del terminal.",
-      "local_terminal_detail": "Esta sesión se abre inmediatamente y no se añade a las conexiones guardadas.",
+      "local_terminal_detail": "Guarde el shell y el directorio inicial del proyecto. Cada apertura crea un terminal independiente.",
       "local_terminal_open": "Abrir terminal",
       "transport_ssh": "Host SSH",
       "advanced_group": "Conexiones avanzadas",

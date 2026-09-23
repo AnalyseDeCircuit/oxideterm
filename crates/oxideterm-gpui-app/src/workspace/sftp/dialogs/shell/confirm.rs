@@ -7,13 +7,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let dialog_visible = self.sftp_view.read(cx).dialog_presence.phase()
+        let dialog_visible = self.sftp_view().read(cx).dialog_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let backdrop_name = name.clone();
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                self.sftp_listener(cx, move |this, _event, window, cx| {
                     // Tauri IDE/SFTP save-confirm dialogs close through
                     // onOpenChange(false) -> cancel, never discard.
                     this.cancel_sftp_editor_close_confirm(backdrop_name.clone(), window, cx);
@@ -103,7 +103,7 @@ impl WorkspaceApp {
                                     .child(self.i18n.t("sftp.dialogs.cancel"))
                                     .on_mouse_down(
                                         MouseButton::Left,
-                                        cx.listener(move |this, _event, window, cx| {
+                                        self.sftp_listener(cx, move |this, _event, window, cx| {
                                             this.cancel_sftp_editor_close_confirm(
                                                 name.clone(),
                                                 window,
@@ -131,7 +131,7 @@ impl WorkspaceApp {
                                     .child(self.i18n.t("sftp.preview.confirm"))
                                     .on_mouse_down(
                                         MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
+                                        self.sftp_listener(cx, |this, _event, _window, cx| {
                                             this.discard_sftp_editor_changes(cx);
                                             cx.stop_propagation();
                                             cx.notify();

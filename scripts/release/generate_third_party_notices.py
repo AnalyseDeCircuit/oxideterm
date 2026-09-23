@@ -344,6 +344,9 @@ def build_notices(args: argparse.Namespace) -> tuple[str, int, int]:
     if bundled_assets:
         output += "## Bundled Fonts / Assets\n\n"
         output += bundled_asset_table(bundled_assets)
+    # Asset attribution must survive notice regeneration during native packaging.
+    output += "## Distribution Icon Assets\n\n"
+    output += (cwd / "licenses/third-party/DISTRO-ICONS-NOTICE.md").read_text(encoding="utf-8") + "\n"
     output += "## Notes\n\n"
     output += "- Multi-license policy: where a crate offers multiple licenses, OxideTerm uses the most permissive compatible option available.\n"
     output += "- License data is generated from crate metadata through cargo-deny and may include multiple licenses per crate.\n"

@@ -132,7 +132,8 @@
       "cancel": "キャンセル",
       "save": "保存",
       "saving": "保存中...",
-      "passphrase_hint": "キーのパスが変わっていない場合、空のままにすると保存済みのパスフレーズを保持します。"
+      "passphrase_hint": "キーのパスが変わっていない場合、空のままにすると保存済みのパスフレーズを保持します。",
+      "brand_icon_hint": "ディストリビューションのロゴは元の色と縦横比を保持します。"
     },
     "serial_profiles": {
       "title": "Serial Profiles",
@@ -198,6 +199,11 @@
       "list_header": "保存済みセッション",
       "expand_all": "すべて展開",
       "collapse_all": "すべて折りたたむ"
+    },
+    "local_terminal_profiles": {
+      "delete": "ローカルセッションを削除",
+      "delete_failed": "ローカルセッションを削除できませんでした",
+      "confirm_delete": "ローカルセッション「{{name}}」を削除しますか？実行中の端末は開いたままになります。"
     }
   }
 }

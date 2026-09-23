@@ -248,7 +248,7 @@ pub(super) struct SftpMutationToast {
 }
 
 // Surface identity prevents a hidden tab completion from replacing sidebar state.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SftpSurfaceId {
     Tab(TabId),
     Sidebar,
@@ -1025,6 +1025,7 @@ pub(super) struct SftpWorkspaceEntity {
     remote_file_scroll: UniformListScrollHandle,
     local_path_scroll: ScrollHandle,
     remote_path_scroll: ScrollHandle,
+    surface_size: Option<gpui::Size<Pixels>>,
     pane_split_ratio: f32,
     pane_resize_drag: Option<SftpPaneResizeDrag>,
     queue_height: f32,
@@ -1146,6 +1147,7 @@ impl Default for SftpWorkspaceEntity {
             remote_file_scroll: UniformListScrollHandle::new(),
             local_path_scroll: ScrollHandle::new(),
             remote_path_scroll: ScrollHandle::new(),
+            surface_size: None,
             pane_split_ratio: SFTP_PANE_SPLIT_DEFAULT_RATIO,
             pane_resize_drag: None,
             queue_height: SFTP_QUEUE_DEFAULT_HEIGHT,
@@ -1745,6 +1747,68 @@ mod entity_delivery_tests {
     }
 
     #[gpui::test]
+    fn independent_pages_keep_late_directory_results_and_selection_with_their_owner(
+        cx: &mut TestAppContext,
+    ) {
+        let pages = [
+            cx.new(SftpWorkspaceEntity::new),
+            cx.new(SftpWorkspaceEntity::new),
+        ];
+        let remote = SftpRemoteId::Node(NodeId::new("shared-node"));
+        for (index, page) in pages.iter().enumerate() {
+            page.update(cx, |state, _| {
+                state.activate_view(SftpSurfaceId::Tab(TabId(index as u64 + 1)), remote.clone());
+                state.remote_load_pending = false;
+                state.remote_load_inflight = true;
+            });
+        }
+        // Page A completes after B has already loaded and received a selection.
+        for index in [1, 0] {
+            let name = ["alpha.txt", "beta.txt"][index];
+            let path = ["/alpha", "/beta"][index];
+            let (sender, generation) = pages[index].read_with(cx, |state, _| {
+                (state.worker_sender(), state.view_generation)
+            });
+            sender
+                .send(SftpWorkerResult::RemoteList {
+                    surface_id: SftpSurfaceId::Tab(TabId(index as u64 + 1)),
+                    remote_id: remote.clone(),
+                    view_generation: generation,
+                    session_id: "shared-session".into(),
+                    path: path.into(),
+                    result: Ok(RemoteSftpListing {
+                        cwd: path.into(),
+                        files: vec![file_entry(name)],
+                    }),
+                })
+                .unwrap();
+            cx.run_until_parked();
+            pages[index].update(cx, |state, _| {
+                state.remote_selected.insert(name.into());
+                state.remote_path_input = format!("{path}/draft");
+            });
+        }
+        for (index, page) in pages.iter().enumerate() {
+            page.update(cx, |state, _| {
+                let path = ["/alpha", "/beta"][index];
+                let name = ["alpha.txt", "beta.txt"][index];
+                assert_eq!(state.remote_path, path);
+                assert_eq!(state.remote_path_input, format!("{path}/draft"));
+                assert_eq!(
+                    state
+                        .remote_files
+                        .iter()
+                        .map(|file| file.name.as_str())
+                        .collect::<Vec<_>>(),
+                    vec![name]
+                );
+                assert_eq!(state.remote_selected, HashSet::from([name.to_string()]));
+                assert!(!state.remote_load_pending);
+            });
+        }
+    }
+
+    #[gpui::test]
     fn stale_remote_list_result_does_not_emit_effect(cx: &mut TestAppContext) {
         let entity = cx.new(SftpWorkspaceEntity::new);
         entity.update(cx, |sftp, _cx| {
@@ -1869,6 +1933,7 @@ mod menus;
 mod runtime;
 mod surface;
 mod transfers;
+pub(super) mod views;
 
 // Re-export only the cross-module helpers needed by the SFTP facade and its children.
 pub(in crate::workspace::sftp) use actions::{SftpTransferLaunch, sftp_extract_archive_kind};

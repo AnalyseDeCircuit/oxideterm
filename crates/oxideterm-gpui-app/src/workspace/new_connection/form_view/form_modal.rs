@@ -17,6 +17,7 @@ struct ConnectionFormModalSnapshot {
     mosh_profile_id: Option<String>,
     standalone_sftp_profile_id: Option<String>,
     serial_profile_id: Option<String>,
+    local_profile_id: Option<String>,
     telnet_profile_id: Option<String>,
     saved_password_keychain_id: Option<String>,
     password_loaded: bool,
@@ -71,6 +72,7 @@ impl ConnectionFormModalSnapshot {
             mosh_profile_id: form.mosh_profile_id.clone(),
             standalone_sftp_profile_id: form.standalone_sftp_profile_id.clone(),
             serial_profile_id: form.serial_profile_id.clone(),
+            local_profile_id: form.local_profile_id.clone(),
             telnet_profile_id: form.telnet_profile_id.clone(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
             password_loaded: form.password_loaded,
@@ -159,6 +161,7 @@ impl WorkspaceApp {
         // Saved non-SSH profiles edit persisted assets without acquiring a runtime owner.
         let saved_profile_edit_mode = remote_desktop_edit_mode
             || mosh_edit_mode
+            || form.local_profile_id.is_some()
             || serial_edit_mode
             || telnet_edit_mode
             || standalone_sftp_edit_mode
@@ -1292,18 +1295,6 @@ impl WorkspaceApp {
                             ))
                         })
                         .when(
-                            local_terminal_mode,
-                            |footer| {
-                                footer.child(self.render_connection_button(
-                                    self.i18n.t("modals.new_connection.local_terminal_open"),
-                                    true,
-                                    ConnectionButtonAction::Connect,
-                                    primary_disabled,
-                                    cx,
-                                ))
-                            },
-                        )
-                        .when(
                             !reauthentication_mode
                                 && !edit_properties_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
@@ -1325,8 +1316,7 @@ impl WorkspaceApp {
                                 && !saved_profile_edit_mode
                                 && self.connection_form_state(cx).saved_connection_prompt_action.is_none()
                                 && !remote_desktop_mode
-                                && !wsl_graphics_mode
-                                && !local_terminal_mode,
+                                && !wsl_graphics_mode,
                             |footer| {
                                 footer
                                     .child(self.render_connection_button(
@@ -1337,7 +1327,7 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                     .child(self.render_connection_button(
-                                        if local_transport_mode {
+                                        if local_transport_mode || local_terminal_mode {
                                             self.i18n.t("modals.new_connection.local_open")
                                         } else if standalone_sftp_mode {
                                             self.i18n.t("sftp.standalone.open")
@@ -1352,7 +1342,7 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                     .child(self.render_connection_button(
-                                        if local_transport_mode {
+                                        if local_transport_mode || local_terminal_mode {
                                             self.i18n.t("modals.new_connection.local_save_and_open")
                                         } else if standalone_sftp_mode {
                                             self.i18n.t("sftp.standalone.save_and_open")

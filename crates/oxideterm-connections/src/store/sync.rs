@@ -171,6 +171,8 @@ impl ConnectionStore {
             .records
             .iter()
             .map(|record| record.updated_at.clone())
+            .chain(snapshot.local_terminal_profiles.iter().map(|p| p.updated_at.to_rfc3339()))
+            .chain(snapshot.local_terminal_tombstones.iter().map(|p| p.deleted_at.to_rfc3339()))
             .max()
             .unwrap_or_else(|| snapshot.exported_at.clone());
 
@@ -329,6 +331,7 @@ impl ConnectionStore {
                 self.add_connection(next_connection);
                 result.applied += 1;
             }
+            self.apply_local_terminal_profiles(snapshot.local_terminal_profiles, snapshot.local_terminal_tombstones, strategy, &mut result)?;
             self.normalize();
             if result.applied > 0 {
                 self.save()?;
@@ -719,25 +722,18 @@ fn build_saved_connections_sync_snapshot(
     );
     records.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let revision = sha256_hex(
-        &records
-            .iter()
-            // The exported record includes updated_at, so the snapshot revision must change with it.
-            .map(|record| {
-                (
-                    &record.id,
-                    &record.revision,
-                    &record.updated_at,
-                    record.deleted,
-                )
-            })
-            .collect::<Vec<_>>(),
-    )?;
-
+    let mut local_terminal_profiles = data.local_terminal_profiles.clone();
+    local_terminal_profiles.sort_by(|a, b| a.id.cmp(&b.id));
+    for profile in &mut local_terminal_profiles { profile.last_used_at = None; }
+    let mut local_terminal_tombstones = active_connection_tombstones(&data.local_terminal_tombstones);
+    local_terminal_tombstones.sort_by(|a, b| a.id.cmp(&b.id));
+    let revision = sha256_hex(&(&records, &local_terminal_profiles, &local_terminal_tombstones))?;
     Ok(SavedConnectionsSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        local_terminal_profiles,
+        local_terminal_tombstones,
     })
 }
 
