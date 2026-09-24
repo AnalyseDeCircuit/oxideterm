@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} sigue ejecutándose (quizá en la bandeja del sistema), o sus archivos están en uso por otra aplicación. Guarde su trabajo. Pulse Aceptar para cerrar las aplicaciones que usan estos archivos y continuar la instalación, o Cancelar para detenerla. Carpeta de instalación: {{path}}",
+    "application_close_failed": "No se pudo liberar o comprobar el uso de los archivos en {{path}}. Salga de {{app}} desde la bandeja del sistema y cierre las demás aplicaciones que usen esta carpeta. Después pulse Reintentar. Cancelar detiene la instalación sin reemplazar archivos."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Lanzador de shell"

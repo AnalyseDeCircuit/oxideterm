@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} 仍在运行（可能位于系统托盘），或其文件正被其他程序占用。请先保存工作。点击“确定”关闭占用程序并继续安装，点击“取消”停止安装。安装目录：{{path}}",
+    "application_close_failed": "无法释放或确认 {{path}} 中的文件占用情况。请从系统托盘退出 {{app}}，并关闭正在使用此目录的其他程序，然后点击“重试”。点击“取消”停止安装，不替换文件。"
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Shell 启动器"

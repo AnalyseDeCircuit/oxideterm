@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} is still running (possibly in the system tray), or its files are in use by another application. Save your work before continuing. Click OK to close the applications using these files and continue installing, or Cancel to stop. Installation folder: {{path}}",
+    "application_close_failed": "Unable to release or verify the files in {{path}}. Exit {{app}} from the system tray and close other applications using this folder, then click Retry. Cancel stops installation without replacing files."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Shell Launcher"

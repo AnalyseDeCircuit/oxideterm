@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} 仍在執行（可能位於系統匣），或其檔案正被其他程式使用。請先儲存工作。按「確定」關閉使用中的程式並繼續安裝，按「取消」停止安裝。安裝目錄：{{path}}",
+    "application_close_failed": "無法釋放或確認 {{path}} 中的檔案使用狀態。請從系統匣結束 {{app}}，並關閉正在使用此目錄的其他程式，再按「重試」。按「取消」停止安裝，不取代檔案。"
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Shell 啟動器"

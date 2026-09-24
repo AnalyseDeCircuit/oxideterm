@@ -1118,6 +1118,28 @@ def windows_protocol_unregistration_script(identity: ReleaseIdentity) -> str:
     return "\n".join(lines)
 
 
+def windows_installer_languages(identity: ReleaseIdentity) -> str:
+    languages = (
+        ("en", "English"), ("zh-CN", "SimpChinese"), ("zh-TW", "TradChinese"),
+        ("de", "German"), ("es-ES", "Spanish"), ("fr-FR", "French"),
+        ("it", "Italian"), ("ja", "Japanese"), ("ko", "Korean"),
+        ("pt-BR", "PortugueseBR"), ("vi", "Vietnamese"),
+    )
+    lines = []
+    for locale, language in languages:
+        catalog = ROOT_DIR / "crates" / "oxideterm-i18n" / "locales" / locale / "common.json"
+        messages = json.loads(catalog.read_text(encoding="utf-8"))["installer"]
+        lines.append(f'!insertmacro MUI_LANGUAGE "{language}"')
+        for key, name in (
+            ("close_running_application", "CloseRunningApplication"),
+            ("application_close_failed", "ApplicationCloseFailed"),
+        ):
+            message = nsis_string(messages[key].replace("{{app}}", identity.app_name))
+            message = message.replace("{{path}}", "$INSTDIR")
+            lines.append(f'LangString {name} ${{LANG_{language.upper()}}} "{message}"')
+    return "\n".join(lines)
+
+
 def windows_installer_script(
     *,
     binary: Path,
@@ -1181,7 +1203,7 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "{nsis_string(version)}"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
-!insertmacro MUI_LANGUAGE "English"
+{windows_installer_languages(identity)}
 
 Var IsOxideUpdate
 Var IsLegacyUpgrade
@@ -1199,11 +1221,55 @@ oxide_update_mode:
   SetSilent silent
 FunctionEnd
 
+Function EnsureApplicationClosed
+  ; Check the selected installation, not unrelated portable or preview copies.
+  IfFileExists "$INSTDIR\\{binary.name}" 0 preflight_return
+  System::Store "s"
+preflight_start:
+  StrCpy $5 0
+  System::Call 'rstrtmgr::RmStartSession(*i .r0, i 0, w .r1) i .r2'
+  StrCmp $2 0 0 preflight_failed
+  StrCpy $5 1
+  System::Call 'rstrtmgr::RmRegisterResources(i r0, i 1, *w "$INSTDIR\\{binary.name}", i 0, p 0, i 0, p 0) i .r2'
+  StrCmp $2 0 0 preflight_failed
+  System::Call 'rstrtmgr::RmGetList(i r0, *i .r3, *i 0, p 0, *i .r4) i .r2'
+  StrCmp $2 0 preflight_done
+  ; ERROR_MORE_DATA with a zero-sized list means there are file owners.
+  StrCmp $2 234 0 preflight_failed
+  IfSilent preflight_cancel
+  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION|MB_DEFBUTTON2 "$(CloseRunningApplication)" IDCANCEL preflight_cancel
+  ; No force flag: allow applications to finish their normal shutdown.
+  System::Call 'rstrtmgr::RmShutdown(i r0, i 0, p 0) i .r2'
+  StrCmp $2 0 0 preflight_failed
+  System::Call 'rstrtmgr::RmGetList(i r0, *i .r3, *i 0, p 0, *i .r4) i .r2'
+  StrCmp $2 0 preflight_done preflight_failed
+
+preflight_failed:
+  IfSilent preflight_cancel
+  MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(ApplicationCloseFailed)" IDRETRY preflight_retry
+  Goto preflight_cancel
+preflight_retry:
+  StrCmp $5 1 0 preflight_start
+  System::Call 'rstrtmgr::RmEndSession(i r0)'
+  Goto preflight_start
+preflight_cancel:
+  StrCmp $5 1 0 preflight_abort
+  System::Call 'rstrtmgr::RmEndSession(i r0)'
+preflight_abort:
+  SetErrorLevel 2
+  Quit
+preflight_done:
+  System::Call 'rstrtmgr::RmEndSession(i r0)'
+  System::Store "l"
+preflight_return:
+FunctionEnd
+
 Section "Application Files"
   SectionIn RO
   StrCmp $IsOxideUpdate "1" update_install normal_install
 
 normal_install:
+  Call EnsureApplicationClosed
   SetOutPath "$INSTDIR"
   SetOverwrite on
   File /r "{nsis_path(installer_root)}\\*"

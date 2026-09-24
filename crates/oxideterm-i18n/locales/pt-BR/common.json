@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} ainda está em execução (talvez na bandeja do sistema), ou seus arquivos estão sendo usados por outro aplicativo. Salve seu trabalho. Clique em OK para fechar os aplicativos que usam esses arquivos e continuar a instalação, ou em Cancelar para interrompê-la. Pasta de instalação: {{path}}",
+    "application_close_failed": "Não foi possível liberar ou verificar o uso dos arquivos em {{path}}. Saia do {{app}} pela bandeja do sistema e feche outros aplicativos que usam esta pasta. Depois clique em Repetir. Cancelar interrompe a instalação sem substituir arquivos."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Inicializador de shell"

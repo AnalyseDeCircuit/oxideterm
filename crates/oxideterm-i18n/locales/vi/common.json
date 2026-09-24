@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} vẫn đang chạy (có thể trong khay hệ thống), hoặc tệp của ứng dụng đang được chương trình khác sử dụng. Hãy lưu công việc. Nhấn OK để đóng các ứng dụng đang dùng những tệp này và tiếp tục cài đặt, hoặc Hủy để dừng. Thư mục cài đặt: {{path}}",
+    "application_close_failed": "Không thể giải phóng hoặc kiểm tra các tệp đang được sử dụng trong {{path}}. Hãy thoát {{app}} từ khay hệ thống và đóng các ứng dụng khác đang dùng thư mục này, rồi nhấn Thử lại. Hủy sẽ dừng cài đặt mà không thay thế tệp."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Trình khởi chạy shell"

@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} est toujours en cours d’exécution (peut-être dans la zone de notification), ou ses fichiers sont utilisés par une autre application. Enregistrez votre travail. Cliquez sur OK pour fermer les applications concernées et poursuivre l’installation, ou sur Annuler pour l’arrêter. Dossier d’installation : {{path}}",
+    "application_close_failed": "Impossible de libérer les fichiers de {{path}} ou de vérifier leur utilisation. Quittez {{app}} depuis la zone de notification et fermez les autres applications utilisant ce dossier, puis cliquez sur Réessayer. Annuler arrête l’installation sans remplacer de fichiers."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Lanceur de shell"

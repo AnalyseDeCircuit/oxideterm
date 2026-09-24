@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} è ancora in esecuzione (forse nell’area di notifica), oppure i suoi file sono usati da un’altra applicazione. Salvare il lavoro. Fare clic su OK per chiudere le applicazioni interessate e continuare l’installazione, oppure su Annulla per interromperla. Cartella di installazione: {{path}}",
+    "application_close_failed": "Impossibile liberare i file in {{path}} o verificarne l’utilizzo. Uscire da {{app}} nell’area di notifica e chiudere le altre applicazioni che usano questa cartella, quindi fare clic su Riprova. Annulla interrompe l’installazione senza sostituire file."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Launcher shell"

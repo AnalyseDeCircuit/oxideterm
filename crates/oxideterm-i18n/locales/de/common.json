@@ -1,4 +1,8 @@
 {
+  "installer": {
+    "close_running_application": "{{app}} läuft noch (möglicherweise im Infobereich), oder seine Dateien werden von einer anderen Anwendung verwendet. Speichern Sie Ihre Arbeit. Mit OK werden die betroffenen Anwendungen geschlossen und die Installation fortgesetzt. Abbrechen beendet die Installation. Installationsordner: {{path}}",
+    "application_close_failed": "Die Dateibelegung in {{path}} konnte nicht aufgehoben oder geprüft werden. Beenden Sie {{app}} im Infobereich und schließen Sie andere Anwendungen, die diesen Ordner verwenden. Klicken Sie dann auf Wiederholen. Abbrechen beendet die Installation, ohne Dateien zu ersetzen."
+  },
   "app": {
     "name": "OxideTerm",
     "shellLauncher": "Shell-Launcher"
