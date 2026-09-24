@@ -24,13 +24,14 @@ use windows::{
             WindowsAndMessaging::{
                 AppendMenuW, CS_HREDRAW, CS_VREDRAW, CreatePopupMenu, CreateWindowExW,
                 DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW, GetCursorPos,
-                GetMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, LR_DEFAULTSIZE, LR_LOADFROMFILE,
-                LR_SHARED, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW, PostQuitMessage,
-                RegisterClassW, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SW_SHOW, SendMessageW,
-                SetForegroundWindow, ShowWindowAsync, TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON,
-                TRACK_POPUP_MENU_FLAGS, TranslateMessage, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP,
-                WM_CONTEXTMENU, WM_DESTROY, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP,
-                WM_SETICON, WNDCLASSW, WS_OVERLAPPED,
+                GetMessageW, ICON_BIG, ICON_SMALL, IMAGE_ICON, IsIconic, LR_DEFAULTSIZE,
+                LR_LOADFROMFILE, LR_SHARED, LoadImageW, MF_SEPARATOR, MF_STRING, MSG, PostMessageW,
+                PostQuitMessage, RegisterClassW, RegisterWindowMessageW, SW_HIDE, SW_RESTORE,
+                SW_SHOW, SendMessageW, SetForegroundWindow, ShowWindowAsync, TPM_NONOTIFY,
+                TPM_RETURNCMD, TPM_RIGHTBUTTON, TRACK_POPUP_MENU_FLAGS, TranslateMessage,
+                WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_CONTEXTMENU, WM_DESTROY,
+                WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WM_SETICON, WNDCLASSW,
+                WS_OVERLAPPED,
             },
         },
     },
@@ -117,8 +118,13 @@ pub(crate) fn show_main_window() {
         return;
     }
     unsafe {
-        let _ = ShowWindowAsync(hwnd, SW_SHOW);
-        let _ = ShowWindowAsync(hwnd, SW_RESTORE);
+        // Restoring a hidden maximized window would discard its current size.
+        let show = if IsIconic(hwnd).as_bool() {
+            SW_RESTORE
+        } else {
+            SW_SHOW
+        };
+        let _ = ShowWindowAsync(hwnd, show);
         let _ = SetForegroundWindow(hwnd);
     }
 }
@@ -501,6 +507,103 @@ fn show_tray_menu(hwnd: HWND) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use windows::Win32::{
+        Foundation::RECT,
+        UI::WindowsAndMessaging::{
+            GetSystemMetrics, GetWindowRect, IsWindowVisible, IsZoomed, PM_REMOVE, PeekMessageW,
+            SM_CXSCREEN, SM_CYSCREEN, SW_MAXIMIZE, SW_MINIMIZE, SW_SHOWNORMAL, ShowWindow,
+            WS_OVERLAPPEDWINDOW, WS_POPUP,
+        },
+    };
+
+    #[test]
+    fn tray_restore_preserves_window_bounds_and_unminimizes() {
+        fn dispatch_pending_messages() {
+            let mut message = MSG::default();
+            unsafe {
+                while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+                    let _ = TranslateMessage(&message);
+                    DispatchMessageW(&message);
+                }
+            }
+        }
+
+        struct TestWindow {
+            hwnd: HWND,
+            previous_main: isize,
+        }
+        impl Drop for TestWindow {
+            fn drop(&mut self) {
+                MAIN_HWND.store(self.previous_main, Ordering::SeqCst);
+                unsafe { DestroyWindow(self.hwnd).unwrap() };
+            }
+        }
+
+        for (name, style, initial_show) in [
+            ("normal", WS_OVERLAPPEDWINDOW, SW_SHOWNORMAL),
+            ("maximized", WS_OVERLAPPEDWINDOW, SW_MAXIMIZE),
+            ("fullscreen", WS_POPUP, SW_SHOW),
+        ] {
+            unsafe {
+                let fullscreen = name == "fullscreen";
+                let hwnd = CreateWindowExW(
+                    WINDOW_EX_STYLE::default(),
+                    w!("STATIC"),
+                    w!("OxideTerm tray restore test"),
+                    style,
+                    if fullscreen { 0 } else { 80 },
+                    if fullscreen { 0 } else { 80 },
+                    if fullscreen {
+                        GetSystemMetrics(SM_CXSCREEN)
+                    } else {
+                        640
+                    },
+                    if fullscreen {
+                        GetSystemMetrics(SM_CYSCREEN)
+                    } else {
+                        480
+                    },
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                let _window = TestWindow {
+                    hwnd,
+                    previous_main: MAIN_HWND.swap(hwnd.0 as isize, Ordering::SeqCst),
+                };
+                let _ = ShowWindow(hwnd, initial_show);
+                let mut original = RECT::default();
+                GetWindowRect(hwnd, &mut original).unwrap();
+                let maximized = name == "maximized";
+                assert_eq!(IsZoomed(hwnd).as_bool(), maximized, "{name}");
+
+                hide_main_window();
+                dispatch_pending_messages();
+                assert!(!IsWindowVisible(hwnd).as_bool(), "{name}");
+                show_main_window();
+                dispatch_pending_messages();
+                assert!(IsWindowVisible(hwnd).as_bool(), "{name}");
+                assert_eq!(IsZoomed(hwnd).as_bool(), maximized, "{name}");
+                let mut restored = RECT::default();
+                GetWindowRect(hwnd, &mut restored).unwrap();
+                assert_eq!(restored, original, "{name}");
+
+                let _ = ShowWindow(hwnd, SW_MINIMIZE);
+                assert!(IsIconic(hwnd).as_bool(), "{name}");
+                hide_main_window();
+                dispatch_pending_messages();
+                show_main_window();
+                dispatch_pending_messages();
+                assert!(!IsIconic(hwnd).as_bool(), "{name}");
+                assert!(IsWindowVisible(hwnd).as_bool(), "{name}");
+                assert_eq!(IsZoomed(hwnd).as_bool(), maximized, "{name}");
+                GetWindowRect(hwnd, &mut restored).unwrap();
+                assert_eq!(restored, original, "{name}");
+            }
+        }
+    }
 
     #[test]
     fn tray_notification_code_uses_low_word_only() {
