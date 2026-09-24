@@ -200,9 +200,10 @@ pub(in crate::workspace) use titlebar::{
 
 pub(in crate::workspace) use ai::{
     AcpApplicationToolTurn, AiChatPromptKeyAction, AiCompactionDelivery,
-    AiCompactionDeliverySender, AiInlinePanelState, AiStreamDelivery, AiStreamDeliveryEvent,
-    AiStreamDeliverySender, ai_chat_prompt_key_action, ai_input_soft_wrap_columns,
-    ai_input_visual_lines, ai_now_ms, handle_acp_application_tool_call,
+    AiCompactionDeliverySender, AiInlinePanelState, AiInputVisualLine, AiStreamDelivery,
+    AiStreamDeliveryEvent, AiStreamDeliverySender, ai_chat_prompt_key_action,
+    ai_input_line_index_for_offset, ai_input_visual_lines, ai_now_ms,
+    handle_acp_application_tool_call,
 };
 use helpers::*;
 pub(in crate::workspace) use state::{

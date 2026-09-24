@@ -620,12 +620,15 @@ impl AiWorkspaceEntity {
     pub(in crate::workspace) fn begin_message_edit(&mut self, message_id: String, content: String) {
         self.chat_ui.editing_message_id = Some(message_id);
         self.chat_ui.editing_message_draft = content;
+        self.chat_ui.editing_message_scroll = ScrollHandle::new();
+        self.chat_ui.editing_message_caret_position.set(None);
         self.focus_message_edit();
     }
 
     pub(in crate::workspace) fn clear_message_edit(&mut self) {
         self.chat_ui.editing_message_id = None;
         self.chat_ui.editing_message_draft.clear();
+        self.chat_ui.editing_message_caret_position.set(None);
         self.chat_ui.editing_message_focused = false;
     }
 
@@ -4824,6 +4827,8 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) editing_message_id: Option<String>,
     pub(super) editing_message_draft: String,
     pub(super) editing_message_focused: bool,
+    pub(super) editing_message_scroll: ScrollHandle,
+    pub(super) editing_message_caret_position: std::cell::Cell<Option<(usize, usize, usize)>>,
     pub(super) thinking_expansion_state: HashMap<String, bool>,
     pub(super) tool_call_expansion_state: HashSet<String>,
     pub(super) tool_candidate_selection: Option<AiToolCandidateSelectionState>,
@@ -4891,6 +4896,8 @@ impl AiChatWorkspaceState {
             editing_message_id: None,
             editing_message_draft: String::new(),
             editing_message_focused: false,
+            editing_message_scroll: ScrollHandle::new(),
+            editing_message_caret_position: std::cell::Cell::new(None),
             thinking_expansion_state: HashMap::new(),
             tool_call_expansion_state: HashSet::new(),
             tool_candidate_selection: None,

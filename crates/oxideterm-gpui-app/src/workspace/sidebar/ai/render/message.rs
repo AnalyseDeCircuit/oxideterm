@@ -2161,48 +2161,7 @@ impl WorkspaceApp {
             .editing_message_draft
             .trim()
             .is_empty();
-        let input = text_input(
-            &self.tokens,
-            TextInputView {
-                value: &self.ai_entity.read(cx).chat_ui().editing_message_draft,
-                placeholder: String::new(),
-                focused: self.ai_entity.read(cx).chat_ui().editing_message_focused,
-                caret_visible: self.input_caret.visible(),
-                secret: false,
-                selected_all: false,
-                selected_range: self.ime_selected_range_for_target(target, cx),
-                marked_text: self.marked_text_for_target(target, cx),
-            },
-        )
-        .border_0()
-        .bg(rgba(0x00000000))
-        .p_0()
-        .cursor(CursorStyle::IBeam)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                this.ai_entity.update(cx, |ai, _cx| {
-                    ai.focus_message_edit();
-                });
-                this.ai_entity.update(cx, |ai, _cx| {
-                    ai.set_model_selector_search_focused(false);
-                });
-                this.ime_marked_text = None;
-                window.focus(&this.focus_handle, cx);
-                this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .on_mouse_move(
-            cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-            }),
-        );
-        let input = text_input_anchor_probe(
-            target.anchor_id(),
-            input,
-            Self::deferred_ai_text_input_anchor_update(cx.entity()),
-        );
+        let input = self.render_ai_multiline_input(target, String::new(), true, cx);
 
         div()
             .flex()
