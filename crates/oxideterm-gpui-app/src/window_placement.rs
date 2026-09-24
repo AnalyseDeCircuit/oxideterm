@@ -45,25 +45,17 @@ pub(crate) fn default_window_bounds(cx: &App) -> Bounds<Pixels> {
 }
 
 pub(crate) fn initial_window_bounds(cx: &App, state: &WindowUiState) -> WindowBounds {
-    let metrics = UiMetrics::tauri_default();
     let visible_displays = cx
         .displays()
         .into_iter()
         .map(|display| LogicalWindowRect::from_bounds(display.visible_bounds()))
         .filter(valid_display_rect)
         .collect::<Vec<_>>();
-    let fallback_display = LogicalWindowRect {
-        x: 0.0,
-        y: 0.0,
-        width: metrics.window_min_width,
-        height: metrics.window_min_height,
-    };
     let primary_display = cx
         .primary_display()
         .map(|display| LogicalWindowRect::from_bounds(display.visible_bounds()))
         .filter(valid_display_rect)
-        .or_else(|| visible_displays.first().copied())
-        .unwrap_or(fallback_display);
+        .or_else(|| visible_displays.first().copied());
     let restored =
         restore_window_rect(state.normal_bounds, &visible_displays, primary_display).to_bounds();
 
@@ -79,7 +71,7 @@ pub(crate) fn initial_window_bounds(cx: &App, state: &WindowUiState) -> WindowBo
 fn restore_window_rect(
     saved: Option<WindowGeometry>,
     visible_displays: &[LogicalWindowRect],
-    primary_display: LogicalWindowRect,
+    primary_display: Option<LogicalWindowRect>,
 ) -> LogicalWindowRect {
     let desired = saved
         .filter(|geometry| geometry.width > 0 && geometry.height > 0)
@@ -89,6 +81,19 @@ fn restore_window_rect(
             width: geometry.width as f32,
             height: geometry.height as f32,
         });
+    let Some(primary_display) = primary_display else {
+        // Wayland can report outputs after the application creates its first window.
+        // A bootstrap size is not a monitor boundary and must not clip saved bounds.
+        return desired.unwrap_or_else(|| {
+            let metrics = UiMetrics::tauri_default();
+            LogicalWindowRect {
+                x: 0.0,
+                y: 0.0,
+                width: metrics.window_min_width,
+                height: metrics.window_min_height,
+            }
+        });
+    };
     let Some(desired) = desired else {
         return centered_default_window(primary_display);
     };
@@ -153,5 +158,141 @@ fn fit_window_to_display(
             .clamp(display.y, display.y + display.height - height),
         width,
         height,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_size_survives_missing_startup_display_information() {
+        let restored = restore_window_rect(
+            Some(WindowGeometry {
+                x: 120,
+                y: 90,
+                width: 1100,
+                height: 720,
+            }),
+            &[],
+            None,
+        );
+        assert_eq!(
+            restored,
+            LogicalWindowRect {
+                x: 120.0,
+                y: 90.0,
+                width: 1100.0,
+                height: 720.0,
+            }
+        );
+    }
+
+    #[test]
+    fn missing_display_uses_bootstrap_size_only_without_valid_saved_bounds() {
+        for saved in [
+            None,
+            Some(WindowGeometry {
+                x: 120,
+                y: 90,
+                width: 0,
+                height: 720,
+            }),
+            Some(WindowGeometry {
+                x: 120,
+                y: 90,
+                width: 1100,
+                height: -1,
+            }),
+        ] {
+            assert_eq!(
+                restore_window_rect(saved, &[], None),
+                LogicalWindowRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 800.0,
+                    height: 600.0,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn known_displays_still_constrain_and_recenter_saved_windows() {
+        let primary = LogicalWindowRect {
+            x: 0.0,
+            y: 0.0,
+            width: 1600.0,
+            height: 900.0,
+        };
+        let secondary = LogicalWindowRect {
+            x: 1600.0,
+            y: 0.0,
+            width: 1280.0,
+            height: 1024.0,
+        };
+        for (name, saved, expected) in [
+            (
+                "oversized",
+                Some(WindowGeometry {
+                    x: 100,
+                    y: 80,
+                    width: 2000,
+                    height: 1200,
+                }),
+                LogicalWindowRect {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 1600.0,
+                    height: 900.0,
+                },
+            ),
+            (
+                "disconnected display",
+                Some(WindowGeometry {
+                    x: -2000,
+                    y: 100,
+                    width: 1100,
+                    height: 720,
+                }),
+                LogicalWindowRect {
+                    x: 250.0,
+                    y: 90.0,
+                    width: 1100.0,
+                    height: 720.0,
+                },
+            ),
+            (
+                "secondary display",
+                Some(WindowGeometry {
+                    x: 1720,
+                    y: 90,
+                    width: 1100,
+                    height: 720,
+                }),
+                LogicalWindowRect {
+                    x: 1720.0,
+                    y: 90.0,
+                    width: 1100.0,
+                    height: 720.0,
+                },
+            ),
+            (
+                "first launch",
+                None,
+                LogicalWindowRect {
+                    x: 160.0,
+                    y: 90.0,
+                    width: 1280.0,
+                    height: 720.0,
+                },
+            ),
+        ] {
+            assert_eq!(
+                restore_window_rect(saved, &[primary, secondary], Some(primary)),
+                expected,
+                "{name}",
+            );
+        }
     }
 }
