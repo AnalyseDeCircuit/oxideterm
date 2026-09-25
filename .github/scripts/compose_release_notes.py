@@ -103,14 +103,26 @@ def compose_notes(version: str, tag: str, base_path: Path, changelog_path: Path)
 
     changelog = changelog_path.read_text(encoding="utf-8")
     # Stable releases already show the version in GitHub's release title, so their
-    # body starts directly with the summary while other channels keep the heading.
+    # body omits the version heading while other channels keep it.
     is_stable_release = DOWNLOADS_MARKER in base
     section = extract_version_section(
         changelog, version, include_heading=not is_stable_release
     )
+    language_blocks = re.split(r"^### (中文|English)\n", section, flags=re.MULTILINE)
+    bilingual = len(language_blocks) == 5 and set(language_blocks[1::2]) == {
+        "中文", "English"
+    }
+    if bilingual:
+        blocks = dict(zip(language_blocks[1::2], language_blocks[2::2]))
+        section = language_blocks[0] + "\n\n".join(
+            f"### {language}\n\n{blocks[language].strip()}"
+            for language in ("中文", "English")
+        )
     notes = base.replace(CHANGELOG_MARKER, section)
     if DOWNLOADS_MARKER in notes:
         notes = notes.replace(DOWNLOADS_MARKER, stable_download_table(version, tag))
+    if bilingual:
+        notes = "[中文](#中文) | [English](#english)\n\n" + notes
     return notes.rstrip() + "\n"
 
 
