@@ -9,7 +9,7 @@ section as the detailed changelog attached to the corresponding GitHub Release.
 
 OxideTerm 2.1.0 带来了跨主机混合分屏、可重复使用的本地终端配置、更直观的主题预览，以及可折叠的串口和 tmux 控制栏，同时改善了持续输出处理、AI 消息编辑和原生窗口体验。祝大家中秋节快乐！感谢你让 OxideTerm 成为日常工作的一部分。
 
-![OxideTerm 2.1.0 中秋更新海报](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/34657ab9a2ffc0975660283c72f6a9618ab4ef42/docs/media/releases/oxideterm-2.1.0-mid-autumn.png)
+![OxideTerm 2.1.0 中秋更新海报](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/d7f50e8b633fc0c01cd0ad600e4c2279a16e36db/docs/media/releases/oxideterm-2.1.0-mid-autumn.png)
 
 #### 🪟 跨主机、跨窗口的混合工作区
 
