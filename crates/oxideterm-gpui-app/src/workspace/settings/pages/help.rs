@@ -443,6 +443,11 @@ impl WorkspaceApp {
                 Some(LucideIcon::CheckCircle),
                 self.tokens.ui.success,
             ),
+            NativeUpdateRenderState::ManagedByPackageManager => (
+                self.i18n.t("settings_view.help.managed_by_package_manager"),
+                None,
+                self.tokens.ui.text_muted,
+            ),
             NativeUpdateRenderState::Verifying(_) => (
                 self.i18n.t("settings_view.help.verifying"),
                 None,

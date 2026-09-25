@@ -11,6 +11,7 @@ pub enum InstallFlavor {
     LinuxAppImage,
     LinuxDeb,
     LinuxRpm,
+    LinuxNix,
     Portable,
     Standard,
 }
@@ -27,6 +28,7 @@ impl InstallFlavor {
             "macos" => Self::MacApp,
             "windows" => Self::WindowsNsis,
             "linux" if path_is_appimage(current_exe) => Self::LinuxAppImage,
+            "linux" if path_is_nix_install(current_exe) => Self::LinuxNix,
             "linux" if path_is_rpm_install(current_exe) => Self::LinuxRpm,
             "linux" => Self::LinuxDeb,
             _ => Self::Standard,
@@ -86,6 +88,7 @@ impl PlatformTarget {
                 format!("linux-{arch}-rpm"),
                 format!("{arch}-unknown-linux-gnu-rpm"),
             ],
+            ("linux", InstallFlavor::LinuxNix) => vec![],
             ("macos", InstallFlavor::Portable) => vec![
                 format!("darwin-{arch}-portable"),
                 format!("macos-{arch}-portable"),
@@ -112,6 +115,13 @@ fn path_is_appimage(path: &Path) -> bool {
         .and_then(|extension| extension.to_str())
         .map(|extension| extension.eq_ignore_ascii_case("appimage"))
         .unwrap_or(false)
+}
+
+fn path_is_nix_install(current_exe: &Path) -> bool {
+    current_exe
+        .parent()
+        .and_then(|parent| std::fs::read_to_string(parent.join("PACKAGE_KIND")).ok())
+        .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("nix"))
 }
 
 fn path_is_rpm_install(current_exe: &Path) -> bool {
@@ -164,6 +174,23 @@ mod tests {
                 true,
             ),
             InstallFlavor::Portable
+        );
+    }
+
+    #[test]
+    fn nix_marker_selects_nix_install_flavor() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("oxideterm-native");
+        std::fs::write(directory.path().join("PACKAGE_KIND"), "nix\n").unwrap();
+
+        assert_eq!(
+            InstallFlavor::infer(&PlatformTarget::new("linux", "x86_64"), &executable, false),
+            InstallFlavor::LinuxNix
+        );
+        assert!(
+            PlatformTarget::new("linux", "x86_64")
+                .candidate_keys(InstallFlavor::LinuxNix)
+                .is_empty()
         );
     }
 

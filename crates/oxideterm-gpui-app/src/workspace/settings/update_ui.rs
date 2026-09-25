@@ -158,7 +158,8 @@ impl WorkspaceApp {
             ),
             NativeUpdateRenderState::Idle
             | NativeUpdateRenderState::Checking
-            | NativeUpdateRenderState::UpToDate => return None,
+            | NativeUpdateRenderState::UpToDate
+            | NativeUpdateRenderState::ManagedByPackageManager => return None,
         };
 
         let description = self
