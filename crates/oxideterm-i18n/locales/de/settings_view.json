@@ -1382,6 +1382,7 @@
       "check_update": "Nach Updates suchen",
       "checking": "Suche nach Updates...",
       "up_to_date": "Sie sind auf dem neuesten Stand",
+      "managed_by_package_manager": "Updates für diese Nix-Installation werden von Nix verwaltet.",
       "update_available": "Neue Version verfügbar",
       "update_available_toast": "Eine neue Version ist verfügbar. Gehen Sie zu Einstellungen → Hilfe zum Aktualisieren.",
       "download_install": "Herunterladen und installieren",

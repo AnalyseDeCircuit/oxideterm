@@ -1382,6 +1382,7 @@
       "check_update": "Kiểm tra cập nhật",
       "checking": "Đang kiểm tra cập nhật...",
       "up_to_date": "Bạn đang dùng phiên bản mới nhất",
+      "managed_by_package_manager": "Bản cập nhật của bản cài đặt Nix này do Nix quản lý.",
       "update_available": "Có phiên bản mới",
       "update_available_toast": "Có phiên bản mới. Vào Cài đặt → Trợ giúp để cập nhật.",
       "download_install": "Tải và cài đặt",

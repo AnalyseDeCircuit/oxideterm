@@ -101,6 +101,7 @@ impl NativeUpdateRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeUpdateStatus {
     UpToDate,
+    ManagedByPackageManager,
     Available(NativeUpdatePackage),
 }
 
@@ -138,6 +139,10 @@ impl NativeUpdateClient {
         &self,
         request: NativeUpdateRequest,
     ) -> Result<NativeUpdateStatus, NativeUpdateError> {
+        if request.install_flavor == InstallFlavor::LinuxNix {
+            return Ok(NativeUpdateStatus::ManagedByPackageManager);
+        }
+
         let endpoint = endpoint_for_channel(request.channel);
         let response = self
             .http
@@ -777,6 +782,22 @@ fn compute_retry_delay(attempt: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn nix_install_flavor_skips_remote_update_check() {
+        let client = NativeUpdateClient::new().unwrap();
+        let result = client
+            .check(NativeUpdateRequest {
+                channel: oxideterm_settings::UpdateChannel::Stable,
+                current_version: "1.0.0".into(),
+                target: PlatformTarget::new("linux", "x86_64"),
+                install_flavor: InstallFlavor::LinuxNix,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result, NativeUpdateStatus::ManagedByPackageManager);
+    }
 
     #[test]
     fn package_file_name_keeps_version_and_removes_path_unsafe_chars() {

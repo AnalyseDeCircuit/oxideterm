@@ -1382,6 +1382,7 @@
       "check_update": "Buscar actualizaciones",
       "checking": "Buscando actualizaciones...",
       "up_to_date": "Estás al día",
+      "managed_by_package_manager": "Nix gestiona las actualizaciones de esta instalación.",
       "update_available": "Nueva versión disponible",
       "update_available_toast": "Hay una nueva versión disponible. Ve a Ajustes → Ayuda para actualizar.",
       "download_install": "Descargar e instalar",

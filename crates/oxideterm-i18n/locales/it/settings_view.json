@@ -1382,6 +1382,7 @@
       "check_update": "Controlla aggiornamenti",
       "checking": "Controllo aggiornamenti...",
       "up_to_date": "Sei aggiornato",
+      "managed_by_package_manager": "Gli aggiornamenti di questa installazione sono gestiti da Nix.",
       "update_available": "Nuova versione disponibile",
       "update_available_toast": "Una nuova versione è disponibile. Vai in Impostazioni → Aiuto per aggiornare.",
       "download_install": "Scarica e installa",

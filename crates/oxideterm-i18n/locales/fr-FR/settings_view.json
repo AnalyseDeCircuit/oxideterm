@@ -1382,6 +1382,7 @@
       "check_update": "Vérifier les mises à jour",
       "checking": "Vérification des mises à jour...",
       "up_to_date": "Vous êtes à jour",
+      "managed_by_package_manager": "Les mises à jour de cette installation sont gérées par Nix.",
       "update_available": "Nouvelle version disponible",
       "update_available_toast": "Une nouvelle version est disponible. Allez dans Paramètres → Aide pour mettre à jour.",
       "download_install": "Télécharger et installer",

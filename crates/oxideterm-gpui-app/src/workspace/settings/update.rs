@@ -14,6 +14,7 @@ pub(in crate::workspace) enum NativeUpdateUiState {
     Idle,
     Checking,
     UpToDate,
+    ManagedByPackageManager,
     Available(oxideterm_update::NativeUpdatePackage),
     Downloading(Option<oxideterm_update::ResumableUpdateStatus>),
     Verifying(Option<oxideterm_update::ResumableUpdateStatus>),
@@ -28,6 +29,7 @@ pub(in crate::workspace) enum NativeUpdateRenderState {
     Idle,
     Checking,
     UpToDate,
+    ManagedByPackageManager,
     Available {
         version: String,
         has_release_notes: bool,
@@ -130,6 +132,9 @@ impl SettingsWorkspaceEntity {
             NativeUpdateUiState::Idle => NativeUpdateRenderState::Idle,
             NativeUpdateUiState::Checking => NativeUpdateRenderState::Checking,
             NativeUpdateUiState::UpToDate => NativeUpdateRenderState::UpToDate,
+            NativeUpdateUiState::ManagedByPackageManager => {
+                NativeUpdateRenderState::ManagedByPackageManager
+            }
             NativeUpdateUiState::Available(package) => NativeUpdateRenderState::Available {
                 version: package.version.clone(),
                 has_release_notes: package
@@ -283,6 +288,9 @@ impl SettingsWorkspaceEntity {
                     }
                     Ok(oxideterm_update::NativeUpdateStatus::UpToDate) => {
                         NativeUpdateUiState::UpToDate
+                    }
+                    Ok(oxideterm_update::NativeUpdateStatus::ManagedByPackageManager) => {
+                        NativeUpdateUiState::ManagedByPackageManager
                     }
                     Ok(oxideterm_update::NativeUpdateStatus::Available(package)) => {
                         settings.native_update.package = Some(package.clone());

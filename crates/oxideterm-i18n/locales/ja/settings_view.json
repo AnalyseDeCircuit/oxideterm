@@ -1382,6 +1382,7 @@
       "check_update": "更新を確認",
       "checking": "更新を確認中...",
       "up_to_date": "最新バージョンです",
+      "managed_by_package_manager": "この Nix インストールの更新は Nix で管理されています。",
       "update_available": "新しいバージョンが利用可能",
       "update_available_toast": "新しいバージョンが利用可能です。設定 → ヘルプから更新できます。",
       "download_install": "ダウンロードしてインストール",

@@ -1382,6 +1382,7 @@
       "check_update": "檢查更新",
       "checking": "正在檢查更新...",
       "up_to_date": "已是最新版本",
+      "managed_by_package_manager": "此 Nix 安裝的更新由 Nix 管理。",
       "update_available": "發現新版本",
       "update_available_toast": "有新版本可用，前往 設定 → 說明 頁面更新。",
       "download_install": "下載並安裝",
