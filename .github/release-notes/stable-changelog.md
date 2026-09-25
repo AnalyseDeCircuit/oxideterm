@@ -9,7 +9,7 @@ section as the detailed changelog attached to the corresponding GitHub Release.
 
 OxideTerm 2.1.0 带来了跨主机混合分屏、可重复使用的本地终端配置、更直观的主题预览，以及可折叠的串口和 tmux 控制栏，同时改善了持续输出处理、AI 消息编辑和原生窗口体验。祝大家中秋节快乐！感谢你让 OxideTerm 成为日常工作的一部分。
 
-![OxideTerm 2.1.0 中秋更新海报](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/main/docs/media/releases/oxideterm-2.1.0-mid-autumn.png)
+![OxideTerm 2.1.0 中秋更新海报](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/34657ab9a2ffc0975660283c72f6a9618ab4ef42/docs/media/releases/oxideterm-2.1.0-mid-autumn.png)
 
 #### 🪟 跨主机、跨窗口的混合工作区
 
@@ -66,7 +66,7 @@ OxideTerm 2.1.0 带来了跨主机混合分屏、可重复使用的本地终端�
 
 下图与此前发布的基准结果并列展示，金色为 2.1.0。本测试测量进程到伪终端的吞吐量，不代表画面帧率或 GPU 呈现速度。
 
-![OxideTerm 历次版本终端吞吐量对比 · 中秋版](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/main/.github/release-notes/assets/terminal-performance-2.1.0-comparison.png)
+![OxideTerm 历次版本终端吞吐量对比 · 中秋版](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/34657ab9a2ffc0975660283c72f6a9618ab4ef42/.github/release-notes/assets/terminal-performance-2.1.0-comparison.png)
 
 #### 🤖 AI 消息编辑与输入
 
@@ -145,7 +145,7 @@ To create a reusable entry, choose Local Terminal in the connection form, select
 
 The chart places these results alongside the previously published benchmarks, with 2.1.0 highlighted in gold. These measurements cover process-to-PTY throughput, not frame rate or GPU presentation.
 
-![OxideTerm terminal throughput across releases — Mid-Autumn edition](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/main/.github/release-notes/assets/terminal-performance-2.1.0-comparison.png)
+![OxideTerm terminal throughput across releases — Mid-Autumn edition](https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm/34657ab9a2ffc0975660283c72f6a9618ab4ef42/.github/release-notes/assets/terminal-performance-2.1.0-comparison.png)
 
 #### 🤖 AI Message Editing and Input
 
