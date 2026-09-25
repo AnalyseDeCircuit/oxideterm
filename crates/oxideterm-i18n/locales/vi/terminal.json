@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "Hiện các nút điều khiển",
+      "hide_controls": "Ẩn các nút điều khiển"
+    },
     "autosuggest": {
       "matches": "{{count}} kết quả",
       "navigation_hint": "{{select}} chọn · {{run}} chạy · Nhấp để điền",

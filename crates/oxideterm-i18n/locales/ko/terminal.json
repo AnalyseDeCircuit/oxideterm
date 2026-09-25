@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "조작 메뉴 펼치기",
+      "hide_controls": "조작 메뉴 접기"
+    },
     "autosuggest": {
       "matches": "후보 {{count}}개",
       "navigation_hint": "{{select}} 선택 · {{run}} 실행 · 클릭하여 입력",

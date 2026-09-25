@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "Show controls",
+      "hide_controls": "Hide controls"
+    },
     "autosuggest": {
       "matches": "{{count}} matches",
       "navigation_hint": "{{select}} select · {{run}} run · Click fill",

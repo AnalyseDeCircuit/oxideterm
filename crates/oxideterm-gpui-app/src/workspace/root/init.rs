@@ -694,6 +694,8 @@ impl WorkspaceApp {
             )
             .measure_all(),
             open_settings_select: None,
+            settings_theme_preview: None,
+            settings_theme_scroll: ScrollHandle::new(),
             open_settings_select_owner_window_id: None,
             settings_select_focus_origin: None,
             // Settings tabs are variable-height browser sections, not a single
@@ -776,6 +778,7 @@ impl WorkspaceApp {
             saved_ssh_nodes: HashMap::new(),
             expanded_ssh_nodes: HashSet::new(),
             expanded_standalone_connections: HashSet::new(),
+            local_session_group_expanded: true,
             active_ssh_node_id: None,
             next_ssh_node_id: 1,
             forwarding,
@@ -1225,6 +1228,8 @@ impl WorkspaceApp {
                 zmodem_upload: self.i18n.t("terminal.modem.zmodem_upload"),
                 zmodem_receive: self.i18n.t("terminal.modem.zmodem_receive"),
             },
+            control_bar_expand_label: self.i18n.t("terminal.control_bar.show_controls"),
+            control_bar_collapse_label: self.i18n.t("terminal.control_bar.hide_controls"),
             serial_control_labels: TerminalSerialControlLabels {
                 serial: self.i18n.t("terminal.serial_control.serial"),
                 connected: self.i18n.t("terminal.serial_control.connected"),

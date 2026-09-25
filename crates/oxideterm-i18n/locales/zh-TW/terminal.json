@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "展開操作列",
+      "hide_controls": "收起操作列"
+    },
     "autosuggest": {
       "matches": "{{count}} 筆符合",
       "navigation_hint": "{{select}} 選擇 · {{run}} 執行 · 點擊填入",

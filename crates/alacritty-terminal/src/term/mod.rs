@@ -1197,7 +1197,6 @@ impl<T: EventListener> Handler for Term<T> {
     fn input_text(&mut self, text: &str) {
         let active_charset = self.grid.cursor.charsets[self.active_charset];
         let supports_batch = text.is_ascii()
-            && active_charset == StandardCharset::Ascii
             && self.mode.contains(TermMode::LINE_WRAP)
             && !self.mode.contains(TermMode::INSERT)
             && !self.grid.cursor.template.flags.intersects(
@@ -1236,15 +1235,30 @@ impl<T: EventListener> Handler for Term<T> {
             }
 
             let template = self.grid.cursor.template.clone();
-            for (cell, byte) in self.grid[line][Column(start)..Column(end)]
-                .iter_mut()
-                .zip(&bytes[processed..processed + write_len])
-            {
-                cell.c = *byte as char;
-                cell.fg = template.fg;
-                cell.bg = template.bg;
-                cell.flags = template.flags;
-                cell.extra.clone_from(&template.extra);
+            let cells = &mut self.grid[line][Column(start)..Column(end)];
+            // Keep charset mapping outside the ordinary ASCII fill loop.
+            if active_charset == StandardCharset::Ascii {
+                for (cell, byte) in cells
+                    .iter_mut()
+                    .zip(&bytes[processed..processed + write_len])
+                {
+                    cell.c = *byte as char;
+                    cell.fg = template.fg;
+                    cell.bg = template.bg;
+                    cell.flags = template.flags;
+                    cell.extra.clone_from(&template.extra);
+                }
+            } else {
+                for (cell, byte) in cells
+                    .iter_mut()
+                    .zip(&bytes[processed..processed + write_len])
+                {
+                    cell.c = active_charset.map(*byte as char);
+                    cell.fg = template.fg;
+                    cell.bg = template.bg;
+                    cell.flags = template.flags;
+                    cell.extra.clone_from(&template.extra);
+                }
             }
 
             processed += write_len;
@@ -2798,7 +2812,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_input_resumes_scalar_path_for_complex_terminal_state() {
+    fn batch_input_preserves_complex_terminal_state() {
         let size = TermSize::new(8, 3);
         assert_batch_input_matches_scalar(&size, "ASCII中文e\u{301}", |_| {});
         assert_batch_input_matches_scalar(&size, "jklmnop", |term| {
@@ -2813,6 +2827,24 @@ mod tests {
         assert_batch_input_matches_scalar(&size, "overlap", |term| {
             term.input('界');
         });
+    }
+
+    #[test]
+    fn batch_dec_charset_matches_scalar_mapping_and_wrapping() {
+        let text: String = (0x20u8..=0x7e).map(char::from).collect();
+        for columns in [2, 7, 80] {
+            assert_batch_input_matches_scalar(&TermSize::new(columns, 3), &text, |term| {
+                term.configure_charset(
+                    CharsetIndex::G0,
+                    StandardCharset::SpecialCharacterAndLineDrawing,
+                );
+                term.grid
+                    .cursor
+                    .template
+                    .flags
+                    .insert(Flags::BOLD | Flags::UNDERLINE);
+            });
+        }
     }
 
     #[test]

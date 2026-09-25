@@ -162,11 +162,11 @@ fn dim_color(color: TerminalColor) -> TerminalColor {
     )
 }
 
-fn is_app_chosen_exact_color(color: &Color) -> bool {
+pub(crate) fn is_app_chosen_exact_color(color: &Color) -> bool {
     matches!(color, Color::Spec(_) | Color::Indexed(16..=255))
 }
 
-fn is_terminal_decoration_glyph(ch: char) -> bool {
+pub(crate) fn is_terminal_decoration_glyph(ch: char) -> bool {
     const DECORATIVE_RANGES: &[(u32, u32)] = &[
         (0x2500, 0x257f),
         (0x2580, 0x259f),

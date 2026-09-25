@@ -1187,6 +1187,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_settings_select(&mut self) {
+        self.settings_theme_preview = None;
         browser_behavior::close_browser_trigger_select(
             &mut self.open_settings_select,
             &mut self.settings_select_focus_origin,

@@ -8,6 +8,76 @@ use oxideterm_terminal_triggers::{
 pub(in crate::workspace) const SETTINGS_ROW_LABEL_MIN_WIDTH: f32 = 180.0; // Keep localized labels readable before controls wrap.
 const KNOWLEDGE_SCOPE_SELECT_MAX_HEIGHT: f32 = 320.0;
 
+enum ThemeSelectEntry {
+    Group(&'static str),
+    Theme(String),
+}
+
+fn appearance_theme_entries(settings: &PersistedSettings) -> Vec<ThemeSelectEntry> {
+    let mut entries = Vec::new();
+    if !settings.custom_themes.is_empty() {
+        entries.push(ThemeSelectEntry::Group(
+            "settings_view.appearance.theme_group_custom",
+        ));
+        let mut ids: Vec<_> = settings.custom_themes.keys().cloned().collect();
+        ids.sort();
+        entries.extend(ids.into_iter().map(ThemeSelectEntry::Theme));
+    }
+    entries.push(ThemeSelectEntry::Group(
+        "settings_view.appearance.theme_group_oxide",
+    ));
+    entries.extend(
+        OXIDE_THEME_IDS
+            .iter()
+            .filter(|id| built_in_theme_exists(id))
+            .map(|id| ThemeSelectEntry::Theme((*id).to_string())),
+    );
+    entries.push(ThemeSelectEntry::Group(
+        "settings_view.appearance.theme_group_classic",
+    ));
+    let mut classic: Vec<_> = BUILT_IN_THEMES
+        .iter()
+        .filter(|theme| !is_oxide_theme(theme.id))
+        .collect();
+    classic.sort_by_key(|theme| theme.id);
+    entries.extend(
+        classic
+            .into_iter()
+            .map(|theme| ThemeSelectEntry::Theme(theme.id.to_string())),
+    );
+    entries
+}
+
+fn next_theme_option<'a>(
+    entries: &'a [ThemeSelectEntry],
+    current: Option<&str>,
+    key: &str,
+) -> Option<(usize, &'a str)> {
+    let options: Vec<_> = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            if let ThemeSelectEntry::Theme(id) = entry {
+                Some((index, id.as_str()))
+            } else {
+                None
+            }
+        })
+        .collect();
+    let current = options
+        .iter()
+        .position(|(_, id)| Some(*id) == current)
+        .unwrap_or(0);
+    let next = match key {
+        "up" | "arrowup" => current.saturating_sub(1),
+        "home" => 0,
+        "end" => options.len().saturating_sub(1),
+        "down" | "arrowdown" => (current + 1).min(options.len().saturating_sub(1)),
+        _ => return None,
+    };
+    options.get(next).copied()
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_settings_select_overlay(
         &self,
@@ -177,94 +247,67 @@ impl WorkspaceApp {
                     &self.tokens,
                     width,
                     self.tokens.metrics.settings_theme_select_popup_max_height,
-                );
-
-                if !settings.custom_themes.is_empty() {
-                    popup = popup.child(select_label(
-                        &self.tokens,
-                        self.i18n.t("settings_view.appearance.theme_group_custom"),
-                    ));
-                    let mut custom_theme_ids: Vec<_> =
-                        settings.custom_themes.keys().cloned().collect();
-                    custom_theme_ids.sort();
-                    for theme_id in custom_theme_ids {
-                        let label = custom_theme_display_name(settings, &theme_id);
-                        let selected = theme_id == settings.terminal.theme;
-                        popup = popup.child(select_option_action(
-                            select_option(&self.tokens, label, selected),
-                            false,
-                            false,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.close_settings_select();
-                                this.edit_settings(
-                                    |settings| settings.terminal.theme = theme_id.clone(),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        ));
+                )
+                .w(px(width))
+                .track_scroll(&self.settings_theme_scroll);
+                for entry in appearance_theme_entries(settings) {
+                    match entry {
+                        ThemeSelectEntry::Group(key) => {
+                            popup = popup.child(select_label(&self.tokens, self.i18n.t(key)));
+                        }
+                        ThemeSelectEntry::Theme(theme_id) => {
+                            let label = custom_theme_display_name(settings, &theme_id);
+                            let preview_id = theme_id.clone();
+                            let palette =
+                                super::appearance::appearance_theme_palette(settings, &theme_id);
+                            let row = oxideterm_gpui_ui::select::select_option_highlighted(
+                                &self.tokens,
+                                "",
+                                theme_id == settings.terminal.theme,
+                                self.settings_theme_preview.as_deref() == Some(theme_id.as_str()),
+                            )
+                            .h_auto()
+                            .min_h(px(self.tokens.metrics.ui_control_height))
+                            .flex_none()
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .pr(px(self.tokens.metrics.ui_select_check_size))
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(4.0))
+                                    .child(div().truncate().child(label))
+                                    .child(
+                                        oxideterm_gpui_settings_view::settings_theme_palette_swatch(
+                                            &self.tokens,
+                                            palette,
+                                        ),
+                                    ),
+                            )
+                            .on_mouse_move(cx.listener(
+                                move |this, _, _, cx| {
+                                    if this.settings_theme_preview.as_ref() != Some(&preview_id) {
+                                        this.settings_theme_preview = Some(preview_id.clone());
+                                        cx.notify();
+                                    }
+                                },
+                            ));
+                            popup = popup.child(select_option_action(
+                                row,
+                                false,
+                                false,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.close_settings_select();
+                                    this.edit_settings(
+                                        |settings| settings.terminal.theme = theme_id.clone(),
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ));
+                        }
                     }
-                    popup = popup.child(select_separator(&self.tokens));
-                }
-
-                popup = popup.child(select_label(
-                    &self.tokens,
-                    self.i18n.t("settings_view.appearance.theme_group_oxide"),
-                ));
-                for &theme_id in OXIDE_THEME_IDS {
-                    if !built_in_theme_exists(theme_id) {
-                        continue;
-                    }
-                    let next_theme = theme_id.to_string();
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            theme_display_name(theme_id),
-                            theme_id == settings.terminal.theme.as_str(),
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.theme = next_theme.clone(),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-
-                popup = popup
-                    .child(select_separator(&self.tokens))
-                    .child(select_label(
-                        &self.tokens,
-                        self.i18n.t("settings_view.appearance.theme_group_classic"),
-                    ));
-                let mut classic_themes: Vec<_> = BUILT_IN_THEMES
-                    .iter()
-                    .filter(|theme| !is_oxide_theme(theme.id))
-                    .collect();
-                classic_themes.sort_by_key(|theme| theme.id);
-                for theme in classic_themes {
-                    let theme_id = theme.id.to_string();
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            theme_display_name(theme.id),
-                            theme.id == settings.terminal.theme.as_str(),
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.theme = theme_id.clone(),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
                 }
                 Some(popup)
             }
@@ -2030,9 +2073,62 @@ impl WorkspaceApp {
             self.close_settings_select();
             return;
         }
+        self.settings_theme_preview = None;
+        if select_id == SettingsSelect::AppearanceTheme {
+            let selected = &self.settings_store.settings().terminal.theme;
+            self.settings_theme_preview = Some(selected.clone());
+            self.settings_theme_scroll = ScrollHandle::new();
+            if let Some(row) = appearance_theme_entries(self.settings_store.settings())
+                .iter()
+                .position(|entry| matches!(entry, ThemeSelectEntry::Theme(id) if id == selected))
+            {
+                self.settings_theme_scroll.scroll_to_item(row);
+            }
+        }
         self.open_settings_select = Some(select_id);
         self.open_settings_select_owner_window_id = Some(owner_window_id);
         self.settings_select_focus_origin = Some(browser_behavior::BrowserFocusOrigin::Pointer);
+    }
+
+    pub(in crate::workspace) fn handle_appearance_theme_select_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if event.keystroke.modifiers.platform
+            || event.keystroke.modifiers.control
+            || event.keystroke.modifiers.alt
+        {
+            return false;
+        }
+        match event.keystroke.key.as_str() {
+            "escape" | "tab" => {
+                self.close_settings_select();
+                cx.notify();
+                true
+            }
+            "enter" | "space" | " " => {
+                if let Some(id) = self.settings_theme_preview.clone() {
+                    self.close_settings_select();
+                    self.edit_settings(|settings| settings.terminal.theme = id, cx);
+                }
+                true
+            }
+            "up" | "arrowup" | "down" | "arrowdown" | "home" | "end" => {
+                let entries = appearance_theme_entries(self.settings_store.settings());
+                if let Some((row, id)) = next_theme_option(
+                    &entries,
+                    self.settings_theme_preview.as_deref(),
+                    &event.keystroke.key,
+                ) {
+                    self.settings_theme_preview = Some(id.to_string());
+                    self.settings_theme_scroll.scroll_to_item(row);
+                    cx.notify();
+                }
+                true
+            }
+            _ => false,
+        }
     }
 
     pub(in crate::workspace) fn language_select_row(
@@ -2162,5 +2258,36 @@ impl WorkspaceApp {
             )
             .child(control)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod theme_select_tests {
+    use super::*;
+
+    #[test]
+    fn theme_navigation_skips_groups_and_scrolls_to_the_actual_row() {
+        let entries = [
+            ThemeSelectEntry::Group("custom"),
+            ThemeSelectEntry::Theme("custom:one".into()),
+            ThemeSelectEntry::Group("oxide"),
+            ThemeSelectEntry::Theme("azurite".into()),
+            ThemeSelectEntry::Group("classic"),
+            ThemeSelectEntry::Theme("tokyo-night".into()),
+        ];
+        for (current, key, expected) in [
+            ("custom:one", "down", (3, "azurite")),
+            ("azurite", "up", (1, "custom:one")),
+            ("azurite", "end", (5, "tokyo-night")),
+            ("tokyo-night", "home", (1, "custom:one")),
+            ("custom:one", "up", (1, "custom:one")),
+            ("tokyo-night", "down", (5, "tokyo-night")),
+        ] {
+            assert_eq!(
+                next_theme_option(&entries, Some(current), key),
+                Some(expected),
+                "{current}: {key}"
+            );
+        }
     }
 }

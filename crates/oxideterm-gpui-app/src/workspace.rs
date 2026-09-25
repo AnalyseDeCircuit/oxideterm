@@ -845,6 +845,8 @@ pub(crate) struct WorkspaceApp {
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     knowledge_workspace_list_state: ListState,
     open_settings_select: Option<SettingsSelect>,
+    settings_theme_preview: Option<String>,
+    settings_theme_scroll: ScrollHandle,
     // A root-mounted select portal must only use the trigger geometry from the
     // native window that opened it.
     open_settings_select_owner_window_id: Option<gpui::WindowId>,
@@ -910,6 +912,7 @@ pub(crate) struct WorkspaceApp {
     saved_ssh_nodes: HashMap<String, NodeId>,
     expanded_ssh_nodes: HashSet<NodeId>,
     expanded_standalone_connections: HashSet<String>,
+    local_session_group_expanded: bool,
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
     forwarding: Entity<forwards::ForwardingWorkspaceEntity>,

@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "展开操作栏",
+      "hide_controls": "收起操作栏"
+    },
     "autosuggest": {
       "matches": "{{count}} 条匹配",
       "navigation_hint": "{{select}} 选择 · {{run}} 执行 · 单击填充",

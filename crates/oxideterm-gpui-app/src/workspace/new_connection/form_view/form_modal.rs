@@ -1197,6 +1197,7 @@ impl WorkspaceApp {
                                                 &form.color,
                                                 &form.icon_background_color,
                                                 form.icon_picker_expanded,
+                                                form.transport == NewConnectionTransport::Ssh,
                                                 cx,
                                             ))
                                             .child(

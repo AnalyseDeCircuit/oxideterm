@@ -448,6 +448,7 @@ pub struct TerminalPane {
     session_kind: TerminalSessionKind,
     serial_session_config: Option<SerialSessionConfig>,
     serial_port_available: Option<bool>,
+    control_bar_expanded: bool,
     focus_handle: FocusHandle,
     preference_overrides: TerminalUiPreferenceOverrides,
     // The pane owns only its live-session highlight choice. Saved connection
@@ -1165,6 +1166,7 @@ impl TerminalPane {
             session_kind,
             serial_session_config: None,
             serial_port_available: None,
+            control_bar_expanded: true,
             focus_handle,
             preference_overrides: TerminalUiPreferenceOverrides::default(),
             session_highlight_override: None,

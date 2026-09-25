@@ -28,6 +28,39 @@ fn background_scope_index(scope: BackgroundScope) -> usize {
         .unwrap_or(0)
 }
 
+pub(super) fn appearance_theme_palette(settings: &PersistedSettings, id: &str) -> TerminalTheme {
+    let mut palette = theme_by_id(id).terminal;
+    let Some(colors) = settings
+        .custom_themes
+        .get(id)
+        .and_then(|theme| theme.get("terminalColors"))
+    else {
+        return palette;
+    };
+    // Preview only needs RGB values. The full runtime parser allocates static
+    // selection-color strings, which must not be repeated on hover repaint.
+    for (key, target) in [
+        ("background", &mut palette.background),
+        ("foreground", &mut palette.foreground),
+        ("cursor", &mut palette.cursor),
+        ("red", &mut palette.red),
+        ("green", &mut palette.green),
+        ("yellow", &mut palette.yellow),
+        ("blue", &mut palette.blue),
+        ("magenta", &mut palette.magenta),
+        ("cyan", &mut palette.cyan),
+    ] {
+        if let Some(color) = colors
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .and_then(parse_color_hex)
+        {
+            *target = color;
+        }
+    }
+    palette
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_appearance_section(
         &self,
@@ -949,7 +982,32 @@ impl WorkspaceApp {
         &self,
         settings: &PersistedSettings,
     ) -> AnyElement {
-        settings_appearance_theme_preview(&self.tokens, settings)
+        let previewing = self.open_settings_select == Some(SettingsSelect::AppearanceTheme);
+        let id = if previewing {
+            self.settings_theme_preview
+                .as_deref()
+                .unwrap_or(&settings.terminal.theme)
+        } else {
+            &settings.terminal.theme
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.spacing.two))
+            .child(settings_appearance_theme_preview(
+                &self.tokens,
+                settings,
+                appearance_theme_palette(settings, id),
+                custom_theme_display_name(settings, id),
+                &self.i18n,
+            ))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.appearance.theme_preview_hint")),
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_theme_editor_modal(
@@ -1971,6 +2029,45 @@ impl WorkspaceApp {
                 }
             },
             cx,
+        );
+    }
+}
+
+#[cfg(test)]
+mod theme_preview_tests {
+    use super::*;
+
+    #[test]
+    fn custom_theme_preview_reads_all_displayed_colors() {
+        let mut settings = PersistedSettings::default();
+        settings.terminal.theme = "tokyo-night".into();
+        settings.custom_themes.insert(
+            "custom:preview".into(),
+            serde_json::json!({
+                "terminalColors": {
+                    "background": "#102030", "foreground": "#e0d0c0", "cursor": "#abcdef",
+                    "red": "#aa0000", "green": "#00bb00", "yellow": "#cccc00",
+                    "blue": "#0000dd", "magenta": "#ee00ee", "cyan": "#00ffff"
+                }
+            }),
+        );
+        let palette = appearance_theme_palette(&settings, "custom:preview");
+        assert_eq!(
+            [
+                palette.background,
+                palette.foreground,
+                palette.cursor,
+                palette.red,
+                palette.green,
+                palette.yellow,
+                palette.blue,
+                palette.magenta,
+                palette.cyan
+            ],
+            [
+                0x102030, 0xe0d0c0, 0xabcdef, 0xaa0000, 0x00bb00, 0xcccc00, 0x0000dd, 0xee00ee,
+                0x00ffff
+            ],
         );
     }
 }

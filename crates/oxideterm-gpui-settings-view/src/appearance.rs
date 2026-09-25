@@ -182,10 +182,12 @@ pub fn settings_appearance_radius_control(
 pub fn settings_appearance_theme_preview(
     tokens: &ThemeTokens,
     settings: &PersistedSettings,
+    terminal: TerminalTheme,
+    name: String,
+    i18n: &I18n,
 ) -> AnyElement {
     // This is a static terminal sample, so it can live outside WorkspaceApp
     // without knowing anything about panes, sessions, or live terminal state.
-    let terminal = tokens.terminal;
     div()
         .w_full()
         .mt(px(tokens.metrics.settings_font_preview_margin_top))
@@ -201,6 +203,7 @@ pub fn settings_appearance_theme_preview(
             div()
                 .flex()
                 .flex_row()
+                .items_center()
                 .gap(px(tokens.metrics.settings_theme_preview_dot_gap))
                 .child(settings_appearance_preview_dot(
                     terminal.red,
@@ -213,7 +216,16 @@ pub fn settings_appearance_theme_preview(
                 .child(settings_appearance_preview_dot(
                     terminal.green,
                     tokens.metrics.settings_theme_preview_dot_size,
-                )),
+                ))
+                .child(div().flex_1())
+                .child(
+                    div()
+                        .text_size(px(tokens.metrics.ui_text_xs))
+                        .text_color(rgb(terminal.foreground))
+                        .min_w_0()
+                        .truncate()
+                        .child(name),
+                ),
         )
         .child(
             div()
@@ -228,15 +240,29 @@ pub fn settings_appearance_theme_preview(
                 .text_color(rgb(terminal.foreground))
                 .flex()
                 .flex_col()
-                .child("$ echo \"Hello World\"")
                 .child(
                     div()
                         .flex()
                         .flex_row()
                         .gap(px(6.0))
-                        .child(div().text_color(rgb(terminal.blue)).child("~"))
+                        .child(div().text_color(rgb(terminal.cyan)).child("~/project"))
                         .child(div().text_color(rgb(terminal.magenta)).child("git"))
                         .child(div().text_color(rgb(terminal.blue)).child("status")),
+                )
+                .child(
+                    div()
+                        .text_color(rgb(terminal.green))
+                        .child(i18n.t("settings_view.appearance.theme_preview_added")),
+                )
+                .child(
+                    div()
+                        .text_color(rgb(terminal.yellow))
+                        .child(i18n.t("settings_view.appearance.theme_preview_modified")),
+                )
+                .child(
+                    div()
+                        .text_color(rgb(terminal.red))
+                        .child(i18n.t("settings_view.appearance.theme_preview_deleted")),
                 )
                 .child(
                     div()
@@ -249,6 +275,42 @@ pub fn settings_appearance_theme_preview(
                 ),
         )
         .into_any_element()
+}
+
+pub fn settings_theme_palette_swatch(tokens: &ThemeTokens, terminal: TerminalTheme) -> Div {
+    let mut swatch = div()
+        .flex()
+        .items_center()
+        .gap(px(3.0))
+        .rounded(px(tokens.radii.xs))
+        .border_1()
+        .border_color(rgb(tokens.ui.border))
+        .bg(rgb(terminal.background))
+        .px(px(5.0))
+        .py(px(2.0))
+        .child(
+            div()
+                .text_size(px(tokens.metrics.ui_text_xs))
+                .text_color(rgb(terminal.foreground))
+                .child("Aa"),
+        );
+    for color in [
+        terminal.red,
+        terminal.green,
+        terminal.yellow,
+        terminal.blue,
+        terminal.magenta,
+        terminal.cyan,
+    ] {
+        swatch = swatch.child(
+            div()
+                .flex_none()
+                .size(px(9.0))
+                .rounded(px(tokens.radii.xs))
+                .bg(rgb(color)),
+        );
+    }
+    swatch
 }
 
 pub fn settings_theme_editor_preview(

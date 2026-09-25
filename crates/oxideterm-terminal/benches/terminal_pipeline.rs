@@ -146,9 +146,19 @@ fn terminal_input_corpora() -> Vec<(&'static str, Vec<u8>)> {
             ),
         ),
         (
+            "osc-links",
+            repeated_input(b"\x1b]8;id=build;https://example.com/builds/123456789/logs?step=compile&platform=macos\x1b\\build output with a hyperlink\x1b]8;;\x1b\\\r\n"),
+        ),
+        (
+            "osc-title",
+            repeated_input(format!("\x1b]2;{}\x07", "terminal title ".repeat(128)).as_bytes()),
+        ),
+        (
             "long-csi",
             repeated_input(b"\x1b[1;2;3;4;5;7;8;9;22;23;24;25;27;28;29;38;5;42mX\x1b[0m"),
         ),
+        ("cjk", repeated_input("终端输出性能测试中文日本語漢字かなカナ全角文字连续输出\r\n".as_bytes())),
+        ("dec-lines", repeated_input(b"\x1b(0lqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk\r\nx                                                                x\r\nmqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqj\x1b(B\r\n")),
         ("wrapped-ascii", fixed_size_input(b"x")),
         ("crlf-ascii", crlf_ascii_input()),
     ]
@@ -422,6 +432,38 @@ fn benchmark_terminal_snapshots(criterion: &mut Criterion) {
         let terminal = snapshot_benchmark_session();
         bencher.iter(|| black_box(terminal.snapshot()));
     });
+
+    for (name, row) in [
+        (
+            "ansi_runs",
+            "\x1b[31mred output ".repeat(4)
+                + "\x1b[32mgreen output ".repeat(4).as_str()
+                + "\x1b[0m",
+        ),
+        (
+            "low_contrast",
+            "\x1b[37;107m".to_owned() + &"low contrast ".repeat(8) + "\x1b[0m",
+        ),
+        (
+            "hyperlinks",
+            "\x1b]8;;https://example.com/build/123456789\x1b\\".to_owned()
+                + &"linked output ".repeat(8)
+                + "\x1b]8;;\x1b\\",
+        ),
+        ("alternating", "\x1b[31mA\x1b[32mB".repeat(60)),
+    ] {
+        group.bench_function(name, |bencher| {
+            let mut terminal = TerminalSession::recording_playback(
+                BENCHMARK_COLS,
+                BENCHMARK_ROWS,
+                GraphicsOptions::default(),
+                20_000,
+            );
+            terminal
+                .feed_recording_output((row.clone() + "\r\n").repeat(BENCHMARK_ROWS).as_bytes());
+            bencher.iter(|| black_box(terminal.snapshot()));
+        });
+    }
 
     group.bench_function("incremental_unchanged", |bencher| {
         let terminal = snapshot_benchmark_session();

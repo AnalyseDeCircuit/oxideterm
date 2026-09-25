@@ -119,6 +119,8 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         while i != bytes.len() {
             match self.state {
                 State::Ground => i += self.advance_ground(performer, &bytes[i..]),
+                State::CsiParam => i += self.advance_csi_params::<P, false>(performer, &bytes[i..]),
+                State::OscString => i += self.advance_osc_bytes::<P, false>(performer, &bytes[i..]),
                 _ => {
                     // Inlining it results in worse codegen.
                     let byte = bytes[i];
@@ -154,6 +156,8 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         while i != bytes.len() && !performer.terminated() {
             match self.state {
                 State::Ground => i += self.advance_ground(performer, &bytes[i..]),
+                State::CsiParam => i += self.advance_csi_params::<P, true>(performer, &bytes[i..]),
+                State::OscString => i += self.advance_osc_bytes::<P, true>(performer, &bytes[i..]),
                 _ => {
                     // Inlining it results in worse codegen.
                     let byte = bytes[i];
@@ -235,6 +239,53 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             0x40..=0x7E => self.action_csi_dispatch(performer, byte),
             _ => self.anywhere(performer, byte),
         }
+    }
+
+    /// Consume parameters without redispatching the parser state for every digit.
+    fn advance_csi_params<P: Perform, const CHECK_TERMINATION: bool>(
+        &mut self,
+        performer: &mut P,
+        bytes: &[u8],
+    ) -> usize {
+        let mut param = self.param;
+        for (index, &byte) in bytes.iter().enumerate() {
+            if CHECK_TERMINATION && index > 0 && performer.terminated() {
+                self.param = param;
+                return index;
+            }
+            match byte {
+                b'0'..=b'9' => {
+                    if self.params.is_full() {
+                        self.ignoring = true;
+                    } else {
+                        param = param
+                            .saturating_mul(10)
+                            .saturating_add((byte - b'0') as u16);
+                    }
+                }
+                b';' | b':' => {
+                    if self.params.is_full() {
+                        self.ignoring = true;
+                    } else {
+                        if byte == b':' {
+                            self.params.extend(param);
+                        } else {
+                            self.params.push(param);
+                        }
+                        param = 0;
+                    }
+                }
+                _ => {
+                    // Dispatch at most one callback before returning so synchronized-output
+                    // termination and in-band controls keep their original byte boundary.
+                    self.param = param;
+                    self.advance_csi_param(performer, byte);
+                    return index + 1;
+                }
+            }
+        }
+        self.param = param;
+        bytes.len()
     }
 
     #[inline(always)]
@@ -402,6 +453,40 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             },
             0x7F => (),
             _ => self.anywhere(performer, byte),
+        }
+    }
+
+    fn advance_osc_bytes<P: Perform, const CHECK_TERMINATED: bool>(
+        &mut self,
+        performer: &mut P,
+        bytes: &[u8],
+    ) -> usize {
+        for (index, &byte) in bytes.iter().enumerate() {
+            if CHECK_TERMINATED && index > 0 && performer.terminated() {
+                self.osc_extend(&bytes[..index]);
+                return index;
+            }
+            if byte < 0x20 || byte == b';' {
+                self.osc_extend(&bytes[..index]);
+                // Controls and parameter boundaries retain the scalar parser's dispatch order.
+                self.advance_osc_string(performer, byte);
+                return index + 1;
+            }
+        }
+        self.osc_extend(bytes);
+        bytes.len()
+    }
+
+    #[inline]
+    fn osc_extend(&mut self, bytes: &[u8]) {
+        #[cfg(feature = "std")]
+        self.osc_raw.extend_from_slice(bytes);
+        #[cfg(not(feature = "std"))]
+        {
+            let retained = bytes.len().min(OSC_RAW_BUF_SIZE - self.osc_raw.len());
+            self.osc_raw
+                .try_extend_from_slice(&bytes[..retained])
+                .unwrap();
         }
     }
 
@@ -970,7 +1055,7 @@ extern crate std;
 
 #[cfg(test)]
 mod tests {
-    use std::vec::Vec;
+    use std::{borrow::ToOwned, string::String, vec::Vec};
 
     use super::*;
 
@@ -1118,6 +1203,134 @@ mod tests {
                 Sequence::Execute(b'\n'),
             ]
         );
+    }
+
+    #[test]
+    fn csi_batches_preserve_controls_subparameters_and_chunk_boundaries() {
+        let bytes = b"\x1b[?38:2::255:128:0;999999m\x1b[1\x07;2 q\x1b[12\x18Z";
+        let expected = vec![
+            Sequence::Csi(
+                vec![vec![38, 2, 0, 255, 128, 0], vec![65535]],
+                vec![b'?'],
+                false,
+                'm',
+            ),
+            Sequence::Execute(7),
+            Sequence::Csi(vec![vec![1], vec![2]], vec![b' '], false, 'q'),
+            Sequence::Execute(0x18),
+            Sequence::Print('Z'),
+        ];
+        for split in 0..=bytes.len() {
+            let mut parser = Parser::new();
+            let mut dispatcher = Dispatcher::default();
+            parser.advance(&mut dispatcher, &bytes[..split]);
+            parser.advance(&mut dispatcher, &bytes[split..]);
+            assert_eq!(dispatcher.dispatched, expected, "split at {split}");
+        }
+    }
+
+    #[test]
+    fn csi_batch_termination_leaves_the_following_bytes_unconsumed() {
+        #[derive(Default)]
+        struct StopAtCsi(Dispatcher);
+        impl Perform for StopAtCsi {
+            fn csi_dispatch(
+                &mut self,
+                params: &Params,
+                intermediates: &[u8],
+                ignore: bool,
+                c: char,
+            ) {
+                self.0.csi_dispatch(params, intermediates, ignore, c);
+            }
+            fn terminated(&self) -> bool {
+                !self.0.dispatched.is_empty()
+            }
+        }
+        let mut parser = Parser::new();
+        let mut stop = StopAtCsi::default();
+        let input = b"\x1b[?2026hrest";
+        let consumed = parser.advance_until_terminated(&mut stop, input);
+        assert_eq!(&input[consumed..], b"rest");
+        assert_eq!(
+            stop.0.dispatched,
+            vec![Sequence::Csi(vec![vec![2026]], vec![b'?'], false, 'h')]
+        );
+    }
+
+    #[test]
+    fn osc_batches_preserve_controls_parameters_and_chunk_boundaries() {
+        let bytes = b"\x1b]8;id=x;url\0-path;tail\x1b\\\x1b]2;ab\x18Z\x1b]2;cd\x1aY\x1b]0;done\x07";
+        let expected = vec![
+            Sequence::Osc(
+                vec![
+                    b"8".to_vec(),
+                    b"id=x".to_vec(),
+                    b"url-path".to_vec(),
+                    b"tail".to_vec(),
+                ],
+                false,
+            ),
+            Sequence::Esc(vec![], false, b'\\'),
+            Sequence::Osc(vec![b"2".to_vec(), b"ab".to_vec()], false),
+            Sequence::Execute(0x18),
+            Sequence::Print('Z'),
+            Sequence::Osc(vec![b"2".to_vec(), b"cd".to_vec()], false),
+            Sequence::Execute(0x1a),
+            Sequence::Print('Y'),
+            Sequence::Osc(vec![b"0".to_vec(), b"done".to_vec()], true),
+        ];
+        for split in 0..=bytes.len() {
+            for until_terminated in [false, true] {
+                let mut parser = Parser::new();
+                let mut dispatcher = Dispatcher::default();
+                for chunk in [&bytes[..split], &bytes[split..]] {
+                    if until_terminated {
+                        assert_eq!(
+                            parser.advance_until_terminated(&mut dispatcher, chunk),
+                            chunk.len()
+                        );
+                    } else {
+                        parser.advance(&mut dispatcher, chunk);
+                    }
+                }
+                assert_eq!(
+                    dispatcher.dispatched, expected,
+                    "split at {split}, termination {until_terminated}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn osc_batch_termination_preserves_the_dispatch_boundary() {
+        #[derive(Default)]
+        struct StopAtOsc(Dispatcher);
+        impl Perform for StopAtOsc {
+            fn osc_dispatch(&mut self, params: &[&[u8]], bell: bool) {
+                self.0.osc_dispatch(params, bell);
+            }
+            fn terminated(&self) -> bool {
+                !self.0.dispatched.is_empty()
+            }
+        }
+        for (input, remaining, bell) in [
+            (b"\x1b]2;title\x07rest".as_slice(), b"rest".as_slice(), true),
+            (
+                b"\x1b]2;title\x1b\\rest".as_slice(),
+                b"\\rest".as_slice(),
+                false,
+            ),
+        ] {
+            let mut parser = Parser::new();
+            let mut stop = StopAtOsc::default();
+            let consumed = parser.advance_until_terminated(&mut stop, input);
+            assert_eq!(&input[consumed..], remaining);
+            assert_eq!(
+                stop.0.dispatched,
+                vec![Sequence::Osc(vec![b"2".to_vec(), b"title".to_vec()], bell)]
+            );
+        }
     }
 
     #[test]

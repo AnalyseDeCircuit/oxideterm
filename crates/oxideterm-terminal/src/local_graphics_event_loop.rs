@@ -48,6 +48,9 @@ use crate::{
     privilege_prompt::TerminalPrivilegePromptStream,
     shell_integration::TerminalShellIntegration,
 };
+#[cfg(target_os = "macos")]
+mod read_ahead;
+
 #[cfg(windows)]
 const PTY_READ_WRITE_TOKEN: usize = 2;
 #[cfg(not(windows))]
@@ -84,6 +87,8 @@ pub(crate) struct LocalPtyReadReport {
 pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     poll: Arc<Poller>,
     pty: tty::Pty,
+    #[cfg(target_os = "macos")]
+    read_ahead: read_ahead::PtyReadAhead,
     rx: PeekableReceiver<LocalGraphicsMsg>,
     tx: Sender<LocalGraphicsMsg>,
     terminal: Arc<FairMutex<Term<U>>>,
@@ -118,8 +123,13 @@ where
         tmux_controller: crate::tmux::TmuxController,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
+        let poll = Arc::new(Poller::new()?);
+        #[cfg(target_os = "macos")]
+        let read_ahead = read_ahead::PtyReadAhead::new(pty.file().try_clone()?, poll.clone())?;
         Ok(Self {
-            poll: Poller::new()?.into(),
+            poll,
+            #[cfg(target_os = "macos")]
+            read_ahead,
             pty,
             rx: PeekableReceiver::new(rx),
             tx,
@@ -495,7 +505,11 @@ where
         let mut terminal = None;
 
         loop {
-            match self.pty.reader().read(&mut buf[unprocessed..]) {
+            #[cfg(target_os = "macos")]
+            let read = self.read_ahead.read(&mut buf[unprocessed..]);
+            #[cfg(not(target_os = "macos"))]
+            let read = self.pty.reader().read(&mut buf[unprocessed..]);
+            match read {
                 Ok(0) if unprocessed == 0 => break,
                 Ok(got) => {
                     unprocessed += got;
@@ -557,6 +571,10 @@ where
             self.event_proxy.send_event(Event::Wakeup);
         }
 
+        #[cfg(target_os = "macos")]
+        if self.read_ahead.has_pending() {
+            self.poll.notify()?;
+        }
         Ok(LocalPtyReadReport {
             raw_bytes,
             parsed_bytes: processed,
@@ -680,6 +698,9 @@ where
                 );
                 let mut buf = [0u8; LOCAL_PTY_READ_BUFFER_BYTES];
                 let poll_opts = PollMode::Level;
+                #[cfg(target_os = "macos")]
+                let mut interest = PollingEvent::none(0);
+                #[cfg(not(target_os = "macos"))]
                 let mut interest = PollingEvent::readable(0);
 
                 if let Err(error) = unsafe { self.pty.register(&self.poll, interest, poll_opts) } {
@@ -715,7 +736,12 @@ where
 
                     let modem_writes_queued = self.flush_modem_server_writes(&mut state);
                     let modem_output_flushed = self.flush_buffered_modem_output(&mut state, false);
+                    #[cfg(target_os = "macos")]
+                    let pending_reads = self.read_ahead.has_pending();
+                    #[cfg(not(target_os = "macos"))]
+                    let pending_reads = false;
                     if events.is_empty()
+                        && !pending_reads
                         && self.rx.peek().is_none()
                         && !modem_writes_queued
                         && !modem_output_flushed
@@ -729,6 +755,15 @@ where
                         break;
                     }
 
+                    if pending_reads {
+                        match self.pty_read(&mut state, &mut buf) {
+                            Ok(report) => self.send_read_report(report),
+                            Err(error) => {
+                                tracing::error!(%error, "local PTY read-ahead failed");
+                                break 'event_loop;
+                            }
+                        }
+                    }
                     for event in events.iter() {
                         match event.key {
                             PTY_CHILD_EVENT_TOKEN => {
@@ -738,6 +773,28 @@ where
                                     if let Some(status) = status {
                                         self.event_proxy.send_event(Event::ChildExit(status));
                                     }
+                                    #[cfg(target_os = "macos")]
+                                    if self.drain_on_exit {
+                                        self.read_ahead.finish();
+                                        loop {
+                                            match self.read_ahead.wait_pending() {
+                                                Ok(true) => {},
+                                                Ok(false) => break,
+                                                Err(error) => {
+                                                    tracing::error!(%error, "local PTY exit read failed");
+                                                    break;
+                                                }
+                                            }
+                                            match self.pty_read(&mut state, &mut buf) {
+                                                Ok(report) => self.send_read_report(report),
+                                                Err(error) => {
+                                                    tracing::error!(%error, "local PTY exit drain failed");
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+                                    #[cfg(not(target_os = "macos"))]
                                     if self.drain_on_exit {
                                         if let Ok(report) = self.pty_read(&mut state, &mut buf) {
                                             self.send_read_report(report);

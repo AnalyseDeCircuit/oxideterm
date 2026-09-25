@@ -2477,6 +2477,7 @@ impl WorkspaceApp {
         color_value: &str,
         background_color_value: &str,
         expanded: bool,
+        supports_auto_icon: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -2558,6 +2559,9 @@ impl WorkspaceApp {
                             this.update_connection_form_state(cx, |state| {
                                 if let Some(form) = state.form.as_mut() {
                                     form.icon = icon_id.clone();
+                                    if supports_auto_icon {
+                                        form.icon_picker_expanded = false;
+                                    }
                                     clear_connection_selection(form);
                                 }
                             });
@@ -2595,12 +2599,18 @@ impl WorkspaceApp {
                         .child(
                             button(
                                 &self.tokens,
-                                if expanded {
+                                if supports_auto_icon {
+                                    self.i18n.t("sessionManager.edit_properties.custom_icon")
+                                } else if expanded {
                                     self.i18n.t("sessionManager.edit_properties.hide_icons")
                                 } else {
                                     self.i18n.t("sessionManager.edit_properties.choose_icon")
                                 },
-                                ButtonTone::Secondary,
+                                if supports_auto_icon && !icon_value.trim().is_empty() {
+                                    ButtonTone::Primary
+                                } else {
+                                    ButtonTone::Secondary
+                                },
                             )
                             .on_mouse_down(
                                 MouseButton::Left,
@@ -2615,19 +2625,30 @@ impl WorkspaceApp {
                                 }),
                             ),
                         )
-                        .when(!icon_value.trim().is_empty(), |row| {
+                        .when(supports_auto_icon || !icon_value.trim().is_empty(), |row| {
                             row.child(
                                 button(
                                     &self.tokens,
-                                    self.i18n.t("sessionManager.edit_properties.default_icon"),
-                                    ButtonTone::Secondary,
+                                    self.i18n.t(if supports_auto_icon {
+                                        "sessionManager.edit_properties.auto_icon"
+                                    } else {
+                                        "sessionManager.edit_properties.default_icon"
+                                    }),
+                                    if supports_auto_icon && icon_value.trim().is_empty() {
+                                        ButtonTone::Primary
+                                    } else {
+                                        ButtonTone::Secondary
+                                    },
                                 )
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
+                                    cx.listener(move |this, _event, _window, cx| {
                                         this.update_connection_form_state(cx, |state| {
                                             if let Some(form) = state.form.as_mut() {
                                                 form.icon.clear();
+                                                if supports_auto_icon {
+                                                    form.icon_picker_expanded = false;
+                                                }
                                                 clear_connection_selection(form);
                                             }
                                         });
@@ -2636,6 +2657,14 @@ impl WorkspaceApp {
                                 ),
                             )
                         }),
+                )
+                .when(
+                    supports_auto_icon && icon_value.trim().is_empty(),
+                    |content| {
+                        content.child(self.render_connection_hint(
+                            self.i18n.t("sessionManager.edit_properties.auto_icon_hint"),
+                        ))
+                    },
                 )
                 .when(
                     matches!(

@@ -8,6 +8,102 @@ use gpui::{
 mod ssh_peer;
 
 #[gpui::test]
+fn busy_ssh_parser_does_not_block_drawing_the_previous_frame(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config =
+        SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let (pane, cx) = cx.add_window_view(move |window, cx| {
+        TerminalPane::new_ssh_with_preferences(
+            config,
+            TerminalUiPreferences {
+                cursor_blink: false,
+                ..Default::default()
+            },
+            window,
+            cx,
+        )
+        .unwrap()
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(10)).unwrap();
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.draw(
+            point(px(0.0), px(0.0)),
+            size(
+                AvailableSpace::Definite(px(900.0)),
+                AvailableSpace::Definite(px(600.0)),
+            ),
+            |_, _| pane.clone().into_element(),
+        );
+    };
+    draw(cx);
+    let previous = pane.read_with(cx, |pane, _| pane.snapshot.clone());
+    let (entered_tx, entered_rx) = crossbeam_channel::bounded(1);
+    let (release_tx, release_rx) = crossbeam_channel::bounded(1);
+    let timed_out = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let worker_timed_out = timed_out.clone();
+    pane.update(cx, |pane, _| {
+        pane.terminal
+            .lock()
+            .set_output_processor(Some(Arc::new(move |bytes| {
+                entered_tx.send(()).unwrap();
+                // A watchdog releases the worker even when a blocking render regresses.
+                if release_rx.recv_timeout(Duration::from_secs(5)).is_err() {
+                    worker_timed_out.store(true, std::sync::atomic::Ordering::Release);
+                }
+                bytes.to_vec()
+            })));
+    });
+    peer.runtime
+        .block_on(sender.data(channel, b"FINAL-AFTER-DEFER".to_vec()))
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    pane.update(cx, |pane, _| {
+        pane.snapshot_dirty = true;
+        pane.snapshot_deferred_since = None;
+    });
+    draw(cx);
+    let blocked = timed_out.load(std::sync::atomic::Ordering::Acquire);
+    let _ = release_tx.send(());
+    assert!(
+        !blocked,
+        "render waited for the parser despite deferring its snapshot"
+    );
+    pane.read_with(cx, |pane, _| {
+        assert!(pane.snapshot_dirty);
+        assert_eq!(
+            pane.snapshot
+                .lines
+                .iter()
+                .map(|row| &row.cells)
+                .collect::<Vec<_>>(),
+            previous
+                .lines
+                .iter()
+                .map(|row| &row.cells)
+                .collect::<Vec<_>>(),
+        );
+    });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        draw(cx);
+        if pane.read_with(cx, |pane, _| {
+            pane.snapshot
+                .lines
+                .iter()
+                .any(|line| line.text().contains("FINAL-AFTER-DEFER"))
+        }) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "deferred final output was never painted"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    pane.update(cx, |pane, _| pane.terminal.lock().shutdown());
+}
+
+#[gpui::test]
 fn ssh_worker_output_reaches_a_painted_pane_without_followup_output(cx: &mut TestAppContext) {
     let mut peer = ssh_peer::SshPeer::new();
     let config = SshSessionConfig::from(peer.config.take().unwrap())

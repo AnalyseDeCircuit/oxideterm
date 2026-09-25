@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "操作欄を表示",
+      "hide_controls": "操作欄を非表示"
+    },
     "autosuggest": {
       "matches": "{{count}} 件の候補",
       "navigation_hint": "{{select}} 選択 · {{run}} 実行 · クリックで入力",

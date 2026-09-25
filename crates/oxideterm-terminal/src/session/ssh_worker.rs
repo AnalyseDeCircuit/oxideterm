@@ -41,6 +41,7 @@ struct Shared {
     events: Mutex<Vec<TerminalEvent>>,
     event_bytes: std::sync::atomic::AtomicUsize,
     status: Mutex<Status>,
+    tmux_display: Arc<crate::tmux::TmuxDisplay>,
     ready_trzsz: Mutex<VecDeque<TrzszTransfer>>,
     wake: crate::activity::TerminalActivitySender,
     ui: crate::activity::TerminalActivitySender,
@@ -118,6 +119,7 @@ impl SshPtySession {
         };
         let shared = Arc::new(Shared {
             wake: core.activity.clone(),
+            tmux_display: core.parser_state.tmux_display.clone(),
             core: FairMutex::new(core),
             controls: Default::default(),
             cancelled: AtomicBool::new(false),
@@ -753,7 +755,8 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn tmux_state(&self) -> Option<crate::TmuxUiState> {
-        self.shared.core.lock().tmux_state()
+        // Drawing a deferred snapshot must not wait for the parser's core lock.
+        self.shared.tmux_display.ui_state()
     }
 
     fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {

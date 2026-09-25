@@ -1,5 +1,9 @@
 {
   "terminal": {
+    "control_bar": {
+      "show_controls": "Bedienelemente anzeigen",
+      "hide_controls": "Bedienelemente ausblenden"
+    },
     "autosuggest": {
       "matches": "{{count}} Treffer",
       "navigation_hint": "{{select}} wählen · {{run}} ausführen · Klick einfügen",

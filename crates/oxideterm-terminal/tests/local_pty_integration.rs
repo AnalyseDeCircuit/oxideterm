@@ -65,6 +65,109 @@ wait
 }
 
 #[test]
+fn local_pty_bulk_output_preserves_queries_and_final_bytes_on_exit() {
+    let directory = tempfile::tempdir().unwrap();
+    let input = directory.path().join("input");
+    let response = directory.path().join("response");
+    std::fs::write(&input, "output before cursor query\r\n".repeat(32_768)).unwrap();
+    let script = r#"
+stty raw -echo
+cat "$1"
+printf '\033[4;6H\033[6n'
+dd bs=1 count=6 of="$2" 2>/dev/null
+printf '\033[2J\033[HFINAL-OUTPUT'
+"#;
+    let config = LocalPtyConfig {
+        shell: Some(
+            ShellInfo::new("test-sh", "Test sh", "/bin/sh").with_args(vec![
+                "-c".into(),
+                script.into(),
+                "pty-query-test".into(),
+                input.display().to_string(),
+                response.display().to_string(),
+            ]),
+        ),
+        load_profile: false,
+        ..Default::default()
+    };
+    let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+        80,
+        24,
+        config,
+        GraphicsOptions::default(),
+        TerminalEncoding::Utf8,
+        100,
+    )
+    .unwrap();
+    assert_eventually(
+        Duration::from_secs(5),
+        || {
+            session.drain_output();
+            session.take_events();
+            !session.lifecycle().is_running()
+        },
+        "PTY did not complete its cursor query and exit",
+    );
+    assert_eq!(std::fs::read(response).unwrap(), b"\x1b[4;6R");
+    let snapshot = session.snapshot();
+    let first_line: String = snapshot.lines[0]
+        .cells
+        .iter()
+        .take(12)
+        .map(|cell| cell.ch)
+        .collect();
+    assert_eq!(first_line, "FINAL-OUTPUT");
+}
+
+#[test]
+fn concurrent_local_ptys_keep_output_and_shutdown_independent() {
+    let mut sessions: Vec<_> = (0..4).map(|index| {
+        let config = LocalPtyConfig {
+            shell: Some(ShellInfo::new("test-sh", "Test sh", "/bin/sh").with_args(vec![
+                "-c".into(),
+                r#"
+n=0
+while [ "$n" -lt 2000 ]; do
+    printf 'bulk output %s\r\n' "$n"
+    n=$((n+1))
+done
+printf '\033[2J\033[Hsession-%s' "$1"
+"#.into(),
+                "pty-isolation-test".into(), index.to_string(),
+            ])),
+            load_profile: false,
+            ..Default::default()
+        };
+        LocalPtySession::spawn_with_config_graphics_and_encoding(
+            80, 24, config, GraphicsOptions::default(), TerminalEncoding::Utf8, 100,
+        ).unwrap()
+    }).collect();
+    assert_eventually(
+        Duration::from_secs(10),
+        || {
+            for session in &mut sessions {
+                session.drain_output();
+                session.take_events();
+            }
+            sessions
+                .iter()
+                .all(|session| !session.lifecycle().is_running())
+        },
+        "concurrent PTYs did not exit",
+    );
+    for (index, session) in sessions.iter().enumerate() {
+        let snapshot = session.snapshot();
+        let text: String = snapshot.lines[0]
+            .cells
+            .iter()
+            .take(9)
+            .map(|cell| cell.ch)
+            .collect();
+        assert_eq!(text, format!("session-{index}"));
+    }
+}
+
+#[test]
 fn local_available_shell_integrations_report_initial_cwd() {
     let expected_cwd = std::env::temp_dir();
     for shell_id in ["bash", "zsh", "fish", "pwsh"] {

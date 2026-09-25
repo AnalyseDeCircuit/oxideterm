@@ -1019,6 +1019,13 @@ impl WorkspaceApp {
         }
 
         if self.active_surface == ActiveSurface::Settings && self.open_settings_select.is_some() {
+            if self.open_settings_select == Some(SettingsSelect::AppearanceTheme)
+                && self.handle_appearance_theme_select_key(event, cx)
+            {
+                window.prevent_default();
+                cx.stop_propagation();
+                return;
+            }
             if key == "escape" && !modifiers.platform {
                 self.close_settings_select();
                 cx.notify();
