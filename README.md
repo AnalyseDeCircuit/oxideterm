@@ -124,7 +124,7 @@ OxideTerm keeps terminal rendering, connection state, reconnect orchestration, f
 
 - macOS: download the `.dmg` matching Apple Silicon or Intel.
 - Windows: use the x64 or ARM64 installer.
-- Linux: choose AppImage, `.deb`, or `.rpm`.
+- Linux: choose AppImage, `.deb`, `.rpm`, or run via Nix (`nix run github:AnalyseDeCircuit/oxideterm`; updates are managed by Nix).
 - Verify downloads with the `sha256sums.txt` asset on the release page.
 
 Need to build from source? Continue to [Run From Source](#run-from-source).

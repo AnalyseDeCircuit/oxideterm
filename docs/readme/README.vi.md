@@ -123,7 +123,7 @@ OxideTerm giữ kết nối, tệp, chuyển tiếp, công cụ máy chủ, tự
 
 - macOS: chọn tệp `.dmg` phù hợp với Apple Silicon hoặc Intel.
 - Windows: dùng trình cài đặt x64 hoặc ARM64.
-- Linux: chọn AppImage, `.deb` hoặc `.rpm`.
+- Linux: chọn AppImage, `.deb`, `.rpm` hoặc chạy qua Nix (`nix run github:AnalyseDeCircuit/oxideterm`; các bản cập nhật do Nix quản lý).
 - Xác minh tệp tải xuống bằng `sha256sums.txt` trên trang phát hành.
 
 Để biên dịch từ mã nguồn, hãy xem phần « Chạy từ mã nguồn » bên dưới.
