@@ -12,8 +12,8 @@ use std::{
 
 use clap::Args;
 use oxideterm_ssh_launch::{
-    NativeConnectionLaunch, SavedConnectionLaunch, TemporarySshLaunch, parse_connection_uri,
-    parse_user_host_target,
+    NativeConnectionHandoff, NativeConnectionLaunch, SavedConnectionLaunch, TemporarySshLaunch,
+    parse_connection_uri, parse_user_host_target,
 };
 use zeroize::Zeroizing;
 
@@ -49,7 +49,7 @@ impl fmt::Debug for SshLaunchArgs {
 pub fn run(args: SshLaunchArgs) -> CliResult<i32> {
     let launch = build_launch(args)?;
     let title = launch.title();
-    launch_request(&NativeConnectionLaunch::Ssh(launch))?;
+    launch_request(NativeConnectionLaunch::Ssh(launch))?;
     println!("Opening temporary SSH terminal: {title}");
     Ok(0)
 }
@@ -58,7 +58,7 @@ pub(crate) fn launch_saved_connection(connection_id: String) -> CliResult<()> {
     let request = NativeConnectionLaunch::SavedConnection(SavedConnectionLaunch {
         saved_connection_id: connection_id,
     });
-    launch_request(&request)
+    launch_request(request)
 }
 
 fn build_launch(args: SshLaunchArgs) -> CliResult<TemporarySshLaunch> {
@@ -121,13 +121,20 @@ fn read_password_from_stdin() -> CliResult<Zeroizing<String>> {
     Ok(password)
 }
 
-pub(crate) fn launch_request(launch: &NativeConnectionLaunch) -> CliResult<()> {
+pub(crate) fn launch_request(launch: NativeConnectionLaunch) -> CliResult<()> {
     let request_path = write_launch_request(launch)?;
     launch_native_gui(&request_path)
 }
 
-fn write_launch_request(launch: &NativeConnectionLaunch) -> CliResult<PathBuf> {
-    let bytes = Zeroizing::new(serde_json::to_vec(launch).map_err(|error| {
+fn write_launch_request(launch: NativeConnectionLaunch) -> CliResult<PathBuf> {
+    let audit_parent_id = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .and_then(|context| context.parent_id);
+    let handoff = NativeConnectionHandoff {
+        launch,
+        audit_parent_id,
+    };
+    let bytes = Zeroizing::new(serde_json::to_vec(&handoff).map_err(|error| {
         CliError::new(
             "connection_launch_serialize_failed",
             error.to_string(),

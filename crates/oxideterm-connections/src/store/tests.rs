@@ -3507,6 +3507,13 @@ mod tests {
             Some("Moved")
         );
         assert_eq!(store.local_terminal_profiles()[0].group.as_deref(), Some("Moved"));
+        let last_updated = store.get("ssh-move").unwrap().updated_at;
+        assert_eq!(
+            store.move_to_group(&["ssh-move".to_string()], Some("Moved"))
+                .unwrap(),
+            0
+        );
+        assert_eq!(store.get("ssh-move").unwrap().updated_at, last_updated);
     }
 
     #[test]

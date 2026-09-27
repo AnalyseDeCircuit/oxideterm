@@ -84,38 +84,51 @@ fn write_backup_document(
     output: Option<&str>,
     json: bool,
 ) -> CliResult<(CreatedBackup, BackupDocument)> {
-    let backup = build_backup_document(json)?;
-    let path = output_path(output, backup.created_at_ms);
-    let backup_dir = path
-        .parent()
-        .map(PathBuf::from)
-        .unwrap_or_else(default_backups_dir);
-    fs::create_dir_all(&backup_dir).map_err(|error| {
-        CliError::new(
-            "backup_dir_create_failed",
-            format!(
-                "failed to create backup dir {}: {error}",
-                backup_dir.display()
-            ),
-            json,
-        )
-    })?;
-    let bytes = serde_json::to_vec_pretty(&backup)
-        .map_err(|error| CliError::new("serialization_failed", error.to_string(), json))?;
-    fs::write(&path, &bytes).map_err(|error| {
-        CliError::new(
-            "backup_write_failed",
-            format!("failed to write backup {}: {error}", path.display()),
-            json,
-        )
-    })?;
-    Ok((
-        CreatedBackup {
-            path: path.display().to_string(),
-            size_bytes: bytes.len() as u64,
-        },
-        backup,
-    ))
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "backup_create",
+        None,
+        Some("cli_backup"),
+    );
+    let audit_result = (|| {
+        let backup = build_backup_document(json)?;
+        let path = output_path(output, backup.created_at_ms);
+        let backup_dir = path
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_backups_dir);
+        fs::create_dir_all(&backup_dir).map_err(|error| {
+            CliError::new(
+                "backup_dir_create_failed",
+                format!(
+                    "failed to create backup dir {}: {error}",
+                    backup_dir.display()
+                ),
+                json,
+            )
+        })?;
+        let bytes = serde_json::to_vec_pretty(&backup)
+            .map_err(|error| CliError::new("serialization_failed", error.to_string(), json))?;
+        fs::write(&path, &bytes).map_err(|error| {
+            CliError::new(
+                "backup_write_failed",
+                format!("failed to write backup {}: {error}", path.display()),
+                json,
+            )
+        })?;
+        Ok((
+            CreatedBackup {
+                path: path.display().to_string(),
+                size_bytes: bytes.len() as u64,
+            },
+            backup,
+        ))
+    })();
+    if let Ok((created, _)) = &audit_result {
+        audit.summary(&format!("size_bytes={}", created.size_bytes));
+    }
+    audit.result(&audit_result);
+    audit_result
 }
 
 fn output_path(output: Option<&str>, created_at_ms: u64) -> PathBuf {

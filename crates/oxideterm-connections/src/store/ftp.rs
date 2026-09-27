@@ -114,6 +114,35 @@ impl ConnectionStore {
     }
 
     pub fn upsert_ftp_profile(&mut self, request: SaveFtpProfileRequest) -> Result<FtpProfile> {
+        let credential_change = if request.password.is_some() {
+            Some("credential_set")
+        } else if request.clear_password {
+            Some("credential_delete")
+        } else {
+            None
+        };
+        let had_credential = self.get_ftp_profile(&request.profile.id)
+            .is_some_and(|profile| profile.password_keychain_id.is_some());
+        let mut credential_audit = credential_change.map(|action| oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            action,
+            Some(&request.profile.id),
+            Some("ftp_credential"),
+        ));
+        if let Some(audit) = &mut credential_audit {
+            audit.summary(match credential_change {
+                Some("credential_set") if had_credential => "credential:updated",
+                Some("credential_set") => "credential:created",
+                _ => "credential:deleted",
+            });
+        }
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            Some(&request.profile.id),
+            Some("ftp_profile"),
+        );
+        let audit_result = (|| {
         let mut profile = request.profile;
         profile.validate()?;
         if request
@@ -189,6 +218,21 @@ impl ConnectionStore {
             }
         }
         Ok(profile)
+        })();
+        audit.result(&audit_result);
+        if let Some(credential_audit) = credential_audit {
+            credential_audit.finish(
+                match (&audit_result, credential_change) {
+                    (Err(_), _) => oxideterm_audit::AuditOutcome::Failed,
+                    (Ok(_), Some("credential_delete")) if !had_credential => oxideterm_audit::AuditOutcome::Unchanged,
+                    _ => oxideterm_audit::AuditOutcome::Succeeded,
+                },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        }
+        audit_result
     }
 
     pub fn get_ftp_password(&self, id: &str) -> Result<Option<SecretString>> {
@@ -199,6 +243,13 @@ impl ConnectionStore {
     }
 
     pub fn delete_ftp_profile(&mut self, id: &str) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_delete",
+            Some(id),
+            Some("ftp_profile"),
+        );
+        let audit_result = (|| {
         let Some(profile) = self.get_ftp_profile(id).cloned() else {
             return Ok(false);
         };
@@ -216,10 +267,13 @@ impl ConnectionStore {
             self.delete_or_queue_connection_keychain_entry(reference)?;
         }
         Ok(true)
+        })();
+        audit.changed(&audit_result);
+        audit_result
     }
 
     pub fn export_ftp_profiles_snapshot(&self) -> Result<FtpProfilesSyncSnapshot> {
-        build_ftp_profiles_sync_snapshot(&self.data)
+        audit_configuration_snapshot("ftp_profiles", || build_ftp_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn apply_ftp_profiles_snapshot(

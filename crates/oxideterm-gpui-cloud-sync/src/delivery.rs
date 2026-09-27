@@ -112,11 +112,50 @@ pub struct CloudSyncUploadActionResult {
     pub secret_hints: BTreeMap<String, bool>,
 }
 
-#[derive(Debug)]
 pub struct CloudSyncApplyUiOutcome {
     pub connection_store: ConnectionStore,
     pub settings_store: SettingsStore,
     pub outcome: CloudSyncApplyOutcome,
+    pub legacy_import_audit: Option<PendingLegacyImportAudit>,
+}
+
+pub struct PendingLegacyImportAudit(Option<oxideterm_audit::AuditOperation>);
+
+impl PendingLegacyImportAudit {
+    pub fn finish(mut self, summary: &str, outcome: oxideterm_audit::AuditOutcome) {
+        if let Some(mut audit) = self.0.take() {
+            audit.summary(summary);
+            audit.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        }
+    }
+}
+
+impl Drop for PendingLegacyImportAudit {
+    fn drop(&mut self) {
+        if let Some(audit) = self.0.take() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Partial,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+    }
+}
+
+impl std::fmt::Debug for CloudSyncApplyUiOutcome {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CloudSyncApplyUiOutcome")
+            .field("outcome", &self.outcome)
+            .field("legacy_import_audit", &self.legacy_import_audit.is_some())
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -379,6 +418,16 @@ pub async fn deliver_cloud_sync_upload(
     options: UploadOptions,
     automatic: bool,
 ) {
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "cloud_sync_upload",
+        None,
+        None,
+    );
+    audit.summary(&format!(
+        "provider={:?},automatic={automatic},direction=upload",
+        settings.backend_type
+    ));
     let mut provider = CloudSyncKeychainSecretProvider::new(hints);
     let progress_tx = tx.clone();
     let mut progress = move |progress| {
@@ -397,13 +446,51 @@ pub async fn deliver_cloud_sync_upload(
         .await
     {
         Ok(Some(outcome)) => (Ok(outcome), None, None),
-        Ok(None) => return,
+        Ok(None) => {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Unchanged,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+            return;
+        }
         Err(error) => (
             Err(error.to_string()),
             error.remote_metadata,
             error.revision_sequence_consumed,
         ),
     };
+    if let Ok(outcome) = &result {
+        let scope = &outcome.local_snapshot.scope;
+        let selected_kinds = [
+            scope.sync_connections,
+            scope.sync_forwards,
+            scope.sync_quick_commands,
+            scope.sync_serial_profiles,
+            scope.sync_telnet_profiles,
+            scope.sync_mosh_profiles,
+            scope.sync_remote_desktop_profiles,
+            scope.sync_app_settings,
+            scope.sync_plugin_settings,
+        ]
+        .into_iter()
+        .filter(|selected| *selected)
+        .count();
+        audit.summary(&format!("provider={:?},automatic={automatic},direction=upload,scope_kinds={selected_kinds},sensitive_credentials={}", settings.backend_type, scope.sync_sensitive_credentials));
+    }
+    audit.finish(
+        if result.is_ok() {
+            oxideterm_audit::AuditOutcome::Succeeded
+        } else if revision_sequence_consumed.is_some() {
+            oxideterm_audit::AuditOutcome::Unknown
+        } else {
+            oxideterm_audit::AuditOutcome::Failed
+        },
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
     let _ = tx.send(CloudSyncDelivery::UploadFinished {
         action: CloudSyncUploadActionResult {
             result,
@@ -471,6 +558,16 @@ pub async fn deliver_cloud_sync_pull_preview(
     hints: BTreeMap<String, bool>,
     previous_remote_sections: Option<StructuredSectionRevisions>,
 ) {
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "cloud_sync_download",
+        None,
+        None,
+    );
+    audit.summary(&format!(
+        "provider={:?},direction=download",
+        settings.backend_type
+    ));
     let mut provider = CloudSyncKeychainSecretProvider::new(hints);
     let progress_tx = tx.clone();
     let mut progress = move |progress| {
@@ -503,6 +600,16 @@ pub async fn deliver_cloud_sync_pull_preview(
         Err(error) => Err(error),
     }
     .map_err(|error| error.to_string());
+    audit.finish(
+        if result.is_ok() {
+            oxideterm_audit::AuditOutcome::Succeeded
+        } else {
+            oxideterm_audit::AuditOutcome::Failed
+        },
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
     send_action_result(
         tx,
         CloudSyncDelivery::PullPreviewFinished,
@@ -581,6 +688,35 @@ pub async fn deliver_cloud_sync_apply_preview(
     selection: CloudSyncPreviewSelection,
     create_rollback_backup: bool,
 ) {
+    let mut legacy_import_audit = match &preview {
+        CloudSyncPendingPreview::Legacy {
+            source: CloudSyncPreviewSource::Backup { .. },
+            ..
+        } => {
+            let mut audit = oxideterm_audit::AuditOperation::begin(
+                oxideterm_audit::AuditCategory::Configuration,
+                "backup_restore",
+                None,
+                Some("cloud_sync_rollback"),
+            );
+            audit.summary("mode=legacy_backup");
+            Some(audit)
+        }
+        CloudSyncPendingPreview::Legacy {
+            source: CloudSyncPreviewSource::LocalFile,
+            ..
+        } => {
+            let mut audit = oxideterm_audit::AuditOperation::begin(
+                oxideterm_audit::AuditCategory::Configuration,
+                "cloud_sync_local_import",
+                None,
+                Some("oxide_file"),
+            );
+            audit.summary("mode=legacy_local_file,direction=import");
+            Some(audit)
+        }
+        _ => None,
+    };
     let apply_total_units =
         cloud_sync_apply_total_units(&preview, &selection, create_rollback_backup);
     let mut provider = CloudSyncKeychainSecretProvider::new(hints);
@@ -596,6 +732,14 @@ pub async fn deliver_cloud_sync_apply_preview(
         &selection,
         create_rollback_backup,
     ) else {
+        if let Some(audit) = legacy_import_audit.take() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        }
         return;
     };
     if create_rollback_backup {
@@ -617,6 +761,14 @@ pub async fn deliver_cloud_sync_apply_preview(
             }
             Ok(None) => {}
             Err(error) => {
+                if let Some(audit) = legacy_import_audit.take() {
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
+                }
                 send_action_result(
                     tx,
                     CloudSyncDelivery::ApplyPreviewFinished,
@@ -690,8 +842,21 @@ pub async fn deliver_cloud_sync_apply_preview(
         connection_store,
         settings_store,
         outcome,
+        legacy_import_audit: legacy_import_audit
+            .take()
+            .map(|audit| PendingLegacyImportAudit(Some(audit))),
     })
     .map_err(|error| error.to_string());
+    if result.is_err() {
+        if let Some(audit) = legacy_import_audit.take() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        }
+    }
     send_action_result(
         tx,
         CloudSyncDelivery::ApplyPreviewFinished,

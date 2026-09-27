@@ -202,284 +202,400 @@ pub(crate) fn apply_structured_snapshots_with_credentials(
     conflict_strategy: SavedConnectionsConflictStrategy,
     mut credentials: Option<&mut crate::credentials::ProfileCredentialImport>,
 ) -> Result<CloudSyncApplyOutcome> {
-    // Validate every independently supplied resource before the coordinated
-    // transaction captures owner checkpoints and performs its first write.
-    let mut staged_app_settings = preflight_structured_snapshots(
-        settings_store,
-        forwards_snapshot.as_ref(),
-        quick_commands_snapshot_json.as_deref(),
-        serial_profiles_snapshot.as_ref(),
-        telnet_profiles_snapshot.as_ref(),
-        mosh_profiles_snapshot.as_ref(),
-        standalone_sftp_profiles_snapshot.as_ref(),
-        remote_desktop_profiles_snapshot.as_ref(),
-        &app_settings_snapshots,
-        &plugin_settings_snapshot,
-    )?;
-
-    if let Some(next) = staged_app_settings.as_mut() {
-        crate::credentials::preserve_global_proxy_reference(settings_store.settings(), next);
-    }
-
-    // Capture every owner before the first write. The connection checkpoint is
-    // always required because profile-only sync still mutates ConnectionStore.
-    let settings_path = settings_store.path().to_path_buf();
-    let connection_checkpoint = connection_store
-        .create_checkpoint()
-        .context("failed to checkpoint connection store before cloud sync apply")?;
-    let forwards_checkpoint = forwarding_registry
-        .checkpoint_saved_forwards()
-        .map_err(anyhow::Error::msg)
-        .context("failed to checkpoint saved forwards before cloud sync apply")?;
-    let quick_commands_checkpoint = oxideterm_quick_commands::capture_checkpoint(&settings_path)
-        .map_err(anyhow::Error::msg)
-        .context("failed to checkpoint Quick Commands before cloud sync apply")?;
-    let plugin_settings_checkpoint = plugin_settings::checkpoint_plugin_settings(&settings_path)
-        .map_err(anyhow::Error::msg)
-        .context("failed to checkpoint plugin settings before cloud sync apply")?;
-    let settings_checkpoint = settings_store
-        .create_checkpoint()
-        .context("failed to checkpoint app settings before cloud sync apply")?;
-
-    let mut prepared_connections = None;
-    let mut prepared_credentials = None;
-    let mut forwards_attempted = false;
-    let mut quick_commands_attempted = false;
-    let mut settings_applied = false;
-    let mut plugin_settings_attempted = false;
-
-    let apply_result = (|| -> Result<CloudSyncApplyOutcome> {
-        let connections = if let Some(snapshot) = connections_snapshot {
-            let prepared = connection_store
-                .prepare_saved_connections_snapshot(snapshot, conflict_strategy)
-                .context("failed to prepare saved connections cloud sync")?;
-            let outcome = prepared.outcome().clone();
-            prepared_connections = Some(prepared);
-            Some(outcome)
-        } else {
-            None
-        };
-        if let Some(snapshot) = remote_desktop_profiles_snapshot.as_mut() {
-            // Connection preparation has already resolved skip/replace/merge
-            // conflicts, so only references in the staged store remain valid.
-            crate::operation::selection::retain_available_remote_desktop_gateway_refs(
-                snapshot,
-                connection_store,
-            );
-        }
-
-        if let Some(outcome) = connections.as_ref() {
-            forwards_attempted = true;
-            for connection_id in &outcome.deleted_connection_ids {
-                forwarding_registry
-                    .delete_owned_forwards(connection_id)
-                    .map_err(anyhow::Error::msg)?;
-            }
-        }
-
-        let valid_owner_connection_ids = connection_store
-            .connections()
-            .iter()
-            .map(|connection| connection.id.clone())
-            .collect::<HashSet<_>>();
-        let forwards = if let Some(snapshot) = forwards_snapshot {
-            forwards_attempted = true;
-            Some(
-                forwarding_registry
-                    .apply_saved_forwards_snapshot(snapshot, &valid_owner_connection_ids)
-                    .map_err(anyhow::Error::msg)?,
-            )
-        } else {
-            None
-        };
-
-        let quick_commands_applied = if let Some(snapshot_json) = quick_commands_snapshot_json {
-            quick_commands_attempted = true;
-            let result = oxideterm_quick_commands::apply_snapshot_json(
-                &settings_path,
-                &snapshot_json,
-                oxideterm_quick_commands::QuickCommandImportStrategy::Merge,
-            );
-            if !result.errors.is_empty() {
-                bail!(
-                    "failed to apply quick commands snapshot: {}",
-                    result.errors.join("; ")
-                );
-            }
-            result.imported
-        } else {
-            0
-        };
-
-        let serial_profiles_applied = if let Some(snapshot) = serial_profiles_snapshot {
-            connection_store.apply_serial_profiles_snapshot(snapshot)?
-        } else {
-            0
-        };
-        let telnet_profiles_applied = if let Some(snapshot) = telnet_profiles_snapshot {
-            connection_store.apply_telnet_profiles_snapshot(snapshot)?
-        } else {
-            0
-        };
-        let mosh_profiles_applied = if let Some(snapshot) = mosh_profiles_snapshot {
-            connection_store.apply_mosh_profiles_snapshot(snapshot)?
-        } else {
-            0
-        };
-        if let Some(snapshot) = standalone_sftp_profiles_snapshot {
-            connection_store.apply_standalone_sftp_profiles_snapshot(snapshot)?;
-        }
-        let remote_desktop_profiles_applied =
-            if let Some(snapshot) = remote_desktop_profiles_snapshot {
-                connection_store.apply_remote_desktop_profiles_snapshot(snapshot)?
-            } else {
-                0
-            };
-        fail_structured_apply_after(StructuredApplyStage::Profiles)?;
-
-        let app_settings_applied = app_settings_snapshots.len();
-        if let Some(next) = staged_app_settings {
-            // SettingsStore changes memory only after its durable swap succeeds.
-            settings_store.replace_and_save(next)?;
-            settings_applied = true;
-        }
-        fail_structured_apply_after(StructuredApplyStage::Settings)?;
-
-        plugin_settings_attempted = true;
-        let plugin_settings_applied =
-            plugin_settings::upsert_plugin_settings(&settings_path, &plugin_settings_snapshot)
-                .map_err(anyhow::Error::msg)?;
-        fail_structured_apply_after(StructuredApplyStage::PluginSettings)?;
-
-        if let Some(batch) = credentials.as_mut() {
-            let mut proxy = crate::credentials::global_proxy(settings_store.settings());
-            let prepared = connection_store.prepare_profile_credentials(
-                &batch.secrets,
-                &batch.selection,
-                &mut proxy,
-            )?;
-            batch.summary = prepared.summary;
-            prepared_credentials = Some(prepared);
-            let mut next = settings_store.settings().clone();
-            crate::credentials::apply_global_proxy_reference(&mut next, proxy.as_ref());
-            if &next != settings_store.settings() {
-                settings_store.replace_and_save(next)?;
-                settings_applied = true;
-            }
-            connection_store.save()?;
-            fail_structured_apply_after(StructuredApplyStage::Credentials)?;
-        }
-
-        Ok(CloudSyncApplyOutcome {
-            connections,
-            forwards,
-            quick_commands_applied,
-            serial_profiles_applied,
-            telnet_profiles_applied,
-            mosh_profiles_applied,
-            remote_desktop_profiles_applied,
-            app_settings_applied,
-            plugin_settings_applied,
-        })
-    })();
-
-    let outcome = match apply_result {
-        Ok(outcome) => outcome,
-        Err(error) => {
-            let rollback_errors = rollback_structured_apply(
-                connection_store,
-                forwarding_registry,
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "cloud_sync_apply",
+        None,
+        Some("structured"),
+    );
+    audit.summary(&format!(
+        "mode=structured,connections={},forwards={},profiles={}",
+        connections_snapshot
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.records.len()),
+        forwards_snapshot
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.records.len()),
+        serial_profiles_snapshot
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.records.len())
+            + telnet_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len())
+            + mosh_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len())
+            + standalone_sftp_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len())
+            + remote_desktop_profiles_snapshot
+                .as_ref()
+                .map_or(0, |snapshot| snapshot.records.len()),
+    ));
+    let mut rollback_attempted = false;
+    let mut rollback_failed = false;
+    let mut standalone_sftp_applied = 0usize;
+    let mut credentials_applied = 0usize;
+    let child_context = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context.protocol = Some("cloud_sync_apply".to_string());
+            context
+        });
+    let audit_result = oxideterm_audit::AuditContext::with_sync_request(
+        child_context.as_ref(),
+        || {
+            // Validate every independently supplied resource before the coordinated
+            // transaction captures owner checkpoints and performs its first write.
+            let mut staged_app_settings = preflight_structured_snapshots(
                 settings_store,
-                &settings_path,
-                &connection_checkpoint,
-                forwards_checkpoint.as_ref(),
-                &quick_commands_checkpoint,
-                &plugin_settings_checkpoint,
-                &settings_checkpoint,
-                forwards_attempted,
-                quick_commands_attempted,
-                settings_applied,
-                plugin_settings_attempted,
-            );
-            let mut rollback_errors = rollback_errors;
-            if let Some(prepared) = prepared_credentials.take() {
-                if let Err(cleanup) = connection_store.rollback_profile_credentials(prepared) {
-                    rollback_errors.push(cleanup.to_string());
-                }
-            }
-            return Err(cloud_sync_transaction_error(error, rollback_errors));
-        }
-    };
+                forwards_snapshot.as_ref(),
+                quick_commands_snapshot_json.as_deref(),
+                serial_profiles_snapshot.as_ref(),
+                telnet_profiles_snapshot.as_ref(),
+                mosh_profiles_snapshot.as_ref(),
+                standalone_sftp_profiles_snapshot.as_ref(),
+                remote_desktop_profiles_snapshot.as_ref(),
+                &app_settings_snapshots,
+                &plugin_settings_snapshot,
+            )?;
 
-    if let Some(prepared) = prepared_connections {
-        let mut cleanup = match connection_store
-            .commit_prepared_saved_connections_snapshot(prepared)
-        {
-            Ok(cleanup) => cleanup,
-            Err(error) => {
-                let rollback_errors = rollback_structured_apply(
-                    connection_store,
-                    forwarding_registry,
-                    settings_store,
-                    &settings_path,
-                    &connection_checkpoint,
-                    forwards_checkpoint.as_ref(),
-                    &quick_commands_checkpoint,
-                    &plugin_settings_checkpoint,
-                    &settings_checkpoint,
-                    forwards_attempted,
-                    quick_commands_attempted,
-                    settings_applied,
-                    plugin_settings_attempted,
+            if let Some(next) = staged_app_settings.as_mut() {
+                crate::credentials::preserve_global_proxy_reference(
+                    settings_store.settings(),
+                    next,
                 );
-                let mut rollback_errors = rollback_errors;
-                if let Some(prepared) = prepared_credentials.take() {
-                    if let Err(cleanup) = connection_store.rollback_profile_credentials(prepared) {
-                        rollback_errors.push(cleanup.to_string());
+            }
+
+            // Capture every owner before the first write. The connection checkpoint is
+            // always required because profile-only sync still mutates ConnectionStore.
+            let settings_path = settings_store.path().to_path_buf();
+            let connection_checkpoint = connection_store
+                .create_checkpoint()
+                .context("failed to checkpoint connection store before cloud sync apply")?;
+            let forwards_checkpoint = forwarding_registry
+                .checkpoint_saved_forwards()
+                .map_err(anyhow::Error::msg)
+                .context("failed to checkpoint saved forwards before cloud sync apply")?;
+            let quick_commands_checkpoint =
+                oxideterm_quick_commands::capture_checkpoint(&settings_path)
+                    .map_err(anyhow::Error::msg)
+                    .context("failed to checkpoint Quick Commands before cloud sync apply")?;
+            let plugin_settings_checkpoint =
+                plugin_settings::checkpoint_plugin_settings(&settings_path)
+                    .map_err(anyhow::Error::msg)
+                    .context("failed to checkpoint plugin settings before cloud sync apply")?;
+            let settings_checkpoint = settings_store
+                .create_checkpoint()
+                .context("failed to checkpoint app settings before cloud sync apply")?;
+
+            let mut prepared_connections = None;
+            let mut prepared_credentials = None;
+            let mut forwards_attempted = false;
+            let mut quick_commands_attempted = false;
+            let mut settings_applied = false;
+            let mut plugin_settings_attempted = false;
+
+            let apply_result = (|| -> Result<CloudSyncApplyOutcome> {
+                let connections = if let Some(snapshot) = connections_snapshot {
+                    let prepared = connection_store
+                        .prepare_saved_connections_snapshot(snapshot, conflict_strategy)
+                        .context("failed to prepare saved connections cloud sync")?;
+                    let outcome = prepared.outcome().clone();
+                    prepared_connections = Some(prepared);
+                    Some(outcome)
+                } else {
+                    None
+                };
+                if let Some(snapshot) = remote_desktop_profiles_snapshot.as_mut() {
+                    // Connection preparation has already resolved skip/replace/merge
+                    // conflicts, so only references in the staged store remain valid.
+                    crate::operation::selection::retain_available_remote_desktop_gateway_refs(
+                        snapshot,
+                        connection_store,
+                    );
+                }
+
+                if let Some(outcome) = connections.as_ref() {
+                    forwards_attempted = true;
+                    for connection_id in &outcome.deleted_connection_ids {
+                        forwarding_registry
+                            .delete_owned_forwards(connection_id)
+                            .map_err(anyhow::Error::msg)?;
                     }
                 }
-                return Err(cloud_sync_transaction_error(
-                    error.context("failed to commit prepared saved connections cloud sync"),
-                    rollback_errors,
-                ));
+
+                let valid_owner_connection_ids = connection_store
+                    .connections()
+                    .iter()
+                    .map(|connection| connection.id.clone())
+                    .collect::<HashSet<_>>();
+                let forwards = if let Some(snapshot) = forwards_snapshot {
+                    forwards_attempted = true;
+                    Some(
+                        forwarding_registry
+                            .apply_saved_forwards_snapshot(snapshot, &valid_owner_connection_ids)
+                            .map_err(anyhow::Error::msg)?,
+                    )
+                } else {
+                    None
+                };
+
+                let quick_commands_applied =
+                    if let Some(snapshot_json) = quick_commands_snapshot_json {
+                        quick_commands_attempted = true;
+                        let result = oxideterm_quick_commands::apply_snapshot_json(
+                            &settings_path,
+                            &snapshot_json,
+                            oxideterm_quick_commands::QuickCommandImportStrategy::Merge,
+                        );
+                        if !result.errors.is_empty() {
+                            bail!(
+                                "failed to apply quick commands snapshot: {}",
+                                result.errors.join("; ")
+                            );
+                        }
+                        result.imported
+                    } else {
+                        0
+                    };
+
+                let serial_profiles_applied = if let Some(snapshot) = serial_profiles_snapshot {
+                    connection_store.apply_serial_profiles_snapshot(snapshot)?
+                } else {
+                    0
+                };
+                let telnet_profiles_applied = if let Some(snapshot) = telnet_profiles_snapshot {
+                    connection_store.apply_telnet_profiles_snapshot(snapshot)?
+                } else {
+                    0
+                };
+                let mosh_profiles_applied = if let Some(snapshot) = mosh_profiles_snapshot {
+                    connection_store.apply_mosh_profiles_snapshot(snapshot)?
+                } else {
+                    0
+                };
+                if let Some(snapshot) = standalone_sftp_profiles_snapshot {
+                    standalone_sftp_applied =
+                        connection_store.apply_standalone_sftp_profiles_snapshot(snapshot)?;
+                }
+                let remote_desktop_profiles_applied =
+                    if let Some(snapshot) = remote_desktop_profiles_snapshot {
+                        connection_store.apply_remote_desktop_profiles_snapshot(snapshot)?
+                    } else {
+                        0
+                    };
+                fail_structured_apply_after(StructuredApplyStage::Profiles)?;
+
+                let app_settings_applied = app_settings_snapshots.len();
+                if let Some(next) = staged_app_settings {
+                    // SettingsStore changes memory only after its durable swap succeeds.
+                    settings_store.replace_and_save(next)?;
+                    settings_applied = true;
+                }
+                fail_structured_apply_after(StructuredApplyStage::Settings)?;
+
+                plugin_settings_attempted = true;
+                let plugin_settings_applied = plugin_settings::upsert_plugin_settings(
+                    &settings_path,
+                    &plugin_settings_snapshot,
+                )
+                .map_err(anyhow::Error::msg)?;
+                fail_structured_apply_after(StructuredApplyStage::PluginSettings)?;
+
+                if let Some(batch) = credentials.as_mut() {
+                    let mut proxy = crate::credentials::global_proxy(settings_store.settings());
+                    let prepared = connection_store.prepare_profile_credentials(
+                        &batch.secrets,
+                        &batch.selection,
+                        &mut proxy,
+                    )?;
+                    batch.summary = prepared.summary;
+                    credentials_applied = batch.summary.restored + batch.summary.cleared;
+                    prepared_credentials = Some(prepared);
+                    let mut next = settings_store.settings().clone();
+                    crate::credentials::apply_global_proxy_reference(&mut next, proxy.as_ref());
+                    if &next != settings_store.settings() {
+                        settings_store.replace_and_save(next)?;
+                        settings_applied = true;
+                    }
+                    connection_store.save()?;
+                    fail_structured_apply_after(StructuredApplyStage::Credentials)?;
+                }
+
+                Ok(CloudSyncApplyOutcome {
+                    connections,
+                    forwards,
+                    quick_commands_applied,
+                    serial_profiles_applied,
+                    telnet_profiles_applied,
+                    mosh_profiles_applied,
+                    remote_desktop_profiles_applied,
+                    app_settings_applied,
+                    plugin_settings_applied,
+                })
+            })();
+
+            let outcome = match apply_result {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    rollback_attempted = true;
+                    let rollback_errors = rollback_structured_apply(
+                        connection_store,
+                        forwarding_registry,
+                        settings_store,
+                        &settings_path,
+                        &connection_checkpoint,
+                        forwards_checkpoint.as_ref(),
+                        &quick_commands_checkpoint,
+                        &plugin_settings_checkpoint,
+                        &settings_checkpoint,
+                        forwards_attempted,
+                        quick_commands_attempted,
+                        settings_applied,
+                        plugin_settings_attempted,
+                    );
+                    let mut rollback_errors = rollback_errors;
+                    if let Some(prepared) = prepared_credentials.take() {
+                        if let Err(cleanup) =
+                            connection_store.rollback_profile_credentials(prepared)
+                        {
+                            rollback_errors.push(cleanup.to_string());
+                        }
+                    }
+                    rollback_failed = !rollback_errors.is_empty();
+                    return Err(cloud_sync_transaction_error(error, rollback_errors));
+                }
+            };
+
+            if let Some(prepared) = prepared_connections {
+                let mut cleanup = match connection_store
+                    .commit_prepared_saved_connections_snapshot(prepared)
+                {
+                    Ok(cleanup) => cleanup,
+                    Err(error) => {
+                        rollback_attempted = true;
+                        let rollback_errors = rollback_structured_apply(
+                            connection_store,
+                            forwarding_registry,
+                            settings_store,
+                            &settings_path,
+                            &connection_checkpoint,
+                            forwards_checkpoint.as_ref(),
+                            &quick_commands_checkpoint,
+                            &plugin_settings_checkpoint,
+                            &settings_checkpoint,
+                            forwards_attempted,
+                            quick_commands_attempted,
+                            settings_applied,
+                            plugin_settings_attempted,
+                        );
+                        let mut rollback_errors = rollback_errors;
+                        if let Some(prepared) = prepared_credentials.take() {
+                            if let Err(cleanup) =
+                                connection_store.rollback_profile_credentials(prepared)
+                            {
+                                rollback_errors.push(cleanup.to_string());
+                            }
+                        }
+                        rollback_failed = !rollback_errors.is_empty();
+                        return Err(cloud_sync_transaction_error(
+                            error.context("failed to commit prepared saved connections cloud sync"),
+                            rollback_errors,
+                        ));
+                    }
+                };
+
+                // Cleanup is intentionally outside the rollback boundary: all data is
+                // committed, and stale credentials are harmless if deletion fails.
+                if connection_store
+                    .finalize_saved_connections_sync_cleanup(&mut cleanup)
+                    .is_err()
+                    && connection_store
+                        .finalize_saved_connections_sync_cleanup(&mut cleanup)
+                        .is_err()
+                {
+                    // The synchronized data is already committed, so housekeeping must
+                    // not make the operation look failed and trigger a duplicate apply.
+                    // A future cleanup queue should persist this retry state across runs.
+                    eprintln!(
+                        "warning: cloud sync committed, but {} stale keychain entries remain after cleanup retry",
+                        cleanup.pending_keychain_entries()
+                    );
+                }
             }
-        };
 
-        // Cleanup is intentionally outside the rollback boundary: all data is
-        // committed, and stale credentials are harmless if deletion fails.
-        if connection_store
-            .finalize_saved_connections_sync_cleanup(&mut cleanup)
-            .is_err()
-            && connection_store
-                .finalize_saved_connections_sync_cleanup(&mut cleanup)
-                .is_err()
-        {
-            // The synchronized data is already committed, so housekeeping must
-            // not make the operation look failed and trigger a duplicate apply.
-            // A future cleanup queue should persist this retry state across runs.
-            eprintln!(
-                "warning: cloud sync committed, but {} stale keychain entries remain after cleanup retry",
-                cleanup.pending_keychain_entries()
-            );
-        }
+            if let Some(mut prepared) = prepared_credentials {
+                if connection_store
+                    .commit_profile_credentials(&mut prepared)
+                    .is_err()
+                    && connection_store
+                        .commit_profile_credentials(&mut prepared)
+                        .is_err()
+                {
+                    // Metadata is committed; cleanup can retry without replaying the import.
+                    eprintln!(
+                        "warning: cloud sync committed, but {} credential slots await cleanup",
+                        prepared.pending_cleanup_count()
+                    );
+                }
+            }
+            Ok(outcome)
+        },
+    );
+    if let Ok(outcome) = &audit_result {
+        audit.summary(&format!(
+            "mode=structured,connections_applied={},forwards_applied={},profiles_applied={},settings_applied={},plugins_applied={},credentials_applied={}",
+            outcome.connections.as_ref().map_or(0, |connections| connections.result.applied),
+            outcome.forwards.as_ref().map_or(0, |forwards| forwards.applied),
+            outcome.serial_profiles_applied + outcome.telnet_profiles_applied
+                + outcome.mosh_profiles_applied + standalone_sftp_applied
+                + outcome.remote_desktop_profiles_applied,
+            outcome.app_settings_applied,
+            outcome.plugin_settings_applied,
+            credentials_applied,
+        ));
+    } else {
+        audit.summary(match (rollback_attempted, rollback_failed) {
+            (true, true) => "mode=structured,rollback=failed",
+            (true, false) => "mode=structured,rollback=complete",
+            (false, _) => "mode=structured,phase=preflight",
+        });
     }
-
-    if let Some(mut prepared) = prepared_credentials {
-        if connection_store
-            .commit_profile_credentials(&mut prepared)
-            .is_err()
-            && connection_store
-                .commit_profile_credentials(&mut prepared)
-                .is_err()
-        {
-            // Metadata is committed; cleanup can retry without replaying the import.
-            eprintln!(
-                "warning: cloud sync committed, but {} credential slots await cleanup",
-                prepared.pending_cleanup_count()
-            );
-        }
-    }
-    Ok(outcome)
+    audit.finish(
+        match &audit_result {
+            Ok(outcome)
+                if outcome
+                    .connections
+                    .as_ref()
+                    .map_or(0, |connections| connections.result.applied)
+                    + outcome
+                        .forwards
+                        .as_ref()
+                        .map_or(0, |forwards| forwards.applied)
+                    + outcome.quick_commands_applied
+                    + outcome.serial_profiles_applied
+                    + outcome.telnet_profiles_applied
+                    + outcome.mosh_profiles_applied
+                    + standalone_sftp_applied
+                    + outcome.remote_desktop_profiles_applied
+                    + outcome.app_settings_applied
+                    + outcome.plugin_settings_applied
+                    + credentials_applied
+                    == 0 =>
+            {
+                oxideterm_audit::AuditOutcome::Unchanged
+            }
+            Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+            Err(_) if rollback_failed => oxideterm_audit::AuditOutcome::Partial,
+            Err(_) => oxideterm_audit::AuditOutcome::Failed,
+        },
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
+    audit_result
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -797,6 +913,24 @@ mod tests {
         SaveConnectionRequest, SavedAuth, SavedUpstreamProxyPolicy, SerialProfile,
     };
 
+    struct TestAuditKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for TestAuditKeys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![7; 32]))
+        }
+
+        fn create(
+            &self,
+            id: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
     fn temp_path(name: &str, file_name: &str) -> std::path::PathBuf {
         std::env::temp_dir()
             .join(format!(
@@ -1013,8 +1147,24 @@ mod tests {
         );
     }
 
-    #[test]
-    fn profile_stage_failure_restores_missing_connection_store() {
+    #[tokio::test]
+    async fn profile_stage_failure_restores_missing_connection_store() {
+        let audit_dir = std::env::temp_dir().join(format!("cloud-audit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&audit_dir).unwrap();
+        oxideterm_audit::AuditStore::open(&audit_dir.join("audit.db"), &TestAuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = oxideterm_audit::AuditService::with_key_provider(
+            audit_dir.join("audit.db"),
+            TestAuditKeys,
+        )
+        .unwrap();
+        let context =
+            oxideterm_audit::AuditContext::new(service.client(), oxideterm_audit::AuditSource::Cli);
         let target_path = temp_path("profile-rollback", "connections.json");
         let mut target = ConnectionStore::load(&target_path).unwrap();
         let forwarding_registry = ForwardingRegistry::new();
@@ -1023,19 +1173,21 @@ mod tests {
         let profiles = SerialProfilesSyncSnapshot {
             revision: "profile-revision".to_string(),
             exported_at: chrono::Utc::now().to_rfc3339(),
-            records: vec![SerialProfile::new("Console", "/dev/ttyUSB0")],
+            records: vec![SerialProfile::new("secret-for-test", "/dev/ttyUSB0")],
         };
 
         set_failure_after(StructuredApplyStage::Profiles);
-        let error = empty_apply_arguments(
-            &mut target,
-            &forwarding_registry,
-            &mut settings_store,
-            Some(profiles),
-            BTreeMap::new(),
-            Vec::new(),
-            None,
-        )
+        let error = oxideterm_audit::AuditContext::with_sync_request(Some(&context), || {
+            empty_apply_arguments(
+                &mut target,
+                &forwarding_registry,
+                &mut settings_store,
+                Some(profiles),
+                BTreeMap::new(),
+                Vec::new(),
+                None,
+            )
+        })
         .unwrap_err();
 
         assert!(
@@ -1045,10 +1197,66 @@ mod tests {
         );
         assert!(target.serial_profiles().is_empty());
         assert!(!target_path.exists());
+        let page = service
+            .client()
+            .query(oxideterm_audit::AuditQuery {
+                category: Some(oxideterm_audit::AuditCategory::Configuration),
+                limit: 50,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(
+            page.records
+                .iter()
+                .any(|record| record
+                    .details
+                    .operation
+                    .as_ref()
+                    .is_some_and(|operation| operation.action == "cloud_sync_apply"
+                        && operation.phase == Some(oxideterm_audit::AuditPhase::Result)
+                        && operation.outcome == oxideterm_audit::AuditOutcome::Failed))
+        );
+        assert!(
+            !page
+                .records
+                .iter()
+                .any(|record| record
+                    .details
+                    .operation
+                    .as_ref()
+                    .is_some_and(
+                        |operation| operation.action == "configuration_snapshot_apply"
+                            && operation.outcome == oxideterm_audit::AuditOutcome::Succeeded
+                    ))
+        );
+        assert!(
+            !serde_json::to_string(&page.records)
+                .unwrap()
+                .contains("secret-for-test")
+        );
+        drop(service);
+        std::fs::remove_dir_all(audit_dir).unwrap();
     }
 
-    #[test]
-    fn settings_stage_failure_restores_settings_and_missing_quick_commands_file() {
+    #[tokio::test]
+    async fn settings_stage_failure_restores_settings_and_missing_quick_commands_file() {
+        let audit_dir = std::env::temp_dir().join(format!("cloud-audit-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&audit_dir).unwrap();
+        oxideterm_audit::AuditStore::open(&audit_dir.join("audit.db"), &TestAuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = oxideterm_audit::AuditService::with_key_provider(
+            audit_dir.join("audit.db"),
+            TestAuditKeys,
+        )
+        .unwrap();
+        let context =
+            oxideterm_audit::AuditContext::new(service.client(), oxideterm_audit::AuditSource::Cli);
         let target_path = temp_path("settings-rollback", "connections.json");
         let mut target = ConnectionStore::load(target_path).unwrap();
         let forwarding_registry = ForwardingRegistry::new();
@@ -1072,15 +1280,17 @@ mod tests {
         assert!(!quick_commands_path.exists());
 
         set_failure_after(StructuredApplyStage::Settings);
-        empty_apply_arguments(
-            &mut target,
-            &forwarding_registry,
-            &mut settings_store,
-            None,
-            app_snapshots,
-            Vec::new(),
-            Some(quick_snapshot),
-        )
+        oxideterm_audit::AuditContext::with_sync_request(Some(&context), || {
+            empty_apply_arguments(
+                &mut target,
+                &forwarding_registry,
+                &mut settings_store,
+                None,
+                app_snapshots,
+                Vec::new(),
+                Some(quick_snapshot),
+            )
+        })
         .unwrap_err();
 
         assert_eq!(settings_store.settings(), &previous_settings);
@@ -1091,6 +1301,34 @@ mod tests {
                 .settings(),
             &previous_settings
         );
+        let page = service
+            .client()
+            .query(oxideterm_audit::AuditQuery {
+                category: Some(oxideterm_audit::AuditCategory::Configuration),
+                limit: 50,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        assert!(
+            page.records
+                .iter()
+                .any(|record| record
+                    .details
+                    .operation
+                    .as_ref()
+                    .is_some_and(|operation| operation.action == "cloud_sync_apply"
+                        && operation.phase == Some(oxideterm_audit::AuditPhase::Result)
+                        && operation.outcome == oxideterm_audit::AuditOutcome::Failed))
+        );
+        assert!(!page.records.iter().any(|record| {
+            record.details.operation.as_ref().is_some_and(|operation| {
+                operation.action == "settings_save"
+                    && operation.outcome == oxideterm_audit::AuditOutcome::Succeeded
+            })
+        }));
+        drop(service);
+        std::fs::remove_dir_all(audit_dir).unwrap();
     }
 
     #[test]

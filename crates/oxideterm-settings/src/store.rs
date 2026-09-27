@@ -274,16 +274,124 @@ pub fn save_settings_to_path(
     path: &Path,
     settings: PersistedSettings,
 ) -> Result<SettingsSaveResult> {
-    // Non-GPUI writers share the same sanitize-and-envelope path as SettingsStore::save.
-    let sanitized = sanitize_settings_value(settings.to_value())?;
-    let updated_at = now_ms();
-    write_envelope(path, &sanitized.settings, updated_at)?;
-    Ok(SettingsSaveResult {
-        settings: sanitized.settings,
-        version: SETTINGS_SCHEMA_VERSION,
-        updated_at,
-        validation_warnings: sanitized.validation_warnings,
-    })
+    let mut audit = if oxideterm_audit::AuditContext::current_request()
+        .as_ref()
+        .is_some_and(|context| context.protocol.as_deref() == Some("cloud_sync_apply"))
+    {
+        // The cross-store transaction reports the final result after commit or rollback.
+        oxideterm_audit::AuditOperation::in_context(
+            None,
+            oxideterm_audit::AuditCategory::Configuration,
+            "settings_save",
+            None,
+        )
+    } else {
+        oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "settings_save",
+            None,
+            None,
+        )
+    };
+    let audit_result = (|| {
+        // Non-GPUI writers share the same sanitize-and-envelope path as SettingsStore::save.
+        let sanitized = sanitize_settings_value(settings.to_value())?;
+        let previous = read_envelope(path).ok().flatten().map(|(value, _)| value);
+        let changed_sections = changed_settings_sections(previous.as_ref(), &sanitized.settings);
+        audit.summary(&changed_sections.join(","));
+        let updated_at = now_ms();
+        write_envelope(path, &sanitized.settings, updated_at)?;
+        Ok((
+            SettingsSaveResult {
+                settings: sanitized.settings,
+                version: SETTINGS_SCHEMA_VERSION,
+                updated_at,
+                validation_warnings: sanitized.validation_warnings,
+            },
+            !changed_sections.is_empty(),
+        ))
+    })();
+    match &audit_result {
+        Ok((_, true)) => audit.finish(
+            oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        ),
+        Ok((_, false)) => audit.finish(
+            oxideterm_audit::AuditOutcome::Unchanged,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        ),
+        Err(_) => audit.finish(
+            oxideterm_audit::AuditOutcome::Failed,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        ),
+    }
+    audit_result.map(|(saved, _)| saved)
+}
+
+fn changed_settings_sections(previous: Option<&Value>, current: &PersistedSettings) -> Vec<String> {
+    let current = current.to_value();
+    let schema = PersistedSettings::default().to_value();
+    let mut changed = Vec::new();
+    let Some(previous) = previous else {
+        return vec!["settings".to_string()];
+    };
+    let Some(schema_sections) = schema.as_object() else {
+        return vec!["settings".to_string()];
+    };
+    for (section, defaults) in schema_sections {
+        let before = previous.get(section);
+        let after = current.get(section);
+        if before == after {
+            continue;
+        }
+        match defaults.as_object() {
+            Some(fields) if !fields.is_empty() => {
+                let changed_before = changed.len();
+                for field in fields.keys() {
+                    if before.and_then(|value| value.get(field))
+                        != after.and_then(|value| value.get(field))
+                    {
+                        changed.push(format!("{section}.{field}"));
+                    }
+                }
+                let dynamic_before = before.and_then(Value::as_object).map(|map| {
+                    map.iter()
+                        .filter(|(key, _)| !fields.contains_key(*key))
+                        .collect::<Vec<_>>()
+                });
+                let dynamic_after = after.and_then(Value::as_object).map(|map| {
+                    map.iter()
+                        .filter(|(key, _)| !fields.contains_key(*key))
+                        .collect::<Vec<_>>()
+                });
+                // Dynamic keys are never copied into audit metadata.
+                if dynamic_before != dynamic_after || changed.len() == changed_before {
+                    changed.push(section.clone());
+                }
+            }
+            _ => changed.push(section.clone()),
+        }
+    }
+    let unknown_before = previous.as_object().map(|map| {
+        map.iter()
+            .filter(|(key, _)| !schema_sections.contains_key(*key))
+            .collect::<Vec<_>>()
+    });
+    let unknown_after = current.as_object().map(|map| {
+        map.iter()
+            .filter(|(key, _)| !schema_sections.contains_key(*key))
+            .collect::<Vec<_>>()
+    });
+    if unknown_before != unknown_after {
+        changed.push("other".to_string());
+    }
+    changed
 }
 
 fn read_envelope(path: &Path) -> Result<Option<(Value, u64)>> {
@@ -510,6 +618,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn settings_change_summary_exposes_only_known_section_names() {
+        let previous = PersistedSettings::default();
+        let mut current = previous.clone();
+        current.terminal.font_size = 18;
+        current
+            .extra
+            .insert("token-for-test".to_string(), json!("known-secret-for-test"));
+
+        assert_eq!(
+            changed_settings_sections(Some(&previous.to_value()), &current),
+            vec!["terminal.fontSize", "other"]
+        );
+        assert!(changed_settings_sections(Some(&current.to_value()), &current).is_empty());
+    }
+
     #[test]
     fn terminal_padding_defaults_and_saved_axes_are_independent() {
         let defaults = sanitize_settings_value(json!({})).unwrap().settings;

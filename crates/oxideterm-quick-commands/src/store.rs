@@ -73,7 +73,131 @@ pub fn load_snapshot(settings_path: &Path) -> Result<QuickCommandsSnapshot, Stri
 
 pub fn save_snapshot(settings_path: &Path, snapshot: &QuickCommandsSnapshot) -> Result<(), String> {
     let path = quick_commands_path(settings_path);
-    save_snapshot_to_path(&path, snapshot)
+    let previous = load_snapshot_from_path(&path).ok().flatten();
+    let mut audit = quick_command_audit("quick_command_configuration_save");
+    audit.summary(&quick_command_change_summary(previous.as_ref(), snapshot));
+    let result = save_snapshot_to_path(&path, snapshot);
+    audit.finish(
+        match &result {
+            Ok(_)
+                if previous
+                    .as_ref()
+                    .is_some_and(|previous| quick_commands_unchanged(previous, snapshot)) =>
+            {
+                oxideterm_audit::AuditOutcome::Unchanged
+            }
+            Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+            Err(_) => oxideterm_audit::AuditOutcome::Failed,
+        },
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
+    result
+}
+
+fn quick_command_audit(action: &str) -> oxideterm_audit::AuditOperation {
+    if oxideterm_audit::AuditContext::current_request()
+        .as_ref()
+        .is_some_and(|context| context.protocol.as_deref() == Some("cloud_sync_apply"))
+    {
+        // The cross-store transaction owns the result until commit or rollback.
+        oxideterm_audit::AuditOperation::in_context(
+            None,
+            oxideterm_audit::AuditCategory::Configuration,
+            action,
+            None,
+        )
+    } else {
+        oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            action,
+            None,
+            None,
+        )
+    }
+}
+
+fn quick_command_change_summary(
+    previous: Option<&QuickCommandsSnapshot>,
+    current: &QuickCommandsSnapshot,
+) -> String {
+    let Some(previous) = previous else {
+        return format!(
+            "commands_created={},categories_created={}",
+            current.commands.len(),
+            current.categories.len()
+        );
+    };
+    let created = current
+        .commands
+        .iter()
+        .filter(|command| !previous.commands.iter().any(|old| old.id == command.id))
+        .count();
+    let edited = current
+        .commands
+        .iter()
+        .filter(|command| {
+            previous
+                .commands
+                .iter()
+                .any(|old| old.id == command.id && !quick_command_definition_eq(old, command))
+        })
+        .count();
+    let deleted = previous
+        .commands
+        .iter()
+        .filter(|command| !current.commands.iter().any(|next| next.id == command.id))
+        .count();
+    let categories_created = current
+        .categories
+        .iter()
+        .filter(|category| !previous.categories.iter().any(|old| old.id == category.id))
+        .count();
+    let categories_edited = current
+        .categories
+        .iter()
+        .filter(|category| {
+            previous
+                .categories
+                .iter()
+                .any(|old| old.id == category.id && old != *category)
+        })
+        .count();
+    let categories_deleted = previous
+        .categories
+        .iter()
+        .filter(|category| !current.categories.iter().any(|next| next.id == category.id))
+        .count();
+    format!(
+        "commands_created={created},commands_edited={edited},commands_deleted={deleted},categories_created={categories_created},categories_edited={categories_edited},categories_deleted={categories_deleted}"
+    )
+}
+
+fn quick_commands_unchanged(
+    previous: &QuickCommandsSnapshot,
+    current: &QuickCommandsSnapshot,
+) -> bool {
+    previous.categories == current.categories
+        && previous.commands.len() == current.commands.len()
+        && current.commands.iter().all(|command| {
+            previous
+                .commands
+                .iter()
+                .any(|old| old.id == command.id && quick_command_definition_eq(old, command))
+        })
+}
+
+fn quick_command_definition_eq(left: &QuickCommand, right: &QuickCommand) -> bool {
+    left.id == right.id
+        && left.name == right.name
+        && left.command == right.command
+        && left.category == right.category
+        && left.description == right.description
+        && left.parameters == right.parameters
+        && left.availability == right.availability
+        && left.confirmation == right.confirmation
+        && left.sort_order == right.sort_order
 }
 
 /// Captures whether the Quick Commands file exists and its complete contents.
@@ -115,6 +239,34 @@ pub fn restore_checkpoint(
 }
 
 pub fn apply_snapshot_json(
+    settings_path: &Path,
+    snapshot_json: &str,
+    strategy: QuickCommandImportStrategy,
+) -> QuickCommandImportResult {
+    let mut audit = quick_command_audit("quick_command_configuration_import");
+    let result = apply_snapshot_json_inner(settings_path, snapshot_json, strategy);
+    audit.summary(&format!(
+        "imported={},skipped={},errors={}",
+        result.imported,
+        result.skipped,
+        result.errors.len()
+    ));
+    audit.finish(
+        if !result.errors.is_empty() {
+            oxideterm_audit::AuditOutcome::Failed
+        } else if result.imported == 0 {
+            oxideterm_audit::AuditOutcome::Unchanged
+        } else {
+            oxideterm_audit::AuditOutcome::Succeeded
+        },
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
+    result
+}
+
+fn apply_snapshot_json_inner(
     settings_path: &Path,
     snapshot_json: &str,
     strategy: QuickCommandImportStrategy,
@@ -915,6 +1067,34 @@ mod tests {
 
         assert!(result.imported > 0);
         assert!(exported.contains("Ops Uptime"));
+    }
+
+    #[test]
+    fn change_summary_counts_edits_without_command_body() {
+        let previous = QuickCommandsSnapshot {
+            version: QUICK_COMMANDS_SCHEMA_VERSION,
+            categories: vec![quick_category("ops", "Ops", QuickCommandIcon::Zap, 0)],
+            commands: vec![quick_command(
+                "ops-check",
+                "Check",
+                "echo safe",
+                "ops",
+                "Check",
+            )],
+            updated_at: 1,
+        };
+        let mut current = previous.clone();
+        current.updated_at = 2;
+        current.commands[0].updated_at = 2;
+        assert!(quick_commands_unchanged(&previous, &current));
+        current.commands[0].command = "printf token-for-test".to_string();
+        assert!(!quick_commands_unchanged(&previous, &current));
+        let summary = quick_command_change_summary(Some(&previous), &current);
+        assert_eq!(
+            summary,
+            "commands_created=0,commands_edited=1,commands_deleted=0,categories_created=0,categories_edited=0,categories_deleted=0"
+        );
+        assert!(!summary.contains("token-for-test"));
     }
 
     #[test]

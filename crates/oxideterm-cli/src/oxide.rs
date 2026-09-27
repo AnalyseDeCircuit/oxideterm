@@ -168,55 +168,108 @@ fn import(args: OxideImportArgs) -> CliResult<i32> {
         return Ok(if ok { 0 } else { 1 });
     }
 
-    let mut store = ConnectionStore::load(default_connections_path())
-        .map_err(|error| runtime_error(error, write.json))?;
-    let mut result = oxideterm_connections::oxide_file::apply_oxide_import_with_options(
-        &mut store,
-        &bytes,
-        &password,
-        OxideImportOptions {
-            selected_names: selected_connection_names,
-            selected_forward_ids,
-            conflict_strategy: strategy,
-            import_forwards: !args.no_forwards,
-            import_portable_secrets: args.import_portable_secrets,
-            ..OxideImportOptions::default()
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "configuration_import",
+        None,
+        Some("oxide_file"),
+    );
+    audit.summary(&format!(
+        "mode=oxide,selected_connections={}",
+        selected_connection_names
+            .as_ref()
+            .map_or(0, |names| names.len())
+    ));
+    let mut applied_parts = 0usize;
+    let child_context = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
+    let apply_result =
+        oxideterm_audit::AuditContext::with_sync_request(child_context.as_ref(), || {
+            let mut store = ConnectionStore::load(default_connections_path())
+                .map_err(|error| runtime_error(error, write.json))?;
+            let mut result = oxideterm_connections::oxide_file::apply_oxide_import_with_options(
+                &mut store,
+                &bytes,
+                &password,
+                OxideImportOptions {
+                    selected_names: selected_connection_names,
+                    selected_forward_ids,
+                    conflict_strategy: strategy,
+                    import_forwards: !args.no_forwards,
+                    import_portable_secrets: args.import_portable_secrets,
+                    ..OxideImportOptions::default()
+                },
+            )
+            .map_err(|error| CliError::new("oxide_import_failed", error.to_string(), write.json))?;
+            applied_parts += result.imported + result.replaced + result.merged + result.renamed;
+            applied_parts += result.imported_serial_profiles
+                + result.imported_telnet_profiles
+                + result.imported_mosh_profiles
+                + result.imported_standalone_sftp_profiles
+                + result.imported_remote_desktop_profiles
+                + result.restored_managed_keys
+                + result.restored_profile_credentials
+                + result.cleared_profile_credentials;
+            let imported_app_settings = if args.no_app_settings {
+                false
+            } else {
+                apply_imported_app_settings(
+                    result.app_settings_json.as_deref(),
+                    import_filter.settings_sections.as_ref(),
+                    write.json,
+                )?
+            };
+            applied_parts += usize::from(imported_app_settings);
+            let imported_quick_commands = if args.no_quick_commands {
+                0
+            } else {
+                apply_imported_quick_commands(
+                    result.quick_commands_json.as_deref(),
+                    args.strategy,
+                    write.json,
+                )?
+            };
+            applied_parts += imported_quick_commands;
+            let imported_plugin_settings = if args.no_plugin_settings {
+                0
+            } else {
+                apply_imported_plugin_settings(
+                    &default_settings_path(),
+                    &result.plugin_settings,
+                    import_filter.plugin_ids.as_ref(),
+                    write.json,
+                )?
+            };
+            applied_parts += imported_plugin_settings;
+            if args.import_portable_secrets {
+                apply_imported_portable_secrets(&mut result, write.json)?;
+            }
+            apply_imported_forward_records(&mut result, write.json)?;
+            applied_parts += result.imported_forwards;
+            write_guard::mark_applied(&mut guard);
+            Ok::<_, CliError>((
+                result,
+                imported_app_settings,
+                imported_quick_commands,
+                imported_plugin_settings,
+            ))
+        });
+    audit.finish(
+        match &apply_result {
+            Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+            Err(_) if applied_parts > 0 => oxideterm_audit::AuditOutcome::Partial,
+            Err(_) => oxideterm_audit::AuditOutcome::Failed,
         },
-    )
-    .map_err(|error| CliError::new("oxide_import_failed", error.to_string(), write.json))?;
-    let imported_app_settings = if args.no_app_settings {
-        false
-    } else {
-        apply_imported_app_settings(
-            result.app_settings_json.as_deref(),
-            import_filter.settings_sections.as_ref(),
-            write.json,
-        )?
-    };
-    let imported_quick_commands = if args.no_quick_commands {
-        0
-    } else {
-        apply_imported_quick_commands(
-            result.quick_commands_json.as_deref(),
-            args.strategy,
-            write.json,
-        )?
-    };
-    let imported_plugin_settings = if args.no_plugin_settings {
-        0
-    } else {
-        apply_imported_plugin_settings(
-            &default_settings_path(),
-            &result.plugin_settings,
-            import_filter.plugin_ids.as_ref(),
-            write.json,
-        )?
-    };
-    if args.import_portable_secrets {
-        apply_imported_portable_secrets(&mut result, write.json)?;
-    }
-    apply_imported_forward_records(&mut result, write.json)?;
-    write_guard::mark_applied(&mut guard);
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
+    let (result, imported_app_settings, imported_quick_commands, imported_plugin_settings) =
+        apply_result?;
     let response = OxideImportResponse {
         path: args.path,
         applied: guard.applied,
@@ -298,24 +351,39 @@ fn export(args: OxideExportArgs) -> CliResult<i32> {
             args.json,
         ));
     }
-    ensure_output_path(&args.path, args.overwrite, args.json)?;
-    let bytes = export_connections_to_oxide(
-        &store,
-        &connection_ids,
-        &password,
-        OxideExportOptions {
-            description: args.description.clone(),
-            embed_keys: args.embed_keys,
-            app_settings_json,
-            quick_commands_json,
-            plugin_settings,
-            portable_secrets,
-            forwards,
-            ..OxideExportOptions::default()
-        },
-    )
-    .map_err(|error| CliError::new("oxide_export_failed", error.to_string(), args.json))?;
-    write_output_file(&args.path, &bytes, args.json)?;
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "configuration_export",
+        None,
+        Some("oxide_file"),
+    );
+    audit.summary(&format!(
+        "connections={},forwards={forward_count}",
+        connection_ids.len()
+    ));
+    let export_result = (|| {
+        ensure_output_path(&args.path, args.overwrite, args.json)?;
+        let bytes = export_connections_to_oxide(
+            &store,
+            &connection_ids,
+            &password,
+            OxideExportOptions {
+                description: args.description.clone(),
+                embed_keys: args.embed_keys,
+                app_settings_json,
+                quick_commands_json,
+                plugin_settings,
+                portable_secrets,
+                forwards,
+                ..OxideExportOptions::default()
+            },
+        )
+        .map_err(|error| CliError::new("oxide_export_failed", error.to_string(), args.json))?;
+        write_output_file(&args.path, &bytes, args.json)?;
+        Ok::<_, CliError>(bytes)
+    })();
+    audit.result(&export_result);
+    let bytes = export_result?;
     let metadata = OxideFile::from_bytes(&bytes)
         .map_err(|error| CliError::new("oxide_export_failed", error.to_string(), args.json))?
         .metadata;

@@ -31,7 +31,7 @@ pub fn run(args: ConnectionUriArgs) -> CliResult<i32> {
     let uri = Zeroizing::new(args.uri);
     let launch = parse_connection_uri(&uri, current_username().as_deref())
         .map_err(|error| CliError::new("invalid_connection_uri", error.to_string(), false))?;
-    launch_request(&launch)?;
+    launch_request(launch)?;
     println!("Opening temporary connection in OxideTerm");
     Ok(0)
 }

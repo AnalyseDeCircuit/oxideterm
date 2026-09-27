@@ -7,6 +7,7 @@ use std::{
 };
 
 use oxideterm_ai::AiProviderKeyStore;
+use oxideterm_audit::{AuditCategory, AuditContext, AuditEvidence, AuditOperation, AuditOutcome};
 use oxideterm_cloud_sync::{secret_keys, secrets::CloudSyncKeychainSecretProvider};
 use oxideterm_connections::{ConnectionStore, SaveConnectionRequest, SavedAuth, SecretString};
 use serde::{Deserialize, Serialize};
@@ -137,64 +138,78 @@ fn status(args: SecretsStatusArgs) -> CliResult<()> {
     write_status(args.json, statuses)
 }
 
+fn secret_reference(
+    scope: &SecretScopeArg,
+    id: Option<&str>,
+    plugin_id: Option<&str>,
+    key: Option<&str>,
+) -> (&'static str, Option<String>, Option<String>) {
+    let (scope, id, key) = match scope {
+        SecretScopeArg::Ai => ("ai", id, None),
+        SecretScopeArg::Plugin => ("plugin", plugin_id, key),
+        SecretScopeArg::CloudSync => ("cloud-sync", None, key),
+        SecretScopeArg::Connection => ("connection", id, Some(key.unwrap_or("password"))),
+        SecretScopeArg::Portable => ("portable", id, Some(key.unwrap_or("ai_provider_key"))),
+    };
+    (scope, id.map(str::to_owned), key.map(str::to_owned))
+}
+
+fn credential_operation(
+    action: &str,
+    scope: &SecretScopeArg,
+    id: Option<&str>,
+    plugin_id: Option<&str>,
+    key: Option<&str>,
+) -> AuditOperation {
+    // Only references cross this boundary; the helper never receives a credential value.
+    let (scope, id, key) = secret_reference(scope, id, plugin_id, key);
+    let detail = format!(
+        "scope={scope}; object={}; field={}",
+        id.as_deref().unwrap_or("-"),
+        key.as_deref().unwrap_or("-")
+    );
+    AuditOperation::begin(AuditCategory::Security, action, None, Some(&detail))
+}
+
 fn set(args: SecretsSetArgs) -> CliResult<()> {
     let value = read_secret_value(args.stdin, args.env.as_deref(), args.json)?;
-    match args.scope {
-        SecretScopeArg::Ai => {
-            let id = required_arg(args.id.as_deref(), "--id", args.json)?;
-            // The provider key enters the OS keychain as Zeroizing<String> and is never echoed.
-            AiProviderKeyStore::new()
-                .store_provider_key(&id, value)
-                .map_err(|error| runtime_error(error, args.json))?;
-            write_secret_response(args.json, "ai", Some(id), None, false, true)
-        }
-        SecretScopeArg::Plugin => {
-            let plugin_id = required_arg(args.plugin_id.as_deref(), "--plugin-id", args.json)?;
-            let key = required_arg(args.key.as_deref(), "--key", args.json)?;
-            let account_id = plugin_secret_account_id(&plugin_id, &key, args.json)?;
-            AiProviderKeyStore::new()
-                .store_provider_key(&account_id, value)
-                .map_err(|error| runtime_error(error, args.json))?;
-            write_secret_response(args.json, "plugin", Some(plugin_id), Some(key), false, true)
-        }
-        SecretScopeArg::CloudSync => {
-            let key = required_arg(args.key.as_deref(), "--key", args.json)?;
-            write_cloud_sync_secret(&key, Some(value.as_str()), args.json)?;
-            write_secret_response(args.json, "cloud-sync", None, Some(key), false, true)
-        }
-        SecretScopeArg::Connection => {
-            let id = required_arg(args.id.as_deref(), "--id", args.json)?;
-            let key = args.key.unwrap_or_else(|| "password".to_string());
-            write_connection_secret(&id, &key, Some(value), args.json)?;
-            write_secret_response(args.json, "connection", Some(id), Some(key), false, true)
-        }
-        SecretScopeArg::Portable => {
-            let id = required_arg(args.id.as_deref(), "--id", args.json)?;
-            validate_portable_secret_kind(args.key.as_deref(), args.json)?;
-            // Portable AI-provider secrets use the same keychain entry that .oxide export encrypts.
-            AiProviderKeyStore::new()
-                .store_provider_key(&id, value)
-                .map_err(|error| runtime_error(error, args.json))?;
-            write_secret_response(
-                args.json,
-                "portable",
-                Some(id),
-                Some("ai_provider_key".to_string()),
-                false,
-                true,
-            )
-        }
-    }
+    let (scope, id, key) = secret_reference(
+        &args.scope,
+        args.id.as_deref(),
+        args.plugin_id.as_deref(),
+        args.key.as_deref(),
+    );
+    let json = args.json;
+    set_imported_secret(args, value)?;
+    write_secret_response(json, scope, id, key, false, true)
 }
 
 fn clear(args: SecretsClearArgs) -> CliResult<()> {
-    match args.scope {
+    let (scope, id, key) = secret_reference(
+        &args.scope,
+        args.id.as_deref(),
+        args.plugin_id.as_deref(),
+        args.key.as_deref(),
+    );
+    let operation = credential_operation(
+        "credential_delete",
+        &args.scope,
+        args.id.as_deref(),
+        args.plugin_id.as_deref(),
+        args.key.as_deref(),
+    );
+    let json = args.json;
+    let mut child = AuditContext::current_request().or_else(AuditContext::current);
+    if let Some(context) = &mut child {
+        context.parent_id = operation.id().map(str::to_owned);
+    }
+    let result = AuditContext::with_sync_request(child.as_ref(), || match args.scope {
         SecretScopeArg::Ai => {
             let id = required_arg(args.id.as_deref(), "--id", args.json)?;
             AiProviderKeyStore::new()
                 .delete_provider_key(&id)
                 .map_err(|error| runtime_error(error, args.json))?;
-            write_secret_response(args.json, "ai", Some(id), None, true, false)
+            Ok(())
         }
         SecretScopeArg::Plugin => {
             let plugin_id = required_arg(args.plugin_id.as_deref(), "--plugin-id", args.json)?;
@@ -203,18 +218,18 @@ fn clear(args: SecretsClearArgs) -> CliResult<()> {
             AiProviderKeyStore::new()
                 .delete_provider_key(&account_id)
                 .map_err(|error| runtime_error(error, args.json))?;
-            write_secret_response(args.json, "plugin", Some(plugin_id), Some(key), true, false)
+            Ok(())
         }
         SecretScopeArg::CloudSync => {
             let key = required_arg(args.key.as_deref(), "--key", args.json)?;
             write_cloud_sync_secret(&key, None, args.json)?;
-            write_secret_response(args.json, "cloud-sync", None, Some(key), true, false)
+            Ok(())
         }
         SecretScopeArg::Connection => {
             let id = required_arg(args.id.as_deref(), "--id", args.json)?;
             let key = args.key.unwrap_or_else(|| "password".to_string());
             write_connection_secret(&id, &key, None, args.json)?;
-            write_secret_response(args.json, "connection", Some(id), Some(key), true, false)
+            Ok(())
         }
         SecretScopeArg::Portable => {
             let id = required_arg(args.id.as_deref(), "--id", args.json)?;
@@ -222,51 +237,75 @@ fn clear(args: SecretsClearArgs) -> CliResult<()> {
             AiProviderKeyStore::new()
                 .delete_provider_key(&id)
                 .map_err(|error| runtime_error(error, args.json))?;
-            write_secret_response(
-                args.json,
-                "portable",
-                Some(id),
-                Some("ai_provider_key".to_string()),
-                true,
-                false,
-            )
+            Ok(())
         }
-    }
+    });
+    operation.result(&result);
+    result?;
+    write_secret_response(json, scope, id, key, true, false)
 }
 
 fn import(args: SecretsImportArgs) -> CliResult<()> {
-    let mut contents = Zeroizing::new(String::new());
-    File::open(&args.path)
-        .and_then(|mut file| file.read_to_string(&mut contents))
-        .map_err(|error| {
-            CliError::new(
-                "secrets_import_failed",
-                format!("failed to read secrets import file {}: {error}", args.path),
-                args.json,
-            )
-        })?;
-    let document = serde_json::from_str::<SecretImportDocument>(&contents).map_err(|error| {
-        CliError::new(
-            "secrets_import_failed",
-            format!("failed to parse secrets import file {}: {error}", args.path),
-            args.json,
-        )
-    })?;
-    let mut imported = 0;
-    for entry in document.secrets {
-        let value = import_entry_value(&entry, args.json)?;
-        let set_args = SecretsSetArgs {
-            scope: entry.scope,
-            id: entry.id,
-            plugin_id: entry.plugin_id,
-            key: entry.key,
-            stdin: false,
-            env: None,
-            json: args.json,
-        };
-        set_imported_secret(set_args, value)?;
-        imported += 1;
+    let mut operation = AuditOperation::begin(
+        AuditCategory::Security,
+        "credential_import",
+        None,
+        Some("scope=credentials"),
+    );
+    let mut child = AuditContext::current_request().or_else(AuditContext::current);
+    if let Some(context) = &mut child {
+        context.parent_id = operation.id().map(str::to_owned);
     }
+    let mut imported = 0;
+    let result: CliResult<()> = AuditContext::with_sync_request(child.as_ref(), || {
+        let mut contents = Zeroizing::new(String::new());
+        File::open(&args.path)
+            .and_then(|mut file| file.read_to_string(&mut contents))
+            .map_err(|error| {
+                CliError::new(
+                    "secrets_import_failed",
+                    format!("failed to read secrets import file {}: {error}", args.path),
+                    args.json,
+                )
+            })?;
+        let document =
+            serde_json::from_str::<SecretImportDocument>(&contents).map_err(|error| {
+                CliError::new(
+                    "secrets_import_failed",
+                    format!("failed to parse secrets import file {}: {error}", args.path),
+                    args.json,
+                )
+            })?;
+        for entry in document.secrets {
+            let value = import_entry_value(&entry, args.json)?;
+            let set_args = SecretsSetArgs {
+                scope: entry.scope,
+                id: entry.id,
+                plugin_id: entry.plugin_id,
+                key: entry.key,
+                stdin: false,
+                env: None,
+                json: args.json,
+            };
+            set_imported_secret(set_args, value)?;
+            imported += 1;
+        }
+        Ok(())
+    });
+    operation.summary(&format!("scope=credentials; imported={imported}"));
+    operation.finish(
+        if result.is_ok() {
+            AuditOutcome::Succeeded
+        } else if imported > 0 {
+            AuditOutcome::Partial
+        } else {
+            AuditOutcome::Failed
+        },
+        AuditEvidence::Protocol,
+        None,
+        None,
+    );
+    result?;
     match output::format_from_flag(args.json) {
         OutputFormat::Json => output::write_json(&serde_json::json!({ "imported": imported })),
         OutputFormat::Text => {
@@ -277,39 +316,54 @@ fn import(args: SecretsImportArgs) -> CliResult<()> {
 }
 
 fn set_imported_secret(args: SecretsSetArgs, value: Zeroizing<String>) -> CliResult<()> {
-    match args.scope {
-        SecretScopeArg::Ai => {
-            let id = required_arg(args.id.as_deref(), "--id", args.json)?;
-            AiProviderKeyStore::new()
-                .store_provider_key(&id, value)
-                .map_err(|error| runtime_error(error, args.json))
-        }
-        SecretScopeArg::Plugin => {
-            let plugin_id = required_arg(args.plugin_id.as_deref(), "--plugin-id", args.json)?;
-            let key = required_arg(args.key.as_deref(), "--key", args.json)?;
-            let account_id = plugin_secret_account_id(&plugin_id, &key, args.json)?;
-            AiProviderKeyStore::new()
-                .store_provider_key(&account_id, value)
-                .map_err(|error| runtime_error(error, args.json))
-        }
-        SecretScopeArg::CloudSync => {
-            let key = required_arg(args.key.as_deref(), "--key", args.json)?;
-            write_cloud_sync_secret(&key, Some(value.as_str()), args.json)
-        }
-        SecretScopeArg::Connection => {
-            let id = required_arg(args.id.as_deref(), "--id", args.json)?;
-            let key = args.key.unwrap_or_else(|| "password".to_string());
-            write_connection_secret(&id, &key, Some(value), args.json)
-        }
-        SecretScopeArg::Portable => {
-            let id = required_arg(args.id.as_deref(), "--id", args.json)?;
-            validate_portable_secret_kind(args.key.as_deref(), args.json)?;
-            // Portable secrets decrypt into AI provider keychain entries, matching .oxide import.
-            AiProviderKeyStore::new()
-                .store_provider_key(&id, value)
-                .map_err(|error| runtime_error(error, args.json))
-        }
+    let operation = credential_operation(
+        "credential_save",
+        &args.scope,
+        args.id.as_deref(),
+        args.plugin_id.as_deref(),
+        args.key.as_deref(),
+    );
+    let mut child = AuditContext::current_request().or_else(AuditContext::current);
+    if let Some(context) = &mut child {
+        context.parent_id = operation.id().map(str::to_owned);
     }
+    let result = AuditContext::with_sync_request(child.as_ref(), || {
+        match args.scope {
+            SecretScopeArg::Ai => {
+                let id = required_arg(args.id.as_deref(), "--id", args.json)?;
+                AiProviderKeyStore::new()
+                    .store_provider_key(&id, value)
+                    .map_err(|error| runtime_error(error, args.json))
+            }
+            SecretScopeArg::Plugin => {
+                let plugin_id = required_arg(args.plugin_id.as_deref(), "--plugin-id", args.json)?;
+                let key = required_arg(args.key.as_deref(), "--key", args.json)?;
+                let account_id = plugin_secret_account_id(&plugin_id, &key, args.json)?;
+                AiProviderKeyStore::new()
+                    .store_provider_key(&account_id, value)
+                    .map_err(|error| runtime_error(error, args.json))
+            }
+            SecretScopeArg::CloudSync => {
+                let key = required_arg(args.key.as_deref(), "--key", args.json)?;
+                write_cloud_sync_secret(&key, Some(value.as_str()), args.json)
+            }
+            SecretScopeArg::Connection => {
+                let id = required_arg(args.id.as_deref(), "--id", args.json)?;
+                let key = args.key.unwrap_or_else(|| "password".to_string());
+                write_connection_secret(&id, &key, Some(value), args.json)
+            }
+            SecretScopeArg::Portable => {
+                let id = required_arg(args.id.as_deref(), "--id", args.json)?;
+                validate_portable_secret_kind(args.key.as_deref(), args.json)?;
+                // Portable secrets decrypt into AI provider keychain entries, matching .oxide import.
+                AiProviderKeyStore::new()
+                    .store_provider_key(&id, value)
+                    .map_err(|error| runtime_error(error, args.json))
+            }
+        }
+    });
+    operation.result(&result);
+    result
 }
 
 fn validate_portable_secret_kind(key: Option<&str>, json: bool) -> CliResult<()> {
@@ -645,4 +699,121 @@ fn required_arg(value: Option<&str>, name: &str, json: bool) -> CliResult<String
                 json,
             )
         })
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::*;
+    use oxideterm_audit::{
+        AuditError, AuditKeyProvider, AuditPhase, AuditQuery, AuditService, AuditSource,
+    };
+
+    struct Keys;
+    impl AuditKeyProvider for Keys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+            Ok(Zeroizing::new(vec![31; 32]))
+        }
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[test]
+    fn rejected_credential_write_records_reference_and_failure_without_value() {
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let client = service.client();
+        let mut context = AuditContext::new(client.clone(), AuditSource::Cli);
+        context.parent_id = Some("cli-request".into());
+        let result = AuditContext::with_sync_request(Some(&context), || {
+            set_imported_secret(
+                SecretsSetArgs {
+                    scope: SecretScopeArg::Portable,
+                    id: Some("provider-A".into()),
+                    plugin_id: None,
+                    key: Some("unsupported-kind".into()),
+                    stdin: false,
+                    env: None,
+                    json: true,
+                },
+                Zeroizing::new("credential-value-must-never-be-audited".into()),
+            )
+        });
+        assert_eq!(result.unwrap_err().code, "portable_secret_kind_invalid");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let page = runtime
+            .block_on(client.query(AuditQuery {
+                limit: 10,
+                ..Default::default()
+            }))
+            .unwrap();
+        let records = page
+            .records
+            .iter()
+            .filter(|r| {
+                r.details
+                    .operation
+                    .as_ref()
+                    .is_some_and(|op| op.action == "credential_save")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            records
+                .iter()
+                .map(|r| {
+                    let op = r.details.operation.as_ref().unwrap();
+                    (
+                        op.phase,
+                        op.outcome,
+                        op.source,
+                        op.parent_id.as_deref(),
+                        r.details.detail.as_deref().map(|s| s.as_str()),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            [
+                (
+                    Some(AuditPhase::Result),
+                    AuditOutcome::Failed,
+                    AuditSource::Cli,
+                    Some("cli-request"),
+                    Some("scope=portable; object=provider-A; field=unsupported-kind")
+                ),
+                (
+                    Some(AuditPhase::Start),
+                    AuditOutcome::Started,
+                    AuditSource::Cli,
+                    Some("cli-request"),
+                    Some("scope=portable; object=provider-A; field=unsupported-kind")
+                ),
+            ]
+        );
+        let exported = directory.path().join("audit.json");
+        runtime
+            .block_on(client.export(
+                AuditQuery {
+                    limit: 100,
+                    ..Default::default()
+                },
+                exported.clone(),
+                oxideterm_audit::AuditExportFormat::Json,
+                true,
+            ))
+            .unwrap();
+        assert!(
+            !std::fs::read_to_string(exported)
+                .unwrap()
+                .contains("credential-value-must-never-be-audited")
+        );
+    }
 }

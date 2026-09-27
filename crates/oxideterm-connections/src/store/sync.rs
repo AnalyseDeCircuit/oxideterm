@@ -3,6 +3,25 @@ enum SavedConnectionsStoreFileCheckpoint {
     Present(Vec<u8>),
 }
 
+fn audit_configuration_snapshot<T>(
+    kind: &'static str,
+    build: impl FnOnce() -> Result<T>,
+    count: impl FnOnce(&T) -> usize,
+) -> Result<T> {
+    let mut audit = oxideterm_audit::AuditOperation::in_context(
+        oxideterm_audit::AuditContext::current_request().as_ref(),
+        oxideterm_audit::AuditCategory::Configuration,
+        "configuration_snapshot_create",
+        Some(kind),
+    );
+    let result = build();
+    if let Ok(snapshot) = &result {
+        audit.summary(&format!("{kind}:records={}", count(snapshot)));
+    }
+    audit.result(&result);
+    result
+}
+
 /// Opaque rollback state for the complete connection store.
 ///
 /// The checkpoint owns every `ConnectionStoreData` field and the exact
@@ -138,35 +157,35 @@ impl ConnectionStore {
     }
 
     pub fn export_saved_connections_snapshot(&self) -> Result<SavedConnectionsSyncSnapshot> {
-        build_saved_connections_sync_snapshot(&self.data)
+        audit_configuration_snapshot("saved_connections", || build_saved_connections_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn export_serial_profiles_snapshot(&self) -> Result<SerialProfilesSyncSnapshot> {
-        build_serial_profiles_sync_snapshot(&self.data)
+        audit_configuration_snapshot("serial_profiles", || build_serial_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn export_telnet_profiles_snapshot(&self) -> Result<TelnetProfilesSyncSnapshot> {
-        build_telnet_profiles_sync_snapshot(&self.data)
+        audit_configuration_snapshot("telnet_profiles", || build_telnet_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn export_mosh_profiles_snapshot(&self) -> Result<MoshProfilesSyncSnapshot> {
-        build_mosh_profiles_sync_snapshot(&self.data)
+        audit_configuration_snapshot("mosh_profiles", || build_mosh_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn export_standalone_sftp_profiles_snapshot(
         &self,
     ) -> Result<StandaloneSftpProfilesSyncSnapshot> {
-        build_standalone_sftp_profiles_sync_snapshot(&self.data)
+        audit_configuration_snapshot("sftp_profiles", || build_standalone_sftp_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn export_remote_desktop_profiles_snapshot(
         &self,
     ) -> Result<RemoteDesktopProfilesSyncSnapshot> {
-        build_remote_desktop_profiles_sync_snapshot(&self.data)
+        audit_configuration_snapshot("remote_desktop_profiles", || build_remote_desktop_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
     pub fn local_sync_metadata(&self) -> Result<LocalSyncMetadata> {
-        let snapshot = self.export_saved_connections_snapshot()?;
+        let snapshot = build_saved_connections_sync_snapshot(&self.data)?;
         let saved_connections_updated_at = snapshot
             .records
             .iter()
@@ -187,6 +206,13 @@ impl ConnectionStore {
         snapshot: SavedConnectionsSyncSnapshot,
         strategy: SavedConnectionsConflictStrategy,
     ) -> Result<ApplySavedConnectionsSyncOutcome> {
+        let mut audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_snapshot_apply",
+            None,
+            Some("saved_connections"),
+        );
+        let audit_result = (|| {
         let prepared = self.prepare_saved_connections_snapshot(snapshot, strategy)?;
         let mut cleanup = self.commit_prepared_saved_connections_snapshot(prepared)?;
         let outcome = cleanup.outcome().clone();
@@ -196,6 +222,29 @@ impl ConnectionStore {
         // commit/finalize API so failed cleanup remains available for retry.
         let _ = self.finalize_saved_connections_sync_cleanup(&mut cleanup);
         Ok(outcome)
+        })();
+        let outcome = match &audit_result {
+                Ok(outcome) => {
+                    audit.summary(&format!(
+                        "saved_connections:applied={},deleted={}",
+                        outcome.result.applied,
+                        outcome.deleted_connection_ids.len(),
+                    ));
+                    if outcome.result.applied == 0 && outcome.deleted_connection_ids.is_empty() {
+                        oxideterm_audit::AuditOutcome::Unchanged
+                    } else {
+                        oxideterm_audit::AuditOutcome::Succeeded
+                    }
+                }
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            };
+        audit.finish(
+            outcome,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        audit_result
     }
 
     pub fn prepare_saved_connections_snapshot(

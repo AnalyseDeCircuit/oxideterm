@@ -236,47 +236,79 @@ fn cloud_sync_restore_input(backup: &Value, json: bool) -> CliResult<RestoreInpu
 }
 
 fn apply_restore_inputs(inputs: Vec<RestoreInput>, json: bool) -> CliResult<()> {
-    for input in inputs {
-        if input.changes.is_empty() {
-            continue;
-        }
-        match input.target {
-            RestoreTarget::Settings(settings) => {
-                let saved = save_settings_to_path(Path::new(&input.target_path), settings)
-                    .map_err(|error| {
-                        CliError::new("settings_restore_failed", error.to_string(), json)
-                    })?;
-                if !saved.validation_warnings.is_empty() {
-                    return Err(CliError::new(
-                        "settings_restore_failed",
-                        format!(
-                            "settings save produced validation warnings: {}",
-                            saved.validation_warnings.join("; ")
-                        ),
-                        json,
-                    ));
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "backup_restore",
+        None,
+        Some("cli_backup"),
+    );
+    let child_context = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
+    let mut applied = 0usize;
+    let audit_result =
+        oxideterm_audit::AuditContext::with_sync_request(child_context.as_ref(), || {
+            for input in inputs {
+                if input.changes.is_empty() {
+                    continue;
+                }
+                match input.target {
+                    RestoreTarget::Settings(settings) => {
+                        let saved = save_settings_to_path(Path::new(&input.target_path), settings)
+                            .map_err(|error| {
+                                CliError::new("settings_restore_failed", error.to_string(), json)
+                            })?;
+                        applied += 1;
+                        if !saved.validation_warnings.is_empty() {
+                            return Err(CliError::new(
+                                "settings_restore_failed",
+                                format!(
+                                    "settings save produced validation warnings: {}",
+                                    saved.validation_warnings.join("; ")
+                                ),
+                                json,
+                            ));
+                        }
+                    }
+                    RestoreTarget::Connections(snapshot) => {
+                        let mut store = ConnectionStore::load(default_connections_path())
+                            .map_err(|error| runtime_error(error, json))?;
+                        store
+                            .apply_saved_connections_snapshot(
+                                snapshot,
+                                SavedConnectionsConflictStrategy::Replace,
+                            )
+                            .map_err(|error| runtime_error(error, json))?;
+                        applied += 1;
+                    }
+                    RestoreTarget::CloudSync(state) => {
+                        let mut store = CloudSyncStateStore::load(default_cloud_sync_path())
+                            .map_err(|error| runtime_error(error, json))?;
+                        store.replace_state(state);
+                        store.save().map_err(|error| runtime_error(error, json))?;
+                        applied += 1;
+                    }
+                    RestoreTarget::Unsupported => {}
                 }
             }
-            RestoreTarget::Connections(snapshot) => {
-                let mut store = ConnectionStore::load(default_connections_path())
-                    .map_err(|error| runtime_error(error, json))?;
-                store
-                    .apply_saved_connections_snapshot(
-                        snapshot,
-                        SavedConnectionsConflictStrategy::Replace,
-                    )
-                    .map_err(|error| runtime_error(error, json))?;
-            }
-            RestoreTarget::CloudSync(state) => {
-                let mut store = CloudSyncStateStore::load(default_cloud_sync_path())
-                    .map_err(|error| runtime_error(error, json))?;
-                store.replace_state(state);
-                store.save().map_err(|error| runtime_error(error, json))?;
-            }
-            RestoreTarget::Unsupported => {}
-        }
-    }
-    Ok(())
+            Ok(())
+        });
+    audit.summary(&format!("sections_applied={applied}"));
+    audit.finish(
+        match &audit_result {
+            Ok(_) if applied == 0 => oxideterm_audit::AuditOutcome::Unchanged,
+            Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+            Err(_) if applied > 0 => oxideterm_audit::AuditOutcome::Partial,
+            Err(_) => oxideterm_audit::AuditOutcome::Failed,
+        },
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        None,
+    );
+    audit_result
 }
 
 fn restore_response(

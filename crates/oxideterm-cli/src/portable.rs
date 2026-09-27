@@ -61,8 +61,16 @@ fn setup(args: PortablePasswordArgs) -> CliResult<()> {
     acquire_lock(args.json)?;
     let password =
         read_single_password(args.password_stdin, args.password_env.as_deref(), args.json)?;
-    oxideterm_portable_runtime::keystore::create_portable_keystore(password.as_str())
-        .map_err(|error| CliError::new("portable_setup_failed", error.to_string(), args.json))?;
+    let audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Security,
+        "portable_lock_setup",
+        None,
+        None,
+    );
+    let result = oxideterm_portable_runtime::keystore::create_portable_keystore(password.as_str())
+        .map_err(|error| CliError::new("portable_setup_failed", error.to_string(), args.json));
+    audit.result(&result);
+    result?;
     write_response(args.json, "setup")
 }
 
@@ -71,8 +79,16 @@ fn unlock(args: PortablePasswordArgs) -> CliResult<()> {
     acquire_lock(args.json)?;
     let password =
         read_single_password(args.password_stdin, args.password_env.as_deref(), args.json)?;
-    oxideterm_portable_runtime::keystore::unlock_portable_keystore(password.as_str())
-        .map_err(|error| CliError::new("portable_unlock_failed", error.to_string(), args.json))?;
+    let audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Security,
+        "app_unlock",
+        None,
+        Some("portable"),
+    );
+    let result = oxideterm_portable_runtime::keystore::unlock_portable_keystore(password.as_str())
+        .map_err(|error| CliError::new("portable_unlock_failed", error.to_string(), args.json));
+    audit.result(&result);
+    result?;
     write_response(args.json, "unlock")
 }
 
@@ -80,7 +96,13 @@ fn change_password(args: PortableChangePasswordArgs) -> CliResult<()> {
     initialize_portable(args.json)?;
     acquire_lock(args.json)?;
     let (current_password, new_password) = read_password_pair(&args)?;
-    oxideterm_portable_runtime::keystore::change_portable_keystore_password(
+    let audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Security,
+        "portable_lock_change",
+        None,
+        None,
+    );
+    let result = oxideterm_portable_runtime::keystore::change_portable_keystore_password(
         current_password.as_str(),
         new_password.as_str(),
     )
@@ -90,7 +112,9 @@ fn change_password(args: PortableChangePasswordArgs) -> CliResult<()> {
             error.to_string(),
             args.json,
         )
-    })?;
+    });
+    audit.result(&result);
+    result?;
     write_response(args.json, "changePassword")
 }
 
@@ -104,8 +128,16 @@ fn reset(args: PortableResetArgs) -> CliResult<()> {
             args.json,
         ));
     }
-    oxideterm_portable_runtime::keystore::delete_portable_keystore()
-        .map_err(|error| CliError::new("portable_reset_failed", error.to_string(), args.json))?;
+    let audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Security,
+        "portable_lock_reset",
+        None,
+        None,
+    );
+    let result = oxideterm_portable_runtime::keystore::delete_portable_keystore()
+        .map_err(|error| CliError::new("portable_reset_failed", error.to_string(), args.json));
+    audit.result(&result);
+    result?;
     write_response(args.json, "reset")
 }
 

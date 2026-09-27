@@ -195,36 +195,52 @@ fn settings_report(json: bool) -> ReportSettings {
 }
 
 fn write_report_bundle(path: PathBuf, json: bool) -> CliResult<ReportBundleWriteResponse> {
-    let bundle = build_report_bundle(json);
-    let contents = serde_json::to_string_pretty(&bundle)
-        .map_err(|error| CliError::new("serialization_failed", error.to_string(), json))?;
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent).map_err(|error| {
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Configuration,
+        "support_report_export",
+        None,
+        Some("cli_report"),
+    );
+    let audit_result = (|| {
+        let bundle = build_report_bundle(json);
+        let contents = serde_json::to_string_pretty(&bundle)
+            .map_err(|error| CliError::new("serialization_failed", error.to_string(), json))?;
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            fs::create_dir_all(parent).map_err(|error| {
+                CliError::new(
+                    "report_bundle_write_failed",
+                    format!(
+                        "failed to create report bundle dir {}: {error}",
+                        parent.display()
+                    ),
+                    json,
+                )
+            })?;
+        }
+        fs::write(&path, &contents).map_err(|error| {
             CliError::new(
                 "report_bundle_write_failed",
-                format!(
-                    "failed to create report bundle dir {}: {error}",
-                    parent.display()
-                ),
+                format!("failed to write report bundle {}: {error}", path.display()),
                 json,
             )
         })?;
+        Ok(ReportBundleWriteResponse {
+            path: path.display().to_string(),
+            ok: bundle.report.ok,
+            bytes: contents.len(),
+        })
+    })();
+    if let Ok(response) = &audit_result {
+        audit.summary(&format!(
+            "size_bytes={},checks_ok={}",
+            response.bytes, response.ok
+        ));
     }
-    fs::write(&path, &contents).map_err(|error| {
-        CliError::new(
-            "report_bundle_write_failed",
-            format!("failed to write report bundle {}: {error}", path.display()),
-            json,
-        )
-    })?;
-    Ok(ReportBundleWriteResponse {
-        path: path.display().to_string(),
-        ok: bundle.report.ok,
-        bytes: contents.len(),
-    })
+    audit.result(&audit_result);
+    audit_result
 }
 
 fn build_report_bundle(json: bool) -> ReportBundle {
