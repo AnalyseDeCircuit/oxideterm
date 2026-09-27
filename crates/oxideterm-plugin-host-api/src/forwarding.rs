@@ -106,10 +106,14 @@ pub fn native_plugin_forward_response(
     // Forward listener creation and teardown can await SSH channel operations.
     // Keep those operations on the long-lived forwarding runtime that owns the
     // registry managers instead of the plugin stdio reader.
-    runtime.spawn(async move {
-        let result = native_plugin_forward_async_result(&registry, &method, &args).await;
-        let _ = response_tx.send(result);
-    });
+    let audit_context = oxideterm_audit::AuditContext::current_request();
+    runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+        audit_context,
+        async move {
+            let result = native_plugin_forward_async_result(&registry, &method, &args).await;
+            let _ = response_tx.send(result);
+        },
+    ));
 
     match response_rx.recv() {
         Ok(Ok(value)) => plugin_runtime::PluginResponse::ok(request_id, value),

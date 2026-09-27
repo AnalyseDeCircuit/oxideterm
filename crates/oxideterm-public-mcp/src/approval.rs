@@ -60,6 +60,8 @@ pub struct ApprovalProjection {
     pub status: ApprovalStatus,
     pub created_at_ms: u128,
     pub expires_at_ms: u128,
+    #[serde(skip_serializing)]
+    pub audit_operation_id: Option<String>,
     /// This material is available only to the local approval UI.
     #[serde(skip_serializing)]
     pub review: ApprovalReview,
@@ -68,6 +70,7 @@ pub struct ApprovalProjection {
 struct PendingApproval {
     projection: ApprovalProjection,
     call: Option<PublicToolCall>,
+    audit: Option<oxideterm_audit::AuditOperation>,
 }
 
 #[derive(Default)]
@@ -104,17 +107,22 @@ impl ApprovalStore {
         client_ref: ClientRef,
         call: PublicToolCall,
     ) -> Result<ApprovalProjection, ApprovalError> {
+        self.stage_with_context(
+            client_ref,
+            call,
+            oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+                .as_ref(),
+        )
+    }
+
+    pub fn stage_with_context(
+        &self,
+        client_ref: ClientRef,
+        call: PublicToolCall,
+        audit_context: Option<&oxideterm_audit::AuditContext>,
+    ) -> Result<ApprovalProjection, ApprovalError> {
         let created_at_ms = unix_time_ms();
-        let projection = ApprovalProjection {
-            approval_ref: ApprovalRef::new(),
-            client_ref: client_ref.clone(),
-            tool_name: call.tool_name().to_owned(),
-            target: call.target_summary(),
-            status: ApprovalStatus::Pending,
-            created_at_ms,
-            expires_at_ms: created_at_ms.saturating_add(APPROVAL_LIFETIME.as_millis()),
-            review: approval_review(&call),
-        };
         let mut entries = self.entries.lock();
         expire_entries(&mut entries);
         entries.retain(|_, entry| entry.call.is_some());
@@ -126,11 +134,40 @@ impl ApprovalStore {
         {
             return Err(ApprovalError::CapacityReached);
         }
+        let mut audit = audit_context.cloned().map(|mut context| {
+            context.source = oxideterm_audit::AuditSource::Mcp;
+            context.agent_id = Some(oxideterm_audit::redact(client_ref.as_str()));
+            context.operation(
+                oxideterm_audit::AuditCategory::Automation,
+                "mcp_call",
+                Some(call.tool_name()),
+            )
+        });
+        if let Some(audit) = audit.as_mut() {
+            audit.authorization(
+                oxideterm_audit::AuditAuthorization::Pending,
+                Some("mcp_app_approval"),
+            );
+        }
+        let projection = ApprovalProjection {
+            approval_ref: ApprovalRef::new(),
+            client_ref: client_ref.clone(),
+            tool_name: call.tool_name().to_owned(),
+            target: call.target_summary(),
+            status: ApprovalStatus::Pending,
+            created_at_ms,
+            expires_at_ms: created_at_ms.saturating_add(APPROVAL_LIFETIME.as_millis()),
+            audit_operation_id: audit
+                .as_ref()
+                .and_then(|operation| operation.id().map(str::to_owned)),
+            review: approval_review(&call),
+        };
         entries.insert(
             projection.approval_ref.clone(),
             PendingApproval {
                 projection: projection.clone(),
                 call: Some(call),
+                audit,
             },
         );
         Ok(projection)
@@ -170,9 +207,26 @@ impl ApprovalStore {
             ApprovalStatus::Pending => {}
         }
         entry.projection.status = status;
+        if let Some(audit) = entry.audit.as_mut() {
+            let decision = match status {
+                ApprovalStatus::Pending => oxideterm_audit::AuditAuthorization::Pending,
+                ApprovalStatus::Approved => oxideterm_audit::AuditAuthorization::Approved,
+                ApprovalStatus::Rejected => oxideterm_audit::AuditAuthorization::Denied,
+                ApprovalStatus::Expired => oxideterm_audit::AuditAuthorization::TimedOut,
+            };
+            audit.authorization(decision, Some("mcp_app_approval"));
+        }
         if matches!(status, ApprovalStatus::Rejected | ApprovalStatus::Expired) {
             // Dropping the frozen call also zeroizes command text owned by that call.
             entry.call.take();
+            if let Some(audit) = entry.audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Denied,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+            }
         }
         Ok(())
     }
@@ -189,6 +243,18 @@ impl ApprovalStore {
             {
                 entry.projection.status = ApprovalStatus::Rejected;
                 entry.call.take();
+                if let Some(mut audit) = entry.audit.take() {
+                    audit.authorization(
+                        oxideterm_audit::AuditAuthorization::Cancelled,
+                        Some("mcp_app_approval"),
+                    );
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Cancelled,
+                        oxideterm_audit::AuditEvidence::Lifecycle,
+                        None,
+                        None,
+                    );
+                }
                 revoked += 1;
             }
         }
@@ -212,6 +278,18 @@ impl ApprovalStore {
             {
                 entry.projection.status = ApprovalStatus::Rejected;
                 entry.call.take();
+                if let Some(mut audit) = entry.audit.take() {
+                    audit.authorization(
+                        oxideterm_audit::AuditAuthorization::Cancelled,
+                        Some("mcp_app_approval"),
+                    );
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Cancelled,
+                        oxideterm_audit::AuditEvidence::Lifecycle,
+                        None,
+                        None,
+                    );
+                }
                 revoked += 1;
             }
         }
@@ -223,6 +301,23 @@ impl ApprovalStore {
         client_ref: &ClientRef,
         approval_ref: &ApprovalRef,
     ) -> Result<PublicToolCall, ApprovalError> {
+        let (call, audit) = self.take_approved_with_audit(client_ref, approval_ref)?;
+        if let Some(audit) = audit {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Sent,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
+        }
+        Ok(call)
+    }
+
+    pub fn take_approved_with_audit(
+        &self,
+        client_ref: &ClientRef,
+        approval_ref: &ApprovalRef,
+    ) -> Result<(PublicToolCall, Option<oxideterm_audit::AuditOperation>), ApprovalError> {
         let mut entries = self.entries.lock();
         expire_entries(&mut entries);
         let entry = entries
@@ -235,7 +330,11 @@ impl ApprovalStore {
             ApprovalStatus::Pending => Err(ApprovalError::Pending),
             ApprovalStatus::Rejected => Err(ApprovalError::Rejected),
             ApprovalStatus::Expired => Err(ApprovalError::Expired),
-            ApprovalStatus::Approved => entry.call.take().ok_or(ApprovalError::Consumed),
+            ApprovalStatus::Approved => entry
+                .call
+                .take()
+                .map(|call| (call, entry.audit.take()))
+                .ok_or(ApprovalError::Consumed),
         }
     }
 }
@@ -272,6 +371,18 @@ fn expire_entries(entries: &mut HashMap<ApprovalRef, PendingApproval>) {
         {
             entry.projection.status = ApprovalStatus::Expired;
             entry.call.take();
+            if let Some(mut audit) = entry.audit.take() {
+                audit.authorization(
+                    oxideterm_audit::AuditAuthorization::TimedOut,
+                    Some("mcp_app_approval"),
+                );
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Denied,
+                    oxideterm_audit::AuditEvidence::Lifecycle,
+                    None,
+                    None,
+                );
+            }
         }
     }
 }
@@ -291,6 +402,120 @@ mod tests {
         NodeRef, QuickCommandRef,
         calls::{PreparedQuickCommandRunArgs, StartCommandArgs},
     };
+
+    struct AuditKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for AuditKeys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(Zeroizing::new(vec![7; 32]))
+        }
+
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn approval_records_are_client_scoped_and_rejection_cannot_dispatch() {
+        use oxideterm_audit::{
+            AuditAuthorization, AuditCategory, AuditContext, AuditPhase, AuditQuery, AuditService,
+            AuditSource,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&dir.path().join("audit.db"), &AuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let audit_service =
+            AuditService::with_key_provider(dir.path().join("audit.db"), AuditKeys).unwrap();
+        let context = AuditContext::new(audit_service.client(), AuditSource::Mcp);
+        let approvals = ApprovalStore::default();
+        let client_a = ClientRef::new();
+        let client_b = ClientRef::new();
+        let make_call = || {
+            PublicToolCall::StartCommand(StartCommandArgs {
+                node_ref: NodeRef::new(),
+                command: Zeroizing::new("printf private-command".into()),
+                working_directory: None,
+            })
+        };
+        let a = approvals
+            .stage_with_context(client_a.clone(), make_call(), Some(&context))
+            .unwrap();
+        let b = approvals
+            .stage_with_context(client_b.clone(), make_call(), Some(&context))
+            .unwrap();
+        assert_ne!(a.audit_operation_id, b.audit_operation_id);
+        approvals
+            .set_status(&a.approval_ref, ApprovalStatus::Rejected)
+            .unwrap();
+        approvals
+            .set_status(&b.approval_ref, ApprovalStatus::Approved)
+            .unwrap();
+        assert!(matches!(
+            approvals.take_approved(&client_a, &a.approval_ref),
+            Err(ApprovalError::Rejected)
+        ));
+        assert!(matches!(
+            approvals.take_approved(&client_a, &b.approval_ref),
+            Err(ApprovalError::WrongClient)
+        ));
+        let (approved, audit) = approvals
+            .take_approved_with_audit(&client_b, &b.approval_ref)
+            .unwrap();
+        assert!(matches!(approved, PublicToolCall::StartCommand(_)));
+        audit.unwrap().finish(
+            oxideterm_audit::AuditOutcome::Sent,
+            oxideterm_audit::AuditEvidence::Dispatch,
+            None,
+            None,
+        );
+        let page = audit_service
+            .client()
+            .query(AuditQuery {
+                category: Some(AuditCategory::Automation),
+                limit: 20,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let events = page
+            .records
+            .iter()
+            .map(|record| {
+                let op = record.details.operation.as_ref().unwrap();
+                (
+                    op.id.as_str(),
+                    op.agent_id.as_ref().map(|id| id.as_str()),
+                    op.phase.unwrap(),
+                    op.authorization,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(events.len(), 8);
+        let a_id = a.audit_operation_id.as_deref().unwrap();
+        let b_id = b.audit_operation_id.as_deref().unwrap();
+        assert!(events.contains(&(
+            a_id,
+            Some(client_a.as_str()),
+            AuditPhase::Authorization,
+            AuditAuthorization::Denied
+        )));
+        assert!(events.contains(&(
+            b_id,
+            Some(client_b.as_str()),
+            AuditPhase::Authorization,
+            AuditAuthorization::Approved
+        )));
+        assert!(
+            !serde_json::to_string(&page.records)
+                .unwrap()
+                .contains("private-command")
+        );
+    }
 
     #[test]
     fn approved_action_is_client_scoped_frozen_and_one_shot() {

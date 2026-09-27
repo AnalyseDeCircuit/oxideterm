@@ -25,6 +25,7 @@ pub fn native_plugin_scp_response(
     router: &NodeRouter,
     runtime: &Arc<tokio::runtime::Runtime>,
     transfer_manager: &Arc<SftpTransferManager>,
+    request_context: Option<&oxideterm_audit::AuditContext>,
 ) -> plugin_runtime::PluginResponse {
     let request_id = call.request_id.clone();
     if let Err(error) = native_plugin_scp_check_capability(&call.method, permissions) {
@@ -37,13 +38,25 @@ pub fn native_plugin_scp_response(
     let args = call.args;
     let router = router.clone();
     let manager = transfer_manager.clone();
+    let request_context = request_context.cloned();
+    let scoped_context = request_context.clone();
     let (response_tx, response_rx) = mpsc::channel();
 
     // The plugin bridge is synchronous, while SCP remains owned by the retained SSH runtime.
-    runtime.spawn(async move {
-        let result = native_plugin_scp_result(&router, &manager, &method, &args).await;
-        let _ = response_tx.send(result);
-    });
+    runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+        scoped_context,
+        async move {
+            let result = native_plugin_scp_result(
+                &router,
+                &manager,
+                &method,
+                &args,
+                request_context.as_ref(),
+            )
+            .await;
+            let _ = response_tx.send(result);
+        },
+    ));
 
     match response_rx.recv() {
         Ok(Ok(value)) => plugin_runtime::PluginResponse::ok(request_id, value),
@@ -89,6 +102,7 @@ async fn native_plugin_scp_result(
     manager: &Arc<SftpTransferManager>,
     method: &str,
     args: &Value,
+    request_context: Option<&oxideterm_audit::AuditContext>,
 ) -> Result<Value, String> {
     let node_id = scp_node_id_arg(args)?;
     let resolved = router
@@ -162,7 +176,13 @@ async fn native_plugin_scp_result(
         0,
     );
     snapshot.protocol = TransferProtocol::Scp;
-    manager.register_background_transfer(snapshot);
+    let transfer_audit = resolved.handle.audit_context().map(|runtime| {
+        let runtime = router
+            .audit_context(&node_id)
+            .map_or(runtime.clone(), |node| runtime.with_request(&node));
+        request_context.map_or(runtime.clone(), |request| runtime.with_request(request))
+    });
+    manager.register_background_transfer(snapshot, transfer_audit.as_ref());
     manager.mark_background_transfer_active(&transfer_id);
     let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<TransferProgress>(100);
     let progress_manager = manager.clone();

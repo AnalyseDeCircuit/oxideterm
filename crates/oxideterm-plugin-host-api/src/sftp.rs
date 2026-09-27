@@ -53,10 +53,14 @@ pub fn native_plugin_sftp_response(
     // NodeRouter async runtime. Spawn the real protocol operation on that
     // backend runtime and block only this plugin host-call worker until it
     // finishes, preserving Tauri's Promise-returning ctx.sftp shape.
-    runtime.spawn(async move {
-        let result = native_plugin_sftp_result(&router, &method, &args, transfer_manager).await;
-        let _ = response_tx.send(result);
-    });
+    let audit_context = oxideterm_audit::AuditContext::current_request();
+    runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+        audit_context,
+        async move {
+            let result = native_plugin_sftp_result(&router, &method, &args, transfer_manager).await;
+            let _ = response_tx.send(result);
+        },
+    ));
 
     match response_rx.recv() {
         Ok(Ok(value)) => plugin_runtime::PluginResponse::ok(request_id, value),

@@ -113,6 +113,7 @@ impl BackgroundTaskSpec {
 
 /// Represents one executor handoff. The argument copy is cleared after the call completes.
 pub struct BackgroundTaskExecution {
+    pub audit_context: Option<oxideterm_audit::AuditContext>,
     pub task_id: BackgroundTaskId,
     pub tool_name: String,
     pub arguments_json: Zeroizing<String>,

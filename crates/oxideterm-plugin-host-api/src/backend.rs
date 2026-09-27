@@ -109,6 +109,7 @@ pub fn native_plugin_supported_backend_commands() -> &'static [&'static str] {
 // api.invoke adapters are the narrow bridge from declared plugin commands to
 // native backend services; capability checks stay in the target namespace.
 pub struct NativePluginBackendAdapters<'a> {
+    pub audit_context: Option<&'a oxideterm_audit::AuditContext>,
     pub permissions: &'a plugin_runtime::PluginPermissionSet,
     pub sftp_router: &'a NodeRouter,
     pub sftp_runtime: &'a Arc<tokio::runtime::Runtime>,
@@ -244,6 +245,7 @@ fn native_plugin_backend_command_response(
             adapters.sftp_router,
             adapters.sftp_runtime,
             adapters.transfer_manager,
+            adapters.audit_context,
         ),
         NATIVE_PLUGIN_API_COMMAND_LIST_PORT_FORWARDS
         | NATIVE_PLUGIN_API_COMMAND_CREATE_PORT_FORWARD
@@ -377,10 +379,14 @@ fn native_plugin_http_request_response(
     // The plugin host-call worker is synchronous. Run the actual HTTP request
     // on the long-lived async runtime so timeouts and socket cleanup are owned
     // by the backend, matching Tauri's command boundary.
-    runtime.spawn(async move {
-        let result = native_plugin_http_request_result(&args).await;
-        let _ = response_tx.send(result);
-    });
+    let audit_context = oxideterm_audit::AuditContext::current_request();
+    runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+        audit_context,
+        async move {
+            let result = native_plugin_http_request_result(&args).await;
+            let _ = response_tx.send(result);
+        },
+    ));
 
     match response_rx.recv() {
         Ok(Ok(value)) => plugin_runtime::PluginResponse::ok(request_id, value),

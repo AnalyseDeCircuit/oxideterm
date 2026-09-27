@@ -12,6 +12,9 @@ use std::{
 
 use async_trait::async_trait;
 use chrono::Utc;
+use oxideterm_audit::{
+    AuditCategory, AuditContext, AuditEvidence, AuditOperation, AuditOutcome, AuditSource,
+};
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use tokio::{sync::Notify, task::AbortHandle};
@@ -36,6 +39,7 @@ pub trait BackgroundTaskExecutor: Send + Sync + 'static {
 }
 
 struct OwnedTask {
+    audit: Option<AuditContext>,
     snapshot: BackgroundTaskSnapshot,
     arguments_json: Zeroizing<String>,
     last_fingerprint: Option<String>,
@@ -81,6 +85,25 @@ impl BackgroundTaskRuntime {
     ) -> Result<BackgroundTaskId, BackgroundTaskValidationError> {
         validate_background_task_spec(&spec, self.limits)?;
         let task_id = BackgroundTaskId::new();
+        let mut context = AuditContext::current_request().or_else(AuditContext::current);
+        if let Some(context) = &mut context {
+            if context.source == AuditSource::Application {
+                context.source = AuditSource::User;
+            }
+        }
+        let audit = AuditOperation::in_context(
+            context.as_ref(),
+            AuditCategory::Automation,
+            "background_task_create",
+            Some(&format!(
+                "task={}; tool={}",
+                task_id.as_str(),
+                spec.tool_name
+            )),
+        );
+        if let Some(context) = &mut context {
+            context.parent_id = audit.id().map(str::to_owned);
+        }
         let now = Utc::now();
         let normalized_title = spec.normalized_title();
         let snapshot = BackgroundTaskSnapshot {
@@ -107,6 +130,7 @@ impl BackgroundTaskRuntime {
                 })
                 .count();
             if active_for_owner >= MAX_ACTIVE_TASKS_PER_OWNER {
+                audit.finish(AuditOutcome::Failed, AuditEvidence::Request, None, None);
                 return Err(BackgroundTaskValidationError::TooManyActiveTasks);
             }
             let removed_task = if tasks.len() >= MAX_RETAINED_TASKS {
@@ -114,8 +138,11 @@ impl BackgroundTaskRuntime {
                     .iter()
                     .filter(|(_, task)| is_terminal_state(task.snapshot.state))
                     .min_by_key(|(_, task)| task.snapshot.updated_at)
-                    .map(|(task_id, _)| task_id.clone())
-                    .ok_or(BackgroundTaskValidationError::TaskCapacityReached)?;
+                    .map(|(task_id, _)| task_id.clone());
+                let Some(oldest_terminal) = oldest_terminal else {
+                    audit.finish(AuditOutcome::Failed, AuditEvidence::Request, None, None);
+                    return Err(BackgroundTaskValidationError::TaskCapacityReached);
+                };
                 tasks.remove(&oldest_terminal);
                 Some(oldest_terminal)
             } else {
@@ -124,6 +151,7 @@ impl BackgroundTaskRuntime {
             tasks.insert(
                 task_id.clone(),
                 OwnedTask {
+                    audit: context,
                     snapshot: snapshot.clone(),
                     arguments_json: spec.arguments_json,
                     last_fingerprint: None,
@@ -138,6 +166,12 @@ impl BackgroundTaskRuntime {
         if let Some(removed_task) = removed_task {
             self.emit(BackgroundTaskEvent::Removed(removed_task));
         }
+        audit.finish(
+            AuditOutcome::Succeeded,
+            AuditEvidence::Lifecycle,
+            None,
+            None,
+        );
         self.emit(BackgroundTaskEvent::Changed(snapshot));
 
         let runtime = self.clone();
@@ -165,6 +199,26 @@ impl BackgroundTaskRuntime {
             ) {
                 return false;
             }
+            let mut context = task.audit.clone();
+            if let Some(context) = &mut context {
+                *context = context.for_request();
+                if AuditContext::current_request().is_none() {
+                    context.source = AuditSource::User;
+                    context.agent_id = None;
+                }
+            }
+            let audit = AuditOperation::in_context(
+                context.as_ref(),
+                AuditCategory::Automation,
+                "background_task_cancel",
+                Some(&format!("task={}", task_id.as_str())),
+            );
+            audit.finish(
+                AuditOutcome::CancelRequested,
+                AuditEvidence::Request,
+                None,
+                None,
+            );
             task.cancelled.store(true, Ordering::Release);
             task.cancellation.notify_waiters();
             task.snapshot.state = BackgroundTaskState::Cancelled;
@@ -200,7 +254,19 @@ impl BackgroundTaskRuntime {
     pub fn shutdown(&self) {
         let task_ids = self.inner.lock().keys().cloned().collect::<Vec<_>>();
         for task_id in task_ids {
-            let _ = self.cancel(&task_id);
+            let context = self
+                .inner
+                .lock()
+                .get(&task_id)
+                .and_then(|task| task.audit.clone())
+                .map(|mut context| {
+                    context.source = AuditSource::System;
+                    context.agent_id = None;
+                    context
+                });
+            AuditContext::with_sync_request(context.as_ref(), || {
+                let _ = self.cancel(&task_id);
+            });
         }
         for task in self.inner.lock().values_mut() {
             if let Some(abort_handle) = task.abort_handle.take() {
@@ -230,10 +296,43 @@ impl BackgroundTaskRuntime {
 
     async fn run_task(&self, task_id: BackgroundTaskId) {
         loop {
-            let Some(execution) = self.prepare_execution(&task_id) else {
+            let Some(mut execution) = self.prepare_execution(&task_id) else {
                 break;
             };
-            let result = self.executor.execute(execution).await;
+            let mut context = execution.audit_context.clone();
+            if let Some(context) = &mut context {
+                context.source = AuditSource::System;
+                context.agent_id = None;
+            }
+            let audit = AuditOperation::in_context(
+                context.as_ref(),
+                AuditCategory::Automation,
+                "background_task_run",
+                Some(&format!(
+                    "task={}; run={}; tool={}",
+                    execution.task_id.as_str(),
+                    execution.run_number,
+                    execution.tool_name
+                )),
+            );
+            if let Some(context) = &mut context {
+                context.parent_id = audit.id().map(str::to_owned);
+            }
+            execution.audit_context = context.clone();
+            // The executor may cross into UI delivery; it carries this run's
+            // context explicitly instead of retaining the caller's task-local scope.
+            let result =
+                AuditContext::scope_optional(context, self.executor.execute(execution)).await;
+            audit.finish(
+                if result.is_ok() {
+                    AuditOutcome::Succeeded
+                } else {
+                    AuditOutcome::Failed
+                },
+                AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             let decision = self.apply_execution_result(&task_id, result);
             match decision {
                 NextRun::Stop => break,
@@ -262,6 +361,7 @@ impl BackgroundTaskRuntime {
             task.snapshot.updated_at = Utc::now();
             (
                 BackgroundTaskExecution {
+                    audit_context: task.audit.clone(),
                     task_id: task_id.clone(),
                     tool_name: task.snapshot.tool_name.clone(),
                     arguments_json: Zeroizing::new(task.arguments_json.to_string()),
@@ -468,6 +568,139 @@ mod tests {
             arguments_json: Zeroizing::new("{}".to_string()),
             mode,
         }
+    }
+
+    #[tokio::test]
+    async fn recurring_runs_keep_creator_links_and_individual_results() {
+        use oxideterm_audit::{AuditKeyProvider, AuditPhase, AuditQuery, AuditService};
+        struct Keys;
+        impl AuditKeyProvider for Keys {
+            fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                Ok(Zeroizing::new(vec![31; 32]))
+            }
+            fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                self.load(id)
+            }
+        }
+        struct ObservingExecutor(Mutex<Vec<AuditContext>>);
+        #[async_trait]
+        impl BackgroundTaskExecutor for ObservingExecutor {
+            async fn execute(
+                &self,
+                execution: BackgroundTaskExecution,
+            ) -> Result<BackgroundTaskExecutionResult, String> {
+                let context = AuditContext::current_request().expect("run scope");
+                assert_eq!(
+                    execution.audit_context.as_ref().unwrap().parent_id,
+                    context.parent_id
+                );
+                let mut calls = self.0.lock();
+                calls.push(context);
+                if calls.len() == 1 {
+                    Err("private-executor-error".into())
+                } else {
+                    Ok(BackgroundTaskExecutionResult::sanitized(
+                        "done", "second", None,
+                    ))
+                }
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let mut context = AuditContext::new(service.client(), AuditSource::Ai);
+        let parent = context.operation(AuditCategory::Automation, "ai_tool_call", None);
+        context.parent_id = parent.id().map(str::to_owned);
+        let executor = Arc::new(ObservingExecutor(Mutex::new(Vec::new())));
+        let (runtime, mut events) =
+            BackgroundTaskRuntime::new(executor.clone(), tokio::runtime::Handle::current());
+        let mut task_spec = spec(BackgroundTaskMode::Interval {
+            interval_seconds: 5,
+            max_runs: 2,
+        });
+        task_spec.arguments_json =
+            Zeroizing::new(r#"{"credential":"private-task-argument"}"#.into());
+        let id = context
+            .scope(async { runtime.create(task_spec).unwrap() })
+            .await;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while runtime
+                .snapshot(&id)
+                .is_none_or(|task| task.state != BackgroundTaskState::Completed)
+            {
+                events.recv().await.expect("task state delivery");
+            }
+        })
+        .await
+        .expect("recurring task did not complete");
+        let page = service
+            .client()
+            .query(AuditQuery {
+                limit: 30,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let create = page
+            .records
+            .iter()
+            .filter_map(|record| record.details.operation.as_ref())
+            .find(|operation| {
+                operation.action == "background_task_create"
+                    && operation.phase == Some(AuditPhase::Result)
+            })
+            .unwrap();
+        assert_eq!(create.parent_id.as_deref(), parent.id());
+        assert_eq!(create.source, AuditSource::Ai);
+        assert_eq!(create.outcome, AuditOutcome::Succeeded);
+        let observations = executor.0.lock();
+        assert_eq!(observations.len(), 2);
+        for (index, expected) in [AuditOutcome::Failed, AuditOutcome::Succeeded]
+            .into_iter()
+            .enumerate()
+        {
+            let record = page
+                .records
+                .iter()
+                .find(|record| {
+                    record.details.operation.as_ref().is_some_and(|operation| {
+                        operation.action == "background_task_run"
+                            && operation.phase == Some(AuditPhase::Result)
+                    }) && record
+                        .details
+                        .detail
+                        .as_ref()
+                        .is_some_and(|detail| detail.contains(&format!("run={};", index + 1)))
+                })
+                .unwrap();
+            let run = record.details.operation.as_ref().unwrap();
+            assert_eq!(run.parent_id.as_deref(), Some(create.id.as_str()));
+            assert_eq!(run.source, AuditSource::System);
+            assert_eq!(run.outcome, expected);
+            assert_eq!(
+                observations[index].parent_id.as_deref(),
+                Some(run.id.as_str())
+            );
+        }
+        assert!(page.records.iter().all(|record| {
+            record.details.detail.as_ref().is_none_or(|detail| {
+                !detail.contains("private-task-argument")
+                    && !detail.contains("private-executor-error")
+            })
+        }));
+        parent.finish(
+            AuditOutcome::Succeeded,
+            AuditEvidence::Lifecycle,
+            None,
+            None,
+        );
     }
 
     #[tokio::test]

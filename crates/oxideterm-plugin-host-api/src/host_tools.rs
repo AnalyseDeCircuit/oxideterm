@@ -159,10 +159,14 @@ pub fn native_plugin_host_tools_response(
     let args = call.args;
     let router = router.clone();
     let (response_tx, response_rx) = mpsc::channel();
-    runtime.spawn(async move {
-        let result = native_plugin_host_tools_result(&router, &method, &args, extension).await;
-        let _ = response_tx.send(result);
-    });
+    let audit_context = oxideterm_audit::AuditContext::current_request();
+    runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+        audit_context,
+        async move {
+            let result = native_plugin_host_tools_result(&router, &method, &args, extension).await;
+            let _ = response_tx.send(result);
+        },
+    ));
 
     match response_rx.recv_timeout(HOST_TOOLS_RESPONSE_TIMEOUT) {
         Ok(Ok(value)) => plugin_runtime::PluginResponse::ok(request_id, value),

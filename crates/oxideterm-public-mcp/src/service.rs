@@ -424,6 +424,27 @@ impl PublicMcpService {
                 .iter()
                 .any(|group| !client.tool_groups.contains(group))
         {
+            if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+            {
+                context.source = oxideterm_audit::AuditSource::Mcp;
+                context.agent_id = Some(oxideterm_audit::redact(client.client_ref.as_str()));
+                let mut audit = context.operation(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "mcp_call",
+                    Some(call.tool_name()),
+                );
+                audit.authorization(
+                    oxideterm_audit::AuditAuthorization::Denied,
+                    Some("mcp_tool_group_disabled"),
+                );
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Denied,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+            }
             return tool_error(
                 "tool_group_disabled",
                 "This tool group is disabled for the client",
@@ -467,6 +488,7 @@ impl PublicMcpService {
             client.approval_mode,
             call,
             authorization,
+            None,
         )
         .await
     }
@@ -477,9 +499,45 @@ impl PublicMcpService {
         expected_approval_mode: ClientApprovalMode,
         call: PublicToolCall,
         authorization: AuditAuthorization,
+        parent_id: Option<String>,
     ) -> CallToolResult {
         let tool_name = call.tool_name().to_owned();
         let target = call.target_summary();
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current)
+            .map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::Mcp;
+                context.agent_id = Some(oxideterm_audit::redact(client_ref.as_str()));
+                context.parent_id = parent_id;
+                context
+            });
+        let mut audit = audit_context.as_ref().map(|context| {
+            context.operation(
+                oxideterm_audit::AuditCategory::Automation,
+                "mcp_call",
+                Some(&tool_name),
+            )
+        });
+        if let Some(audit) = audit.as_mut() {
+            let decision = match authorization {
+                AuditAuthorization::AppApproval | AuditAuthorization::Unattended => {
+                    oxideterm_audit::AuditAuthorization::Approved
+                }
+                AuditAuthorization::NotRequired => oxideterm_audit::AuditAuthorization::NotRequired,
+            };
+            let policy_ref = match authorization {
+                AuditAuthorization::AppApproval => Some("mcp_app_approval"),
+                AuditAuthorization::Unattended => Some("mcp_unattended"),
+                AuditAuthorization::NotRequired => None,
+            };
+            audit.authorization(decision, policy_ref);
+        }
+        let request_context = audit_context.map(|mut context| {
+            context.parent_id = audit
+                .as_ref()
+                .and_then(|operation| operation.id().map(str::to_owned));
+            context
+        });
         let response = self
             .state
             .broker
@@ -488,8 +546,35 @@ impl PublicMcpService {
                 expected_approval_mode,
                 client_ref.clone(),
                 call,
+                request_context,
             )
             .await;
+        if matches!(&response, Err(BrokerError::AuthorizationChanged)) {
+            if let Some(audit) = audit.as_mut() {
+                audit.authorization(
+                    oxideterm_audit::AuditAuthorization::Denied,
+                    Some("mcp_client_policy_changed"),
+                );
+            }
+        }
+        if let Some(audit) = audit {
+            let outcome = match &response {
+                Ok(envelope) => match &envelope.outcome {
+                    ToolOutcome::Completed => oxideterm_audit::AuditOutcome::Succeeded,
+                    ToolOutcome::Accepted => oxideterm_audit::AuditOutcome::Sent,
+                    ToolOutcome::Failed => oxideterm_audit::AuditOutcome::Failed,
+                },
+                Err(BrokerError::AuthorizationChanged) => oxideterm_audit::AuditOutcome::Denied,
+                Err(BrokerError::TimedOut) => oxideterm_audit::AuditOutcome::Unknown,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            };
+            audit.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        }
         match response {
             Ok(envelope) => {
                 self.state.audit.record_fields(
@@ -527,10 +612,10 @@ impl PublicMcpService {
             Ok(args) => args,
             Err(error) => return *error,
         };
-        let call = match self
+        let (call, approval_audit) = match self
             .state
             .approvals
-            .take_approved(&client.client_ref, &args.approval_ref)
+            .take_approved_with_audit(&client.client_ref, &args.approval_ref)
         {
             Ok(call) => call,
             Err(error) => return tool_error("approval_unavailable", error.to_string()),
@@ -541,9 +626,32 @@ impl PublicMcpService {
                 .iter()
                 .any(|group| !client.tool_groups.contains(group))
         {
+            if let Some(mut audit) = approval_audit {
+                audit.authorization(
+                    oxideterm_audit::AuditAuthorization::Denied,
+                    Some("mcp_group_revoked"),
+                );
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Denied,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+            }
             return tool_error(
                 "tool_group_disabled",
                 "The required tool group was disabled before commit",
+            );
+        }
+        let parent_id = approval_audit
+            .as_ref()
+            .and_then(|operation| operation.id().map(str::to_owned));
+        if let Some(audit) = approval_audit {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Sent,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
             );
         }
         self.execute_approved_call(
@@ -551,6 +659,7 @@ impl PublicMcpService {
             client.approval_mode,
             call,
             AuditAuthorization::AppApproval,
+            parent_id,
         )
         .await
     }
@@ -2736,6 +2845,117 @@ fn unauthorized_error() -> McpError {
 mod tests {
     use super::*;
     use crate::DomainMessage;
+
+    struct AuditKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for AuditKeys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![8; 32]))
+        }
+
+        fn create(
+            &self,
+            id: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_clients_keep_their_own_audit_context_through_domain_queue() {
+        let dir = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&dir.path().join("audit.db"), &AuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let audit_service = oxideterm_audit::AuditService::with_key_provider(
+            dir.path().join("audit.db"),
+            AuditKeys,
+        )
+        .unwrap();
+        let clients = Arc::new(ClientRegistry::default());
+        let client_a = clients
+            .register("a", ClientApprovalMode::Unattended, [ToolGroup::CloudSync])
+            .unwrap()
+            .projection;
+        let client_b = clients
+            .register("b", ClientApprovalMode::Unattended, [ToolGroup::CloudSync])
+            .unwrap()
+            .projection;
+        let (broker, mut receiver) = DomainBroker::channel(2);
+        let service = PublicMcpService::new(Arc::new(PublicMcpState {
+            clients,
+            approvals: Arc::default(),
+            audit: Arc::new(AuditStore::new(16)),
+            artifacts: Arc::default(),
+            broker,
+        }));
+        let context = oxideterm_audit::AuditContext::new(
+            audit_service.client(),
+            oxideterm_audit::AuditSource::Mcp,
+        );
+        let service_a = service.clone();
+        let service_b = service.clone();
+        let client_a_for_task = client_a.clone();
+        let client_b_for_task = client_b.clone();
+        let context_a = context.clone();
+        let first = tokio::spawn(async move {
+            context_a
+                .scope(async move {
+                    service_a
+                        .execute_call(
+                            &client_a_for_task,
+                            PublicToolCall::SyncStatus(SyncStatusArgs {}),
+                        )
+                        .await
+                })
+                .await
+        });
+        let second = tokio::spawn(async move {
+            context
+                .scope(async move {
+                    service_b
+                        .execute_call(
+                            &client_b_for_task,
+                            PublicToolCall::SyncStatus(SyncStatusArgs {}),
+                        )
+                        .await
+                })
+                .await
+        });
+        let mut seen = std::collections::HashMap::new();
+        for _ in 0..2 {
+            let Some(DomainMessage::Request(request)) = receiver.recv().await else {
+                panic!("domain request missing");
+            };
+            let audit = request.audit_context.as_ref().expect("MCP request context");
+            seen.insert(
+                request.client_ref.to_string(),
+                (
+                    audit.agent_id.as_ref().map(|id| id.to_string()),
+                    audit.parent_id.clone(),
+                ),
+            );
+            request.finish(ToolEnvelope::completed(json!({"ready": true})).unwrap());
+        }
+        first.await.unwrap();
+        second.await.unwrap();
+        for client in [&client_a, &client_b] {
+            let (agent, parent) = seen.get(&client.client_ref.to_string()).unwrap();
+            assert_eq!(agent.as_deref(), Some(client.client_ref.as_str()));
+            assert!(parent.as_deref().is_some_and(|id| !id.is_empty()));
+        }
+        assert_ne!(
+            seen[&client_a.client_ref.to_string()].1,
+            seen[&client_b.client_ref.to_string()].1
+        );
+    }
 
     #[test]
     fn public_tool_input_schemas_have_object_roots() {
