@@ -122,16 +122,42 @@ impl IdeFileSystem for LocalIdeFileSystem {
         location: &IdeLocation,
         encoding: Option<&str>,
     ) -> Result<IdeFileData, IdeFileError> {
-        let path = self.local_path(location)?;
-        use std::io::Read;
-        let file = fs::File::open(path).map_err(map_io_error)?;
-        let metadata = file.metadata().map_err(map_io_error)?;
-        check_size(metadata.len())?;
-        let mut bytes = Zeroizing::new(Vec::new());
-        file.take(MAX_EDITABLE_FILE_SIZE + 1)
-            .read_to_end(&mut bytes)
-            .map_err(map_io_error)?;
-        decode_file(&bytes, encoding, version_from_metadata(&metadata))
+        let audit_context = oxideterm_audit::AuditContext::current_request().map(|mut context| {
+            context.target = Some(oxideterm_audit::redact("local"));
+            context.protocol = Some("local".into());
+            context
+        });
+        let audit = oxideterm_audit::AuditOperation::in_context(
+            audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_open",
+            Some(&location.stable_key()),
+        );
+        let mut read_bytes = None;
+        let result = (|| {
+            let path = self.local_path(location)?;
+            use std::io::Read;
+            let file = fs::File::open(path).map_err(map_io_error)?;
+            let metadata = file.metadata().map_err(map_io_error)?;
+            check_size(metadata.len())?;
+            let mut bytes = Zeroizing::new(Vec::new());
+            file.take(MAX_EDITABLE_FILE_SIZE + 1)
+                .read_to_end(&mut bytes)
+                .map_err(map_io_error)?;
+            read_bytes = Some(bytes.len() as u64);
+            decode_file(&bytes, encoding, version_from_metadata(&metadata))
+        })();
+        audit.finish(
+            if result.is_ok() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            read_bytes,
+        );
+        result
     }
 
     fn stat(&self, location: &IdeLocation) -> Result<FileStat, IdeFileError> {
@@ -173,43 +199,81 @@ impl IdeFileSystem for LocalIdeFileSystem {
         expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
     ) -> Result<SavedFileVersion, IdeFileError> {
-        let bytes = encode_file(text, format)?;
-        let path = self.local_path(location)?;
-        if mode == WriteMode::CreateNew && path.exists() {
-            return Err(IdeFileError::new(
-                IdeFileErrorKind::Conflict,
-                "File already exists",
-            ));
-        }
-        if let Some(expected) = expected_version
-            && path.exists()
-        {
-            let current = version_from_metadata(&fs::metadata(path).map_err(map_io_error)?);
-            if local_versions_conflict(expected, &current) {
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current)
+            .map(|mut context| {
+                context.target = Some(oxideterm_audit::redact(&location.stable_key()));
+                context.protocol = Some("local".into());
+                context
+            });
+        let mut audit = oxideterm_audit::AuditOperation::in_context(
+            audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_save",
+            Some(&format!(
+                "mode={mode:?}; expected_version={}",
+                expected_version.is_some()
+            )),
+        );
+        let mut written_bytes = None;
+        let audit_result = (|| {
+            let bytes = encode_file(text, format)?;
+            let path = self.local_path(location)?;
+            if mode == WriteMode::CreateNew && path.exists() {
                 return Err(IdeFileError::new(
                     IdeFileErrorKind::Conflict,
-                    "File changed on disk",
+                    "File already exists",
                 ));
             }
-        }
-
-        match mode {
-            WriteMode::AtomicReplace => write_atomic(path, &bytes)?,
-            WriteMode::CreateNew => {
-                let mut file = fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(path)
-                    .map_err(map_io_error)?;
-                file.write_all(&bytes).map_err(map_io_error)?;
-                file.sync_all().map_err(map_io_error)?;
+            if let Some(expected) = expected_version
+                && path.exists()
+            {
+                let current = version_from_metadata(&fs::metadata(path).map_err(map_io_error)?);
+                if local_versions_conflict(expected, &current) {
+                    return Err(IdeFileError::new(
+                        IdeFileErrorKind::Conflict,
+                        "File changed on disk",
+                    ));
+                }
             }
-            WriteMode::CreateOrReplace => fs::write(path, &bytes).map_err(map_io_error)?,
-        }
 
-        Ok(version_from_metadata(
-            &fs::metadata(path).map_err(map_io_error)?,
-        ))
+            match mode {
+                WriteMode::AtomicReplace => write_atomic(path, &bytes)?,
+                WriteMode::CreateNew => {
+                    let mut file = fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(path)
+                        .map_err(map_io_error)?;
+                    file.write_all(&bytes).map_err(map_io_error)?;
+                    file.sync_all().map_err(map_io_error)?;
+                }
+                WriteMode::CreateOrReplace => fs::write(path, &bytes).map_err(map_io_error)?,
+            }
+
+            written_bytes = Some(bytes.len() as u64);
+            Ok(version_from_metadata(
+                &fs::metadata(path).map_err(map_io_error)?,
+            ))
+        })();
+        audit.summary(&format!(
+            "mode={mode:?}; expected_version={}; bytes={}",
+            expected_version.is_some(),
+            written_bytes.map_or_else(|| "unknown".to_owned(), |bytes| bytes.to_string())
+        ));
+        audit.finish(
+            if audit_result.is_ok() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else if written_bytes.is_some() {
+                oxideterm_audit::AuditOutcome::Partial
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            written_bytes,
+        );
+        audit_result
     }
 }
 
@@ -352,6 +416,97 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    struct TestKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for TestKeys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(Zeroizing::new(vec![13; 32]))
+        }
+
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn explicit_local_open_and_save_record_results_without_background_read() {
+        use oxideterm_audit::{
+            AuditCategory, AuditContext, AuditOutcome, AuditPhase, AuditQuery, AuditService,
+            AuditSource, AuditStore,
+        };
+
+        let root = temp_dir();
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("note.txt");
+        fs::write(&path, b"old").unwrap();
+        let location = IdeLocation::local(&path);
+        let provider = LocalIdeFileSystem::new();
+        let audit_path = root.join("audit.db");
+        oxideterm_audit::AuditStore::open(&audit_path, &TestKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = AuditService::with_key_provider(audit_path.clone(), TestKeys).unwrap();
+        let context = AuditContext::new(service.client(), AuditSource::User);
+
+        IdeFileSystem::read_file(&provider, &location, None).unwrap();
+        context
+            .scope(async {
+                let data = IdeFileSystem::read_file(&provider, &location, None).unwrap();
+                IdeFileSystem::write_file(
+                    &provider,
+                    &location,
+                    "new",
+                    &data.format,
+                    Some(&data.version),
+                    WriteMode::AtomicReplace,
+                )
+                .unwrap();
+            })
+            .await;
+        drop(service);
+
+        let records = AuditStore::open(&audit_path, &TestKeys)
+            .unwrap()
+            .query(&AuditQuery {
+                category: Some(AuditCategory::File),
+                limit: 12,
+                ..Default::default()
+            })
+            .unwrap()
+            .records;
+        let results = records
+            .iter()
+            .filter_map(|record| record.details.operation.as_ref())
+            .filter(|operation| operation.phase == Some(AuditPhase::Result))
+            .map(|operation| {
+                (
+                    operation.action.as_str(),
+                    operation.source,
+                    operation.outcome,
+                    operation.bytes,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(results.len(), 2);
+        assert!(results.contains(&(
+            "file_open",
+            AuditSource::User,
+            AuditOutcome::Succeeded,
+            Some(3)
+        )));
+        assert!(results.contains(&(
+            "file_save",
+            AuditSource::User,
+            AuditOutcome::Succeeded,
+            Some(3)
+        )));
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn saves_the_original_encoding_and_refuses_unrepresentable_edits() {

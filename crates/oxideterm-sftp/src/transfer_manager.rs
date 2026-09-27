@@ -278,6 +278,8 @@ pub struct SftpTransferManager {
     shutdown_state: AtomicU8,
     shutdown_notify: Arc<Notify>,
     background_transfers: RwLock<HashMap<String, BackgroundTransferSnapshot>>,
+    audit_transfers: RwLock<HashMap<String, AuditedTransfer>>,
+    previous_attempts: RwLock<HashMap<String, String>>,
     background_notify: Arc<Notify>,
     tar_capability_probes: RwLock<HashMap<String, Arc<OnceCell<TarCapabilities>>>>,
     scp_capability_probes: RwLock<HashMap<String, Arc<OnceCell<ScpCapabilities>>>>,
@@ -288,6 +290,60 @@ struct RegisteredTransferControl {
     control: Arc<SftpTransferControl>,
     owner_count: usize,
     node_id: Option<String>,
+}
+
+struct AuditedTransfer {
+    operation: oxideterm_audit::AuditOperation,
+    context: oxideterm_audit::AuditContext,
+    attempt_id: String,
+    retry_of: Option<String>,
+    stream_bytes: Option<u64>,
+}
+
+fn transfer_audit_detail(
+    snapshot: &BackgroundTransferSnapshot,
+    attempt_id: &str,
+    retry_of: Option<&str>,
+    stream_bytes: Option<u64>,
+) -> String {
+    let per_file = if snapshot.strategy == TransferStrategy::DirectoryTar {
+        "unavailable:archive_stream"
+    } else if snapshot.protocol == TransferProtocol::Scp
+        && snapshot.kind == BackgroundTransferKind::Directory
+    {
+        "unavailable:batch_only"
+    } else {
+        "available"
+    };
+    let count_basis = if snapshot.protocol == TransferProtocol::Scp
+        && snapshot.kind == BackgroundTransferKind::Directory
+    {
+        "entries_including_directories"
+    } else if snapshot.kind == BackgroundTransferKind::Directory {
+        "regular_files"
+    } else {
+        "single_file"
+    };
+    format!(
+        "attempt={attempt_id}; retry_of={}; direction={:?}; kind={:?}; local={}; remote={}; protocol={:?}; strategy={:?}; per_file={per_file}; count_basis={count_basis}; completed_items={}; stream_bytes={}",
+        retry_of.unwrap_or("none"),
+        snapshot.direction,
+        snapshot.kind,
+        snapshot.local_path,
+        snapshot.remote_path,
+        snapshot.protocol,
+        snapshot.strategy,
+        snapshot
+            .item_count
+            .map_or_else(|| "unknown".to_owned(), |count| count.to_string()),
+        stream_bytes.map_or_else(|| "unknown".to_owned(), |count| count.to_string()),
+    )
+}
+
+impl std::fmt::Debug for AuditedTransfer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("AuditedTransfer { .. }")
+    }
 }
 
 impl SftpTransferManager {
@@ -303,6 +359,8 @@ impl SftpTransferManager {
             shutdown_state: AtomicU8::new(TRANSFER_MANAGER_RUNNING),
             shutdown_notify: Arc::new(Notify::new()),
             background_transfers: RwLock::new(HashMap::new()),
+            audit_transfers: RwLock::new(HashMap::new()),
+            previous_attempts: RwLock::new(HashMap::new()),
             background_notify: Arc::new(Notify::new()),
             tar_capability_probes: RwLock::new(HashMap::new()),
             scp_capability_probes: RwLock::new(HashMap::new()),
@@ -386,13 +444,17 @@ impl SftpTransferManager {
 
     fn cleanup_background_transfers(&self) {
         let now = now_ms();
-        self.background_transfers.write().retain(|_, snapshot| {
+        let mut transfers = self.background_transfers.write();
+        transfers.retain(|_, snapshot| {
             !snapshot.state.is_finished()
                 || snapshot
                     .end_time
                     .map(|end| now.saturating_sub(end) <= FINISHED_BACKGROUND_TRANSFER_RETENTION_MS)
                     .unwrap_or(true)
         });
+        self.previous_attempts
+            .write()
+            .retain(|id, _| transfers.contains_key(id));
     }
 
     pub fn apply_settings(&self, settings: SftpTransferRuntimeSettings) {
@@ -532,11 +594,44 @@ impl SftpTransferManager {
         transfer_ids
     }
 
-    pub fn register_background_transfer(&self, mut snapshot: BackgroundTransferSnapshot) {
+    /// The producer supplies the context of the connection that will execute this attempt.
+    pub fn register_background_transfer(
+        &self,
+        mut snapshot: BackgroundTransferSnapshot,
+        context: Option<&oxideterm_audit::AuditContext>,
+    ) {
         self.cleanup_background_transfers();
+        if let Some(context) = context {
+            let context = context.for_request();
+            let attempt_id = uuid::Uuid::new_v4().to_string();
+            let retry_of = self.previous_attempts.read().get(&snapshot.id).cloned();
+            let operation = context.operation(
+                oxideterm_audit::AuditCategory::File,
+                "file_transfer",
+                Some(&transfer_audit_detail(
+                    &snapshot,
+                    &attempt_id,
+                    retry_of.as_deref(),
+                    None,
+                )),
+            );
+            let mut child_context = context;
+            child_context.parent_id = operation.id().map(str::to_owned);
+            self.audit_transfers.write().insert(
+                snapshot.id.clone(),
+                AuditedTransfer {
+                    operation,
+                    context: child_context,
+                    attempt_id,
+                    retry_of,
+                    stream_bytes: None,
+                },
+            );
+        }
         // Match Tauri: callers may seed a speculative state, but registration
         // always exposes a queued background transfer until the task starts.
-        if self.shutdown_state.load(Ordering::Acquire) == TRANSFER_MANAGER_RUNNING {
+        let accepted = self.shutdown_state.load(Ordering::Acquire) == TRANSFER_MANAGER_RUNNING;
+        if accepted {
             snapshot.state = BackgroundTransferState::Pending;
         } else {
             // Late delivery after session release is terminal, never resumable.
@@ -544,10 +639,19 @@ impl SftpTransferManager {
             snapshot.backend_speed = Some(0);
             snapshot.end_time = Some(now_ms());
         }
+        let transfer_id = snapshot.id.clone();
         self.background_transfers
             .write()
-            .insert(snapshot.id.clone(), snapshot);
+            .insert(transfer_id.clone(), snapshot);
         self.background_notify.notify_waiters();
+        if !accepted {
+            let _ = self.finish_background_transfer(
+                &transfer_id,
+                BackgroundTransferState::Cancelled,
+                None,
+                None,
+            );
+        }
     }
 
     pub fn update_background_transfer_strategy(
@@ -558,6 +662,13 @@ impl SftpTransferManager {
         if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id) {
             snapshot.strategy = strategy;
             self.background_notify.notify_waiters();
+        }
+    }
+
+    /// Records bytes from a completed archive stream, separate from file payload progress.
+    pub fn record_background_transfer_stream_bytes(&self, transfer_id: &str, stream_bytes: u64) {
+        if let Some(transfer) = self.audit_transfers.write().get_mut(transfer_id) {
+            transfer.stream_bytes = Some(stream_bytes);
         }
     }
 
@@ -610,11 +721,39 @@ impl SftpTransferManager {
         snapshot.error = if shutdown_cancelled { None } else { error };
         snapshot.item_count = item_count;
         snapshot.end_time = Some(now_ms());
-        if snapshot.state == BackgroundTransferState::Completed && snapshot.size > 0 {
-            snapshot.transferred = snapshot.size;
-        }
         let snapshot = snapshot.clone();
         drop(transfers);
+        if let Some(mut audited) = self.audit_transfers.write().remove(transfer_id) {
+            use oxideterm_audit::{AuditEvidence, AuditOutcome};
+            audited.operation.summary(&transfer_audit_detail(
+                &snapshot,
+                &audited.attempt_id,
+                audited.retry_of.as_deref(),
+                audited.stream_bytes,
+            ));
+            let outcome = match snapshot.state {
+                BackgroundTransferState::Completed => AuditOutcome::Succeeded,
+                BackgroundTransferState::Cancelled => AuditOutcome::Cancelled,
+                BackgroundTransferState::Error
+                    if snapshot.error.is_some() && snapshot.transferred > 0 =>
+                {
+                    AuditOutcome::Partial
+                }
+                BackgroundTransferState::Error if snapshot.error.is_some() => AuditOutcome::Failed,
+                _ => AuditOutcome::Unknown,
+            };
+            if let Some(id) = audited.operation.id() {
+                self.previous_attempts
+                    .write()
+                    .insert(transfer_id.to_owned(), id.to_owned());
+            }
+            audited.operation.finish(
+                outcome,
+                AuditEvidence::Protocol,
+                None,
+                Some(snapshot.transferred),
+            );
+        }
         self.background_notify.notify_waiters();
         Some(snapshot)
     }
@@ -622,6 +761,16 @@ impl SftpTransferManager {
     pub fn get_background_transfer(&self, transfer_id: &str) -> Option<BackgroundTransferSnapshot> {
         self.cleanup_background_transfers();
         self.background_transfers.read().get(transfer_id).cloned()
+    }
+
+    pub fn audit_context_for_transfer(
+        &self,
+        transfer_id: &str,
+    ) -> Option<oxideterm_audit::AuditContext> {
+        self.audit_transfers
+            .read()
+            .get(transfer_id)
+            .map(|transfer| transfer.context.clone())
     }
 
     pub fn list_background_transfers(
@@ -656,6 +805,11 @@ impl SftpTransferManager {
 
     pub fn cancel(&self, transfer_id: &str) -> bool {
         if let Some(control) = self.get_control(transfer_id) {
+            self.audit_control_request(
+                transfer_id,
+                "file_transfer_cancel",
+                oxideterm_audit::AuditOutcome::CancelRequested,
+            );
             control.cancel();
             true
         } else {
@@ -665,6 +819,11 @@ impl SftpTransferManager {
 
     pub fn pause(&self, transfer_id: &str) -> bool {
         if let Some(control) = self.get_control(transfer_id) {
+            self.audit_control_request(
+                transfer_id,
+                "file_transfer_pause",
+                oxideterm_audit::AuditOutcome::Sent,
+            );
             control.pause();
             if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
                 && !snapshot.state.is_finished()
@@ -681,6 +840,11 @@ impl SftpTransferManager {
 
     pub fn resume(&self, transfer_id: &str) -> bool {
         if let Some(control) = self.get_control(transfer_id) {
+            self.audit_control_request(
+                transfer_id,
+                "file_transfer_resume",
+                oxideterm_audit::AuditOutcome::Sent,
+            );
             control.resume();
             if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
                 && snapshot.state == BackgroundTransferState::Paused
@@ -691,6 +855,24 @@ impl SftpTransferManager {
             true
         } else {
             false
+        }
+    }
+
+    fn audit_control_request(
+        &self,
+        transfer_id: &str,
+        action: &str,
+        outcome: oxideterm_audit::AuditOutcome,
+    ) {
+        let context = self
+            .audit_transfers
+            .read()
+            .get(transfer_id)
+            .map(|transfer| transfer.context.clone());
+        if let Some(context) = context {
+            context
+                .operation(oxideterm_audit::AuditCategory::File, action, None)
+                .finish(outcome, oxideterm_audit::AuditEvidence::Request, None, None);
         }
     }
 
@@ -861,6 +1043,24 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    struct TestKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for TestKeys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![7; 32]))
+        }
+
+        fn create(
+            &self,
+            id: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
     #[tokio::test]
     async fn nested_registration_preserves_queued_cancellation() {
         let manager = SftpTransferManager::new();
@@ -1004,7 +1204,7 @@ mod tests {
     async fn interrupted_transfer_exits_without_deleting_resume_progress() {
         let manager = SftpTransferManager::new();
         manager.register("tx-1");
-        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
         manager.mark_background_transfer_active("tx-1");
 
         assert!(manager.interrupt("tx-1", "Connection lost"));
@@ -1027,7 +1227,7 @@ mod tests {
     fn pause_and_resume_update_background_snapshot_state() {
         let manager = SftpTransferManager::new();
         manager.register("tx-1");
-        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
         manager.mark_background_transfer_active("tx-1");
 
         assert!(manager.pause("tx-1"));
@@ -1040,11 +1240,141 @@ mod tests {
         assert_eq!(resumed.state, BackgroundTransferState::Pending);
     }
 
+    #[test]
+    fn completion_keeps_observed_bytes_when_estimate_is_larger() {
+        let manager = SftpTransferManager::new();
+        let mut snapshot = make_background_snapshot("tx-estimate", "node-a");
+        snapshot.size = 4096;
+        manager.register_background_transfer(snapshot, None);
+        manager.update_background_transfer_progress("tx-estimate", 3072, 4096, 0);
+
+        let finished = manager
+            .finish_background_transfer(
+                "tx-estimate",
+                BackgroundTransferState::Completed,
+                None,
+                Some(1),
+            )
+            .unwrap();
+        assert_eq!(finished.transferred, 3072);
+        assert_eq!(finished.item_count, Some(1));
+    }
+
+    #[test]
+    fn transfer_control_and_retry_keep_attempt_history() {
+        use oxideterm_audit::{
+            AuditCategory, AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource,
+            AuditStore,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("audit.db");
+        oxideterm_audit::AuditStore::open(&path, &TestKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = AuditService::with_key_provider(path.clone(), TestKeys).unwrap();
+        let mut context = AuditContext::new(service.client(), AuditSource::User);
+        context.session_id = Some("logical-session".into());
+        context.connection_id = Some(zeroize::Zeroizing::new("connection-one".into()));
+        let manager = SftpTransferManager::new();
+        manager.register_for_node("tx-1", "node-a");
+        let mut snapshot = make_background_snapshot("tx-1", "node-a");
+        snapshot.kind = BackgroundTransferKind::Directory;
+        manager.register_background_transfer(snapshot, Some(&context));
+        manager.update_background_transfer_strategy("tx-1", TransferStrategy::DirectoryTar);
+        manager.record_background_transfer_stream_bytes("tx-1", 9);
+        assert!(manager.pause("tx-1"));
+        assert!(manager.resume("tx-1"));
+        assert!(manager.cancel("tx-1"));
+        manager.update_background_transfer_progress("tx-1", 12, 20, 0);
+        manager.finish_background_transfer(
+            "tx-1",
+            BackgroundTransferState::Completed,
+            None,
+            Some(1),
+        );
+        manager.unregister("tx-1");
+        manager.register_for_node("tx-1", "node-a");
+        let mut retry = make_background_snapshot("tx-1", "node-a");
+        retry.kind = BackgroundTransferKind::Directory;
+        manager.register_background_transfer(retry, Some(&context));
+        manager.finish_background_transfer(
+            "tx-1",
+            BackgroundTransferState::Error,
+            Some("protocol error".into()),
+            None,
+        );
+        drop(manager);
+        drop(service);
+
+        let store = AuditStore::open(&path, &TestKeys).unwrap();
+        let records = store
+            .query(&AuditQuery {
+                category: Some(AuditCategory::File),
+                limit: 32,
+                ..Default::default()
+            })
+            .unwrap()
+            .records;
+        let operations = records
+            .iter()
+            .filter_map(|record| record.details.operation.as_ref())
+            .collect::<Vec<_>>();
+        let first = operations
+            .iter()
+            .find(|operation| {
+                operation.action == "file_transfer" && operation.outcome == AuditOutcome::Succeeded
+            })
+            .unwrap();
+        let second = operations
+            .iter()
+            .find(|operation| {
+                operation.action == "file_transfer" && operation.outcome == AuditOutcome::Failed
+            })
+            .unwrap();
+        assert_eq!(first.session_id.as_deref(), Some("logical-session"));
+        assert_eq!(first.bytes, Some(12));
+        assert!(records.iter().any(|record| {
+            record
+                .details
+                .detail
+                .as_deref()
+                .is_some_and(|detail| detail.contains(&format!("retry_of={}", first.id)))
+        }));
+        assert!(records.iter().any(|record| {
+            record
+                .details
+                .operation
+                .as_ref()
+                .is_some_and(|operation| operation.id == first.id)
+                && record.details.detail.as_deref().is_some_and(|detail| {
+                    detail.contains("stream_bytes=9")
+                        && detail.contains("per_file=unavailable:archive_stream")
+                })
+        }));
+        for action in [
+            "file_transfer_pause",
+            "file_transfer_resume",
+            "file_transfer_cancel",
+        ] {
+            let operation = operations
+                .iter()
+                .find(|operation| operation.action == action)
+                .unwrap();
+            assert_eq!(operation.parent_id.as_deref(), Some(first.id.as_str()));
+        }
+        assert_ne!(first.id, second.id);
+    }
+
     #[tokio::test]
     async fn session_shutdown_cancels_once_and_terminalizes_background_progress() {
         let manager = Arc::new(SftpTransferManager::new());
         let control = manager.register_for_node("tx-1", "node-a");
-        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"));
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
         manager.mark_background_transfer_active("tx-1");
 
         let unregistering_manager = manager.clone();
@@ -1089,7 +1419,7 @@ mod tests {
         assert!(snapshot.end_time.is_some());
 
         let late_control = manager.register("tx-late");
-        manager.register_background_transfer(make_background_snapshot("tx-late", "node-a"));
+        manager.register_background_transfer(make_background_snapshot("tx-late", "node-a"), None);
         assert!(late_control.is_cancelled());
         assert_eq!(
             manager

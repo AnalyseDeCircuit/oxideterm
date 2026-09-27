@@ -25,31 +25,46 @@ impl FtpSession {
         limit: usize,
         cancel: &CancellationToken,
     ) -> Result<Vec<u8>> {
-        validate_path(path)?;
-        self.operate(cancel, None, |mut stream| async move {
-            let mut reader = tokio::time::timeout(COMMAND_TIMEOUT, stream.retr_as_stream(path))
-                .await
-                .map_err(|_| Error::Timeout)??;
-            let mut result = Zeroizing::new(Vec::new());
-            let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES.min(limit.saturating_add(1))]);
-            loop {
-                let count = tokio::time::timeout(IDLE_TIMEOUT, reader.read(&mut buffer))
+        let audit = self.audit_operation("file_preview", path);
+        let result = async {
+            validate_path(path)?;
+            self.operate(cancel, None, |mut stream| async move {
+                let mut reader = tokio::time::timeout(COMMAND_TIMEOUT, stream.retr_as_stream(path))
                     .await
                     .map_err(|_| Error::Timeout)??;
-                if count == 0 {
-                    break;
+                let mut result = Zeroizing::new(Vec::new());
+                let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES.min(limit.saturating_add(1))]);
+                loop {
+                    let count = tokio::time::timeout(IDLE_TIMEOUT, reader.read(&mut buffer))
+                        .await
+                        .map_err(|_| Error::Timeout)??;
+                    if count == 0 {
+                        break;
+                    }
+                    if count > limit.saturating_sub(result.len()) {
+                        return Err(Error::TooLarge);
+                    }
+                    result.extend_from_slice(&buffer[..count]);
                 }
-                if count > limit.saturating_sub(result.len()) {
-                    return Err(Error::TooLarge);
-                }
-                result.extend_from_slice(&buffer[..count]);
-            }
-            tokio::time::timeout(COMMAND_TIMEOUT, reader.finish())
-                .await
-                .map_err(|_| Error::Timeout)??;
-            Ok((stream, std::mem::take(&mut *result)))
-        })
-        .await
+                tokio::time::timeout(COMMAND_TIMEOUT, reader.finish())
+                    .await
+                    .map_err(|_| Error::Timeout)??;
+                Ok((stream, std::mem::take(&mut *result)))
+            })
+            .await
+        }
+        .await;
+        if matches!(&result, Err(Error::Cancelled)) {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        } else {
+            audit.result(&result);
+        }
+        result
     }
 
     pub async fn write(
@@ -58,32 +73,47 @@ impl FtpSession {
         content: &[u8],
         cancel: &CancellationToken,
     ) -> Result<()> {
-        validate_path(path)?;
-        let temporary = remote_temporary_path(path);
-        self.pending_upload = Some(temporary.clone());
-        let result = self
-            .operate(cancel, None, |mut stream| async move {
-                let mut writer =
-                    tokio::time::timeout(COMMAND_TIMEOUT, stream.put_with_stream(&temporary))
+        let audit = self.audit_operation("file_save", path);
+        let result = async {
+            validate_path(path)?;
+            let temporary = remote_temporary_path(path);
+            self.pending_upload = Some(temporary.clone());
+            let result = self
+                .operate(cancel, None, |mut stream| async move {
+                    let mut writer =
+                        tokio::time::timeout(COMMAND_TIMEOUT, stream.put_with_stream(&temporary))
+                            .await
+                            .map_err(|_| Error::Timeout)??;
+                    for chunk in content.chunks(CHUNK_BYTES) {
+                        tokio::time::timeout(IDLE_TIMEOUT, writer.write_all(chunk))
+                            .await
+                            .map_err(|_| Error::Timeout)??;
+                    }
+                    tokio::time::timeout(COMMAND_TIMEOUT, writer.finish())
                         .await
                         .map_err(|_| Error::Timeout)??;
-                for chunk in content.chunks(CHUNK_BYTES) {
-                    tokio::time::timeout(IDLE_TIMEOUT, writer.write_all(chunk))
+                    // Never delete the previous destination to work around a failed rename.
+                    tokio::time::timeout(COMMAND_TIMEOUT, stream.rename(temporary.as_str(), path))
                         .await
                         .map_err(|_| Error::Timeout)??;
-                }
-                tokio::time::timeout(COMMAND_TIMEOUT, writer.finish())
-                    .await
-                    .map_err(|_| Error::Timeout)??;
-                // Never delete the previous destination to work around a failed rename.
-                tokio::time::timeout(COMMAND_TIMEOUT, stream.rename(temporary.as_str(), path))
-                    .await
-                    .map_err(|_| Error::Timeout)??;
-                Ok((stream, ()))
-            })
-            .await;
-        if result.is_ok() {
-            self.pending_upload = None;
+                    Ok((stream, ()))
+                })
+                .await;
+            if result.is_ok() {
+                self.pending_upload = None;
+            }
+            result
+        }
+        .await;
+        if matches!(&result, Err(Error::Cancelled)) {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        } else {
+            audit.result(&result);
         }
         result
     }
@@ -95,49 +125,70 @@ impl FtpSession {
         cancel: &CancellationToken,
         progress: impl Fn(TransferProgress) -> Fut,
     ) -> Result<u64> {
-        validate_path(remote)?;
-        let mut file = tokio::fs::File::open(local).await?;
-        let total = file.metadata().await?.len();
-        let temporary = remote_temporary_path(remote);
-        self.pending_upload = Some(temporary.clone());
-        let result = self
-            .operate(cancel, None, |mut stream| async move {
-                let mut writer =
-                    tokio::time::timeout(COMMAND_TIMEOUT, stream.put_with_stream(&temporary))
-                        .await
-                        .map_err(|_| Error::Timeout)??;
-                let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES]);
-                let mut completed = 0;
-                loop {
-                    let count = file.read(&mut buffer).await?;
-                    if count == 0 {
-                        break;
+        let audit = oxideterm_audit::AuditOperation::in_context(
+            self.audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_transfer",
+            Some(&format!("upload: {} → {remote}", local.display())),
+        );
+        let transferred = std::sync::atomic::AtomicU64::new(0);
+        let result = async {
+            validate_path(remote)?;
+            let mut file = tokio::fs::File::open(local).await?;
+            let total = file.metadata().await?.len();
+            let temporary = remote_temporary_path(remote);
+            self.pending_upload = Some(temporary.clone());
+            let transferred_bytes = &transferred;
+            let result = self
+                .operate(cancel, None, |mut stream| async move {
+                    let mut writer =
+                        tokio::time::timeout(COMMAND_TIMEOUT, stream.put_with_stream(&temporary))
+                            .await
+                            .map_err(|_| Error::Timeout)??;
+                    let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES]);
+                    let mut completed = 0;
+                    loop {
+                        let count = file.read(&mut buffer).await?;
+                        if count == 0 {
+                            break;
+                        }
+                        tokio::time::timeout(IDLE_TIMEOUT, writer.write_all(&buffer[..count]))
+                            .await
+                            .map_err(|_| Error::Timeout)??;
+                        completed += count as u64;
+                        transferred_bytes.store(completed, std::sync::atomic::Ordering::Relaxed);
+                        progress(TransferProgress {
+                            completed,
+                            total: Some(total),
+                        })
+                        .await?;
                     }
-                    tokio::time::timeout(IDLE_TIMEOUT, writer.write_all(&buffer[..count]))
+                    tokio::time::timeout(COMMAND_TIMEOUT, writer.finish())
                         .await
                         .map_err(|_| Error::Timeout)??;
-                    completed += count as u64;
-                    progress(TransferProgress {
-                        completed,
-                        total: Some(total),
-                    })
-                    .await?;
-                }
-                tokio::time::timeout(COMMAND_TIMEOUT, writer.finish())
+                    if completed != total {
+                        return Err(Error::Protocol);
+                    }
+                    tokio::time::timeout(
+                        COMMAND_TIMEOUT,
+                        stream.rename(temporary.as_str(), remote),
+                    )
                     .await
                     .map_err(|_| Error::Timeout)??;
-                if completed != total {
-                    return Err(Error::Protocol);
-                }
-                tokio::time::timeout(COMMAND_TIMEOUT, stream.rename(temporary.as_str(), remote))
-                    .await
-                    .map_err(|_| Error::Timeout)??;
-                Ok((stream, completed))
-            })
-            .await;
-        if result.is_ok() {
-            self.pending_upload = None;
+                    Ok((stream, completed))
+                })
+                .await;
+            if result.is_ok() {
+                self.pending_upload = None;
+            }
+            result
         }
+        .await;
+        finish_file_transfer_audit(
+            audit,
+            &result,
+            transferred.load(std::sync::atomic::Ordering::Relaxed),
+        );
         result
     }
 
@@ -149,69 +200,87 @@ impl FtpSession {
         cancel: &CancellationToken,
         progress: impl Fn(TransferProgress) -> Fut,
     ) -> Result<u64> {
-        validate_path(remote)?;
-        let parent = local.parent().ok_or(Error::InvalidInput)?;
-        let parent = parent.to_owned();
-        let (file, temporary) = tokio::task::spawn_blocking(move || {
-            tempfile::Builder::new()
-                .prefix(".oxideterm-")
-                .suffix(".part")
-                .tempfile_in(parent)
-                .map(|file| file.into_parts())
-        })
-        .await
-        .map_err(|_| Error::Protocol)??;
-        let mut file = tokio::fs::File::from_std(file);
-        let outcome = self
-            .operate(cancel, None, |mut stream| async move {
-                let total = match tokio::time::timeout(COMMAND_TIMEOUT, stream.size(remote))
-                    .await
-                    .map_err(|_| Error::Timeout)?
-                {
-                    Ok(size) => Some(size as u64),
-                    Err(suppaftp::FtpError::UnexpectedResponse(_)) => None,
-                    Err(error) => return Err(error.into()),
-                };
-                let mut reader =
-                    tokio::time::timeout(COMMAND_TIMEOUT, stream.retr_as_stream(remote))
-                        .await
-                        .map_err(|_| Error::Timeout)??;
-                let mut completed = 0;
-                let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES]);
-                loop {
-                    let count = tokio::time::timeout(IDLE_TIMEOUT, reader.read(&mut buffer))
-                        .await
-                        .map_err(|_| Error::Timeout)??;
-                    if count == 0 {
-                        break;
-                    }
-                    file.write_all(&buffer[..count]).await?;
-                    completed += count as u64;
-                    progress(TransferProgress { completed, total }).await?;
-                }
-                tokio::time::timeout(COMMAND_TIMEOUT, reader.finish())
-                    .await
-                    .map_err(|_| Error::Timeout)??;
-                if total.is_some_and(|size| size != completed) {
-                    return Err(Error::Protocol);
-                }
-                file.sync_all().await?;
-                Ok((stream, completed))
+        let audit = oxideterm_audit::AuditOperation::in_context(
+            self.audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_transfer",
+            Some(&format!("download: {remote} → {}", local.display())),
+        );
+        let transferred = std::sync::atomic::AtomicU64::new(0);
+        let result = async {
+            validate_path(remote)?;
+            let parent = local.parent().ok_or(Error::InvalidInput)?;
+            let parent = parent.to_owned();
+            let (file, temporary) = tokio::task::spawn_blocking(move || {
+                tempfile::Builder::new()
+                    .prefix(".oxideterm-")
+                    .suffix(".part")
+                    .tempfile_in(parent)
+                    .map(|file| file.into_parts())
             })
-            .await;
-        let completed = outcome?;
-        let destination = local.to_owned();
-        tokio::task::spawn_blocking(move || {
-            // The TempPath guard also removes partial data when the caller drops its future.
-            if replace {
-                oxideterm_atomic_file::durable_replace(&temporary, &destination)
-            } else {
-                std::fs::hard_link(&temporary, &destination)
-            }
-        })
-        .await
-        .map_err(|_| Error::Protocol)??;
-        Ok(completed)
+            .await
+            .map_err(|_| Error::Protocol)??;
+            let mut file = tokio::fs::File::from_std(file);
+            let transferred_bytes = &transferred;
+            let outcome = self
+                .operate(cancel, None, |mut stream| async move {
+                    let total = match tokio::time::timeout(COMMAND_TIMEOUT, stream.size(remote))
+                        .await
+                        .map_err(|_| Error::Timeout)?
+                    {
+                        Ok(size) => Some(size as u64),
+                        Err(suppaftp::FtpError::UnexpectedResponse(_)) => None,
+                        Err(error) => return Err(error.into()),
+                    };
+                    let mut reader =
+                        tokio::time::timeout(COMMAND_TIMEOUT, stream.retr_as_stream(remote))
+                            .await
+                            .map_err(|_| Error::Timeout)??;
+                    let mut completed = 0;
+                    let mut buffer = Zeroizing::new(vec![0; CHUNK_BYTES]);
+                    loop {
+                        let count = tokio::time::timeout(IDLE_TIMEOUT, reader.read(&mut buffer))
+                            .await
+                            .map_err(|_| Error::Timeout)??;
+                        if count == 0 {
+                            break;
+                        }
+                        file.write_all(&buffer[..count]).await?;
+                        completed += count as u64;
+                        transferred_bytes.store(completed, std::sync::atomic::Ordering::Relaxed);
+                        progress(TransferProgress { completed, total }).await?;
+                    }
+                    tokio::time::timeout(COMMAND_TIMEOUT, reader.finish())
+                        .await
+                        .map_err(|_| Error::Timeout)??;
+                    if total.is_some_and(|size| size != completed) {
+                        return Err(Error::Protocol);
+                    }
+                    file.sync_all().await?;
+                    Ok((stream, completed))
+                })
+                .await;
+            let completed = outcome?;
+            let destination = local.to_owned();
+            tokio::task::spawn_blocking(move || {
+                // The TempPath guard also removes partial data when the caller drops its future.
+                if replace {
+                    oxideterm_atomic_file::durable_replace(&temporary, &destination)
+                } else {
+                    std::fs::hard_link(&temporary, &destination)
+                }
+            })
+            .await
+            .map_err(|_| Error::Protocol)??;
+            Ok(completed)
+        }
+        .await;
+        finish_file_transfer_audit(
+            audit,
+            &result,
+            transferred.load(std::sync::atomic::Ordering::Relaxed),
+        );
+        result
     }
 
     pub async fn upload_directory<Fut: Future<Output = Result<()>>>(
@@ -309,6 +378,25 @@ impl FtpSession {
         }
         Ok(completed)
     }
+}
+
+fn finish_file_transfer_audit(
+    audit: oxideterm_audit::AuditOperation,
+    result: &Result<u64>,
+    transferred: u64,
+) {
+    let outcome = match result {
+        Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+        Err(Error::Cancelled) => oxideterm_audit::AuditOutcome::Cancelled,
+        Err(_) if transferred > 0 => oxideterm_audit::AuditOutcome::Partial,
+        Err(_) => oxideterm_audit::AuditOutcome::Failed,
+    };
+    audit.finish(
+        outcome,
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        Some(transferred),
+    );
 }
 
 fn remote_temporary_path(path: &str) -> String {

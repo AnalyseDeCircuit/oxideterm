@@ -196,6 +196,16 @@ impl NodeAgentIdeFileSystem {
         path: impl Into<String>,
     ) -> Result<IdeProjectInfo, IdeFileError> {
         let node_id = node_id.into();
+        let path = path.into();
+        let context = oxideterm_audit::AuditContext::current_request()
+            .and_then(|_| self.router.audit_context(&NodeId::new(node_id.clone())));
+        let audit = oxideterm_audit::AuditOperation::in_context(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "project_open",
+            Some(&path),
+        );
+        let result = async {
         self.ensure_ide_session_for_node(&NodeId::new(node_id.clone()))
             .await?;
         if self.mode == NodeAgentMode::Enabled {
@@ -204,6 +214,9 @@ impl NodeAgentIdeFileSystem {
             self.set_status_for_node(&NodeId::new(node_id.clone()), None, AgentStatus::SftpFallback);
         }
         self.sftp.open_project(node_id, path).await
+        }.await;
+        audit.result(&result);
+        result
     }
 
     pub async fn check_file(
@@ -506,6 +519,15 @@ impl NodeAgentIdeFileSystem {
         query: IdeSearchQuery,
     ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
         let node_id = NodeId::new(node_id.into());
+        let context = oxideterm_audit::AuditContext::current_request()
+            .and_then(|_| self.router.audit_context(&node_id));
+        let mut audit = oxideterm_audit::AuditOperation::in_context(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_search",
+            Some(&format!("root={}; max_results={}", query.root_path, query.max_results)),
+        );
+        let result = async {
         self.ensure_ide_session_for_node(&node_id).await?;
         if let Some(session) = self.agent_session(&node_id).await {
             match session
@@ -537,6 +559,12 @@ impl NodeAgentIdeFileSystem {
 
         self.grep_project_via_exec(&node_id, &query)
             .await
+        }.await;
+        if let Ok(matches) = &result {
+            audit.summary(&format!("root={}; matches={}", query.root_path, matches.len()));
+        }
+        audit.result(&result);
+        result
     }
 
     async fn grep_project_via_exec(
@@ -1066,6 +1094,15 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     ) -> IdeFsFuture<'a, IdeFileData> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+            let context = oxideterm_audit::AuditContext::current_request()
+                .and_then(|_| self.router.audit_context(&node_id));
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::File,
+                "file_open",
+                Some(&path),
+            );
+            let result = async {
             self.ensure_ide_session_for_node(&node_id).await?;
             if let Some(session) = self.agent_session(&node_id).await {
                 match session.read_file_bytes(&path).await {
@@ -1080,6 +1117,14 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                 }
             }
             self.sftp.read_file(location, encoding).await
+            }.await;
+            audit.finish(
+                if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                result.as_ref().ok().and_then(|file: &IdeFileData| file.version.size_bytes),
+            );
+            result
         })
     }
 
@@ -1117,6 +1162,15 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     fn list_dir<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, Vec<FileTreeEntry>> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+            let context = oxideterm_audit::AuditContext::current_request()
+                .and_then(|_| self.router.audit_context(&node_id));
+            let mut audit = oxideterm_audit::AuditOperation::in_context(
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::File,
+                "file_browse",
+                Some(&path),
+            );
+            let result = async {
             self.ensure_ide_session_for_node(&node_id).await?;
             if let Some(session) = self.agent_session(&node_id).await {
                 match session.list_dir(&path).await {
@@ -1136,6 +1190,12 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                 }
             }
             self.sftp.list_dir(location).await
+            }.await;
+            if let Ok(entries) = &result {
+                audit.summary(&format!("path={path}; entries={}", entries.len()));
+            }
+            audit.result(&result);
+            result
         })
     }
 
@@ -1149,6 +1209,18 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     ) -> IdeFsFuture<'a, SavedFileVersion> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+            let context = self.router.audit_context(&node_id);
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::File,
+                "file_save",
+                Some(&format!("path={path}; mode={mode:?}; expected_version={}", expected_version.is_some())),
+            );
+            let child_context = context.map(|mut context| {
+                context.parent_id = audit.id().map(str::to_owned);
+                context
+            });
+            let task = async {
             self.ensure_ide_session_for_node(&node_id).await?;
             if mode == WriteMode::CreateNew {
                 return self
@@ -1182,6 +1254,19 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             self.sftp
                 .write_file(location, text, format, expected_version, mode)
                 .await
+            };
+            let result = if let Some(context) = child_context {
+                context.scope(task).await
+            } else {
+                task.await
+            };
+            audit.finish(
+                if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                result.as_ref().ok().and_then(|version| version.size_bytes),
+            );
+            result
         })
     }
 }

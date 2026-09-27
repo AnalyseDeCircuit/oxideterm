@@ -9,7 +9,8 @@ mod paths;
 mod preview;
 
 pub use archive::{
-    can_extract_archive, compress_local_files, extract_local_archive, list_local_archive_contents,
+    ArchiveEntryOutcome, can_extract_archive, compress_local_files, extract_local_archive,
+    list_local_archive_contents,
 };
 pub use bookmarks::{
     BOOKMARKS_FILENAME, bookmark_name_for_path, default_file_manager_bookmarks_path,

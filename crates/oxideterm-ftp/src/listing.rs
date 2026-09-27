@@ -43,30 +43,47 @@ impl FtpSession {
         path: &str,
         cancel: &CancellationToken,
     ) -> Result<u64> {
-        validate_path(path)?;
-        let Some(entry) = self.stat(path, cancel).await? else {
-            return Err(Error::Server(550));
-        };
-        let mut pending = vec![(path.to_owned(), entry.kind, false)];
+        let mut audit = self.audit_operation("file_delete_recursive", path);
         let mut removed = 0;
-        while let Some((path, kind, visited)) = pending.pop() {
-            if kind == EntryKind::Directory && !visited {
-                let children = self.list(&path, cancel).await?;
-                pending.push((path.clone(), kind, true));
-                for child in children {
-                    pending.push((
-                        format!("{}/{}", path.trim_end_matches('/'), child.name),
-                        child.kind,
-                        false,
-                    ));
+        let result = async {
+            validate_path(path)?;
+            let Some(entry) = self.stat(path, cancel).await? else {
+                return Err(Error::Server(550));
+            };
+            let mut pending = vec![(path.to_owned(), entry.kind, false)];
+            while let Some((path, kind, visited)) = pending.pop() {
+                if kind == EntryKind::Directory && !visited {
+                    let children = self.list(&path, cancel).await?;
+                    pending.push((path.clone(), kind, true));
+                    for child in children {
+                        pending.push((
+                            format!("{}/{}", path.trim_end_matches('/'), child.name),
+                            child.kind,
+                            false,
+                        ));
+                    }
+                } else {
+                    self.delete(&path, kind == EntryKind::Directory, cancel)
+                        .await?;
+                    removed += 1;
                 }
-            } else {
-                self.delete(&path, kind == EntryKind::Directory, cancel)
-                    .await?;
-                removed += 1;
             }
+            Ok(removed)
         }
-        Ok(removed)
+        .await;
+        audit.summary(&format!("path={path}; removed={removed}"));
+        audit.finish(
+            match &result {
+                Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(Error::Cancelled) => oxideterm_audit::AuditOutcome::Cancelled,
+                Err(_) if removed > 0 => oxideterm_audit::AuditOutcome::Partial,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub async fn list(&mut self, path: &str, cancel: &CancellationToken) -> Result<Vec<Entry>> {

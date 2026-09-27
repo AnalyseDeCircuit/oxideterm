@@ -134,7 +134,7 @@ impl IdeSurface {
         let Some(root_path) = self.root_path.clone() else {
             return;
         };
-        self.load_directory(IdeLocation::remote(node_id, root_path), cx);
+        self.load_directory(IdeLocation::remote(node_id, root_path), None, cx);
     }
 
     /// Opens a remote file through the surface's existing NodeRouter-backed project.
@@ -142,7 +142,7 @@ impl IdeSurface {
         let Some(node_id) = self.node_id.clone() else {
             return false;
         };
-        self.open_remote_file(IdeLocation::remote(node_id, path), cx);
+        self.open_remote_file(IdeLocation::remote(node_id, path), Some(oxideterm_audit::AuditSource::Plugin), cx);
         true
     }
 
@@ -169,7 +169,7 @@ impl IdeSurface {
         let Some(tab_id) = self.workspace.active_tab() else {
             return false;
         };
-        self.save_tab(tab_id, cx);
+        self.save_tab_with_source(tab_id, oxideterm_audit::AuditSource::Plugin, cx);
         true
     }
 
@@ -297,14 +297,14 @@ impl IdeSurface {
         }
         for path in pending_restore_files {
             if let Some(node_id) = node_id.clone() {
-                self.open_remote_file(IdeLocation::remote(node_id, path), cx);
+                self.open_remote_file(IdeLocation::remote(node_id, path), None, cx);
             }
         }
         self.finish_pending_reconnect_file_restore_if_needed(cx);
         cx.notify();
     }
 
-    fn load_directory(&mut self, directory: IdeLocation, cx: &mut Context<Self>) {
+    fn load_directory(&mut self, directory: IdeLocation, source: Option<oxideterm_audit::AuditSource>, cx: &mut Context<Self>) {
         if !self.ensure_remote_actions_ready(cx) {
             return;
         }
@@ -316,14 +316,26 @@ impl IdeSurface {
         let fs = self.fs.clone();
         let generation = self.generation;
         let backend_runtime = self.backend_runtime.clone();
+        let audit_request = source.and_then(|source| {
+            oxideterm_audit::AuditContext::current_request().or_else(|| {
+                oxideterm_audit::AuditContext::current().map(|mut context| {
+                    context.source = source;
+                    context
+                })
+            })
+        });
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
             let directory_for_task = directory.clone();
             let result = await_ide_backend(backend_runtime.spawn(async move {
-                fs.list_dir(&directory_for_task)
-                    .await
-                    .map(sort_tree_entries)
+                let task = fs.list_dir(&directory_for_task);
+                let result = if let Some(context) = audit_request {
+                    context.scope(task).await
+                } else {
+                    task.await
+                };
+                result.map(sort_tree_entries)
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -376,7 +388,7 @@ impl IdeSurface {
         {
             return;
         }
-        self.load_directory(IdeLocation::remote(node_id, path), cx);
+        self.load_directory(IdeLocation::remote(node_id, path), None, cx);
     }
 
     fn start_agent_watch_if_ready(&mut self, cx: &mut Context<Self>) {
@@ -637,12 +649,26 @@ impl IdeSurface {
         let generation = self.search.generation;
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
+        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::User;
+                context
+            })
+        });
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn({
                 let search_query = search_query.clone();
-                async move { fs.search_project(node_id, search_query).await.map(group_search_matches) }
+                async move {
+                    let task = fs.search_project(node_id, search_query);
+                    let result = if let Some(context) = audit_request {
+                        context.scope(task).await
+                    } else {
+                        task.await
+                    };
+                    result.map(group_search_matches)
+                }
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -934,7 +960,7 @@ impl IdeSurface {
         let path = resolve_search_match_path(&root_path, &hit.path);
         self.pending_search_queries
             .insert(path.clone(), self.search.query.clone());
-        self.open_remote_file(IdeLocation::remote(node_id, path), cx);
+        self.open_remote_file(IdeLocation::remote(node_id, path), Some(oxideterm_audit::AuditSource::User), cx);
     }
 
     fn go_to_symbol_definition(&mut self, word: String, cx: &mut Context<Self>) {
@@ -1004,7 +1030,7 @@ impl IdeSurface {
                 column: definition.column,
             },
         );
-        self.open_remote_file(IdeLocation::remote(node_id, definition.path), cx);
+        self.open_remote_file(IdeLocation::remote(node_id, definition.path), Some(oxideterm_audit::AuditSource::User), cx);
     }
 
     fn apply_pending_search_query_for_location(
@@ -1072,16 +1098,16 @@ impl IdeSurface {
                     let _ = self.workspace.set_tree_expanded(&entry.location, false);
                     cx.notify();
                 } else {
-                    self.load_directory(entry.location, cx);
+                    self.load_directory(entry.location, Some(oxideterm_audit::AuditSource::User), cx);
                 }
             }
             FileKind::File | FileKind::Symlink | FileKind::Other => {
-                self.open_remote_file(entry.location, cx);
+                self.open_remote_file(entry.location, Some(oxideterm_audit::AuditSource::User), cx);
             }
         }
     }
 
-    fn open_remote_file(&mut self, location: IdeLocation, cx: &mut Context<Self>) {
+    fn open_remote_file(&mut self, location: IdeLocation, source: Option<oxideterm_audit::AuditSource>, cx: &mut Context<Self>) {
         if !self.ensure_remote_actions_ready(cx) {
             return;
         }
@@ -1121,6 +1147,14 @@ impl IdeSurface {
         let fs = self.fs.clone();
         let generation = self.generation;
         let backend_runtime = self.backend_runtime.clone();
+        let audit_request = source.and_then(|source| {
+            oxideterm_audit::AuditContext::current_request().or_else(|| {
+                oxideterm_audit::AuditContext::current().map(|mut context| {
+                    context.source = source;
+                    context
+                })
+            })
+        });
         cx.notify();
 
         let encoding = remote_path(&location)
@@ -1129,7 +1163,14 @@ impl IdeSurface {
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn({
                 let location = location.clone();
-                async move { open_text_file(fs, location, encoding).await }
+                async move {
+                    let task = open_text_file(fs, location, encoding);
+                    if let Some(context) = audit_request {
+                        context.scope(task).await
+                    } else {
+                        task.await
+                    }
+                }
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -1293,7 +1334,7 @@ impl IdeSurface {
             && self.is_tab_dirty(previous_tab_id, cx)
             && !self.saving_tabs.contains(&previous_tab_id)
         {
-            self.save_tab(previous_tab_id, cx);
+            self.save_tab_with_source(previous_tab_id, oxideterm_audit::AuditSource::System, cx);
         }
         let _ = self.workspace.set_active_tab(tab_id);
         cx.notify();
@@ -1464,11 +1505,13 @@ impl IdeSurface {
                         this.clear_search_cache();
                         this.load_directory(
                             IdeLocation::remote(source_node_id.clone(), target_dir),
+                            None,
                             cx,
                         );
                         if source_parent != parent_remote_path(&target_path) {
                             this.load_directory(
                                 IdeLocation::remote(source_node_id, source_parent),
+                                None,
                                 cx,
                             );
                         }
@@ -1625,9 +1668,9 @@ impl IdeSurface {
                         }
                         this.clear_search_cache();
                         this.tree_name_input = None;
-                        this.load_directory(IdeLocation::remote(node_id.clone(), parent_path), cx);
+                        this.load_directory(IdeLocation::remote(node_id.clone(), parent_path), None, cx);
                         if input.kind == TreeNameInputKind::NewFile {
-                            this.open_remote_file(IdeLocation::remote(node_id, new_path), cx);
+                            this.open_remote_file(IdeLocation::remote(node_id, new_path), None, cx);
                         }
                         this.start_agent_watch_if_ready(cx);
                     }
@@ -1817,7 +1860,7 @@ impl IdeSurface {
                         this.clear_search_cache();
                         this.delete_confirm = None;
                         if let Some(node_id) = this.node_id.clone() {
-                            this.load_directory(IdeLocation::remote(node_id, parent_path), cx);
+                            this.load_directory(IdeLocation::remote(node_id, parent_path), None, cx);
                         }
                         if root_path.as_deref() == this.root_path.as_deref() {
                             this.start_agent_watch_if_ready(cx);
@@ -1921,16 +1964,20 @@ impl IdeSurface {
     }
 
     fn save_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+        self.save_tab_with_source(tab_id, oxideterm_audit::AuditSource::User, cx);
+    }
+
+    fn save_tab_with_source(&mut self, tab_id: EditorTabId, source: oxideterm_audit::AuditSource, cx: &mut Context<Self>) {
         self.sync_editor_to_workspace(tab_id, cx);
-        self.save_tab_current(tab_id, cx);
+        self.save_tab_current(tab_id, source, cx);
     }
 
     fn save_tab_with_text(&mut self, tab_id: EditorTabId, text: Arc<str>, cx: &mut Context<Self>) {
         let _ = self.workspace.replace_buffer_text(tab_id, text);
-        self.save_tab_current(tab_id, cx);
+        self.save_tab_current(tab_id, oxideterm_audit::AuditSource::User, cx);
     }
 
-    fn save_tab_current(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+    fn save_tab_current(&mut self, tab_id: EditorTabId, source: oxideterm_audit::AuditSource, cx: &mut Context<Self>) {
         let close_request = self.save_after_close.take();
         if !self.ensure_remote_actions_ready(cx) {
             return;
@@ -1960,6 +2007,12 @@ impl IdeSurface {
         let saved_text = buffer.text.clone();
         let saved_revision = buffer.revision;
         let saved_format = buffer.format.clone();
+        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = source;
+                context
+            })
+        });
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -1970,6 +2023,7 @@ impl IdeSurface {
             };
             let result = backend_runtime
                 .spawn(async move {
+                    let task = async {
                     match fs
                         .write_file(
                             &buffer.location,
@@ -1990,6 +2044,12 @@ impl IdeSurface {
                             Err((error, remote_version))
                         }
                         Err(error) => Err((error, None)),
+                    }
+                    };
+                    if let Some(context) = audit_request {
+                        context.scope(task).await
+                    } else {
+                        task.await
                     }
                 })
                 .await
@@ -2087,6 +2147,14 @@ impl IdeSurface {
     }
 
     fn clear_conflict(&mut self, cx: &mut Context<Self>) {
+        if let Some(conflict) = &self.conflict_state
+            && let Some(buffer) = self.workspace.buffer(conflict.tab_id)
+            && let Some(mut context) = oxideterm_audit::AuditContext::current()
+        {
+            context.source = oxideterm_audit::AuditSource::User;
+            context.operation(oxideterm_audit::AuditCategory::File, "file_conflict_cancel", Some(&buffer.location.stable_key()))
+                .finish(oxideterm_audit::AuditOutcome::Cancelled, oxideterm_audit::AuditEvidence::Request, None, None);
+        }
         self.conflict_state = None;
         cx.notify();
     }
@@ -2128,6 +2196,17 @@ impl IdeSurface {
         let saved_text = buffer.text.clone();
         let saved_revision = buffer.revision;
         let saved_format = buffer.format.clone();
+        let audit_context = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::User;
+                context
+            })
+        });
+        let audit = oxideterm_audit::AuditOperation::in_context(audit_context.as_ref(), oxideterm_audit::AuditCategory::File, "file_conflict_overwrite", Some(&buffer.location.stable_key()));
+        let child_context = audit_context.map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
@@ -2137,8 +2216,19 @@ impl IdeSurface {
                 WriteMode::CreateOrReplace
             };
             let result = await_ide_backend(backend_runtime.spawn(async move {
-                force_write_conflict(&fs, &buffer.location, &buffer.text, &buffer.format, mode)
-                    .await
+                let task = force_write_conflict(&fs, &buffer.location, &buffer.text, &buffer.format, mode);
+                let result = if let Some(context) = child_context {
+                    context.scope(task).await
+                } else {
+                    task.await
+                };
+                audit.finish(
+                    if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed },
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    result.as_ref().ok().and_then(|version| version.size_bytes),
+                );
+                result
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -2229,12 +2319,34 @@ impl IdeSurface {
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
         let conflict_location = buffer.location.clone();
+        let audit_context = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::User;
+                context
+            })
+        });
+        let audit = oxideterm_audit::AuditOperation::in_context(audit_context.as_ref(), oxideterm_audit::AuditCategory::File, "file_conflict_reload", Some(&buffer.location.stable_key()));
+        let child_context = audit_context.map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn(async move {
-                fs.read_file(&buffer.location, Some(&buffer.format.encoding))
-                    .await
+                let task = fs.read_file(&buffer.location, Some(&buffer.format.encoding));
+                let result = if let Some(context) = child_context {
+                    context.scope(task).await
+                } else {
+                    task.await
+                };
+                audit.finish(
+                    if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed },
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    result.as_ref().ok().and_then(|file| file.version.size_bytes),
+                );
+                result
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {

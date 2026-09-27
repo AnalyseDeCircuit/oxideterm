@@ -53,6 +53,9 @@ const SFTP_SINGLE_FILE_MAX_INFLIGHT_BYTES: usize = 16 * 1024 * 1024;
 const SFTP_PROGRESS_PERSIST_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 pub trait SftpChannelOpener: Clone + Send + Sync + 'static {
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        None
+    }
     fn open_sftp_channel(
         &self,
     ) -> impl Future<Output = Result<russh::Channel<russh::client::Msg>, SftpError>> + Send;
@@ -67,6 +70,7 @@ pub struct WriteContentResult {
 }
 
 pub struct SftpSession {
+    audit: Option<oxideterm_audit::AuditContext>,
     sftp: Arc<RusshSftpSession>,
     channel_factory: SftpChannelFactory,
     _connection_owner: Option<Arc<dyn Send + Sync>>,

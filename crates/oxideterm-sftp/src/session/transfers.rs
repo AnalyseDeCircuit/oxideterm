@@ -82,6 +82,26 @@ async fn open_local_download_file(
     }
 }
 
+fn finish_sftp_file_transfer_audit(
+    audit: oxideterm_audit::AuditOperation,
+    result: &Result<u64, SftpError>,
+) {
+    let outcome = match result {
+        Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+        Err(SftpError::TransferCancelled) => oxideterm_audit::AuditOutcome::Cancelled,
+        Err(SftpError::TransferShutdown | SftpError::TransferInterrupted(_)) => {
+            oxideterm_audit::AuditOutcome::Interrupted
+        }
+        Err(_) => oxideterm_audit::AuditOutcome::Failed,
+    };
+    audit.finish(
+        outcome,
+        oxideterm_audit::AuditEvidence::Protocol,
+        None,
+        result.as_ref().ok().copied(),
+    );
+}
+
 impl SftpSession {
     pub async fn download_file(
         &self,
@@ -91,6 +111,8 @@ impl SftpSession {
         progress_tx: Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
+        let audit = self.audit_operation("file_transfer", &format!("download: {remote_path} → {local_path}"));
+        let result = async {
         let _control = transfer_manager
             .as_ref()
             .map(|manager| manager.register(transfer_id));
@@ -109,6 +131,9 @@ impl SftpSession {
         )
         .await?;
         Ok(remote_info.size)
+        }.await;
+        finish_sftp_file_transfer_audit(audit, &result);
+        result
     }
 
     pub async fn upload_file(
@@ -119,6 +144,8 @@ impl SftpSession {
         progress_tx: Option<tokio::sync::mpsc::Sender<TransferProgress>>,
         transfer_manager: Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
+        let audit = self.audit_operation("file_transfer", &format!("upload: {local_path} → {remote_path}"));
+        let result = async {
         let _control = transfer_manager
             .as_ref()
             .map(|manager| manager.register(transfer_id));
@@ -139,6 +166,9 @@ impl SftpSession {
         )
         .await?;
         Ok(metadata.len())
+        }.await;
+        finish_sftp_file_transfer_audit(audit, &result);
+        result
     }
 
     pub async fn download_with_resume(
@@ -151,6 +181,8 @@ impl SftpSession {
         transfer_manager: Option<Arc<SftpTransferManager>>,
         transfer_id: Option<String>,
     ) -> Result<u64, SftpError> {
+        let audit = self.audit_operation("file_transfer", &format!("download: {remote_path} → {local_path}"));
+        let result = async {
         let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let _control = transfer_manager
             .as_ref()
@@ -244,6 +276,9 @@ impl SftpSession {
                 Err(error)
             }
         }
+        }.await;
+        finish_sftp_file_transfer_audit(audit, &result);
+        result
     }
 
     pub async fn upload_with_resume(
@@ -255,6 +290,8 @@ impl SftpSession {
         transfer_manager: Option<Arc<SftpTransferManager>>,
         transfer_id: Option<String>,
     ) -> Result<u64, SftpError> {
+        let audit = self.audit_operation("file_transfer", &format!("upload: {local_path} → {remote_path}"));
+        let result = async {
         let transfer_id = transfer_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let _control = transfer_manager
             .as_ref()
@@ -361,6 +398,9 @@ impl SftpSession {
                 Err(error)
             }
         }
+        }.await;
+        finish_sftp_file_transfer_audit(audit, &result);
+        result
     }
 
     pub async fn download_dir(
@@ -711,6 +751,9 @@ impl SftpSession {
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
         let bulk_lane = Arc::new(tokio::sync::Semaphore::new(plan.bulk_lane_workers));
+        let audit_context = transfer_manager.as_ref()
+            .and_then(|manager| manager.audit_context_for_transfer(transfer_id))
+            .or_else(|| self.audit.clone());
         stream::unfold(job_rx, |mut receiver| async move {
             receiver.recv().await.map(|job| (job, receiver))
         })
@@ -719,7 +762,14 @@ impl SftpSession {
                 let pool = pool.clone();
                 let bulk_lane = bulk_lane.clone();
                 let rate_limiter = rate_limiter.clone();
+                let audit_context = audit_context.clone();
                 async move {
+                    let audit = oxideterm_audit::AuditOperation::in_context(
+                        audit_context.as_ref(),
+                        oxideterm_audit::AuditCategory::File,
+                        "file_transfer",
+                        Some(&format!("download: {} → {}", job.remote_path, job.local_path)),
+                    );
                     let _bulk_permit = match plan.classify_size(job.total_bytes) {
                         DirectoryJobClass::Compact => None,
                         DirectoryJobClass::Bulk => Some(
@@ -730,7 +780,7 @@ impl SftpSession {
                         ),
                     };
                     let sftp = pool.session_for_worker(worker_index);
-                    self.download_file_inner_with_sftp(
+                    let result = self.download_file_inner_with_sftp(
                         sftp,
                         &job,
                         transfer_id,
@@ -738,7 +788,9 @@ impl SftpSession {
                         transfer_manager,
                         Some(rate_limiter.as_ref()),
                     )
-                    .await?;
+                    .await.map(|_| job.total_bytes);
+                    finish_sftp_file_transfer_audit(audit, &result);
+                    result?;
                     Ok::<u64, SftpError>(1)
                 }
             })
@@ -758,6 +810,9 @@ impl SftpSession {
         transfer_manager: &Option<Arc<SftpTransferManager>>,
     ) -> Result<u64, SftpError> {
         let bulk_lane = Arc::new(tokio::sync::Semaphore::new(plan.bulk_lane_workers));
+        let audit_context = transfer_manager.as_ref()
+            .and_then(|manager| manager.audit_context_for_transfer(transfer_id))
+            .or_else(|| self.audit.clone());
         stream::unfold(job_rx, |mut receiver| async move {
             receiver.recv().await.map(|job| (job, receiver))
         })
@@ -766,7 +821,14 @@ impl SftpSession {
                 let pool = pool.clone();
                 let bulk_lane = bulk_lane.clone();
                 let rate_limiter = rate_limiter.clone();
+                let audit_context = audit_context.clone();
                 async move {
+                    let audit = oxideterm_audit::AuditOperation::in_context(
+                        audit_context.as_ref(),
+                        oxideterm_audit::AuditCategory::File,
+                        "file_transfer",
+                        Some(&format!("upload: {} → {}", job.local_path, job.remote_path)),
+                    );
                     let _bulk_permit = match plan.classify_size(job.total_bytes) {
                         DirectoryJobClass::Compact => None,
                         DirectoryJobClass::Bulk => Some(
@@ -777,7 +839,7 @@ impl SftpSession {
                         ),
                     };
                     let sftp = pool.session_for_worker(worker_index);
-                    self.upload_file_inner_with_sftp(
+                    let result = self.upload_file_inner_with_sftp(
                         sftp,
                         &job,
                         transfer_id,
@@ -785,7 +847,9 @@ impl SftpSession {
                         transfer_manager,
                         Some(rate_limiter.as_ref()),
                     )
-                    .await?;
+                    .await.map(|_| job.total_bytes);
+                    finish_sftp_file_transfer_audit(audit, &result);
+                    result?;
                     Ok::<u64, SftpError>(1)
                 }
             })

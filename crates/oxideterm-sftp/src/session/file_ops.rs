@@ -33,82 +33,125 @@ enum CompletedDeleteOperation {
 
 impl SftpSession {
     pub async fn delete(&self, path: &str) -> Result<(), SftpError> {
-        let canonical_path = self.resolve_path(path).await?;
-        let metadata = self
-            .sftp
-            .symlink_metadata(&canonical_path)
-            .await
-            .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
-        if metadata.is_dir() && !metadata.is_symlink() {
-            self.sftp
-                .remove_dir(&canonical_path)
+        let audit = self.audit_operation("file_delete", path);
+        let audit_result = async {
+            let canonical_path = self.resolve_path(path).await?;
+            let metadata = self
+                .sftp
+                .symlink_metadata(&canonical_path)
                 .await
-                .map_err(|error| self.map_sftp_error(error, &canonical_path))
-        } else {
-            self.sftp
-                .remove_file(&canonical_path)
-                .await
-                .map_err(|error| self.map_sftp_error(error, &canonical_path))
+                .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
+            if metadata.is_dir() && !metadata.is_symlink() {
+                self.sftp
+                    .remove_dir(&canonical_path)
+                    .await
+                    .map_err(|error| self.map_sftp_error(error, &canonical_path))
+            } else {
+                self.sftp
+                    .remove_file(&canonical_path)
+                    .await
+                    .map_err(|error| self.map_sftp_error(error, &canonical_path))
+            }
         }
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     pub async fn delete_recursive(&self, path: &str) -> Result<u64, SftpError> {
-        let canonical_path = self.resolve_path(path).await?;
-        let metadata = self
-            .sftp
-            .symlink_metadata(&canonical_path)
-            .await
-            .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
-        if !metadata.is_dir() || metadata.is_symlink() {
-            self.sftp
-                .remove_file(&canonical_path)
+        let mut audit = self.audit_operation("file_delete_recursive", path);
+        let mut child_context = self.audit.clone();
+        if let Some(context) = child_context.as_mut() {
+            context.parent_id = audit.id().map(str::to_owned);
+        }
+        let removed = std::sync::atomic::AtomicU64::new(0);
+        let audit_result = async {
+            let canonical_path = self.resolve_path(path).await?;
+            let metadata = self
+                .sftp
+                .symlink_metadata(&canonical_path)
                 .await
                 .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
-            return Ok(1);
-        }
+            if !metadata.is_dir() || metadata.is_symlink() {
+                self.sftp
+                    .remove_file(&canonical_path)
+                    .await
+                    .map_err(|error| self.map_sftp_error(error, &canonical_path))?;
+                removed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                return Ok(1);
+            }
 
-        let plan = plan_directory_transfer(
-            crate::DEFAULT_SFTP_DIRECTORY_PARALLELISM,
-            self.sftp.advertised_open_handle_limit(),
+            let plan = plan_directory_transfer(
+                crate::DEFAULT_SFTP_DIRECTORY_PARALLELISM,
+                self.sftp.advertised_open_handle_limit(),
+            );
+            self.delete_directory_tree_resolved(&canonical_path, plan.worker_count, child_context.as_ref(), &removed)
+                .await
+        }
+        .await;
+        let removed = removed.load(std::sync::atomic::Ordering::Relaxed);
+        audit.summary(&format!("path={path}; removed={removed}"));
+        audit.finish(
+            match &audit_result {
+                Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(_) if removed > 0 => oxideterm_audit::AuditOutcome::Partial,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
         );
-        self.delete_directory_tree_resolved(&canonical_path, plan.worker_count)
-            .await
+        audit_result
     }
 
     pub async fn mkdir(&self, path: &str) -> Result<(), SftpError> {
-        let canonical_path = if is_absolute_remote_path(path) {
-            path.to_string()
-        } else {
-            join_remote_path(&self.cwd, path)
-        };
-        self.sftp
-            .create_dir(&canonical_path)
-            .await
-            .map_err(|error| self.map_sftp_error(error, &canonical_path))
+        let audit = self.audit_operation("file_mkdir", path);
+        let audit_result = async {
+            let canonical_path = if is_absolute_remote_path(path) {
+                path.to_string()
+            } else {
+                join_remote_path(&self.cwd, path)
+            };
+            self.sftp
+                .create_dir(&canonical_path)
+                .await
+                .map_err(|error| self.map_sftp_error(error, &canonical_path))
+        }
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<(), SftpError> {
-        let old_canonical = self.resolve_path(old_path).await?;
-        let new_canonical = if is_absolute_remote_path(new_path) {
-            new_path.to_string()
-        } else {
-            let parent = old_canonical
-                .rsplit_once('/')
-                .map(|(parent, _)| parent)
-                .filter(|parent| !parent.is_empty())
-                .unwrap_or("/");
-            join_remote_path(parent, new_path)
-        };
-        self.sftp
-            .rename(&old_canonical, &new_canonical)
-            .await
-            .map_err(|error| self.map_sftp_error(error, &old_canonical))
+        let audit = self.audit_operation("file_rename", &format!("{old_path} → {new_path}"));
+        let audit_result = async {
+            let old_canonical = self.resolve_path(old_path).await?;
+            let new_canonical = if is_absolute_remote_path(new_path) {
+                new_path.to_string()
+            } else {
+                let parent = old_canonical
+                    .rsplit_once('/')
+                    .map(|(parent, _)| parent)
+                    .filter(|parent| !parent.is_empty())
+                    .unwrap_or("/");
+                join_remote_path(parent, new_path)
+            };
+            self.sftp
+                .rename(&old_canonical, &new_canonical)
+                .await
+                .map_err(|error| self.map_sftp_error(error, &old_canonical))
+        }
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     async fn delete_directory_tree_resolved(
         &self,
         root_path: &str,
         parallelism: usize,
+        child_context: Option<&oxideterm_audit::AuditContext>,
+        removed: &std::sync::atomic::AtomicU64,
     ) -> Result<u64, SftpError> {
         let root_id = 0;
         let mut next_directory_id = root_id + 1;
@@ -131,7 +174,7 @@ impl SftpSession {
             while operations.len() < parallelism
                 && let Some(operation) = pending.pop_front()
             {
-                operations.push(async move { self.execute_delete_operation(operation).await });
+                operations.push(async move { self.execute_delete_operation(operation, child_context, removed).await });
             }
 
             let Some(completed) = operations.next().await else {
@@ -236,6 +279,8 @@ impl SftpSession {
     async fn execute_delete_operation(
         &self,
         operation: PendingDeleteOperation,
+        child_context: Option<&oxideterm_audit::AuditContext>,
+        removed: &std::sync::atomic::AtomicU64,
     ) -> Result<CompletedDeleteOperation, SftpError> {
         match operation {
             PendingDeleteOperation::ListDirectory { directory_id, path } => {
@@ -254,25 +299,37 @@ impl SftpSession {
                 if metadata.is_dir() && !metadata.is_symlink() {
                     Ok(CompletedDeleteOperation::DirectoryDiscovered { parent_id, path })
                 } else {
-                    self.sftp
+                    let audit = oxideterm_audit::AuditOperation::in_context(child_context, oxideterm_audit::AuditCategory::File, "file_delete", Some(&path));
+                    let result = self.sftp
                         .remove_file(&path)
                         .await
-                        .map_err(|error| self.map_sftp_error(error, &path))?;
+                        .map_err(|error| self.map_sftp_error(error, &path));
+                    audit.result(&result);
+                    result?;
+                    removed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     Ok(CompletedDeleteOperation::FileRemoved { parent_id })
                 }
             }
             PendingDeleteOperation::RemoveFile { parent_id, path } => {
-                self.sftp
+                let audit = oxideterm_audit::AuditOperation::in_context(child_context, oxideterm_audit::AuditCategory::File, "file_delete", Some(&path));
+                let result = self.sftp
                     .remove_file(&path)
                     .await
-                    .map_err(|error| self.map_sftp_error(error, &path))?;
+                    .map_err(|error| self.map_sftp_error(error, &path));
+                audit.result(&result);
+                result?;
+                removed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 Ok(CompletedDeleteOperation::FileRemoved { parent_id })
             }
             PendingDeleteOperation::RemoveDirectory { directory_id, path } => {
-                self.sftp
+                let audit = oxideterm_audit::AuditOperation::in_context(child_context, oxideterm_audit::AuditCategory::File, "file_delete", Some(&path));
+                let result = self.sftp
                     .remove_dir(&path)
                     .await
-                    .map_err(|error| self.map_sftp_error(error, &path))?;
+                    .map_err(|error| self.map_sftp_error(error, &path));
+                audit.result(&result);
+                result?;
+                removed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 Ok(CompletedDeleteOperation::DirectoryRemoved { directory_id })
             }
         }

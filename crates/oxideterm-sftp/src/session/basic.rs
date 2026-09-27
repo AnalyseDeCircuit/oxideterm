@@ -1,8 +1,18 @@
 impl SftpSession {
+    fn audit_operation(&self, action: &str, detail: &str) -> oxideterm_audit::AuditOperation {
+        oxideterm_audit::AuditOperation::in_request(
+            self.audit.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            action,
+            Some(detail),
+        )
+    }
+
     pub async fn new<O>(connection: O, session_id: String) -> Result<Self, SftpError>
     where
         O: SftpChannelOpener,
     {
+        let audit = connection.audit_context().map(|context| context.consumer());
         info!("Opening SFTP subsystem for session {session_id}");
         // Store an erased channel factory so directory transfers can open
         // short-lived sibling SFTP channels without changing the public opener API.
@@ -17,6 +27,7 @@ impl SftpSession {
             .map_err(|error| SftpError::ProtocolError(error.to_string()))?;
         info!("SFTP subsystem opened for session {session_id}");
         Ok(Self {
+            audit,
             sftp: Arc::new(sftp),
             channel_factory,
             _connection_owner: None,
@@ -25,6 +36,20 @@ impl SftpSession {
             home: cwd.clone(),
             cwd,
         })
+    }
+
+    pub fn with_resolved_node_audit(
+        mut self,
+        resolved: Option<&oxideterm_audit::AuditContext>,
+    ) -> Self {
+        if let (Some(owner), Some(resolved)) = (&self.audit, resolved) {
+            let mut context = owner.with_request(resolved);
+            // The router resolved the logical node; the SFTP channel still owns its physical endpoint and transport.
+            context.session_id = resolved.session_id.clone();
+            context.node_id = resolved.node_id.clone();
+            self.audit = Some(context);
+        }
+        self
     }
 
     pub fn with_connection_owner(mut self, owner: Arc<dyn Send + Sync>) -> Self {
@@ -258,8 +283,8 @@ impl SftpSession {
                 "offset exceeds remote file size: {canonical_path}"
             )));
         }
-        let read_limit = (total_size - offset)
-            .min(u64::try_from(maximum_bytes).unwrap_or(u64::MAX));
+        let read_limit =
+            (total_size - offset).min(u64::try_from(maximum_bytes).unwrap_or(u64::MAX));
         let mut file = self
             .sftp
             .open(&canonical_path)
@@ -293,33 +318,39 @@ impl SftpSession {
         path: &str,
         content: &[u8],
     ) -> Result<WriteContentResult, SftpError> {
-        let canonical_path = match self.resolve_path(path).await {
-            Ok(path) => path,
-            Err(_) => self.resolve_new_file_path(path).await?,
-        };
-        let swap_path = swap_path(&canonical_path);
-        match self
-            .write_to_swap_and_rename(&canonical_path, &swap_path, content)
-            .await
-        {
-            Ok(()) => Ok(WriteContentResult { atomic_write: true }),
-            Err(error) => {
-                let error_string = error.to_string();
-                let recoverable = matches!(error, SftpError::PermissionDenied(_))
-                    || error_string.contains(".oxswp")
-                    || error_string.contains("Atomic rename failed");
-                if !recoverable {
-                    return Err(error);
+        let audit = self.audit_operation("file_save", path);
+        let audit_result = async {
+            let canonical_path = match self.resolve_path(path).await {
+                Ok(path) => path,
+                Err(_) => self.resolve_new_file_path(path).await?,
+            };
+            let swap_path = swap_path(&canonical_path);
+            match self
+                .write_to_swap_and_rename(&canonical_path, &swap_path, content)
+                .await
+            {
+                Ok(()) => Ok(WriteContentResult { atomic_write: true }),
+                Err(error) => {
+                    let error_string = error.to_string();
+                    let recoverable = matches!(error, SftpError::PermissionDenied(_))
+                        || error_string.contains(".oxswp")
+                        || error_string.contains("Atomic rename failed");
+                    if !recoverable {
+                        return Err(error);
+                    }
+                    warn!(
+                        "Atomic SFTP write failed for {canonical_path} ({error_string}), falling back to direct overwrite"
+                    );
+                    self.write_direct(&canonical_path, content).await?;
+                    Ok(WriteContentResult {
+                        atomic_write: false,
+                    })
                 }
-                warn!(
-                    "Atomic SFTP write failed for {canonical_path} ({error_string}), falling back to direct overwrite"
-                );
-                self.write_direct(&canonical_path, content).await?;
-                Ok(WriteContentResult {
-                    atomic_write: false,
-                })
             }
         }
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     /// Replaces a user configuration file without following-path or metadata loss.
@@ -328,65 +359,71 @@ impl SftpSession {
         path: &str,
         content: &[u8],
     ) -> Result<WriteContentResult, SftpError> {
-        let canonical_path = match self.resolve_path(path).await {
-            Ok(path) => path,
-            Err(_) => self.resolve_new_file_path(path).await?,
-        };
-        let metadata = self.sftp.metadata(&canonical_path).await.ok();
-        let suffix = uuid::Uuid::new_v4().simple().to_string();
-        let swap_path = format!("{canonical_path}.oxideterm-{suffix}.tmp");
-        let backup_path = format!("{canonical_path}.oxideterm-{suffix}.bak");
-
-        self.write_direct(&swap_path, content).await?;
-        let written = self.read_file_limited(&swap_path, content.len()).await?;
-        if written != content {
-            let _ = self.sftp.remove_file(&swap_path).await;
-            return Err(SftpError::WriteError(format!(
-                "Remote configuration verification failed for {canonical_path}"
-            )));
-        }
-        if let Some(metadata) = metadata.as_ref() {
-            let preserved = FileAttributes {
-                uid: metadata.uid,
-                gid: metadata.gid,
-                permissions: metadata.permissions,
-                ..FileAttributes::empty()
+        let audit = self.audit_operation("file_save", path);
+        let audit_result = async {
+            let canonical_path = match self.resolve_path(path).await {
+                Ok(path) => path,
+                Err(_) => self.resolve_new_file_path(path).await?,
             };
-            if let Err(error) = self.sftp.set_metadata(&swap_path, preserved).await {
+            let metadata = self.sftp.metadata(&canonical_path).await.ok();
+            let suffix = uuid::Uuid::new_v4().simple().to_string();
+            let swap_path = format!("{canonical_path}.oxideterm-{suffix}.tmp");
+            let backup_path = format!("{canonical_path}.oxideterm-{suffix}.bak");
+
+            self.write_direct(&swap_path, content).await?;
+            let written = self.read_file_limited(&swap_path, content.len()).await?;
+            if written != content {
                 let _ = self.sftp.remove_file(&swap_path).await;
                 return Err(SftpError::WriteError(format!(
-                    "Failed to preserve metadata for {canonical_path}: {error}"
+                    "Remote configuration verification failed for {canonical_path}"
                 )));
             }
-            if let Err(error) = self.sftp.rename(&canonical_path, &backup_path).await {
-                let _ = self.sftp.remove_file(&swap_path).await;
-                return Err(self.map_sftp_error(error, &canonical_path));
+            if let Some(metadata) = metadata.as_ref() {
+                let preserved = FileAttributes {
+                    uid: metadata.uid,
+                    gid: metadata.gid,
+                    permissions: metadata.permissions,
+                    ..FileAttributes::empty()
+                };
+                if let Err(error) = self.sftp.set_metadata(&swap_path, preserved).await {
+                    let _ = self.sftp.remove_file(&swap_path).await;
+                    return Err(SftpError::WriteError(format!(
+                        "Failed to preserve metadata for {canonical_path}: {error}"
+                    )));
+                }
+                if let Err(error) = self.sftp.rename(&canonical_path, &backup_path).await {
+                    let _ = self.sftp.remove_file(&swap_path).await;
+                    return Err(self.map_sftp_error(error, &canonical_path));
+                }
             }
-        }
 
-        if let Err(error) = self.sftp.rename(&swap_path, &canonical_path).await {
-            let rollback_error = if metadata.is_some() {
-                self.sftp
-                    .rename(&backup_path, &canonical_path)
-                    .await
-                    .err()
-            } else {
-                None
-            };
-            let _ = self.sftp.remove_file(&swap_path).await;
-            if let Some(rollback_error) = rollback_error {
+            if let Err(error) = self.sftp.rename(&swap_path, &canonical_path).await {
+                let rollback_error = if metadata.is_some() {
+                    self.sftp
+                        .rename(&backup_path, &canonical_path)
+                        .await
+                        .err()
+                } else {
+                    None
+                };
+                let _ = self.sftp.remove_file(&swap_path).await;
+                if let Some(rollback_error) = rollback_error {
+                    return Err(SftpError::WriteError(format!(
+                        "Failed to replace {canonical_path}: {error}; rollback failed: {rollback_error}. The original file remains at {backup_path}"
+                    )));
+                }
                 return Err(SftpError::WriteError(format!(
-                    "Failed to replace {canonical_path}: {error}; rollback failed: {rollback_error}. The original file remains at {backup_path}"
+                    "Failed to replace {canonical_path}: {error}"
                 )));
             }
-            return Err(SftpError::WriteError(format!(
-                "Failed to replace {canonical_path}: {error}"
-            )));
+            if metadata.is_some() {
+                let _ = self.sftp.remove_file(&backup_path).await;
+            }
+            Ok(WriteContentResult { atomic_write: true })
         }
-        if metadata.is_some() {
-            let _ = self.sftp.remove_file(&backup_path).await;
-        }
-        Ok(WriteContentResult { atomic_write: true })
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 }
 
@@ -398,9 +435,7 @@ async fn open_russh_sftp_session(
         .request_subsystem(true, "sftp")
         .await
         .map_err(|error| {
-            SftpError::SubsystemNotAvailable(format!(
-                "Failed to request SFTP subsystem: {error}"
-            ))
+            SftpError::SubsystemNotAvailable(format!("Failed to request SFTP subsystem: {error}"))
         })?;
     let (reader, writer) = channel.into_stream().into_split();
     let config = russh_sftp::client::Config {

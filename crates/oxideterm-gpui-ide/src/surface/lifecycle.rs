@@ -240,9 +240,22 @@ impl IdeSurface {
 
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
+        let audit_request = self.pending_reconnect_restore_node_id.is_none().then(|| {
+            oxideterm_audit::AuditContext::current_request().or_else(|| {
+                oxideterm_audit::AuditContext::current().map(|mut context| {
+                    context.source = oxideterm_audit::AuditSource::User;
+                    context
+                })
+            })
+        }).flatten();
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn(async move {
-                open_project_with_root_listing(fs, node_id, root_path).await
+                let task = open_project_with_root_listing(fs, node_id, root_path);
+                if let Some(context) = audit_request {
+                    context.scope(task).await
+                } else {
+                    task.await
+                }
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
@@ -371,6 +384,7 @@ impl IdeSurface {
             for path in snapshot.tab_paths {
                 self.open_remote_file(
                     IdeLocation::remote(snapshot.connection_id.clone(), path),
+                    None,
                     cx,
                 );
             }

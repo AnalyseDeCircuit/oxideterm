@@ -1113,7 +1113,8 @@ impl SftpSession {
         );
         // Cleanup shares the same bounded post-order scheduler as user deletion;
         // it never follows links and does not outlive this relay operation.
-        self.delete_directory_tree_resolved(path, plan.worker_count)
+        let removed = std::sync::atomic::AtomicU64::new(0);
+        self.delete_directory_tree_resolved(path, plan.worker_count, None, &removed)
             .await
             .map(|_| ())
     }

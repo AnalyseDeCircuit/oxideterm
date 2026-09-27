@@ -40,12 +40,34 @@ impl std::fmt::Debug for ConnectOptions {
 
 pub struct FtpSession {
     pub(crate) stream: Option<Stream>,
+    pub(crate) audit_context: Option<oxideterm_audit::AuditContext>,
     pub(crate) home: String,
     pub(crate) machine_listing: bool,
     pub(crate) pending_upload: Option<String>,
 }
 
 impl FtpSession {
+    /// A transfer keeps its physical FTP session identity while inheriting the task's request.
+    pub fn with_audit_request(mut self, request: Option<&oxideterm_audit::AuditContext>) -> Self {
+        if let (Some(owner), Some(request)) = (&self.audit_context, request) {
+            self.audit_context = Some(owner.with_request(request));
+        }
+        self
+    }
+
+    pub(crate) fn audit_operation(
+        &self,
+        action: &str,
+        detail: &str,
+    ) -> oxideterm_audit::AuditOperation {
+        oxideterm_audit::AuditOperation::in_request(
+            self.audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            action,
+            Some(detail),
+        )
+    }
+
     pub async fn connect(options: &ConnectOptions, cancel: &CancellationToken) -> Result<Self> {
         Self::connect_with_tls(options, cancel, None).await
     }
@@ -55,6 +77,19 @@ impl FtpSession {
         cancel: &CancellationToken,
         tls: Option<Arc<rustls::ClientConfig>>,
     ) -> Result<Self> {
+        let audit_context = oxideterm_audit::AuditContext::current().map(|context| {
+            context
+                .session(
+                    if options.security == Security::Plain {
+                        "ftp"
+                    } else {
+                        "ftps"
+                    },
+                    &format!("{}@{}:{}", options.username, options.host, options.port),
+                )
+                .consumer()
+        });
+
         if options.host.trim().is_empty()
             || options.port == 0
             || options.timeout.is_zero()
@@ -136,6 +171,7 @@ impl FtpSession {
             };
             let home = stream.pwd().await?;
             Ok(Self {
+                audit_context,
                 stream: Some(stream),
                 home,
                 machine_listing,
@@ -201,22 +237,52 @@ impl FtpSession {
     }
 
     pub async fn mkdir(&mut self, path: &str, cancel: &CancellationToken) -> Result<()> {
-        validate_path(path)?;
-        self.operate(cancel, Some(COMMAND_TIMEOUT), |mut stream| async move {
-            stream.mkdir(path).await?;
-            Ok((stream, ()))
-        })
-        .await
+        let audit = self.audit_operation("file_mkdir", path);
+        let result = async {
+            validate_path(path)?;
+            self.operate(cancel, Some(COMMAND_TIMEOUT), |mut stream| async move {
+                stream.mkdir(path).await?;
+                Ok((stream, ()))
+            })
+            .await
+        }
+        .await;
+        if matches!(&result, Err(Error::Cancelled)) {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        } else {
+            audit.result(&result);
+        }
+        result
     }
 
     pub async fn rename(&mut self, from: &str, to: &str, cancel: &CancellationToken) -> Result<()> {
-        validate_path(from)?;
-        validate_path(to)?;
-        self.operate(cancel, Some(COMMAND_TIMEOUT), |mut stream| async move {
-            stream.rename(from, to).await?;
-            Ok((stream, ()))
-        })
-        .await
+        let audit = self.audit_operation("file_rename", &format!("{from} → {to}"));
+        let result = async {
+            validate_path(from)?;
+            validate_path(to)?;
+            self.operate(cancel, Some(COMMAND_TIMEOUT), |mut stream| async move {
+                stream.rename(from, to).await?;
+                Ok((stream, ()))
+            })
+            .await
+        }
+        .await;
+        if matches!(&result, Err(Error::Cancelled)) {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        } else {
+            audit.result(&result);
+        }
+        result
     }
 
     pub async fn delete(
@@ -225,16 +291,31 @@ impl FtpSession {
         directory: bool,
         cancel: &CancellationToken,
     ) -> Result<()> {
-        validate_path(path)?;
-        self.operate(cancel, Some(COMMAND_TIMEOUT), |mut stream| async move {
-            if directory {
-                stream.rmdir(path).await?;
-            } else {
-                stream.rm(path).await?;
-            }
-            Ok((stream, ()))
-        })
-        .await
+        let audit = self.audit_operation("file_delete", path);
+        let result = async {
+            validate_path(path)?;
+            self.operate(cancel, Some(COMMAND_TIMEOUT), |mut stream| async move {
+                if directory {
+                    stream.rmdir(path).await?;
+                } else {
+                    stream.rm(path).await?;
+                }
+                Ok((stream, ()))
+            })
+            .await
+        }
+        .await;
+        if matches!(&result, Err(Error::Cancelled)) {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        } else {
+            audit.result(&result);
+        }
+        result
     }
 }
 
