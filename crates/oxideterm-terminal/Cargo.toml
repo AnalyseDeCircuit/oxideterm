@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
 alacritty_terminal.workspace = true
 anyhow.workspace = true
 async-channel.workspace = true

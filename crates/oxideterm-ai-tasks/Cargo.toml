@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
 async-trait.workspace = true
 chrono.workspace = true
 parking_lot.workspace = true
@@ -18,3 +19,6 @@ thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"

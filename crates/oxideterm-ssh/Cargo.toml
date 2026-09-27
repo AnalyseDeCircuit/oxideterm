@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 base64.workspace = true
 dashmap.workspace = true
@@ -22,6 +23,7 @@ oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding" }
 parking_lot.workspace = true
 russh.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 signature.workspace = true
 ssh-encoding.workspace = true
@@ -38,5 +40,7 @@ libgssapi.workspace = true
 windows.workspace = true
 
 [dev-dependencies]
+russh-sftp = { path = "../russh-sftp" }
+tempfile = "3.23"
 tokio = { workspace = true, features = ["test-util"] }
 rand10.workspace = true

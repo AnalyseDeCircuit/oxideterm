@@ -16,6 +16,7 @@ anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
 oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }

@@ -7,7 +7,7 @@ mod platform;
 mod temporary;
 
 use std::{
-    fs::{self, File},
+    fs::{self, OpenOptions},
     io::{self, Write},
     path::Path,
 };
@@ -64,7 +64,12 @@ pub fn durable_replace(source: &Path, destination: &Path) -> io::Result<()> {
     }
 
     // Sync the caller-provided source before making it visible at the destination.
-    File::open(source)?.sync_all()?;
+    // FlushFileBuffers requires write access on Windows, even for an already-written source.
+    OpenOptions::new()
+        .read(true)
+        .write(cfg!(windows))
+        .open(source)?
+        .sync_all()?;
     replace_and_sync_parent(source, destination, destination_parent)
 }
 
@@ -75,6 +80,11 @@ pub fn durable_remove(path: &Path) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
     }
+}
+
+/// Persists a batch of directory-entry changes with the platform's required handle flags.
+pub fn sync_directory(directory: &Path) -> io::Result<()> {
+    platform::sync_directory(directory)
 }
 
 fn replace_and_sync_parent(source: &Path, destination: &Path, parent: &Path) -> io::Result<()> {

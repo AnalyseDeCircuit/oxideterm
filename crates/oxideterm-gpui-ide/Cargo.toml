@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 gpui.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }

@@ -11,6 +11,8 @@ version.workspace = true
 bench = []
 
 [dependencies]
+uuid.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
 anyhow.workspace = true
 async-channel.workspace = true
 chrono.workspace = true

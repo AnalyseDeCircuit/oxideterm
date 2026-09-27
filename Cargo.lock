@@ -3208,6 +3208,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af9673d8203fcb076b19dfd17e38b3d4ae9f44959416ea532ce72415a6020365"
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fancy-regex"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4590,6 +4602,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.5",
+]
+
+[[package]]
 name = "hdrhistogram"
 version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5819,6 +5840,17 @@ dependencies = [
  "libc",
  "plain",
  "redox_syscall 0.7.4",
+]
+
+[[package]]
+name = "libsqlite3-sys"
+version = "0.35.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "133c182a6a2c87864fe97778797e46c7e999672690dc9fa3ee8e241aa4a9c13f"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
 ]
 
 [[package]]
@@ -7451,10 +7483,12 @@ version = "2.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "oxideterm-audit",
  "parking_lot",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "uuid",
@@ -7492,6 +7526,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-audit"
+version = "2.1.0"
+dependencies = [
+ "async-channel",
+ "base64 0.22.1",
+ "chacha20poly1305",
+ "fs2",
+ "futures",
+ "oxideterm-atomic-file",
+ "oxideterm-portable-runtime",
+ "oxideterm-secret-store",
+ "rand 0.8.6",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "whoami",
+ "zeroize",
+]
+
+[[package]]
 name = "oxideterm-backend-classification"
 version = "2.1.0"
 
@@ -7503,6 +7563,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "oxideterm-ai",
+ "oxideterm-audit",
  "oxideterm-cloud-sync",
  "oxideterm-connections",
  "oxideterm-forwarding",
@@ -7514,6 +7575,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "zeroize",
 ]
@@ -7527,6 +7589,7 @@ dependencies = [
  "chrono",
  "hmac 0.12.1",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-connections",
  "oxideterm-forwarding",
  "oxideterm-network-proxy",
@@ -7569,6 +7632,7 @@ dependencies = [
  "dirs 5.0.1",
  "encoding_rs",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-portable-runtime",
  "oxideterm-remote-desktop",
  "oxideterm-secret-store",
@@ -7667,6 +7731,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-backend-classification",
  "oxideterm-ssh",
  "oxideterm-x11-forwarding",
@@ -7680,6 +7745,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -7687,6 +7753,7 @@ name = "oxideterm-ftp"
 version = "2.1.0"
 dependencies = [
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-network-proxy",
  "rcgen",
  "rustls",
@@ -7727,6 +7794,7 @@ dependencies = [
  "oxideterm-ai-tasks",
  "oxideterm-app-lock",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-backend-classification",
  "oxideterm-cloud-sync",
  "oxideterm-connection-monitor",
@@ -7811,6 +7879,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "gpui",
+ "oxideterm-audit",
  "oxideterm-cloud-sync",
  "oxideterm-connections",
  "oxideterm-forwarding",
@@ -7846,6 +7915,7 @@ name = "oxideterm-gpui-ide"
 version = "2.1.0"
 dependencies = [
  "gpui",
+ "oxideterm-audit",
  "oxideterm-editor-syntax",
  "oxideterm-gpui-editor",
  "oxideterm-gpui-ui",
@@ -7938,6 +8008,7 @@ dependencies = [
  "gpui",
  "gpui_platform",
  "image",
+ "oxideterm-audit",
  "oxideterm-gpui-ui",
  "oxideterm-modem-transfer",
  "oxideterm-render-policy",
@@ -7959,6 +8030,7 @@ dependencies = [
  "tokio",
  "unicode-segmentation",
  "unicode-width",
+ "uuid",
  "vte",
  "zeroize",
 ]
@@ -7996,6 +8068,7 @@ dependencies = [
  "dashmap",
  "encoding_rs",
  "futures-util",
+ "oxideterm-audit",
  "oxideterm-backend-classification",
  "oxideterm-ide-core",
  "oxideterm-preview",
@@ -8039,6 +8112,7 @@ version = "2.1.0"
 dependencies = [
  "fernomade-crypto",
  "fernomade-runtime",
+ "fernomade-wire",
  "oxideterm-ssh",
  "thiserror 2.0.20",
  "tokio",
@@ -8078,6 +8152,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "oxideterm-ai",
+ "oxideterm-audit",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
  "oxideterm-forwarding",
@@ -8197,6 +8272,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "parking_lot",
  "rmcp",
  "schemars 1.2.1",
@@ -8218,6 +8294,7 @@ name = "oxideterm-quick-commands"
 version = "2.1.0"
 dependencies = [
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "regex",
  "serde",
  "serde_json",
@@ -8305,6 +8382,7 @@ version = "2.1.0"
 dependencies = [
  "anyhow",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-portable-runtime",
  "oxideterm-render-policy",
  "oxideterm-terminal-semantic",
@@ -8340,6 +8418,7 @@ dependencies = [
  "glob",
  "mime_guess",
  "oxideterm-atomic-file",
+ "oxideterm-audit",
  "oxideterm-preview",
  "parking_lot",
  "redb",
@@ -8378,6 +8457,7 @@ dependencies = [
  "dashmap",
  "dirs 5.0.1",
  "libgssapi",
+ "oxideterm-audit",
  "oxideterm-backend-classification",
  "oxideterm-connection-monitor",
  "oxideterm-connections",
@@ -8389,10 +8469,13 @@ dependencies = [
  "parking_lot",
  "rand 0.10.2",
  "russh",
+ "russh-sftp",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
  "signature",
  "ssh-encoding",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
@@ -8424,6 +8507,7 @@ dependencies = [
  "fernomade-predict",
  "libc",
  "memchr",
+ "oxideterm-audit",
  "oxideterm-modem-transfer",
  "oxideterm-mosh",
  "oxideterm-network-proxy",
@@ -10425,9 +10509,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusqlite"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "165ca6e57b20e1351573e3729b958bc62f0e48025386970b6e4d29e7a7e71f3f"
+dependencies = [
+ "bitflags 2.13.2",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+]
+
+[[package]]
 name = "russh"
 version = "0.63.0"
-source = "git+https://github.com/AnalyseDeCircuit/russh?rev=01a5b773927a6cd6177c4778c19c9bf3607d3518#01a5b773927a6cd6177c4778c19c9bf3607d3518"
+source = "git+https://github.com/AnalyseDeCircuit/russh?rev=58542ed1045f033abeca4a91164109ab18d9304a#58542ed1045f033abeca4a91164109ab18d9304a"
 dependencies = [
  "aes 0.9.1",
  "aws-lc-rs",

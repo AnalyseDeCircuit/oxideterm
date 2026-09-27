@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 regex.workspace = true
 serde.workspace = true

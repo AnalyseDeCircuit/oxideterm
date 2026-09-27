@@ -2,12 +2,12 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-09-23T15:47:26.994090Z
+Generated: 2026-09-27T07:07:09.705305Z
 
 ## Summary
 
-- MIT: 1095
-- Apache-2.0: 879
+- MIT: 1100
+- Apache-2.0: 882
 - Apache-2.0 WITH LLVM-exception: 59
 - Zlib: 45
 - BSD-3-Clause: 21
@@ -329,6 +329,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | eventsource-stream | 0.2.3 | MIT, Apache-2.0 | https://crates.io/crates/eventsource-stream |
 | exr | 1.74.0 | BSD-3-Clause | https://crates.io/crates/exr |
 | extended | 0.1.0 | MIT | https://crates.io/crates/extended |
+| fallible-iterator | 0.3.0 | MIT, Apache-2.0 | https://crates.io/crates/fallible-iterator |
+| fallible-streaming-iterator | 0.1.9 | MIT, Apache-2.0 | https://crates.io/crates/fallible-streaming-iterator |
 | fancy-regex | 0.14.0 | MIT | https://crates.io/crates/fancy-regex |
 | fast-srgb8 | 1.0.0 | MIT, Apache-2.0, CC0-1.0 | https://crates.io/crates/fast-srgb8 |
 | fastrand | 1.9.0 | Apache-2.0, MIT | https://crates.io/crates/fastrand |
@@ -436,6 +438,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | hashbrown | 0.15.5 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
 | hashbrown | 0.16.1 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
 | hashbrown | 0.17.0 | MIT, Apache-2.0 | https://crates.io/crates/hashbrown |
+| hashlink | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/hashlink |
 | hdrhistogram | 7.5.4 | MIT, Apache-2.0 | https://crates.io/crates/hdrhistogram |
 | heapless | 0.7.17 | MIT, Apache-2.0 | https://crates.io/crates/heapless |
 | heapless | 0.9.3 | MIT, Apache-2.0 | https://crates.io/crates/heapless |
@@ -552,6 +555,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | libloading | 0.8.9 | ISC | https://crates.io/crates/libloading |
 | libm | 0.2.16 | MIT | https://crates.io/crates/libm |
 | libredox | 0.1.16 | MIT | https://crates.io/crates/libredox |
+| libsqlite3-sys | 0.35.0 | MIT | https://crates.io/crates/libsqlite3-sys |
 | libudev | 0.3.0 | MIT | https://crates.io/crates/libudev |
 | libudev-sys | 0.1.4 | MIT | https://crates.io/crates/libudev-sys |
 | libz-sys | 1.1.28 | MIT, Apache-2.0 | https://crates.io/crates/libz-sys |
@@ -837,6 +841,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | roxmltree | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/roxmltree |
 | rsa | 0.10.0-rc.18 | MIT, Apache-2.0 | https://crates.io/crates/rsa |
 | rsasl | 2.3.1 | Apache-2.0, MIT | https://crates.io/crates/rsasl |
+| rusqlite | 0.37.0 | MIT | https://crates.io/crates/rusqlite |
 | russh | 0.63.0 | Apache-2.0 | vendored in repository |
 | russh-cryptovec | 0.62.0 | Apache-2.0 | https://crates.io/crates/russh-cryptovec |
 | russh-util | 0.52.0 | Apache-2.0 | https://crates.io/crates/russh-util |

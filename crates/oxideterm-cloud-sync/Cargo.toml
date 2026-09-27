@@ -17,6 +17,7 @@ base64.workspace = true
 chrono.workspace = true
 hmac = "0.12"
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }

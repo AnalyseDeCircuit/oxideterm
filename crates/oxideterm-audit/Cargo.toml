@@ -2,37 +2,31 @@
 workspace = true
 
 [package]
-name = "oxideterm-connections"
+name = "oxideterm-audit"
 edition.workspace = true
 license.workspace = true
 version.workspace = true
 
 [dependencies]
-oxideterm-audit = { path = "../oxideterm-audit" }
-anyhow.workspace = true
-argon2.workspace = true
+async-channel.workspace = true
 base64.workspace = true
+fs2.workspace = true
 chacha20poly1305.workspace = true
-chrono.workspace = true
-dirs.workspace = true
-encoding_rs.workspace = true
-quick-xml.workspace = true
-rand.workspace = true
-rmp-serde.workspace = true
-serde.workspace = true
-serde_json.workspace = true
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
-oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
-russh.workspace = true
+rand.workspace = true
+regex.workspace = true
+whoami.workspace = true
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 uuid.workspace = true
-whoami.workspace = true
 zeroize.workspace = true
-zip.workspace = true
 
 [dev-dependencies]
+futures.workspace = true
 tempfile = "3"
-rand10.workspace = true

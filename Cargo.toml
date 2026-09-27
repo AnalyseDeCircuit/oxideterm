@@ -40,6 +40,7 @@ members = [
   "crates/oxideterm-quick-commands",
   "crates/oxideterm-connection-monitor",
   "crates/oxideterm-notification-center",
+  "crates/oxideterm-audit",
   "crates/oxideterm-network-proxy",
   "crates/oxideterm-topology",
   "crates/oxideterm-backend-classification",
@@ -112,7 +113,7 @@ resolver = "2"
 alacritty_terminal = { path = "crates/alacritty-terminal" }
 gpui = { path = "crates/gpui-ce/gpui" }
 # Keep the SSH protocol fork independent from application lint and test targets.
-russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "01a5b773927a6cd6177c4778c19c9bf3607d3518" }
+russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "58542ed1045f033abeca4a91164109ab18d9304a" }
 russh-sftp = { path = "crates/russh-sftp" }
 vte = { path = "crates/vte" }
 

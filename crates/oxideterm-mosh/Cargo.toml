@@ -15,3 +15,6 @@ zeroize.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+fernomade-wire = { path = "../fernomade/wire" }
