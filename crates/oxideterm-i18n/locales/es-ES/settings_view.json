@@ -223,6 +223,9 @@
       "keep_running_on_close_hint": "Al cerrar la ventana, OxideTerm seguirá ejecutándose en segundo plano."
     },
     "terminal": {
+      "cjk_font_custom": "Personalizada…",
+      "custom_cjk_font": "Fuente CJK personalizada",
+      "custom_cjk_font_hint": "Introduce el nombre completo de una fuente instalada. Déjalo vacío para usar la sustitución automática.",
       "input_keyboard": "Teclado y sugerencias de entrada",
       "input_mouse_links": "Ratón y enlaces",
       "input_clipboard": "Copiar y pegar",

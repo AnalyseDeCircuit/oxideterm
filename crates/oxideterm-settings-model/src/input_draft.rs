@@ -41,6 +41,7 @@ pub fn persisted_settings_input_value(
 ) -> Option<String> {
     let value = match input {
         SettingsInput::TerminalCustomFontFamily => settings.terminal.custom_font_family.clone(),
+        SettingsInput::TerminalCjkFontFamily => settings.terminal.cjk_font_family.clone(),
         SettingsInput::TerminalFontSize => settings.terminal.font_size.to_string(),
         SettingsInput::TerminalFontWeight => settings.terminal.font_weight.to_string(),
         SettingsInput::TerminalScrollback => settings.terminal.scrollback.to_string(),
@@ -50,6 +51,7 @@ pub fn persisted_settings_input_value(
         }
         SettingsInput::TerminalPaddingVertical => settings.terminal.padding_vertical.to_string(),
         SettingsInput::IdeCustomFontFamily => settings.ide.custom_font_family.clone(),
+        SettingsInput::IdeCjkFontFamily => settings.ide.cjk_font_family.clone().unwrap_or_default(),
         SettingsInput::IdeFontWeight => settings
             .ide
             .font_weight
@@ -338,6 +340,10 @@ pub fn apply_persisted_settings_input_draft(
             settings.terminal.custom_font_family = draft.trim().to_string();
             SettingsInputDraftApply::Applied
         }
+        SettingsInput::TerminalCjkFontFamily => {
+            settings.terminal.cjk_font_family = draft.trim().to_string();
+            SettingsInputDraftApply::Applied
+        }
         SettingsInput::TerminalFontSize => parse_i64(draft)
             .map(|value| settings.terminal.font_size = value.clamp(8, 32))
             .into(),
@@ -363,6 +369,10 @@ pub fn apply_persisted_settings_input_draft(
             .into(),
         SettingsInput::IdeCustomFontFamily => {
             settings.ide.custom_font_family = draft.trim().to_string();
+            SettingsInputDraftApply::Applied
+        }
+        SettingsInput::IdeCjkFontFamily => {
+            settings.ide.cjk_font_family = Some(draft.trim().to_string());
             SettingsInputDraftApply::Applied
         }
         SettingsInput::IdeFontWeight => {
@@ -899,6 +909,29 @@ mod tests {
                 "fontSize":null,"lineHeight":null,"agentMode":"ask","wordWrap":false
             })
         );
+        let mut settings = PersistedSettings::default();
+        apply_persisted_settings_input_draft(
+            &mut settings,
+            SettingsInput::TerminalCjkFontFamily,
+            "  Custom Terminal CJK  ",
+        );
+        apply_persisted_settings_input_draft(
+            &mut settings,
+            SettingsInput::IdeCjkFontFamily,
+            "  自定义编辑器字体  ",
+        );
+        assert_eq!(settings.terminal.cjk_font_family, "Custom Terminal CJK");
+        assert_eq!(
+            settings.ide.cjk_font_family.as_deref(),
+            Some("自定义编辑器字体")
+        );
+        assert_eq!(
+            persisted_settings_input_value(&settings, SettingsInput::IdeCjkFontFamily).as_deref(),
+            Some("自定义编辑器字体")
+        );
+        apply_persisted_settings_input_draft(&mut settings, SettingsInput::IdeCjkFontFamily, " ");
+        assert_eq!(settings.ide.cjk_font_family, Some(String::new()));
+        assert_eq!(settings.terminal.cjk_font_family, "Custom Terminal CJK");
     }
 
     #[test]

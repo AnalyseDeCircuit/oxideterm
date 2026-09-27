@@ -223,6 +223,9 @@
       "keep_running_on_close_hint": "창을 닫아도 OxideTerm은 백그라운드에서 계속 실행됩니다."
     },
     "terminal": {
+      "cjk_font_custom": "사용자 지정…",
+      "custom_cjk_font": "사용자 지정 CJK 글꼴",
+      "custom_cjk_font_hint": "설치된 글꼴의 전체 이름을 입력하세요. 비워 두면 자동 대체 글꼴을 사용합니다.",
       "input_keyboard": "키보드 및 입력 제안",
       "input_mouse_links": "마우스 및 링크",
       "input_clipboard": "복사 및 붙여넣기",

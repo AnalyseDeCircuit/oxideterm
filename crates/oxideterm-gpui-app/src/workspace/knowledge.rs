@@ -2406,6 +2406,11 @@ impl WorkspaceApp {
             .flex_col()
             .relative()
             .overflow_hidden()
+            .bg(color_for_background(
+                self.tokens.ui.bg,
+                has_background_image,
+                0x00,
+            ))
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
                 let target = ime::WorkspaceImeTarget::KnowledgeSearch;
                 if this.active_ime_target(cx) == Some(target)

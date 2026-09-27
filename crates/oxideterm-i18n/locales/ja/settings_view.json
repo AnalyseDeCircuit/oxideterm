@@ -223,6 +223,9 @@
       "keep_running_on_close_hint": "ウィンドウを閉じても、OxideTerm はバックグラウンドで実行し続けます。"
     },
     "terminal": {
+      "cjk_font_custom": "カスタム…",
+      "custom_cjk_font": "カスタム CJK フォント",
+      "custom_cjk_font_hint": "インストール済みフォントの正式な名前を入力してください。空欄にすると自動フォールバックを使用します。",
       "input_keyboard": "キーボードと入力候補",
       "input_mouse_links": "マウスとリンク",
       "input_clipboard": "コピーと貼り付け",

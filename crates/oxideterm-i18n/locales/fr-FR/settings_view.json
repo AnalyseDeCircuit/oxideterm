@@ -223,6 +223,9 @@
       "keep_running_on_close_hint": "Après la fermeture de la fenêtre, OxideTerm continue de s’exécuter en arrière-plan."
     },
     "terminal": {
+      "cjk_font_custom": "Personnalisée…",
+      "custom_cjk_font": "Police CJK personnalisée",
+      "custom_cjk_font_hint": "Saisissez le nom complet d’une police installée. Laissez vide pour utiliser les polices de substitution automatiques.",
       "input_keyboard": "Clavier et suggestions de saisie",
       "input_mouse_links": "Souris et liens",
       "input_clipboard": "Copier et coller",

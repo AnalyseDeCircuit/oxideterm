@@ -143,6 +143,10 @@ pub fn terminal_cjk_font_options() -> &'static [&'static str] {
     ]
 }
 
+pub fn cjk_font_is_custom(family: &str) -> bool {
+    !terminal_cjk_font_options().contains(&family.trim())
+}
+
 pub fn terminal_encoding_options() -> &'static [TerminalEncoding] {
     &[
         TerminalEncoding::Utf8,

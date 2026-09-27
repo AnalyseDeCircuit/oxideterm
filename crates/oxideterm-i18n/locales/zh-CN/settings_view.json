@@ -223,6 +223,9 @@
       "keep_running_on_close_hint": "关闭窗口后，OxideTerm 将继续在后台运行。"
     },
     "terminal": {
+      "cjk_font_custom": "自定义…",
+      "custom_cjk_font": "自定义中文/CJK 字体",
+      "custom_cjk_font_hint": "输入已安装字体的完整名称，留空使用自动回退。",
       "input_keyboard": "键盘与输入提示",
       "input_mouse_links": "鼠标与链接",
       "input_clipboard": "复制与粘贴",

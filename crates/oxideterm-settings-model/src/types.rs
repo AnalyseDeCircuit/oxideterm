@@ -146,6 +146,7 @@ pub enum SettingsSelect {
 pub enum SettingsInput {
     SettingsSearch,
     TerminalCustomFontFamily,
+    TerminalCjkFontFamily,
     TerminalFontSize,
     TerminalFontWeight,
     TerminalScrollback,
@@ -154,6 +155,7 @@ pub enum SettingsInput {
     TerminalPaddingVertical,
     IdeFontWeight,
     IdeCustomFontFamily,
+    IdeCjkFontFamily,
     IdeFontSize,
     IdeLineHeight,
     AppearanceUiFont,
@@ -544,6 +546,7 @@ impl SettingsInput {
         match self {
             Self::SettingsSearch => SETTINGS_SEARCH_INPUT_ANCHOR_KEY,
             Self::TerminalCustomFontFamily => 19,
+            Self::TerminalCjkFontFamily => 24,
             Self::TerminalFontSize => 1,
             Self::TerminalFontWeight => 21,
             Self::TerminalScrollback => 33_000,
@@ -552,6 +555,7 @@ impl SettingsInput {
             Self::TerminalPaddingVertical => 23,
             Self::IdeFontWeight => 34_010,
             Self::IdeCustomFontFamily => 34_011,
+            Self::IdeCjkFontFamily => 34_012,
             Self::IdeFontSize => 3,
             Self::IdeLineHeight => 4,
             Self::AppearanceUiFont => 5,

@@ -223,6 +223,9 @@
       "keep_running_on_close_hint": "Sau khi đóng cửa sổ, OxideTerm sẽ tiếp tục chạy trong nền."
     },
     "terminal": {
+      "cjk_font_custom": "Tùy chỉnh…",
+      "custom_cjk_font": "Phông chữ CJK tùy chỉnh",
+      "custom_cjk_font_hint": "Nhập tên đầy đủ của phông chữ đã cài đặt. Để trống để tự động chọn phông chữ thay thế.",
       "input_keyboard": "Bàn phím và gợi ý nhập",
       "input_mouse_links": "Chuột và liên kết",
       "input_clipboard": "Sao chép và dán",

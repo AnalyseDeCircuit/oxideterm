@@ -65,6 +65,12 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let custom_cjk = self.settings_workspace.read(cx).ide_cjk_font_custom
+            || settings
+                .ide
+                .cjk_font_family
+                .as_deref()
+                .is_some_and(cjk_font_is_custom);
         self.ide_card()
             .flex()
             .flex_col()
@@ -105,21 +111,37 @@ impl WorkspaceApp {
                 },
             )
             .child(self.card_separator())
-            .child(
-                self.select_setting_row(
-                    "settings_view.ide.cjk_font_family",
-                    "settings_view.ide.cjk_font_family_hint",
-                    SettingsSelect::IdeCjkFontFamily,
+            .child(self.select_setting_row(
+                "settings_view.ide.cjk_font_family",
+                "settings_view.ide.cjk_font_family_hint",
+                SettingsSelect::IdeCjkFontFamily,
+                if custom_cjk {
+                    self.i18n.t("settings_view.terminal.cjk_font_custom")
+                } else {
                     settings
                         .ide
                         .cjk_font_family
                         .as_deref()
                         .map(|family| terminal_cjk_font_label(family, &self.i18n))
-                        .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
-                    self.tokens.metrics.settings_select_width,
+                        .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal"))
+                },
+                self.tokens.metrics.settings_select_width,
+                cx,
+            ))
+            .when(custom_cjk, |card| {
+                card.child(self.setting_row(
+                    "settings_view.terminal.custom_cjk_font",
+                    "settings_view.terminal.custom_cjk_font_hint",
+                    self.settings_text_input_control(
+                        SettingsInput::IdeCjkFontFamily,
+                        settings.ide.cjk_font_family.clone().unwrap_or_default(),
+                        "PingFang SC".to_string(),
+                        SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
+                        cx,
+                    ),
                     cx,
-                ),
-            )
+                ))
+            })
             .child(self.card_separator())
             .child(
                 self.ide_setting_row(
