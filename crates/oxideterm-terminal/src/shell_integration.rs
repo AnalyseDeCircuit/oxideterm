@@ -54,6 +54,7 @@ pub struct ShellIntegrationEvent {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerminalCommandMarkDetectionSource {
     CommandBar,
+    QuickCommand,
     Ai,
     Broadcast,
     UserInputObserved,

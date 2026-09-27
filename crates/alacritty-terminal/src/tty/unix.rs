@@ -101,7 +101,7 @@ fn get_pw_entry(buf: &mut [i8; 1024]) -> Result<Passwd<'_>> {
 
 pub struct Pty {
     child: Child,
-    file: File,
+    file: Option<File>,
     signals: UnixStream,
     sig_id: SigId,
 }
@@ -112,7 +112,7 @@ impl Pty {
     }
 
     pub fn file(&self) -> &File {
-        &self.file
+        self.file.as_ref().expect("live PTY master")
     }
 }
 
@@ -293,7 +293,7 @@ pub fn from_fd(config: &Options, window_id: u64, master: OwnedFd, slave: OwnedFd
                 set_nonblocking(master_fd);
             }
 
-            Ok(Pty { child, file: File::from(master), signals, sig_id })
+            Ok(Pty { child, file: Some(File::from(master)), signals, sig_id })
         },
         Err(err) => Err(Error::new(
             err.kind(),
@@ -308,10 +308,17 @@ pub fn from_fd(config: &Options, window_id: u64, master: OwnedFd, slave: OwnedFd
 
 impl Drop for Pty {
     fn drop(&mut self) {
-        // Make sure the PTY is terminated properly.
-        unsafe {
-            libc::kill(self.child.id() as i32, libc::SIGHUP);
+        // Draining recorded output can outlive a reaped child. Do not signal its
+        // old PID after the OS has been free to reuse it.
+        if matches!(self.child.try_wait(), Ok(None)) {
+            unsafe {
+                libc::kill(self.child.id() as i32, libc::SIGHUP);
+            }
         }
+
+        // A child exiting with a saturated Darwin PTY can wait for the master
+        // to close. Release it before waiting for the child, not after Drop returns.
+        drop(self.file.take());
 
         // Clear signal-hook handler.
         unregister_signal(self.sig_id);
@@ -333,7 +340,7 @@ impl EventedReadWrite for Pty {
     ) -> Result<()> {
         interest.key = PTY_READ_WRITE_TOKEN;
         unsafe {
-            poll.add_with_mode(&self.file, interest, poll_opts)?;
+            poll.add_with_mode(self.file(), interest, poll_opts)?;
         }
 
         unsafe {
@@ -353,7 +360,7 @@ impl EventedReadWrite for Pty {
         poll_opts: PollMode,
     ) -> Result<()> {
         interest.key = PTY_READ_WRITE_TOKEN;
-        poll.modify_with_mode(&self.file, interest, poll_opts)?;
+        poll.modify_with_mode(self.file(), interest, poll_opts)?;
 
         poll.modify_with_mode(
             &self.signals,
@@ -364,18 +371,18 @@ impl EventedReadWrite for Pty {
 
     #[inline]
     fn deregister(&mut self, poll: &Arc<Poller>) -> Result<()> {
-        poll.delete(&self.file)?;
+        poll.delete(self.file())?;
         poll.delete(&self.signals)
     }
 
     #[inline]
     fn reader(&mut self) -> &mut File {
-        &mut self.file
+        self.file.as_mut().expect("live PTY master")
     }
 
     #[inline]
     fn writer(&mut self) -> &mut File {
-        &mut self.file
+        self.file.as_mut().expect("live PTY master")
     }
 }
 
@@ -411,7 +418,7 @@ impl OnResize for Pty {
     fn on_resize(&mut self, window_size: WindowSize) {
         let win = window_size.to_winsize();
 
-        let res = unsafe { libc::ioctl(self.file.as_raw_fd(), libc::TIOCSWINSZ, &win as *const _) };
+        let res = unsafe { libc::ioctl(self.file().as_raw_fd(), libc::TIOCSWINSZ, &win as *const _) };
 
         if res < 0 {
             die!("ioctl TIOCSWINSZ failed: {}", Error::last_os_error());

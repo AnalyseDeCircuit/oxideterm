@@ -196,35 +196,41 @@ fn byte_bounded_channel_inner<T>(
 }
 
 impl<T> ByteBoundedSender<T> {
-    /// Blocks a dedicated worker thread until this data event fits the byte budget.
-    pub(crate) fn send(&self, value: T, byte_len: usize) -> Result<(), T> {
+    /// Waits for capacity for one worker turn so device controls remain reachable.
+    pub(crate) fn send_timeout(
+        &self,
+        value: T,
+        byte_len: usize,
+        timeout: Duration,
+    ) -> Result<(), crossbeam_channel::SendTimeoutError<T>> {
+        use crossbeam_channel::SendTimeoutError;
         if byte_len > self.inner.max_bytes {
-            return Err(value);
+            return Err(SendTimeoutError::Disconnected(value));
         }
-
-        let mut value = Some(value);
+        let started = std::time::Instant::now();
         let mut state = lock_state(&self.inner);
         loop {
             if !state.receiver_open {
-                return Err(value.take().expect("queued value must be present"));
+                return Err(SendTimeoutError::Disconnected(value));
             }
             if state.outstanding_bytes.saturating_add(byte_len) <= self.inner.max_bytes {
-                enqueue(
-                    &mut state,
-                    value.take().expect("queued value must be present"),
-                    byte_len,
-                );
+                enqueue(&mut state, value, byte_len);
                 drop(state);
                 if let Some(activity) = &self.inner.activity {
                     activity.notify();
                 }
                 return Ok(());
             }
-            state = self
+            let remaining = timeout.saturating_sub(started.elapsed());
+            if remaining.is_zero() {
+                return Err(SendTimeoutError::Timeout(value));
+            }
+            let (next, _) = self
                 .inner
                 .blocking_space
-                .wait(state)
+                .wait_timeout(state, remaining)
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            state = next;
         }
     }
 
@@ -633,7 +639,9 @@ mod tests {
         let (finished_tx, finished_rx) = mpsc::channel();
         let producer = std::thread::spawn(move || {
             for _ in 0..CHUNK_COUNT {
-                sender.send(vec![0_u8; CHUNK_BYTES], CHUNK_BYTES).unwrap();
+                sender
+                    .send_timeout(vec![0_u8; CHUNK_BYTES], CHUNK_BYTES, Duration::from_secs(5))
+                    .unwrap();
                 producer_progress.fetch_add(1, Ordering::Release);
             }
             finished_tx.send(()).unwrap();
@@ -674,10 +682,13 @@ mod tests {
     fn closing_receiver_releases_blocked_sender() {
         const LIMIT_BYTES: usize = 8;
         let (sender, receiver) = byte_bounded_channel(LIMIT_BYTES);
-        sender.send(vec![1_u8; LIMIT_BYTES], LIMIT_BYTES).unwrap();
+        sender
+            .send_timeout(vec![1_u8; LIMIT_BYTES], LIMIT_BYTES, Duration::from_secs(5))
+            .unwrap();
         let (finished_tx, finished_rx) = mpsc::channel();
         let blocked_sender = std::thread::spawn(move || {
-            let result = sender.send(vec![2_u8; LIMIT_BYTES], LIMIT_BYTES);
+            let result =
+                sender.send_timeout(vec![2_u8; LIMIT_BYTES], LIMIT_BYTES, Duration::from_secs(5));
             finished_tx.send(result.is_err()).unwrap();
         });
 

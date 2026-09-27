@@ -17,6 +17,11 @@ impl TerminalPane {
     }
 
     pub fn start_recording(&mut self, title: Option<String>, cx: &mut Context<Self>) {
+        let context = self.terminal.lock().audit_context();
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            context.as_ref(), oxideterm_audit::AuditCategory::Automation,
+            "terminal_recording_start", None,
+        );
         let options = TerminalRecordingOptions {
             title,
             capture_input: false,
@@ -32,13 +37,25 @@ impl TerminalPane {
             options,
         ));
         self.sync_terminal_output_events_enabled();
+        audit.finish(oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Lifecycle, None, None);
         cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
     }
 
     pub fn pause_recording(&mut self, cx: &mut Context<Self>) {
         if let Some(recorder) = self.recorder.as_mut() {
+            let before = recorder.status().state;
             recorder.pause();
+            let changed = recorder.status().state != before;
+            let context = self.terminal.lock().audit_context();
+            let audit = oxideterm_audit::AuditOperation::in_request(
+                context.as_ref(), oxideterm_audit::AuditCategory::Automation,
+                "terminal_recording_pause", None,
+            );
+            audit.finish(if changed { oxideterm_audit::AuditOutcome::Succeeded }
+                else { oxideterm_audit::AuditOutcome::Unchanged },
+                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
             self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
@@ -47,7 +64,17 @@ impl TerminalPane {
 
     pub fn resume_recording(&mut self, cx: &mut Context<Self>) {
         if let Some(recorder) = self.recorder.as_mut() {
+            let before = recorder.status().state;
             recorder.resume();
+            let changed = recorder.status().state != before;
+            let context = self.terminal.lock().audit_context();
+            let audit = oxideterm_audit::AuditOperation::in_request(
+                context.as_ref(), oxideterm_audit::AuditCategory::Automation,
+                "terminal_recording_resume", None,
+            );
+            audit.finish(if changed { oxideterm_audit::AuditOutcome::Succeeded }
+                else { oxideterm_audit::AuditOutcome::Unchanged },
+                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
             self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
@@ -56,6 +83,12 @@ impl TerminalPane {
 
     pub fn discard_recording(&mut self, cx: &mut Context<Self>) {
         if self.recorder.take().is_some() {
+            let context = self.terminal.lock().audit_context();
+            oxideterm_audit::AuditOperation::in_request(
+                context.as_ref(), oxideterm_audit::AuditCategory::Automation,
+                "terminal_recording_discard", None,
+            ).finish(oxideterm_audit::AuditOutcome::Succeeded,
+                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
             self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
@@ -64,10 +97,18 @@ impl TerminalPane {
 
     pub fn stop_recording(&mut self, cx: &mut Context<Self>) -> Option<String> {
         let recorder = self.recorder.take()?;
+        let context = self.terminal.lock().audit_context();
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            context.as_ref(), oxideterm_audit::AuditCategory::Automation,
+            "terminal_recording_stop", None,
+        );
         self.sync_terminal_output_events_enabled();
         cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
-        Some(recorder.stop())
+        let content = recorder.stop();
+        audit.finish(oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Lifecycle, None, Some(content.len() as u64));
+        Some(content)
     }
 
     pub fn reset_recording_playback(&mut self, cols: usize, rows: usize, cx: &mut Context<Self>) {

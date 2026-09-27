@@ -212,7 +212,8 @@ pub trait TerminalSessionBackend: Send {
     fn tmux_state(&self) -> Option<crate::TmuxUiState> {
         None
     }
-    fn tmux_action(&mut self, _action: crate::TmuxAction) -> Result<bool> {
+    fn tmux_action(&mut self, _action: crate::TmuxAction, audit: oxideterm_audit::AuditOperation) -> Result<bool> {
+        audit.finish(oxideterm_audit::AuditOutcome::Unchanged, oxideterm_audit::AuditEvidence::Dispatch, None, None);
         Ok(false)
     }
     fn tmux_separator_at(&self, _col: usize, _row: usize) -> Option<crate::TmuxSeparator> {
@@ -280,6 +281,7 @@ pub trait TerminalSessionBackend: Send {
     fn terminate_active_task(&mut self) -> Result<()>;
     fn kill_active_task(&mut self) -> Result<()>;
     fn shutdown(&mut self);
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> { None }
     fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         None
     }

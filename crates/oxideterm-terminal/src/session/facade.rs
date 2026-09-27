@@ -1,4 +1,5 @@
 pub struct TerminalSession {
+    audit: Option<oxideterm_audit::AuditContext>,
     backend: Box<dyn TerminalSessionBackend>,
     // The session owns the capability so sandbox cleanup follows the backend
     // lifetime instead of any transient graphics request or UI prompt.
@@ -80,14 +81,19 @@ impl TerminalSession {
         scrollback_lines: usize,
     ) -> Result<Self> {
         let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
+        let audit = terminal_audit_context("local", "localhost");
+        let operation = oxideterm_audit::AuditOperation::in_context(
+            audit.as_ref(), oxideterm_audit::AuditCategory::Connection,
+            "local_terminal_start", None,
+        );
+        let backend = LocalPtySession::spawn_with_config_graphics_encoding_and_audit(
+            cols, rows, LocalPtyConfig::default(), graphics_options, encoding, scrollback_lines,
+            audit.clone());
+        operation.result(&backend);
+        let backend = backend?;
         Ok(Self {
-            backend: Box::new(LocalPtySession::spawn_with_graphics_and_encoding(
-                cols,
-                rows,
-                graphics_options,
-                encoding,
-                scrollback_lines,
-            )?),
+            audit,
+            backend: Box::new(backend),
             kitty_file_transmission,
         })
     }
@@ -101,15 +107,20 @@ impl TerminalSession {
         scrollback_lines: usize,
     ) -> Result<Self> {
         let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
+        let audit = terminal_audit_context("local", "localhost");
+        let operation = oxideterm_audit::AuditOperation::in_context(
+            audit.as_ref(), oxideterm_audit::AuditCategory::Connection,
+            "local_terminal_start", Some(&format!("shell={} cwd={}",
+                config.shell.as_ref().map(|shell| shell.id.as_str()).unwrap_or("default"),
+                config.cwd.as_ref().map(|cwd| cwd.display().to_string()).unwrap_or_default())),
+        );
+        let backend = LocalPtySession::spawn_with_config_graphics_encoding_and_audit(
+            cols, rows, config, graphics_options, encoding, scrollback_lines, audit.clone());
+        operation.result(&backend);
+        let backend = backend?;
         Ok(Self {
-            backend: Box::new(LocalPtySession::spawn_with_config_graphics_and_encoding(
-                cols,
-                rows,
-                config,
-                graphics_options,
-                encoding,
-                scrollback_lines,
-            )?),
+            audit,
+            backend: Box::new(backend),
             kitty_file_transmission,
         })
     }
@@ -121,6 +132,7 @@ impl TerminalSession {
         scrollback_lines: usize,
     ) -> Self {
         Self {
+            audit: None,
             backend: Box::new(PlaybackTerminalSession::new(
                 cols,
                 rows,
@@ -160,9 +172,12 @@ impl TerminalSession {
         scrollback_lines: usize,
     ) -> Self {
         let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
+        let audit = config.audit_context().map(|context| context.consumer());
         Self {
-            backend: Box::new(SshPtySession::new(
+            audit: audit.clone(),
+            backend: Box::new(SshPtySession::new_with_audit(
                 config,
+                audit.clone(),
                 cols,
                 rows,
                 graphics_options,
@@ -204,11 +219,17 @@ impl TerminalSession {
         scrollback_lines: usize,
     ) -> Self {
         let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
+        let mut audit = terminal_audit_context("telnet", &config.endpoint_label());
+        if let (Some(context), Some(login)) = (&mut audit, &login) {
+            context.remote_account = Some(login.username.clone());
+        }
         Self {
+            audit: audit.clone(),
             backend: Box::new(TelnetSession::new_with_login(
                 config,
                 login,
                 upstream_proxy,
+                audit,
                 cols,
                 rows,
                 graphics_options,
@@ -227,9 +248,21 @@ impl TerminalSession {
         scrollback_lines: usize,
     ) -> Self {
         let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
+        let mut audit = terminal_audit_context(
+            "mosh",
+            &format!(
+                "{}@{}:{}",
+                config.bootstrap.ssh.username, config.bootstrap.ssh.host, config.bootstrap.ssh.port
+            ),
+        );
+        if let Some(context) = &mut audit {
+            context.remote_account = Some(zeroize::Zeroizing::new(config.bootstrap.ssh.username.clone()));
+        }
         Self {
+            audit: audit.clone(),
             backend: Box::new(MoshTerminalSession::new(
                 config,
+                audit,
                 cols,
                 rows,
                 graphics_options,
@@ -247,17 +280,44 @@ impl TerminalSession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> std::result::Result<Self, SerialError> {
-        Ok(Self {
-            backend: Box::new(SerialSession::new(
+        let audit = terminal_audit_context("serial", &config.port_path);
+        let result = SerialSession::new(
                 config,
+                audit.clone(),
                 cols,
                 rows,
                 graphics_options,
                 encoding,
                 scrollback_lines,
-            )?),
+            );
+        if result.is_err() {
+            let operation = oxideterm_audit::AuditOperation::in_context(
+                audit.as_ref(), oxideterm_audit::AuditCategory::Connection,
+                "serial_connect", None,
+            );
+            operation.finish(oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
+        }
+        Ok(Self {
+            audit,
+            backend: Box::new(result?),
             kitty_file_transmission: None,
         })
+    }
+
+    pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        if let Some(mut context) = self.backend.audit_context()
+        {
+            // The connection owns the transport identity; the terminal keeps
+            // its consumer identity even when the parser worker becomes ready.
+            context.consumer_id = self
+                .audit
+                .as_ref()
+                .and_then(|context| context.consumer_id.clone());
+            Some(context)
+        } else {
+            self.audit.clone()
+        }
     }
 
     pub fn kind(&self) -> TerminalSessionKind {
@@ -340,7 +400,15 @@ impl TerminalSession {
     }
 
     pub fn set_serial_runtime_options(&mut self, options: SerialRuntimeOptions) -> Result<()> {
-        self.backend.set_serial_runtime_options(options)
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            self.audit.as_ref(),
+            oxideterm_audit::AuditCategory::Connection,
+            "serial_control",
+            Some(&format!("{options:?}")),
+        );
+        let result = (|| self.backend.set_serial_runtime_options(options))();
+        audit.result(&result);
+        result
     }
 
     pub fn serial_control_state(&self) -> Option<SerialControlState> {
@@ -352,15 +420,79 @@ impl TerminalSession {
         line: SerialControlLine,
         asserted: bool,
     ) -> Result<()> {
-        self.backend.set_serial_control_line(line, asserted)
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            self.audit.as_ref(),
+            oxideterm_audit::AuditCategory::Connection,
+            "serial_control",
+            Some(&format!("{line:?}={asserted}")),
+        );
+        let result = (|| self.backend.set_serial_control_line(line, asserted))();
+        audit.finish(
+            if result.is_ok() { oxideterm_audit::AuditOutcome::Sent } else { oxideterm_audit::AuditOutcome::Failed },
+            oxideterm_audit::AuditEvidence::Dispatch, None, None,
+        );
+        result
     }
 
     pub fn send_serial_break(&mut self) -> Result<()> {
-        self.backend.send_serial_break()
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            self.audit.as_ref(),
+            oxideterm_audit::AuditCategory::Connection,
+            "serial_control",
+            Some("break"),
+        );
+        let result = (|| self.backend.send_serial_break())();
+        audit.finish(
+            if result.is_ok() { oxideterm_audit::AuditOutcome::Sent } else { oxideterm_audit::AuditOutcome::Failed },
+            oxideterm_audit::AuditEvidence::Dispatch, None, None,
+        );
+        result
     }
 
     pub fn send_telnet_control(&mut self, command: TelnetControlCommand) -> Result<()> {
-        self.backend.send_telnet_control(command)
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            self.audit.as_ref(), oxideterm_audit::AuditCategory::Connection,
+            "telnet_control", Some(&format!("{command:?}")),
+        );
+        let result = self.backend.send_telnet_control(command);
+        audit.finish(
+            if result.is_ok() { oxideterm_audit::AuditOutcome::Sent } else { oxideterm_audit::AuditOutcome::Failed },
+            oxideterm_audit::AuditEvidence::Dispatch, None, None,
+        );
+        result
+    }
+
+    pub fn send_serial_text(&mut self, text: &str) -> Result<()> {
+        self.audit_serial_send(text.len(), |backend| backend.write_text(text))
+    }
+
+    pub fn send_serial_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        self.audit_serial_send(bytes.len(), |backend| backend.write_protocol_bytes(bytes))
+    }
+
+    fn audit_serial_send(
+        &mut self,
+        byte_count: usize,
+        send: impl FnOnce(&mut dyn TerminalSessionBackend) -> Result<()>,
+    ) -> Result<()> {
+        if self.kind() != TerminalSessionKind::Serial {
+            anyhow::bail!("Serial send requires a serial session");
+        }
+        let mode = self.serial_runtime_options().map(|options| options.send_mode);
+        let operation = oxideterm_audit::AuditOperation::in_request(
+            self.audit.as_ref(), oxideterm_audit::AuditCategory::Connection,
+            "serial_send", Some(&format!("mode={mode:?}; input_bytes={byte_count}")),
+        );
+        let result = if self.backend.lifecycle().is_running() {
+            send(self.backend.as_mut())
+        } else {
+            Err(anyhow::anyhow!("Serial session is not running"))
+        };
+        operation.finish(
+            if result.is_ok() { oxideterm_audit::AuditOutcome::Sent } else { oxideterm_audit::AuditOutcome::Failed },
+            oxideterm_audit::AuditEvidence::Dispatch, None, None,
+        );
+        result
     }
 
     pub fn set_trzsz_policy(&mut self, policy: Option<TrzszTransferPolicy>) {
@@ -463,7 +595,12 @@ impl TerminalSession {
     }
 
     pub fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
-        self.backend.tmux_action(action)
+        let context = self.audit_context();
+        let audit = oxideterm_audit::AuditOperation::in_request(
+            context.as_ref(), oxideterm_audit::AuditCategory::Automation,
+            "tmux_control", Some(&tmux_action_audit_detail(&action)),
+        );
+        self.backend.tmux_action(action, audit)
     }
 
     pub fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {
@@ -584,5 +721,51 @@ impl TerminalSession {
 
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         self.backend.ssh_connection_handle()
+    }
+}
+
+fn terminal_audit_context(protocol: &str, target: &str) -> Option<oxideterm_audit::AuditContext> {
+    oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|context| context.session(protocol, target).consumer())
+}
+
+fn tmux_action_audit_detail(action: &crate::TmuxAction) -> String {
+    use crate::TmuxAction;
+    match action {
+        TmuxAction::SelectSession(id) => format!("select_session id={id}"),
+        TmuxAction::SelectWindow(id) => format!("select_window id={id}"),
+        TmuxAction::PreviousWindow => "previous_window".into(),
+        TmuxAction::NextWindow => "next_window".into(),
+        TmuxAction::NewSession => "new_session".into(),
+        TmuxAction::CloseSession => "close_session".into(),
+        TmuxAction::NewWindow => "new_window".into(),
+        TmuxAction::CloseWindow => "close_window".into(),
+        TmuxAction::SplitHorizontal => "split_horizontal".into(),
+        TmuxAction::SplitVertical => "split_vertical".into(),
+        TmuxAction::ClosePane => "close_pane".into(),
+        TmuxAction::ResizePaneLeft => "resize_pane_left".into(),
+        TmuxAction::ResizePaneRight => "resize_pane_right".into(),
+        TmuxAction::ResizePaneUp => "resize_pane_up".into(),
+        TmuxAction::ResizePaneDown => "resize_pane_down".into(),
+        TmuxAction::Detach => "detach".into(),
+        TmuxAction::CancelPaneMode => "cancel_pane_mode".into(),
+        TmuxAction::RenameSession { id, .. } => format!("rename_session id={id}"),
+        TmuxAction::RenameWindow { id, .. } => format!("rename_window id={id}"),
+        TmuxAction::RunCommand(_) => "run_command".into(),
+    }
+}
+
+#[cfg(test)]
+mod tmux_audit_tests {
+    use super::*;
+
+    #[test]
+    fn tmux_control_detail_excludes_arbitrary_command_and_rename_text() {
+        assert_eq!(tmux_action_audit_detail(&crate::TmuxAction::RunCommand(
+            "display-message private-token".into())), "run_command");
+        assert_eq!(tmux_action_audit_detail(&crate::TmuxAction::RenameWindow {
+            id: 7, name: "private-token".into(),
+        }), "rename_window id=7");
     }
 }

@@ -14,9 +14,31 @@ impl TerminalPane {
         };
         let result = self.terminal.lock().begin_modem_transfer(request.clone());
         match result {
-            Ok(Some(transfer)) => self.handle_modem_transfer_prompt(request, transfer, cx),
+            Ok(Some(transfer)) => self.handle_modem_transfer_prompt(
+                request,
+                transfer,
+                oxideterm_audit::AuditSource::User,
+                cx,
+            ),
             Ok(None) => {}
-            Err(_) => self.manual_modem_transfer_failed(cx),
+            Err(_) => {
+                if let Some(mut context) = self.terminal.lock().audit_context() {
+                    context.source = oxideterm_audit::AuditSource::User;
+                    context
+                        .operation(
+                            oxideterm_audit::AuditCategory::File,
+                            "file_transfer",
+                            Some(&format!("protocol={protocol:?}; direction={direction:?}")),
+                        )
+                        .finish(
+                            oxideterm_audit::AuditOutcome::Failed,
+                            oxideterm_audit::AuditEvidence::Lifecycle,
+                            None,
+                            None,
+                        );
+                }
+                self.manual_modem_transfer_failed(cx);
+            }
         }
     }
 
@@ -33,6 +55,7 @@ impl TerminalPane {
         &mut self,
         request: TerminalModemTransferRequest,
         transfer: ModemTransfer,
+        source: oxideterm_audit::AuditSource,
         cx: &mut Context<Self>,
     ) {
         if self.modem_prompt_active {
@@ -42,13 +65,29 @@ impl TerminalPane {
 
         self.modem_prompt_active = true;
         self.modem_connection_lost = false;
+        self.modem_audit_connection_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.modem_transfer = Some(transfer.clone());
+        let audit = self.terminal.lock().audit_context().map(|mut context| {
+            context.source = source;
+            context.operation(
+                oxideterm_audit::AuditCategory::File,
+                "file_transfer",
+                Some(&format!(
+                    "protocol={:?}; direction={:?}",
+                    request.protocol, request.direction
+                )),
+            )
+        });
+        self.modem_audit_operation_id = audit
+            .as_ref()
+            .and_then(|operation| operation.id().map(str::to_owned));
 
         let receiver = match request.direction {
             ModemTransferDirection::Upload => cx.prompt_for_paths(PathPromptOptions {
                 files: true,
                 directories: false,
-                multiple: request.protocol != oxideterm_modem_transfer::DetectedModemProtocol::Xmodem,
+                multiple: request.protocol
+                    != oxideterm_modem_transfer::DetectedModemProtocol::Xmodem,
                 prompt: Some(SharedString::from(
                     self.preferences
                         .trzsz_labels
@@ -69,12 +108,13 @@ impl TerminalPane {
             }),
         };
 
+        let connection_lost = self.modem_audit_connection_lost.clone();
+        let cancel_context = self.terminal.lock().audit_context();
+        let audit_parent_id = self.modem_audit_operation_id.clone();
         cx.spawn(async move |weak, cx| {
             let selection = match receiver.await {
                 Ok(Ok(Some(paths))) => match request.direction {
-                    ModemTransferDirection::Upload => ModemPromptSelection::UploadFiles(
-                        paths,
-                    ),
+                    ModemTransferDirection::Upload => ModemPromptSelection::UploadFiles(paths),
                     ModemTransferDirection::Download => paths
                         .into_iter()
                         .next()
@@ -83,6 +123,25 @@ impl TerminalPane {
                 },
                 _ => ModemPromptSelection::Cancelled,
             };
+            if matches!(&selection, ModemPromptSelection::Cancelled)
+                && !connection_lost.load(std::sync::atomic::Ordering::Acquire)
+                && let Some(mut context) = cancel_context
+            {
+                context.source = oxideterm_audit::AuditSource::User;
+                context.parent_id = audit_parent_id;
+                context
+                    .operation(
+                        oxideterm_audit::AuditCategory::File,
+                        "file_transfer_cancel",
+                        Some("file_selection_cancelled"),
+                    )
+                    .finish(
+                        oxideterm_audit::AuditOutcome::CancelRequested,
+                        oxideterm_audit::AuditEvidence::Request,
+                        None,
+                        None,
+                    );
+            }
 
             let (event_tx, event_rx) = std::sync::mpsc::channel();
             let transfer_status = transfer.clone();
@@ -92,6 +151,10 @@ impl TerminalPane {
                         transfer,
                         request,
                         selection,
+                        audit,
+                        connection_lost,
+                        payload_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                        completed_files: None,
                     },
                     event_tx,
                 );
@@ -132,6 +195,7 @@ impl TerminalPane {
                                 let _ = this.handle_modem_worker_event(event, cx);
                                 this.terminal.lock().finish_modem_transfer();
                                 this.modem_prompt_active = false;
+                                this.modem_audit_operation_id = None;
                                 this.modem_connection_lost = false;
                                 this.modem_progress = None;
                                 this.modem_transfer = None;
@@ -250,6 +314,22 @@ impl TerminalPane {
             return;
         }
         if let Some(transfer) = &self.modem_transfer {
+            if let Some(mut context) = self.terminal.lock().audit_context() {
+                context.source = oxideterm_audit::AuditSource::User;
+                context.parent_id = self.modem_audit_operation_id.clone();
+                context
+                    .operation(
+                        oxideterm_audit::AuditCategory::File,
+                        "file_transfer_cancel",
+                        None,
+                    )
+                    .finish(
+                        oxideterm_audit::AuditOutcome::CancelRequested,
+                        oxideterm_audit::AuditEvidence::Request,
+                        None,
+                        None,
+                    );
+            }
             transfer.stop();
         }
         self.terminal.lock().interrupt_modem_transfer();
@@ -262,6 +342,24 @@ impl TerminalPane {
             return;
         }
         self.modem_connection_lost = true;
+        self.modem_audit_connection_lost
+            .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(mut context) = self.terminal.lock().audit_context() {
+            context.source = oxideterm_audit::AuditSource::System;
+            context.parent_id = self.modem_audit_operation_id.clone();
+            context
+                .operation(
+                    oxideterm_audit::AuditCategory::File,
+                    "file_transfer_interrupt",
+                    Some("connection_lost"),
+                )
+                .finish(
+                    oxideterm_audit::AuditOutcome::Sent,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+        }
         if let Some(transfer) = &self.modem_transfer {
             transfer.stop();
         }

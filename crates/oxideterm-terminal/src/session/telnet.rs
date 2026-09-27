@@ -26,6 +26,11 @@ const TELNET_URI_LOGIN_TIMEOUT: std::time::Duration = std::time::Duration::from_
 const TELNET_URI_PROMPT_TAIL_LIMIT: usize = 256;
 
 pub struct TelnetSession {
+    audit: Option<oxideterm_audit::AuditContext>,
+    recording_sink: Option<oxideterm_audit::RecordingSink>,
+    recording_pending: Option<crate::recording_output::RecordingOutput>,
+    connect_audit: Option<oxideterm_audit::AuditOperation>,
+    connected: bool,
     config: TelnetSessionConfig,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
@@ -66,6 +71,7 @@ enum TelnetWorkerEvent {
     Connected,
     Output(Vec<u8>),
     Failed(String),
+    Eof,
     Closed,
 }
 
@@ -224,6 +230,7 @@ impl TelnetSession {
         config: TelnetSessionConfig,
         login: Option<TelnetLoginCredentials>,
         upstream_proxy: Option<oxideterm_network_proxy::tcp::UpstreamProxyConfig>,
+        audit: Option<oxideterm_audit::AuditContext>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -238,6 +245,7 @@ impl TelnetSession {
             cell_height: resize.cell_height,
         };
         let (listener, event_rx) = local_event_channel();
+        let recording_activity = listener.activity_sender();
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel_with_activity(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
             listener.activity_sender(),
@@ -245,6 +253,23 @@ impl TelnetSession {
         let (command_tx, command_rx) = tokio::sync::mpsc::channel(256);
         let term_config = interactive_terminal_config(scrollback_lines);
         let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
+        let connect_audit = Some(oxideterm_audit::AuditOperation::in_context(
+            audit.as_ref(),
+            oxideterm_audit::AuditCategory::Connection,
+            "telnet_connect",
+            None,
+        ));
+        let recording_sink = audit
+            .as_ref()
+            .map(oxideterm_audit::AuditContext::recording_sink);
+        if let Some(sink) = &recording_sink {
+            sink.set_wake_callback(Arc::new(move || recording_activity.notify()));
+        }
+        let recording_pending = recording_sink.as_ref().map(|sink| {
+            let mut pending = crate::recording_output::RecordingOutput::new(sink.clone());
+            pending.resize(resize.cols as u16, resize.rows as u16);
+            pending
+        });
 
         let runtime = Runtime::new().ok();
         if let Some(runtime) = runtime.as_ref() {
@@ -265,6 +290,11 @@ impl TelnetSession {
         }
 
         Self {
+            audit,
+            recording_sink,
+            recording_pending,
+            connect_audit,
+            connected: false,
             config,
             term,
             parser: Processor::new(),
@@ -297,10 +327,44 @@ impl TelnetSession {
         format!("Telnet {}", self.config.endpoint_label())
     }
 
-    fn drain_worker_events_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+    fn audit_exit(&mut self, outcome: oxideterm_audit::AuditOutcome) {
+        if let Some(operation) = self.connect_audit.take() {
+            operation.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        } else if self.connected {
+            if let Some(context) = &self.audit {
+                context.observe(
+                    oxideterm_audit::AuditCategory::Connection,
+                    "telnet_disconnect",
+                    None,
+                    outcome,
+                    oxideterm_audit::AuditEvidence::Lifecycle,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+            self.connected = false;
+        }
+    }
+
+    fn drain_worker_events_with_budget(
+        &mut self,
+        budget: TerminalDrainBudget,
+    ) -> TerminalDrainReport {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
         loop {
+            if self
+                .recording_pending
+                .as_mut()
+                .is_some_and(|pending| !pending.flush())
+            {
+                break;
+            }
+
             if budget.time_exhausted(started)
                 || report.drained_bytes >= budget.max_bytes
                 || report.events_drained >= budget.max_events
@@ -310,26 +374,20 @@ impl TelnetSession {
                 break;
             }
 
-            if let Some(event) = self.output_queue.pop_front() {
-                let TelnetWorkerEvent::Output(bytes) = event.into_inner() else {
-                    unreachable!("only output events enter the local drain queue");
-                };
-                report.events_drained += 1;
-                let processing_started = budget.collect_performance_metrics.then(Instant::now);
-                self.feed_transport_output(&bytes);
-                report.record_data_chunk(
-                    bytes.len(),
-                    processing_started.map_or(Duration::ZERO, |started| started.elapsed()),
-                );
-                report.mark_changed();
-                continue;
-            }
-
-            let event = match self.worker_rx.try_recv() {
+            let event = match self
+                .output_queue
+                .pop_front()
+                .map(Ok)
+                .unwrap_or_else(|| self.worker_rx.try_recv())
+            {
                 Ok(event) => event,
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
                     if self.lifecycle.is_running() {
+                        if let Some(sink) = &self.recording_sink {
+                            sink.interrupt();
+                        }
+                        self.audit_exit(oxideterm_audit::AuditOutcome::Interrupted);
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -346,8 +404,32 @@ impl TelnetSession {
                 break;
             }
 
+            if matches!(event.value(), TelnetWorkerEvent::Eof) {
+                let tail = self.modem_consumer.flush_pending_plain_output();
+                if !tail.is_empty() {
+                    self.handle_modem_consumer_events(tail);
+                    report.mark_changed();
+                }
+                if self
+                    .recording_pending
+                    .as_mut()
+                    .is_some_and(|pending| !pending.flush())
+                {
+                    self.output_queue.push_front(event);
+                    break;
+                }
+            }
             match event.into_inner() {
                 TelnetWorkerEvent::Connected => {
+                    self.connected = true;
+                    if let Some(operation) = self.connect_audit.take() {
+                        operation.finish(
+                            oxideterm_audit::AuditOutcome::Succeeded,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            None,
+                        );
+                    }
                     self.title = Some(self.title_text());
                     self.pending_events
                         .push(TerminalEvent::TitleChanged(self.title_text()));
@@ -365,6 +447,10 @@ impl TelnetSession {
                     report.mark_changed();
                 }
                 TelnetWorkerEvent::Failed(error) => {
+                    if let Some(sink) = &self.recording_sink {
+                        sink.interrupt();
+                    }
+                    self.audit_exit(oxideterm_audit::AuditOutcome::Failed);
                     self.lifecycle = TerminalLifecycle::Exited(None);
                     self.feed_utf8_terminal_output(
                         format!("\r\nTelnet connection failed: {error}\r\n").as_bytes(),
@@ -374,8 +460,21 @@ impl TelnetSession {
                     report.mark_changed();
                     break;
                 }
-                TelnetWorkerEvent::Closed => {
+                closed @ (TelnetWorkerEvent::Eof | TelnetWorkerEvent::Closed) => {
                     if self.lifecycle.is_running() {
+                        let confirmed_eof = matches!(closed, TelnetWorkerEvent::Eof);
+                        if let Some(sink) = &self.recording_sink {
+                            if confirmed_eof {
+                                sink.close();
+                            } else {
+                                sink.interrupt();
+                            }
+                        }
+                        self.audit_exit(if confirmed_eof {
+                            oxideterm_audit::AuditOutcome::Succeeded
+                        } else {
+                            oxideterm_audit::AuditOutcome::Interrupted
+                        });
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -425,7 +524,12 @@ impl TelnetSession {
                                 .push(TerminalEvent::TriggerMatched(matched));
                         });
                     }
-                    if self.output_events_enabled {
+                    let record_output = self.output_events_enabled
+                        || self
+                            .recording_sink
+                            .as_ref()
+                            .is_some_and(oxideterm_audit::RecordingSink::is_enabled);
+                    if record_output {
                         // Apply the same private-OSC recording boundary as PTY sessions.
                         let (_, recordable) = self.shell_integration.advance_with_recording(
                             &mut self.parser,
@@ -434,7 +538,12 @@ impl TelnetSession {
                             |event| self.pending_events.push(event),
                         );
                         if !recordable.is_empty() {
-                            self.pending_events.push(TerminalEvent::Output(recordable));
+                            if let Some(pending) = &mut self.recording_pending {
+                                pending.output(&recordable);
+                            }
+                            if self.output_events_enabled {
+                                self.pending_events.push(TerminalEvent::Output(recordable));
+                            }
                         }
                     } else {
                         self.shell_integration.advance(
@@ -595,6 +704,13 @@ impl TelnetSession {
             TelnetControlCommand::EraseLine => TELNET_COMMAND_EL,
             TelnetControlCommand::GoAhead => TELNET_COMMAND_GA,
         }
+    }
+}
+
+impl Drop for TelnetSession {
+    fn drop(&mut self) {
+        // Dropping this backend cancels its private runtime and any pending recording.
+        self.shutdown();
     }
 }
 
@@ -766,6 +882,11 @@ impl TerminalSessionBackend for TelnetSession {
             cell_height: resize.cell_height,
         };
         self.term.lock().resize(size);
+        if grid_changed {
+            if let Some(pending) = &mut self.recording_pending {
+                pending.resize(resize.cols as u16, resize.rows as u16);
+            }
+        }
         let _ = self.send_command(TelnetCommand::Resize {
             cols: resize.cols as u16,
             rows: resize.rows as u16,
@@ -923,6 +1044,30 @@ impl TerminalSessionBackend for TelnetSession {
         if matches!(self.lifecycle, TerminalLifecycle::Closed) {
             return;
         }
+        if let Some(sink) = &self.recording_sink {
+            sink.interrupt();
+        }
+        if let Some(operation) = self.connect_audit.take() {
+            operation.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+        if self.connected {
+            if let Some(context) = &self.audit {
+                context.observe(
+                    oxideterm_audit::AuditCategory::Connection,
+                    "telnet_disconnect",
+                    None,
+                    oxideterm_audit::AuditOutcome::CancelRequested,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+            self.connected = false;
+        }
         let _ = self.send_command(TelnetCommand::Close);
         self.runtime = None;
         self.lifecycle = TerminalLifecycle::Closed;
@@ -1067,13 +1212,23 @@ async fn run_telnet_worker(
         .map(TelnetLoginAutomation::new);
     let login_timeout = tokio::time::sleep(TELNET_URI_LOGIN_TIMEOUT);
     tokio::pin!(login_timeout);
-    let mut buffer = vec![0_u8; 8192];
+    let mut buffer = zeroize::Zeroizing::new(vec![0_u8; 8192]);
+    let mut pending_output: Option<std::pin::Pin<Box<_>>> = None;
     loop {
         tokio::select! {
-            read_result = reader.read(&mut buffer) => {
+            sent = async {
+                match &mut pending_output {
+                    Some(send) => send.await,
+                    None => std::future::pending::<std::result::Result<(), TelnetWorkerEvent>>().await,
+                }
+            } => {
+                pending_output = None;
+                if sent.is_err() { break; }
+            }
+            read_result = reader.read(&mut buffer), if pending_output.is_none() => {
                 match read_result {
                     Ok(0) => {
-                        let _ = worker_tx.send_control(TelnetWorkerEvent::Closed);
+                        let _ = worker_tx.send_control(TelnetWorkerEvent::Eof);
                         break;
                     }
                     Ok(read_count) => {
@@ -1098,13 +1253,9 @@ async fn run_telnet_worker(
                         }
                         if !data.is_empty() {
                             let data_len = data.len();
-                            if worker_tx
-                                .send_async(TelnetWorkerEvent::Output(data), data_len)
-                                .await
-                                .is_err()
-                            {
-                                break;
-                            }
+                            pending_output = Some(Box::pin(worker_tx.send_async(
+                                TelnetWorkerEvent::Output(data), data_len,
+                            )));
                         }
                     }
                     Err(error) => {
@@ -1167,6 +1318,450 @@ fn telnet_escape_iac_payload(bytes: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod telnet_tests {
     use super::*;
+
+    struct AuditTestKeys;
+    impl oxideterm_audit::AuditKeyProvider for AuditTestKeys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> std::result::Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![9; 32]))
+        }
+        fn create(
+            &self,
+            id: &str,
+        ) -> std::result::Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[test]
+    fn telnet_connect_and_close_record_protocol_lifecycle_without_login_secret() {
+        use oxideterm_audit::{
+            AuditContext, AuditOutcome, AuditPolicy, AuditQuery, AuditService, AuditSource,
+            RecordingState, StoredRecordingFrameKind,
+        };
+        use zeroize::Zeroizing;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let peer = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            use std::io::Write;
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            stream.write_all(b"login: ").unwrap();
+            let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+            use std::io::BufRead;
+            let mut reply = Vec::new();
+            reader.read_until(b'\n', &mut reply).unwrap();
+            assert_eq!(reply, b"audit-user\r\n");
+            reply.clear();
+            stream.write_all(b"Password: ").unwrap();
+            reader.read_until(b'\n', &mut reply).unwrap();
+            assert_eq!(reply, b"audit-secret\r\n");
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), AuditTestKeys)
+                .unwrap();
+        let client = service.client();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime
+            .block_on(client.set_policy(AuditPolicy {
+                enabled: true,
+                record_output: true,
+                ..Default::default()
+            }))
+            .unwrap();
+        let context = AuditContext::new(client.clone(), AuditSource::User)
+            .session("telnet", &format!("127.0.0.1:{port}"));
+        let login = TelnetLoginCredentials {
+            username: Zeroizing::new("audit-user".to_string()),
+            password: Some(Zeroizing::new("audit-secret".to_string())),
+        };
+        let mut session = TelnetSession::new_with_login(
+            TelnetSessionConfig {
+                host: "127.0.0.1".to_string(),
+                port,
+            },
+            Some(login),
+            None,
+            Some(context),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            100,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.lifecycle.is_running() && Instant::now() < deadline {
+            session.read_pending();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        peer.join().unwrap();
+        assert!(matches!(session.lifecycle, TerminalLifecycle::Exited(None)));
+        let page = runtime
+            .block_on(client.query(AuditQuery {
+                limit: 20,
+                ..Default::default()
+            }))
+            .unwrap();
+        let operations: Vec<_> = page
+            .records
+            .iter()
+            .filter_map(|record| record.details.operation.as_ref())
+            .collect();
+        assert!(
+            operations
+                .iter()
+                .any(|operation| operation.action == "telnet_connect"
+                    && operation.outcome == AuditOutcome::Succeeded)
+        );
+        assert!(
+            operations
+                .iter()
+                .any(|operation| operation.action == "telnet_disconnect"
+                    && operation.outcome == AuditOutcome::Succeeded)
+        );
+        assert!(page.records.iter().all(|record| {
+            !record.details.title.contains("audit-secret")
+                && record
+                    .details
+                    .detail
+                    .as_ref()
+                    .is_none_or(|value| !value.contains("audit-secret"))
+                && record
+                    .details
+                    .target
+                    .as_ref()
+                    .is_none_or(|value| !value.contains("audit-secret"))
+        }));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let recording_id = loop {
+            let list = runtime.block_on(client.list_recordings(None, 10)).unwrap();
+            if let Some(recording) = list.recordings.first()
+                && recording.state == RecordingState::Finished
+            {
+                break recording.id.clone();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Telnet EOF should finish recording"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let frames = runtime
+            .block_on(client.read_recording_page(recording_id, None, None, 10))
+            .unwrap();
+        let mut output = Vec::new();
+        let mut sizes = Vec::new();
+        for frame in frames.chunks.iter().flat_map(|chunk| &chunk.frames) {
+            match &frame.kind {
+                StoredRecordingFrameKind::Output(bytes) => output.extend_from_slice(bytes),
+                StoredRecordingFrameKind::Resize { columns, rows } => sizes.push((*columns, *rows)),
+                StoredRecordingFrameKind::Gap { .. } => panic!("unexpected recording gap"),
+            }
+        }
+        assert!(
+            output
+                .windows(b"Password: ".len())
+                .any(|window| window == b"Password: ")
+        );
+        assert!(
+            !output
+                .windows(b"audit-secret".len())
+                .any(|window| window == b"audit-secret")
+        );
+        assert!(sizes.contains(&(80, 24)));
+    }
+
+    #[test]
+    fn telnet_recording_pressure_keeps_controls_live_and_preserves_output() {
+        use crate::recording_test_support::{PausedFiles, read_finished};
+        use oxideterm_audit::{
+            AuditContext, AuditPolicy, AuditService, AuditSource, RecordingState,
+            StoredRecordingFrameKind,
+        };
+        use std::sync::{Mutex, atomic::AtomicBool, mpsc};
+        let corpus = Arc::new(
+            (0..600_000)
+                .map(|i| format!("{i:08}:0123456789abcdef0123456789abcdef\r\n"))
+                .collect::<String>(),
+        );
+        for cancel in [false, true] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let (ack_tx, ack_rx) = mpsc::channel();
+            let source = corpus.clone();
+            let peer = std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let mut writer = stream.try_clone().unwrap();
+                let producer = std::thread::spawn(move || {
+                    let result = writer.write_all(source.as_bytes());
+                    let _ = writer.shutdown(std::net::Shutdown::Write);
+                    result
+                });
+                let mut input = [0; 3];
+                stream.read_exact(&mut input).unwrap();
+                ack_tx.send(input).unwrap();
+                let result = producer.join().unwrap();
+                if !cancel {
+                    result.unwrap();
+                }
+            });
+            let directory = tempfile::tempdir().unwrap();
+            let (entered, waiting) = mpsc::channel();
+            let (resume, resumed) = mpsc::channel();
+            let service = AuditService::with_recording_files(
+                directory.path().join("audit.db"),
+                AuditTestKeys,
+                Arc::new(PausedFiles {
+                    first: AtomicBool::new(false),
+                    entered,
+                    resume: Mutex::new(resumed),
+                }),
+            )
+            .unwrap();
+            let client = service.client();
+            let runtime = Runtime::new().unwrap();
+            runtime
+                .block_on(client.set_policy(AuditPolicy {
+                    enabled: true,
+                    record_output: true,
+                    ..Default::default()
+                }))
+                .unwrap();
+            let context = AuditContext::new(client.clone(), AuditSource::User)
+                .session("telnet", "pressure-fixture");
+            let mut session = TelnetSession::new_with_login(
+                TelnetSessionConfig {
+                    host: "127.0.0.1".into(),
+                    port,
+                },
+                None,
+                None,
+                Some(context),
+                80,
+                24,
+                Default::default(),
+                TerminalEncoding::Utf8,
+                100,
+            );
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let mut paused = false;
+            loop {
+                session.read_pending();
+                paused |= waiting.try_recv().is_ok();
+                if paused
+                    && session
+                        .recording_pending
+                        .as_mut()
+                        .is_some_and(|pending| !pending.flush())
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "Telnet did not encounter recording pressure"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(
+                session
+                    .read_pending_with_budget(TerminalDrainBudget::normal())
+                    .drained_bytes,
+                0
+            );
+            session.write_input(b"\x03").unwrap();
+            session
+                .send_telnet_control(TelnetControlCommand::InterruptProcess)
+                .unwrap();
+            assert_eq!(
+                ack_rx
+                    .recv_timeout(Duration::from_secs(3))
+                    .expect("recording pause blocked Telnet controls"),
+                [3, 255, 244]
+            );
+            if cancel {
+                session.shutdown();
+            }
+            resume.send(()).unwrap();
+            if !cancel {
+                let deadline = Instant::now() + Duration::from_secs(30);
+                while session.lifecycle.is_running() {
+                    session.read_pending();
+                    assert!(
+                        Instant::now() < deadline,
+                        "Telnet EOF remained blocked after resume"
+                    );
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+            }
+            peer.join().unwrap();
+            let (state, frames) = read_finished(&runtime, &client);
+            assert_eq!(
+                state,
+                if cancel {
+                    RecordingState::Interrupted
+                } else {
+                    RecordingState::Finished
+                }
+            );
+            let mut output = Vec::new();
+            for frame in frames {
+                match frame {
+                    StoredRecordingFrameKind::Output(bytes) => output.extend_from_slice(&bytes),
+                    StoredRecordingFrameKind::Gap { .. } => {
+                        panic!("retryable Telnet recording lost output")
+                    }
+                    _ => {}
+                }
+            }
+            if cancel {
+                assert!(output.len() > 0 && output.len() < corpus.len());
+                assert_eq!(output, corpus.as_bytes()[..output.len()]);
+            } else {
+                assert_eq!(output, corpus.as_bytes());
+            }
+        }
+    }
+
+    #[test]
+    fn telnet_refused_connection_records_failure() {
+        use oxideterm_audit::{AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &AuditTestKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), AuditTestKeys)
+                .unwrap();
+        let context = AuditContext::new(service.client(), AuditSource::User)
+            .session("telnet", &format!("127.0.0.1:{port}"));
+        let mut session = TelnetSession::new_with_login(
+            TelnetSessionConfig {
+                host: "127.0.0.1".to_string(),
+                port,
+            },
+            None,
+            None,
+            Some(context),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            100,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.lifecycle.is_running() && Instant::now() < deadline {
+            session.read_pending();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(matches!(session.lifecycle, TerminalLifecycle::Exited(None)));
+        let page = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(service.client().query(AuditQuery {
+                limit: 20,
+                ..Default::default()
+            }))
+            .unwrap();
+        assert!(
+            page.records
+                .iter()
+                .filter_map(|record| record.details.operation.as_ref())
+                .any(|operation| operation.action == "telnet_connect"
+                    && operation.outcome == AuditOutcome::Failed)
+        );
+    }
+
+    #[test]
+    fn telnet_drop_records_close_request_without_claiming_remote_exit() {
+        use oxideterm_audit::{AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource};
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let peer = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            release_rx.recv().unwrap();
+            drop(stream);
+        });
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &AuditTestKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), AuditTestKeys)
+                .unwrap();
+        let context = AuditContext::new(service.client(), AuditSource::User)
+            .session("telnet", &format!("127.0.0.1:{port}"));
+        let mut session = TelnetSession::new_with_login(
+            TelnetSessionConfig {
+                host: "127.0.0.1".to_string(),
+                port,
+            },
+            None,
+            None,
+            Some(context),
+            80,
+            24,
+            GraphicsOptions::default(),
+            TerminalEncoding::Utf8,
+            100,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !session.connected && Instant::now() < deadline {
+            session.read_pending();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(session.connected);
+        drop(session);
+        let page = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(service.client().query(AuditQuery {
+                limit: 20,
+                ..Default::default()
+            }))
+            .unwrap();
+        assert!(
+            page.records
+                .iter()
+                .filter_map(|record| record.details.operation.as_ref())
+                .any(|operation| operation.action == "telnet_disconnect"
+                    && operation.outcome == AuditOutcome::CancelRequested)
+        );
+        assert!(
+            !page
+                .records
+                .iter()
+                .filter_map(|record| record.details.operation.as_ref())
+                .any(|operation| operation.action == "telnet_disconnect"
+                    && operation.outcome == AuditOutcome::Succeeded)
+        );
+        release_tx.send(()).unwrap();
+        peer.join().unwrap();
+    }
 
     fn uri_login() -> TelnetLoginAutomation {
         TelnetLoginAutomation::new(encode_telnet_login(

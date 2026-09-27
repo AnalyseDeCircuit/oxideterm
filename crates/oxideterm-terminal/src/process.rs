@@ -132,6 +132,9 @@ impl ProcessState {
     }
 
     pub(crate) fn mark_exited(&mut self) {
+        // Foreground probes are no longer needed. Retaining this duplicate master
+        // can keep a saturated PTY child waiting for closure after shutdown.
+        self.pty_master.take();
         self.info.foreground_pid = None;
         self.info.foreground_process_group_id = None;
         self.info.command = None;

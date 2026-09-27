@@ -11,6 +11,7 @@ const EVENT_BYTES: usize = 1024 * 1024;
 
 struct Control {
     boundary: u64,
+    wait_for_output: bool,
     bytes: usize,
     apply: Box<dyn FnOnce(&mut SshPtyCore) -> Result<()> + Send>,
 }
@@ -22,6 +23,7 @@ struct Controls {
 }
 
 struct Status {
+    audit: Option<oxideterm_audit::AuditContext>,
     title: Option<String>,
     lifecycle: TerminalLifecycle,
     interactive: bool,
@@ -105,12 +107,27 @@ impl SshPtySession {
         ))
     }
 
+    pub(crate) fn new_with_audit(
+        config: SshSessionConfig,
+        audit: Option<oxideterm_audit::AuditContext>,
+        cols: usize,
+        rows: usize,
+        graphics: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback: usize,
+    ) -> Self {
+        Self::from_core(SshPtyCore::new_with_audit(
+            config, audit, cols, rows, graphics, encoding, scrollback,
+        ))
+    }
+
     fn from_core(core: SshPtyCore) -> Self {
         reap_workers();
         let runtime = core.runtime.clone();
         let (ui, activity) = crate::activity::terminal_activity_channel();
         let wake_rx = core.activity_receiver();
         let status = Status {
+            audit: core.audit_context(),
             title: core.title(),
             lifecycle: core.lifecycle(),
             interactive: core.is_interactive(),
@@ -206,6 +223,23 @@ impl SshPtySession {
         bytes: usize,
         apply: impl FnOnce(&mut SshPtyCore) -> Result<()> + Send + 'static,
     ) -> Result<()> {
+        self.enqueue_request(bytes, true, apply)
+    }
+
+    fn enqueue_input(
+        &self,
+        bytes: usize,
+        apply: impl FnOnce(&mut SshPtyCore) -> Result<()> + Send + 'static,
+    ) -> Result<()> {
+        self.enqueue_request(bytes, false, apply)
+    }
+
+    fn enqueue_request(
+        &self,
+        bytes: usize,
+        wait_for_output: bool,
+        apply: impl FnOnce(&mut SshPtyCore) -> Result<()> + Send + 'static,
+    ) -> Result<()> {
         if self.shared.cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
@@ -234,6 +268,7 @@ impl SshPtySession {
             .map_or(0, |boundary| boundary.capture());
         controls.queue.push_back(Control {
             boundary,
+            wait_for_output,
             bytes,
             apply: Box::new(apply),
         });
@@ -342,13 +377,38 @@ fn run_worker(shared: &Shared, wake_rx: TerminalActivityReceiver, runtime: tokio
                 shared.failed.store(true, Ordering::Release);
             }
             let events_full = shared.event_bytes.load(Ordering::Acquire) >= EVENT_BYTES;
+            let recording_ready = core.parser_state.flush_recording();
+            if (events_full || !recording_ready) && core.parser_state.pending_writes.is_empty() {
+                // Input acts on the currently displayed terminal state. It must
+                // still allow Ctrl-C while persistence or UI consumption pauses.
+                let input = if control
+                    .as_ref()
+                    .is_some_and(|(next, _)| !next.wait_for_output)
+                {
+                    control.take().map(|(next, _)| next)
+                } else {
+                    let mut queue = shared.controls.lock().expect("SSH parser controls");
+                    let index = queue.queue.iter().position(|next| !next.wait_for_output);
+                    index
+                        .and_then(|index| queue.queue.remove(index))
+                        .inspect(|next| {
+                            queue.bytes -= next.bytes;
+                        })
+                };
+                if let Some(input) = input {
+                    if (input.apply)(&mut core).is_err() {
+                        shared.failed.store(true, Ordering::Release);
+                    }
+                    progress = true;
+                }
+            }
             if !core.parser_state.pending_writes.is_empty() {
                 wait_writer = core
                     .parser_state
                     .command_tx
                     .clone()
                     .zip(core.runtime.clone());
-            } else if !events_full && !core.parser_state.transfer_input_full() {
+            } else if !events_full && recording_ready && !core.parser_state.transfer_input_full() {
                 if control.as_ref().is_some_and(|(_, boundary)| {
                     core.consumed_sequence >= *boundary || !core.lifecycle.is_running()
                 }) {
@@ -438,6 +498,7 @@ fn finish_worker(shared: &Shared) {
         }
         core.parser_state.interrupt_trzsz_transfer();
         core.parser_state.interrupt_modem_transfer();
+        core.parser_state.interrupt_recording();
         core.output_queue.clear();
         core.output_queue_bytes = 0;
         core.parser_state.retire_transport();
@@ -526,6 +587,7 @@ fn publish(shared: &Shared, core: &mut SshPtyCore) {
         if core.handle.is_none() {
             status.connection = None;
         } else if status.connection.is_none() {
+            status.audit = core.audit_context();
             status.connection = core.ssh_connection_handle();
         }
     }
@@ -628,25 +690,25 @@ impl TerminalSessionBackend for SshPtySession {
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
         let bytes = Zeroizing::new(bytes.to_vec());
         let cost = bytes.len();
-        self.enqueue(cost, move |core| core.write_input(&bytes))
+        self.enqueue_input(cost, move |core| core.write_input(&bytes))
     }
 
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         let bytes = Zeroizing::new(bytes.to_vec());
         let cost = bytes.len();
-        self.enqueue(cost, move |core| core.write_protocol_bytes(&bytes))
+        self.enqueue_input(cost, move |core| core.write_protocol_bytes(&bytes))
     }
 
     fn write_text(&mut self, text: &str) -> Result<()> {
         let text = Zeroizing::new(text.to_string());
         let cost = text.len();
-        self.enqueue(cost, move |core| core.write_text(&text))
+        self.enqueue_input(cost, move |core| core.write_text(&text))
     }
 
     fn paste_text(&mut self, text: &str) -> Result<()> {
         let text = Zeroizing::new(text.to_string());
         let cost = text.len();
-        self.enqueue(cost, move |core| core.paste_text(&text))
+        self.enqueue_input(cost, move |core| core.paste_text(&text))
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -759,7 +821,11 @@ impl TerminalSessionBackend for SshPtySession {
         self.shared.tmux_display.ui_state()
     }
 
-    fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
+    fn tmux_action(
+        &mut self,
+        action: crate::TmuxAction,
+        audit: oxideterm_audit::AuditOperation,
+    ) -> Result<bool> {
         let cost = match &action {
             crate::TmuxAction::RunCommand(text)
             | crate::TmuxAction::RenameSession { name: text, .. }
@@ -767,11 +833,19 @@ impl TerminalSessionBackend for SshPtySession {
             _ => 0,
         };
         if self.shared.core.lock().tmux_state().is_none() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Unchanged,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
             return Ok(false);
         }
         let action = Zeroizing::new(action);
         self.enqueue(cost, move |core| {
-            core.parser_state.tmux_action_ref(&action).map(|_| ())
+            core.parser_state
+                .tmux_action_ref(&action, audit)
+                .map(|_| ())
         })?;
         Ok(true)
     }
@@ -887,11 +961,20 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn terminate_active_task(&mut self) -> Result<()> {
-        self.enqueue(0, move |core| core.terminate_active_task())
+        self.enqueue_input(0, move |core| core.terminate_active_task())
     }
 
     fn kill_active_task(&mut self) -> Result<()> {
-        self.enqueue(0, move |core| core.kill_active_task())
+        self.enqueue_input(0, move |core| core.kill_active_task())
+    }
+
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.shared
+            .status
+            .lock()
+            .expect("SSH parser status")
+            .audit
+            .clone()
     }
 
     fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {

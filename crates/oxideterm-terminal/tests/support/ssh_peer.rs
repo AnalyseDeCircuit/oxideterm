@@ -11,6 +11,12 @@ struct Peer {
     input: crossbeam_channel::Sender<(Vec<u8>, Instant)>,
     forwards: std::collections::HashSet<ChannelId>,
     auth_delay: Duration,
+    #[cfg(target_os = "macos")]
+    sessions: std::collections::HashMap<ChannelId, Channel<server::Msg>>,
+    #[cfg(target_os = "macos")]
+    subsystems: std::collections::HashSet<ChannelId>,
+    #[cfg(target_os = "macos")]
+    subsystem_tasks: tokio::task::JoinSet<()>,
 }
 impl server::Handler for Peer {
     type Error = russh::Error;
@@ -30,10 +36,14 @@ impl server::Handler for Peer {
     }
     async fn channel_open_session(
         &mut self,
-        _: Channel<server::Msg>,
+        channel: Channel<server::Msg>,
         reply: server::ChannelOpenHandle,
         _: &mut server::Session,
     ) -> Result<(), Self::Error> {
+        #[cfg(target_os = "macos")]
+        self.sessions.insert(channel.id(), channel);
+        #[cfg(not(target_os = "macos"))]
+        drop(channel);
         reply.accept().await;
         Ok(())
     }
@@ -55,8 +65,44 @@ impl server::Handler for Peer {
         channel: ChannelId,
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
+        #[cfg(target_os = "macos")]
+        self.sessions.remove(&channel);
         session.channel_success(channel)?;
         self.ready.send((session.handle(), channel)).unwrap();
+        Ok(())
+    }
+    #[cfg(target_os = "macos")]
+    async fn subsystem_request(
+        &mut self,
+        channel: ChannelId,
+        name: &str,
+        session: &mut server::Session,
+    ) -> Result<(), Self::Error> {
+        if name != "sftp" {
+            return session.channel_failure(channel);
+        }
+        // Exercise the installed OpenSSH subsystem, including its real file I/O.
+        let mut child = tokio::process::Command::new("/usr/libexec/sftp-server")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .expect("macOS OpenSSH SFTP server");
+        let mut input = child.stdin.take().unwrap();
+        let mut output = child.stdout.take().unwrap();
+        let stream = self.sessions.remove(&channel).unwrap().into_stream();
+        let (mut reader, mut writer) = tokio::io::split(stream);
+        self.subsystems.insert(channel);
+        session.channel_success(channel)?;
+        self.subsystem_tasks.spawn(async move {
+            tokio::select! {
+                _ = tokio::io::copy(&mut reader, &mut input) => {}
+                _ = tokio::io::copy(&mut output, &mut writer) => {}
+            }
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        });
         Ok(())
     }
     async fn channel_open_direct_tcpip(
@@ -79,6 +125,10 @@ impl server::Handler for Peer {
         data: &[u8],
         session: &mut server::Session,
     ) -> Result<(), Self::Error> {
+        #[cfg(target_os = "macos")]
+        if self.subsystems.contains(&channel) {
+            return Ok(());
+        }
         if self.forwards.contains(&channel) {
             session.data(channel, data.to_vec())?;
         } else {
@@ -131,6 +181,12 @@ impl SshPeer {
                     input: input_tx,
                     forwards: Default::default(),
                     auth_delay,
+                    #[cfg(target_os = "macos")]
+                    sessions: Default::default(),
+                    #[cfg(target_os = "macos")]
+                    subsystems: Default::default(),
+                    #[cfg(target_os = "macos")]
+                    subsystem_tasks: tokio::task::JoinSet::new(),
                 },
             )
             .await

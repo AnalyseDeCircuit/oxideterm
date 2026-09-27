@@ -34,6 +34,8 @@ pub(crate) struct TrzszWorkerJob {
     pub(crate) policy: TrzszTransferPolicy,
     pub(crate) event_tx: Sender<TrzszWorkerEvent>,
     pub(crate) terminal_columns: usize,
+    pub(crate) audit: Option<oxideterm_audit::AuditOperation>,
+    pub(crate) connection_lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
 pub(crate) enum TrzszWorkerEvent {
@@ -69,6 +71,50 @@ pub(crate) fn run_trzsz_worker_job(mut job: TrzszWorkerJob) -> Result<(), TrzszE
     if cleanup.cleanup_errors > 0 {
         let _ = job.event_tx.send(TrzszWorkerEvent::PartialCleanup);
     }
+    if let Some(mut audit) = job.audit.take() {
+        let selection = match &job.selection {
+            TrzszPromptSelection::Upload(paths) => format!(
+                "local={}; selected={}",
+                paths.first().map(String::as_str).unwrap_or("unavailable"),
+                paths.len()
+            ),
+            TrzszPromptSelection::DownloadRoot(root) => format!("local_root={root}"),
+            TrzszPromptSelection::Cancelled => "selection=cancelled".to_string(),
+        };
+        audit.summary(&format!(
+            "protocol=trzsz; direction={:?}; {selection}; completed_files={}; cleanup_errors={}",
+            job.request.direction,
+            job.transfer.completed_files(),
+            cleanup.cleanup_errors
+        ));
+        let outcome = if job
+            .connection_lost
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            oxideterm_audit::AuditOutcome::Interrupted
+        } else {
+            match &result {
+                Ok(()) if cleanup.cleanup_errors > 0 => oxideterm_audit::AuditOutcome::Partial,
+                Ok(()) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(error) if is_cancelled_transfer(error) => {
+                    oxideterm_audit::AuditOutcome::Cancelled
+                }
+                Err(_)
+                    if job.transfer.completed_files() > 0 || job.transfer.payload_bytes() > 0 =>
+                {
+                    oxideterm_audit::AuditOutcome::Partial
+                }
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            }
+        };
+        audit.finish(
+            outcome,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            Some(job.transfer.payload_bytes()),
+        );
+    }
+
     result
 }
 

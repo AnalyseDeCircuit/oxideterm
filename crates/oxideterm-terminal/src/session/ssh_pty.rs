@@ -19,6 +19,7 @@ impl PendingSshOutput {
 }
 
 pub(crate) struct SshPtyCore {
+    audit: Option<oxideterm_audit::AuditContext>,
     config: SshSessionConfig,
     parser_state: SshParser,
     activity: crate::activity::TerminalActivitySender,
@@ -46,6 +47,7 @@ impl SshPtyCore {
     ) -> Self {
         Self::new_inner(
             config,
+            None,
             cols,
             rows,
             graphics_options,
@@ -53,6 +55,19 @@ impl SshPtyCore {
             scrollback_lines,
             true,
         )
+    }
+
+    pub(crate) fn new_with_audit(
+        config: SshSessionConfig,
+        audit: Option<oxideterm_audit::AuditContext>,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+    ) -> Self {
+        Self::new_inner(config, audit, cols, rows, graphics_options, encoding,
+            scrollback_lines, true)
     }
 
     #[cfg(test)]
@@ -67,6 +82,7 @@ impl SshPtyCore {
         // State-only tests must not create a runtime or attempt a network connection.
         Self::new_inner(
             config,
+            None,
             cols,
             rows,
             graphics_options,
@@ -78,6 +94,7 @@ impl SshPtyCore {
 
     fn new_inner(
         mut config: SshSessionConfig,
+        audit: Option<oxideterm_audit::AuditContext>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -85,6 +102,7 @@ impl SshPtyCore {
         scrollback_lines: usize,
         start_connection: bool,
     ) -> Self {
+        let audit = audit.or_else(|| config.audit_context());
         let resize = TerminalResize::new(cols, rows, 0, 0);
         let (parser_state, activity) = SshParser::new(
             &config,
@@ -105,6 +123,7 @@ impl SshPtyCore {
             None
         };
         let runtime_handle = runtime.as_ref().map(|runtime| runtime.handle().clone());
+        let connect_audit = audit.clone();
         let mut connect_task = None;
         let (connect_tx, connect_rx) = unbounded();
         if let Some(runtime_handle) = runtime_handle {
@@ -124,7 +143,8 @@ impl SshPtyCore {
                     Some(SshSessionConnection::New(mut ssh_config)) => {
                         ssh_config.cols = cols;
                         ssh_config.rows = rows;
-                        let mut client = SshTransportClient::new(ssh_config);
+                        let mut client = SshTransportClient::new(ssh_config)
+                            .with_audit_context(connect_audit.clone());
                         if let Some(prompt_handler) = prompt_handler {
                             client = client.with_prompt_handler(prompt_handler);
                         }
@@ -175,7 +195,8 @@ impl SshPtyCore {
                     }) => {
                         config.cols = cols;
                         config.rows = rows;
-                        let mut client = SshTransportClient::new(config);
+                        let mut client = SshTransportClient::new(config)
+                            .with_audit_context(connect_audit.clone());
                         if let Some(prompt_handler) = prompt_handler {
                             client = client.with_prompt_handler(prompt_handler);
                         }
@@ -213,6 +234,7 @@ impl SshPtyCore {
         }
 
         Self {
+            audit,
             parser_state,
             config,
             activity,
@@ -241,6 +263,13 @@ impl SshPtyCore {
 
         match result {
             Ok(mut handle) => {
+                // The established transport supplies the recording identity; keep this pane's consumer ID.
+                let mut audit = handle.audit_context().or_else(|| self.audit.clone());
+                if let Some(context) = &mut audit {
+                    context.consumer_id = self.audit.as_ref().and_then(|owner| owner.consumer_id.clone());
+                }
+                self.audit = audit;
+                self.parser_state.set_recording_context(self.audit.as_ref());
                 let activity = self.activity.clone();
                 handle
                     .output_rx
@@ -319,6 +348,11 @@ impl SshPtyCore {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
         loop {
+            // The parser has already consumed this suffix. Retry persistence
+            // before reading more transport bytes or marking EOF as complete.
+            if !self.parser_state.flush_recording() {
+                break;
+            }
             if budget.time_exhausted(started)
                 || report.drained_bytes >= budget.max_bytes
                 || report.events_drained >= budget.max_events
@@ -376,6 +410,17 @@ impl SshPtyCore {
                 }
                 Err(TryRecvError::Disconnected) => {
                     if self.lifecycle.is_running() {
+                        if self.parser_state.flush_buffered_modem_output(false) {
+                            report.mark_changed();
+                        }
+                        if !self.parser_state.flush_recording() {
+                            break;
+                        }
+                        if self.handle.as_ref().is_some_and(SshPtyHandle::shell_started) {
+                            self.parser_state.close_recording();
+                        } else {
+                            self.parser_state.interrupt_recording();
+                        }
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.parser_state.transport_running = false;
                         self.parser_state.tmux_display.reset();
@@ -594,8 +639,8 @@ impl TerminalSessionBackend for SshPtyCore {
         self.parser_state.tmux_state()
     }
 
-    fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
-        self.parser_state.tmux_action(action)
+    fn tmux_action(&mut self, action: crate::TmuxAction, audit: oxideterm_audit::AuditOperation) -> Result<bool> {
+        self.parser_state.tmux_action(action, audit)
     }
 
     fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {
@@ -820,6 +865,7 @@ impl TerminalSessionBackend for SshPtyCore {
         if matches!(self.lifecycle, TerminalLifecycle::Closed) {
             return;
         }
+        self.parser_state.interrupt_recording();
         let _ = self.send_command(SshTransportCommand::Close);
         self.parser_state.command_tx = None;
         self.handle = None;
@@ -827,6 +873,10 @@ impl TerminalSessionBackend for SshPtyCore {
         self.lifecycle = TerminalLifecycle::Closed;
         self.parser_state.transport_running = false;
         self.parser_state.tmux_display.reset();
+    }
+
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.audit.clone()
     }
 
     fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
@@ -896,6 +946,69 @@ mod ssh_output_protocol_tests {
         session.set_output_processor(Some(Arc::new(|bytes| bytes.to_ascii_uppercase())));
         session.set_output_events_enabled(true);
         session
+    }
+
+    #[test]
+    fn ssh_parser_records_display_output_after_trzsz_filter_without_ui_events() {
+        use oxideterm_audit::{
+            AuditContext, AuditKeyProvider, AuditPolicy, AuditService, AuditSource,
+            RecordingState, StoredRecordingFrameKind,
+        };
+        use zeroize::Zeroizing;
+
+        struct Keys;
+        impl AuditKeyProvider for Keys {
+            fn load(&self, _: &str) -> std::result::Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                Ok(Zeroizing::new(vec![13; 32]))
+            }
+            fn create(&self, id: &str) -> std::result::Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                self.load(id)
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let service = AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let client = service.client();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(client.set_policy(AuditPolicy {
+            enabled: true,
+            record_output: true,
+            ..Default::default()
+        })).unwrap();
+        let context = AuditContext::new(client.clone(), AuditSource::User)
+            .session("ssh", "test@example.invalid:22").consumer();
+        let mut session = session();
+        session.set_output_events_enabled(false);
+        session.parser_state.set_recording_context(Some(&context));
+        session.parser_state.feed_transport_output(b"visible-shell-output\r\n");
+        let handshake = b"::TRZSZ:TRANSFER:R:1.1.6:9\n";
+        let config = b"#CFG:eJyrVkrKzEssqlSySkvMKU7VUUrJLEpNLsmHi9QCANctDJE=\n";
+        session.parser_state.feed_transport_output(handshake);
+        let _transfer = session.take_trzsz_transfer().expect("transfer worker");
+        session.parser_state.feed_transport_output(config);
+        session.parser_state.close_recording();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let recording_id = loop {
+            let list = runtime.block_on(client.list_recordings(None, 10)).unwrap();
+            if let Some(recording) = list.recordings.first()
+                && recording.state == RecordingState::Finished
+            {
+                break recording.id.clone();
+            }
+            assert!(Instant::now() < deadline, "SSH parser recording should close");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let page = runtime.block_on(client.read_recording_page(recording_id, None, None, 10)).unwrap();
+        let output: Vec<u8> = page.chunks.iter().flat_map(|chunk| &chunk.frames)
+            .filter_map(|frame| match &frame.kind {
+                StoredRecordingFrameKind::Output(bytes) => Some(bytes.as_slice()),
+                _ => None,
+            }).flatten().copied().collect();
+        assert!(output.windows(b"VISIBLE-SHELL-OUTPUT".len())
+            .any(|window| window == b"VISIBLE-SHELL-OUTPUT"));
+        assert!(!output.windows(config.len()).any(|window| window == config));
+        assert!(session.take_events().into_iter().all(|event| !matches!(event, TerminalEvent::Output(_))));
     }
 
     #[test]

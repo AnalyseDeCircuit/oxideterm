@@ -61,6 +61,8 @@ pub struct TrzszTransfer {
     stopped: bool,
     max_chunk_time: Duration,
     protocol_newline: &'static str,
+    payload_bytes: u64,
+    completed_files: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -105,7 +107,17 @@ impl TrzszTransfer {
             stopped: false,
             max_chunk_time: Duration::ZERO,
             protocol_newline: "\n",
+            payload_bytes: 0,
+            completed_files: 0,
         }
+    }
+
+    pub fn payload_bytes(&self) -> u64 {
+        self.payload_bytes
+    }
+
+    pub fn completed_files(&self) -> u64 {
+        self.completed_files
     }
 
     pub fn add_received_data(&mut self, data: &[u8]) {
@@ -215,6 +227,7 @@ impl TrzszTransfer {
             )?;
             file.close_file();
             self.send_file_md5(&digest, progress.as_deref_mut())?;
+            self.completed_files = self.completed_files.saturating_add(1);
         }
 
         Ok(remote_names)
@@ -284,6 +297,9 @@ impl TrzszTransfer {
 
         for file in &mut created_files {
             file.commit_file()?;
+            if !file.is_dir() {
+                self.completed_files = self.completed_files.saturating_add(1);
+            }
         }
 
         Ok(local_names)
@@ -527,6 +543,7 @@ impl TrzszTransfer {
             context.consume(&data);
             self.check_integer(data.len() as u64)?;
             step += data.len() as u64;
+            self.payload_bytes = self.payload_bytes.saturating_add(data.len() as u64);
             if let Some(progress) = progress.as_deref_mut() {
                 progress.on_step(step);
             }
@@ -619,6 +636,7 @@ impl TrzszTransfer {
             let data = self.recv_data(binary, escape_codes, timeout)?;
             file.write_file(&data)?;
             step += data.len() as u64;
+            self.payload_bytes = self.payload_bytes.saturating_add(data.len() as u64);
             if let Some(progress) = progress.as_deref_mut() {
                 progress.on_step(step);
             }
@@ -802,6 +820,8 @@ mod tests {
             )
             .unwrap();
         assert_eq!(names, vec!["remote.txt"]);
+        assert_eq!(transfer.payload_bytes(), 5);
+        assert_eq!(transfer.completed_files(), 1);
         let writes = output.lock().unwrap();
         assert!(
             String::from_utf8(writes[0].clone())

@@ -9,10 +9,12 @@
 use std::{
     borrow::Cow,
     cell::Cell,
+    cell::RefCell,
     collections::VecDeque,
     fmt::{self, Display, Formatter},
     io::{self, ErrorKind, Read, Write},
     num::NonZeroUsize,
+    rc::Rc,
     sync::{
         Arc,
         mpsc::{self, Receiver, Sender, TryRecvError},
@@ -21,6 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::recording_output::RecordingOutput;
 use alacritty_terminal::{
     event::{Event, EventListener, Notify, OnResize, WindowSize},
     sync::FairMutex,
@@ -59,7 +62,7 @@ const PTY_CHILD_EVENT_TOKEN: usize = 1;
 
 pub(crate) enum LocalGraphicsMsg {
     Input(Cow<'static, [u8]>),
-    ControlInput(Cow<'static, [u8]>),
+    ControlInput(Cow<'static, [u8]>, Option<crate::tmux::ExternalReply>),
     Shutdown,
     Resize(WindowSize),
     SetEncoding(TerminalEncoding),
@@ -82,18 +85,21 @@ pub(crate) struct LocalPtyReadReport {
     pub(crate) output_processing_duration: Duration,
     pub(crate) terminal_lock_wait_duration: Duration,
     pub(crate) budget_exhausted: bool,
+    pub(crate) recording_backpressured: bool,
 }
 
 pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     poll: Arc<Poller>,
-    pty: tty::Pty,
+    // Stop the reader and release its master descriptor before PTY child teardown.
     #[cfg(target_os = "macos")]
     read_ahead: read_ahead::PtyReadAhead,
+    pty: tty::Pty,
     rx: PeekableReceiver<LocalGraphicsMsg>,
     tx: Sender<LocalGraphicsMsg>,
     terminal: Arc<FairMutex<Term<U>>>,
     event_proxy: U,
     drain_on_exit: bool,
+    read_eof: bool,
     graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
     magic_tx: CrossbeamSender<TerminalMagicKind>,
     event_tx: CrossbeamSender<TerminalEvent>,
@@ -101,6 +107,7 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     size: TerminalSize,
     graphics_options: GraphicsOptions,
     encoding: TerminalEncoding,
+    recording_sink: Option<oxideterm_audit::RecordingSink>,
     tmux_controller: Option<crate::tmux::TmuxController>,
 }
 
@@ -120,6 +127,7 @@ where
         size: TerminalSize,
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
+        recording_sink: Option<oxideterm_audit::RecordingSink>,
         tmux_controller: crate::tmux::TmuxController,
     ) -> io::Result<Self> {
         let (tx, rx) = mpsc::channel();
@@ -136,6 +144,7 @@ where
             terminal,
             event_proxy,
             drain_on_exit,
+            read_eof: false,
             graphics_tx,
             magic_tx,
             event_tx: terminal_event_tx,
@@ -143,6 +152,7 @@ where
             size,
             graphics_options,
             encoding,
+            recording_sink,
             tmux_controller: Some(tmux_controller),
         })
     }
@@ -170,6 +180,10 @@ where
             let encoding_detector = &mut state.encoding_detector;
             let output_decoder = &mut state.output_decoder;
             let output_events_enabled = state.output_events_enabled;
+            let recording_sink = state.recording_sink.as_ref();
+            let recording_pending = state.recording_pending.clone();
+            let record_output = output_events_enabled
+                || recording_sink.is_some_and(oxideterm_audit::RecordingSink::is_enabled);
             let trigger_stream = &mut state.trigger_stream;
             let privilege_prompt = &mut state.privilege_prompt;
             let shell_integration = &mut state.shell_integration;
@@ -191,7 +205,7 @@ where
                         for event in privilege_prompt.observe(decoded.as_ref()) {
                             let _ = event_tx.send(TerminalEvent::PrivilegePrompt(event));
                         }
-                        if output_events_enabled {
+                        if record_output {
                             // Persist only bytes released by the shell-integration
                             // scanner so invisible private clipboard OSC cannot enter recordings.
                             let (_, recordable) = shell_integration.advance_with_recording(
@@ -203,7 +217,12 @@ where
                                 },
                             );
                             if !recordable.is_empty() {
-                                let _ = event_tx.send(TerminalEvent::Output(recordable));
+                                if let Some(pending) = &recording_pending {
+                                    pending.borrow_mut().output(&recordable);
+                                }
+                                if output_events_enabled {
+                                    let _ = event_tx.send(TerminalEvent::Output(recordable));
+                                }
                             }
                         } else {
                             shell_integration.advance(
@@ -308,7 +327,13 @@ where
                         .tmux_controller
                         .take()
                         .expect("local tmux controller must remain owned by the reader state");
-                    let record_output = state.output_events_enabled;
+                    let record_output = state.output_events_enabled
+                        || state
+                            .recording_sink
+                            .as_ref()
+                            .is_some_and(oxideterm_audit::RecordingSink::is_enabled);
+                    let recording_pending = state.recording_pending.clone();
+                    let output_events_enabled = state.output_events_enabled;
                     let result = controller.advance(
                         &bytes,
                         |terminal_bytes| {
@@ -325,6 +350,14 @@ where
                         },
                         record_output,
                         |event| {
+                            if let TerminalEvent::Output(bytes) = &event {
+                                if let Some(pending) = &recording_pending {
+                                    pending.borrow_mut().output(bytes);
+                                }
+                                if !output_events_enabled {
+                                    return;
+                                }
+                            }
                             let _ = event_tx.send(event);
                         },
                     );
@@ -336,9 +369,7 @@ where
                                 let _ =
                                     graphics_tx.send(TerminalGraphicsEvent::Delete { id: None });
                             }
-                            state.push_priority_writes(
-                                outcome.commands.into_iter().map(Cow::Owned).collect(),
-                            );
+                            state.push_tmux_writes(outcome.commands, outcome.replies);
                             graphics_changed |= outcome.changed;
                         }
                         Err(error) => {
@@ -409,8 +440,8 @@ where
                 LocalGraphicsMsg::Input(input) => {
                     state.write_list.push_back(Writing::new(input));
                 }
-                LocalGraphicsMsg::ControlInput(input) => {
-                    state.push_priority_write(input);
+                LocalGraphicsMsg::ControlInput(input, reply) => {
+                    state.push_external_tmux_write(input, reply);
                 }
                 LocalGraphicsMsg::Resize(window_size) => {
                     let grid_changed = self.size.cols != window_size.num_cols as usize
@@ -429,6 +460,13 @@ where
                             });
                     }
                     self.pty.on_resize(window_size);
+                    if grid_changed {
+                        if let Some(pending) = &state.recording_pending {
+                            pending
+                                .borrow_mut()
+                                .resize(window_size.num_cols, window_size.num_lines);
+                        }
+                    }
                     if let Some(controller) = state.tmux_controller.as_mut() {
                         controller.resize(self.size);
                     }
@@ -481,7 +519,12 @@ where
                 LocalGraphicsMsg::InterruptModemTransfer => {
                     state.modem_consumer.interrupt_transfer();
                 }
-                LocalGraphicsMsg::Shutdown => return false,
+                LocalGraphicsMsg::Shutdown => {
+                    if let Some(sink) = &state.recording_sink {
+                        sink.interrupt();
+                    }
+                    return false;
+                }
             }
         }
 
@@ -493,6 +536,12 @@ where
         state: &mut LocalGraphicsState,
         buf: &mut [u8],
     ) -> io::Result<LocalPtyReadReport> {
+        if !state.flush_recording() {
+            return Ok(LocalPtyReadReport {
+                recording_backpressured: true,
+                ..Default::default()
+            });
+        }
         let mut unprocessed = 0;
         let mut processed = 0;
         let mut raw_bytes = 0;
@@ -510,7 +559,10 @@ where
             #[cfg(not(target_os = "macos"))]
             let read = self.pty.reader().read(&mut buf[unprocessed..]);
             match read {
-                Ok(0) if unprocessed == 0 => break,
+                Ok(0) if unprocessed == 0 => {
+                    self.read_eof = true;
+                    break;
+                }
                 Ok(got) => {
                     unprocessed += got;
                     raw_bytes += got;
@@ -554,7 +606,7 @@ where
             processed += parsed_bytes;
             unprocessed = 0;
 
-            if processed >= LOCAL_MAX_LOCKED_PARSE_BYTES {
+            if !state.flush_recording() || processed >= LOCAL_MAX_LOCKED_PARSE_BYTES {
                 budget_exhausted = true;
                 break;
             }
@@ -572,7 +624,7 @@ where
         }
 
         #[cfg(target_os = "macos")]
-        if self.read_ahead.has_pending() {
+        if self.read_ahead.has_pending() && state.flush_recording() {
             self.poll.notify()?;
         }
         Ok(LocalPtyReadReport {
@@ -582,6 +634,7 @@ where
             output_processing_duration,
             terminal_lock_wait_duration,
             budget_exhausted,
+            recording_backpressured: !state.flush_recording(),
         })
     }
 
@@ -629,6 +682,7 @@ where
             output_processing_duration,
             terminal_lock_wait_duration,
             budget_exhausted: false,
+            recording_backpressured: !state.flush_recording(),
         })
     }
 
@@ -645,6 +699,22 @@ where
                     Ok(n) => {
                         current.advance(n);
                         if current.finished() {
+                            if let Some(reply) = current.tmux_reply.take() {
+                                if let Some(controller) = state.tmux_controller.as_ref() {
+                                    match reply {
+                                        TmuxWriteReply::Internal(reply) => {
+                                            controller.register_written_reply(reply)
+                                        }
+                                        TmuxWriteReply::External(Some(reply)) => controller
+                                            .register_written_reply(
+                                                crate::tmux::ReplyTag::External(reply),
+                                            ),
+                                        TmuxWriteReply::External(None) => {
+                                            controller.register_external_write()
+                                        }
+                                    }
+                                }
+                            }
                             state.goto_next();
                             break 'write_one;
                         }
@@ -695,7 +765,16 @@ where
                     self.tmux_controller
                         .take()
                         .expect("local tmux controller must be transferred once"),
+                    self.recording_sink.take(),
                 );
+                if let Some(sink) = &state.recording_sink {
+                    let poll = self.poll.clone();
+                    sink.set_wake_callback(Arc::new(move || {
+                        let _ = poll.notify();
+                    }));
+                }
+                let mut child_exited = false;
+                let mut trailing_flushed = false;
                 let mut buf = [0u8; LOCAL_PTY_READ_BUFFER_BYTES];
                 let poll_opts = PollMode::Level;
                 #[cfg(target_os = "macos")]
@@ -711,13 +790,16 @@ where
                 let mut events = Events::with_capacity(NonZeroUsize::new(1024).unwrap());
 
                 'event_loop: loop {
+                    let recording_ready = state.flush_recording();
                     let handler = state.parser.sync_timeout();
                     let parser_timeout = handler
                         .sync_timeout()
                         .map(|deadline| deadline.saturating_duration_since(Instant::now()));
                     let timeout = [
                         parser_timeout,
-                        state.modem_consumer.pending_plain_output_delay(),
+                        recording_ready
+                            .then(|| state.modem_consumer.pending_plain_output_delay())
+                            .flatten(),
                     ]
                     .into_iter()
                     .flatten()
@@ -735,9 +817,11 @@ where
                     }
 
                     let modem_writes_queued = self.flush_modem_server_writes(&mut state);
-                    let modem_output_flushed = self.flush_buffered_modem_output(&mut state, false);
+                    let recording_ready = state.flush_recording();
+                    let modem_output_flushed =
+                        recording_ready && self.flush_buffered_modem_output(&mut state, false);
                     #[cfg(target_os = "macos")]
-                    let pending_reads = self.read_ahead.has_pending();
+                    let pending_reads = recording_ready && self.read_ahead.has_pending();
                     #[cfg(not(target_os = "macos"))]
                     let pending_reads = false;
                     if events.is_empty()
@@ -745,6 +829,7 @@ where
                         && self.rx.peek().is_none()
                         && !modem_writes_queued
                         && !modem_output_flushed
+                        && !child_exited
                     {
                         state.parser.stop_sync(&mut *self.terminal.lock());
                         self.event_proxy.send_event(Event::Wakeup);
@@ -773,40 +858,10 @@ where
                                     if let Some(status) = status {
                                         self.event_proxy.send_event(Event::ChildExit(status));
                                     }
+                                    child_exited = true;
                                     #[cfg(target_os = "macos")]
-                                    if self.drain_on_exit {
-                                        self.read_ahead.finish();
-                                        loop {
-                                            match self.read_ahead.wait_pending() {
-                                                Ok(true) => {},
-                                                Ok(false) => break,
-                                                Err(error) => {
-                                                    tracing::error!(%error, "local PTY exit read failed");
-                                                    break;
-                                                }
-                                            }
-                                            match self.pty_read(&mut state, &mut buf) {
-                                                Ok(report) => self.send_read_report(report),
-                                                Err(error) => {
-                                                    tracing::error!(%error, "local PTY exit drain failed");
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                    }
-                                    #[cfg(not(target_os = "macos"))]
-                                    if self.drain_on_exit {
-                                        if let Ok(report) = self.pty_read(&mut state, &mut buf) {
-                                            self.send_read_report(report);
-                                        }
-                                    }
-                                    self.flush_buffered_modem_output(&mut state, true);
-                                    if let Ok(report) = self.flush_utf8_residual(&mut state) {
-                                        self.send_read_report(report);
-                                    }
-                                    self.terminal.lock().exit();
-                                    self.event_proxy.send_event(Event::Wakeup);
-                                    break 'event_loop;
+                                    self.read_ahead.finish();
+                                    let _ = self.poll.notify();
                                 }
                             }
                             PTY_READ_WRITE_TOKEN => {
@@ -814,7 +869,7 @@ where
                                     continue;
                                 }
 
-                                if event.readable {
+                                if event.readable && state.flush_recording() {
                                     match self.pty_read(&mut state, &mut buf) {
                                         Ok(report) => self.send_read_report(report),
                                         Err(error) => {
@@ -854,9 +909,47 @@ where
                         break 'event_loop;
                     }
 
+                    if child_exited && state.flush_recording() {
+                        if self.drain_on_exit && !self.read_eof {
+                            match self.pty_read(&mut state, &mut buf) {
+                                Ok(report) => self.send_read_report(report),
+                                #[cfg(unix)]
+                                Err(error) if error.raw_os_error() == Some(libc::EIO) => {
+                                    self.read_eof = true
+                                }
+                                Err(error) => {
+                                    tracing::error!(%error, "local PTY exit drain failed");
+                                    break 'event_loop;
+                                }
+                            }
+                        }
+                        if (!self.drain_on_exit || self.read_eof) && state.flush_recording() {
+                            if !trailing_flushed {
+                                self.flush_buffered_modem_output(&mut state, true);
+                                if let Ok(report) = self.flush_utf8_residual(&mut state) {
+                                    self.send_read_report(report);
+                                }
+                                trailing_flushed = true;
+                            }
+                            if state.flush_recording() {
+                                self.terminal.lock().exit();
+                                if let Some(sink) = &state.recording_sink {
+                                    sink.close();
+                                }
+                                self.event_proxy.send_event(Event::Wakeup);
+                                break 'event_loop;
+                            }
+                        }
+                    }
+
                     let needs_write = state.needs_write();
-                    if needs_write != interest.writable {
+                    #[cfg(target_os = "macos")]
+                    let needs_read = false;
+                    #[cfg(not(target_os = "macos"))]
+                    let needs_read = !self.read_eof && state.flush_recording();
+                    if needs_write != interest.writable || needs_read != interest.readable {
                         interest.writable = needs_write;
+                        interest.readable = needs_read;
                         if let Err(error) = self.pty.reregister(&self.poll, interest, poll_opts) {
                             tracing::error!(
                                 %error,
@@ -873,7 +966,11 @@ where
     }
 
     fn send_read_report(&self, report: LocalPtyReadReport) {
-        if report.raw_bytes > 0 || report.parsed_bytes > 0 || report.budget_exhausted {
+        if report.raw_bytes > 0
+            || report.parsed_bytes > 0
+            || report.budget_exhausted
+            || report.recording_backpressured
+        {
             let _ = self.stats_tx.send(report);
         }
     }
@@ -883,6 +980,12 @@ struct Writing {
     source: Cow<'static, [u8]>,
     written: usize,
     modem_completion: Option<(ModemTransfer, usize)>,
+    tmux_reply: Option<TmuxWriteReply>,
+}
+
+enum TmuxWriteReply {
+    Internal(crate::tmux::ReplyTag),
+    External(Option<crate::tmux::ExternalReply>),
 }
 
 pub(crate) struct LocalGraphicsNotifier(pub(crate) LocalGraphicsEventLoopSender);
@@ -952,6 +1055,8 @@ struct LocalGraphicsState {
     magic_scan: MagicScanWindow,
     output_processor: Option<TerminalOutputProcessor>,
     output_events_enabled: bool,
+    recording_sink: Option<oxideterm_audit::RecordingSink>,
+    recording_pending: Option<Rc<RefCell<RecordingOutput>>>,
     trigger_stream: Option<oxideterm_terminal_triggers::TerminalTriggerStream>,
     output_decoder: TerminalOutputDecoder,
     privilege_prompt: TerminalPrivilegePromptStream,
@@ -968,7 +1073,11 @@ impl LocalGraphicsState {
         encoding: TerminalEncoding,
         modem_wake: Arc<dyn Fn() + Send + Sync + 'static>,
         tmux_controller: crate::tmux::TmuxController,
+        recording_sink: Option<oxideterm_audit::RecordingSink>,
     ) -> Self {
+        let recording_pending = recording_sink
+            .as_ref()
+            .map(|sink| Rc::new(RefCell::new(RecordingOutput::new(sink.clone()))));
         Self {
             priority_writes: VecDeque::new(),
             write_list: VecDeque::new(),
@@ -979,6 +1088,8 @@ impl LocalGraphicsState {
             magic_scan: MagicScanWindow::default(),
             output_processor: None,
             output_events_enabled: false,
+            recording_sink,
+            recording_pending,
             trigger_stream: None,
             output_decoder: TerminalOutputDecoder::new(encoding),
             privilege_prompt: TerminalPrivilegePromptStream::default(),
@@ -988,6 +1099,12 @@ impl LocalGraphicsState {
             alt_screen_active: false,
             tmux_controller: Some(tmux_controller),
         }
+    }
+
+    fn flush_recording(&self) -> bool {
+        self.recording_pending
+            .as_ref()
+            .is_none_or(|pending| pending.borrow_mut().flush())
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -1053,6 +1170,29 @@ impl LocalGraphicsState {
         self.ensure_next();
     }
 
+    fn push_tmux_writes(&mut self, commands: Vec<Vec<u8>>, replies: Vec<crate::tmux::ReplyTag>) {
+        for (bytes, reply) in commands.into_iter().zip(replies) {
+            let mut writing = Writing::new(Cow::Owned(bytes));
+            writing.tmux_reply = Some(TmuxWriteReply::Internal(reply));
+            self.priority_writes.push_back(writing);
+        }
+        self.ensure_next();
+    }
+
+    fn push_external_tmux_write(
+        &mut self,
+        bytes: Cow<'static, [u8]>,
+        reply: Option<crate::tmux::ExternalReply>,
+    ) {
+        if bytes.is_empty() {
+            return;
+        }
+        let mut writing = Writing::new(bytes);
+        writing.tmux_reply = Some(TmuxWriteReply::External(reply));
+        self.priority_writes.push_back(writing);
+        self.ensure_next();
+    }
+
     fn push_modem_write(&mut self, bytes: Vec<u8>, transfer: ModemTransfer) {
         if bytes.is_empty() {
             return;
@@ -1090,6 +1230,7 @@ impl Writing {
             source,
             written: 0,
             modem_completion: None,
+            tmux_reply: None,
         }
     }
 
@@ -1099,6 +1240,7 @@ impl Writing {
             source: Cow::Owned(source),
             written: 0,
             modem_completion: Some((transfer, byte_len)),
+            tmux_reply: None,
         }
     }
 

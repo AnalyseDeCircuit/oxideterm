@@ -190,6 +190,8 @@ struct TransientLiteralQuery {
 
 #[derive(Default)]
 pub(crate) struct CommandFactLedger {
+    audit: Option<oxideterm_audit::AuditContext>,
+    audit_commands: HashMap<String, oxideterm_audit::AuditOperation>,
     facts: Vec<TerminalCommandFact>,
     ai_records: Vec<TerminalAiCommandRecord>,
     autosuggest_records: Vec<TerminalAutosuggestCommandRecord>,
@@ -197,6 +199,85 @@ pub(crate) struct CommandFactLedger {
 }
 
 impl CommandFactLedger {
+    pub(crate) fn set_audit_context(&mut self, context: Option<oxideterm_audit::AuditContext>) {
+        // In-flight guards retain their original connection snapshot.
+        self.audit = context;
+    }
+
+    pub(crate) fn with_audit(context: Option<oxideterm_audit::AuditContext>) -> Self {
+        Self {
+            audit: context,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn audit_enabled(&self) -> bool {
+        self.audit.is_some()
+    }
+
+    pub(crate) fn record_dispatch(
+        &self,
+        command_id: Option<&str>,
+        parent_id: Option<&str>,
+        source: oxideterm_audit::AuditSource,
+        sent: bool,
+    ) {
+        let Some(mut context) = self.audit.clone() else {
+            return;
+        };
+        let request = oxideterm_audit::AuditContext::current_request();
+        if let Some(request) = &request {
+            context.agent_id = request.agent_id.clone();
+            if context.parent_id.is_none() {
+                context.parent_id = request.parent_id.clone();
+            }
+        }
+        let request_source = request.map(|request| request.source);
+        context.source = request_source
+            .filter(|source| {
+                matches!(
+                    source,
+                    oxideterm_audit::AuditSource::Ai
+                        | oxideterm_audit::AuditSource::Mcp
+                        | oxideterm_audit::AuditSource::Plugin
+                        | oxideterm_audit::AuditSource::Cli
+                )
+            })
+            .unwrap_or(source);
+        let inherited_parent = context.parent_id.clone();
+        context.parent_id = command_id
+            .and_then(|id| self.audit_commands.get(id))
+            .and_then(oxideterm_audit::AuditOperation::id)
+            .map(str::to_string)
+            .or_else(|| parent_id.map(str::to_string))
+            .or(inherited_parent);
+        context
+            .operation(
+                oxideterm_audit::AuditCategory::Automation,
+                "command_dispatch",
+                None,
+            )
+            .finish(
+                if sent {
+                    oxideterm_audit::AuditOutcome::Sent
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
+    }
+
+    pub(crate) fn disable_audit(&mut self) {
+        self.audit = None;
+        self.audit_commands.clear();
+    }
+
+    pub(crate) fn interrupt_audit_commands(&mut self) {
+        self.audit_commands.clear();
+    }
+
     pub(crate) fn facts(&self) -> Vec<TerminalCommandFact> {
         self.facts.clone()
     }
@@ -280,6 +361,48 @@ impl CommandFactLedger {
         }
 
         self.close_previous_open(mark.start_line);
+        if let Some(context) = &self.audit {
+            let mut context = context.clone();
+            let request = oxideterm_audit::AuditContext::current_request();
+            if let Some(request) = &request {
+                context.agent_id = request.agent_id.clone();
+                if context.parent_id.is_none() {
+                    context.parent_id = request.parent_id.clone();
+                }
+            }
+            let request_source = request.map(|request| request.source);
+            context.source = request_source
+                .filter(|source| {
+                    matches!(
+                        source,
+                        oxideterm_audit::AuditSource::Ai
+                            | oxideterm_audit::AuditSource::Mcp
+                            | oxideterm_audit::AuditSource::Plugin
+                            | oxideterm_audit::AuditSource::Cli
+                    )
+                })
+                .unwrap_or(match mark.submitted_by.unwrap_or(mark.detection_source) {
+                    TerminalCommandMarkDetectionSource::Ai => oxideterm_audit::AuditSource::Ai,
+                    TerminalCommandMarkDetectionSource::Broadcast => {
+                        oxideterm_audit::AuditSource::Broadcast
+                    }
+                    TerminalCommandMarkDetectionSource::CommandBar => {
+                        oxideterm_audit::AuditSource::CommandBar
+                    }
+                    TerminalCommandMarkDetectionSource::QuickCommand => {
+                        oxideterm_audit::AuditSource::QuickCommand
+                    }
+                    _ => oxideterm_audit::AuditSource::User,
+                });
+            self.audit_commands.insert(
+                mark.command_id.clone(),
+                context.operation(
+                    oxideterm_audit::AuditCategory::Command,
+                    "command_execute",
+                    mark.command.as_deref(),
+                ),
+            );
+        }
         // The pane owns one derived query for only the latest command fact. Replacing
         // it here prevents a prior grep query from leaking into later output.
         self.transient_command_highlight = mark
@@ -345,6 +468,25 @@ impl CommandFactLedger {
     }
 
     pub(crate) fn close_from_mark(&mut self, mark: &TerminalCommandMark) {
+        if let Some(operation) = self.audit_commands.remove(&mark.command_id) {
+            use oxideterm_audit::{AuditEvidence, AuditOutcome};
+            let evidence = if mark.closed_by == Some(TerminalCommandMarkClosedBy::ShellIntegration)
+            {
+                AuditEvidence::ShellIntegration
+            } else {
+                AuditEvidence::InputInference
+            };
+            let outcome = if evidence == AuditEvidence::ShellIntegration {
+                match mark.exit_code {
+                    Some(0) => AuditOutcome::Succeeded,
+                    Some(_) => AuditOutcome::Failed,
+                    None => AuditOutcome::Unknown,
+                }
+            } else {
+                AuditOutcome::Unknown
+            };
+            operation.finish(outcome, evidence, mark.exit_code, None);
+        }
         let mut closed_fact = None;
         if let Some(fact) = self
             .facts
@@ -386,6 +528,14 @@ impl CommandFactLedger {
     }
 
     fn close_previous_open(&mut self, next_start_line: usize) {
+        for (_, operation) in self.audit_commands.drain() {
+            operation.finish(
+                oxideterm_audit::AuditOutcome::Unknown,
+                oxideterm_audit::AuditEvidence::InputInference,
+                None,
+                None,
+            );
+        }
         let now = now_millis();
         for fact in &mut self.facts {
             if fact.status != TerminalCommandFactStatus::Open {
@@ -646,6 +796,22 @@ fn now_millis() -> u64 {
 mod tests {
     use super::*;
 
+    struct Keys;
+    impl oxideterm_audit::AuditKeyProvider for Keys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![7; 32]))
+        }
+        fn create(
+            &self,
+            id: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
     fn mark(command_id: &str, command: Option<&str>, closed: bool) -> TerminalCommandMark {
         TerminalCommandMark {
             command_id: command_id.to_string(),
@@ -666,6 +832,222 @@ mod tests {
             started_at: 100,
             finished_at: closed.then_some(120),
         }
+    }
+
+    #[test]
+    fn quick_command_dispatch_and_shell_result_share_one_command_identity() {
+        use oxideterm_audit::*;
+
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let mut context = AuditContext::new(service.client(), AuditSource::User)
+            .session("ssh", "operator@example.invalid:22")
+            .consumer();
+        context.parent_id = Some("quick-batch-1".to_string());
+        let mut ledger = CommandFactLedger::with_audit(Some(context));
+        let mut started = mark("quick-target-1", Some("printf done"), false);
+        started.detection_source = TerminalCommandMarkDetectionSource::QuickCommand;
+        ledger.create_from_mark(&started);
+        ledger.record_dispatch(
+            Some(&started.command_id),
+            Some("quick-batch-1"),
+            AuditSource::QuickCommand,
+            true,
+        );
+        let mut closed = mark("quick-target-1", Some("printf done"), true);
+        closed.submitted_by = Some(TerminalCommandMarkDetectionSource::QuickCommand);
+        ledger.close_from_mark(&closed);
+
+        let page = futures::executor::block_on(service.client().query(AuditQuery {
+            limit: 20,
+            ..Default::default()
+        }))
+        .unwrap();
+        let command_records = page
+            .records
+            .iter()
+            .filter(|record| record.category == AuditCategory::Command)
+            .map(|record| record.details.operation.as_ref().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(command_records.len(), 2);
+        assert_eq!(command_records[0].id, command_records[1].id);
+        assert!(
+            command_records
+                .iter()
+                .all(|op| op.parent_id.as_deref() == Some("quick-batch-1")
+                    && op.source == AuditSource::QuickCommand)
+        );
+        assert!(
+            command_records
+                .iter()
+                .any(|op| op.outcome == AuditOutcome::Succeeded
+                    && op.evidence == AuditEvidence::ShellIntegration)
+        );
+        let dispatch = page
+            .records
+            .iter()
+            .filter(|record| record.category == AuditCategory::Automation)
+            .find_map(|record| {
+                record
+                    .details
+                    .operation
+                    .as_ref()
+                    .filter(|op| op.action == "command_dispatch")
+            })
+            .unwrap();
+        assert_eq!(
+            dispatch.parent_id.as_deref(),
+            Some(command_records[0].id.as_str())
+        );
+        assert_eq!(dispatch.outcome, AuditOutcome::Sent);
+    }
+
+    #[test]
+    fn audit_keeps_started_command_owner_when_the_terminal_context_changes() {
+        use oxideterm_audit::*;
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let base = AuditContext::new(service.client(), AuditSource::User);
+        let old = base.session("ssh", "alice@old.example:22").consumer();
+        let new = base.session("ssh", "bob@new.example:2222").consumer();
+        let mut ledger = CommandFactLedger::with_audit(Some(old.clone()));
+        ledger.create_from_mark(&mark("old", Some("pwd"), false));
+        ledger.set_audit_context(Some(new.clone()));
+        ledger.close_from_mark(&mark("old", Some("pwd"), true));
+        ledger.create_from_mark(&mark("new", Some("date"), false));
+        ledger.close_from_mark(&mark("new", Some("date"), true));
+        let page = futures::executor::block_on(service.client().query(AuditQuery {
+            limit: 20,
+            ..Default::default()
+        }))
+        .unwrap();
+        let actual = page
+            .records
+            .iter()
+            .map(|record| {
+                let op = record.details.operation.as_ref().unwrap();
+                (
+                    record.details.target.as_ref().unwrap().as_str(),
+                    op.session_id.as_deref(),
+                    op.consumer_id.as_deref(),
+                    op.outcome,
+                    op.exit_code,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            actual,
+            [
+                (
+                    "bob@new.example:2222",
+                    new.session_id.as_deref(),
+                    new.consumer_id.as_deref(),
+                    AuditOutcome::Succeeded,
+                    Some(0)
+                ),
+                (
+                    "bob@new.example:2222",
+                    new.session_id.as_deref(),
+                    new.consumer_id.as_deref(),
+                    AuditOutcome::Started,
+                    None
+                ),
+                (
+                    "alice@old.example:22",
+                    old.session_id.as_deref(),
+                    old.consumer_id.as_deref(),
+                    AuditOutcome::Succeeded,
+                    Some(0)
+                ),
+                (
+                    "alice@old.example:22",
+                    old.session_id.as_deref(),
+                    old.consumer_id.as_deref(),
+                    AuditOutcome::Started,
+                    None
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn audit_reuses_command_identity_and_does_not_infer_success_from_next_prompt() {
+        use oxideterm_audit::*;
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let mut context = AuditContext::new(service.client(), AuditSource::User);
+        context.session_id = Some("terminal-session".into());
+        let mut ledger = CommandFactLedger::with_audit(Some(context));
+        ledger.create_from_mark(&mark("cmd-unknown", None, false));
+        ledger.close_from_mark(&mark("cmd-unknown", None, true));
+        let first = mark("cmd-1", Some("pwd"), false);
+        ledger.create_from_mark(&first);
+        ledger.create_from_mark(&first);
+        let mut closed = mark("cmd-1", Some("pwd"), true);
+        closed.exit_code = Some(2);
+        ledger.close_from_mark(&closed);
+        ledger.close_from_mark(&closed);
+        ledger.create_from_mark(&mark("cmd-2", Some("ls"), false));
+        ledger.create_from_mark(&mark("cmd-3", Some("date"), false));
+        drop(ledger);
+        let page = futures::executor::block_on(service.client().query(AuditQuery {
+            limit: 20,
+            ..Default::default()
+        }))
+        .unwrap();
+        let observations = page
+            .records
+            .iter()
+            .map(|record| {
+                let operation = record.details.operation.as_ref().unwrap();
+                (
+                    record.details.detail.as_ref().map(|value| value.as_str()),
+                    operation.outcome,
+                    operation.exit_code,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            observations,
+            [
+                (Some("date"), AuditOutcome::Unknown, None),
+                (Some("date"), AuditOutcome::Started, None),
+                (Some("ls"), AuditOutcome::Unknown, None),
+                (Some("ls"), AuditOutcome::Started, None),
+                (Some("pwd"), AuditOutcome::Failed, Some(2)),
+                (Some("pwd"), AuditOutcome::Started, None),
+                (None, AuditOutcome::Succeeded, Some(0)),
+                (None, AuditOutcome::Started, None),
+            ]
+        );
+        assert_eq!(
+            page.records[4].details.operation.as_ref().unwrap().id,
+            page.records[5].details.operation.as_ref().unwrap().id
+        );
     }
 
     #[test]

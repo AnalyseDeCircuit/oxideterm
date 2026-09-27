@@ -1,9 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fernomade_crypto::SessionKey;
@@ -12,13 +13,16 @@ use fernomade_runtime::{
     TerminalInputEvent,
 };
 use tokio::net::UdpSocket;
-use tokio::sync::mpsc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
 use tokio::task::JoinHandle;
+use zeroize::Zeroize;
 
 use crate::MoshIpFamily;
 
 const COMMAND_CHANNEL_CAPACITY: usize = 256;
 const EVENT_CHANNEL_CAPACITY: usize = 512;
+const EVENT_OUTPUT_BYTES: usize = 1024 * 1024;
+const OUTPUT_CHUNK_BYTES: usize = 8 * 1024;
 const MAX_DATAGRAM_BYTES: usize = u16::MAX as usize;
 const MAX_TIMER_SLEEP: Duration = Duration::from_secs(1);
 const SUSPEND_GAP: Duration = Duration::from_secs(5);
@@ -120,9 +124,40 @@ impl fmt::Debug for MoshSessionEvent {
     }
 }
 
+// The byte permit follows queued output until the bridge takes ownership.
+// Pending protocol actions and cancelled events wipe their owned plaintext.
+struct QueuedEvent {
+    event: MoshSessionEvent,
+    permit: Option<OwnedSemaphorePermit>,
+}
+impl QueuedEvent {
+    fn new(event: MoshSessionEvent) -> Self {
+        Self {
+            event,
+            permit: None,
+        }
+    }
+    fn into_event(mut self) -> MoshSessionEvent {
+        std::mem::replace(&mut self.event, MoshSessionEvent::RemoteStateAdvanced(0))
+    }
+    fn bytes(&self) -> usize {
+        match &self.event {
+            MoshSessionEvent::Output(bytes) => bytes.len(),
+            _ => 0,
+        }
+    }
+}
+impl Drop for QueuedEvent {
+    fn drop(&mut self) {
+        if let MoshSessionEvent::Output(bytes) = &mut self.event {
+            bytes.zeroize();
+        }
+    }
+}
+
 pub struct MoshSessionClient {
     command_tx: mpsc::Sender<MoshSessionCommand>,
-    event_rx: mpsc::Receiver<MoshSessionEvent>,
+    event_rx: mpsc::Receiver<QueuedEvent>,
 }
 
 impl MoshSessionClient {
@@ -148,11 +183,11 @@ impl MoshSessionClient {
     }
 
     pub async fn next_event(&mut self) -> Option<MoshSessionEvent> {
-        self.event_rx.recv().await
+        self.event_rx.recv().await.map(QueuedEvent::into_event)
     }
 
     pub fn try_next_event(&mut self) -> Option<MoshSessionEvent> {
-        self.event_rx.try_recv().ok()
+        self.event_rx.try_recv().ok().map(QueuedEvent::into_event)
     }
 }
 
@@ -267,7 +302,7 @@ async fn run_session(
     columns: u16,
     rows: u16,
     mut command_rx: mpsc::Receiver<MoshSessionCommand>,
-    event_tx: mpsc::Sender<MoshSessionEvent>,
+    event_tx: mpsc::Sender<QueuedEvent>,
 ) {
     let started_at = Instant::now();
     let mut previous_loop = started_at;
@@ -275,114 +310,98 @@ async fn run_session(
     runtime.queue_resize(columns, rows);
     let mut prediction_ids = PredictionIdMap::default();
     let mut receive_buffer = vec![0_u8; MAX_DATAGRAM_BYTES];
+    let bytes = Arc::new(Semaphore::new(EVENT_OUTPUT_BYTES));
+    let mut pending = VecDeque::new();
+    let mut ending = false;
 
     loop {
-        let now = Instant::now();
-        if now.duration_since(previous_loop) > SUSPEND_GAP {
-            runtime.resume(monotonic_time(started_at));
-        }
-        previous_loop = now;
-        let actions = match runtime.poll(monotonic_time(started_at)) {
-            Ok(actions) => actions,
-            Err(error) => {
-                let _ = event_tx
-                    .send(MoshSessionEvent::Failed(error.to_string()))
-                    .await;
-                let _ = runtime.cancel();
-                return;
+        if !ending {
+            let now = Instant::now();
+            if now.duration_since(previous_loop) > SUSPEND_GAP {
+                runtime.resume(monotonic_time(started_at));
             }
-        };
-        if !apply_actions(&socket, &event_tx, &mut prediction_ids, actions).await {
-            let _ = runtime.cancel();
+            previous_loop = now;
+            match runtime.poll(monotonic_time(started_at)) {
+                Ok(actions) => {
+                    ending =
+                        !apply_actions(&socket, &mut pending, &mut prediction_ids, actions).await;
+                }
+                Err(error) => {
+                    pending.push_back(QueuedEvent::new(MoshSessionEvent::Failed(
+                        error.to_string(),
+                    )));
+                    ending = true;
+                }
+            }
+            ending |= runtime.shutdown_outcome().is_some();
+        }
+        if ending {
+            command_rx.close();
+        }
+        if ending && pending.is_empty() {
             return;
         }
-        if runtime.shutdown_outcome().is_some() {
-            return;
-        }
-
         let poll_wait = runtime
             .milliseconds_until_next_poll(monotonic_time(started_at))
             .min(MAX_TIMER_SLEEP.as_millis() as u64);
+        let next_bytes = pending.front().map_or(0, QueuedEvent::bytes) as u32;
         tokio::select! {
-            command = command_rx.recv() => {
-                match command {
+            capacity = async {
+                let permit = bytes.clone().acquire_many_owned(next_bytes).await.expect("live output budget");
+                event_tx.reserve().await.map(|slot| (permit, slot))
+            }, if !pending.is_empty() => {
+                let Ok((permit, slot)) = capacity else { let _ = runtime.cancel(); return; };
+                let mut event = pending.pop_front().unwrap();
+                event.permit = Some(permit);
+                slot.send(event);
+            }
+            command = command_rx.recv(), if !ending => {
+                let result = match command {
                     Some(MoshSessionCommand::Input { prediction_id, bytes }) => {
-                        if let Err(error) = queue_prediction_input(
-                            &mut runtime,
-                            &mut prediction_ids,
-                            prediction_id,
-                            bytes,
-                        ) {
-                            let _ = event_tx.send(MoshSessionEvent::Failed(error.to_string())).await;
-                            let _ = runtime.cancel();
-                            return;
-                        }
+                        queue_prediction_input(&mut runtime, &mut prediction_ids, prediction_id, bytes)
+                            .map(|_| Vec::new())
                     }
                     Some(MoshSessionCommand::Resize { columns, rows }) => {
-                        if columns > 0 && rows > 0 {
-                            let _ = runtime.queue_terminal_event(TerminalInputEvent::Resize { columns, rows });
-                        }
+                        if columns > 0 && rows > 0 { runtime.queue_resize(columns, rows); }
+                        Ok(Vec::new())
                     }
-                    Some(MoshSessionCommand::Shutdown) => {
-                        match runtime.request_shutdown(monotonic_time(started_at)) {
-                            Ok(actions) => {
-                                if !apply_actions(
-                                    &socket,
-                                    &event_tx,
-                                    &mut prediction_ids,
-                                    actions,
-                                ).await {
-                                    let _ = runtime.cancel();
-                                    return;
-                                }
-                            }
-                            Err(error) => {
-                                let _ = event_tx.send(MoshSessionEvent::Failed(error.to_string())).await;
-                                let _ = runtime.cancel();
-                                return;
-                            }
-                        }
+                    Some(MoshSessionCommand::Shutdown) => runtime.request_shutdown(monotonic_time(started_at)),
+                    Some(MoshSessionCommand::Cancel) | None => { let _ = runtime.cancel(); return; }
+                };
+                match result {
+                    Ok(actions) => {
+                        ending = !apply_actions(&socket, &mut pending, &mut prediction_ids, actions).await;
                     }
-                    Some(MoshSessionCommand::Cancel) | None => {
-                        let _ = runtime.cancel();
-                        return;
+                    Err(error) => {
+                        pending.push_back(QueuedEvent::new(MoshSessionEvent::Failed(error.to_string())));
+                        ending = true;
                     }
                 }
             }
-            received = socket.recv(&mut receive_buffer) => {
+            // Do not accept/acknowledge another SSP update while the preceding
+            // display actions are waiting. Timers and outgoing input stay live;
+            // UDP loss during this pause is recovered by the protocol's retry.
+            received = socket.recv(&mut receive_buffer), if pending.is_empty() && !ending => {
                 match received {
                     Ok(length) => {
-                        let actions = runtime.receive_datagram_lossy(
-                            &receive_buffer[..length],
-                            monotonic_time(started_at),
-                        );
-                        if !apply_actions(
-                            &socket,
-                            &event_tx,
-                            &mut prediction_ids,
-                            actions,
-                        ).await {
-                            let _ = runtime.cancel();
-                            return;
-                        }
+                        let actions = runtime.receive_datagram_lossy(&receive_buffer[..length], monotonic_time(started_at));
+                        ending = !apply_actions(&socket, &mut pending, &mut prediction_ids, actions).await;
                     }
                     Err(_) => {
-                        let _ = event_tx.send(MoshSessionEvent::Failed(
-                            "Mosh UDP receive failed".to_string(),
-                        )).await;
-                        let _ = runtime.cancel();
-                        return;
+                        pending.push_back(QueuedEvent::new(MoshSessionEvent::Failed("Mosh UDP receive failed".into())));
+                        ending = true;
                     }
                 }
             }
-            () = tokio::time::sleep(Duration::from_millis(poll_wait)) => {}
+            () = tokio::time::sleep(Duration::from_millis(poll_wait)), if !ending => {}
+            () = event_tx.closed() => { let _ = runtime.cancel(); return; }
         }
     }
 }
 
 async fn apply_actions(
     socket: &UdpSocket,
-    event_tx: &mpsc::Sender<MoshSessionEvent>,
+    pending: &mut VecDeque<QueuedEvent>,
     prediction_ids: &mut PredictionIdMap,
     actions: Vec<SessionAction>,
 ) -> bool {
@@ -390,14 +409,20 @@ async fn apply_actions(
         let event = match action {
             SessionAction::SendDatagram(datagram) => {
                 if socket.send(&datagram).await.is_err() {
-                    let _ = event_tx
-                        .send(MoshSessionEvent::Failed("Mosh UDP send failed".to_string()))
-                        .await;
+                    pending.push_back(QueuedEvent::new(MoshSessionEvent::Failed(
+                        "Mosh UDP send failed".into(),
+                    )));
                     return false;
                 }
                 continue;
             }
-            SessionAction::WriteTerminal(bytes) => MoshSessionEvent::Output(bytes),
+            SessionAction::WriteTerminal(bytes) => {
+                let bytes = zeroize::Zeroizing::new(bytes);
+                for chunk in bytes.chunks(OUTPUT_CHUNK_BYTES) {
+                    pending.push_back(QueuedEvent::new(MoshSessionEvent::Output(chunk.to_vec())));
+                }
+                continue;
+            }
             SessionAction::ResizeTerminal { columns, rows } => {
                 MoshSessionEvent::RemoteResize { columns, rows }
             }
@@ -423,9 +448,7 @@ async fn apply_actions(
             | SessionAction::UdpBindingChanged(_)
             | SessionAction::Diagnostic(_) => continue,
         };
-        if event_tx.send(event).await.is_err() {
-            return false;
-        }
+        pending.push_back(QueuedEvent::new(event));
     }
     true
 }
@@ -478,6 +501,162 @@ mod tests {
     use super::*;
 
     const SYNTHETIC_KEY: &str = "AQIDBAUGBwgJCgsMDQ4PEA==";
+
+    #[tokio::test]
+    async fn stalled_display_keeps_udp_input_timers_and_cancel_live() {
+        for cancel in [false, true] {
+            run_stalled_display(cancel).await;
+        }
+    }
+
+    async fn run_stalled_display(cancel: bool) {
+        use fernomade_crypto::{PeerRole, SecureChannel};
+        use fernomade_wire::{
+            ByteRun, Fragment, Instruction, InstructionBatch, StateUpdate, ViewportSize,
+            decode_compressed_update, encode_compressed_update,
+        };
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let address = socket.local_addr().unwrap();
+        socket.connect(server.local_addr().unwrap()).await.unwrap();
+        let (commands, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+        let (events, mut receiver) = mpsc::channel(1);
+        // Leave a preceding event unread so the real delivery mailbox is full.
+        events
+            .send(QueuedEvent::new(MoshSessionEvent::RemoteStateAdvanced(999)))
+            .await
+            .unwrap();
+        let mut task = tokio::spawn(run_session(
+            socket,
+            SessionKey::decode(SYNTHETIC_KEY).unwrap(),
+            80,
+            24,
+            command_rx,
+            events,
+        ));
+        let mut secure =
+            SecureChannel::new(PeerRole::Server, SessionKey::decode(SYNTHETIC_KEY).unwrap());
+        let mut buffer = vec![0; MAX_DATAGRAM_BYTES];
+        let mut initial = 0;
+        while initial < 1 {
+            let (length, _) =
+                tokio::time::timeout(Duration::from_secs(3), server.recv_from(&mut buffer))
+                    .await
+                    .unwrap()
+                    .unwrap();
+            let packet = secure.open(&buffer[..length]).unwrap();
+            let fragment = Fragment::parse(&packet.plaintext).unwrap();
+            initial = decode_compressed_update(&fragment.body)
+                .unwrap()
+                .target_state;
+        }
+        let mut update = StateUpdate::new(0, 1, initial);
+        update.delta = InstructionBatch {
+            instructions: vec![Instruction {
+                bytes: Some(ByteRun {
+                    value: b"remote display".to_vec(),
+                }),
+                viewport: Some(ViewportSize {
+                    columns: 100,
+                    rows: 30,
+                }),
+                marker: None,
+                session_control: None,
+            }],
+        }
+        .encode_bytes();
+        for fragment in
+            Fragment::split(&encode_compressed_update(&update).unwrap(), 1, 0, 1).unwrap()
+        {
+            server
+                .send_to(&secure.seal_next(&fragment.encode()).unwrap(), address)
+                .await
+                .unwrap();
+        }
+        // Acknowledgement comes from the protocol timer after accepting the
+        // update; the display receiver remains full throughout this exchange.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let (length, _) = server.recv_from(&mut buffer).await.unwrap();
+                let packet = secure.open(&buffer[..length]).unwrap();
+                let fragment = Fragment::parse(&packet.plaintext).unwrap();
+                if decode_compressed_update(&fragment.body)
+                    .unwrap()
+                    .acknowledged_state
+                    == 1
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("display queue blocked the SSP acknowledgement timer");
+        commands
+            .send(MoshSessionCommand::Input {
+                prediction_id: 42,
+                bytes: b"control-under-pressure".to_vec(),
+            })
+            .await
+            .unwrap();
+        let input = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let (length, _) = server.recv_from(&mut buffer).await.unwrap();
+                let packet = secure.open(&buffer[..length]).unwrap();
+                let fragment = Fragment::parse(&packet.plaintext).unwrap();
+                let update = decode_compressed_update(&fragment.body).unwrap();
+                let input = update
+                    .decode_instructions()
+                    .unwrap()
+                    .instructions
+                    .into_iter()
+                    .filter_map(|instruction| instruction.bytes)
+                    .flat_map(|bytes| bytes.value)
+                    .collect::<Vec<_>>();
+                if !input.is_empty() {
+                    break input;
+                }
+            }
+        })
+        .await
+        .expect("display queue blocked UDP input");
+        assert_eq!(input, b"control-under-pressure");
+        if cancel {
+            commands.send(MoshSessionCommand::Cancel).await.unwrap();
+            tokio::time::timeout(Duration::from_secs(3), &mut task)
+                .await
+                .expect("full display queue blocked cancellation")
+                .unwrap();
+            return;
+        }
+
+        assert!(matches!(
+            receiver.recv().await.unwrap().into_event(),
+            MoshSessionEvent::RemoteStateAdvanced(999)
+        ));
+        let (output, sizes) = tokio::time::timeout(Duration::from_secs(3), async {
+            let mut output = Vec::new();
+            let mut sizes = Vec::new();
+            while sizes.is_empty() {
+                match receiver.recv().await.unwrap().into_event() {
+                    MoshSessionEvent::Output(bytes) => output.extend(bytes),
+                    MoshSessionEvent::RemoteResize { columns, rows } => {
+                        sizes.push((output.len(), columns, rows))
+                    }
+                    _ => {}
+                }
+            }
+            (output, sizes)
+        })
+        .await
+        .expect("display output did not resume");
+        assert_eq!(output, b"remote display");
+        assert_eq!(sizes, vec![(b"remote display".len(), 100, 30)]);
+        commands.send(MoshSessionCommand::Cancel).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3), &mut task)
+            .await
+            .expect("protocol task did not cancel")
+            .unwrap();
+    }
 
     #[test]
     fn terminal_prediction_ids_do_not_depend_on_protocol_state_numbers() {

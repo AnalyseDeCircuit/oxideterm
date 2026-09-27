@@ -1,4 +1,8 @@
 impl TerminalSessionBackend for LocalPtySession {
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.audit.clone()
+    }
+
     fn kind(&self) -> TerminalSessionKind {
         TerminalSessionKind::LocalPty
     }
@@ -117,8 +121,8 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::tmux_state(self)
     }
 
-    fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
-        LocalPtySession::tmux_action(self, action)
+    fn tmux_action(&mut self, action: crate::TmuxAction, audit: oxideterm_audit::AuditOperation) -> Result<bool> {
+        LocalPtySession::tmux_action(self, action, audit)
     }
 
     fn tmux_separator_at(&self, col: usize, row: usize) -> Option<crate::TmuxSeparator> {

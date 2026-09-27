@@ -12,6 +12,11 @@ use fernomade_predict::{
 const MOSH_COMMAND_CHANNEL_CAPACITY: usize = 256;
 
 pub struct MoshTerminalSession {
+    audit: Option<oxideterm_audit::AuditContext>,
+    recording_sink: Option<oxideterm_audit::RecordingSink>,
+    recording_pending: Option<crate::recording_output::RecordingOutput>,
+    connect_audit: Option<oxideterm_audit::AuditOperation>,
+    connected: bool,
     title: String,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
@@ -74,12 +79,13 @@ enum MoshTerminalWorkerEvent {
     RoundTripEstimate(u16),
     PredictionAcknowledged(u64),
     Failed(String),
-    Closed,
+    Closed(bool),
 }
 
 impl MoshTerminalSession {
     pub fn new(
         config: MoshTerminalConfig,
+        audit: Option<oxideterm_audit::AuditContext>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -93,6 +99,7 @@ impl MoshTerminalSession {
             cell_height: resize.cell_height,
         };
         let (listener, event_rx) = local_event_channel();
+        let recording_activity = listener.activity_sender();
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel_with_activity(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
             listener.activity_sender(),
@@ -105,6 +112,23 @@ impl MoshTerminalSession {
             listener,
         )));
         let title = config.title.clone();
+        let connect_audit = Some(oxideterm_audit::AuditOperation::in_context(
+            audit.as_ref(),
+            oxideterm_audit::AuditCategory::Connection,
+            "mosh_connect",
+            None,
+        ));
+        let recording_sink = audit
+            .as_ref()
+            .map(oxideterm_audit::AuditContext::recording_sink);
+        if let Some(sink) = &recording_sink {
+            sink.set_wake_callback(Arc::new(move || recording_activity.notify()));
+        }
+        let recording_pending = recording_sink.as_ref().map(|sink| {
+            let mut pending = crate::recording_output::RecordingOutput::new(sink.clone());
+            pending.resize(resize.cols as u16, resize.rows as u16);
+            pending
+        });
         let prediction_display = match config.prediction {
             MoshPredictionDisplay::Adaptive => PredictionDisplay::Adaptive,
             MoshPredictionDisplay::Always => PredictionDisplay::Always,
@@ -119,6 +143,11 @@ impl MoshTerminalSession {
         ));
 
         Self {
+            audit,
+            recording_sink,
+            recording_pending,
+            connect_audit,
+            connected: false,
             title,
             term,
             parser: Processor::new(),
@@ -149,7 +178,33 @@ impl MoshTerminalSession {
             .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
 
-    fn drain_worker_events_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+    fn audit_exit(&mut self, outcome: oxideterm_audit::AuditOutcome) {
+        if let Some(operation) = self.connect_audit.take() {
+            operation.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        } else if self.connected {
+            if let Some(context) = &self.audit {
+                context.observe(
+                    oxideterm_audit::AuditCategory::Connection,
+                    "mosh_disconnect",
+                    None,
+                    outcome,
+                    oxideterm_audit::AuditEvidence::Lifecycle,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+            self.connected = false;
+        }
+    }
+
+    fn drain_worker_events_with_budget(
+        &mut self,
+        budget: TerminalDrainBudget,
+    ) -> TerminalDrainReport {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
         if self
@@ -160,6 +215,14 @@ impl MoshTerminalSession {
             report.mark_changed();
         }
         loop {
+            if self
+                .recording_pending
+                .as_mut()
+                .is_some_and(|pending| !pending.flush())
+            {
+                break;
+            }
+
             if budget.time_exhausted(started)
                 || report.drained_bytes >= budget.max_bytes
                 || report.events_drained >= budget.max_events
@@ -168,26 +231,20 @@ impl MoshTerminalSession {
                     !self.output_queue.is_empty() || !self.worker_rx.is_empty();
                 break;
             }
-            if let Some(event) = self.output_queue.pop_front() {
-                let MoshTerminalWorkerEvent::Output(bytes) = event.into_inner() else {
-                    unreachable!("only Mosh output enters the local drain queue");
-                };
-                report.events_drained += 1;
-                let processing_started = budget.collect_performance_metrics.then(Instant::now);
-                self.feed_transport_output(&bytes);
-                report.record_data_chunk(
-                    bytes.len(),
-                    processing_started.map_or(Duration::ZERO, |started| started.elapsed()),
-                );
-                report.mark_changed();
-                continue;
-            }
-
-            let event = match self.worker_rx.try_recv() {
+            let event = match self
+                .output_queue
+                .pop_front()
+                .map(Ok)
+                .unwrap_or_else(|| self.worker_rx.try_recv())
+            {
                 Ok(event) => event,
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
                     if self.lifecycle.is_running() {
+                        if let Some(sink) = &self.recording_sink {
+                            sink.interrupt();
+                        }
+                        self.audit_exit(oxideterm_audit::AuditOutcome::Interrupted);
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -206,6 +263,15 @@ impl MoshTerminalSession {
 
             match event.into_inner() {
                 MoshTerminalWorkerEvent::Connected => {
+                    self.connected = true;
+                    if let Some(operation) = self.connect_audit.take() {
+                        operation.finish(
+                            oxideterm_audit::AuditOutcome::Succeeded,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            None,
+                        );
+                    }
                     self.pending_events
                         .push(TerminalEvent::TitleChanged(self.title.clone()));
                     report.mark_changed();
@@ -238,6 +304,10 @@ impl MoshTerminalSession {
                     self.predictor.acknowledge(frame_id);
                 }
                 MoshTerminalWorkerEvent::Failed(error) => {
+                    if let Some(sink) = &self.recording_sink {
+                        sink.interrupt();
+                    }
+                    self.audit_exit(oxideterm_audit::AuditOutcome::Failed);
                     self.reconcile_prediction();
                     self.lifecycle = TerminalLifecycle::Exited(None);
                     self.feed_transport_output(
@@ -247,9 +317,21 @@ impl MoshTerminalSession {
                     report.mark_changed();
                     break;
                 }
-                MoshTerminalWorkerEvent::Closed => {
+                MoshTerminalWorkerEvent::Closed(confirmed) => {
                     self.reconcile_prediction();
                     if self.lifecycle.is_running() {
+                        if let Some(sink) = &self.recording_sink {
+                            if confirmed {
+                                sink.close();
+                            } else {
+                                sink.interrupt();
+                            }
+                        }
+                        self.audit_exit(if confirmed {
+                            oxideterm_audit::AuditOutcome::Succeeded
+                        } else {
+                            oxideterm_audit::AuditOutcome::Interrupted
+                        });
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -276,6 +358,9 @@ impl MoshTerminalSession {
             cell_width: self.resize.cell_width,
             cell_height: self.resize.cell_height,
         });
+        if let Some(pending) = &mut self.recording_pending {
+            pending.resize(columns, rows);
+        }
     }
 
     fn feed_transport_output(&mut self, bytes: &[u8]) {
@@ -300,7 +385,12 @@ impl MoshTerminalSession {
                                 .push(TerminalEvent::TriggerMatched(matched));
                         });
                     }
-                    if self.output_events_enabled {
+                    let record_output = self.output_events_enabled
+                        || self
+                            .recording_sink
+                            .as_ref()
+                            .is_some_and(oxideterm_audit::RecordingSink::is_enabled);
+                    if record_output {
                         let (_, recordable) = self.shell_integration.advance_with_recording(
                             &mut self.parser,
                             &mut *term,
@@ -308,7 +398,12 @@ impl MoshTerminalSession {
                             |event| self.pending_events.push(event),
                         );
                         if !recordable.is_empty() {
-                            self.pending_events.push(TerminalEvent::Output(recordable));
+                            if let Some(pending) = &mut self.recording_pending {
+                                pending.output(&recordable);
+                            }
+                            if self.output_events_enabled {
+                                self.pending_events.push(TerminalEvent::Output(recordable));
+                            }
                         }
                     } else {
                         self.shell_integration.advance(
@@ -447,6 +542,13 @@ impl MoshTerminalSession {
     }
 }
 
+impl Drop for MoshTerminalSession {
+    fn drop(&mut self) {
+        // The workspace runtime may survive this pane, so send an explicit close request.
+        self.shutdown();
+    }
+}
+
 impl TerminalSessionBackend for MoshTerminalSession {
     fn kind(&self) -> TerminalSessionKind {
         TerminalSessionKind::Mosh
@@ -569,6 +671,11 @@ impl TerminalSessionBackend for MoshTerminalSession {
             cell_width: resize.cell_width,
             cell_height: resize.cell_height,
         });
+        if grid_changed {
+            if let Some(pending) = &mut self.recording_pending {
+                pending.resize(resize.cols as u16, resize.rows as u16);
+            }
+        }
         let _ = self.send_command(MoshTerminalCommand::Resize {
             columns: u16::try_from(resize.cols).unwrap_or(u16::MAX),
             rows: u16::try_from(resize.rows).unwrap_or(u16::MAX),
@@ -695,6 +802,30 @@ impl TerminalSessionBackend for MoshTerminalSession {
         if matches!(self.lifecycle, TerminalLifecycle::Closed) {
             return;
         }
+        if let Some(sink) = &self.recording_sink {
+            sink.interrupt();
+        }
+        if let Some(operation) = self.connect_audit.take() {
+            operation.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+        if self.connected {
+            if let Some(context) = &self.audit {
+                context.observe(
+                    oxideterm_audit::AuditCategory::Connection,
+                    "mosh_disconnect",
+                    None,
+                    oxideterm_audit::AuditOutcome::CancelRequested,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+            self.connected = false;
+        }
         let _ = self.send_command(MoshTerminalCommand::Close);
         self.lifecycle = TerminalLifecycle::Closed;
     }
@@ -733,6 +864,7 @@ async fn run_mosh_terminal_worker(
     };
     let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Connected);
     let mut owner = Some(owner);
+    let mut pending_output: Option<std::pin::Pin<Box<_>>> = None;
 
     loop {
         tokio::select! {
@@ -741,7 +873,8 @@ async fn run_mosh_terminal_worker(
                 match command {
                     Some(MoshTerminalCommand::Data { prediction_id, bytes }) => {
                         if client.send_input_for_prediction(prediction_id, bytes).await.is_err() {
-                            let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed);
+                            let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Failed(
+                                "Mosh input transport failed".to_string()));
                             return;
                         }
                     }
@@ -750,25 +883,41 @@ async fn run_mosh_terminal_worker(
                     }
                     Some(MoshTerminalCommand::Close) => {
                         if let Some(owner) = owner.take() {
-                            owner.shutdown().await;
+                            // Explicit cancellation abandons the display tail, but
+                            // keeps consuming protocol events until shutdown completes.
+                            let shutdown = owner.shutdown();
+                            tokio::pin!(shutdown);
+                            loop {
+                                tokio::select! {
+                                    () = &mut shutdown => break,
+                                    event = client.next_event() => if event.is_none() { break; },
+                                }
+                            }
                         }
-                        let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed);
+                        let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed(false));
                         return;
                     }
                     None => return,
                 }
             }
-            event = client.next_event() => {
+            sent = async {
+                match &mut pending_output {
+                    Some(send) => send.await,
+                    None => std::future::pending::<std::result::Result<(), MoshTerminalWorkerEvent>>().await,
+                }
+            } => {
+                pending_output = None;
+                if sent.is_err() { return; }
+            }
+            event = client.next_event(), if pending_output.is_none() => {
                 let Some(event) = event else {
-                    let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed);
+                    let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed(false));
                     return;
                 };
                 match event {
                     oxideterm_mosh::MoshSessionEvent::Output(bytes) => {
                         let byte_len = bytes.len();
-                        if worker_tx.send_async(MoshTerminalWorkerEvent::Output(bytes), byte_len).await.is_err() {
-                            return;
-                        }
+                        pending_output = Some(Box::pin(worker_tx.send_async(MoshTerminalWorkerEvent::Output(bytes), byte_len)));
                     }
                     oxideterm_mosh::MoshSessionEvent::RemoteResize { columns, rows } => {
                         let _ = worker_tx.send_control(MoshTerminalWorkerEvent::RemoteResize { columns, rows });
@@ -781,9 +930,10 @@ async fn run_mosh_terminal_worker(
                         };
                         let _ = worker_tx.send_control(MoshTerminalWorkerEvent::ConnectionState(status));
                     }
-                    oxideterm_mosh::MoshSessionEvent::Closed(_) => {
+                    oxideterm_mosh::MoshSessionEvent::Closed(outcome) => {
                         owner.take();
-                        let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed);
+                        let confirmed = !matches!(outcome, oxideterm_mosh::ShutdownOutcome::TimedOut);
+                        let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed(confirmed));
                         return;
                     }
                     oxideterm_mosh::MoshSessionEvent::Failed(error) => {

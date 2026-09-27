@@ -16,6 +16,21 @@ impl TerminalPane {
 
         self.trzsz_prompt_active = true;
         self.trzsz_connection_lost = false;
+        self.trzsz_audit_connection_lost = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let audit = self.terminal.lock().audit_context().map(|mut context| {
+            context.source = oxideterm_audit::AuditSource::System;
+            context.operation(
+                oxideterm_audit::AuditCategory::File,
+                "file_transfer",
+                Some(&format!(
+                    "protocol=trzsz; direction={:?}; selection={:?}",
+                    request.direction, request.selection
+                )),
+            )
+        });
+        self.trzsz_audit_operation_id = audit
+            .as_ref()
+            .and_then(|operation| operation.id().map(str::to_owned));
         self.emit_trzsz_prompt_notice(&request);
         let receiver = match request.direction {
             TrzszTransferDirection::Upload => {
@@ -54,6 +69,9 @@ impl TerminalPane {
         let owner_id = self.trzsz_owner_id.clone();
         let policy = self.preferences.trzsz_policy.clone().unwrap_or_default();
         let terminal_columns = self.snapshot.cols;
+        let connection_lost = self.trzsz_audit_connection_lost.clone();
+        let cancel_context = self.terminal.lock().audit_context();
+        let audit_parent_id = self.trzsz_audit_operation_id.clone();
         cx.spawn(async move |weak, cx| {
             let selection = match receiver.await {
                 Ok(Ok(Some(paths))) => match request.direction {
@@ -73,6 +91,25 @@ impl TerminalPane {
                 },
                 _ => TrzszPromptSelection::Cancelled,
             };
+            if matches!(&selection, TrzszPromptSelection::Cancelled)
+                && !connection_lost.load(std::sync::atomic::Ordering::Acquire)
+                && let Some(mut context) = cancel_context
+            {
+                context.source = oxideterm_audit::AuditSource::User;
+                context.parent_id = audit_parent_id;
+                context
+                    .operation(
+                        oxideterm_audit::AuditCategory::File,
+                        "file_transfer_cancel",
+                        Some("file_selection_cancelled"),
+                    )
+                    .finish(
+                        oxideterm_audit::AuditOutcome::CancelRequested,
+                        oxideterm_audit::AuditEvidence::Request,
+                        None,
+                        None,
+                    );
+            }
             let (result_tx, result_rx) = std::sync::mpsc::channel();
             let (event_tx, event_rx) = std::sync::mpsc::channel();
             // The worker blocks on trzsz protocol reads, so it must never run
@@ -88,6 +125,8 @@ impl TerminalPane {
                     policy,
                     event_tx,
                     terminal_columns,
+                    audit,
+                    connection_lost,
                 })
                 .map_err(|error| error.to_string());
                 let _ = result_tx.send(result);
@@ -109,6 +148,7 @@ impl TerminalPane {
                                 this.terminal.lock().finish_trzsz_transfer();
                             }
                             this.trzsz_prompt_active = false;
+                            this.trzsz_audit_operation_id = None;
                             this.trzsz_connection_lost = false;
                             let _ = result;
                             cx.notify();
@@ -129,6 +169,7 @@ impl TerminalPane {
                                 this.terminal.lock().finish_trzsz_transfer();
                             }
                             this.trzsz_prompt_active = false;
+                            this.trzsz_audit_operation_id = None;
                             this.trzsz_connection_lost = false;
                             cx.notify();
                         });
@@ -209,6 +250,24 @@ impl TerminalPane {
         }
 
         self.trzsz_connection_lost = true;
+        self.trzsz_audit_connection_lost
+            .store(true, std::sync::atomic::Ordering::Release);
+        if let Some(mut context) = self.terminal.lock().audit_context() {
+            context.source = oxideterm_audit::AuditSource::System;
+            context.parent_id = self.trzsz_audit_operation_id.clone();
+            context
+                .operation(
+                    oxideterm_audit::AuditCategory::File,
+                    "file_transfer_interrupt",
+                    Some("connection_lost"),
+                )
+                .finish(
+                    oxideterm_audit::AuditOutcome::Sent,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+        }
         // Mirrors TerminalView.disposeTrzszController({ notifyConnectionLost: true }):
         // emit one connection-lost toast, then stop the protocol buffer so the
         // transfer worker is unblocked instead of waiting for more PTY data.
@@ -319,7 +378,6 @@ impl TerminalPane {
             ),
         }
     }
-
 }
 
 fn format_count_limit_message(template: &str, detail: Option<&str>) -> String {

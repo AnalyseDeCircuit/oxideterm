@@ -1,4 +1,5 @@
 pub struct LocalPtySession {
+    pub(crate) audit: Option<oxideterm_audit::AuditContext>,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     notifier: LocalGraphicsNotifier,
     event_rx: LocalEventReceiver,
@@ -74,6 +75,26 @@ impl LocalPtySession {
         encoding: TerminalEncoding,
         scrollback_lines: usize,
     ) -> Result<Self> {
+        Self::spawn_with_config_graphics_encoding_and_audit(
+            cols,
+            rows,
+            local_config,
+            graphics_options,
+            encoding,
+            scrollback_lines,
+            None,
+        )
+    }
+
+    pub(crate) fn spawn_with_config_graphics_encoding_and_audit(
+        cols: usize,
+        rows: usize,
+        local_config: LocalPtyConfig,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+        audit: Option<oxideterm_audit::AuditContext>,
+    ) -> Result<Self> {
         let size = TerminalSize {
             cols: cols.max(2),
             rows: rows.max(2),
@@ -85,7 +106,10 @@ impl LocalPtySession {
         // Some PTY backends report a successful fork even when chdir or exec fails in the child.
         // Reject known-invalid launch targets before a session can be registered by the caller.
         if !shell.id.starts_with("wsl")
-            && local_config.cwd.as_ref().is_some_and(|path| !path.as_os_str().is_empty() && !path.is_dir())
+            && local_config
+                .cwd
+                .as_ref()
+                .is_some_and(|path| !path.as_os_str().is_empty() && !path.is_dir())
         {
             anyhow::bail!("local terminal startup directory is unavailable");
         }
@@ -125,11 +149,12 @@ impl LocalPtySession {
             .or_else(|| env::var_os("USERPROFILE").map(PathBuf::from))
             .or_else(|| env::current_dir().ok());
         #[cfg(target_os = "windows")]
-        let working_directory = if shell.id.starts_with("wsl") || matches!(shell.id.as_str(), "powershell" | "pwsh") {
-            None
-        } else {
-            cwd.clone()
-        };
+        let working_directory =
+            if shell.id.starts_with("wsl") || matches!(shell.id.as_str(), "powershell" | "pwsh") {
+                None
+            } else {
+                cwd.clone()
+            };
         #[cfg(not(target_os = "windows"))]
         let working_directory = cwd.clone();
         let pty = tty::new(
@@ -156,6 +181,13 @@ impl LocalPtySession {
         #[cfg(target_os = "windows")]
         let pty_master = None;
         let process = ProcessState::new(shell_pid, pty_master, cwd);
+        // The PTY reader owns output capture even while its pane is not draining events.
+        let recording_sink = audit
+            .as_ref()
+            .map(oxideterm_audit::AuditContext::recording_sink);
+        if let Some(sink) = &recording_sink {
+            sink.resize(size.cols as u16, size.rows as u16);
+        }
         let tmux_graphics_options = graphics_options.clone();
         let event_loop = LocalGraphicsEventLoop::new(
             term.clone(),
@@ -169,6 +201,7 @@ impl LocalPtySession {
             size,
             graphics_options,
             encoding,
+            recording_sink,
             crate::tmux::TmuxController::new(
                 tmux_display.clone(),
                 listener,
@@ -184,6 +217,7 @@ impl LocalPtySession {
         let io_thread = event_loop.spawn();
 
         Ok(Self {
+            audit,
             term,
             notifier,
             event_rx,
@@ -214,6 +248,7 @@ impl LocalPtySession {
     }
 
     pub fn drain_output_with_budget(&mut self, budget: TerminalDrainBudget) -> TerminalDrainReport {
+        self.join_io_thread_if_finished();
         let started = std::time::Instant::now();
         let mut report = TerminalDrainReport::default();
         let mut changed = false;
@@ -223,9 +258,8 @@ impl LocalPtySession {
             };
             report.events_drained += 1;
             report.drained_bytes = report.drained_bytes.saturating_add(stats.raw_bytes);
-            report.max_data_chunk_bytes = report
-                .max_data_chunk_bytes
-                .max(stats.max_data_chunk_bytes);
+            report.max_data_chunk_bytes =
+                report.max_data_chunk_bytes.max(stats.max_data_chunk_bytes);
             if budget.collect_performance_metrics {
                 report.output_processing_duration += stats.output_processing_duration;
                 report.terminal_lock_wait_duration += stats.terminal_lock_wait_duration;
@@ -289,7 +323,7 @@ impl LocalPtySession {
     pub fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
         if let Some(commands) = self.tmux_display.input_commands(bytes) {
             for command in commands {
-                self.write_control_bytes(command)?;
+                self.write_control_bytes(command, None)?;
             }
             return Ok(());
         }
@@ -299,7 +333,7 @@ impl LocalPtySession {
     pub fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
         if let Some(commands) = self.tmux_display.protocol_commands(bytes) {
             for command in commands {
-                self.write_control_bytes(command)?;
+                self.write_control_bytes(command, None)?;
             }
             return Ok(());
         }
@@ -313,13 +347,50 @@ impl LocalPtySession {
         Ok(())
     }
 
-    fn write_control_bytes(&mut self, bytes: Vec<u8>) -> Result<()> {
-        if self.lifecycle.is_running() && !bytes.is_empty() {
-            self.notifier
-                .0
-                .send(LocalGraphicsMsg::ControlInput(Cow::Owned(bytes)))?;
+    fn write_control_bytes(
+        &mut self,
+        bytes: Vec<u8>,
+        reply: Option<crate::tmux::ExternalReply>,
+    ) -> Result<()> {
+        use crate::local_graphics_event_loop::EventLoopSendError;
+        if !self.lifecycle.is_running() {
+            if let Some(crate::tmux::ExternalReply::Action(audit)) = reply {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    None,
+                    None,
+                );
+            }
+            anyhow::bail!("local terminal session has closed");
         }
-        Ok(())
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        match self
+            .notifier
+            .0
+            .send(LocalGraphicsMsg::ControlInput(Cow::Owned(bytes), reply))
+        {
+            Ok(()) => Ok(()),
+            Err(EventLoopSendError::Send(error)) => {
+                if let LocalGraphicsMsg::ControlInput(
+                    _,
+                    Some(crate::tmux::ExternalReply::Action(audit)),
+                ) = error.0
+                {
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Dispatch,
+                        None,
+                        None,
+                    );
+                }
+                anyhow::bail!("local terminal control channel closed")
+            }
+            // A wakeup failure follows queue admission; the reader still owns the actual result.
+            Err(EventLoopSendError::Io(error)) => Err(error.into()),
+        }
     }
 
     pub fn write_text(&mut self, text: &str) -> Result<()> {
@@ -379,11 +450,16 @@ impl LocalPtySession {
             response_tx,
         };
         self.notifier.0.send(message).ok()?;
-        response_rx.recv_timeout(std::time::Duration::from_secs(1)).ok()?
+        response_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .ok()?
     }
 
     pub fn interrupt_modem_transfer(&mut self) {
-        let _ = self.notifier.0.send(LocalGraphicsMsg::InterruptModemTransfer);
+        let _ = self
+            .notifier
+            .0
+            .send(LocalGraphicsMsg::InterruptModemTransfer);
     }
 
     pub fn finish_modem_transfer(&mut self) {
@@ -409,7 +485,10 @@ impl LocalPtySession {
     }
 
     pub fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
-        self.lifecycle.is_running().then(|| self.process.probe()).flatten()
+        self.lifecycle
+            .is_running()
+            .then(|| self.process.probe())
+            .flatten()
     }
 
     pub fn apply_process_info(&mut self, info: TerminalProcessInfo) -> bool {
@@ -453,7 +532,7 @@ impl LocalPtySession {
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
         if let Some(commands) = self.tmux_display.paste_commands(&bytes) {
             for command in commands {
-                self.write_control_bytes(command)?;
+                self.write_control_bytes(command, None)?;
             }
             return Ok(());
         }
@@ -469,7 +548,7 @@ impl LocalPtySession {
         let Some(command) = self.tmux_display.select_pane_command(col, row) else {
             return Ok(false);
         };
-        self.write_control_bytes(command)?;
+        self.write_control_bytes(command, None)?;
         Ok(true)
     }
 
@@ -481,11 +560,16 @@ impl LocalPtySession {
         self.tmux_display.ui_state()
     }
 
-    pub fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
-        let Some(command) = self.tmux_display.action_command(&action) else {
+    pub fn tmux_action(
+        &mut self,
+        action: crate::TmuxAction,
+        audit: oxideterm_audit::AuditOperation,
+    ) -> Result<bool> {
+        let Some((command, reply)) = self.tmux_display.action_command_with_audit(&action, audit)
+        else {
             return Ok(false);
         };
-        self.write_control_bytes(command)?;
+        self.write_control_bytes(command, Some(reply))?;
         Ok(true)
     }
 
@@ -498,18 +582,17 @@ impl LocalPtySession {
         separator: crate::TmuxSeparator,
         delta: i32,
     ) -> Result<bool> {
-        let Some(command) = self
-            .tmux_display
-            .resize_separator_command(separator, delta)
-        else {
+        let Some(command) = self.tmux_display.resize_separator_command(separator, delta) else {
             return Ok(false);
         };
-        self.write_control_bytes(command)?;
+        self.write_control_bytes(command, None)?;
         Ok(true)
     }
 
     fn display_term(&self) -> Arc<FairMutex<Term<LocalEventListener>>> {
-        self.tmux_display.term().unwrap_or_else(|| self.term.clone())
+        self.tmux_display
+            .term()
+            .unwrap_or_else(|| self.term.clone())
     }
 
     pub fn set_focused(&mut self, focused: bool) -> Result<()> {
@@ -583,13 +666,21 @@ impl LocalPtySession {
             AlacEvent::ChildExit(status) => {
                 self.tmux_display.reset();
                 let code = status.code();
+                self.audit_exit(
+                    if status.success() {
+                        oxideterm_audit::AuditOutcome::Succeeded
+                    } else {
+                        oxideterm_audit::AuditOutcome::Failed
+                    },
+                    code,
+                );
                 self.lifecycle = TerminalLifecycle::Exited(code);
                 self.process.mark_exited();
                 // Startup files are session-owned and can be removed as soon
                 // as the shell exits, even if its closed pane remains mounted.
                 self._shell_integration.take();
                 self.pending_events.push(TerminalEvent::ChildExited(code));
-                self.join_io_thread();
+                self.join_io_thread_if_finished();
                 true
             }
             AlacEvent::Exit => false,
@@ -602,16 +693,17 @@ impl LocalPtySession {
         }
 
         if self.lifecycle.is_running() {
+            self.audit_exit(oxideterm_audit::AuditOutcome::Cancelled, None);
             #[cfg(windows)]
             if let Some(job) = &self.process_job {
                 job.terminate();
             }
             #[cfg(not(windows))]
             cleanup_local_pty_process_tree(self.process.info.shell_pid);
-
-            let _ = self.notifier.0.send(LocalGraphicsMsg::Shutdown);
-            self.detach_io_thread();
         }
+        // An exited child can still have a reader draining its recorded tail.
+        let _ = self.notifier.0.send(LocalGraphicsMsg::Shutdown);
+        self.detach_io_thread();
 
         self.lifecycle = TerminalLifecycle::Closed;
         self.tmux_display.reset();
@@ -619,7 +711,37 @@ impl LocalPtySession {
         self._shell_integration.take();
     }
 
-    fn join_io_thread(&mut self) {
+    fn audit_exit(&mut self, outcome: oxideterm_audit::AuditOutcome, exit_code: Option<i32>) {
+        if let Some(context) = self.audit.take() {
+            let operation = oxideterm_audit::AuditOperation::in_context(
+                Some(&context),
+                oxideterm_audit::AuditCategory::Connection,
+                "local_terminal_exit",
+                None,
+            );
+            operation.finish(
+                outcome,
+                if exit_code.is_some() {
+                    oxideterm_audit::AuditEvidence::ExitCode
+                } else {
+                    oxideterm_audit::AuditEvidence::Lifecycle
+                },
+                exit_code,
+                None,
+            );
+        }
+    }
+
+    fn join_io_thread_if_finished(&mut self) {
+        // Child exit does not mean its recording tail has finished. Pane event
+        // handling must never wait for disk capacity while reaping this thread.
+        if self
+            .io_thread
+            .as_ref()
+            .is_none_or(|thread| !thread.is_finished())
+        {
+            return;
+        }
         if let Some(io_thread) = self.io_thread.take() {
             if let Err(error) = io_thread.join() {
                 tracing::debug!(
@@ -674,7 +796,7 @@ impl LocalPtySession {
         }
         self.notifier.on_resize(window_size(next));
         if let Some(command) = self.tmux_display.resize_command(next.cols, next.rows) {
-            self.write_control_bytes(command)?;
+            self.write_control_bytes(command, None)?;
         }
         self.size = next;
         Ok(())
@@ -682,7 +804,9 @@ impl LocalPtySession {
 
     pub fn scroll_lines(&mut self, delta: i32) {
         if delta != 0 {
-            self.display_term().lock().scroll_display(Scroll::Delta(delta));
+            self.display_term()
+                .lock()
+                .scroll_display(Scroll::Delta(delta));
         }
     }
 
@@ -777,10 +901,18 @@ impl LocalPtySession {
         &self,
         previous: &TerminalSnapshot,
         allow_defer: bool,
-    ) -> Option<(TerminalSnapshot, Option<crate::TerminalSelectionRange>, TermMode)> {
+    ) -> Option<(
+        TerminalSnapshot,
+        Option<crate::TerminalSelectionRange>,
+        TermMode,
+    )> {
         // The tmux compositor owns multiple grids and retains its existing snapshot contract.
         if self.tmux_display.is_active() {
-            return Some((self.snapshot_incremental(previous), self.selection(), self.mode()));
+            return Some((
+                self.snapshot_incremental(previous),
+                self.selection(),
+                self.mode(),
+            ));
         }
         let mut term = if allow_defer {
             self.term.try_lock_unfair()?
@@ -969,13 +1101,8 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
         && previous.lines.len() == size.rows;
     let offset_distance = previous.display_offset.abs_diff(display_offset);
     if !compatible || offset_distance >= size.rows {
-        let snapshot = snapshot_from_term_with_display_offset(
-            term,
-            size,
-            graphics,
-            display_offset,
-            size.rows,
-        );
+        let snapshot =
+            snapshot_from_term_with_display_offset(term, size, graphics, display_offset, size.rows);
         term.reset_damage();
         return snapshot;
     }
@@ -1252,7 +1379,8 @@ fn refresh_snapshot_metadata<T: EventListener>(
     let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
     let cursor_col = content.cursor.point.column.0;
     let mut metadata_rows = Vec::new();
-    let cursor_position_changed = snapshot.cursor_row != cursor_row || snapshot.cursor_col != cursor_col;
+    let cursor_position_changed =
+        snapshot.cursor_row != cursor_row || snapshot.cursor_col != cursor_col;
     if cursor_position_changed
         && snapshot.cursor_row < snapshot.lines.len()
         && snapshot.cursor_col < size.cols
@@ -1420,14 +1548,8 @@ mod incremental_snapshot_tests {
         let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
         let full = snapshot_from_term(&term, size, &graphics);
 
-        assert!(!Arc::ptr_eq(
-            &previous.lines[0].cells,
-            &next.lines[0].cells
-        ));
-        assert!(Arc::ptr_eq(
-            &previous.lines[2].cells,
-            &next.lines[2].cells
-        ));
+        assert!(!Arc::ptr_eq(&previous.lines[0].cells, &next.lines[0].cells));
+        assert!(Arc::ptr_eq(&previous.lines[2].cells, &next.lines[2].cells));
         assert_snapshot_content_eq(&next, &full);
     }
 
@@ -1499,14 +1621,8 @@ mod incremental_snapshot_tests {
         let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
         let full = snapshot_from_term(&term, size, &graphics);
 
-        assert!(Arc::ptr_eq(
-            &previous.lines[1].cells,
-            &next.lines[0].cells
-        ));
-        assert!(!Arc::ptr_eq(
-            &previous.lines[2].cells,
-            &next.lines[1].cells
-        ));
+        assert!(Arc::ptr_eq(&previous.lines[1].cells, &next.lines[0].cells));
+        assert!(!Arc::ptr_eq(&previous.lines[2].cells, &next.lines[1].cells));
         assert_snapshot_content_eq(&next, &full);
     }
 
@@ -1530,14 +1646,8 @@ mod incremental_snapshot_tests {
         let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
         let full = snapshot_from_term(&term, size, &graphics);
 
-        assert!(Arc::ptr_eq(
-            &previous.lines[2].cells,
-            &next.lines[0].cells
-        ));
-        assert!(Arc::ptr_eq(
-            &previous.lines[3].cells,
-            &next.lines[1].cells
-        ));
+        assert!(Arc::ptr_eq(&previous.lines[2].cells, &next.lines[0].cells));
+        assert!(Arc::ptr_eq(&previous.lines[3].cells, &next.lines[1].cells));
         assert!(next.lines[2].text().starts_with("prompt-completed"));
         assert_snapshot_content_eq(&next, &full);
     }
@@ -1560,10 +1670,7 @@ mod incremental_snapshot_tests {
         let next = scroll_snapshot_from_term(&mut term, size, &graphics, 1, &previous);
         let full = snapshot_from_term(&term, size, &graphics);
 
-        assert!(Arc::ptr_eq(
-            &previous.lines[0].cells,
-            &next.lines[1].cells
-        ));
+        assert!(Arc::ptr_eq(&previous.lines[0].cells, &next.lines[1].cells));
         assert_snapshot_content_eq(&next, &full);
     }
 
@@ -1616,10 +1723,7 @@ mod incremental_snapshot_tests {
     }
 }
 
-fn mark_active_input_rows(
-    rows: &mut [TerminalRow],
-    cursor_row: usize,
-) -> std::ops::Range<usize> {
+fn mark_active_input_rows(rows: &mut [TerminalRow], cursor_row: usize) -> std::ops::Range<usize> {
     let active_rows = active_input_row_range(rows, cursor_row);
     for row in &mut rows[active_rows.clone()] {
         row.active_input = true;
@@ -1627,10 +1731,7 @@ fn mark_active_input_rows(
     active_rows
 }
 
-fn active_input_row_range(
-    rows: &[TerminalRow],
-    cursor_row: usize,
-) -> std::ops::Range<usize> {
+fn active_input_row_range(rows: &[TerminalRow], cursor_row: usize) -> std::ops::Range<usize> {
     let mut start = cursor_row;
     while start > 0 && rows.get(start - 1).is_some_and(|row| row.wrapped) {
         start -= 1;

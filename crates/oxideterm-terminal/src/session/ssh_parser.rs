@@ -25,6 +25,8 @@ pub(super) struct SshParser {
     output_decoder: TerminalOutputDecoder,
     output_processor: Option<TerminalOutputProcessor>,
     output_events_enabled: bool,
+    recording_sink: Option<oxideterm_audit::RecordingSink>,
+    recording_pending: Option<Arc<std::sync::Mutex<crate::recording_output::RecordingOutput>>>,
     trigger_stream: Option<oxideterm_terminal_triggers::TerminalTriggerStream>,
     privilege_prompt: TerminalPrivilegePromptStream,
     input_encoder: TerminalInputEncoder,
@@ -34,13 +36,13 @@ pub(super) struct SshParser {
     shell_integration: TerminalShellIntegration,
     pub(super) tmux_display: Arc<crate::tmux::TmuxDisplay>,
     tmux_controller: Option<crate::tmux::TmuxController>,
-    tmux_command_queue: VecDeque<Vec<u8>>,
+    tmux_command_queue: VecDeque<(Vec<u8>, Option<crate::tmux::ReplyTag>)>,
 }
 
-pub(super) struct PendingWrite(SshTransportCommand);
+pub(super) struct PendingWrite(SshTransportCommand, Option<crate::tmux::ReplyTag>);
 
 impl PendingWrite {
-    fn take(mut self) -> SshTransportCommand {
+    fn take(&mut self) -> SshTransportCommand {
         std::mem::replace(&mut self.0, SshTransportCommand::Close)
     }
 }
@@ -109,6 +111,8 @@ impl SshParser {
                 output_decoder: TerminalOutputDecoder::new(encoding),
                 output_processor: None,
                 output_events_enabled: false,
+                recording_sink: None,
+                recording_pending: None,
                 trigger_stream: None,
                 privilege_prompt: TerminalPrivilegePromptStream::default(),
                 input_encoder: TerminalInputEncoder::new(encoding),
@@ -134,8 +138,9 @@ impl SshParser {
     pub(super) fn retire_transport(&mut self) {
         self.command_tx = None;
         self.transport_running = false;
+        self.tmux_display.reset();
         self.pending_writes.clear();
-        for mut command in self.tmux_command_queue.drain(..) {
+        for (mut command, _) in self.tmux_command_queue.drain(..) {
             zeroize::Zeroize::zeroize(&mut command);
         }
         if let Some(consumer) = &mut self.trzsz_consumer {
@@ -143,11 +148,59 @@ impl SshParser {
         }
     }
 
+    pub(super) fn set_recording_context(
+        &mut self,
+        context: Option<&oxideterm_audit::AuditContext>,
+    ) {
+        if let Some(sink) = self.recording_sink.take() {
+            sink.interrupt();
+        }
+        self.recording_sink = context.map(oxideterm_audit::AuditContext::recording_sink);
+        self.recording_pending = self.recording_sink.as_ref().map(|sink| {
+            let activity = self.activity.clone();
+            sink.set_wake_callback(Arc::new(move || activity.notify()));
+            let mut pending = crate::recording_output::RecordingOutput::new(sink.clone());
+            pending.resize(self.resize.cols as u16, self.resize.rows as u16);
+            Arc::new(std::sync::Mutex::new(pending))
+        });
+    }
+
+    pub(super) fn flush_recording(&self) -> bool {
+        self.recording_pending
+            .as_ref()
+            .is_none_or(|pending| pending.lock().expect("SSH recording output").flush())
+    }
+
+    pub(super) fn close_recording(&self) {
+        if let Some(sink) = &self.recording_sink {
+            sink.close();
+        }
+    }
+
+    pub(super) fn interrupt_recording(&self) {
+        if let Some(sink) = &self.recording_sink {
+            sink.interrupt();
+        }
+    }
+
     pub(super) fn send_command(&mut self, command: SshTransportCommand) -> Result<()> {
         if self.command_tx.is_none() {
             bail!("SSH PTY backend for {} is still connecting", self.endpoint);
         }
-        self.pending_writes.push_back(PendingWrite(command));
+        self.pending_writes.push_back(PendingWrite(command, None));
+        self.flush_pending_writes()
+    }
+
+    fn send_tmux_command(
+        &mut self,
+        command: Vec<u8>,
+        reply: Option<crate::tmux::ReplyTag>,
+    ) -> Result<()> {
+        if self.command_tx.is_none() {
+            bail!("SSH PTY backend for {} is still connecting", self.endpoint);
+        }
+        self.pending_writes
+            .push_back(PendingWrite(SshTransportCommand::Data(command), reply));
         self.flush_pending_writes()
     }
 
@@ -155,15 +208,26 @@ impl SshParser {
         let Some(sender) = &self.command_tx else {
             return Ok(());
         };
-        while let Some(command) = self.pending_writes.pop_front() {
-            match sender.try_send(command.take()) {
-                Ok(()) => {}
+        while let Some(mut pending) = self.pending_writes.pop_front() {
+            match sender.try_send(pending.take()) {
+                Ok(()) => {
+                    if let Some(reply) = pending.1.take() {
+                        match reply {
+                            crate::tmux::ReplyTag::PendingExternal => {
+                                self.tmux_display.register_external_write()
+                            }
+                            query => self.tmux_display.register_written_reply(query),
+                        }
+                    }
+                }
                 Err(tokio::sync::mpsc::error::TrySendError::Full(command)) => {
-                    self.pending_writes.push_front(PendingWrite(command));
+                    pending.0 = command;
+                    self.pending_writes.push_front(pending);
                     break;
                 }
                 Err(tokio::sync::mpsc::error::TrySendError::Closed(command)) => {
-                    drop(PendingWrite(command));
+                    pending.0 = command;
+                    drop(pending);
                     self.pending_writes.clear();
                     bail!("SSH terminal channel closed");
                 }
@@ -221,13 +285,29 @@ impl SshParser {
             .tmux_controller
             .take()
             .expect("SSH tmux controller must remain owned by its terminal session");
-        let record_output = self.output_events_enabled;
+        let record_output = self.output_events_enabled
+            || self
+                .recording_sink
+                .as_ref()
+                .is_some_and(oxideterm_audit::RecordingSink::is_enabled);
+        let recording_pending = self.recording_pending.clone();
+        let output_events_enabled = self.output_events_enabled;
         let mut tmux_events = Vec::new();
         let result = controller.advance(
             bytes,
             |terminal_bytes| self.feed_normal_transport_output_to_terminal(terminal_bytes),
             record_output,
-            |event| tmux_events.push(event),
+            |event| {
+                if let TerminalEvent::Output(bytes) = &event {
+                    if let Some(pending) = &recording_pending {
+                        pending.lock().expect("SSH recording output").output(bytes);
+                    }
+                    if !output_events_enabled {
+                        return;
+                    }
+                }
+                tmux_events.push(event)
+            },
         );
         self.tmux_controller = Some(controller);
         self.pending_events.extend(tmux_events);
@@ -237,7 +317,7 @@ impl SshParser {
                     self.graphics.clear();
                     self.graphics_alt_screen_active = false;
                 }
-                self.queue_tmux_commands(outcome.commands);
+                self.queue_internal_tmux_commands(outcome.commands, outcome.replies);
                 if outcome.changed {
                     self.pending_events.push(TerminalEvent::Wakeup);
                 }
@@ -284,7 +364,12 @@ impl SshParser {
                         self.pending_events
                             .push(TerminalEvent::PrivilegePrompt(event));
                     }
-                    if self.output_events_enabled {
+                    let record_output = self.output_events_enabled
+                        || self
+                            .recording_sink
+                            .as_ref()
+                            .is_some_and(oxideterm_audit::RecordingSink::is_enabled);
+                    if record_output {
                         // The scanner removes private OSC before persistence;
                         // decoded clipboard payloads must never reach a recording.
                         let (_, recordable) = self.shell_integration.advance_with_recording(
@@ -294,7 +379,15 @@ impl SshParser {
                             |event| self.pending_events.push(event),
                         );
                         if !recordable.is_empty() {
-                            self.pending_events.push(TerminalEvent::Output(recordable));
+                            if let Some(pending) = &self.recording_pending {
+                                pending
+                                    .lock()
+                                    .expect("SSH recording output")
+                                    .output(&recordable);
+                            }
+                            if self.output_events_enabled {
+                                self.pending_events.push(TerminalEvent::Output(recordable));
+                            }
                         }
                     } else {
                         self.shell_integration.advance(
@@ -508,7 +601,25 @@ impl SshParser {
     }
 
     pub(super) fn queue_tmux_commands(&mut self, commands: impl IntoIterator<Item = Vec<u8>>) {
-        self.tmux_command_queue.extend(commands);
+        self.tmux_command_queue.extend(
+            commands
+                .into_iter()
+                .map(|command| (command, Some(crate::tmux::ReplyTag::PendingExternal))),
+        );
+        self.flush_tmux_commands();
+    }
+
+    fn queue_internal_tmux_commands(
+        &mut self,
+        commands: Vec<Vec<u8>>,
+        replies: Vec<crate::tmux::ReplyTag>,
+    ) {
+        self.tmux_command_queue.extend(
+            commands
+                .into_iter()
+                .zip(replies)
+                .map(|(command, reply)| (command, Some(reply))),
+        );
         self.flush_tmux_commands();
     }
 
@@ -518,10 +629,10 @@ impl SshParser {
         }
         let mut changed = false;
         while self.pending_writes.is_empty() {
-            let Some(command) = self.tmux_command_queue.pop_front() else {
+            let Some((command, reply)) = self.tmux_command_queue.pop_front() else {
                 break;
             };
-            let _ = self.send_command(SshTransportCommand::Data(command));
+            let _ = self.send_tmux_command(command, reply);
             changed = true;
         }
         changed
@@ -688,15 +799,26 @@ impl SshParser {
         self.tmux_display.ui_state()
     }
 
-    pub(super) fn tmux_action(&mut self, action: crate::TmuxAction) -> Result<bool> {
-        self.tmux_action_ref(&zeroize::Zeroizing::new(action))
+    pub(super) fn tmux_action(
+        &mut self,
+        action: crate::TmuxAction,
+        audit: oxideterm_audit::AuditOperation,
+    ) -> Result<bool> {
+        self.tmux_action_ref(&zeroize::Zeroizing::new(action), audit)
     }
 
-    pub(super) fn tmux_action_ref(&mut self, action: &crate::TmuxAction) -> Result<bool> {
-        let Some(command) = self.tmux_display.action_command(action) else {
+    pub(super) fn tmux_action_ref(
+        &mut self,
+        action: &crate::TmuxAction,
+        audit: oxideterm_audit::AuditOperation,
+    ) -> Result<bool> {
+        let Some((command, reply)) = self.tmux_display.action_command_with_audit(action, audit)
+        else {
             return Ok(false);
         };
-        self.queue_tmux_commands([command]);
+        self.tmux_command_queue
+            .push_back((command, Some(crate::tmux::ReplyTag::External(reply))));
+        self.flush_tmux_commands();
         Ok(true)
     }
 
@@ -752,6 +874,14 @@ impl SshParser {
             cell_height: resize.cell_height,
         };
         self.term.lock().resize(size);
+        if grid_changed {
+            if let Some(pending) = &self.recording_pending {
+                pending
+                    .lock()
+                    .expect("SSH recording output")
+                    .resize(resize.cols as u16, resize.rows as u16);
+            }
+        }
         if let Some(controller) = self.tmux_controller.as_mut() {
             controller.resize(size);
         }

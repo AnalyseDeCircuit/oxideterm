@@ -29,6 +29,31 @@ pub struct SshSessionConfig {
 const POST_CONNECT_COMMAND_MAX_BYTES: usize = 8192;
 
 impl SshSessionConfig {
+    pub(super) fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        if let (Some(registry), Some(SshSessionConnection::Existing { connection_id, .. })) =
+            (&self.registry, &self.connection)
+        {
+            if let Some(context) = registry
+                .get(connection_id)
+                .and_then(|handle| handle.audit_context())
+            {
+                return Some(context);
+            }
+        }
+        let owner = match &self.registry {
+            Some(registry) => registry.audit_context(),
+            None => oxideterm_audit::AuditContext::current(),
+        };
+        owner.map(|context| {
+            let mut session = context.session(
+                "ssh",
+                &format!("{}@{}:{}", self.username, self.host, self.port),
+            );
+            session.remote_account = Some(zeroize::Zeroizing::new(self.username.clone()));
+            session
+        })
+    }
+
     pub fn new(host: impl Into<String>, port: u16, username: impl Into<String>) -> Self {
         Self::from(SshConfig::password(host, port, username, ""))
     }

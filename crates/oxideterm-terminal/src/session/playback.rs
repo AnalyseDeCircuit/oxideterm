@@ -141,6 +141,20 @@ impl PlaybackTerminalSession {
 
 }
 
+#[cfg(test)]
+mod recording_capture_tests {
+    use super::*;
+
+    #[test]
+    fn playback_renders_without_creating_a_live_audit_session() {
+        let mut playback = TerminalSession::recording_playback(20, 4, GraphicsOptions::default(), 100);
+        assert!(playback.audit_context().is_none());
+        playback.feed_recording_output(b"replayed output");
+        assert!(playback.buffer_text().contains("replayed output"));
+        assert!(playback.audit_context().is_none());
+    }
+}
+
 impl TerminalSessionBackend for PlaybackTerminalSession {
     fn kind(&self) -> TerminalSessionKind {
         TerminalSessionKind::LocalPty

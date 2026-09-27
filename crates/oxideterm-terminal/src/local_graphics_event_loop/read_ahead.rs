@@ -143,6 +143,7 @@ impl PtyReadAhead {
         let _ = self.poll.notify();
     }
 
+    #[cfg(test)]
     pub(super) fn wait_pending(&mut self) -> io::Result<bool> {
         if self.current.is_some() {
             return Ok(true);

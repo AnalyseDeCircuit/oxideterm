@@ -30,6 +30,10 @@ pub(crate) struct ModemWorkerJob {
     pub transfer: ModemTransfer,
     pub request: TerminalModemTransferRequest,
     pub selection: ModemPromptSelection,
+    pub audit: Option<oxideterm_audit::AuditOperation>,
+    pub connection_lost: Arc<std::sync::atomic::AtomicBool>,
+    pub payload_bytes: Arc<std::sync::atomic::AtomicU64>,
+    pub completed_files: Option<u64>,
 }
 
 pub(crate) enum ModemWorkerEvent {
@@ -51,6 +55,57 @@ pub(crate) fn run_modem_worker_job(
     event_tx: std::sync::mpsc::Sender<ModemWorkerEvent>,
 ) {
     let result = run_modem_worker_job_inner(&mut job, &event_tx);
+    if let Some(mut audit) = job.audit.take() {
+        let actual_protocol = match (job.request.protocol, &job.selection) {
+            (
+                DetectedModemProtocol::XymodemNegotiation,
+                ModemPromptSelection::UploadFiles(paths),
+            ) if paths.len() == 1 => "xmodem",
+            (
+                DetectedModemProtocol::XymodemNegotiation,
+                ModemPromptSelection::UploadFiles(paths),
+            ) if !paths.is_empty() => "ymodem",
+            (DetectedModemProtocol::XymodemNegotiation, _) => "unknown",
+            (DetectedModemProtocol::Xmodem, _) => "xmodem",
+            (DetectedModemProtocol::Ymodem, _) => "ymodem",
+            (DetectedModemProtocol::Zmodem, _) => "zmodem",
+        };
+        let selection = match &job.selection {
+            ModemPromptSelection::UploadFiles(paths) => format!(
+                "local={}; selected={}",
+                paths
+                    .first()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "unavailable".into()),
+                paths.len()
+            ),
+            ModemPromptSelection::DownloadRoot(root) => format!("local_root={}", root.display()),
+            ModemPromptSelection::Cancelled => "selection=cancelled".to_string(),
+        };
+        audit.summary(&format!("protocol={actual_protocol}; detected={:?}; direction={:?}; {selection}; completed_files={}", job.request.protocol, job.request.direction, job.completed_files.map_or_else(|| "unknown".to_owned(), |count| count.to_string())));
+        let bytes = job.payload_bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let outcome = if job
+            .connection_lost
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            oxideterm_audit::AuditOutcome::Interrupted
+        } else {
+            match &result {
+                Ok(()) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(ModemWorkerError::Cancelled) => oxideterm_audit::AuditOutcome::Cancelled,
+                Err(_) if bytes > 0 || job.completed_files.is_some_and(|count| count > 0) => {
+                    oxideterm_audit::AuditOutcome::Partial
+                }
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            }
+        };
+        audit.finish(
+            outcome,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            Some(bytes),
+        );
+    }
     if result.is_err() {
         // Protocol failures and user cancellation both need an on-wire abort so
         // the peer exits instead of retrying after the UI releases the transfer.
@@ -104,7 +159,13 @@ fn run_download(
             let (file, file_name) = downloads
                 .create_writer(root, "xmodem.bin")
                 .map_err(worker_error)?;
-            let mut writer = ProgressWriter::new(file, Some(file_name), None, event_tx.clone());
+            let mut writer = ProgressWriter::new(
+                file,
+                Some(file_name),
+                None,
+                event_tx.clone(),
+                job.payload_bytes.clone(),
+            );
             receive_xmodem(&mut job.transfer, &mut writer, true).map_err(worker_error)?;
             drop(writer);
         }
@@ -117,6 +178,7 @@ fn run_download(
                     Some(file_name),
                     total,
                     event_tx.clone(),
+                    job.payload_bytes.clone(),
                 ))
             })
             .map_err(worker_error)?;
@@ -130,6 +192,7 @@ fn run_download(
                     Some(file_name),
                     total,
                     event_tx.clone(),
+                    job.payload_bytes.clone(),
                 ))
             })
             .map_err(worker_error)?;
@@ -140,7 +203,9 @@ fn run_download(
             ));
         }
     }
-    downloads.commit(root).map_err(worker_error)?;
+    downloads
+        .commit(root, &mut job.completed_files)
+        .map_err(worker_error)?;
     Ok(())
 }
 
@@ -159,9 +224,16 @@ fn run_upload(
             let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
             let file_name = Some(local_file_name(path)?);
-            let mut file = ProgressReader::new(file, file_name, file_size, event_tx.clone());
+            let mut file = ProgressReader::new(
+                file,
+                file_name,
+                file_size,
+                event_tx.clone(),
+                job.payload_bytes.clone(),
+            );
             send_xmodem(&mut job.transfer, &mut file, XmodemBlockMode::Bytes1024)
                 .map_err(worker_error)?;
+            job.completed_files = Some(1);
         }
         DetectedModemProtocol::XymodemNegotiation if paths.len() == 1 => {
             // Bare C/NAK negotiation does not identify XMODEM vs YMODEM; a
@@ -170,17 +242,26 @@ fn run_upload(
             let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
             let file_name = Some(local_file_name(path)?);
-            let mut file = ProgressReader::new(file, file_name, file_size, event_tx.clone());
+            let mut file = ProgressReader::new(
+                file,
+                file_name,
+                file_size,
+                event_tx.clone(),
+                job.payload_bytes.clone(),
+            );
             send_xmodem(&mut job.transfer, &mut file, XmodemBlockMode::Bytes1024)
                 .map_err(worker_error)?;
+            job.completed_files = Some(1);
         }
         DetectedModemProtocol::XymodemNegotiation | DetectedModemProtocol::Ymodem => {
-            let mut entries = open_ymodem_entries(paths, event_tx)?;
+            let mut entries = open_ymodem_entries(paths, event_tx, job.payload_bytes.clone())?;
             send_ymodem_stream(&mut job.transfer, &mut entries).map_err(worker_error)?;
+            job.completed_files = Some(paths.len() as u64);
         }
         DetectedModemProtocol::Zmodem => {
-            let mut entries = open_zmodem_entries(paths, event_tx)?;
+            let mut entries = open_zmodem_entries(paths, event_tx, job.payload_bytes.clone())?;
             send_zmodem_stream(&mut job.transfer, &mut entries).map_err(worker_error)?;
+            job.completed_files = Some(paths.len() as u64);
         }
     }
     Ok(())
@@ -189,6 +270,7 @@ fn run_upload(
 fn open_ymodem_entries(
     paths: &[PathBuf],
     event_tx: &std::sync::mpsc::Sender<ModemWorkerEvent>,
+    payload_bytes: Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<Vec<YmodemSendStreamEntry<ProgressReader<File>>>, ModemWorkerError> {
     paths
         .iter()
@@ -196,8 +278,13 @@ fn open_ymodem_entries(
             let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
             let file_name = local_file_name(path)?;
-            let reader =
-                ProgressReader::new(file, Some(file_name.clone()), file_size, event_tx.clone());
+            let reader = ProgressReader::new(
+                file,
+                Some(file_name.clone()),
+                file_size,
+                event_tx.clone(),
+                payload_bytes.clone(),
+            );
             Ok(YmodemSendStreamEntry {
                 file_name,
                 file_size,
@@ -210,6 +297,7 @@ fn open_ymodem_entries(
 fn open_zmodem_entries(
     paths: &[PathBuf],
     event_tx: &std::sync::mpsc::Sender<ModemWorkerEvent>,
+    payload_bytes: Arc<std::sync::atomic::AtomicU64>,
 ) -> Result<Vec<ZmodemSendStreamEntry<ProgressReader<File>>>, ModemWorkerError> {
     paths
         .iter()
@@ -217,8 +305,13 @@ fn open_zmodem_entries(
             let file = File::open(path).map_err(failed)?;
             let file_size = file.metadata().map_err(failed)?.len();
             let file_name = local_file_name(path)?;
-            let reader =
-                ProgressReader::new(file, Some(file_name.clone()), file_size, event_tx.clone());
+            let reader = ProgressReader::new(
+                file,
+                Some(file_name.clone()),
+                file_size,
+                event_tx.clone(),
+                payload_bytes.clone(),
+            );
             Ok(ZmodemSendStreamEntry {
                 file_name,
                 file_size,
@@ -274,10 +367,11 @@ impl DownloadBatch {
         ))
     }
 
-    fn commit(&self, root: &Path) -> Result<(), ModemTransferError> {
+    fn commit(&self, root: &Path, completed: &mut Option<u64>) -> Result<(), ModemTransferError> {
         let pending = std::mem::take(&mut *self.pending.lock());
         for pending_download in pending {
             persist_download_without_overwrite(root, pending_download)?;
+            *completed = Some(completed.unwrap_or(0).saturating_add(1));
         }
         Ok(())
     }
@@ -399,6 +493,7 @@ struct ProgressReader<R> {
     total_bytes: u64,
     event_tx: std::sync::mpsc::Sender<ModemWorkerEvent>,
     last_emit: Instant,
+    payload_bytes: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl<R> ProgressReader<R> {
@@ -407,6 +502,7 @@ impl<R> ProgressReader<R> {
         file_name: Option<String>,
         total_bytes: u64,
         event_tx: std::sync::mpsc::Sender<ModemWorkerEvent>,
+        payload_bytes: Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         Self {
             inner,
@@ -415,6 +511,7 @@ impl<R> ProgressReader<R> {
             total_bytes,
             event_tx,
             last_emit: Instant::now() - Duration::from_secs(1),
+            payload_bytes,
         }
     }
 
@@ -437,6 +534,8 @@ impl<R: Read> Read for ProgressReader<R> {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         let read = self.inner.read(buffer)?;
         self.transferred_bytes = self.transferred_bytes.saturating_add(read as u64);
+        self.payload_bytes
+            .fetch_add(read as u64, std::sync::atomic::Ordering::Relaxed);
         self.emit_progress(read == 0 || self.transferred_bytes >= self.total_bytes);
         Ok(read)
     }
@@ -458,6 +557,7 @@ struct ProgressWriter<W> {
     total_bytes: Option<u64>,
     event_tx: std::sync::mpsc::Sender<ModemWorkerEvent>,
     last_emit: Instant,
+    payload_bytes: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl<W> ProgressWriter<W> {
@@ -466,6 +566,7 @@ impl<W> ProgressWriter<W> {
         file_name: Option<String>,
         total_bytes: Option<u64>,
         event_tx: std::sync::mpsc::Sender<ModemWorkerEvent>,
+        payload_bytes: Arc<std::sync::atomic::AtomicU64>,
     ) -> Self {
         Self {
             inner,
@@ -474,6 +575,7 @@ impl<W> ProgressWriter<W> {
             total_bytes,
             event_tx,
             last_emit: Instant::now() - Duration::from_secs(1),
+            payload_bytes,
         }
     }
 
@@ -496,6 +598,8 @@ impl<W: Write> Write for ProgressWriter<W> {
     fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
         let written = self.inner.write(buffer)?;
         self.transferred_bytes = self.transferred_bytes.saturating_add(written as u64);
+        self.payload_bytes
+            .fetch_add(written as u64, std::sync::atomic::Ordering::Relaxed);
         self.emit_progress(
             self.total_bytes
                 .is_some_and(|total| self.transferred_bytes >= total),
@@ -511,6 +615,114 @@ impl<W: Write> Write for ProgressWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for TestKeys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![11; 32]))
+        }
+
+        fn create(
+            &self,
+            id: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[test]
+    fn modem_worker_distinguishes_cancel_from_connection_loss() {
+        use oxideterm_audit::{
+            AuditCategory, AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource,
+            AuditStore,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("audit.db");
+        oxideterm_audit::AuditStore::open(&path, &TestKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service = AuditService::with_key_provider(path.clone(), TestKeys).unwrap();
+        for (source, connection_lost) in [(AuditSource::User, false), (AuditSource::System, true)] {
+            let context = AuditContext::new(service.client(), source);
+            let audit = context.operation(
+                AuditCategory::File,
+                "file_transfer",
+                Some("protocol=xmodem"),
+            );
+            let (sender, receiver) = std::sync::mpsc::channel();
+            run_modem_worker_job(
+                ModemWorkerJob {
+                    transfer: ModemTransfer::new(&[]),
+                    request: TerminalModemTransferRequest {
+                        protocol: DetectedModemProtocol::Xmodem,
+                        direction: ModemTransferDirection::Upload,
+                    },
+                    selection: ModemPromptSelection::Cancelled,
+                    audit: Some(audit),
+                    connection_lost: Arc::new(std::sync::atomic::AtomicBool::new(connection_lost)),
+                    payload_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    completed_files: None,
+                },
+                sender,
+            );
+            assert!(matches!(
+                receiver.recv().unwrap(),
+                ModemWorkerEvent::Cancelled
+            ));
+        }
+        drop(service);
+        let records = AuditStore::open(&path, &TestKeys)
+            .unwrap()
+            .query(&AuditQuery {
+                category: Some(AuditCategory::File),
+                limit: 16,
+                ..Default::default()
+            })
+            .unwrap()
+            .records;
+        let outcomes = records
+            .iter()
+            .filter_map(|record| record.details.operation.as_ref())
+            .filter(|operation| operation.phase == Some(oxideterm_audit::AuditPhase::Result))
+            .map(|operation| (operation.source, operation.outcome, operation.bytes))
+            .collect::<Vec<_>>();
+        assert!(outcomes.contains(&(AuditSource::User, AuditOutcome::Cancelled, Some(0))));
+        assert!(outcomes.contains(&(AuditSource::System, AuditOutcome::Interrupted, Some(0))));
+    }
+
+    #[test]
+    fn modem_payload_counter_tracks_bytes_processed_by_file_io() {
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        let bytes = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let mut reader = ProgressReader::new(
+            std::io::Cursor::new(b"hello".to_vec()),
+            Some("hello.txt".into()),
+            5,
+            sender.clone(),
+            bytes.clone(),
+        );
+        let mut buffer = [0; 3];
+        assert_eq!(reader.read(&mut buffer).unwrap(), 3);
+        assert_eq!(reader.read(&mut buffer).unwrap(), 2);
+        let mut writer = ProgressWriter::new(
+            Vec::new(),
+            Some("reply.txt".into()),
+            Some(4),
+            sender,
+            bytes.clone(),
+        );
+        writer.write_all(b"data").unwrap();
+        assert_eq!(bytes.load(std::sync::atomic::Ordering::Relaxed), 9);
+    }
 
     #[test]
     fn abandoned_download_batch_removes_partial_files() {
@@ -533,7 +745,9 @@ mod tests {
         writer.write_all(b"downloaded").unwrap();
         drop(writer);
 
-        downloads.commit(root.path()).unwrap();
+        let mut completed = None;
+        downloads.commit(root.path(), &mut completed).unwrap();
+        assert_eq!(completed, Some(1));
 
         assert_eq!(
             std::fs::read(root.path().join("report.txt")).unwrap(),

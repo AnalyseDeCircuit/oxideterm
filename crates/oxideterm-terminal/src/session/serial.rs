@@ -153,6 +153,11 @@ pub fn serial_list_ports() -> Result<Vec<SerialPortInfo>, SerialError> {
 }
 
 pub struct SerialSession {
+    audit: Option<oxideterm_audit::AuditContext>,
+    recording_sink: Option<oxideterm_audit::RecordingSink>,
+    recording_pending: Option<crate::recording_output::RecordingOutput>,
+    connect_audit: Option<oxideterm_audit::AuditOperation>,
+    connected: bool,
     config: SerialSessionConfig,
     term: Arc<FairMutex<Term<LocalEventListener>>>,
     parser: Processor,
@@ -320,6 +325,7 @@ fn append_serial_escape_pair(output: &mut Vec<u8>, next: u8) {
 impl SerialSession {
     pub fn new(
         config: SerialSessionConfig,
+        audit: Option<oxideterm_audit::AuditContext>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -338,6 +344,7 @@ impl SerialSession {
             cell_height: resize.cell_height,
         };
         let (listener, event_rx) = local_event_channel();
+        let recording_activity = listener.activity_sender();
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel_with_activity(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
             listener.activity_sender(),
@@ -359,7 +366,46 @@ impl SerialSession {
         serial_graphics_options.enabled = false;
 
         let runtime_options = config.runtime_options;
+        let connect_audit = Some(oxideterm_audit::AuditOperation::in_context(
+            audit.as_ref(),
+            oxideterm_audit::AuditCategory::Connection,
+            "serial_connect",
+            Some(&format!(
+                "baud={} data_bits={} stop_bits={} parity={:?} flow={:?}",
+                config.baud_rate,
+                config.data_bits,
+                config.stop_bits,
+                config.parity,
+                config.flow_control
+            )),
+        ));
+        let recording_sink = audit
+            .as_ref()
+            .map(oxideterm_audit::AuditContext::recording_sink);
+        // Only configured device flow control can propagate a recording pause.
+        // With no flow control, preserve live reads and report recording gaps.
+        if let Some(sink) = &recording_sink {
+            sink.set_wake_callback(Arc::new(move || recording_activity.notify()));
+        }
+        let recording_pending = recording_sink
+            .as_ref()
+            .filter(|_| config.flow_control != SerialFlowControl::None)
+            .map(|sink| {
+                let mut pending = crate::recording_output::RecordingOutput::new(sink.clone());
+                pending.resize(resize.cols as u16, resize.rows as u16);
+                pending
+            });
+        if recording_pending.is_none() {
+            if let Some(sink) = &recording_sink {
+                sink.resize(resize.cols as u16, resize.rows as u16);
+            }
+        }
         Ok(Self {
+            audit,
+            recording_sink,
+            recording_pending,
+            connect_audit,
+            connected: false,
             config,
             term,
             parser: Processor::new(),
@@ -398,6 +444,29 @@ impl SerialSession {
         self.config.title_text()
     }
 
+    fn audit_exit(&mut self, outcome: oxideterm_audit::AuditOutcome) {
+        if let Some(operation) = self.connect_audit.take() {
+            operation.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        } else if self.connected {
+            if let Some(context) = &self.audit {
+                context.observe(
+                    oxideterm_audit::AuditCategory::Connection,
+                    "serial_disconnect",
+                    None,
+                    outcome,
+                    oxideterm_audit::AuditEvidence::Lifecycle,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+            self.connected = false;
+        }
+    }
+
     fn release_port_reservation(&mut self) {
         // Dropping the reservation removes the in-process owner entry while
         // the worker thread owns the OS-level serial handle lifecycle.
@@ -411,6 +480,14 @@ impl SerialSession {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
         loop {
+            if self
+                .recording_pending
+                .as_mut()
+                .is_some_and(|pending| !pending.flush())
+            {
+                break;
+            }
+
             if budget.time_exhausted(started)
                 || report.drained_bytes >= budget.max_bytes
                 || report.events_drained >= budget.max_events
@@ -420,27 +497,21 @@ impl SerialSession {
                 break;
             }
 
-            if let Some(event) = self.output_queue.pop_front() {
-                let SerialWorkerEvent::Output(bytes) = event.into_inner() else {
-                    unreachable!("only output events enter the local drain queue");
-                };
-                report.events_drained += 1;
-                let processing_started = budget.collect_performance_metrics.then(Instant::now);
-                self.feed_transport_output(&bytes);
-                report.record_data_chunk(
-                    bytes.len(),
-                    processing_started.map_or(Duration::ZERO, |started| started.elapsed()),
-                );
-                report.mark_changed();
-                continue;
-            }
-
-            let event = match self.worker_rx.try_recv() {
+            let event = match self
+                .output_queue
+                .pop_front()
+                .map(Ok)
+                .unwrap_or_else(|| self.worker_rx.try_recv())
+            {
                 Ok(event) => event,
                 Err(crossbeam_channel::TryRecvError::Empty) => break,
                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
                     self.release_port_reservation();
                     if self.lifecycle.is_running() {
+                        if let Some(sink) = &self.recording_sink {
+                            sink.interrupt();
+                        }
+                        self.audit_exit(oxideterm_audit::AuditOutcome::Interrupted);
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -457,8 +528,32 @@ impl SerialSession {
                 break;
             }
 
+            if matches!(event.value(), SerialWorkerEvent::Closed) {
+                let tail = self.modem_consumer.flush_pending_plain_output();
+                if !tail.is_empty() {
+                    self.handle_modem_consumer_events(tail);
+                    report.mark_changed();
+                }
+                if self
+                    .recording_pending
+                    .as_mut()
+                    .is_some_and(|pending| !pending.flush())
+                {
+                    self.output_queue.push_front(event);
+                    break;
+                }
+            }
             match event.into_inner() {
                 SerialWorkerEvent::Connected => {
+                    self.connected = true;
+                    if let Some(operation) = self.connect_audit.take() {
+                        operation.finish(
+                            oxideterm_audit::AuditOutcome::Succeeded,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            None,
+                        );
+                    }
                     self.title = Some(self.title_text());
                     self.pending_events
                         .push(TerminalEvent::TitleChanged(self.title_text()));
@@ -476,6 +571,10 @@ impl SerialSession {
                     report.mark_changed();
                 }
                 SerialWorkerEvent::Failed(error) => {
+                    if let Some(sink) = &self.recording_sink {
+                        sink.interrupt();
+                    }
+                    self.audit_exit(oxideterm_audit::AuditOutcome::Failed);
                     self.lifecycle = TerminalLifecycle::Exited(None);
                     self.release_port_reservation();
                     self.feed_utf8_terminal_output(
@@ -489,6 +588,10 @@ impl SerialSession {
                 SerialWorkerEvent::Closed => {
                     self.release_port_reservation();
                     if self.lifecycle.is_running() {
+                        if let Some(sink) = &self.recording_sink {
+                            sink.close();
+                        }
+                        self.audit_exit(oxideterm_audit::AuditOutcome::Succeeded);
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -509,6 +612,10 @@ impl SerialSession {
     }
 
     fn feed_plain_transport_output(&mut self, bytes: &[u8]) {
+        self.feed_display_output(bytes, true);
+    }
+
+    fn feed_display_output(&mut self, bytes: &[u8], remote_output: bool) {
         // Modem framing is defined on raw serial bytes, before display plugins.
         let processed_output = apply_terminal_output_processor(&self.output_processor, bytes);
         let bytes = processed_output.as_ref();
@@ -543,7 +650,13 @@ impl SerialSession {
                                 .push(TerminalEvent::TriggerMatched(matched));
                         });
                     }
-                    if self.output_events_enabled {
+                    let record_output = remote_output
+                        && (self.output_events_enabled
+                            || self
+                                .recording_sink
+                                .as_ref()
+                                .is_some_and(oxideterm_audit::RecordingSink::is_enabled));
+                    if record_output {
                         // Apply the same private-OSC recording boundary as PTY sessions.
                         let (_, recordable) = self.shell_integration.advance_with_recording(
                             &mut self.parser,
@@ -552,7 +665,14 @@ impl SerialSession {
                             |event| self.pending_events.push(event),
                         );
                         if !recordable.is_empty() {
-                            self.pending_events.push(TerminalEvent::Output(recordable));
+                            if let Some(pending) = &mut self.recording_pending {
+                                pending.output(&recordable);
+                            } else if let Some(sink) = &self.recording_sink {
+                                sink.record_output(&recordable);
+                            }
+                            if self.output_events_enabled {
+                                self.pending_events.push(TerminalEvent::Output(recordable));
+                            }
                         }
                     } else {
                         self.shell_integration.advance(
@@ -719,6 +839,13 @@ impl SerialSession {
     }
 }
 
+impl Drop for SerialSession {
+    fn drop(&mut self) {
+        // The backend joins its dedicated port worker before releasing the device reservation.
+        self.shutdown();
+    }
+}
+
 impl TerminalSessionBackend for SerialSession {
     fn kind(&self) -> TerminalSessionKind {
         TerminalSessionKind::Serial
@@ -786,7 +913,7 @@ impl TerminalSessionBackend for SerialSession {
         let encoded = self.encode_user_input(bytes)?;
         self.write_protocol_bytes(&encoded)?;
         if self.runtime_options.local_echo {
-            self.feed_plain_transport_output(&encoded);
+            self.feed_display_output(&encoded, false);
         }
         Ok(())
     }
@@ -860,13 +987,9 @@ impl TerminalSessionBackend for SerialSession {
         Some(self.control_state)
     }
 
-    fn set_serial_control_line(
-        &mut self,
-        line: SerialControlLine,
-        asserted: bool,
-    ) -> Result<()> {
+    fn set_serial_control_line(&mut self, line: SerialControlLine, asserted: bool) -> Result<()> {
         if !self.lifecycle.is_running() {
-            return Ok(());
+            anyhow::bail!("Serial session is not running");
         }
         self.command_tx
             .try_send(SerialCommand::SetControlLine { line, asserted })
@@ -883,12 +1006,12 @@ impl TerminalSessionBackend for SerialSession {
     }
 
     fn send_serial_break(&mut self) -> Result<()> {
-        if self.lifecycle.is_running() {
-            self.command_tx
-                .try_send(SerialCommand::SendBreak(SerialBreakDuration::default()))
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        if !self.lifecycle.is_running() {
+            anyhow::bail!("Serial session is not running");
         }
-        Ok(())
+        self.command_tx
+            .try_send(SerialCommand::SendBreak(SerialBreakDuration::default()))
+            .map_err(|error| anyhow::anyhow!(error.to_string()))
     }
 
     fn start_modem_transfer(
@@ -938,6 +1061,13 @@ impl TerminalSessionBackend for SerialSession {
             cell_height: resize.cell_height,
         };
         self.term.lock().resize(size);
+        if grid_changed {
+            if let Some(pending) = &mut self.recording_pending {
+                pending.resize(resize.cols as u16, resize.rows as u16);
+            } else if let Some(sink) = &self.recording_sink {
+                sink.resize(resize.cols as u16, resize.rows as u16);
+            }
+        }
         Ok(())
     }
 
@@ -1091,15 +1221,54 @@ impl TerminalSessionBackend for SerialSession {
         if matches!(self.lifecycle, TerminalLifecycle::Closed) {
             return;
         }
-        self.release_port_reservation();
+        if let Some(operation) = self.connect_audit.take() {
+            operation.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+        let was_connected = std::mem::replace(&mut self.connected, false);
         // Closing the output receiver releases a worker blocked by backpressure
         // before this method joins the dedicated serial thread.
+        let unrecorded = self.worker_rx.pending_bytes() > 0
+            || !self.output_queue.is_empty()
+            || self
+                .recording_pending
+                .as_mut()
+                .is_some_and(|pending| !pending.flush());
         self.worker_rx.close();
         let _ = self.command_tx.try_send(SerialCommand::Close);
-        if let Some(handle) = self.worker_handle.take() {
-            let _ = handle.join();
+        let joined = self
+            .worker_handle
+            .take()
+            .is_some_and(|handle| handle.join().is_ok());
+        if let Some(sink) = &self.recording_sink {
+            if joined && !unrecorded {
+                sink.close();
+            } else {
+                sink.interrupt();
+            }
         }
+        self.release_port_reservation();
         self.lifecycle = TerminalLifecycle::Closed;
+        if was_connected {
+            if let Some(context) = &self.audit {
+                context.observe(
+                    oxideterm_audit::AuditCategory::Connection,
+                    "serial_disconnect",
+                    None,
+                    if joined {
+                        oxideterm_audit::AuditOutcome::Succeeded
+                    } else {
+                        oxideterm_audit::AuditOutcome::Failed
+                    },
+                    oxideterm_audit::AuditEvidence::Lifecycle,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+        }
     }
 }
 
@@ -1195,7 +1364,8 @@ fn run_serial_worker_with_port<P>(
 ) where
     P: SerialWorkerPort + ?Sized,
 {
-    let mut buffer = [0_u8; 8192];
+    let mut buffer = zeroize::Zeroizing::new([0_u8; 8192]);
+    let mut pending_output: Option<zeroize::Zeroizing<Vec<u8>>> = None;
     loop {
         while let Ok(command) = command_rx.try_recv() {
             match command {
@@ -1229,18 +1399,28 @@ fn run_serial_worker_with_port<P>(
             }
         }
 
-        match port.read(&mut buffer) {
+        if let Some(mut bytes) = pending_output.take() {
+            let byte_len = bytes.len();
+            match worker_tx.send_timeout(
+                SerialWorkerEvent::Output(std::mem::take(&mut *bytes)),
+                byte_len,
+                SERIAL_READ_TIMEOUT,
+            ) {
+                Ok(()) => {}
+                Err(crossbeam_channel::SendTimeoutError::Timeout(SerialWorkerEvent::Output(
+                    bytes,
+                ))) => {
+                    pending_output = Some(zeroize::Zeroizing::new(bytes));
+                }
+                Err(_) => return,
+            }
+            continue;
+        }
+
+        match port.read(&mut *buffer) {
             Ok(0) => {}
             Ok(read_count) => {
-                if worker_tx
-                    .send(
-                        SerialWorkerEvent::Output(buffer[..read_count].to_vec()),
-                        read_count,
-                    )
-                    .is_err()
-                {
-                    return;
-                }
+                pending_output = Some(zeroize::Zeroizing::new(buffer[..read_count].to_vec()));
             }
             Err(error)
                 if matches!(
@@ -1624,7 +1804,7 @@ mod serial_tests {
     }
 
     struct FakeSerialPort {
-        reads: VecDeque<FakeRead>,
+        reads: Arc<Mutex<VecDeque<FakeRead>>>,
         writes: Arc<Mutex<Vec<Vec<u8>>>>,
         controls: Arc<Mutex<Vec<FakeControlEvent>>>,
     }
@@ -1632,7 +1812,7 @@ mod serial_tests {
     impl FakeSerialPort {
         fn new(reads: impl Into<VecDeque<FakeRead>>) -> Self {
             Self {
-                reads: reads.into(),
+                reads: Arc::new(Mutex::new(reads.into())),
                 writes: Arc::new(Mutex::new(Vec::new())),
                 controls: Arc::new(Mutex::new(Vec::new())),
             }
@@ -1641,14 +1821,17 @@ mod serial_tests {
 
     impl Read for FakeSerialPort {
         fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            match self.reads.pop_front() {
+            match self.reads.lock().unwrap().pop_front() {
                 Some(FakeRead::Bytes(bytes)) => {
                     let len = bytes.len().min(buf.len());
                     buf[..len].copy_from_slice(&bytes[..len]);
                     Ok(len)
                 }
                 Some(FakeRead::Error(kind)) => Err(io::Error::new(kind, "fake serial error")),
-                None => Err(io::Error::new(io::ErrorKind::TimedOut, "fake timeout")),
+                None => {
+                    std::thread::sleep(SERIAL_READ_TIMEOUT);
+                    Err(io::Error::new(io::ErrorKind::TimedOut, "fake timeout"))
+                }
             }
         }
     }
@@ -1705,6 +1888,11 @@ mod serial_tests {
         term_config.scrolling_history = 100;
 
         SerialSession {
+            audit: None,
+            recording_sink: None,
+            recording_pending: None,
+            connect_audit: None,
+            connected: false,
             config: valid_config(),
             term: Arc::new(FairMutex::new(Term::new(term_config, &size, listener))),
             parser: Processor::new(),
@@ -1742,6 +1930,100 @@ mod serial_tests {
     }
 
     #[test]
+    fn serial_local_echo_does_not_enter_encrypted_output_recording() {
+        use oxideterm_audit::{
+            AuditContext, AuditKeyProvider, AuditPolicy, AuditService, AuditSource, RecordingState,
+            StoredRecordingFrameKind,
+        };
+        use zeroize::Zeroizing;
+
+        struct Keys;
+        impl AuditKeyProvider for Keys {
+            fn load(
+                &self,
+                _: &str,
+            ) -> std::result::Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                Ok(Zeroizing::new(vec![11; 32]))
+            }
+            fn create(
+                &self,
+                id: &str,
+            ) -> std::result::Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                self.load(id)
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let client = service.client();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime
+            .block_on(client.set_policy(AuditPolicy {
+                enabled: true,
+                record_output: true,
+                ..Default::default()
+            }))
+            .unwrap();
+        let context =
+            AuditContext::new(client.clone(), AuditSource::User).session("serial", "test-port");
+        let sink = context.recording_sink();
+        sink.resize(80, 24);
+        let mut session = test_serial_session();
+        session.recording_sink = Some(sink.clone());
+        session.runtime_options.local_echo = true;
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        session.command_tx = command_tx;
+        session.write_input(b"private-input\r").unwrap();
+        assert!(
+            matches!(command_rx.try_recv(), Ok(SerialCommand::Data(bytes))
+            if bytes == b"private-input\r")
+        );
+        let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
+            crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
+        );
+        session.worker_rx = worker_rx;
+        worker_tx
+            .send_timeout(
+                SerialWorkerEvent::Output(b"device-output".to_vec()),
+                13,
+                Duration::from_secs(5),
+            )
+            .unwrap();
+        session.read_pending();
+        sink.close();
+        session.lifecycle = TerminalLifecycle::Closed;
+        drop(session);
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let recording_id = loop {
+            let list = runtime.block_on(client.list_recordings(None, 10)).unwrap();
+            if let Some(recording) = list.recordings.first()
+                && recording.state == RecordingState::Finished
+            {
+                break recording.id.clone();
+            }
+            assert!(Instant::now() < deadline, "serial recording should close");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let page = runtime
+            .block_on(client.read_recording_page(recording_id, None, None, 10))
+            .unwrap();
+        let output: Vec<u8> = page
+            .chunks
+            .iter()
+            .flat_map(|chunk| &chunk.frames)
+            .filter_map(|frame| match &frame.kind {
+                StoredRecordingFrameKind::Output(bytes) => Some(bytes.as_slice()),
+                _ => None,
+            })
+            .flatten()
+            .copied()
+            .collect();
+        assert_eq!(output, b"device-output");
+    }
+
+    #[test]
     fn serial_config_validation_rejects_invalid_parameters() {
         let mut config = valid_config();
         assert!(config.validate().is_ok());
@@ -1776,9 +2058,18 @@ mod serial_tests {
         let producer = std::thread::spawn(move || {
             let start = Instant::now();
             for (index, packet) in packets.into_iter().enumerate() {
-                std::thread::sleep((start + Duration::from_millis(index as u64 * 5)).saturating_duration_since(Instant::now()));
+                std::thread::sleep(
+                    (start + Duration::from_millis(index as u64 * 5))
+                        .saturating_duration_since(Instant::now()),
+                );
                 let len = packet.len();
-                sender.send(SerialWorkerEvent::Output(packet), len).unwrap();
+                sender
+                    .send_timeout(
+                        SerialWorkerEvent::Output(packet),
+                        len,
+                        Duration::from_secs(5),
+                    )
+                    .unwrap();
             }
         });
         let start = Instant::now();
@@ -1810,7 +2101,149 @@ mod serial_tests {
         producer.join().unwrap();
         assert_eq!(drained, expected.len());
         assert_eq!(output, expected);
-        eprintln!("serial probe frame_ms={frame_ms} ticks={ticks} bytes={drained} parse_ms={:.3} snapshot_ms={:.3}", parse_time.as_secs_f64() * 1000.0, snapshot_time.as_secs_f64() * 1000.0);
+        eprintln!(
+            "serial probe frame_ms={frame_ms} ticks={ticks} bytes={drained} parse_ms={:.3} snapshot_ms={:.3}",
+            parse_time.as_secs_f64() * 1000.0,
+            snapshot_time.as_secs_f64() * 1000.0
+        );
+    }
+
+    #[test]
+    fn serial_recording_resumes_with_flow_control_and_reports_gaps_without_it() {
+        use crate::recording_test_support::{AuditTestKeys, PausedFiles, read_finished};
+        use oxideterm_audit::{
+            AuditContext, AuditPolicy, AuditService, AuditSource, RecordingState,
+            StoredRecordingFrameKind,
+        };
+        use std::sync::{atomic::AtomicBool, mpsc};
+        let corpus = (0..600_000)
+            .map(|i| format!("{i:08}:0123456789abcdef0123456789abcdef\r\n"))
+            .collect::<String>();
+        for flow in [SerialFlowControl::Hardware, SerialFlowControl::None] {
+            let directory = tempfile::tempdir().unwrap();
+            let (entered, waiting) = mpsc::channel();
+            let (resume, resumed) = mpsc::channel();
+            let service = AuditService::with_recording_files(
+                directory.path().join("audit.db"),
+                AuditTestKeys,
+                Arc::new(PausedFiles {
+                    first: AtomicBool::new(false),
+                    entered,
+                    resume: Mutex::new(resumed),
+                }),
+            )
+            .unwrap();
+            let client = service.client();
+            let runtime = Runtime::new().unwrap();
+            runtime
+                .block_on(client.set_policy(AuditPolicy {
+                    enabled: true,
+                    record_output: true,
+                    ..Default::default()
+                }))
+                .unwrap();
+            let context = AuditContext::new(client.clone(), AuditSource::User)
+                .session("serial", "pressure-fixture");
+            let mut session = test_serial_session();
+            session.config.flow_control = flow;
+            let sink = context.recording_sink();
+            sink.resize(80, 24);
+            if flow != SerialFlowControl::None {
+                session.recording_pending =
+                    Some(crate::recording_output::RecordingOutput::new(sink.clone()));
+            }
+            session.recording_sink = Some(sink);
+            let mut port = FakeSerialPort::new(
+                corpus
+                    .as_bytes()
+                    .chunks(8192)
+                    .map(|bytes| FakeRead::Bytes(bytes.to_vec()))
+                    .collect::<VecDeque<_>>(),
+            );
+            let (commands, command_rx) = crossbeam_channel::unbounded();
+            let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
+                crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
+            );
+            let config = session.config.clone();
+            session.command_tx = commands;
+            session.worker_rx = worker_rx;
+            session.worker_handle = Some(std::thread::spawn(move || {
+                run_serial_worker_with_port(&mut port, &config, command_rx, worker_tx)
+            }));
+            let mut drained = 0;
+            let mut paused = false;
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                drained += session
+                    .read_pending_with_budget(TerminalDrainBudget::normal())
+                    .drained_bytes;
+                paused |= waiting.try_recv().is_ok();
+                if paused
+                    && (drained == corpus.len()
+                        || session
+                            .recording_pending
+                            .as_mut()
+                            .is_some_and(|pending| !pending.flush()))
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "serial did not reach recording pressure"
+                );
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if flow == SerialFlowControl::Hardware {
+                assert!(drained < corpus.len());
+                assert_eq!(
+                    session
+                        .read_pending_with_budget(TerminalDrainBudget::normal())
+                        .drained_bytes,
+                    0
+                );
+            } else {
+                assert_eq!(drained, corpus.len());
+            }
+            resume.send(()).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(30);
+            while drained < corpus.len()
+                || session
+                    .recording_pending
+                    .as_mut()
+                    .is_some_and(|pending| !pending.flush())
+            {
+                drained += session
+                    .read_pending_with_budget(TerminalDrainBudget::normal())
+                    .drained_bytes;
+                assert!(Instant::now() < deadline, "serial recording did not resume");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            session.shutdown();
+            let (state, frames) = read_finished(&runtime, &client);
+            let mut output = Vec::new();
+            let mut lost = 0;
+            for frame in frames {
+                match frame {
+                    StoredRecordingFrameKind::Output(bytes) => output.extend_from_slice(&bytes),
+                    StoredRecordingFrameKind::Gap {
+                        lost_bytes: Some(bytes),
+                    } => lost += bytes as usize,
+                    StoredRecordingFrameKind::Gap { lost_bytes: None } => {
+                        panic!("serial loss must remain accounted for")
+                    }
+                    _ => {}
+                }
+            }
+            if flow == SerialFlowControl::Hardware {
+                assert_eq!(state, RecordingState::Finished);
+                assert_eq!(lost, 0);
+                assert_eq!(output, corpus.as_bytes());
+            } else {
+                assert_eq!(state, RecordingState::Gaps);
+                assert!(lost > 0);
+                assert_eq!(output.len() + lost, corpus.len());
+            }
+        }
     }
 
     #[test]
@@ -1923,13 +2356,32 @@ mod serial_tests {
     #[test]
     fn fake_serial_worker_applies_control_lines_and_break() {
         let config = valid_config();
-        let mut port = FakeSerialPort::new(VecDeque::new());
+        let mut port = FakeSerialPort::new(VecDeque::from([FakeRead::Bytes(vec![7; 8192])]));
         let controls = port.controls.clone();
+        let reads = port.reads.clone();
         let (command_tx, command_rx) = crossbeam_channel::unbounded();
         let (worker_tx, worker_rx) = crate::backpressure::byte_bounded_channel(
             crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
         );
 
+        worker_tx
+            .send_timeout(
+                SerialWorkerEvent::Output(vec![
+                    1;
+                    crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES
+                ]),
+                crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES,
+                Duration::from_secs(1),
+            )
+            .unwrap();
+        let worker = std::thread::spawn(move || {
+            run_serial_worker_with_port(&mut port, &config, command_rx, worker_tx)
+        });
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !reads.lock().unwrap().is_empty() {
+            assert!(Instant::now() < deadline, "serial worker did not read its pending output");
+            std::thread::sleep(Duration::from_millis(1));
+        }
         command_tx
             .send(SerialCommand::SetControlLine {
                 line: SerialControlLine::DataTerminalReady,
@@ -1946,7 +2398,15 @@ mod serial_tests {
             .send(SerialCommand::SendBreak(SerialBreakDuration::default()))
             .unwrap();
         command_tx.send(SerialCommand::Close).unwrap();
-        run_serial_worker_with_port(&mut port, &config, command_rx, worker_tx);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !worker.is_finished() {
+            assert!(
+                Instant::now() < deadline,
+                "full serial output queue blocked controls/close"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        worker.join().unwrap();
 
         assert_eq!(
             controls.lock().unwrap().as_slice(),
@@ -1955,6 +2415,9 @@ mod serial_tests {
                 FakeControlEvent::Line(SerialControlLine::RequestToSend, false),
                 FakeControlEvent::Break,
             ]
+        );
+        assert!(
+            matches!(worker_rx.try_recv().unwrap().into_inner(), SerialWorkerEvent::Output(bytes) if bytes == vec![1; crate::backpressure::TRANSPORT_OUTPUT_BACKLOG_BYTES])
         );
         assert!(matches!(
             worker_rx.try_recv().unwrap().into_inner(),

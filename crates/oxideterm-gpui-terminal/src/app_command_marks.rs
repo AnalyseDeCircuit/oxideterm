@@ -58,10 +58,21 @@ impl TerminalPane {
         source: TerminalCommandMarkDetectionSource,
         cx: &mut Context<Self>,
     ) -> Option<String> {
+        self.begin_command_mark_with_parent(command, source, None, cx)
+    }
+
+    pub fn begin_command_mark_with_parent(
+        &mut self,
+        command: &str,
+        source: TerminalCommandMarkDetectionSource,
+        parent_id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Option<String> {
         let command = command.trim();
         if command.is_empty()
             || (!self.settings.command_marks_enabled
-                && source != TerminalCommandMarkDetectionSource::Ai)
+                && source != TerminalCommandMarkDetectionSource::Ai
+                && !self.command_fact_ledger.audit_enabled())
         {
             return None;
         }
@@ -115,6 +126,11 @@ impl TerminalPane {
         } else {
             None
         };
+        let mut audit = self.terminal.lock().audit_context();
+        if let (Some(context), Some(parent_id)) = (&mut audit, parent_id) {
+            context.parent_id = Some(parent_id.to_string());
+        }
+        self.command_fact_ledger.set_audit_context(audit);
         self.command_fact_ledger.create_from_mark(&mark);
         self.command_marks.push(mark);
         self.command_marks_render_cache_dirty = true;
@@ -483,6 +499,7 @@ fn command_mark_confidence(
             TerminalCommandMarkConfidence::Low
         }
         TerminalCommandMarkDetectionSource::CommandBar
+        | TerminalCommandMarkDetectionSource::QuickCommand
         | TerminalCommandMarkDetectionSource::Ai
         | TerminalCommandMarkDetectionSource::Broadcast
         | TerminalCommandMarkDetectionSource::ShellIntegration => {
