@@ -32,6 +32,7 @@ impl WorkspaceApp {
                 self.plugin_entity.update(cx, |plugins, _cx| {
                     plugins.enqueue_product_ui_effect(NativePluginProductUiEffect {
                         plugin_id: plugin_id.to_string(),
+                        audit_context: oxideterm_audit::AuditContext::current_request(),
                         namespace: namespace.to_string(),
                         method: method.to_string(),
                         args,
@@ -63,52 +64,58 @@ impl WorkspaceApp {
             .plugin_entity
             .update(cx, |plugins, _cx| plugins.take_product_ui_effects());
         for effect in effects {
-            match (effect.namespace.as_str(), effect.method.as_str()) {
-                ("connections", "connect") => {
-                    if let Some(connection_id) = string_arg(&effect.args, "connectionId") {
-                        self.open_saved_connection(connection_id, window, cx);
+            let audit_context = effect.audit_context.clone();
+            oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+                match (effect.namespace.as_str(), effect.method.as_str()) {
+                    ("connections", "connect") => {
+                        if let Some(connection_id) = string_arg(&effect.args, "connectionId") {
+                            self.open_saved_connection(connection_id, window, cx);
+                        }
+                    }
+                    ("connections", "reconnect") => {
+                        if let Some(node_id) = string_arg(&effect.args, "nodeId") {
+                            self.ensure_node_connection_started(
+                                &NodeId::new(node_id.to_string()),
+                                cx,
+                            );
+                            cx.notify();
+                        }
+                    }
+                    ("connections", "disconnect") => {
+                        if let Some(node_id) = string_arg(&effect.args, "nodeId") {
+                            // User-facing disconnect policy is resolved before NodeRouter cleanup.
+                            self.request_disconnect_ssh_node(
+                                &NodeId::new(node_id.to_string()),
+                                window,
+                                cx,
+                            );
+                        }
+                    }
+                    ("quickCommands", "execute") => {
+                        if let Some(command_id) = string_arg(&effect.args, "id")
+                            && let Some(command) = self
+                                .terminal
+                                .read(cx)
+                                .quick_commands
+                                .store
+                                .commands
+                                .iter()
+                                .find(|command| command.id == command_id)
+                                .cloned()
+                        {
+                            self.run_quick_command_model(&command, window, cx);
+                        }
+                    }
+                    _ => {
+                        self.plugin_entity.update(cx, |plugins, _cx| {
+                            plugins.registry_mut().record_manager_error(
+                                effect.plugin_id,
+                                "Unsupported queued product plugin effect".to_string(),
+                            );
+                        });
                     }
                 }
-                ("connections", "reconnect") => {
-                    if let Some(node_id) = string_arg(&effect.args, "nodeId") {
-                        self.ensure_node_connection_started(&NodeId::new(node_id.to_string()), cx);
-                        cx.notify();
-                    }
-                }
-                ("connections", "disconnect") => {
-                    if let Some(node_id) = string_arg(&effect.args, "nodeId") {
-                        // User-facing disconnect policy is resolved before NodeRouter cleanup.
-                        self.request_disconnect_ssh_node(
-                            &NodeId::new(node_id.to_string()),
-                            window,
-                            cx,
-                        );
-                    }
-                }
-                ("quickCommands", "execute") => {
-                    if let Some(command_id) = string_arg(&effect.args, "id")
-                        && let Some(command) = self
-                            .terminal
-                            .read(cx)
-                            .quick_commands
-                            .store
-                            .commands
-                            .iter()
-                            .find(|command| command.id == command_id)
-                            .cloned()
-                    {
-                        self.run_quick_command_model(&command, window, cx);
-                    }
-                }
-                _ => {
-                    self.plugin_entity.update(cx, |plugins, _cx| {
-                        plugins.registry_mut().record_manager_error(
-                            effect.plugin_id,
-                            "Unsupported queued product plugin effect".to_string(),
-                        );
-                    });
-                }
-            }
+            });
         }
         backlog_remaining
     }

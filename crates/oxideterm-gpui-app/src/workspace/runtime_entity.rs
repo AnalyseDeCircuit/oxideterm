@@ -705,9 +705,18 @@ impl WorkspaceRuntimeEntity {
         node_name: String,
         snapshot: ReconnectSnapshot,
     ) -> ReconnectJob {
-        let job = self
-            .reconnect_orchestrator
-            .schedule(node_id.0.clone(), node_name, snapshot);
+        let audit_context = self.node_router.audit_context(node_id).map(|mut context| {
+            // A reconnect job spans transport replacements; phases retain only the logical node.
+            context.transport_id = None;
+            context.connection_id = None;
+            context
+        });
+        let job = self.reconnect_orchestrator.schedule_audited(
+            node_id.0.clone(),
+            node_name,
+            snapshot,
+            audit_context,
+        );
         let _ = self
             .reconnect_orchestrator
             .advance(&node_id.0, ReconnectPhase::Snapshot);
@@ -892,78 +901,85 @@ impl WorkspaceRuntimeEntity {
                 attempt_id,
             });
         });
+        let audit_context = router.audit_context(node_id);
         let task = self.task_runtime.spawn(async move {
-            // This task owns the node transport independently from terminal panes and pages.
-            if force_reconnect {
-                node_handle.clear_physical().await;
-            }
-            let client = SshTransportClient::new(config)
-                .with_prompt_handler(prompt_handler)
-                .with_managed_key_resolver(managed_key_resolver)
-                .with_connection_progress(connection_progress);
-            let parent = if let Some(parent_id) = parent_id {
-                let parent_consumer =
-                    ConnectionConsumer::NodeRouter(format!("{}:ancestor", worker_node_id.0));
-                match router
-                    .acquire_connection_wait(
-                        &parent_id,
-                        parent_consumer.clone(),
-                        Duration::from_secs(30),
-                    )
-                    .await
-                {
-                    Ok(parent) => Some((parent.handle, parent_consumer)),
-                    Err(error) => {
-                        registry.release(node_handle.connection_id(), &consumer);
-                        let _ = registry.mark_state(
-                            node_handle.connection_id(),
-                            ConnectionState::Error(error.to_string()),
-                        );
-                        let _ = reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
-                            node_id: worker_node_id,
-                            connection_id: worker_connection_id,
-                            error: error.to_string(),
-                            attempt_id,
-                            job_id: worker_job_id,
-                        });
-                        return;
-                    }
+            let connect = async move {
+                // This task owns the node transport independently from terminal panes and pages.
+                if force_reconnect {
+                    node_handle.clear_physical().await;
                 }
-            } else {
-                None
+                let client = SshTransportClient::new(config)
+                    .with_prompt_handler(prompt_handler)
+                    .with_managed_key_resolver(managed_key_resolver)
+                    .with_connection_progress(connection_progress);
+                let parent = if let Some(parent_id) = parent_id {
+                    let parent_consumer =
+                        ConnectionConsumer::NodeRouter(format!("{}:ancestor", worker_node_id.0));
+                    match router
+                        .acquire_connection_wait(
+                            &parent_id,
+                            parent_consumer.clone(),
+                            Duration::from_secs(30),
+                        )
+                        .await
+                    {
+                        Ok(parent) => Some((parent.handle, parent_consumer)),
+                        Err(error) => {
+                            registry.release(node_handle.connection_id(), &consumer);
+                            let _ = registry.mark_state(
+                                node_handle.connection_id(),
+                                ConnectionState::Error(error.to_string()),
+                            );
+                            let _ = reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
+                                node_id: worker_node_id,
+                                connection_id: worker_connection_id,
+                                error: error.to_string(),
+                                attempt_id,
+                                job_id: worker_job_id,
+                            });
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
+                let result = if let Some((parent_handle, parent_consumer)) = parent {
+                    client
+                        .connect_child_node_via_parent_with_registry(
+                            registry,
+                            consumer,
+                            node_handle,
+                            parent_handle,
+                            parent_consumer,
+                        )
+                        .await
+                } else {
+                    client
+                        .connect_existing_node_with_registry(registry, consumer, node_handle)
+                        .await
+                }
+                .map(|handle| handle.connection_id().to_string())
+                .map_err(|error| error.to_string());
+                let _ = match result {
+                    Ok(connection_id) => reconnect_tx.send(ReconnectWorkerResult::NodeConnected {
+                        node_id: worker_node_id,
+                        connection_id,
+                        attempt_id,
+                        job_id: worker_job_id,
+                    }),
+                    Err(error) => reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
+                        node_id: worker_node_id,
+                        connection_id: worker_connection_id,
+                        error,
+                        attempt_id,
+                        job_id: worker_job_id,
+                    }),
+                };
             };
-            let result = if let Some((parent_handle, parent_consumer)) = parent {
-                client
-                    .connect_child_node_via_parent_with_registry(
-                        registry,
-                        consumer,
-                        node_handle,
-                        parent_handle,
-                        parent_consumer,
-                    )
-                    .await
-            } else {
-                client
-                    .connect_existing_node_with_registry(registry, consumer, node_handle)
-                    .await
+            match audit_context {
+                Some(context) => context.scope(connect).await,
+                None => connect.await,
             }
-            .map(|handle| handle.connection_id().to_string())
-            .map_err(|error| error.to_string());
-            let _ = match result {
-                Ok(connection_id) => reconnect_tx.send(ReconnectWorkerResult::NodeConnected {
-                    node_id: worker_node_id,
-                    connection_id,
-                    attempt_id,
-                    job_id: worker_job_id,
-                }),
-                Err(error) => reconnect_tx.send(ReconnectWorkerResult::NodeConnectFailed {
-                    node_id: worker_node_id,
-                    connection_id: worker_connection_id,
-                    error,
-                    attempt_id,
-                    job_id: worker_job_id,
-                }),
-            };
         });
         self.node_transport_attempts.insert(
             node_id.clone(),

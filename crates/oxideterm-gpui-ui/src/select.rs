@@ -50,6 +50,12 @@ fn readonly_value_trigger_spec() -> SelectTriggerChromeSpec {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SelectAnchorId {
     ActiveSessionSort,
+    AuditCategory,
+    AuditSeverity,
+    AuditSource,
+    AuditOutcome,
+    AuditTime,
+    AuditSearchField,
     SettingsLanguage,
     SettingsUpdateChannel,
     SettingsAppearanceTheme,

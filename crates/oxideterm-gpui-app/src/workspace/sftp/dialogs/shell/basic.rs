@@ -109,7 +109,12 @@ impl WorkspaceApp {
                                     this.sftp_view().update(cx, |sftp_view, cx| {
                                         // Drive selection is committed navigation, so refresh the
                                         // file list and reset selection state through one path.
-                                        sftp_view.apply_local_path(path.clone());
+                                        let audit = oxideterm_audit::AuditOperation::in_context(
+                                            crate::workspace::file_manager::local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
+                                            oxideterm_audit::AuditCategory::File, "file_browse", Some(&path),
+                                        );
+                                        let result = sftp_view.apply_local_path(path.clone());
+                                        audit.result(&result);
                                         cx.notify();
                                     });
                                     this.close_sftp_dialog(cx);

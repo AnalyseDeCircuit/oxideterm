@@ -385,12 +385,11 @@ impl WorkspaceApp {
                     node_ref: node_ref,
                     command: prepared_target.command,
                 });
-            let approval = match self
-                .public_mcp
-                .state
-                .approvals
-                .stage(request.client_ref.clone(), prepared_call)
-            {
+            let approval = match self.public_mcp.state.approvals.stage_with_context(
+                request.client_ref.clone(),
+                prepared_call,
+                request.audit_context.as_ref(),
+            ) {
                 Ok(approval) => approval,
                 Err(error) => {
                     request.finish(ToolEnvelope::failed(error.to_string()));

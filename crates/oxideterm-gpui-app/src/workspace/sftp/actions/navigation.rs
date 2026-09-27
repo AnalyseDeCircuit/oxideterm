@@ -305,12 +305,33 @@ impl WorkspaceApp {
                     if let Some(remote_id) = sftp.current_remote_id.clone() {
                         sftp.local_path_by_remote.insert(remote_id, path.clone());
                     }
-                    sftp.apply_local_path(path);
+                    let audit = oxideterm_audit::AuditOperation::in_context(
+                        crate::workspace::file_manager::local_file_audit_context(
+                            oxideterm_audit::AuditSource::User,
+                        )
+                        .as_ref(),
+                        oxideterm_audit::AuditCategory::File,
+                        "file_browse",
+                        Some(&path),
+                    );
+                    let result = sftp.apply_local_path(path);
+                    audit.result(&result);
                     cx.notify();
                 });
             }
             SftpPane::Remote => {
+                let request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+                    oxideterm_audit::AuditContext::current().map(|mut context| {
+                        context.source = oxideterm_audit::AuditSource::User;
+                        context
+                    })
+                });
                 self.sftp_view().update(cx, |sftp, cx| {
+                    sftp.remote_browse_request = sftp
+                        .current_remote_id
+                        .clone()
+                        .zip(request)
+                        .map(|(remote_id, context)| (remote_id, path.clone(), context));
                     sftp.apply_remote_path(path);
                     cx.notify();
                 });
@@ -879,17 +900,23 @@ impl SftpWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace::sftp) fn apply_local_path(&mut self, path: String) {
+    pub(in crate::workspace::sftp) fn apply_local_path(
+        &mut self,
+        path: String,
+    ) -> Result<usize, String> {
         self.local_path_completion.dismiss();
         // Preserve the horizontal breadcrumb position when navigating through a long path.
         self.local_path = path.clone();
         self.local_path_input.clone_from(&path);
         self.editing_local_path = false;
-        self.local_files = refreshed_local_files(&path);
+        let listing = list_local_files(&path);
+        let outcome = listing.as_ref().map(Vec::len).map_err(ToString::to_string);
+        self.local_files = local_files_or_error(&path, listing);
         self.local_selected.clear();
         self.local_last_selected = None;
         self.focused_input = None;
         self.clear_context_menu_immediately();
+        outcome
     }
 
     pub(in crate::workspace::sftp) fn apply_pair_primary_path(&mut self, path: String) {

@@ -377,29 +377,35 @@ impl WorkspaceApp {
             cloud_sync.view.upload_selection = None;
             cloud_sync.begin_delivery("upload", cx)
         });
-        self.forwarding_runtime.spawn(deliver_cloud_sync_upload(
-            tx,
-            service,
-            connection_store,
-            forwarding_registry,
-            settings_store,
-            settings,
-            hints,
-            UploadOptions {
-                force,
-                device_id,
-                revision_sequence,
-                previous_remote_revision,
-                previous_remote_sections,
-                last_synced_structured_state,
-                raw_sync_scope: Some(raw_sync_scope),
-                item_filter,
-                portable_secrets,
-                automatic,
-                skip_if_busy,
-            },
-            automatic,
-        ));
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current);
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                deliver_cloud_sync_upload(
+                    tx,
+                    service,
+                    connection_store,
+                    forwarding_registry,
+                    settings_store,
+                    settings,
+                    hints,
+                    UploadOptions {
+                        force,
+                        device_id,
+                        revision_sequence,
+                        previous_remote_revision,
+                        previous_remote_sections,
+                        last_synced_structured_state,
+                        raw_sync_scope: Some(raw_sync_scope),
+                        item_filter,
+                        portable_secrets,
+                        automatic,
+                        skip_if_busy,
+                    },
+                    automatic,
+                ),
+            ));
     }
 
     pub(in crate::workspace) fn start_cloud_sync_upload_preview(&mut self, cx: &mut Context<Self>) {
@@ -584,14 +590,19 @@ impl WorkspaceApp {
         let tx = self
             .cloud_sync
             .update(cx, |cloud_sync, cx| cloud_sync.begin_delivery("pull", cx));
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current);
         self.forwarding_runtime
-            .spawn(deliver_cloud_sync_pull_preview(
-                tx,
-                service,
-                connection_store,
-                settings,
-                hints,
-                previous_remote_sections,
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                deliver_cloud_sync_pull_preview(
+                    tx,
+                    service,
+                    connection_store,
+                    settings,
+                    hints,
+                    previous_remote_sections,
+                ),
             ));
     }
 
@@ -734,19 +745,24 @@ impl WorkspaceApp {
         let tx = self
             .cloud_sync
             .update(cx, |cloud_sync, cx| cloud_sync.begin_delivery("apply", cx));
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current);
         self.forwarding_runtime
-            .spawn(deliver_cloud_sync_apply_preview(
-                tx,
-                service,
-                connection_store,
-                forwarding_registry,
-                settings_store,
-                settings,
-                hints,
-                source_revision,
-                preview,
-                selection,
-                create_rollback_backup,
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                deliver_cloud_sync_apply_preview(
+                    tx,
+                    service,
+                    connection_store,
+                    forwarding_registry,
+                    settings_store,
+                    settings,
+                    hints,
+                    source_revision,
+                    preview,
+                    selection,
+                    create_rollback_backup,
+                ),
             ));
     }
 
@@ -993,21 +1009,37 @@ impl WorkspaceApp {
                 });
             }
             CloudSyncDelivery::RollbackBackupCreated(backup) => {
-                self.cloud_sync.update(cx, |cloud_sync, _cx| {
+                let mut audit = oxideterm_audit::AuditOperation::begin(
+                    oxideterm_audit::AuditCategory::Configuration,
+                    "backup_create",
+                    None,
+                    Some("cloud_sync_rollback"),
+                );
+                audit.summary(&format!("size_bytes={}", backup.size_bytes));
+                self.invalidate_cloud_sync_snapshot_caches(cx);
+                let result = self.cloud_sync.update(cx, |cloud_sync, _cx| {
                     cloud_sync
                         .controller
                         .store
                         .state_mut()
                         .append_rollback_backup(backup);
+                    let result = cloud_sync.controller.store.save();
+                    if let Err(error) = &result {
+                        cloud_sync.controller.store.state_mut().last_error =
+                            Some(error.to_string());
+                    }
+                    result
                 });
-                self.save_cloud_sync_state(cx);
-                self.push_cloud_sync_toast(
-                    self.i18n
-                        .t("plugin.cloud_sync.toast.rollback_backup_available"),
-                    None,
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
+                audit.result(&result);
+                if result.is_ok() {
+                    self.push_cloud_sync_toast(
+                        self.i18n
+                            .t("plugin.cloud_sync.toast.rollback_backup_available"),
+                        None,
+                        TerminalNoticeVariant::Success,
+                        cx,
+                    );
+                }
             }
             CloudSyncDelivery::CheckFinished(action) => {
                 self.cloud_sync.update(cx, |cloud_sync, _cx| {
@@ -1398,9 +1430,10 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn finish_cloud_sync_apply_preview(
         &mut self,
-        ui_outcome: CloudSyncApplyUiOutcome,
+        mut ui_outcome: CloudSyncApplyUiOutcome,
         cx: &mut Context<Self>,
     ) {
+        let mut legacy_import_audit = ui_outcome.legacy_import_audit.take();
         let previous_network = self.settings_store.settings().network.clone();
         self.connection_store = ui_outcome.connection_store;
         self.settings_store = ui_outcome.settings_store;
@@ -1412,14 +1445,29 @@ impl WorkspaceApp {
         }
         match ui_outcome.outcome {
             CloudSyncApplyOutcome::Structured(outcome) => {
-                self.finish_structured_cloud_sync_apply(outcome, cx)
+                self.finish_structured_cloud_sync_apply(outcome, cx);
             }
             CloudSyncApplyOutcome::Legacy {
                 preview,
                 source,
                 selection,
                 outcome,
-            } => self.finish_legacy_cloud_sync_apply(preview, source, selection, outcome, cx),
+            } => {
+                let (applied, errors) =
+                    self.finish_legacy_cloud_sync_apply(preview, source, selection, outcome, cx);
+                if let Some(audit) = legacy_import_audit.take() {
+                    audit.finish(
+                        &format!("mode=legacy_apply,applied={applied},errors={errors}"),
+                        if errors > 0 {
+                            oxideterm_audit::AuditOutcome::Partial
+                        } else if applied == 0 {
+                            oxideterm_audit::AuditOutcome::Unchanged
+                        } else {
+                            oxideterm_audit::AuditOutcome::Succeeded
+                        },
+                    );
+                }
+            }
         }
     }
 
@@ -1500,7 +1548,7 @@ impl WorkspaceApp {
         selection: CloudSyncPreviewSelection,
         mut outcome: ApplyLegacyPreviewOutcome,
         cx: &mut Context<Self>,
-    ) {
+    ) -> (usize, usize) {
         let plan = cloud_sync_legacy_apply_plan(&preview, &source, &selection);
         let cloud_options = plan.import_options;
         let imported_forwards = if cloud_options.oxide_options.import_forwards {
@@ -1509,19 +1557,23 @@ impl WorkspaceApp {
             0
         };
         outcome.envelope.imported_forwards = imported_forwards;
-        let (_imported_quick_commands, _skipped_quick_commands, _quick_command_errors) = self
+        let (imported_quick_commands, _skipped_quick_commands, quick_command_errors) = self
             .apply_oxide_import_quick_commands(
                 outcome.envelope.quick_commands_json.as_deref(),
                 selection.import_quick_commands,
                 QuickCommandImportStrategy::Merge,
                 cx,
             );
-        self.apply_oxide_import_plugin_settings(
-            &outcome.envelope.plugin_settings,
-            cloud_options.import_plugin_settings,
-            cloud_options.selected_plugin_ids.as_ref(),
-        );
-        self.apply_oxide_import_app_settings(
+        let (imported_plugin_settings, plugin_settings_failed) = match self
+            .try_apply_oxide_import_plugin_settings(
+                &outcome.envelope.plugin_settings,
+                cloud_options.import_plugin_settings,
+                cloud_options.selected_plugin_ids.as_ref(),
+            ) {
+            Ok(count) => (count, false),
+            Err(_) => (0, true),
+        };
+        let (imported_app_settings, skipped_app_settings) = self.apply_oxide_import_app_settings(
             outcome.envelope.app_settings_json.as_deref(),
             cloud_options.import_app_settings,
             cloud_options.selected_app_settings_sections.as_ref(),
@@ -1577,6 +1629,25 @@ impl WorkspaceApp {
             TerminalNoticeVariant::Success,
             cx,
         );
+        let applied = outcome.envelope.imported
+            + outcome.envelope.merged
+            + outcome.envelope.replaced
+            + outcome.envelope.renamed
+            + outcome.envelope.imported_forwards
+            + outcome.envelope.imported_serial_profiles
+            + outcome.envelope.imported_telnet_profiles
+            + outcome.envelope.imported_mosh_profiles
+            + outcome.envelope.imported_standalone_sftp_profiles
+            + outcome.envelope.imported_remote_desktop_profiles
+            + imported_quick_commands
+            + imported_plugin_settings
+            + usize::from(imported_app_settings)
+            + outcome.envelope.imported_portable_secrets;
+        let errors = outcome.envelope.errors.len()
+            + quick_command_errors.len()
+            + usize::from(plugin_settings_failed)
+            + usize::from(cloud_options.import_app_settings && skipped_app_settings);
+        (applied, errors)
     }
 
     pub(super) fn cloud_sync_sensitive_restore_description(

@@ -4,6 +4,12 @@ use super::*;
 const FILE_MANAGER_EXTERNAL_BRIDGE_CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub(in crate::workspace::file_manager) fn open_path_external(path: &str) -> Result<(), String> {
+    let audit = oxideterm_audit::AuditOperation::in_context(
+        super::super::local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
+        oxideterm_audit::AuditCategory::File,
+        "file_external_open",
+        Some(path),
+    );
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut command = std::process::Command::new("open");
@@ -26,14 +32,22 @@ pub(in crate::workspace::file_manager) fn open_path_external(path: &str) -> Resu
         command
     };
 
-    let status = command
-        .status()
-        .map_err(|error| format!("failed to launch external app: {error}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("external app exited with status {status}"))
-    }
+    let result = match command.status() {
+        Ok(status) if status.success() => Ok(()),
+        Ok(status) => Err(format!("external app exited with status {status}")),
+        Err(error) => Err(format!("failed to launch external app: {error}")),
+    };
+    audit.finish(
+        if result.is_ok() {
+            oxideterm_audit::AuditOutcome::Sent
+        } else {
+            oxideterm_audit::AuditOutcome::Failed
+        },
+        oxideterm_audit::AuditEvidence::Dispatch,
+        None,
+        None,
+    );
+    result
 }
 
 pub(in crate::workspace::file_manager) fn reveal_path_external(path: &str) -> Result<(), String> {

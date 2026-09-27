@@ -405,10 +405,10 @@ impl RemoteDesktopWorkerOwner {
         self.request_tx.clone()
     }
 
-    fn send(&self, request: RemoteDesktopHelperRequest) {
-        if let Some(request_tx) = self.request_tx.as_ref() {
-            let _ = request_tx.send(request);
-        }
+    fn send(&self, request: RemoteDesktopHelperRequest) -> bool {
+        self.request_tx
+            .as_ref()
+            .is_some_and(|request_tx| request_tx.send(request).is_ok())
     }
 
     fn shutdown(&mut self) {
@@ -457,12 +457,57 @@ enum RemoteDesktopPublicClipboard {
     },
 }
 
+fn remote_desktop_audit_context(
+    profile: &RemoteDesktopConnectionProfile,
+) -> Option<oxideterm_audit::AuditContext> {
+    oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            if context.source == oxideterm_audit::AuditSource::Application {
+                context.source = oxideterm_audit::AuditSource::User;
+            }
+            context.session(
+                profile.protocol.provider_id(),
+                &format!("{}:{}", profile.endpoint.host, profile.endpoint.port),
+            )
+        })
+}
+
+fn desktop_connection_audit(
+    context: Option<&oxideterm_audit::AuditContext>,
+    action: &str,
+    source: Option<oxideterm_audit::AuditSource>,
+) -> Option<oxideterm_audit::AuditOperation> {
+    context.map(|context| {
+        let mut context = context.clone();
+        if let Some(source) = source {
+            context.source = source;
+            context.agent_id = None;
+        }
+        let mut audit = context.operation(oxideterm_audit::AuditCategory::Connection, action, None);
+        let mcp = context.source == oxideterm_audit::AuditSource::Mcp;
+        audit.authorization(
+            if mcp {
+                oxideterm_audit::AuditAuthorization::Approved
+            } else {
+                oxideterm_audit::AuditAuthorization::NotRequired
+            },
+            mcp.then_some("mcp_client_policy"),
+        );
+        audit
+    })
+}
+
 pub(in crate::workspace) struct RemoteDesktopSshTunnelLease {
+    audit_context: Option<oxideterm_audit::AuditContext>,
+    connect_audit: Option<oxideterm_audit::AuditOperation>,
     lease_id: String,
     forwarding_service: forwards::ForwardingRuntimeService,
 }
 
 pub(in crate::workspace) struct PendingRemoteDesktopSshTunnel {
+    audit_context: Option<oxideterm_audit::AuditContext>,
+    connect_audit: Option<oxideterm_audit::AuditOperation>,
     lease_id: Option<String>,
     forwarding_service: forwards::ForwardingRuntimeService,
     worker: Option<tokio::task::JoinHandle<Result<RemoteDesktopEndpoint, String>>>,
@@ -473,8 +518,12 @@ impl PendingRemoteDesktopSshTunnel {
         lease_id: String,
         forwarding_service: forwards::ForwardingRuntimeService,
         worker: tokio::task::JoinHandle<Result<RemoteDesktopEndpoint, String>>,
+        audit_context: Option<oxideterm_audit::AuditContext>,
+        connect_audit: Option<oxideterm_audit::AuditOperation>,
     ) -> Self {
         Self {
+            audit_context,
+            connect_audit,
             lease_id: Some(lease_id),
             forwarding_service,
             worker: Some(worker),
@@ -484,22 +533,54 @@ impl PendingRemoteDesktopSshTunnel {
     pub(in crate::workspace) async fn finish(
         mut self,
     ) -> Result<(RemoteDesktopEndpoint, RemoteDesktopSshTunnelLease), String> {
+        // Retain the handle while awaiting so cancellation of this future
+        // still aborts setup through the pending owner's Drop implementation.
         let worker = self
             .worker
-            .take()
+            .as_mut()
             .expect("pending remote desktop tunnel owns one worker");
-        let endpoint = worker.await.map_err(|error| error.to_string())??;
+        let endpoint = match worker
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|result| result)
+        {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                if let Some(audit) = self.connect_audit.take() {
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
+                }
+                return Err(error);
+            }
+        };
         let lease_id = self
             .lease_id
             .take()
             .expect("pending remote desktop tunnel owns one lease id");
-        let lease = RemoteDesktopSshTunnelLease::new(lease_id, self.forwarding_service.clone());
+        let lease = RemoteDesktopSshTunnelLease {
+            lease_id,
+            forwarding_service: self.forwarding_service.clone(),
+            audit_context: self.audit_context.take(),
+            connect_audit: self.connect_audit.take(),
+        };
         Ok((endpoint, lease))
     }
 }
 
 impl Drop for PendingRemoteDesktopSshTunnel {
     fn drop(&mut self) {
+        if let Some(audit) = self.connect_audit.take() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
         if let Some(worker) = self.worker.take() {
             worker.abort();
         }
@@ -512,20 +593,16 @@ impl Drop for PendingRemoteDesktopSshTunnel {
     }
 }
 
-impl RemoteDesktopSshTunnelLease {
-    pub(in crate::workspace) fn new(
-        lease_id: String,
-        forwarding_service: forwards::ForwardingRuntimeService,
-    ) -> Self {
-        Self {
-            lease_id,
-            forwarding_service,
-        }
-    }
-}
-
 impl Drop for RemoteDesktopSshTunnelLease {
     fn drop(&mut self) {
+        if let Some(audit) = self.connect_audit.take() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Cancelled,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
         // The lease stops only its hidden listener; NodeRouter retains the
         // physical SSH node for every other registered consumer.
         self.forwarding_service
@@ -549,6 +626,9 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     ui_frame_visible: bool,
     public_mcp_frame_observers: usize,
     public_mcp_clipboard: Option<RemoteDesktopPublicClipboard>,
+    audit_context: Option<oxideterm_audit::AuditContext>,
+    connect_audit: Option<oxideterm_audit::AuditOperation>,
+    file_audits: HashMap<String, oxideterm_audit::AuditOperation>,
     ssh_tunnel: Option<RemoteDesktopSshTunnelLease>,
     delivery_tx: mpsc::Sender<RemoteDesktopWorkerDelivery>,
     delivery_rx: mpsc::Receiver<RemoteDesktopWorkerDelivery>,
@@ -598,6 +678,7 @@ impl RemoteDesktopSessionEntity {
         frame_slot: RemoteDesktopFrameDeliverySlot,
         window_handle: AnyWindowHandle,
     ) -> Self {
+        let audit_context = remote_desktop_audit_context(&profile);
         let (delivery_tx, delivery_rx) = mpsc::channel();
         let mut state = RemoteDesktopViewState::new(profile.label.clone(), profile.protocol)
             .with_read_only(profile.read_only);
@@ -623,6 +704,9 @@ impl RemoteDesktopSessionEntity {
             ui_frame_visible: false,
             public_mcp_frame_observers: 0,
             public_mcp_clipboard: None,
+            audit_context,
+            connect_audit: None,
+            file_audits: HashMap::new(),
             ssh_tunnel: None,
             // Each tab owns its delivery mailbox. A wake for one detached window
             // must never drain another tab's lifecycle events or frame notices.

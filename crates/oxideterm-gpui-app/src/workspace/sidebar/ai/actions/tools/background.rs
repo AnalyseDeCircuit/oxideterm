@@ -95,7 +95,13 @@ impl WorkspaceApp {
             .read(cx)
             .take_execution_requests();
         for request in requests {
-            let result = self.execute_ai_background_read(request.execution, cx);
+            if request.response.is_closed() {
+                continue;
+            }
+            let context = request.execution.audit_context.clone();
+            let result = oxideterm_audit::AuditContext::with_sync_request(context.as_ref(), || {
+                self.execute_ai_background_read(request.execution, cx)
+            });
             let _ = request.response.send(result);
         }
         for event in events {

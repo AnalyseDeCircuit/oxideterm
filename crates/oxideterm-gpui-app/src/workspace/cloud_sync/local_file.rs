@@ -76,6 +76,39 @@ impl WorkspaceApp {
                 )),
             )
         });
+        let local_audit =
+            (!preview_only).then(|| {
+                let mut audit = oxideterm_audit::AuditOperation::begin(
+                    oxideterm_audit::AuditCategory::Configuration,
+                    if exporting {
+                        "cloud_sync_local_export"
+                    } else {
+                        "cloud_sync_local_import_preview"
+                    },
+                    None,
+                    Some("oxide_file"),
+                );
+                let selected_kinds = [
+                    scope.sync_connections,
+                    scope.sync_forwards,
+                    scope.sync_quick_commands,
+                    scope.sync_serial_profiles,
+                    scope.sync_telnet_profiles,
+                    scope.sync_mosh_profiles,
+                    scope.sync_remote_desktop_profiles,
+                    scope.sync_app_settings,
+                    scope.sync_plugin_settings,
+                ]
+                .into_iter()
+                .filter(|selected| *selected)
+                .count();
+                audit.summary(&format!(
+                "direction={},format=oxide,scope_kinds={selected_kinds},sensitive_credentials={}",
+                if exporting { "export" } else { "import_preview" },
+                scope.sync_sensitive_credentials,
+            ));
+                audit
+            });
         let task = cx.spawn(async move |workspace, cx| {
             let path = async {
                 if let Some(picker) = import_picker {
@@ -95,9 +128,30 @@ impl WorkspaceApp {
             }
             .await;
             let cancelled = matches!(&path, Ok(None)) && !preview_only;
+            let mut local_audit = local_audit;
             let result = match path {
-                Ok(None) if !preview_only => Ok(None),
-                Err(error) => Err(error),
+                Ok(None) if !preview_only => {
+                    if let Some(audit) = local_audit.take() {
+                        audit.finish(
+                            oxideterm_audit::AuditOutcome::Cancelled,
+                            oxideterm_audit::AuditEvidence::Request,
+                            None,
+                            None,
+                        );
+                    }
+                    Ok(None)
+                }
+                Err(error) => {
+                    if let Some(audit) = local_audit.take() {
+                        audit.finish(
+                            oxideterm_audit::AuditOutcome::Failed,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            None,
+                        );
+                    }
+                    Err(error)
+                }
                 Ok(path) => {
                     cx.background_executor()
                         .spawn(async move {
@@ -146,7 +200,20 @@ impl WorkspaceApp {
                                     }))
                                 }
                             };
-                            run().map_err(|error| error.to_string())
+                            let result = run().map_err(|error| error.to_string());
+                            if let Some(audit) = local_audit.take() {
+                                audit.finish(
+                                    if result.is_ok() {
+                                        oxideterm_audit::AuditOutcome::Succeeded
+                                    } else {
+                                        oxideterm_audit::AuditOutcome::Failed
+                                    },
+                                    oxideterm_audit::AuditEvidence::Protocol,
+                                    None,
+                                    None,
+                                );
+                            }
+                            result
                         })
                         .await
                 }

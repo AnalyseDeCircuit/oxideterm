@@ -200,6 +200,7 @@ pub(in crate::workspace) enum AiStreamDeliveryEvent {
         sender: tokio::sync::oneshot::Sender<Option<String>>,
     },
     ToolExecutionRequested {
+        audit_context: Option<oxideterm_audit::AuditContext>,
         dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
         leases: Vec<oxideterm_ai::agent::AgentToolLease>,
         tool_session_id: ToolSessionId,

@@ -115,135 +115,142 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let cancellation = request.cancellation_token();
-        self.forwarding_runtime.spawn(async move {
-            let file_record = match files::refresh_file_session(
-                &router,
-                &handles,
-                &client_ref,
-                &file_session_ref,
-            )
-            .await
-            {
-                Ok(record) => record,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
-            let file_root = match files::ready_root(&file_record) {
-                Ok(root) => root,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
-            let Some(session) = file_record.session.as_ref() else {
-                request.finish(ToolEnvelope::failed("The SFTP handle is still opening"));
-                return;
-            };
-            let canonical_root = {
-                let session = session.lock().await;
-                let candidate = files::path_from_root(file_root, &requested_root);
-                let canonical = match session.canonicalize(&candidate).await {
-                    Ok(path) => path,
-                    Err(_) => {
-                        request.finish(ToolEnvelope::failed(
-                            "The IDE workspace root is unavailable",
-                        ));
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let file_record = match files::refresh_file_session(
+                        &router,
+                        &handles,
+                        &client_ref,
+                        &file_session_ref,
+                    )
+                    .await
+                    {
+                        Ok(record) => record,
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(error));
+                            return;
+                        }
+                    };
+                    let file_root = match files::ready_root(&file_record) {
+                        Ok(root) => root,
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(error));
+                            return;
+                        }
+                    };
+                    let Some(session) = file_record.session.as_ref() else {
+                        request.finish(ToolEnvelope::failed("The SFTP handle is still opening"));
+                        return;
+                    };
+                    let canonical_root = {
+                        let session = session.lock().await;
+                        let candidate = files::path_from_root(file_root, &requested_root);
+                        let canonical = match session.canonicalize(&candidate).await {
+                            Ok(path) => path,
+                            Err(_) => {
+                                request.finish(ToolEnvelope::failed(
+                                    "The IDE workspace root is unavailable",
+                                ));
+                                return;
+                            }
+                        };
+                        if files::require_path_within_root(file_root, &canonical).is_err() {
+                            request.finish(ToolEnvelope::failed(
+                                "The IDE workspace root is outside the authorized SFTP root",
+                            ));
+                            return;
+                        }
+                        match session.stat(&canonical).await {
+                            Ok(info) if info.file_type == FileType::Directory => canonical,
+                            _ => {
+                                request.finish(ToolEnvelope::failed(
+                                    "The IDE workspace root is not a directory",
+                                ));
+                                return;
+                            }
+                        }
+                    };
+                    let project = match owner
+                        .open_project(file_record.node_id.0.clone(), canonical_root.clone())
+                        .await
+                    {
+                        Ok(project) => project,
+                        Err(_) => {
+                            owner.release_all_ide_consumers();
+                            request.finish(ToolEnvelope::failed(
+                                "The remote IDE workspace could not be opened",
+                            ));
+                            return;
+                        }
+                    };
+                    let capabilities = owner.capabilities();
+                    if cancellation.is_cancelled() {
+                        owner.release_all_ide_consumers();
                         return;
                     }
-                };
-                if files::require_path_within_root(file_root, &canonical).is_err() {
-                    request.finish(ToolEnvelope::failed(
-                        "The IDE workspace root is outside the authorized SFTP root",
-                    ));
-                    return;
-                }
-                match session.stat(&canonical).await {
-                    Ok(info) if info.file_type == FileType::Directory => canonical,
-                    _ => {
+                    let retained = {
+                        let mut handles = handles.lock();
+                        let file_session_is_live = handles
+                            .file_sessions
+                            .get(&file_session_ref)
+                            .is_some_and(|record| record.client_ref == client_ref);
+                        let client_workspace_count = handles
+                            .workspaces
+                            .values()
+                            .filter(|record| record.client_ref == client_ref)
+                            .count();
+                        let capacity_available = handles.workspaces.len() < WORKSPACE_CAPACITY
+                            && client_workspace_count < WORKSPACE_CAPACITY_PER_CLIENT;
+                        if !file_session_is_live || !capacity_available {
+                            false
+                        } else {
+                            handles.workspaces.insert(
+                                workspace_ref.clone(),
+                                PublicMcpWorkspaceRecord {
+                                    client_ref: client_ref.clone(),
+                                    file_session_ref,
+                                    node_id: file_record.node_id,
+                                    root: canonical_root,
+                                    owner: owner.clone(),
+                                    revisions: Arc::new(
+                                        parking_lot::Mutex::new(Default::default()),
+                                    ),
+                                    cancellation: tokio_util::sync::CancellationToken::new(),
+                                    edit_cancellation: tokio_util::sync::CancellationToken::new(),
+                                },
+                            );
+                            true
+                        }
+                    };
+                    if !retained {
+                        owner.release_all_ide_consumers();
                         request.finish(ToolEnvelope::failed(
-                            "The IDE workspace root is not a directory",
-                        ));
-                        return;
-                    }
-                }
-            };
-            let project = match owner
-                .open_project(file_record.node_id.0.clone(), canonical_root.clone())
-                .await
-            {
-                Ok(project) => project,
-                Err(_) => {
-                    owner.release_all_ide_consumers();
-                    request.finish(ToolEnvelope::failed(
-                        "The remote IDE workspace could not be opened",
-                    ));
-                    return;
-                }
-            };
-            let capabilities = owner.capabilities();
-            if cancellation.is_cancelled() {
-                owner.release_all_ide_consumers();
-                return;
-            }
-            let retained = {
-                let mut handles = handles.lock();
-                let file_session_is_live = handles
-                    .file_sessions
-                    .get(&file_session_ref)
-                    .is_some_and(|record| record.client_ref == client_ref);
-                let client_workspace_count = handles
-                    .workspaces
-                    .values()
-                    .filter(|record| record.client_ref == client_ref)
-                    .count();
-                let capacity_available = handles.workspaces.len() < WORKSPACE_CAPACITY
-                    && client_workspace_count < WORKSPACE_CAPACITY_PER_CLIENT;
-                if !file_session_is_live || !capacity_available {
-                    false
-                } else {
-                    handles.workspaces.insert(
-                        workspace_ref.clone(),
-                        PublicMcpWorkspaceRecord {
-                            client_ref: client_ref.clone(),
-                            file_session_ref,
-                            node_id: file_record.node_id,
-                            root: canonical_root,
-                            owner: owner.clone(),
-                            revisions: Arc::new(parking_lot::Mutex::new(Default::default())),
-                            cancellation: tokio_util::sync::CancellationToken::new(),
-                            edit_cancellation: tokio_util::sync::CancellationToken::new(),
-                        },
-                    );
-                    true
-                }
-            };
-            if !retained {
-                owner.release_all_ide_consumers();
-                request.finish(ToolEnvelope::failed(
                     "The SFTP grant was revoked or the workspace limit was reached while mounting",
                 ));
-                return;
-            }
-            finish_serialized(
-                request,
-                json!({
-                    "workspace_ref": workspace_ref,
-                    "root": ".",
-                    "name": project.name,
-                    "is_git_repository": project.is_git_repo,
-                    "git_branch": project.git_branch,
-                    "capabilities": {
-                        "directory_listing": capabilities.directory_listing,
-                        "conflict_detection": capabilities.conflict_detection,
-                        "structured_text_edits": true,
-                        "atomic_file_write": capabilities.atomic_write,
-                        "atomic_multi_file_edit": false,
-                    },
-                }),
-            );
-        });
+                        return;
+                    }
+                    finish_serialized(
+                        request,
+                        json!({
+                            "workspace_ref": workspace_ref,
+                            "root": ".",
+                            "name": project.name,
+                            "is_git_repository": project.is_git_repo,
+                            "git_branch": project.git_branch,
+                            "capabilities": {
+                                "directory_listing": capabilities.directory_listing,
+                                "conflict_detection": capabilities.conflict_detection,
+                                "structured_text_edits": true,
+                                "atomic_file_write": capabilities.atomic_write,
+                                "atomic_multi_file_edit": false,
+                            },
+                        }),
+                    );
+                },
+            ));
     }
 
     pub(super) fn handle_public_mcp_workspace_tree(&self, request: DomainRequest) {
@@ -464,40 +471,45 @@ impl WorkspaceApp {
             workspace: record.cancellation.clone(),
             edit: is_structured_edit.then(|| record.edit_cancellation.clone()),
         };
-        self.forwarding_runtime.spawn(async move {
-            let file_record = match files::refresh_file_session(
-                &router,
-                &handles,
-                &client_ref,
-                &record.file_session_ref,
-            )
-            .await
-            {
-                Ok(record) => record,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
-            if request.is_cancelled() {
-                return;
-            }
-            // Structured edits own cancellation compensation. Dropping their future after
-            // the first write could leave an avoidable partial multi-file update.
-            let result = if is_structured_edit {
-                operation(record, file_record, cancellation).await
-            } else {
-                tokio::select! {
-                    biased;
-                    _ = cancellation.cancelled() => return,
-                    result = operation(record, file_record, cancellation.clone()) => result,
-                }
-            };
-            match result {
-                Ok(value) => finish_serialized(request, value),
-                Err(error) => request.finish(ToolEnvelope::failed(error)),
-            }
-        });
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let file_record = match files::refresh_file_session(
+                        &router,
+                        &handles,
+                        &client_ref,
+                        &record.file_session_ref,
+                    )
+                    .await
+                    {
+                        Ok(record) => record,
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(error));
+                            return;
+                        }
+                    };
+                    if request.is_cancelled() {
+                        return;
+                    }
+                    // Structured edits own cancellation compensation. Dropping their future after
+                    // the first write could leave an avoidable partial multi-file update.
+                    let result = if is_structured_edit {
+                        operation(record, file_record, cancellation).await
+                    } else {
+                        tokio::select! {
+                            biased;
+                            _ = cancellation.cancelled() => return,
+                            result = operation(record, file_record, cancellation.clone()) => result,
+                        }
+                    };
+                    match result {
+                        Ok(value) => finish_serialized(request, value),
+                        Err(error) => request.finish(ToolEnvelope::failed(error)),
+                    }
+                },
+            ));
     }
 }
 

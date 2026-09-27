@@ -7,17 +7,16 @@ impl AiWorkspaceEntity {
         backend: oxideterm_ai::AiMessageBackendProvenance,
     ) {
         let message_id = message.id.clone();
-        self
-            .add_message(conversation_id, message);
+        self.add_message(conversation_id, message);
         if let Some(conversation) = self
             .conversation_state_mut()
             .conversations
             .iter_mut()
             .find(|conversation| conversation.id == conversation_id)
         {
-            let metadata = conversation.session_metadata.get_or_insert_with(|| {
-                serde_json::json!({ "conversationId": conversation_id })
-            });
+            let metadata = conversation
+                .session_metadata
+                .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
             if let Some(object) = metadata.as_object_mut() {
                 object.insert(
                     "conversationId".to_string(),
@@ -31,11 +30,7 @@ impl AiWorkspaceEntity {
             }
             // The backend owner is persisted separately from display model
             // text so mixed provider/ACP history can be synchronized exactly.
-            oxideterm_ai::store_ai_message_backend_provenance(
-                conversation,
-                &message_id,
-                backend,
-            );
+            oxideterm_ai::store_ai_message_backend_provenance(conversation, &message_id, backend);
         }
     }
 }
@@ -49,7 +44,8 @@ impl WorkspaceApp {
     ) -> (u64, AiStreamDeliverySender, ToolSessionId) {
         let (replaced_generation, generation, sender) = self.ai_entity.update(cx, |ai, _cx| {
             let replaced_generation = ai.conversation_stream_generations(conversation_id);
-            let (generation, sender) = ai.begin_chat_stream(conversation_id.to_owned(), assistant_id.to_owned());
+            let (generation, sender) =
+                ai.begin_chat_stream(conversation_id.to_owned(), assistant_id.to_owned());
             ai.set_conversation_loading(conversation_id, true);
             (replaced_generation, generation, sender)
         });
@@ -57,7 +53,10 @@ impl WorkspaceApp {
             // The UI run owner chooses which stream was replaced. The broker
             // must not infer that starting a stream cancels every other run.
             for generation in replaced_generation {
-                runtime.finish_tool_session(generation, oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled);
+                runtime.finish_tool_session(
+                    generation,
+                    oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
+                );
             }
             runtime.begin_tool_session(generation)
         });
@@ -77,7 +76,9 @@ impl WorkspaceApp {
         }) {
             Ok(launch) => launch,
             Err(_) => {
-                self.ai_entity.update(cx, |ai, _cx| ai.set_conversation_loading(&conversation_id, false));
+                self.ai_entity.update(cx, |ai, _cx| {
+                    ai.set_conversation_loading(&conversation_id, false)
+                });
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                     TerminalNoticeVariant::Error,
@@ -89,7 +90,9 @@ impl WorkspaceApp {
         let request_message = self
             .ai_entity
             .read(cx)
-            .history.model_contexts.get(&conversation_id)
+            .history
+            .model_contexts
+            .get(&conversation_id)
             .and_then(|conversation| {
                 conversation
                     .messages
@@ -99,7 +102,11 @@ impl WorkspaceApp {
                     .cloned()
             });
         let user_request = request_content
-            .or_else(|| request_message.as_ref().map(|message| message.content.clone()))
+            .or_else(|| {
+                request_message
+                    .as_ref()
+                    .map(|message| message.content.clone())
+            })
             .filter(|request| !request.trim().is_empty());
         let Some(user_request) = user_request else {
             self.push_ai_settings_toast(
@@ -129,14 +136,21 @@ impl WorkspaceApp {
             (!already_known).then_some((catalog, catalog_hash))
         });
 
-        let handoff = self.ai_entity.read(cx).history.model_contexts.get(&conversation_id)
+        let handoff = self
+            .ai_entity
+            .read(cx)
+            .history
+            .model_contexts
+            .get(&conversation_id)
             .and_then(|conversation| {
                 let cursor = ai_acp_session_state(conversation)
                     .filter(|state| state.agent_id == launch.launch_config.id)
                     .and_then(|state| state.handoff_cursor);
                 oxideterm_ai::build_acp_conversation_handoff(
                     conversation,
-                    request_message.as_ref().map(|message| message.id.as_str())?,
+                    request_message
+                        .as_ref()
+                        .map(|message| message.id.as_str())?,
                     cursor.as_ref(),
                 )
             });
@@ -144,39 +158,42 @@ impl WorkspaceApp {
         if let Some(handoff) = handoff {
             prompt.push_str(handoff.as_str());
         }
-        self.ai_entity.update(cx, |ai, _| { ai.history.model_contexts.remove(&conversation_id); });
+        self.ai_entity.update(cx, |ai, _| {
+            ai.history.model_contexts.remove(&conversation_id);
+        });
         {
-        let mut append_prompt_section = |heading: &str, value: &str| {
-            let safe_value = zeroize::Zeroizing::new(oxideterm_ai::sanitize_for_ai(value));
-            if !prompt.is_empty() {
-                prompt.push_str("\n\n");
+            let mut append_prompt_section = |heading: &str, value: &str| {
+                let safe_value = zeroize::Zeroizing::new(oxideterm_ai::sanitize_for_ai(value));
+                if !prompt.is_empty() {
+                    prompt.push_str("\n\n");
+                }
+                prompt.push_str("## ");
+                prompt.push_str(heading);
+                prompt.push('\n');
+                prompt.push_str(safe_value.as_str());
+            };
+            if let Some(instructions) = task_system_prompt.filter(|value| !value.trim().is_empty())
+            {
+                append_prompt_section("OxideTerm Instructions", &instructions);
             }
-            prompt.push_str("## ");
-            prompt.push_str(heading);
-            prompt.push('\n');
-            prompt.push_str(safe_value.as_str());
-        };
-        if let Some(instructions) = task_system_prompt.filter(|value| !value.trim().is_empty()) {
-            append_prompt_section("OxideTerm Instructions", &instructions);
-        }
-        if let Some(memory) = config
-            .memory_context
-            .as_deref()
-            .filter(|value| !value.trim().is_empty())
-        {
-            append_prompt_section("OxideTerm Scoped Memory", memory);
-        }
-        if let Some((skill_catalog, _catalog_hash)) = pending_skill_catalog.as_ref() {
-            append_prompt_section("OxideTerm Agent Skills", &skill_catalog);
-        }
-        if let Some(context) = request_message
-            .as_ref()
-            .and_then(|message| message.context.as_deref())
-            .filter(|value| !value.trim().is_empty())
-        {
-            append_prompt_section("OxideTerm Current Context", context);
-        }
-        append_prompt_section("User Request", &user_request);
+            if let Some(memory) = config
+                .memory_context
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+            {
+                append_prompt_section("OxideTerm Scoped Memory", memory);
+            }
+            if let Some((skill_catalog, _catalog_hash)) = pending_skill_catalog.as_ref() {
+                append_prompt_section("OxideTerm Agent Skills", &skill_catalog);
+            }
+            if let Some(context) = request_message
+                .as_ref()
+                .and_then(|message| message.context.as_deref())
+                .filter(|value| !value.trim().is_empty())
+            {
+                append_prompt_section("OxideTerm Current Context", context);
+            }
+            append_prompt_section("User Request", &user_request);
         }
 
         let now = ai_now_ms();
@@ -208,7 +225,8 @@ impl WorkspaceApp {
             );
             ai.set_conversation_loading(&conversation_id, true);
         });
-        let (generation, ui_tx, tool_session_id) = self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
+        let (generation, ui_tx, tool_session_id) =
+            self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
         let turn_id = format!("{conversation_id}:{generation}");
         let mut config_selections = self
             .ai_entity
@@ -269,9 +287,21 @@ impl WorkspaceApp {
                 },
             })
         });
-        if started
-            && let Some((_skill_catalog, catalog_hash)) = pending_skill_catalog
-        {
+        if started && let Some((skill_catalog, catalog_hash)) = pending_skill_catalog {
+            if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+            {
+                context.source = oxideterm_audit::AuditSource::Ai;
+                context.agent_id = Some(oxideterm_audit::redact(&conversation_id));
+                context.observe(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "ai_context_provided",
+                    Some(&format!("provider=skills bytes={}", skill_catalog.len())),
+                    oxideterm_audit::AuditOutcome::Sent,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
             self.ai_entity.update(cx, |ai, _cx| {
                 let Some(conversation) = ai
                     .conversation_state_mut()
@@ -456,7 +486,9 @@ impl WorkspaceApp {
         ) else {
             return;
         };
-        self.ai_entity.update(cx,|ai,_| { ai.history.model_contexts.remove(&conversation_id); });
+        self.ai_entity.update(cx, |ai, _| {
+            ai.history.model_contexts.remove(&conversation_id);
+        });
         if trimmed_count > 0 {
             self.show_ai_trim_notice(trimmed_count, cx);
         }
@@ -470,7 +502,10 @@ impl WorkspaceApp {
         );
         let now = ai_now_ms();
         let assistant_id = self.next_ai_chat_id(now, cx);
-        let request_message = self.ai_entity.read(cx).conversation_state()
+        let request_message = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -486,7 +521,10 @@ impl WorkspaceApp {
             .as_ref()
             .map(|message| message.id.clone())
             .unwrap_or_else(|| format!("{assistant_id}-request"));
-        let (budget_decision, budget_diagnostic_payload) = self.ai_entity.read(cx).conversation_state()
+        let (budget_decision, budget_diagnostic_payload) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -527,20 +565,20 @@ impl WorkspaceApp {
             ai.begin_assistant_turn(
                 &conversation_id,
                 AiChatMessage {
-                id: assistant_id.clone(),
-                role: AiChatRole::Assistant,
-                content: String::new(),
-                timestamp_ms: now,
-                model: Some(config.model.clone()),
-                context: None,
-                is_streaming: true,
-                thinking_content: None,
-                metadata: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-                turn: None,
-                transcript_ref: None,
-                summary_ref: None,
+                    id: assistant_id.clone(),
+                    role: AiChatRole::Assistant,
+                    content: String::new(),
+                    timestamp_ms: now,
+                    model: Some(config.model.clone()),
+                    context: None,
+                    is_streaming: true,
+                    thinking_content: None,
+                    metadata: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                    turn: None,
+                    transcript_ref: None,
+                    summary_ref: None,
                     branches: None,
                     suggestions: Vec::new(),
                 },
@@ -602,21 +640,27 @@ impl WorkspaceApp {
             now,
             self.ai_diagnostic_base(budget_diagnostic_payload),
         ));
-        self.persist_ai_transcript_entries(
-            conversation_id.clone(),
-            transcript_entries,
-            cx,
-        );
+        self.persist_ai_transcript_entries(conversation_id.clone(), transcript_entries, cx);
         self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events, cx);
-        self.ai_entity.update(cx, |ai, _cx| ai.set_conversation_loading(&conversation_id, true));
+        self.ai_entity.update(cx, |ai, _cx| {
+            ai.set_conversation_loading(&conversation_id, true)
+        });
         // Every model turn receives a fresh authority lease. The token remains
         // transient and never enters conversation history or diagnostics.
-        let (generation, ui_tx, tool_session_id) = self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
-        let model_runtime = AiModelRuntimeState {
-            context_window,
-        };
+        let (generation, ui_tx, tool_session_id) =
+            self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
+        let model_runtime = AiModelRuntimeState { context_window };
         let services = self.ai_model_backend_services(cx);
-        let execution = self.start_ai_agent_group(generation, &conversation_id, &assistant_id, &mut config, &services, &tool_session_id, context_window, cx);
+        let execution = self.start_ai_agent_group(
+            generation,
+            &conversation_id,
+            &assistant_id,
+            &mut config,
+            &services,
+            &tool_session_id,
+            context_window,
+            cx,
+        );
         let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
             config,
             history,

@@ -953,6 +953,7 @@ impl WorkspaceApp {
                     let _ = sender.send(context);
                 }
                 AiStreamDeliveryEvent::ToolExecutionRequested {
+                    audit_context,
                     dispatch,
                     leases,
                     tool_session_id,
@@ -986,19 +987,28 @@ impl WorkspaceApp {
                         self.ai_entity.update(cx, |ai, _cx| { ai.agents.tool_leases.insert((tool_session_id.clone(), tool_call_id.clone()), leases); });
                     }
                     let raw_arguments = zeroize::Zeroizing::new(args.to_string());
-                    self.start_ai_ui_orchestrator_tool_execution(
-                        AiToolRunContext { arguments: zeroize::Zeroizing::new(sanitize_ai_tool_arguments_for_approval(&raw_arguments)), generation: delivery.generation, conversation_id: delivery.conversation_id.clone(),
-                            assistant_id: delivery.assistant_id.clone(), dispatch },
-                        tool_session_id,
-                        tool_call_id,
-                        name,
-                        args,
-                        post_user_approval,
-                        dangerous_command_approved,
-                        sender,
-                        window,
-                        cx,
-                    );
+                    oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+                        self.start_ai_ui_orchestrator_tool_execution(
+                            AiToolRunContext {
+                                arguments: zeroize::Zeroizing::new(
+                                    sanitize_ai_tool_arguments_for_approval(&raw_arguments),
+                                ),
+                                generation: delivery.generation,
+                                conversation_id: delivery.conversation_id.clone(),
+                                assistant_id: delivery.assistant_id.clone(),
+                                dispatch,
+                            },
+                            tool_session_id,
+                            tool_call_id,
+                            name,
+                            args,
+                            post_user_approval,
+                            dangerous_command_approved,
+                            sender,
+                            window,
+                            cx,
+                        );
+                    });
                 }
             }
         }

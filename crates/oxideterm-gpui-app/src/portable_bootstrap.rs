@@ -34,7 +34,7 @@ enum PortableBootstrapAction {
 }
 
 struct PortableBootstrapLaunch {
-    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
+    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionHandoff>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<SingleInstanceReceiver>,
     window_ui: WindowUiState,
@@ -73,7 +73,7 @@ pub(crate) fn open_portable_bootstrap_window(
     cx: &mut App,
     status: PortableStatusSnapshot,
     settings: PersistedSettings,
-    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
+    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionHandoff>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<SingleInstanceReceiver>,
 ) -> anyhow::Result<()> {

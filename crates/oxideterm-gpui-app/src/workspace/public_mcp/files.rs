@@ -84,7 +84,8 @@ impl WorkspaceApp {
         let client_ref = request.client_ref.clone();
         let cancellation = request.cancellation_token();
         let node_id = node_lease.node_id;
-        self.forwarding_runtime.spawn(async move {
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime.spawn(oxideterm_audit::AuditContext::scope_optional(audit_context, async move {
             let resolved = tokio::select! {
                 _ = cancellation.cancelled() => {
                     remove_file_session_reservation(&handles, &file_session_ref, &client_ref);
@@ -166,7 +167,7 @@ impl WorkspaceApp {
                 request,
                 json!({ "file_session_ref": file_session_ref, "root": root }),
             );
-        });
+        }));
     }
 
     /// Releases only the SFTP consumer represented by this public handle.
@@ -554,24 +555,34 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let client_ref = request.client_ref.clone();
-        self.forwarding_runtime.spawn(async move {
-            let record =
-                match refresh_file_session(&router, &handles, &client_ref, &file_session_ref).await
-                {
-                    Ok(record) => record,
-                    Err(error) => {
-                        request.finish(ToolEnvelope::failed(error));
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let record = match refresh_file_session(
+                        &router,
+                        &handles,
+                        &client_ref,
+                        &file_session_ref,
+                    )
+                    .await
+                    {
+                        Ok(record) => record,
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(error));
+                            return;
+                        }
+                    };
+                    if request.is_cancelled() {
                         return;
                     }
-                };
-            if request.is_cancelled() {
-                return;
-            }
-            match operation(record).await {
-                Ok(value) => finish_serialized(request, value),
-                Err(error) => request.finish(ToolEnvelope::failed(error)),
-            }
-        });
+                    match operation(record).await {
+                        Ok(value) => finish_serialized(request, value),
+                        Err(error) => request.finish(ToolEnvelope::failed(error)),
+                    }
+                },
+            ));
     }
 }
 

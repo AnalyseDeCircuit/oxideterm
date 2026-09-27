@@ -168,6 +168,7 @@ fn main() {
             .external_connection_uris_enabled
             .then_some(startup_launch)
             .flatten()
+            .map(Into::into)
     });
     let _log_guard = match logging::init_file_logging(
         &startup_settings,
@@ -205,7 +206,7 @@ fn main() {
             && !launches.is_empty()
             && let Err(error) = open_primary_window(
                 cx,
-                Some(launches.remove(0)),
+                Some(launches.remove(0).into()),
                 desktop_presence_menu_from_settings(),
                 Some(url_event_receiver.clone()),
                 SettingsStore::load_default()
@@ -325,7 +326,7 @@ fn confirm_update_after_initial_workspace() -> std::io::Result<()> {
 
 fn open_main_workspace_window(
     cx: &mut App,
-    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
+    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionHandoff>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
     window_ui: WindowUiState,
@@ -361,7 +362,7 @@ fn open_main_workspace_window(
             });
             if let Some(launch) = native_connection_launch
                 && let Err(error) = session.update(cx, |session, cx| {
-                    session.open_native_connection_launch(launch, window, cx)
+                    session.open_native_connection_handoff(launch, window, cx)
                 })
             {
                 eprintln!("failed to open native connection launch: {error}");
@@ -384,7 +385,7 @@ fn open_main_workspace_window(
 
 fn open_primary_window(
     cx: &mut App,
-    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionLaunch>,
+    native_connection_launch: Option<oxideterm_ssh_launch::NativeConnectionHandoff>,
     desktop_presence_menu: oxideterm_desktop_presence::DesktopPresenceMenu,
     single_instance_rx: Option<single_instance::SingleInstanceReceiver>,
     settings: oxideterm_settings::PersistedSettings,

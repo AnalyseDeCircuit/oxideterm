@@ -8,6 +8,15 @@ pub(in crate::workspace::file_manager) use external::{open_path_external, reveal
 const FILE_MANAGER_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
 
+fn local_file_operation(action: &str, detail: &str) -> oxideterm_audit::AuditOperation {
+    oxideterm_audit::AuditOperation::in_context(
+        super::local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
+        oxideterm_audit::AuditCategory::File,
+        action,
+        Some(detail),
+    )
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_file_manager_tab(
         &mut self,
@@ -50,7 +59,22 @@ impl WorkspaceApp {
             // user is already working, without turning cwd into global state.
             self.set_file_manager_path(path, cx);
         } else {
-            self.refresh_file_manager(cx);
+            let path = self.file_manager.read(cx).path.clone();
+            let audit = local_file_operation("file_browse", &path);
+            self.file_manager.update(cx, |file_manager, cx| {
+                file_manager.refresh();
+                audit.finish(
+                    if file_manager.error.is_none() {
+                        oxideterm_audit::AuditOutcome::Succeeded
+                    } else {
+                        oxideterm_audit::AuditOutcome::Failed
+                    },
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
+                cx.notify();
+            });
         }
         self.persist_sidebar_settings(cx);
         self.reveal_active_tab(window, cx);
@@ -379,9 +403,21 @@ impl WorkspaceApp {
 
     pub(super) fn refresh_file_manager_with_drives(&mut self, cx: &mut Context<Self>) {
         // Explicit refresh updates both the current directory and mounted volumes.
+        let path = self.file_manager.read(cx).path.clone();
+        let audit = local_file_operation("file_browse", &path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.refresh_drives();
             file_manager.refresh();
+            audit.finish(
+                if file_manager.error.is_none() {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
             cx.notify();
         });
     }
@@ -403,8 +439,19 @@ impl WorkspaceApp {
     }
 
     pub(super) fn set_file_manager_path(&mut self, path: String, cx: &mut Context<Self>) {
+        let audit = local_file_operation("file_browse", &path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.set_path(path);
+            audit.finish(
+                if file_manager.error.is_none() {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
             cx.notify();
         });
     }
@@ -949,7 +996,23 @@ impl WorkspaceApp {
                 cx,
             );
         }
+        let audit = local_file_operation("file_preview", &entry.path);
         let preview = read_local_preview(&entry.path);
+        audit.finish(
+            match &preview {
+                LocalPreview::Error(_) => oxideterm_audit::AuditOutcome::Failed,
+                LocalPreview::TooLarge { .. } | LocalPreview::Unsupported(_) => {
+                    oxideterm_audit::AuditOutcome::Unchanged
+                }
+                LocalPreview::Text { .. }
+                | LocalPreview::Markdown { .. }
+                | LocalPreview::Archive { .. } => oxideterm_audit::AuditOutcome::Succeeded,
+                _ => oxideterm_audit::AuditOutcome::Sent,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
         match &preview {
             LocalPreview::Audio { path, .. } => {
                 if let Err(error) = self.file_manager.update(cx, |file_manager, _cx| {
@@ -1046,6 +1109,17 @@ impl WorkspaceApp {
         };
         let result =
             read_local_preview_range(&path, offset, FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE);
+        let audit = local_file_operation("file_preview", &format!("path={path}; offset={offset}"));
+        audit.finish(
+            if result.is_ok() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            result.as_ref().ok().map(|chunk| chunk.data.len() as u64),
+        );
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.preview_stream.loading = false;
             match result {
@@ -1258,10 +1332,12 @@ impl WorkspaceApp {
                 file_manager.path.clone(),
             )
         };
-        match validate_local_name(&name)
+        let audit = local_file_operation("file_mkdir", &join_local_path(&current_path, &name));
+        let result = validate_local_name(&name)
             .map(|_| join_local_path(&current_path, &name))
-            .and_then(|path| std::fs::create_dir(&path).map_err(|error| error.to_string()))
-        {
+            .and_then(|path| std::fs::create_dir(&path).map_err(|error| error.to_string()));
+        audit.result(&result);
+        match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
                 self.refresh_file_manager(cx);
@@ -1290,7 +1366,14 @@ impl WorkspaceApp {
                 file_manager.path.clone(),
             )
         };
-        match validate_local_name(&name)
+        let audit = local_file_operation(
+            "file_save",
+            &format!(
+                "path={}; mode=create_new",
+                join_local_path(&current_path, &name)
+            ),
+        );
+        let result = validate_local_name(&name)
             .map(|_| join_local_path(&current_path, &name))
             .and_then(|path| {
                 std::fs::OpenOptions::new()
@@ -1299,7 +1382,18 @@ impl WorkspaceApp {
                     .open(&path)
                     .map(|_| ())
                     .map_err(|error| error.to_string())
-            }) {
+            });
+        audit.finish(
+            if result.is_ok() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            result.is_ok().then_some(0),
+        );
+        match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
                 self.refresh_file_manager(cx);
@@ -1328,11 +1422,12 @@ impl WorkspaceApp {
                 file_manager.path.clone(),
             )
         };
-        let result = validate_local_name(&new_name).and_then(|_| {
-            let old_path = join_local_path(&current_path, &old_name);
-            let new_path = join_local_path(&current_path, &new_name);
-            std::fs::rename(old_path, new_path).map_err(|error| error.to_string())
-        });
+        let old_path = join_local_path(&current_path, &old_name);
+        let new_path = join_local_path(&current_path, &new_name);
+        let audit = local_file_operation("file_rename", &format!("{old_path} → {new_path}"));
+        let result = validate_local_name(&new_name)
+            .and_then(|_| std::fs::rename(&old_path, &new_path).map_err(|error| error.to_string()));
+        audit.result(&result);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -1360,20 +1455,60 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let current_path = self.file_manager.read(cx).path.clone();
+        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
+        let mut audit = oxideterm_audit::AuditOperation::in_context(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_delete_recursive",
+            Some(&format!("path={current_path}; requested={}", names.len())),
+        );
+        let child_context = context.map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
         let mut error = None;
+        let mut removed = 0usize;
+        let mut failed_path = None;
         for name in &names {
             let path = join_local_path(&current_path, name);
             let path_ref = std::path::Path::new(&path);
-            let result = if path_ref.is_dir() {
+            let is_directory = path_ref.is_dir();
+            let child = oxideterm_audit::AuditOperation::in_context(
+                child_context.as_ref(),
+                oxideterm_audit::AuditCategory::File,
+                if is_directory {
+                    "file_delete_recursive"
+                } else {
+                    "file_delete"
+                },
+                Some(&path),
+            );
+            let result = if is_directory {
                 std::fs::remove_dir_all(path_ref)
             } else {
                 std::fs::remove_file(path_ref)
             };
+            child.result(&result);
             if let Err(err) = result {
                 error = Some(err.to_string());
+                failed_path = Some(path);
                 break;
             }
+            removed += 1;
         }
+        audit.summary(&format!("path={current_path}; requested={}; removed={removed}; unprocessed={}; failed_path={}; nested_items=unavailable:remove_dir_all", names.len(), names.len().saturating_sub(removed + usize::from(error.is_some())), failed_path.as_deref().unwrap_or("none")));
+        audit.finish(
+            if error.is_none() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else if removed > 0 {
+                oxideterm_audit::AuditOutcome::Partial
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
         match error {
             Some(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
@@ -1460,6 +1595,7 @@ impl WorkspaceApp {
         let destination = current_path;
         let sources = clipboard.paths.clone();
         let mode = clipboard.mode;
+        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
         let total = sources
             .iter()
             .map(|source| local_operation_unit_count(std::path::Path::new(source)))
@@ -1467,11 +1603,26 @@ impl WorkspaceApp {
         self.start_file_manager_operation(
             total,
             move |tx| {
-                let mut done = 0usize;
+                let mut audit = oxideterm_audit::AuditOperation::in_context(
+                    audit_context.as_ref(), oxideterm_audit::AuditCategory::File,
+                    if mode == LocalClipboardMode::Cut { "file_move" } else { "file_copy" },
+                    Some(&format!("destination={destination}; sources={}", sources.len())),
+                );
+                let child_context = audit_context.map(|mut context| {
+                    context.parent_id = audit.id().map(str::to_owned);
+                    context
+                });
+                let done = std::cell::Cell::new(0usize);
+                let bytes = std::cell::Cell::new(0u64);
+                let copied = std::cell::Cell::new(false);
+                let mut attempted_source = None;
+                let mut failed_object = None;
+                let result: Result<(), String> = (|| {
                 for source in &sources {
+                    attempted_source = Some(source.as_str());
                     let source_path = std::path::Path::new(source);
                     let Some(name) = source_path.file_name() else {
-                        continue;
+                        return Err("Source has no file name".to_string());
                     };
                     let target = unique_copy_path(&std::path::Path::new(&destination).join(name));
                     if mode == LocalClipboardMode::Cut
@@ -1479,15 +1630,28 @@ impl WorkspaceApp {
                     {
                         return Err("cannot move a folder into itself".to_string());
                     }
-                    let mut progress = |path: &std::path::Path| {
-                        done += 1;
+                    let mut progress = |path: &std::path::Path, copied_bytes: Option<u64>| {
+                        if let Some(copied_bytes) = copied_bytes {
+                            done.set(done.get() + 1);
+                            bytes.set(bytes.get().saturating_add(copied_bytes));
+                            copied.set(true);
+                        } else {
+                            failed_object = Some(path.to_string_lossy().into_owned());
+                        }
+                        if let Some(context) = child_context.as_ref() {
+                            let relative = path.strip_prefix(source_path).unwrap_or_else(|_| std::path::Path::new(""));
+                            let copied_to = if relative.as_os_str().is_empty() { target.clone() } else { target.join(relative) };
+                            context.operation(oxideterm_audit::AuditCategory::File, "file_copy", Some(&format!("{} → {}", path.display(), copied_to.display())))
+                                .finish(if copied_bytes.is_some() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, copied_bytes);
+                        }
+                        if copied_bytes.is_none() { return; }
                         let file_name = path
                             .file_name()
                             .map(|name| name.to_string_lossy().to_string())
                             .unwrap_or_default();
                         let _ = tx.send(FileManagerOperationEvent::Progress(
                             FileManagerOperationProgress {
-                                current: done,
+                                current: done.get(),
                                 total: total.max(1),
                                 file_name,
                                 active: true,
@@ -1497,18 +1661,34 @@ impl WorkspaceApp {
                     if mode == LocalClipboardMode::Cut {
                         match std::fs::rename(source_path, &target) {
                             Ok(()) => {
-                                progress(source_path);
+                                done.set(done.get() + 1);
+                                if let Some(context) = child_context.as_ref() {
+                                    context.operation(oxideterm_audit::AuditCategory::File, "file_move", Some(&format!("{} → {}", source_path.display(), target.display())))
+                                        .finish(oxideterm_audit::AuditOutcome::Succeeded, oxideterm_audit::AuditEvidence::Protocol, None, None);
+                                }
+                                let _ = tx.send(FileManagerOperationEvent::Progress(FileManagerOperationProgress {
+                                    current: done.get(), total: total.max(1), file_name: name.to_string_lossy().into_owned(), active: true,
+                                }));
                                 Ok(())
                             }
                             Err(_) => {
                                 copy_recursively_with_progress(source_path, &target, &mut progress)
                                     .map_err(|error| error.to_string())?;
-                                if source_path.is_dir() {
+                                let removal = if source_path.is_dir() {
                                     std::fs::remove_dir_all(source_path)
                                 } else {
                                     std::fs::remove_file(source_path)
+                                };
+                                if removal.is_ok() {
+                                    if let Some(context) = child_context.as_ref() {
+                                        context.operation(oxideterm_audit::AuditCategory::File, "file_move", Some(&format!("{} → {}", source_path.display(), target.display())))
+                                            .finish(oxideterm_audit::AuditOutcome::Succeeded, oxideterm_audit::AuditEvidence::Protocol, None, None);
+                                    }
+                                } else if let Some(context) = child_context.as_ref() {
+                                    context.operation(oxideterm_audit::AuditCategory::File, "file_move", Some(&format!("{} → {}", source_path.display(), target.display())))
+                                        .finish(oxideterm_audit::AuditOutcome::Partial, oxideterm_audit::AuditEvidence::Protocol, None, None);
                                 }
-                                .map_err(|error| error.to_string())
+                                removal.map_err(|error| error.to_string())
                             }
                         }
                     } else {
@@ -1517,6 +1697,15 @@ impl WorkspaceApp {
                     }?;
                 }
                 Ok(())
+                })();
+                audit.summary(&format!("destination={destination}; sources={}; completed_objects={}; estimated_objects={total}; failed_object={}; copied_bytes={}", sources.len(), done.get(), if result.is_err() { failed_object.as_deref().or(attempted_source).unwrap_or("unknown") } else { "none" }, if copied.get() { bytes.get().to_string() } else { "unknown".into() }));
+                audit.finish(
+                    if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else if done.get() > 0 { oxideterm_audit::AuditOutcome::Partial } else { oxideterm_audit::AuditOutcome::Failed },
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    copied.get().then_some(bytes.get()),
+                );
+                result
             },
             cx,
         );
@@ -1544,15 +1733,41 @@ impl WorkspaceApp {
             .iter()
             .map(|path| local_operation_unit_count(std::path::Path::new(path)))
             .sum::<usize>();
+        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
         self.start_file_manager_operation(
             total,
             move |tx| {
                 let mut done = 0usize;
-                for path in paths {
+                let mut bytes = 0u64;
+                let mut audit = oxideterm_audit::AuditOperation::in_context(
+                    audit_context.as_ref(), oxideterm_audit::AuditCategory::File,
+                    "file_copy", Some(&format!("sources={}; mode=duplicate", paths.len())),
+                );
+                let child_context = audit_context.map(|mut context| {
+                    context.parent_id = audit.id().map(str::to_owned);
+                    context
+                });
+                let mut attempted_source = None;
+                let mut failed_object = None;
+                let result: Result<(), String> = (|| {
+                for path in &paths {
+                    attempted_source = Some(path.as_str());
                     let source = std::path::Path::new(&path);
                     let target = unique_copy_path(source);
-                    let mut progress = |path: &std::path::Path| {
-                        done += 1;
+                    let mut progress = |path: &std::path::Path, copied_bytes: Option<u64>| {
+                        if let Some(copied_bytes) = copied_bytes {
+                            done += 1;
+                            bytes = bytes.saturating_add(copied_bytes);
+                        } else {
+                            failed_object = Some(path.to_string_lossy().into_owned());
+                        }
+                        if let Some(context) = child_context.as_ref() {
+                            let relative = path.strip_prefix(source).unwrap_or_else(|_| std::path::Path::new(""));
+                            let copied_to = if relative.as_os_str().is_empty() { target.clone() } else { target.join(relative) };
+                            context.operation(oxideterm_audit::AuditCategory::File, "file_copy", Some(&format!("{} → {}", path.display(), copied_to.display())))
+                                .finish(if copied_bytes.is_some() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, copied_bytes);
+                        }
+                        if copied_bytes.is_none() { return; }
                         let file_name = path
                             .file_name()
                             .map(|name| name.to_string_lossy().to_string())
@@ -1570,6 +1785,10 @@ impl WorkspaceApp {
                         .map_err(|error| error.to_string())?;
                 }
                 Ok(())
+                })();
+                audit.summary(&format!("sources={}; completed_objects={done}; estimated_objects={total}; failed_object={}; copied_bytes={bytes}", paths.len(), if result.is_err() { failed_object.as_deref().or(attempted_source).unwrap_or("unknown") } else { "none" }));
+                audit.finish(if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else if done > 0 { oxideterm_audit::AuditOutcome::Partial } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, (done > 0).then_some(bytes));
+                result
             },
             cx,
         );
@@ -1594,18 +1813,44 @@ impl WorkspaceApp {
             .iter()
             .map(|source| local_operation_unit_count(std::path::Path::new(source)))
             .sum::<usize>();
+        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
         self.start_file_manager_operation(
             total,
             move |tx| {
                 let mut done = 0usize;
+                let mut bytes = 0u64;
+                let mut audit = oxideterm_audit::AuditOperation::in_context(
+                    audit_context.as_ref(), oxideterm_audit::AuditCategory::File,
+                    "file_copy", Some(&format!("destination={destination}; sources={}; mode=drop", sources.len())),
+                );
+                let child_context = audit_context.map(|mut context| {
+                    context.parent_id = audit.id().map(str::to_owned);
+                    context
+                });
+                let mut attempted_source = None;
+                let mut failed_object = None;
+                let result: Result<(), String> = (|| {
                 for source in &sources {
+                    attempted_source = Some(source.as_str());
                     let source_path = std::path::Path::new(source);
                     let Some(name) = source_path.file_name() else {
-                        continue;
+                        return Err("Source has no file name".to_string());
                     };
                     let target = unique_copy_path(&std::path::Path::new(&destination).join(name));
-                    let mut progress = |path: &std::path::Path| {
-                        done += 1;
+                    let mut progress = |path: &std::path::Path, copied_bytes: Option<u64>| {
+                        if let Some(copied_bytes) = copied_bytes {
+                            done += 1;
+                            bytes = bytes.saturating_add(copied_bytes);
+                        } else {
+                            failed_object = Some(path.to_string_lossy().into_owned());
+                        }
+                        if let Some(context) = child_context.as_ref() {
+                            let relative = path.strip_prefix(source_path).unwrap_or_else(|_| std::path::Path::new(""));
+                            let copied_to = if relative.as_os_str().is_empty() { target.clone() } else { target.join(relative) };
+                            context.operation(oxideterm_audit::AuditCategory::File, "file_copy", Some(&format!("{} → {}", path.display(), copied_to.display())))
+                                .finish(if copied_bytes.is_some() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, copied_bytes);
+                        }
+                        if copied_bytes.is_none() { return; }
                         let file_name = path
                             .file_name()
                             .map(|name| name.to_string_lossy().to_string())
@@ -1623,6 +1868,10 @@ impl WorkspaceApp {
                         .map_err(|error| error.to_string())?;
                 }
                 Ok(())
+                })();
+                audit.summary(&format!("destination={destination}; sources={}; completed_objects={done}; estimated_objects={total}; failed_object={}; copied_bytes={bytes}", sources.len(), if result.is_err() { failed_object.as_deref().or(attempted_source).unwrap_or("unknown") } else { "none" }));
+                audit.finish(if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else if done > 0 { oxideterm_audit::AuditOutcome::Partial } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, (done > 0).then_some(bytes));
+                result
             },
             cx,
         );
@@ -1646,7 +1895,79 @@ impl WorkspaceApp {
             .iter()
             .map(|entry| entry.path.clone())
             .collect::<Vec<_>>();
-        match compress_local_files(&paths, &archive_path.to_string_lossy()) {
+        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
+        let mut audit = oxideterm_audit::AuditOperation::in_context(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_archive_create",
+            Some(&format!(
+                "archive={}; sources={}",
+                archive_path.display(),
+                paths.len()
+            )),
+        );
+        let child_context = context.map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
+        let mut completed = 0usize;
+        let mut skipped = 0usize;
+        let mut input_bytes = 0u64;
+        let mut failed_object = None;
+        let result = compress_local_files(
+            &paths,
+            &archive_path.to_string_lossy(),
+            &mut |path, outcome| {
+                let (audit_outcome, bytes) = match outcome {
+                    ArchiveEntryOutcome::Completed(bytes) => {
+                        completed += 1;
+                        input_bytes = input_bytes.saturating_add(bytes);
+                        (oxideterm_audit::AuditOutcome::Succeeded, Some(bytes))
+                    }
+                    ArchiveEntryOutcome::Skipped => {
+                        skipped += 1;
+                        (oxideterm_audit::AuditOutcome::Unchanged, None)
+                    }
+                    ArchiveEntryOutcome::Failed => {
+                        failed_object = Some(path.to_string_lossy().into_owned());
+                        (oxideterm_audit::AuditOutcome::Failed, None)
+                    }
+                };
+                if let Some(context) = child_context.as_ref() {
+                    context
+                        .operation(
+                            oxideterm_audit::AuditCategory::File,
+                            "file_archive_create",
+                            Some(&format!("{} → {}", path.display(), archive_path.display())),
+                        )
+                        .finish(
+                            audit_outcome,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            bytes,
+                        );
+                }
+            },
+        );
+        let archive_bytes = result
+            .as_ref()
+            .ok()
+            .and_then(|_| std::fs::metadata(&archive_path).ok())
+            .map(|metadata| metadata.len());
+        audit.summary(&format!("archive={}; requested_sources={}; completed_entries={completed}; skipped_entries={skipped}; failed_object={}; input_bytes={input_bytes}", archive_path.display(), paths.len(), failed_object.as_deref().unwrap_or("none")));
+        audit.finish(
+            if result.is_ok() && skipped == 0 {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else if completed > 0 || result.is_ok() {
+                oxideterm_audit::AuditOutcome::Partial
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            archive_bytes,
+        );
+        match result {
             Ok(()) => {
                 self.refresh_file_manager(cx);
                 self.push_file_manager_toast(
@@ -1674,7 +1995,69 @@ impl WorkspaceApp {
             return;
         }
         let current_path = self.file_manager.read(cx).path.clone();
-        match extract_local_archive(&entry.path, &current_path) {
+        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
+        let mut audit = oxideterm_audit::AuditOperation::in_context(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            "file_archive_extract",
+            Some(&format!(
+                "archive={}; destination={current_path}",
+                entry.path
+            )),
+        );
+        let child_context = context.map(|mut context| {
+            context.parent_id = audit.id().map(str::to_owned);
+            context
+        });
+        let mut completed = 0usize;
+        let mut skipped = 0usize;
+        let mut written_bytes = 0u64;
+        let mut failed_object = None;
+        let result = extract_local_archive(&entry.path, &current_path, &mut |path, outcome| {
+            let (audit_outcome, bytes) = match outcome {
+                ArchiveEntryOutcome::Completed(bytes) => {
+                    completed += 1;
+                    written_bytes = written_bytes.saturating_add(bytes);
+                    (oxideterm_audit::AuditOutcome::Succeeded, Some(bytes))
+                }
+                ArchiveEntryOutcome::Skipped => {
+                    skipped += 1;
+                    (oxideterm_audit::AuditOutcome::Unchanged, None)
+                }
+                ArchiveEntryOutcome::Failed => {
+                    failed_object = Some(path.to_string_lossy().into_owned());
+                    (oxideterm_audit::AuditOutcome::Failed, None)
+                }
+            };
+            if let Some(context) = child_context.as_ref() {
+                context
+                    .operation(
+                        oxideterm_audit::AuditCategory::File,
+                        "file_archive_extract",
+                        Some(&format!("{} → {}", entry.path, path.display())),
+                    )
+                    .finish(
+                        audit_outcome,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        bytes,
+                    );
+            }
+        });
+        audit.summary(&format!("archive={}; destination={current_path}; completed_entries={completed}; skipped_entries={skipped}; failed_object={}", entry.path, failed_object.as_deref().unwrap_or("none")));
+        audit.finish(
+            if result.is_ok() && skipped == 0 {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else if completed > 0 || result.is_ok() {
+                oxideterm_audit::AuditOutcome::Partial
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            (completed > 0).then_some(written_bytes),
+        );
+        match result {
             Ok(()) => {
                 self.refresh_file_manager(cx);
                 self.push_file_manager_toast(

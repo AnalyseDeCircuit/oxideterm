@@ -24,8 +24,8 @@ impl WorkspaceApp {
                 Tab {
                     id: tab_id,
                     kind: TabKind::NotificationCenter,
-                    title: self.i18n.t("sidebar.panels.notifications"),
-                    title_source: TabTitleSource::I18nKey("sidebar.panels.notifications"),
+                    title: self.i18n.t("event_log.audit.center_title"),
+                    title_source: TabTitleSource::I18nKey("event_log.audit.center_title"),
                     root_pane: None,
                     active_pane_id: None,
                 },
@@ -33,6 +33,12 @@ impl WorkspaceApp {
             );
             tab_id
         };
+        if self.notification_center.active_view == WorkspaceActivityView::EventLog {
+            self.refresh_audit(true, cx);
+            self.record_audit_view();
+        } else {
+            self.hide_audit_page();
+        }
         self.mark_active_notification_center_view_read();
         self.set_active_tab(tab_id, window, cx);
     }
@@ -55,6 +61,7 @@ impl WorkspaceApp {
         let page_padding = self.tokens.metrics.settings_content_padding;
         let page_gap = self.tokens.metrics.settings_page_gap;
         div()
+            .relative()
             .size_full()
             .overflow_hidden()
             .flex()
@@ -85,7 +92,7 @@ impl WorkspaceApp {
                                     .text_size(px(self.tokens.metrics.ui_text_2xl))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text_heading))
-                                    .child(self.i18n.t("sidebar.panels.notifications")),
+                                    .child(self.i18n.t("event_log.audit.center_title")),
                             )
                             .child(
                                 div()
@@ -116,9 +123,12 @@ impl WorkspaceApp {
                     WorkspaceActivityView::Notifications => {
                         self.render_notifications_center_content(cx)
                     }
-                    WorkspaceActivityView::EventLog => self.render_event_log_center_content(cx),
+                    WorkspaceActivityView::EventLog => self.render_audit_content(cx),
                 }),
             )
+            .when_some(self.render_audit_filter_menu(cx), |view, menu| {
+                view.child(menu)
+            })
             .into_any_element()
     }
 
@@ -132,16 +142,11 @@ impl WorkspaceApp {
         } else {
             self.notification_center.notifications.unread_count
         };
-        let event_count = if self.notification_center.event_log.dnd_enabled {
-            0
-        } else {
-            self.notification_center.event_log.unread_count
-        };
         let items = vec![
             self.render_notification_center_tab(
                 WorkspaceActivityView::Notifications,
                 LucideIcon::Bell,
-                self.i18n.t("sidebar.panels.notifications"),
+                self.i18n.t("event_log.audit.notifications"),
                 notification_count,
                 !self.notification_center.notifications.dnd_enabled
                     && self.notification_center.notifications.unread_critical_count > 0,
@@ -150,10 +155,9 @@ impl WorkspaceApp {
             self.render_notification_center_tab(
                 WorkspaceActivityView::EventLog,
                 LucideIcon::History,
-                self.i18n.t("sidebar.panels.event_log"),
-                event_count,
-                !self.notification_center.event_log.dnd_enabled
-                    && self.notification_center.event_log.unread_errors > 0,
+                self.i18n.t("event_log.audit.title"),
+                0,
+                false,
                 cx,
             ),
         ];
@@ -246,8 +250,15 @@ impl WorkspaceApp {
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
                     if this.notification_center.active_view != view {
+                        this.audit.open_filter = None;
                         this.notification_center.active_view = view;
                         this.mark_active_notification_center_view_read();
+                        if view == WorkspaceActivityView::EventLog {
+                            this.record_audit_view();
+                            this.refresh_audit(true, cx);
+                        } else {
+                            this.hide_audit_page();
+                        }
                         this.begin_user_segmented_control_transition(
                             selection_motion::NOTIFICATION_CENTER_SWITCHER_ID,
                             notification_center_view_index(view),

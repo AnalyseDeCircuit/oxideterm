@@ -332,18 +332,24 @@ impl WorkspaceApp {
         let hints = state.secret_hints.clone();
         let previous_remote_sections = state.last_synced_remote_sections;
         let cancellation = request.cancellation_token();
-        let worker = self.forwarding_runtime.spawn(async move {
-            tokio::select! {
-                _ = cancellation.cancelled() => Err(SYNC_CANCELLED_ERROR.to_owned()),
-                result = run_pull_preview_worker(
-                    service,
-                    connection_store,
-                    settings,
-                    hints,
-                    previous_remote_sections,
-                ) => result,
-            }
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    tokio::select! {
+                        _ = cancellation.cancelled() => Err(SYNC_CANCELLED_ERROR.to_owned()),
+                        result = run_pull_preview_worker(
+                            service,
+                            connection_store,
+                            settings,
+                            hints,
+                            previous_remote_sections,
+                        ) => result,
+                    }
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -478,18 +484,24 @@ impl WorkspaceApp {
         let cancellation = request.cancellation_token();
         let skip_remote_check = matches!(settings.backend_type, BackendType::GithubGist)
             && settings.git_repository.trim().is_empty();
-        let worker = self.forwarding_runtime.spawn(async move {
-            if skip_remote_check {
-                return Ok(PublicMcpCheckWorkerResult {
-                    metadata: RemoteMetadata::missing(),
-                    secret_hints: hints,
-                });
-            }
-            tokio::select! {
-                _ = cancellation.cancelled() => Err(SYNC_CANCELLED_ERROR.to_owned()),
-                result = run_check_worker(service, settings, hints) => result,
-            }
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    if skip_remote_check {
+                        return Ok(PublicMcpCheckWorkerResult {
+                            metadata: RemoteMetadata::missing(),
+                            secret_hints: hints,
+                        });
+                    }
+                    tokio::select! {
+                        _ = cancellation.cancelled() => Err(SYNC_CANCELLED_ERROR.to_owned()),
+                        result = run_check_worker(service, settings, hints) => result,
+                    }
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -686,23 +698,29 @@ impl WorkspaceApp {
         let hints = state.secret_hints.clone();
         let source_revision = state.last_known_remote_revision;
         let cancellation = request.cancellation_token();
-        let worker = self.forwarding_runtime.spawn(async move {
-            run_pull_apply_worker(
-                service,
-                connection_store,
-                forwarding_registry,
-                settings_store,
-                settings,
-                hints,
-                source_revision,
-                preview,
-                selection,
-                create_rollback_backup,
-                remote,
-                cancellation,
-            )
-            .await
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    run_pull_apply_worker(
+                        service,
+                        connection_store,
+                        forwarding_registry,
+                        settings_store,
+                        settings,
+                        hints,
+                        source_revision,
+                        preview,
+                        selection,
+                        create_rollback_backup,
+                        remote,
+                        cancellation,
+                    )
+                    .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -841,19 +859,25 @@ impl WorkspaceApp {
             skip_if_busy: false,
             ..UploadOptions::default()
         };
-        let worker = self.forwarding_runtime.spawn(async move {
-            run_upload_worker(
-                service,
-                connection_store,
-                forwarding_registry,
-                settings_store,
-                settings,
-                hints,
-                options,
-                cancellation,
-            )
-            .await
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    run_upload_worker(
+                        service,
+                        connection_store,
+                        forwarding_registry,
+                        settings_store,
+                        settings,
+                        hints,
+                        options,
+                        cancellation,
+                    )
+                    .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {

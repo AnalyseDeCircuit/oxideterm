@@ -77,123 +77,38 @@ async fn execute_ai_round_call_once(
     allow_selection: bool,
     dispatch: Option<&oxideterm_ai::agent::AgentDispatch>,
 ) -> Result<AiExecutedToolResult, ()> {
-    if dispatch.is_some_and(|guard| guard.check().is_err()) {
-        return Ok(ai_direction_changed_result(&call));
-    }
-    if !available_tool_names.contains(&call.name) {
-        // Tauri rejects unavailable tool names before argument parsing
-        // or policy approval; keep stale/model-invented names out of
-        // the executor path.
-        let executed = unavailable_ai_tool_result(call.id.clone(), call.name.clone());
-        send_ai_tool_status(
-            &ui_tx,
-            generation,
-            &conversation_id,
-            &assistant_id,
-            &call,
-            "rejected",
-            Some(executed.envelope.clone()),
-            None,
-            Some(executed_summary(&executed)),
+    let audit_context = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            context.source = oxideterm_audit::AuditSource::Ai;
+            context.agent_id = Some(oxideterm_audit::redact(&format!(
+                "{conversation_id}:{}",
+                call.id
+            )));
+            context
+        });
+    let mut audit = audit_context.as_ref().map(|context| {
+        context.operation(
+            oxideterm_audit::AuditCategory::Automation,
+            "ai_tool_call",
+            Some(&call.name),
         )
-        .ok();
-        return Ok(executed);
-    }
-    if oxideterm_ai::agent::is_agent_tool(&call.name) {
-        let executed = execute_ai_agent_coordination(
-            execution,
-            &ui_tx,
-            generation,
-            &tool_session_id,
-            &conversation_id,
-            &assistant_id,
-            &call,
-            dispatch,
-        )
-        .await;
-        let _ = send_ai_tool_status(
-            &ui_tx,
-            generation,
-            &conversation_id,
-            &assistant_id,
-            &call,
-            if executed.success {
-                "completed"
-            } else {
-                "error"
-            },
-            Some(executed.envelope.clone()),
-            Some("read".into()),
-            Some(executed_summary(&executed)),
-        );
-        return Ok(executed);
-    }
-    let Some(parsed_args) = parse_ai_tool_args(&call.name, &call.arguments) else {
-        let executed = pre_execution_rejected_ai_tool_result(
-            call.id.clone(),
-            call.name.clone(),
-            "invalid_tool_arguments",
-            "The application tool arguments do not match the v2 contract.",
-        );
-        send_ai_tool_status(
-            &ui_tx,
-            generation,
-            &conversation_id,
-            &assistant_id,
-            &call,
-            "rejected",
-            Some(executed.envelope.clone()),
-            None,
-            Some(executed_summary(&executed)),
-        )
-        .ok();
-        return Ok(executed);
-    };
-    if let Some(executed) = ai_pending_dispatch(
-        dispatch,
-        preflight_ai_tool(
-            &ui_tx,
-            generation,
-            &tool_session_id,
-            &conversation_id,
-            &assistant_id,
-            call.id.clone(),
-            call.name.clone(),
-            parsed_args.clone(),
-        ),
-    )
-    .await
-    .unwrap_or_else(|_| Some(ai_direction_changed_result(&call)))
-    {
-        send_ai_tool_status(
-            &ui_tx,
-            generation,
-            &conversation_id,
-            &assistant_id,
-            &call,
-            "rejected",
-            Some(executed.envelope.clone()),
-            None,
-            Some(executed_summary(&executed)),
-        )
-        .ok();
-        return Ok(executed);
-    }
-    let approval_args = parsed_args.clone();
-    let decision = resolve_ai_policy_decision(
-        &call.name,
-        Some(&approval_args),
-        &config.tool_policy,
-        config.safety_mode,
-        config.profile_id.as_deref(),
-    );
-    let risk = ai_policy_risk_label(decision.risk).to_string();
-    let summary = decision.reason_code.clone();
-    let mut executed_after_policy = false;
-    let mut execution_summary_args = serde_json::json!({});
-
-    let mut executed = match decision.decision {
-        oxideterm_ai::AiPolicyDecisionKind::Deny => {
+    });
+    let request_context = audit_context.map(|mut context| {
+        context.parent_id = audit
+            .as_ref()
+            .and_then(|operation| operation.id().map(str::to_owned));
+        context
+    });
+    let execute = async {
+        if dispatch.is_some_and(|guard| guard.check().is_err()) {
+            return Ok(ai_direction_changed_result(&call));
+        }
+        if !available_tool_names.contains(&call.name) {
+            // Tauri rejects unavailable tool names before argument parsing
+            // or policy approval; keep stale/model-invented names out of
+            // the executor path.
+            let executed = unavailable_ai_tool_result(call.id.clone(), call.name.clone());
             send_ai_tool_status(
                 &ui_tx,
                 generation,
@@ -201,56 +116,115 @@ async fn execute_ai_round_call_once(
                 &assistant_id,
                 &call,
                 "rejected",
+                Some(executed.envelope.clone()),
                 None,
-                Some(risk.clone()),
-                Some(summary.clone()),
+                Some(executed_summary(&executed)),
             )
             .ok();
-            pre_execution_rejected_ai_tool_result(
-                call.id.clone(),
-                call.name.clone(),
-                decision.reason_code.clone(),
-                decision.reason_code.clone(),
-            )
+            return Ok(executed);
         }
-        oxideterm_ai::AiPolicyDecisionKind::RequireApproval => {
-            let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
-            if send_ai_loop_delivery(
-                execution.is_some(),
+        if oxideterm_ai::agent::is_agent_tool(&call.name) {
+            let executed = execute_ai_agent_coordination(
+                execution,
+                &ui_tx,
+                generation,
+                &tool_session_id,
+                &conversation_id,
+                &assistant_id,
+                &call,
+                dispatch,
+            )
+            .await;
+            let _ = send_ai_tool_status(
                 &ui_tx,
                 generation,
                 &conversation_id,
                 &assistant_id,
-                AiStreamDeliveryEvent::ToolApprovalRequested {
-                    tool_call_id: call.id.clone(),
-                    name: call.name.clone(),
-                    arguments: sanitize_ai_tool_arguments_for_approval(&call.arguments),
-                    risk: risk.clone(),
-                    summary: oxideterm_ai::sanitize_for_ai(&summary),
-                    sender: approval_tx,
-                },
-            )
-            .is_err()
-            {
-                return Err(());
-            }
-            let approved = ai_pending_dispatch(dispatch, async {
-                if let Some(agent) = execution.as_mut() {
-                    agent
-                        .wait(AgentState::AwaitingApproval, approval_rx)
-                        .await
-                        .ok()
-                        .and_then(Result::ok)
-                        .unwrap_or(false)
+                &call,
+                if executed.success {
+                    "completed"
                 } else {
-                    approval_rx.await.unwrap_or(false)
+                    "error"
+                },
+                Some(executed.envelope.clone()),
+                Some("read".into()),
+                Some(executed_summary(&executed)),
+            );
+            return Ok(executed);
+        }
+        let Some(parsed_args) = parse_ai_tool_args(&call.name, &call.arguments) else {
+            let executed = pre_execution_rejected_ai_tool_result(
+                call.id.clone(),
+                call.name.clone(),
+                "invalid_tool_arguments",
+                "The application tool arguments do not match the v2 contract.",
+            );
+            send_ai_tool_status(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                &call,
+                "rejected",
+                Some(executed.envelope.clone()),
+                None,
+                Some(executed_summary(&executed)),
+            )
+            .ok();
+            return Ok(executed);
+        };
+        if let Some(executed) = ai_pending_dispatch(
+            dispatch,
+            preflight_ai_tool(
+                &ui_tx,
+                generation,
+                &tool_session_id,
+                &conversation_id,
+                &assistant_id,
+                call.id.clone(),
+                call.name.clone(),
+                parsed_args.clone(),
+            ),
+        )
+        .await
+        .unwrap_or_else(|_| Some(ai_direction_changed_result(&call)))
+        {
+            send_ai_tool_status(
+                &ui_tx,
+                generation,
+                &conversation_id,
+                &assistant_id,
+                &call,
+                "rejected",
+                Some(executed.envelope.clone()),
+                None,
+                Some(executed_summary(&executed)),
+            )
+            .ok();
+            return Ok(executed);
+        }
+        let approval_args = parsed_args.clone();
+        let decision = resolve_ai_policy_decision(
+            &call.name,
+            Some(&approval_args),
+            &config.tool_policy,
+            config.safety_mode,
+            config.profile_id.as_deref(),
+        );
+        let risk = ai_policy_risk_label(decision.risk).to_string();
+        let summary = decision.reason_code.clone();
+        let policy_ref = decision.reason_code.as_str();
+        let mut executed_after_policy = false;
+        let mut execution_summary_args = serde_json::json!({});
+
+        let mut executed = match decision.decision {
+            oxideterm_ai::AiPolicyDecisionKind::Deny => {
+                if let Some(audit) = audit.as_mut() {
+                    audit.authorization(
+                        oxideterm_audit::AuditAuthorization::Denied,
+                        Some(policy_ref),
+                    );
                 }
-            })
-            .await;
-            let Ok(approved) = approved else {
-                return Ok(ai_direction_changed_result(&call));
-            };
-            if !approved {
                 send_ai_tool_status(
                     &ui_tx,
                     generation,
@@ -260,16 +234,166 @@ async fn execute_ai_round_call_once(
                     "rejected",
                     None,
                     Some(risk.clone()),
-                    Some("Rejected by user.".to_string()),
+                    Some(summary.clone()),
                 )
                 .ok();
                 pre_execution_rejected_ai_tool_result(
                     call.id.clone(),
                     call.name.clone(),
-                    "user_rejected",
-                    "Tool call rejected by user.",
+                    decision.reason_code.clone(),
+                    decision.reason_code.clone(),
                 )
-            } else {
+            }
+            oxideterm_ai::AiPolicyDecisionKind::RequireApproval => {
+                if let Some(audit) = audit.as_mut() {
+                    audit.authorization(
+                        oxideterm_audit::AuditAuthorization::Pending,
+                        Some(policy_ref),
+                    );
+                }
+                let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
+                if send_ai_loop_delivery(
+                    execution.is_some(),
+                    &ui_tx,
+                    generation,
+                    &conversation_id,
+                    &assistant_id,
+                    AiStreamDeliveryEvent::ToolApprovalRequested {
+                        tool_call_id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: sanitize_ai_tool_arguments_for_approval(&call.arguments),
+                        risk: risk.clone(),
+                        summary: oxideterm_ai::sanitize_for_ai(&summary),
+                        sender: approval_tx,
+                    },
+                )
+                .is_err()
+                {
+                    if let Some(audit) = audit.as_mut() {
+                        audit.authorization(
+                            oxideterm_audit::AuditAuthorization::Cancelled,
+                            Some(policy_ref),
+                        );
+                    }
+                    return Err(());
+                }
+                let approved = ai_pending_dispatch(dispatch, async {
+                    if let Some(agent) = execution.as_mut() {
+                        agent
+                            .wait(AgentState::AwaitingApproval, approval_rx)
+                            .await
+                            .ok()
+                            .and_then(Result::ok)
+                    } else {
+                        approval_rx.await.ok()
+                    }
+                })
+                .await;
+                let Ok(approved) = approved else {
+                    if let Some(audit) = audit.as_mut() {
+                        audit.authorization(
+                            oxideterm_audit::AuditAuthorization::Cancelled,
+                            Some(policy_ref),
+                        );
+                    }
+                    return Ok(ai_direction_changed_result(&call));
+                };
+                let Some(approved) = approved else {
+                    if let Some(audit) = audit.as_mut() {
+                        audit.authorization(
+                            oxideterm_audit::AuditAuthorization::Cancelled,
+                            Some(policy_ref),
+                        );
+                    }
+                    return Ok(ai_direction_changed_result(&call));
+                };
+                if !approved {
+                    if let Some(audit) = audit.as_mut() {
+                        audit.authorization(
+                            oxideterm_audit::AuditAuthorization::Denied,
+                            Some(policy_ref),
+                        );
+                    }
+                    send_ai_tool_status(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        &call,
+                        "rejected",
+                        None,
+                        Some(risk.clone()),
+                        Some("Rejected by user.".to_string()),
+                    )
+                    .ok();
+                    pre_execution_rejected_ai_tool_result(
+                        call.id.clone(),
+                        call.name.clone(),
+                        "user_rejected",
+                        "Tool call rejected by user.",
+                    )
+                } else {
+                    if let Some(audit) = audit.as_mut() {
+                        audit.authorization(
+                            oxideterm_audit::AuditAuthorization::Approved,
+                            Some(policy_ref),
+                        );
+                    }
+                    send_ai_tool_status(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        &call,
+                        "approved",
+                        None,
+                        Some(risk.clone()),
+                        Some("Approved by user.".to_string()),
+                    )
+                    .ok();
+                    send_ai_tool_status(
+                        &ui_tx,
+                        generation,
+                        &conversation_id,
+                        &assistant_id,
+                        &call,
+                        "running",
+                        None,
+                        Some(risk.clone()),
+                        Some("Approved by user.".to_string()),
+                    )
+                    .ok();
+                    let execution_args = parsed_args.clone();
+                    // Keep the policy outcome out of the canonical model argument object.
+                    let dangerous_command_approved = call.name == "run_command"
+                        && decision.risk == oxideterm_ai::AiActionRisk::Destructive;
+                    execution_summary_args = execution_args.clone();
+                    executed_after_policy = true;
+                    execute_ai_tool(
+                        &services,
+                        &ui_tx,
+                        generation,
+                        &tool_session_id,
+                        &conversation_id,
+                        &assistant_id,
+                        call.id.clone(),
+                        call.name.clone(),
+                        execution_args,
+                        true,
+                        dangerous_command_approved,
+                        execution.as_mut(),
+                        dispatch.cloned(),
+                    )
+                    .await
+                }
+            }
+            oxideterm_ai::AiPolicyDecisionKind::Allow => {
+                if let Some(audit) = audit.as_mut() {
+                    audit.authorization(
+                        oxideterm_audit::AuditAuthorization::Approved,
+                        Some(policy_ref),
+                    );
+                }
                 send_ai_tool_status(
                     &ui_tx,
                     generation,
@@ -279,7 +403,7 @@ async fn execute_ai_round_call_once(
                     "approved",
                     None,
                     Some(risk.clone()),
-                    Some("Approved by user.".to_string()),
+                    Some(summary.clone()),
                 )
                 .ok();
                 send_ai_tool_status(
@@ -291,11 +415,11 @@ async fn execute_ai_round_call_once(
                     "running",
                     None,
                     Some(risk.clone()),
-                    Some("Approved by user.".to_string()),
+                    Some(summary.clone()),
                 )
                 .ok();
                 let execution_args = parsed_args.clone();
-                // Keep the policy outcome out of the canonical model argument object.
+                // Bypass mode is prior user consent, represented as backend state only.
                 let dangerous_command_approved = call.name == "run_command"
                     && decision.risk == oxideterm_ai::AiActionRisk::Destructive;
                 execution_summary_args = execution_args.clone();
@@ -310,99 +434,81 @@ async fn execute_ai_round_call_once(
                     call.id.clone(),
                     call.name.clone(),
                     execution_args,
-                    true,
+                    false,
                     dangerous_command_approved,
                     execution.as_mut(),
                     dispatch.cloned(),
                 )
                 .await
             }
-        }
-        oxideterm_ai::AiPolicyDecisionKind::Allow => {
-            send_ai_tool_status(
+        };
+        if allow_selection && !execution.as_ref().is_some_and(AgentExecution::is_child) {
+            executed = resolve_ai_candidate_selection_if_needed(
                 &ui_tx,
                 generation,
                 &conversation_id,
                 &assistant_id,
                 &call,
-                "approved",
-                None,
-                Some(risk.clone()),
-                Some(summary.clone()),
+                executed,
             )
-            .ok();
-            send_ai_tool_status(
-                &ui_tx,
-                generation,
-                &conversation_id,
-                &assistant_id,
-                &call,
-                "running",
-                None,
-                Some(risk.clone()),
-                Some(summary.clone()),
-            )
-            .ok();
-            let execution_args = parsed_args.clone();
-            // Bypass mode is prior user consent, represented as backend state only.
-            let dangerous_command_approved = call.name == "run_command"
-                && decision.risk == oxideterm_ai::AiActionRisk::Destructive;
-            execution_summary_args = execution_args.clone();
-            executed_after_policy = true;
-            execute_ai_tool(
-                &services,
-                &ui_tx,
-                generation,
-                &tool_session_id,
-                &conversation_id,
-                &assistant_id,
-                call.id.clone(),
-                call.name.clone(),
-                execution_args,
-                false,
-                dangerous_command_approved,
-                execution.as_mut(),
-                dispatch.cloned(),
-            )
-            .await
+            .await;
         }
-    };
-    if allow_selection && !execution.as_ref().is_some_and(AgentExecution::is_child) {
-        executed = resolve_ai_candidate_selection_if_needed(
+        if executed_after_policy {
+            if call.name == "run_command" {
+                annotate_ai_run_command_execution_result(&mut executed, &execution_summary_args);
+            }
+            annotate_executed_ai_tool_result_policy(&mut executed, &decision);
+        }
+
+        let status = if executed.success {
+            "completed"
+        } else {
+            "error"
+        };
+        send_ai_tool_status(
             &ui_tx,
             generation,
             &conversation_id,
             &assistant_id,
             &call,
-            executed,
+            status,
+            Some(executed.envelope.clone()),
+            Some(risk),
+            Some(executed_summary(&executed)),
         )
-        .await;
-    }
-    if executed_after_policy {
-        if call.name == "run_command" {
-            annotate_ai_run_command_execution_result(&mut executed, &execution_summary_args);
-        }
-        annotate_executed_ai_tool_result_policy(&mut executed, &decision);
-    }
-
-    let status = if executed.success {
-        "completed"
-    } else {
-        "error"
+        .ok();
+        Ok(executed)
     };
-    send_ai_tool_status(
-        &ui_tx,
-        generation,
-        &conversation_id,
-        &assistant_id,
-        &call,
-        status,
-        Some(executed.envelope.clone()),
-        Some(risk),
-        Some(executed_summary(&executed)),
-    )
-    .ok();
-    Ok(executed)
+    let audit_result = match request_context {
+        Some(context) => context.scope(execute).await,
+        None => execute.await,
+    };
+    if let Some(audit) = audit {
+        use oxideterm_audit::{AuditEvidence, AuditOutcome};
+        let outcome = match &audit_result {
+            Ok(result) if result.success => AuditOutcome::Succeeded,
+            Ok(result)
+                if matches!(
+                    result
+                        .envelope
+                        .pointer("/error/code")
+                        .and_then(serde_json::Value::as_str),
+                    Some(
+                        "permission_denied"
+                            | "approval_rejected"
+                            | "agent_scope_denied"
+                            | "tool_not_available"
+                    )
+                ) =>
+            {
+                AuditOutcome::Denied
+            }
+            Ok(_) => AuditOutcome::Failed,
+            Err(_) => AuditOutcome::Interrupted,
+        };
+        audit.finish(outcome, AuditEvidence::Protocol, None, None);
+    }
+    audit_result
 }
 
 fn ai_direction_changed_result(call: &AiToolCall) -> AiExecutedToolResult {

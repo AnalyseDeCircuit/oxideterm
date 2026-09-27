@@ -54,9 +54,11 @@ pub(in crate::workspace::sftp) fn list_local_files(
         .map(|files| files.into_iter().map(sftp_file_entry_from_local).collect())
 }
 
-pub(in crate::workspace::sftp) fn refreshed_local_files(path: &str) -> Vec<SftpFileEntry> {
-    // Keep navigation and explicit refresh failures visible in the file pane.
-    list_local_files(path).unwrap_or_else(|error| {
+pub(in crate::workspace::sftp) fn local_files_or_error(
+    path: &str,
+    listing: std::io::Result<Vec<SftpFileEntry>>,
+) -> Vec<SftpFileEntry> {
+    listing.unwrap_or_else(|error| {
         vec![sftp_file_entry(
             format!("Unable to read folder: {error}"),
             path.to_string(),
@@ -906,16 +908,16 @@ mod sftp_helper_tests {
     use super::*;
 
     #[test]
-    fn refreshed_local_files_reads_the_directory_again() {
+    fn local_listing_reads_the_directory_again() {
         let directory =
             std::env::temp_dir().join(format!("oxideterm-sftp-refresh-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).expect("temporary directory should be created");
         let path = directory.to_string_lossy();
 
-        let initial_files = refreshed_local_files(&path);
+        let initial_files = list_local_files(&path).expect("initial listing should succeed");
         std::fs::write(directory.join("country.mmdb"), b"test")
             .expect("fixture file should be created");
-        let refreshed_files = refreshed_local_files(&path);
+        let refreshed_files = list_local_files(&path).expect("second listing should succeed");
 
         assert!(!initial_files.iter().any(|file| file.name == "country.mmdb"));
         assert!(

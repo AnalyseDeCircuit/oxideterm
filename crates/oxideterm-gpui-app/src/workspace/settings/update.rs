@@ -240,10 +240,26 @@ impl SettingsWorkspaceEntity {
         self.native_update.state = NativeUpdateUiState::Checking;
         self.native_update.package = None;
         cx.emit(SettingsWorkspaceEvent::ResetNativeUpdateOverlay);
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::System,
+            "update_check",
+            None,
+            Some(if request.kind == NativeUpdateCheckKind::Automatic {
+                "automatic"
+            } else {
+                "manual"
+            }),
+        );
 
         let install_flavor = match request.install_flavor {
             Ok(install_flavor) => install_flavor,
             Err(error) => {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
                 self.native_update.state = if request.kind == NativeUpdateCheckKind::Automatic {
                     NativeUpdateUiState::Idle
                 } else {
@@ -258,16 +274,30 @@ impl SettingsWorkspaceEntity {
             let result = request
                 .runtime
                 .spawn(async move {
-                    let client = oxideterm_update::NativeUpdateClient::with_update_proxy(
-                        &request.update_proxy,
-                    )?;
-                    client
-                        .check(oxideterm_update::NativeUpdateRequest::current(
-                            request.channel,
-                            request.current_version,
-                            install_flavor,
-                        ))
-                        .await
+                    let result = async {
+                        let client = oxideterm_update::NativeUpdateClient::with_update_proxy(
+                            &request.update_proxy,
+                        )?;
+                        client
+                            .check(oxideterm_update::NativeUpdateRequest::current(
+                                request.channel,
+                                request.current_version,
+                                install_flavor,
+                            ))
+                            .await
+                    }
+                    .await;
+                    audit.finish(
+                        if result.is_ok() {
+                            oxideterm_audit::AuditOutcome::Succeeded
+                        } else {
+                            oxideterm_audit::AuditOutcome::Failed
+                        },
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
+                    result
                 })
                 .await
                 .map_err(|error| error.to_string())
@@ -327,10 +357,17 @@ impl SettingsWorkspaceEntity {
         self.native_update.error_fallback = error_fallback;
         self.native_update.state = NativeUpdateUiState::Downloading(None);
         cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::System,
+            "update_download",
+            None,
+            None,
+        );
 
         self.native_update.operation_task = Some(cx.spawn(async move |_settings, _cx| {
             let _ = runtime
                 .spawn(async move {
+                    let cancelled = cancel.clone();
                     let result = async {
                         let client =
                             oxideterm_update::NativeUpdateClient::with_update_proxy(&update_proxy)?;
@@ -343,6 +380,18 @@ impl SettingsWorkspaceEntity {
                     }
                     .await
                     .map_err(|error: oxideterm_update::NativeUpdateError| error.to_string());
+                    audit.finish(
+                        match &result {
+                            Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                            Err(_) if cancelled.load(Ordering::Relaxed) => {
+                                oxideterm_audit::AuditOutcome::Cancelled
+                            }
+                            Err(_) => oxideterm_audit::AuditOutcome::Failed,
+                        },
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
                     let _ = sender.send(NativeUpdateDelivery::Finished(result));
                 })
                 .await;
@@ -361,9 +410,21 @@ impl SettingsWorkspaceEntity {
         if self.native_update.receiver.is_some() {
             return false;
         }
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::System,
+            "update_install",
+            None,
+            None,
+        );
         let context = match context {
             Ok(context) => context,
             Err(error) => {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
                 self.native_update.state = NativeUpdateUiState::Error(error);
                 cx.emit(SettingsWorkspaceEvent::ShowNativeUpdateNotification);
                 cx.notify();
@@ -374,6 +435,12 @@ impl SettingsWorkspaceEntity {
             match std::mem::replace(&mut self.native_update.state, NativeUpdateUiState::Idle) {
                 NativeUpdateUiState::Downloaded(download) => download,
                 state => {
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Unchanged,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
                     self.native_update.state = state;
                     return false;
                 }
@@ -399,6 +466,16 @@ impl SettingsWorkspaceEntity {
                     let result = result
                         .map_err(|error| error.to_string())
                         .and_then(|result| result.map_err(|error| error.to_string()));
+                    audit.finish(
+                        match &result {
+                            Ok(outcome) if outcome.status == oxideterm_update::NativeInstallStatus::ManualActionRequired => oxideterm_audit::AuditOutcome::Sent,
+                            Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                            Err(_) => oxideterm_audit::AuditOutcome::Failed,
+                        },
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
                     if result.is_ok() {
                         let _ = oxideterm_update::prune_resumable_update_cache(
                             &cleanup_directory,

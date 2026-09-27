@@ -143,6 +143,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.audit.open_filter = None;
+        for input in [
+            super::super::audit::AuditPolicyInput::Retention,
+            super::super::audit::AuditPolicyInput::Capacity,
+        ] {
+            if self
+                .ime_selected_range_for_target(WorkspaceImeTarget::AuditPolicy(input), cx)
+                .is_some()
+            {
+                self.clear_ime_selection();
+                break;
+            }
+        }
+        if self
+            .ime_selected_range_for_target(WorkspaceImeTarget::AuditSearch, cx)
+            .is_some()
+        {
+            self.clear_ime_selection();
+        }
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
@@ -174,6 +193,12 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn sync_active_tab_surface(&mut self, cx: &mut Context<Self>) {
+        if !self
+            .active_content_tab(cx)
+            .is_some_and(|tab| tab.kind == TabKind::NotificationCenter)
+        {
+            self.hide_audit_page();
+        }
         // Tauri keeps the SSH session tree independent from terminal tab focus,
         // but app-level utility tabs still light up their owning activity icon.
         // Keep terminal/SFTP/IDE ownership separate while syncing these sidebar
@@ -1004,6 +1029,9 @@ impl WorkspaceApp {
             previous_active_tab_id,
             next_active_tab_id,
         } = transition;
+        if tab.kind == TabKind::NotificationCenter {
+            self.hide_audit_page();
+        }
         let mut pages = Vec::new();
         if let Some(root) = &tab.root_pane {
             root.collect_page_ids(&mut pages);

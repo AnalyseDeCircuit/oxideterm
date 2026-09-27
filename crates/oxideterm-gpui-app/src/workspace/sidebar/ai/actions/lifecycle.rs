@@ -1,7 +1,7 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn ensure_ai_chat_initialized(&mut self, cx: &mut App) {
         self.ai_entity.update(cx, |ai, cx| {
-            ai.ensure_chat_initialized(default_ai_conversations_path(),cx);
+            ai.ensure_chat_initialized(default_ai_conversations_path(), cx);
         });
     }
 
@@ -81,11 +81,7 @@ impl WorkspaceApp {
             ai.begin_conversation_rename(id, title);
         });
         self.ime_marked_text = None;
-        self.set_ime_selection_from_anchor(
-            WorkspaceImeTarget::AiConversationRename,
-            0,
-            title_len,
-        );
+        self.set_ime_selection_from_anchor(WorkspaceImeTarget::AiConversationRename, 0, title_len);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -123,16 +119,26 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn set_ai_conversation_archived(&mut self, id: &str, archived: bool, cx: &mut App) {
-        self.ai_entity.update(cx, |ai, _| ai.set_conversation_archived(id, archived));
+    pub(in crate::workspace) fn set_ai_conversation_archived(
+        &mut self,
+        id: &str,
+        archived: bool,
+        cx: &mut App,
+    ) {
+        self.ai_entity
+            .update(cx, |ai, _| ai.set_conversation_archived(id, archived));
     }
 
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
         let generations = self.ai_entity.read(cx).conversation_stream_generations(id);
-        self.ai_entity.update(cx, |ai, _cx| ai.cancel_chat_stream_for(id));
+        self.ai_entity
+            .update(cx, |ai, _cx| ai.cancel_chat_stream_for(id));
         self.ai_runtime_context.update(cx, |runtime, _cx| {
             for generation in generations {
-                runtime.finish_tool_session(generation, oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled);
+                runtime.finish_tool_session(
+                    generation,
+                    oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
+                );
             }
         });
         self.ai_background_tasks.update(cx, |tasks, _cx| {
@@ -149,21 +155,55 @@ impl WorkspaceApp {
         self.ai_entity.update(cx, |ai, _cx| {
             ai.reset_chat_after_conversation_delete(has_conversations);
         });
+        if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current)
+        {
+            if context.source == oxideterm_audit::AuditSource::Application {
+                context.source = oxideterm_audit::AuditSource::User;
+            }
+            context.target = Some(oxideterm_audit::redact(id));
+            context.observe(
+                oxideterm_audit::AuditCategory::Automation,
+                "ai_conversation_delete",
+                None,
+                oxideterm_audit::AuditOutcome::Sent,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                oxideterm_audit::AuditAuthorization::NotRequired,
+            );
+        }
     }
 
     pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
-        let mut ids: std::collections::HashSet<String> = match self.ai_entity.read(cx).history.store.as_ref().map(|store| store.conversation_ids()).transpose() {
+        let mut ids: std::collections::HashSet<String> = match self
+            .ai_entity
+            .read(cx)
+            .history
+            .store
+            .as_ref()
+            .map(|store| store.conversation_ids())
+            .transpose()
+        {
             Ok(ids) => ids.unwrap_or_default().into_iter().collect(),
             Err(_) => {
                 self.ai_entity.update(cx, |ai, _| ai.history_load_failed());
                 return;
             }
         };
-        ids.extend(self.ai_entity.read(cx).conversation_state().conversations.iter().map(|conversation| conversation.id.clone()));
+        ids.extend(
+            self.ai_entity
+                .read(cx)
+                .conversation_state()
+                .conversations
+                .iter()
+                .map(|conversation| conversation.id.clone()),
+        );
         // Cancel the live generation before clearing its routing identifier.
         self.cancel_ai_chat_stream_without_notify(cx);
-        self.ai_entity.update(cx, |ai, _| ai.reset_conversation_lists_after_clear());
-        for id in ids { self.delete_ai_conversation(&id, cx); }
+        self.ai_entity
+            .update(cx, |ai, _| ai.reset_conversation_lists_after_clear());
+        for id in ids {
+            self.delete_ai_conversation(&id, cx);
+        }
         self.acp_entity.update(cx, |entity, _cx| {
             entity.close_all_threads(false);
         });
@@ -181,7 +221,15 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
-        let cancelled_generations = self.ai_entity.read(cx).conversation_state().active_conversation_id.as_deref().map(|id| self.ai_entity.read(cx).conversation_stream_generations(id)).unwrap_or_default();
+        let cancelled_generations = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation_id
+            .as_deref()
+            .map(|id| self.ai_entity.read(cx).conversation_stream_generations(id))
+            .unwrap_or_default();
+        let had_active_generation = !cancelled_generations.is_empty();
         let active_conversation_id = self
             .ai_entity
             .read(cx)
@@ -192,10 +240,7 @@ impl WorkspaceApp {
             // The ACP entity is the sole process/session owner. Route Stop to
             // it before invalidating the UI generation so the protocol cancel
             // reaches the still-live session.
-            let _ = self
-                .acp_entity
-                .read(cx)
-                .cancel_active_turn(conversation_id);
+            let _ = self.acp_entity.read(cx).cancel_active_turn(conversation_id);
         }
         let (conversation_id, stopped_turns) = self.ai_entity.update(cx, |ai, _cx| {
             ai.cancel_chat_stream();
@@ -204,13 +249,35 @@ impl WorkspaceApp {
         // An abort can leave a UI delivery queued behind the model task. Revoke
         // its lease before that delivery can reach a terminal or other owner.
         self.ai_runtime_context.update(cx, |runtime, _cx| {
-            for generation in cancelled_generations { runtime.finish_tool_session(
-                generation,
-                oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
-            ); }
+            for generation in cancelled_generations {
+                runtime.finish_tool_session(
+                    generation,
+                    oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
+                );
+            }
         });
         if let Some(conversation_id) = conversation_id.as_deref() {
             self.persist_ai_stopped_assistant_turns(conversation_id, &stopped_turns, cx);
+        }
+        if (had_active_generation || !stopped_turns.is_empty())
+            && let Some(conversation_id) = active_conversation_id
+        {
+            if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+            {
+                if context.source == oxideterm_audit::AuditSource::Application {
+                    context.source = oxideterm_audit::AuditSource::User;
+                }
+                context.target = Some(oxideterm_audit::redact(&conversation_id));
+                context.observe(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "ai_task_cancel",
+                    None,
+                    oxideterm_audit::AuditOutcome::CancelRequested,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
         }
     }
 
@@ -240,7 +307,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {
-        self.ai_entity.update(cx, |ai, cx| ai.retry_chat_initialization(default_ai_conversations_path(),cx));
+        self.ai_entity.update(cx, |ai, cx| {
+            ai.retry_chat_initialization(default_ai_conversations_path(), cx)
+        });
         cx.notify();
     }
 
@@ -251,8 +320,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn next_ai_chat_id(&mut self, now_ms: i64, cx: &mut App) -> String {
-        self.ai_entity
-            .update(cx, |ai, _cx| ai.next_chat_id(now_ms))
+        self.ai_entity.update(cx, |ai, _cx| ai.next_chat_id(now_ms))
     }
 
     pub(in crate::workspace) fn open_ai_settings(
@@ -260,8 +328,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.settings_workspace
-            .update(cx, |settings, cx| settings.set_active_tab(SettingsTab::Ai, cx));
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_active_tab(SettingsTab::Ai, cx)
+        });
         self.open_settings(window, cx);
     }
 }

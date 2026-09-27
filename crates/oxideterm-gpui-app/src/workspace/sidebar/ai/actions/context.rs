@@ -626,6 +626,7 @@ pub(in crate::workspace) fn ai_ledger_source_from_terminal_source(
         TerminalCommandMarkDetectionSource::Broadcast => "broadcast",
         TerminalCommandMarkDetectionSource::ShellIntegration => "shell_integration",
         TerminalCommandMarkDetectionSource::CommandBar => "command_bar",
+        TerminalCommandMarkDetectionSource::QuickCommand => "quick_command",
         TerminalCommandMarkDetectionSource::UserInputObserved => "user.terminal_input",
         TerminalCommandMarkDetectionSource::Heuristic => "user_promoted",
     }

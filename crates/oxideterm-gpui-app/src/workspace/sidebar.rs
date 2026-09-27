@@ -37,9 +37,6 @@ const SESSION_FOCUS_EMERALD: u32 = 0x10b981;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and
 // sticky-bottom behavior stay browser-like.
-const EVENT_LOG_SIDEBAR_ROW_HEIGHT: f32 = 24.0;
-const EVENT_LOG_SIDEBAR_VIRTUAL_OVERSCAN: usize = 20;
-const EVENT_LOG_STICKY_BOTTOM_THRESHOLD_PX: f32 = 30.0;
 const EMBEDDED_SFTP_MIN_SESSION_FRACTION: f32 = 0.2;
 const EMBEDDED_SFTP_MAX_SESSION_FRACTION: f32 = 0.75;
 

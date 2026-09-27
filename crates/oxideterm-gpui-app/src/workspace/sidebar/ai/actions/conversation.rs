@@ -10,6 +10,22 @@ impl AiWorkspaceEntity {
         self.stash_active_chat_draft();
         let id = self.create_conversation(id, title, now_ms, None);
         self.persist_chat_state();
+        if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current)
+        {
+            if context.source == oxideterm_audit::AuditSource::Application {
+                context.source = oxideterm_audit::AuditSource::User;
+            }
+            context.target = Some(oxideterm_audit::redact(&id));
+            context.observe(
+                oxideterm_audit::AuditCategory::Automation,
+                "ai_conversation_create",
+                None,
+                oxideterm_audit::AuditOutcome::Sent,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                oxideterm_audit::AuditAuthorization::NotRequired,
+            );
+        }
         id
     }
 
@@ -22,8 +38,7 @@ impl AiWorkspaceEntity {
     ) -> String {
         let message_id = message.id.clone();
         let backend = ai_message_backend_for_stream(stream_config);
-        self
-            .add_message(&conversation_id, message);
+        self.add_message(&conversation_id, message);
         if let Some(conversation) = self
             .conversation_state_mut()
             .conversations
@@ -56,11 +71,7 @@ impl AiWorkspaceEntity {
             }
             // Provenance is safe structural metadata used to avoid replaying
             // messages that the selected ACP session already owns.
-            oxideterm_ai::store_ai_message_backend_provenance(
-                conversation,
-                &message_id,
-                backend,
-            );
+            oxideterm_ai::store_ai_message_backend_provenance(conversation, &message_id, backend);
         }
         // Save the message and session metadata as one projection.
         self.persist_chat_state();
@@ -75,22 +86,19 @@ impl AiWorkspaceEntity {
         user_message: AiChatMessage,
         assistant_message: AiChatMessage,
     ) {
-        let conversation_id = self.ensure_conversation(
-            candidate_id,
-            Some(title),
-            now_ms,
-            None,
-        );
-        self
-            .add_message(&conversation_id, user_message);
-        self
-            .add_message(&conversation_id, assistant_message);
+        let conversation_id = self.ensure_conversation(candidate_id, Some(title), now_ms, None);
+        self.add_message(&conversation_id, user_message);
+        self.add_message(&conversation_id, assistant_message);
         self.persist_chat_state();
     }
 
     fn truncate_conversation_after_last_user(&mut self, id: &str, now_ms: i64) -> Option<String> {
         self.capture_history_before_edit(id);
-        let conversation = self.conversation_state_mut().conversations.iter_mut().find(|conversation| conversation.id == id)?;
+        let conversation = self
+            .conversation_state_mut()
+            .conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == id)?;
         let last_user_index = conversation
             .messages
             .iter()
@@ -100,18 +108,26 @@ impl AiWorkspaceEntity {
         conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         let conversation_id = conversation.id.clone();
-        self.replace_history_tail(&conversation_id,last_user_index + 1,None);
+        self.replace_history_tail(&conversation_id, last_user_index + 1, None);
         self.persist_chat_state();
         Some(conversation_id)
     }
 
     fn delete_active_message(&mut self, message_id: &str, now_ms: i64) -> bool {
         let history_id = self.conversation_state().active_conversation_id.clone();
-        if let Some(id) = &history_id { self.capture_history_before_edit(id); }
+        if let Some(id) = &history_id {
+            self.capture_history_before_edit(id);
+        }
         let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
             return false;
         };
-        let Some(removed) = conversation.messages.iter().find(|message| message.id == message_id) else { return false; };
+        let Some(removed) = conversation
+            .messages
+            .iter()
+            .find(|message| message.id == message_id)
+        else {
+            return false;
+        };
         let removed_turns = ai_conversation_turn_count(std::slice::from_ref(removed));
         let original_len = conversation.messages.len();
         conversation
@@ -139,8 +155,14 @@ impl AiWorkspaceEntity {
         now_ms: i64,
     ) -> Option<String> {
         let history_id = self.conversation_state().active_conversation_id.clone();
-        if let Some(id) = &history_id { self.capture_history_before_edit(id); }
-        let previous_branch = history_id.as_ref().and_then(|id| self.history.branches.get(id)).cloned().unwrap_or_else(|| "main".into());
+        if let Some(id) = &history_id {
+            self.capture_history_before_edit(id);
+        }
+        let previous_branch = history_id
+            .as_ref()
+            .and_then(|id| self.history.branches.get(id))
+            .cloned()
+            .unwrap_or_else(|| "main".into());
         let conversation = self.conversation_state_mut().active_conversation_mut()?;
         let message_index = conversation
             .messages
@@ -149,7 +171,11 @@ impl AiWorkspaceEntity {
         if conversation.messages.get(message_index)?.role != AiChatRole::User {
             return None;
         }
-        let current_tail = oxideterm_ai::AiHistoryRange { branch_id:previous_branch,first_message_id:Some(message_id.into()),last_message_id:None };
+        let current_tail = oxideterm_ai::AiHistoryRange {
+            branch_id: previous_branch,
+            first_message_id: Some(message_id.into()),
+            last_message_id: None,
+        };
         let original = conversation.messages.get_mut(message_index)?;
         let branches = match original.branches.take() {
             Some(mut branches) => {
@@ -159,7 +185,7 @@ impl AiWorkspaceEntity {
                 branches
             }
             None => AiMessageBranches {
-                refs: HashMap::from([(0,current_tail)]),
+                refs: HashMap::from([(0, current_tail)]),
                 total: 2,
                 active_index: 1,
                 tails: HashMap::new(),
@@ -187,16 +213,12 @@ impl AiWorkspaceEntity {
         });
         // Editing starts a new turn, so the replacement must carry the backend
         // owner selected for that turn instead of inheriting the removed branch.
-        oxideterm_ai::store_ai_message_backend_provenance(
-            conversation,
-            &new_user_id,
-            backend,
-        );
+        oxideterm_ai::store_ai_message_backend_provenance(conversation, &new_user_id, backend);
         conversation.message_count = conversation.messages.len();
         conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         let conversation_id = conversation.id.clone();
-        self.replace_history_tail(&conversation_id,message_index,Some(message_id));
+        self.replace_history_tail(&conversation_id, message_index, Some(message_id));
         self.persist_chat_state();
         Some(conversation_id)
     }
@@ -208,8 +230,14 @@ impl AiWorkspaceEntity {
         now_ms: i64,
     ) -> bool {
         let history_id = self.conversation_state().active_conversation_id.clone();
-        if let Some(id) = &history_id { self.capture_history_before_edit(id); }
-        let previous_branch = history_id.as_ref().and_then(|id| self.history.branches.get(id)).cloned().unwrap_or_else(|| "main".into());
+        if let Some(id) = &history_id {
+            self.capture_history_before_edit(id);
+        }
+        let previous_branch = history_id
+            .as_ref()
+            .and_then(|id| self.history.branches.get(id))
+            .cloned()
+            .unwrap_or_else(|| "main".into());
         let Some(conversation) = self.conversation_state_mut().active_conversation_mut() else {
             return false;
         };
@@ -233,7 +261,11 @@ impl AiWorkspaceEntity {
         {
             return false;
         }
-        let live_tail = oxideterm_ai::AiHistoryRange { branch_id:previous_branch,first_message_id:Some(message_id.into()),last_message_id:None };
+        let live_tail = oxideterm_ai::AiHistoryRange {
+            branch_id: previous_branch,
+            first_message_id: Some(message_id.into()),
+            last_message_id: None,
+        };
         // This branch payload belongs to the message being replaced, so move it
         // instead of cloning every stored branch and message tail.
         let mut branches = conversation.messages[message_index]
@@ -262,20 +294,35 @@ impl AiWorkspaceEntity {
         conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
         conversation.updated_at_ms = now_ms;
         let conversation_id = conversation.id.clone();
-        self.replace_history_tail(&conversation_id,message_index,Some(message_id));
+        self.replace_history_tail(&conversation_id, message_index, Some(message_id));
         self.persist_chat_state();
         true
     }
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn copy_ai_message(&mut self, message_id: String, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn copy_ai_message(
+        &mut self,
+        message_id: String,
+        cx: &mut Context<Self>,
+    ) {
         let ai = self.ai_entity.read(cx);
-        let Some(conversation) = ai.conversation_state().active_conversation() else { return; };
-        let stored = ai.history.store.clone().zip(ai.history.pages.get(&conversation.id)
-            .and_then(|page| page.descriptions.get(&message_id)).cloned());
+        let Some(conversation) = ai.conversation_state().active_conversation() else {
+            return;
+        };
+        let stored = ai.history.store.clone().zip(
+            ai.history
+                .pages
+                .get(&conversation.id)
+                .and_then(|page| page.descriptions.get(&message_id))
+                .cloned(),
+        );
         let Some((store, description)) = stored else {
-            if let Some(message) = conversation.messages.iter().find(|message| message.id == message_id) {
+            if let Some(message) = conversation
+                .messages
+                .iter()
+                .find(|message| message.id == message_id)
+            {
                 cx.write_to_clipboard(ClipboardItem::new_string(message.content.clone()));
             }
             return;
@@ -283,16 +330,32 @@ impl WorkspaceApp {
         let conversation = conversation.id.clone();
         let runtime = self.forwarding_runtime.clone();
         let task = cx.spawn(async move |weak, cx| {
-            let result = runtime.spawn_blocking(move || store.message_content(&conversation, &description.storage_id, description.revision)).await;
+            let result = runtime
+                .spawn_blocking(move || {
+                    store.message_content(
+                        &conversation,
+                        &description.storage_id,
+                        description.revision,
+                    )
+                })
+                .await;
             let _ = weak.update(cx, |this, cx| {
-                this.ai_entity.update(cx, |ai, _| { ai.history.copy_load.take(); });
+                this.ai_entity.update(cx, |ai, _| {
+                    ai.history.copy_load.take();
+                });
                 match result {
                     Ok(Ok(content)) => cx.write_to_clipboard(ClipboardItem::new_string(content)),
-                    _ => this.push_ai_settings_toast(this.i18n.t("ai.chat.load_failed_generic"), TerminalNoticeVariant::Error, cx),
+                    _ => this.push_ai_settings_toast(
+                        this.i18n.t("ai.chat.load_failed_generic"),
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    ),
                 }
             });
         });
-        self.ai_entity.update(cx, |ai, _| { ai.history.copy_load = Some(task); });
+        self.ai_entity.update(cx, |ai, _| {
+            ai.history.copy_load = Some(task);
+        });
     }
 
     pub(in crate::workspace) fn open_ai_safety_confirm(&mut self, cx: &mut Context<Self>) {
@@ -308,12 +371,9 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self
-            .ai_entity
-            .update(cx, |ai, _cx| {
-                ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Safety)
-            })
-        else {
+        let Some(generation) = self.ai_entity.update(cx, |ai, _cx| {
+            ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Safety)
+        }) else {
             return false;
         };
         self.clear_standard_confirm_focus();
@@ -333,12 +393,9 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(generation) = self
-            .ai_entity
-            .update(cx, |ai, _cx| {
-                ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Summarize)
-            })
-        else {
+        let Some(generation) = self.ai_entity.update(cx, |ai, _cx| {
+            ai.begin_standard_chat_confirm_exit(AiStandardConfirmKind::Summarize)
+        }) else {
             return false;
         };
         self.clear_standard_confirm_focus();
@@ -389,7 +446,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         self.ensure_ai_chat_initialized(cx);
-        if !self.ai_entity.read(cx).history_ready() { return None; }
+        if !self.ai_entity.read(cx).history_ready() {
+            return None;
+        }
         let now = ai_now_ms();
         let id = self.next_ai_chat_id(now, cx);
         let id = self
@@ -409,7 +468,9 @@ impl WorkspaceApp {
         }
         if self.ai_entity.read(cx).can_supplement_agent() {
             let sent = self.ai_entity.update(cx, |ai, _cx| {
-                if ai.supplement_agent(&content).is_err() { return false; }
+                if ai.supplement_agent(&content).is_err() {
+                    return false;
+                }
                 if let Some(id) = ai.conversation_state().active_conversation_id.clone() {
                     ai.add_message(&id, agent_chat_message(AiChatRole::User, content.clone()));
                 }
@@ -417,7 +478,13 @@ impl WorkspaceApp {
                 ai.persist_chat_state();
                 true
             });
-            if !sent { self.push_ai_settings_toast(self.i18n.t("ai.agents.message_not_sent"), TerminalNoticeVariant::Warning, cx); }
+            if !sent {
+                self.push_ai_settings_toast(
+                    self.i18n.t("ai.agents.message_not_sent"),
+                    TerminalNoticeVariant::Warning,
+                    cx,
+                );
+            }
             cx.notify();
             return;
         }
@@ -430,7 +497,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn send_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
         self.ensure_ai_chat_initialized(cx);
-        if !self.ai_entity.read(cx).history_ready() { return; }
+        if !self.ai_entity.read(cx).history_ready() {
+            return;
+        }
         let content = self.ai_entity.read(cx).chat_ui().draft.trim().to_string();
         if content.is_empty() {
             cx.notify();
@@ -447,7 +516,9 @@ impl WorkspaceApp {
         }
         let question = self.ai_entity.read(cx).active_user_question();
         if let Some((generation, id)) = question {
-            if self.ai_entity.update(cx, |ai, _| ai.resolve_user_question(generation, &id, zeroize::Zeroizing::new(content))) {
+            if self.ai_entity.update(cx, |ai, _| {
+                ai.resolve_user_question(generation, &id, zeroize::Zeroizing::new(content))
+            }) {
                 self.reset_ai_chat_input_after_submit(cx);
             }
             cx.notify();
@@ -460,31 +531,35 @@ impl WorkspaceApp {
         let sidebar_context = self.resolve_ai_sidebar_context_block(cx);
         let selected_context = self.resolve_ai_selected_terminal_context(cx);
         let reference_context = self.resolve_ai_reference_context(&parsed_input.references, cx);
-        let context = ai_chat_message_context([
-            selected_context,
-            sidebar_context,
-            reference_context,
-        ]);
+        let context_sources = [
+            selected_context.as_ref().map(|_| "terminal"),
+            sidebar_context.as_ref().map(|_| "sidebar"),
+            reference_context.as_ref().map(|_| "reference"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>();
+        let context =
+            ai_chat_message_context([selected_context, sidebar_context, reference_context]);
         let slash_command = parsed_input
             .slash_command
             .as_deref()
             .and_then(resolve_ai_slash_command);
-        let explicit_skill = if slash_command.is_none()
-            && self.settings_store.settings().ai.skills.enabled
-        {
-            parsed_input.slash_command.as_deref().and_then(|skill_id| {
-                let registry = self.skill_registry.read();
-                let record = registry.enabled_record(skill_id)?;
-                let instructions = registry.load(skill_id).ok()?;
-                Some((
-                    skill_id.to_string(),
-                    record.content_hash.clone(),
-                    instructions,
-                ))
-            })
-        } else {
-            None
-        };
+        let explicit_skill =
+            if slash_command.is_none() && self.settings_store.settings().ai.skills.enabled {
+                parsed_input.slash_command.as_deref().and_then(|skill_id| {
+                    let registry = self.skill_registry.read();
+                    let record = registry.enabled_record(skill_id)?;
+                    let instructions = registry.load(skill_id).ok()?;
+                    Some((
+                        skill_id.to_string(),
+                        record.content_hash.clone(),
+                        instructions,
+                    ))
+                })
+            } else {
+                None
+            };
         if let Some(command) = slash_command.filter(|command| command.client_only) {
             if self.ai_entity.read(cx).chat_is_loading() {
                 self.push_ai_settings_toast(
@@ -523,6 +598,29 @@ impl WorkspaceApp {
                 return;
             }
         };
+        if let Some(context_block) = context.as_ref() {
+            if let Some(mut audit_context) = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+            {
+                if audit_context.source == oxideterm_audit::AuditSource::Application {
+                    audit_context.source = oxideterm_audit::AuditSource::User;
+                }
+                audit_context.observe(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "ai_context_provided",
+                    Some(&format!(
+                        "provider={} model={} sources={} bytes={}",
+                        stream_config.provider_id.as_deref().unwrap_or("unknown"),
+                        stream_config.model,
+                        context_sources.join(","),
+                        context_block.len()
+                    )),
+                    oxideterm_audit::AuditOutcome::Sent,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
+            }
+        }
         let now = ai_now_ms();
         let title = generate_chat_title(&content);
         let id = self.next_ai_chat_id(now, cx);
@@ -580,8 +678,7 @@ impl WorkspaceApp {
             (!request_text.is_empty()).then_some(request_text)
         };
         let conversation_id = self.ai_entity.update(cx, |ai, _cx| {
-            ai
-                .ensure_conversation(id, Some(title), now, None)
+            ai.ensure_conversation(id, Some(title), now, None)
         });
         let turn = AiQueuedChatTurn {
             id: message.id,
@@ -704,8 +801,7 @@ impl WorkspaceApp {
                 if ai.supplement_agent(&content).is_err() {
                     return false;
                 }
-                ai
-                    .add_message(conversation, agent_chat_message(AiChatRole::User, content));
+                ai.add_message(conversation, agent_chat_message(AiChatRole::User, content));
                 ai.persist_chat_state();
                 true
             });
@@ -786,40 +882,88 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn start_ai_chat_stream_after_api_key_lookup(
-        &mut self,conversation_id:String,stream_config:AiChatStreamConfig,request_content:Option<String>,task_system_prompt:Option<String>,cx:&mut Context<Self>,
+        &mut self,
+        conversation_id: String,
+        stream_config: AiChatStreamConfig,
+        request_content: Option<String>,
+        task_system_prompt: Option<String>,
+        cx: &mut Context<Self>,
     ) {
-        let launch_id = self.next_ai_chat_id(ai_now_ms(),cx);
+        let launch_id = self.next_ai_chat_id(ai_now_ms(), cx);
         let target = conversation_id.clone();
         let store = self.ai_entity.read(cx).history.store.clone();
-        let branch = self.ai_entity.read(cx).history.branches.get(&conversation_id).cloned().unwrap_or_else(|| "main".into());
+        let branch = self
+            .ai_entity
+            .read(cx)
+            .history
+            .branches
+            .get(&conversation_id)
+            .cloned()
+            .unwrap_or_else(|| "main".into());
         let context_window = self.ai_active_model_context_window(&stream_config);
         let provider = stream_config.provider_type.clone();
         let runtime = self.forwarding_runtime.clone();
-        let (sender,receiver) = tokio::sync::oneshot::channel();
-        self.ai_entity.update(cx,|ai,_| {
-            ai.chat_launches.insert(conversation_id.clone(),launch_id.clone());
-            ai.set_conversation_loading(&conversation_id,true);
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.ai_entity.update(cx, |ai, _| {
+            ai.chat_launches
+                .insert(conversation_id.clone(), launch_id.clone());
+            ai.set_conversation_loading(&conversation_id, true);
             ai.persist_chat_state();
             ai.history_barrier(sender);
         });
-        let task = cx.spawn(async move |weak,cx| {
-            if receiver.await != Ok(true) { return; }
-            let Some(store) = store else { return; };
+        let task = cx.spawn(async move |weak, cx| {
+            if receiver.await != Ok(true) {
+                return;
+            }
+            let Some(store) = store else {
+                return;
+            };
             let id = conversation_id.clone();
-            let context = runtime.spawn_blocking(move || store.model_context(&id,&branch,context_window,&provider)).await;
-            let _ = weak.update(cx,|this,cx| {
-                if !this.ai_entity.read(cx).chat_launch_matches(&conversation_id,Some(&launch_id)) || this.ai_entity.read(cx).history.quitting { return; }
-                this.ai_entity.update(cx,|ai,_| { ai.history.launches.remove(&conversation_id); });
+            let context = runtime
+                .spawn_blocking(move || {
+                    store.model_context(&id, &branch, context_window, &provider)
+                })
+                .await;
+            let _ = weak.update(cx, |this, cx| {
+                if !this
+                    .ai_entity
+                    .read(cx)
+                    .chat_launch_matches(&conversation_id, Some(&launch_id))
+                    || this.ai_entity.read(cx).history.quitting
+                {
+                    return;
+                }
+                this.ai_entity.update(cx, |ai, _| {
+                    ai.history.launches.remove(&conversation_id);
+                });
                 let Ok(Ok(context)) = context else {
-                    this.ai_entity.update(cx,|ai,_| { ai.set_conversation_loading(&conversation_id,false); });
-                    this.push_ai_settings_toast(this.i18n.t("ai.chat.load_failed_generic"),TerminalNoticeVariant::Error,cx);
+                    this.ai_entity.update(cx, |ai, _| {
+                        ai.set_conversation_loading(&conversation_id, false);
+                    });
+                    this.push_ai_settings_toast(
+                        this.i18n.t("ai.chat.load_failed_generic"),
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
                     return;
                 };
-                this.ai_entity.update(cx,|ai,_| { ai.history.model_contexts.insert(conversation_id.clone(),context); });
-                this.start_saved_ai_chat_stream_after_api_key_lookup(conversation_id,stream_config,request_content,task_system_prompt,cx);
+                this.ai_entity.update(cx, |ai, _| {
+                    ai.history
+                        .model_contexts
+                        .insert(conversation_id.clone(), context);
+                });
+                this.start_saved_ai_chat_stream_after_api_key_lookup(
+                    conversation_id,
+                    stream_config,
+                    request_content,
+                    task_system_prompt,
+                    cx,
+                );
             });
         });
-        self.ai_entity.update(cx,|ai,_| { ai.history.launches.insert(target,task); });
+        self.ai_entity.update(cx, |ai, _| {
+            ai.history.launches.insert(target, task);
+        });
     }
 
     fn start_saved_ai_chat_stream_after_api_key_lookup(
@@ -1011,28 +1155,50 @@ impl WorkspaceApp {
         };
         self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
         let ai = self.ai_entity.read(cx);
-        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else { return; };
-        let Some(store) = ai.history.store.clone() else { return; };
-        let branch = ai.history.branches.get(&conversation_id).cloned().unwrap_or_else(|| "main".into());
+        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else {
+            return;
+        };
+        let Some(store) = ai.history.store.clone() else {
+            return;
+        };
+        let branch = ai
+            .history
+            .branches
+            .get(&conversation_id)
+            .cloned()
+            .unwrap_or_else(|| "main".into());
         let launch_id = self.next_ai_chat_id(ai_now_ms(), cx);
         let runtime = self.forwarding_runtime.clone();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.ai_entity.update(cx, |ai, _| {
-            ai.chat_launches.insert(conversation_id.clone(), launch_id.clone());
+            ai.chat_launches
+                .insert(conversation_id.clone(), launch_id.clone());
             ai.set_conversation_loading(&conversation_id, true);
             ai.persist_chat_state();
             ai.history_barrier(sender);
         });
         let target = conversation_id.clone();
         let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) { return; }
+            if receiver.await != Ok(true) {
+                return;
+            }
             let id = conversation_id.clone();
             let source_branch = branch.clone();
-            let result = runtime.spawn_blocking(move || store.retry_messages(&id, &source_branch)).await;
+            let result = runtime
+                .spawn_blocking(move || store.retry_messages(&id, &source_branch))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 let ai = this.ai_entity.read(cx);
-                if ai.history.quitting || !ai.chat_launch_matches(&conversation_id, Some(&launch_id))
-                    || ai.history.branches.get(&conversation_id).is_some_and(|current| current != &branch) { return; }
+                if ai.history.quitting
+                    || !ai.chat_launch_matches(&conversation_id, Some(&launch_id))
+                    || ai
+                        .history
+                        .branches
+                        .get(&conversation_id)
+                        .is_some_and(|current| current != &branch)
+                {
+                    return;
+                }
                 this.ai_entity.update(cx, |ai, _| {
                     ai.history.launches.remove(&conversation_id);
                     ai.set_conversation_loading(&conversation_id, false);
@@ -1042,14 +1208,30 @@ impl WorkspaceApp {
                     cx.notify();
                     return;
                 };
-                let recovery = messages.last().and_then(oxideterm_ai::agent::recoverable_checkpoint)
+                let recovery = messages
+                    .last()
+                    .and_then(oxideterm_ai::agent::recoverable_checkpoint)
                     .map(|checkpoint| checkpoint.resume_prompt());
                 if recovery.is_none() {
-                    let Some(user) = messages.into_iter().find(|message| message.role == AiChatRole::User) else { return; };
+                    let Some(user) = messages
+                        .into_iter()
+                        .find(|message| message.role == AiChatRole::User)
+                    else {
+                        return;
+                    };
                     this.ai_entity.update(cx, |ai, _| {
                         ai.capture_history_before_edit(&conversation_id);
-                        if let Some(conversation) = ai.conversation_state_mut().conversations.iter_mut().find(|conversation| conversation.id == conversation_id) {
-                            if let Some(index) = conversation.messages.iter().position(|message| message.id == user.id) {
+                        if let Some(conversation) = ai
+                            .conversation_state_mut()
+                            .conversations
+                            .iter_mut()
+                            .find(|conversation| conversation.id == conversation_id)
+                        {
+                            if let Some(index) = conversation
+                                .messages
+                                .iter()
+                                .position(|message| message.id == user.id)
+                            {
                                 conversation.messages.truncate(index);
                             } else {
                                 conversation.messages.clear();
@@ -1059,11 +1241,19 @@ impl WorkspaceApp {
                         ai.truncate_conversation_after_last_user(&conversation_id, ai_now_ms());
                     });
                 }
-                this.start_ai_chat_stream_after_api_key_lookup(conversation_id, stream_config, None, recovery, cx);
+                this.start_ai_chat_stream_after_api_key_lookup(
+                    conversation_id,
+                    stream_config,
+                    None,
+                    recovery,
+                    cx,
+                );
                 cx.notify();
             });
         });
-        self.ai_entity.update(cx, |ai, _| { ai.history.launches.insert(target, task); });
+        self.ai_entity.update(cx, |ai, _| {
+            ai.history.launches.insert(target, task);
+        });
         cx.notify();
     }
 
@@ -1091,9 +1281,9 @@ impl WorkspaceApp {
         message_id: &str,
         cx: &mut Context<Self>,
     ) {
-        let deleted = self
-            .ai_entity
-            .update(cx, |ai, _cx| ai.delete_active_message(message_id, ai_now_ms()));
+        let deleted = self.ai_entity.update(cx, |ai, _cx| {
+            ai.delete_active_message(message_id, ai_now_ms())
+        });
         if !deleted {
             return;
         }
@@ -1157,9 +1347,18 @@ impl WorkspaceApp {
             return;
         }
         let ai = self.ai_entity.read(cx);
-        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else { return; };
-        let Some(store) = ai.history.store.clone() else { return; };
-        let branch = ai.history.branches.get(&conversation_id).cloned().unwrap_or_else(|| "main".into());
+        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else {
+            return;
+        };
+        let Some(store) = ai.history.store.clone() else {
+            return;
+        };
+        let branch = ai
+            .history
+            .branches
+            .get(&conversation_id)
+            .cloned()
+            .unwrap_or_else(|| "main".into());
         let runtime = self.forwarding_runtime.clone();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.ai_entity.update(cx, |ai, _| {
@@ -1168,22 +1367,43 @@ impl WorkspaceApp {
             ai.history_barrier(sender);
         });
         let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) { return; }
+            if receiver.await != Ok(true) {
+                return;
+            }
             let id = conversation_id.clone();
             let source_branch = branch.clone();
             let message = message_id.clone();
-            let result = runtime.spawn_blocking(move || store.message_by_id(&id, &source_branch, &message)).await;
+            let result = runtime
+                .spawn_blocking(move || store.message_by_id(&id, &source_branch, &message))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 this.ai_entity.update(cx, |ai, _| {
                     ai.history.edit_load.take();
                     ai.set_conversation_loading(&conversation_id, false);
-                    if ai.history.quitting || ai.conversation_state().active_conversation_id.as_deref() != Some(&conversation_id)
-                        || ai.history.branches.get(&conversation_id).is_some_and(|current| current != &branch) { return; }
+                    if ai.history.quitting
+                        || ai.conversation_state().active_conversation_id.as_deref()
+                            != Some(&conversation_id)
+                        || ai
+                            .history
+                            .branches
+                            .get(&conversation_id)
+                            .is_some_and(|current| current != &branch)
+                    {
+                        return;
+                    }
                     match result {
                         Ok(Ok(message)) if message.role == AiChatRole::User => {
                             let content = message.content.clone();
-                            if let Some(slot) = ai.conversation_state_mut().active_conversation_mut()
-                                .and_then(|conversation| conversation.messages.iter_mut().find(|item| item.id == message_id)) {
+                            if let Some(slot) = ai
+                                .conversation_state_mut()
+                                .active_conversation_mut()
+                                .and_then(|conversation| {
+                                    conversation
+                                        .messages
+                                        .iter_mut()
+                                        .find(|item| item.id == message_id)
+                                })
+                            {
                                 *slot = message;
                             }
                             ai.begin_message_edit(message_id, content);
@@ -1196,14 +1416,18 @@ impl WorkspaceApp {
                 cx.notify();
             });
         });
-        self.ai_entity.update(cx, |ai, _| { ai.history.edit_load = Some(task); });
+        self.ai_entity.update(cx, |ai, _| {
+            ai.history.edit_load = Some(task);
+        });
         cx.notify();
     }
 
     pub(in crate::workspace) fn cancel_edit_ai_message(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _cx| {
             if ai.history.edit_load.take().is_some() {
-                if let Some(id) = ai.conversation_state().active_conversation_id.clone() { ai.set_conversation_loading(&id, false); }
+                if let Some(id) = ai.conversation_state().active_conversation_id.clone() {
+                    ai.set_conversation_loading(&id, false);
+                }
             }
             ai.clear_message_edit();
         });
@@ -1216,7 +1440,13 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let edited_content = self.ai_entity.read(cx).chat_ui().editing_message_draft.trim().to_string();
+        let edited_content = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .editing_message_draft
+            .trim()
+            .to_string();
         if edited_content.is_empty() {
             cx.notify();
             return;
@@ -1290,43 +1520,82 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let reference = self.ai_entity.read(cx).conversation_state().active_conversation().and_then(|conversation| {
-            let message = conversation.messages.iter().find(|message| message.id == message_id)?;
-            let range = message.branches.as_ref()?.refs.get(&branch_index)?.clone();
-            Some((conversation.id.clone(),range))
-        });
-        if let Some((conversation,range)) = reference {
-            let Some(store) = self.ai_entity.read(cx).history.store.clone() else { return; };
-            let launch = self.next_ai_chat_id(ai_now_ms(),cx);
-            let (sender,receiver) = tokio::sync::oneshot::channel();
-            self.ai_entity.update(cx,|ai,_| { ai.chat_launches.insert(conversation.clone(),launch.clone()); ai.set_conversation_loading(&conversation,true); ai.history_barrier(sender); });
+        let reference = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+            .and_then(|conversation| {
+                let message = conversation
+                    .messages
+                    .iter()
+                    .find(|message| message.id == message_id)?;
+                let range = message.branches.as_ref()?.refs.get(&branch_index)?.clone();
+                Some((conversation.id.clone(), range))
+            });
+        if let Some((conversation, range)) = reference {
+            let Some(store) = self.ai_entity.read(cx).history.store.clone() else {
+                return;
+            };
+            let launch = self.next_ai_chat_id(ai_now_ms(), cx);
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            self.ai_entity.update(cx, |ai, _| {
+                ai.chat_launches
+                    .insert(conversation.clone(), launch.clone());
+                ai.set_conversation_loading(&conversation, true);
+                ai.history_barrier(sender);
+            });
             let runtime = self.forwarding_runtime.clone();
             let owner = conversation.clone();
-            let task = cx.spawn(async move |weak,cx| {
-                if receiver.await != Ok(true) { return; }
+            let task = cx.spawn(async move |weak, cx| {
+                if receiver.await != Ok(true) {
+                    return;
+                }
                 let id = conversation.clone();
-                let result = runtime.spawn_blocking(move || {
-                    let mut cursor = None;
-                    let mut pages = Vec::new();
-                    loop {
-                        let page = store.range_messages(&id,&range,cursor.as_ref(),50)?;
-                        pages.push(page.messages);
-                        cursor = page.before;
-                        if cursor.is_none() { break; }
-                    }
-                    Ok::<_,anyhow::Error>(pages.into_iter().rev().flatten().collect::<Vec<_>>())
-                }).await;
-                let _ = weak.update(cx,|this,cx| {
-                    this.ai_entity.update(cx,|ai,_| {
-                        ai.history.launches.remove(&conversation);
-                        if !ai.chat_launch_matches(&conversation,Some(&launch)) { return; }
-                        ai.set_conversation_loading(&conversation,false);
-                        if ai.conversation_state().active_conversation_id.as_deref() != Some(&conversation) { return; }
-                        if let Ok(Ok(tail)) = result {
-                            if let Some(branches) = ai.conversation_state_mut().active_conversation_mut().and_then(|conversation| conversation.messages.iter_mut().find(|message| message.id == message_id)).and_then(|message| message.branches.as_mut()) {
-                                branches.tails.insert(branch_index,tail);
+                let result = runtime
+                    .spawn_blocking(move || {
+                        let mut cursor = None;
+                        let mut pages = Vec::new();
+                        loop {
+                            let page = store.range_messages(&id, &range, cursor.as_ref(), 50)?;
+                            pages.push(page.messages);
+                            cursor = page.before;
+                            if cursor.is_none() {
+                                break;
                             }
-                            ai.switch_active_message_branch(&message_id,branch_index,ai_now_ms());
+                        }
+                        Ok::<_, anyhow::Error>(
+                            pages.into_iter().rev().flatten().collect::<Vec<_>>(),
+                        )
+                    })
+                    .await;
+                let _ = weak.update(cx, |this, cx| {
+                    this.ai_entity.update(cx, |ai, _| {
+                        ai.history.launches.remove(&conversation);
+                        if !ai.chat_launch_matches(&conversation, Some(&launch)) {
+                            return;
+                        }
+                        ai.set_conversation_loading(&conversation, false);
+                        if ai.conversation_state().active_conversation_id.as_deref()
+                            != Some(&conversation)
+                        {
+                            return;
+                        }
+                        if let Ok(Ok(tail)) = result {
+                            if let Some(branches) = ai
+                                .conversation_state_mut()
+                                .active_conversation_mut()
+                                .and_then(|conversation| {
+                                    conversation
+                                        .messages
+                                        .iter_mut()
+                                        .find(|message| message.id == message_id)
+                                })
+                                .and_then(|message| message.branches.as_mut())
+                            {
+                                branches.tails.insert(branch_index, tail);
+                            }
+                            ai.switch_active_message_branch(&message_id, branch_index, ai_now_ms());
                             ai.clear_message_edit();
                         } else {
                             ai.history_load_failed();
@@ -1335,7 +1604,9 @@ impl WorkspaceApp {
                     cx.notify();
                 });
             });
-            self.ai_entity.update(cx,|ai,_| { ai.history.launches.insert(owner,task); });
+            self.ai_entity.update(cx, |ai, _| {
+                ai.history.launches.insert(owner, task);
+            });
             return;
         }
         let switched = self.ai_entity.update(cx, |ai, _cx| {

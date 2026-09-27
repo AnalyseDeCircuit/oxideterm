@@ -110,6 +110,31 @@ impl TerminalInputBroadcastRoute {
             terminal.retain_live_broadcast_targets(&live_panes);
             terminal.filter_broadcast_targets(self.source_pane_id, candidates)
         });
+        if targets.is_empty() {
+            return;
+        }
+        let explicit_send = matches!(kind, TerminalBroadcastInputKind::Paste)
+            || bytes.contains(&b'\r')
+            || bytes.contains(&b'\n');
+        let mut batch = explicit_send.then(|| {
+            let mut context = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current);
+            if let Some(context) = &mut context {
+                context.source = oxideterm_audit::AuditSource::Broadcast;
+            }
+            oxideterm_audit::AuditOperation::in_context(
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::Automation,
+                "broadcast_send_batch",
+                None,
+            )
+        });
+        let parent_id = batch
+            .as_ref()
+            .and_then(oxideterm_audit::AuditOperation::id)
+            .map(str::to_string);
+        let target_count = targets.len();
+        let mut sent_count = 0usize;
         for pane_id in targets {
             let session_id = tab_host
                 .read(cx)
@@ -128,11 +153,31 @@ impl TerminalInputBroadcastRoute {
             let Some(pane) = tab_host.read(cx).panes().get(&pane_id).cloned() else {
                 continue;
             };
-            let _ = pane.update(cx, |pane, cx| {
+            if pane.update(cx, |pane, cx| {
                 // Borrowed input is delivered synchronously and never retained
                 // outside the target pane's existing zeroizing write path.
-                pane.send_broadcast_input(kind, bytes, cx);
-            });
+                pane.send_broadcast_input_with_parent(kind, bytes, parent_id.as_deref(), cx)
+            }) {
+                sent_count += 1;
+            }
+        }
+        if let Some(mut batch) = batch.take() {
+            batch.summary(&format!(
+                "targets={target_count}; sent={sent_count}; input_bytes={}",
+                bytes.len()
+            ));
+            batch.finish(
+                if sent_count == target_count {
+                    oxideterm_audit::AuditOutcome::Sent
+                } else if sent_count > 0 {
+                    oxideterm_audit::AuditOutcome::Partial
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
         }
     }
 }

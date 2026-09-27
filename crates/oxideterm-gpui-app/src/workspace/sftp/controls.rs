@@ -126,7 +126,18 @@ impl WorkspaceApp {
                         // Local refresh only re-reads the visible directory and
                         // must not disturb the node-owned remote SFTP session.
                         let path = this.sftp_view().read(cx).local_path.clone();
-                        let files = refreshed_local_files(&path);
+                        let audit = oxideterm_audit::AuditOperation::in_context(
+                            crate::workspace::file_manager::local_file_audit_context(
+                                oxideterm_audit::AuditSource::User,
+                            )
+                            .as_ref(),
+                            oxideterm_audit::AuditCategory::File,
+                            "file_browse",
+                            Some(&path),
+                        );
+                        let result = list_local_files(&path);
+                        audit.result(&result);
+                        let files = local_files_or_error(&path, result);
                         this.sftp_view().update(cx, |sftp, cx| {
                             sftp.local_files = files;
                             cx.notify();

@@ -297,6 +297,33 @@ struct PublicConnectionDirectoryEntry {
     last_used_at: Option<String>,
 }
 
+fn audit_public_mcp_client_change(
+    client_ref: &ClientRef,
+    action: &str,
+    detail: Option<&str>,
+    succeeded: bool,
+) {
+    if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+    {
+        if context.source == oxideterm_audit::AuditSource::Application {
+            context.source = oxideterm_audit::AuditSource::User;
+        }
+        context.target = Some(oxideterm_audit::redact(client_ref.as_str()));
+        let audit = context.operation(oxideterm_audit::AuditCategory::Security, action, detail);
+        audit.finish(
+            if succeeded {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+    }
+}
+
 impl PublicMcpWorkspaceBridge {
     pub(in crate::workspace) fn start(
         settings_path: &Path,
@@ -460,7 +487,34 @@ impl PublicMcpWorkspaceBridge {
             .state
             .clients
             .register(label, approval_mode, all_tool_groups())
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| error.to_string());
+        let registered = match registered {
+            Ok(registered) => registered,
+            Err(error) => {
+                if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+                    .or_else(oxideterm_audit::AuditContext::current)
+                {
+                    if context.source == oxideterm_audit::AuditSource::Application {
+                        context.source = oxideterm_audit::AuditSource::User;
+                    }
+                    context.observe(
+                        oxideterm_audit::AuditCategory::Security,
+                        "mcp_client_create",
+                        None,
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        oxideterm_audit::AuditAuthorization::NotRequired,
+                    );
+                }
+                return Err(error);
+            }
+        };
+        audit_public_mcp_client_change(
+            &registered.projection.client_ref,
+            "mcp_client_create",
+            None,
+            true,
+        );
         self.revealed_credential = Some(registered.credential);
         self.startup_error = None;
         Ok(())
@@ -475,10 +529,18 @@ impl PublicMcpWorkspaceBridge {
         client_ref: &ClientRef,
         enabled: bool,
     ) -> Result<(), String> {
-        self.state
+        let result = self
+            .state
             .clients
             .set_enabled(client_ref, enabled)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        audit_public_mcp_client_change(
+            client_ref,
+            "mcp_client_authorization_change",
+            Some(if enabled { "enabled" } else { "disabled" }),
+            result.is_ok(),
+        );
+        result
     }
 
     pub(in crate::workspace) fn set_client_approval_mode(
@@ -486,10 +548,21 @@ impl PublicMcpWorkspaceBridge {
         client_ref: &ClientRef,
         approval_mode: ClientApprovalMode,
     ) -> Result<(), String> {
-        self.state
+        let result = self
+            .state
             .clients
             .set_approval_mode(client_ref, approval_mode)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        audit_public_mcp_client_change(
+            client_ref,
+            "mcp_client_authorization_change",
+            Some(match approval_mode {
+                ClientApprovalMode::Standard => "standard_approval",
+                ClientApprovalMode::Unattended => "unattended",
+            }),
+            result.is_ok(),
+        );
+        result
     }
 
     pub(in crate::workspace) fn set_client_tool_group(
@@ -499,6 +572,12 @@ impl PublicMcpWorkspaceBridge {
         enabled: bool,
     ) -> Result<(), String> {
         let Some(client) = self.state.clients.get(client_ref) else {
+            audit_public_mcp_client_change(
+                client_ref,
+                "mcp_client_authorization_change",
+                Some("client_missing"),
+                false,
+            );
             return Err("The external MCP client no longer exists".to_owned());
         };
         let mut tool_groups = client.tool_groups;
@@ -507,10 +586,18 @@ impl PublicMcpWorkspaceBridge {
         } else if tool_group != ToolGroup::Basic {
             tool_groups.remove(&tool_group);
         }
-        self.state
+        let result = self
+            .state
             .clients
             .set_groups(client_ref, tool_groups)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        audit_public_mcp_client_change(
+            client_ref,
+            "mcp_client_authorization_change",
+            Some(&format!("group={} enabled={enabled}", tool_group.as_str())),
+            result.is_ok(),
+        );
+        result
     }
 
     fn set_client_groups(
@@ -518,17 +605,29 @@ impl PublicMcpWorkspaceBridge {
         client_ref: &ClientRef,
         tool_groups: BTreeSet<ToolGroup>,
     ) -> Result<(), String> {
-        self.state
+        let group_count = tool_groups.len();
+        let result = self
+            .state
             .clients
             .set_groups(client_ref, tool_groups)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        audit_public_mcp_client_change(
+            client_ref,
+            "mcp_client_authorization_change",
+            Some(&format!("groups={group_count}")),
+            result.is_ok(),
+        );
+        result
     }
 
     pub(in crate::workspace) fn remove_client(&self, client_ref: &ClientRef) -> Result<(), String> {
-        self.state
+        let result = self
+            .state
             .clients
             .remove(client_ref)
-            .map_err(|error| error.to_string())
+            .map_err(|error| error.to_string());
+        audit_public_mcp_client_change(client_ref, "mcp_client_remove", None, result.is_ok());
+        result
     }
 
     pub(in crate::workspace) fn set_approval_status(
@@ -1214,180 +1313,227 @@ impl WorkspaceApp {
     }
 
     fn handle_public_mcp_request(&mut self, request: DomainRequest, cx: &mut Context<Self>) {
-        if request.is_cancelled() {
-            return;
-        }
-        if self.app_lock.locked {
-            request.finish(ToolEnvelope::failed("The OxideTerm workspace is locked"));
-            return;
-        }
-        match &request.call {
-            PublicToolCall::RequestAccess(_) => self.handle_public_mcp_request_access(request, cx),
-            PublicToolCall::RevokeAccess(_) => self.handle_public_mcp_revoke_access(request, cx),
-            PublicToolCall::OperationState(_) => self.handle_public_mcp_operation(request),
-            PublicToolCall::CancelOperation(_) => self.handle_public_mcp_cancel_operation(request),
-            PublicToolCall::Revert(args) => {
-                let call = PublicToolCall::SyncRestore(SyncRestoreArgs {
-                    undo_ref: args.undo_ref.clone(),
-                });
-                self.handle_public_mcp_sync_restore(request.with_call(call), cx)
+        let audit_context = request.audit_context.clone();
+        oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+            if request.is_cancelled() {
+                return;
             }
-            PublicToolCall::BrowseConnections(_) => {
-                self.handle_public_mcp_browse_connections(request)
+            if self.app_lock.locked {
+                request.finish(ToolEnvelope::failed("The OxideTerm workspace is locked"));
+                return;
             }
-            PublicToolCall::DescribeConnection(_) => {
-                self.handle_public_mcp_describe_connection(request)
+            match &request.call {
+                PublicToolCall::RequestAccess(_) => {
+                    self.handle_public_mcp_request_access(request, cx)
+                }
+                PublicToolCall::RevokeAccess(_) => {
+                    self.handle_public_mcp_revoke_access(request, cx)
+                }
+                PublicToolCall::OperationState(_) => self.handle_public_mcp_operation(request),
+                PublicToolCall::CancelOperation(_) => {
+                    self.handle_public_mcp_cancel_operation(request)
+                }
+                PublicToolCall::Revert(args) => {
+                    let call = PublicToolCall::SyncRestore(SyncRestoreArgs {
+                        undo_ref: args.undo_ref.clone(),
+                    });
+                    self.handle_public_mcp_sync_restore(request.with_call(call), cx)
+                }
+                PublicToolCall::BrowseConnections(_) => {
+                    self.handle_public_mcp_browse_connections(request)
+                }
+                PublicToolCall::DescribeConnection(_) => {
+                    self.handle_public_mcp_describe_connection(request)
+                }
+                PublicToolCall::SaveConnection(_) => {
+                    self.handle_public_mcp_save_connection(request, cx)
+                }
+                PublicToolCall::RemoveConnection(_) => {
+                    self.handle_public_mcp_remove_connection(request, cx)
+                }
+                PublicToolCall::CredentialStatus(_) => {
+                    self.handle_public_mcp_credential_status(request)
+                }
+                PublicToolCall::StoreCredential(_) => {
+                    self.handle_public_mcp_store_credential(request, cx)
+                }
+                PublicToolCall::ForgetCredential(_) => {
+                    self.handle_public_mcp_forget_credential(request, cx)
+                }
+                PublicToolCall::SyncStatus(_) => self.handle_public_mcp_sync_status(request, cx),
+                PublicToolCall::SyncPullPreview(_) => {
+                    self.handle_public_mcp_sync_pull_preview(request, cx)
+                }
+                PublicToolCall::SyncPublishPreview(_) => {
+                    self.handle_public_mcp_sync_publish_preview(request, cx)
+                }
+                PublicToolCall::SyncApplyPlan(_) => {
+                    self.handle_public_mcp_sync_apply_plan(request, cx)
+                }
+                PublicToolCall::SyncRestore(_) => self.handle_public_mcp_sync_restore(request, cx),
+                PublicToolCall::ConnectNode(_) => self.handle_public_mcp_connect_node(request, cx),
+                PublicToolCall::InspectNode(_) => self.handle_public_mcp_inspect_node(request),
+                PublicToolCall::ReleaseNode(_) => self.handle_public_mcp_release_node(request),
+                PublicToolCall::DisconnectNode(_) => {
+                    self.handle_public_mcp_disconnect_node(request, cx)
+                }
+                PublicToolCall::OpenTerminal(_) => {
+                    self.handle_public_mcp_terminal_open(request, cx)
+                }
+                PublicToolCall::TerminalState(_) => {
+                    self.handle_public_mcp_terminal_state(request, cx)
+                }
+                PublicToolCall::ReadTerminal(_) => {
+                    self.handle_public_mcp_terminal_read(request, cx)
+                }
+                PublicToolCall::FindTerminal(_) => {
+                    self.handle_public_mcp_terminal_find(request, cx)
+                }
+                PublicToolCall::SubmitTerminal(_) => {
+                    self.handle_public_mcp_terminal_submit(request, cx)
+                }
+                PublicToolCall::ResizeTerminal(_) => {
+                    self.handle_public_mcp_terminal_resize(request, cx)
+                }
+                PublicToolCall::ControlTerminal(_) => {
+                    self.handle_public_mcp_terminal_control(request, cx)
+                }
+                PublicToolCall::CloseTerminal(_) => {
+                    self.handle_public_mcp_terminal_close(request, cx)
+                }
+                PublicToolCall::RecordingsControl(_) => {
+                    self.handle_public_mcp_recordings_control(request, cx)
+                }
+                PublicToolCall::RecordingsStatus(_) => {
+                    self.handle_public_mcp_recordings_status(request, cx)
+                }
+                PublicToolCall::RecordingsSearch(_) => {
+                    self.handle_public_mcp_recordings_search(request)
+                }
+                PublicToolCall::RecordingsExport(_) => {
+                    self.handle_public_mcp_recordings_export(request)
+                }
+                PublicToolCall::OpenDesktop(_) => self.handle_public_mcp_desktop_open(request, cx),
+                PublicToolCall::DesktopState(_) => {
+                    self.handle_public_mcp_desktop_state(request, cx)
+                }
+                PublicToolCall::DesktopFrame(_) => {
+                    self.handle_public_mcp_desktop_frame(request, cx)
+                }
+                PublicToolCall::DesktopInput(_) => {
+                    self.handle_public_mcp_desktop_input(request, cx)
+                }
+                PublicToolCall::ResizeDesktop(_) => {
+                    self.handle_public_mcp_desktop_resize(request, cx)
+                }
+                PublicToolCall::ReadDesktopClipboard(_) => {
+                    self.handle_public_mcp_desktop_clipboard_read(request, cx)
+                }
+                PublicToolCall::WriteDesktopClipboard(_) => {
+                    self.handle_public_mcp_desktop_clipboard_write(request, cx)
+                }
+                PublicToolCall::ReconnectDesktop(_) => {
+                    self.handle_public_mcp_desktop_reconnect(request, cx)
+                }
+                PublicToolCall::CloseDesktop(_) => {
+                    self.handle_public_mcp_desktop_close(request, cx)
+                }
+                PublicToolCall::StartCommand(_) => self.handle_public_mcp_start_command(request),
+                PublicToolCall::CommandState(_) => self.handle_public_mcp_command_state(request),
+                PublicToolCall::CommandOutput(_) => self.handle_public_mcp_command_output(request),
+                PublicToolCall::CancelCommand(_) => self.handle_public_mcp_cancel_command(request),
+                PublicToolCall::StageArtifact(_) => self.handle_public_mcp_stage_artifact(request),
+                PublicToolCall::ReadArtifact(_) => self.handle_public_mcp_read_artifact(request),
+                PublicToolCall::AuditSearch(_) => self.handle_public_mcp_audit_search(request),
+                PublicToolCall::HostToolsCatalog(_) => {
+                    self.handle_public_mcp_host_tools_catalog(request)
+                }
+                PublicToolCall::HostToolsCapture(_) => {
+                    self.handle_public_mcp_host_tools_capture(request)
+                }
+                PublicToolCall::HostToolsOperate(_) => {
+                    self.handle_public_mcp_host_tools_operate(request)
+                }
+                PublicToolCall::QuickCommandsList(_) => {
+                    self.handle_public_mcp_quick_commands_list(request)
+                }
+                PublicToolCall::QuickCommandsDescribe(_) => {
+                    self.handle_public_mcp_quick_commands_describe(request)
+                }
+                PublicToolCall::QuickCommandsSave(_) => {
+                    self.handle_public_mcp_quick_commands_save(request, cx)
+                }
+                PublicToolCall::QuickCommandsRemove(_) => {
+                    self.handle_public_mcp_quick_commands_remove(request, cx)
+                }
+                PublicToolCall::QuickCommandsRun(_) => {
+                    self.handle_public_mcp_quick_commands_run(request)
+                }
+                PublicToolCall::PreparedQuickCommandRun(_) => {
+                    self.handle_public_mcp_prepared_quick_command_run(request)
+                }
+                PublicToolCall::AddonsList(_) => self.handle_public_mcp_addons_list(request, cx),
+                PublicToolCall::AddonsInstall(_) => {
+                    self.handle_public_mcp_addons_install(request, cx)
+                }
+                PublicToolCall::AddonsSetEnabled(_) => {
+                    self.handle_public_mcp_addons_set_enabled(request, cx)
+                }
+                PublicToolCall::AddonsRemove(_) => {
+                    self.handle_public_mcp_addons_remove(request, cx)
+                }
+                PublicToolCall::ForwardsList(_) => self.handle_public_mcp_forwards_list(request),
+                PublicToolCall::ForwardsOpen(_) => {
+                    self.handle_public_mcp_forwards_open(request, cx)
+                }
+                PublicToolCall::ForwardsChange(_) => {
+                    self.handle_public_mcp_forwards_change(request, cx)
+                }
+                PublicToolCall::ForwardsStop(_) => self.handle_public_mcp_forwards_stop(request),
+                PublicToolCall::ForwardsRestart(_) => {
+                    self.handle_public_mcp_forwards_restart(request, cx)
+                }
+                PublicToolCall::ForwardsRemove(_) => {
+                    self.handle_public_mcp_forwards_remove(request, cx)
+                }
+                PublicToolCall::ForwardsMetrics(_) => {
+                    self.handle_public_mcp_forwards_metrics(request)
+                }
+                PublicToolCall::ForwardsDiscoverPorts(_) => {
+                    self.handle_public_mcp_forwards_discover_ports(request)
+                }
+                PublicToolCall::FilesOpen(_) => self.handle_public_mcp_files_open(request),
+                PublicToolCall::FilesClose(_) => self.handle_public_mcp_files_close(request),
+                PublicToolCall::FilesList(_) => self.handle_public_mcp_files_list(request),
+                PublicToolCall::FilesStat(_) => self.handle_public_mcp_files_stat(request),
+                PublicToolCall::FilesRead(_) => self.handle_public_mcp_files_read(request),
+                PublicToolCall::FilesCompare(_) => self.handle_public_mcp_files_compare(request),
+                PublicToolCall::FilesWrite(_) => self.handle_public_mcp_files_write(request),
+                PublicToolCall::FilesMove(_) => self.handle_public_mcp_files_move(request),
+                PublicToolCall::FilesRemove(_) => self.handle_public_mcp_files_remove(request),
+                PublicToolCall::TransferStart(_) => self.handle_public_mcp_transfer_start(request),
+                PublicToolCall::TransferStatus(_) => {
+                    self.handle_public_mcp_transfer_status(request)
+                }
+                PublicToolCall::TransferCancel(_) => {
+                    self.handle_public_mcp_transfer_cancel(request)
+                }
+                PublicToolCall::WorkspaceMount(_) => {
+                    self.handle_public_mcp_workspace_mount(request, cx)
+                }
+                PublicToolCall::WorkspaceTree(_) => self.handle_public_mcp_workspace_tree(request),
+                PublicToolCall::WorkspaceRead(_) => self.handle_public_mcp_workspace_read(request),
+                PublicToolCall::WorkspaceApplyEdits(_) => {
+                    self.handle_public_mcp_workspace_apply_edits(request)
+                }
+                PublicToolCall::WorkspaceSearch(_) => {
+                    self.handle_public_mcp_workspace_search(request)
+                }
+                PublicToolCall::WorkspaceClose(_) => {
+                    self.handle_public_mcp_workspace_close(request)
+                }
             }
-            PublicToolCall::SaveConnection(_) => {
-                self.handle_public_mcp_save_connection(request, cx)
-            }
-            PublicToolCall::RemoveConnection(_) => {
-                self.handle_public_mcp_remove_connection(request, cx)
-            }
-            PublicToolCall::CredentialStatus(_) => {
-                self.handle_public_mcp_credential_status(request)
-            }
-            PublicToolCall::StoreCredential(_) => {
-                self.handle_public_mcp_store_credential(request, cx)
-            }
-            PublicToolCall::ForgetCredential(_) => {
-                self.handle_public_mcp_forget_credential(request, cx)
-            }
-            PublicToolCall::SyncStatus(_) => self.handle_public_mcp_sync_status(request, cx),
-            PublicToolCall::SyncPullPreview(_) => {
-                self.handle_public_mcp_sync_pull_preview(request, cx)
-            }
-            PublicToolCall::SyncPublishPreview(_) => {
-                self.handle_public_mcp_sync_publish_preview(request, cx)
-            }
-            PublicToolCall::SyncApplyPlan(_) => self.handle_public_mcp_sync_apply_plan(request, cx),
-            PublicToolCall::SyncRestore(_) => self.handle_public_mcp_sync_restore(request, cx),
-            PublicToolCall::ConnectNode(_) => self.handle_public_mcp_connect_node(request, cx),
-            PublicToolCall::InspectNode(_) => self.handle_public_mcp_inspect_node(request),
-            PublicToolCall::ReleaseNode(_) => self.handle_public_mcp_release_node(request),
-            PublicToolCall::DisconnectNode(_) => {
-                self.handle_public_mcp_disconnect_node(request, cx)
-            }
-            PublicToolCall::OpenTerminal(_) => self.handle_public_mcp_terminal_open(request, cx),
-            PublicToolCall::TerminalState(_) => self.handle_public_mcp_terminal_state(request, cx),
-            PublicToolCall::ReadTerminal(_) => self.handle_public_mcp_terminal_read(request, cx),
-            PublicToolCall::FindTerminal(_) => self.handle_public_mcp_terminal_find(request, cx),
-            PublicToolCall::SubmitTerminal(_) => {
-                self.handle_public_mcp_terminal_submit(request, cx)
-            }
-            PublicToolCall::ResizeTerminal(_) => {
-                self.handle_public_mcp_terminal_resize(request, cx)
-            }
-            PublicToolCall::ControlTerminal(_) => {
-                self.handle_public_mcp_terminal_control(request, cx)
-            }
-            PublicToolCall::CloseTerminal(_) => self.handle_public_mcp_terminal_close(request, cx),
-            PublicToolCall::RecordingsControl(_) => {
-                self.handle_public_mcp_recordings_control(request, cx)
-            }
-            PublicToolCall::RecordingsStatus(_) => {
-                self.handle_public_mcp_recordings_status(request, cx)
-            }
-            PublicToolCall::RecordingsSearch(_) => {
-                self.handle_public_mcp_recordings_search(request)
-            }
-            PublicToolCall::RecordingsExport(_) => {
-                self.handle_public_mcp_recordings_export(request)
-            }
-            PublicToolCall::OpenDesktop(_) => self.handle_public_mcp_desktop_open(request, cx),
-            PublicToolCall::DesktopState(_) => self.handle_public_mcp_desktop_state(request, cx),
-            PublicToolCall::DesktopFrame(_) => self.handle_public_mcp_desktop_frame(request, cx),
-            PublicToolCall::DesktopInput(_) => self.handle_public_mcp_desktop_input(request, cx),
-            PublicToolCall::ResizeDesktop(_) => self.handle_public_mcp_desktop_resize(request, cx),
-            PublicToolCall::ReadDesktopClipboard(_) => {
-                self.handle_public_mcp_desktop_clipboard_read(request, cx)
-            }
-            PublicToolCall::WriteDesktopClipboard(_) => {
-                self.handle_public_mcp_desktop_clipboard_write(request, cx)
-            }
-            PublicToolCall::ReconnectDesktop(_) => {
-                self.handle_public_mcp_desktop_reconnect(request, cx)
-            }
-            PublicToolCall::CloseDesktop(_) => self.handle_public_mcp_desktop_close(request, cx),
-            PublicToolCall::StartCommand(_) => self.handle_public_mcp_start_command(request),
-            PublicToolCall::CommandState(_) => self.handle_public_mcp_command_state(request),
-            PublicToolCall::CommandOutput(_) => self.handle_public_mcp_command_output(request),
-            PublicToolCall::CancelCommand(_) => self.handle_public_mcp_cancel_command(request),
-            PublicToolCall::StageArtifact(_) => self.handle_public_mcp_stage_artifact(request),
-            PublicToolCall::ReadArtifact(_) => self.handle_public_mcp_read_artifact(request),
-            PublicToolCall::AuditSearch(_) => self.handle_public_mcp_audit_search(request),
-            PublicToolCall::HostToolsCatalog(_) => {
-                self.handle_public_mcp_host_tools_catalog(request)
-            }
-            PublicToolCall::HostToolsCapture(_) => {
-                self.handle_public_mcp_host_tools_capture(request)
-            }
-            PublicToolCall::HostToolsOperate(_) => {
-                self.handle_public_mcp_host_tools_operate(request)
-            }
-            PublicToolCall::QuickCommandsList(_) => {
-                self.handle_public_mcp_quick_commands_list(request)
-            }
-            PublicToolCall::QuickCommandsDescribe(_) => {
-                self.handle_public_mcp_quick_commands_describe(request)
-            }
-            PublicToolCall::QuickCommandsSave(_) => {
-                self.handle_public_mcp_quick_commands_save(request, cx)
-            }
-            PublicToolCall::QuickCommandsRemove(_) => {
-                self.handle_public_mcp_quick_commands_remove(request, cx)
-            }
-            PublicToolCall::QuickCommandsRun(_) => {
-                self.handle_public_mcp_quick_commands_run(request)
-            }
-            PublicToolCall::PreparedQuickCommandRun(_) => {
-                self.handle_public_mcp_prepared_quick_command_run(request)
-            }
-            PublicToolCall::AddonsList(_) => self.handle_public_mcp_addons_list(request, cx),
-            PublicToolCall::AddonsInstall(_) => self.handle_public_mcp_addons_install(request, cx),
-            PublicToolCall::AddonsSetEnabled(_) => {
-                self.handle_public_mcp_addons_set_enabled(request, cx)
-            }
-            PublicToolCall::AddonsRemove(_) => self.handle_public_mcp_addons_remove(request, cx),
-            PublicToolCall::ForwardsList(_) => self.handle_public_mcp_forwards_list(request),
-            PublicToolCall::ForwardsOpen(_) => self.handle_public_mcp_forwards_open(request, cx),
-            PublicToolCall::ForwardsChange(_) => {
-                self.handle_public_mcp_forwards_change(request, cx)
-            }
-            PublicToolCall::ForwardsStop(_) => self.handle_public_mcp_forwards_stop(request),
-            PublicToolCall::ForwardsRestart(_) => {
-                self.handle_public_mcp_forwards_restart(request, cx)
-            }
-            PublicToolCall::ForwardsRemove(_) => {
-                self.handle_public_mcp_forwards_remove(request, cx)
-            }
-            PublicToolCall::ForwardsMetrics(_) => self.handle_public_mcp_forwards_metrics(request),
-            PublicToolCall::ForwardsDiscoverPorts(_) => {
-                self.handle_public_mcp_forwards_discover_ports(request)
-            }
-            PublicToolCall::FilesOpen(_) => self.handle_public_mcp_files_open(request),
-            PublicToolCall::FilesClose(_) => self.handle_public_mcp_files_close(request),
-            PublicToolCall::FilesList(_) => self.handle_public_mcp_files_list(request),
-            PublicToolCall::FilesStat(_) => self.handle_public_mcp_files_stat(request),
-            PublicToolCall::FilesRead(_) => self.handle_public_mcp_files_read(request),
-            PublicToolCall::FilesCompare(_) => self.handle_public_mcp_files_compare(request),
-            PublicToolCall::FilesWrite(_) => self.handle_public_mcp_files_write(request),
-            PublicToolCall::FilesMove(_) => self.handle_public_mcp_files_move(request),
-            PublicToolCall::FilesRemove(_) => self.handle_public_mcp_files_remove(request),
-            PublicToolCall::TransferStart(_) => self.handle_public_mcp_transfer_start(request),
-            PublicToolCall::TransferStatus(_) => self.handle_public_mcp_transfer_status(request),
-            PublicToolCall::TransferCancel(_) => self.handle_public_mcp_transfer_cancel(request),
-            PublicToolCall::WorkspaceMount(_) => {
-                self.handle_public_mcp_workspace_mount(request, cx)
-            }
-            PublicToolCall::WorkspaceTree(_) => self.handle_public_mcp_workspace_tree(request),
-            PublicToolCall::WorkspaceRead(_) => self.handle_public_mcp_workspace_read(request),
-            PublicToolCall::WorkspaceApplyEdits(_) => {
-                self.handle_public_mcp_workspace_apply_edits(request)
-            }
-            PublicToolCall::WorkspaceSearch(_) => self.handle_public_mcp_workspace_search(request),
-            PublicToolCall::WorkspaceClose(_) => self.handle_public_mcp_workspace_close(request),
-        }
+        });
     }
 
     fn handle_public_mcp_request_access(&mut self, request: DomainRequest, cx: &mut Context<Self>) {
@@ -2014,48 +2160,58 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let request_cancellation = request.cancellation_token();
-        self.forwarding_runtime.spawn(async move {
-            let acquired = tokio::select! {
-                _ = request_cancellation.cancelled() => {
-                    handles.lock().nodes.remove(&node_ref);
-                    return;
-                }
-                result = router.acquire_connection_wait(
-                    &node_id,
-                    consumer.clone(),
-                    Duration::from_secs(30),
-                ) => result,
-            };
-            match acquired {
-                Ok(resolved) => {
-                    let connection_id = resolved.connection_id;
-                    if request_cancellation.is_cancelled() {
-                        handles.lock().nodes.remove(&node_ref);
-                        router.release_consumer(&connection_id, &consumer);
-                        return;
-                    }
-                    let retained = if let Some(lease) = handles.lock().nodes.get_mut(&node_ref) {
-                        lease.physical_connection_id = Some(connection_id.clone());
-                        true
-                    } else {
-                        false
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let acquired = tokio::select! {
+                        _ = request_cancellation.cancelled() => {
+                            handles.lock().nodes.remove(&node_ref);
+                            return;
+                        }
+                        result = router.acquire_connection_wait(
+                            &node_id,
+                            consumer.clone(),
+                            Duration::from_secs(30),
+                        ) => result,
                     };
-                    if !retained {
-                        // Revocation may race an in-flight connection attempt.
-                        router.release_consumer(&connection_id, &consumer);
-                        request.finish(ToolEnvelope::failed(
-                            "The MCP client was revoked while connecting",
-                        ));
-                        return;
+                    match acquired {
+                        Ok(resolved) => {
+                            let connection_id = resolved.connection_id;
+                            if request_cancellation.is_cancelled() {
+                                handles.lock().nodes.remove(&node_ref);
+                                router.release_consumer(&connection_id, &consumer);
+                                return;
+                            }
+                            let retained =
+                                if let Some(lease) = handles.lock().nodes.get_mut(&node_ref) {
+                                    lease.physical_connection_id = Some(connection_id.clone());
+                                    true
+                                } else {
+                                    false
+                                };
+                            if !retained {
+                                // Revocation may race an in-flight connection attempt.
+                                router.release_consumer(&connection_id, &consumer);
+                                request.finish(ToolEnvelope::failed(
+                                    "The MCP client was revoked while connecting",
+                                ));
+                                return;
+                            }
+                            finish_serialized(
+                                request,
+                                json!({ "node_ref": node_ref, "state": "ready" }),
+                            );
+                        }
+                        Err(_) => {
+                            handles.lock().nodes.remove(&node_ref);
+                            request
+                                .finish(ToolEnvelope::failed("The SSH node did not become ready"));
+                        }
                     }
-                    finish_serialized(request, json!({ "node_ref": node_ref, "state": "ready" }));
-                }
-                Err(_) => {
-                    handles.lock().nodes.remove(&node_ref);
-                    request.finish(ToolEnvelope::failed("The SSH node did not become ready"));
-                }
-            }
-        });
+                },
+            ));
     }
 
     fn handle_public_mcp_inspect_node(&self, request: DomainRequest) {
@@ -2319,63 +2475,71 @@ impl WorkspaceApp {
         let router = self.node_router.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let command_ref_for_task = command_ref.clone();
-        self.forwarding_runtime.spawn(async move {
-            let resolved = tokio::select! {
-                _ = cancellation.cancelled() => return,
-                result = router.resolve_connection(&lease.node_id) => result,
-            };
-            let result = match resolved {
-                Ok(resolved) => {
-                    tokio::select! {
-                        _ = cancellation.cancelled() => None,
-                        result = resolved.handle.run_secret_command_capture(
-                            command.as_str(),
-                            PUBLIC_MCP_COMMAND_TIMEOUT,
-                            PUBLIC_MCP_COMMAND_OUTPUT_LIMIT,
-                        ) => Some(result.map_err(public_command_error)),
-                    }
-                }
-                Err(_) => Some(Err("The SSH node is no longer ready".to_owned())),
-            };
-            let Some(result) = result else {
-                return;
-            };
-            // The retained result never needs the submitted command text.
-            drop(command);
-            {
-                let mut runtime_handles = handles.lock();
-                let Some(record) = runtime_handles.commands.get_mut(&command_ref_for_task) else {
-                    return;
-                };
-                if record.state != PublicMcpCommandState::Running {
-                    return;
-                }
-                match result {
-                    Ok(output) => {
-                        record.stdout = output.stdout;
-                        record.stderr = output.stderr;
-                        record.exit_code = output.exit_code;
-                        record.truncated = output.truncated;
-                        if output.exit_code == Some(0) {
-                            record.state = PublicMcpCommandState::Succeeded;
-                        } else {
-                            record.state = PublicMcpCommandState::Failed;
-                            record.error = Some(match output.exit_code {
-                                Some(exit_code) => {
-                                    format!("Remote command exited with status {exit_code}")
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let resolved = tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        result = router.resolve_connection(&lease.node_id) => result,
+                    };
+                    let result = match resolved {
+                        Ok(resolved) => {
+                            tokio::select! {
+                                _ = cancellation.cancelled() => None,
+                                result = resolved.handle.run_secret_command_capture(
+                                    command.as_str(),
+                                    PUBLIC_MCP_COMMAND_TIMEOUT,
+                                    PUBLIC_MCP_COMMAND_OUTPUT_LIMIT,
+                                ) => Some(result.map_err(public_command_error)),
+                            }
+                        }
+                        Err(_) => Some(Err("The SSH node is no longer ready".to_owned())),
+                    };
+                    let Some(result) = result else {
+                        return;
+                    };
+                    // The retained result never needs the submitted command text.
+                    drop(command);
+                    {
+                        let mut runtime_handles = handles.lock();
+                        let Some(record) = runtime_handles.commands.get_mut(&command_ref_for_task)
+                        else {
+                            return;
+                        };
+                        if record.state != PublicMcpCommandState::Running {
+                            return;
+                        }
+                        match result {
+                            Ok(output) => {
+                                record.stdout = output.stdout;
+                                record.stderr = output.stderr;
+                                record.exit_code = output.exit_code;
+                                record.truncated = output.truncated;
+                                if output.exit_code == Some(0) {
+                                    record.state = PublicMcpCommandState::Succeeded;
+                                } else {
+                                    record.state = PublicMcpCommandState::Failed;
+                                    record.error = Some(match output.exit_code {
+                                        Some(exit_code) => {
+                                            format!("Remote command exited with status {exit_code}")
+                                        }
+                                        None => {
+                                            "Remote command ended without an exit status".to_owned()
+                                        }
+                                    });
                                 }
-                                None => "Remote command ended without an exit status".to_owned(),
-                            });
+                            }
+                            Err(error) => {
+                                record.error = Some(error);
+                                record.state = PublicMcpCommandState::Failed;
+                            }
                         }
                     }
-                    Err(error) => {
-                        record.error = Some(error);
-                        record.state = PublicMcpCommandState::Failed;
-                    }
-                }
-            }
-            expire_public_mcp_command_after_retention(handles, command_ref_for_task).await;
-        });
+                    expire_public_mcp_command_after_retention(handles, command_ref_for_task).await;
+                },
+            ));
         finish_serialized(
             request,
             json!({

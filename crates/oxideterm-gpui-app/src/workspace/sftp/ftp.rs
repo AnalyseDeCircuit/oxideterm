@@ -278,6 +278,7 @@ pub(super) async fn run_transfer(
     disposition: LocalDownloadDisposition,
     tx: &delivery::ActiveDeliverySender<SftpWorkerResult>,
     owner: &str,
+    request_audit: Option<&oxideterm_audit::AuditContext>,
 ) -> Result<(), String> {
     let protocol = if runtime.options.security == oxideterm_ftp::Security::ExplicitTls {
         RemoteTransferProtocol::Ftps
@@ -319,7 +320,22 @@ pub(super) async fn run_transfer(
         0,
     );
     background.protocol = protocol;
-    manager.register_background_transfer(background);
+    let transfer_audit = request_audit.cloned().map(|mut context| {
+        context.protocol = Some(
+            if protocol == RemoteTransferProtocol::Ftps {
+                "ftps"
+            } else {
+                "ftp"
+            }
+            .into(),
+        );
+        context.target = Some(oxideterm_audit::redact(&format!(
+            "{}@{}:{}",
+            runtime.options.username, runtime.options.host, runtime.options.port
+        )));
+        context
+    });
+    manager.register_background_transfer(background, transfer_audit.as_ref());
     let started = Instant::now();
     let last_delivery = parking_lot::Mutex::new(started);
     let last_delivery = &last_delivery;
@@ -339,6 +355,12 @@ pub(super) async fn run_transfer(
             }
         }
         let mut last = last_delivery.lock();
+        manager.update_background_transfer_progress(
+            transfer_id,
+            progress.completed,
+            progress.total.unwrap_or(0),
+            0,
+        );
         if last.elapsed() >= Duration::from_millis(50) || progress.total == Some(progress.completed)
         {
             *last = Instant::now();
@@ -374,7 +396,11 @@ pub(super) async fn run_transfer(
             if disposition == LocalDownloadDisposition::ResumeVerified {
                 return Err(oxideterm_ftp::Error::InvalidInput);
             }
-            session = Some(FtpSession::connect(&runtime.options, &token).await?);
+            session = Some(
+                FtpSession::connect(&runtime.options, &token)
+                    .await?
+                    .with_audit_request(manager.audit_context_for_transfer(transfer_id).as_ref()),
+            );
             let session = session.as_mut().expect("connected FTP transfer");
             match (direction, directory) {
                 (SftpTransferDirection::Upload, false) => {

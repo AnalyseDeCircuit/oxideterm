@@ -31,6 +31,37 @@ const NATIVE_PLUGIN_RELEASE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const NATIVE_PLUGIN_WORKSPACE_RELEASED_CODE: &str = "plugin_workspace_released";
 const NATIVE_PLUGIN_MANAGED_INSTALL_CANCELLED_CODE: &str = "managed_plugin_install_cancelled";
 
+fn plugin_request_audit_context(plugin_id: &str) -> Option<oxideterm_audit::AuditContext> {
+    oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            context.source = oxideterm_audit::AuditSource::Plugin;
+            context.agent_id = Some(oxideterm_audit::redact(plugin_id));
+            context
+        })
+}
+
+fn plugin_management_audit(
+    plugin_id: Option<&str>,
+    action: &str,
+) -> oxideterm_audit::AuditOperation {
+    let context = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            if context.source == oxideterm_audit::AuditSource::Application {
+                context.source = oxideterm_audit::AuditSource::User;
+            }
+            context.target = plugin_id.map(oxideterm_audit::redact);
+            context
+        });
+    oxideterm_audit::AuditOperation::in_context(
+        context.as_ref(),
+        oxideterm_audit::AuditCategory::Configuration,
+        action,
+        None,
+    )
+}
+
 pub(in crate::workspace) enum PluginWorkspaceEvent {
     ManagerDeliveryReady,
     RuntimeRequestsReady,
@@ -68,6 +99,7 @@ pub(in crate::workspace) enum PluginRuntimeAdapterRefresh {
 pub(in crate::workspace) enum PluginRuntimeIntent {
     ApplyEffects {
         plugin_id: String,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         effects: Vec<plugin_runtime::PluginOutboundEffect>,
         refresh: PluginRuntimeAdapterRefresh,
     },
@@ -331,11 +363,22 @@ impl PluginWorkspaceEntity {
         plugin_id: &str,
         enabled: bool,
     ) -> Result<(), String> {
-        self.registry_mut().set_plugin_enabled(plugin_id, enabled)?;
-        if !enabled {
+        let audit = plugin_management_audit(Some(plugin_id), "plugin_enabled_change");
+        let result = self.registry_mut().set_plugin_enabled(plugin_id, enabled);
+        if result.is_ok() && !enabled {
             self.start_runtime_deactivation(plugin_id.to_string());
         }
-        Ok(())
+        audit.finish(
+            if result.is_ok() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub(in crate::workspace) fn uninstall_plugin(
@@ -343,10 +386,24 @@ impl PluginWorkspaceEntity {
         plugin_id: &str,
         remove_storage: bool,
     ) -> Result<(), String> {
-        self.registry_mut()
-            .uninstall_plugin(plugin_id, remove_storage)?;
-        self.start_runtime_deactivation(plugin_id.to_string());
-        Ok(())
+        let audit = plugin_management_audit(Some(plugin_id), "plugin_uninstall");
+        let result = self
+            .registry_mut()
+            .uninstall_plugin(plugin_id, remove_storage);
+        if result.is_ok() {
+            self.start_runtime_deactivation(plugin_id.to_string());
+        }
+        audit.finish(
+            if result.is_ok() {
+                oxideterm_audit::AuditOutcome::Succeeded
+            } else {
+                oxideterm_audit::AuditOutcome::Failed
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub(in crate::workspace) fn set_plugin_setting_value(
@@ -505,20 +562,28 @@ impl PluginWorkspaceEntity {
         }
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
-        self.spawn_owned_task(async move {
-            let mut host = host.lock().await;
-            host.set_host_api_resolver(host_api_resolver);
-            let result = host
-                .dispatch_command(
-                    &plugin_id,
-                    command,
-                    arguments,
-                    NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
-                )
-                .await;
-            let _ = delivery_tx
-                .send(NativePluginRuntimeDelivery::CommandDispatch { plugin_id, result });
-        });
+        let audit_context = plugin_request_audit_context(&plugin_id);
+        let scoped_context = audit_context.clone();
+        self.spawn_owned_task(oxideterm_audit::AuditContext::scope_optional(
+            scoped_context,
+            async move {
+                let mut host = host.lock().await;
+                host.set_host_api_resolver(host_api_resolver);
+                let result = host
+                    .dispatch_command(
+                        &plugin_id,
+                        command,
+                        arguments,
+                        NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                    )
+                    .await;
+                let _ = delivery_tx.send(NativePluginRuntimeDelivery::CommandDispatch {
+                    plugin_id,
+                    audit_context,
+                    result,
+                });
+            },
+        ));
     }
 
     pub(in crate::workspace) fn start_runtime_event(
@@ -532,15 +597,23 @@ impl PluginWorkspaceEntity {
         }
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
-        self.spawn_owned_task(async move {
-            let mut host = host.lock().await;
-            host.set_host_api_resolver(host_api_resolver);
-            let result = host
-                .dispatch_event(&plugin_id, event, NATIVE_PLUGIN_LIFECYCLE_TIMEOUT)
-                .await;
-            let _ =
-                delivery_tx.send(NativePluginRuntimeDelivery::EventDispatch { plugin_id, result });
-        });
+        let audit_context = plugin_request_audit_context(&plugin_id);
+        let scoped_context = audit_context.clone();
+        self.spawn_owned_task(oxideterm_audit::AuditContext::scope_optional(
+            scoped_context,
+            async move {
+                let mut host = host.lock().await;
+                host.set_host_api_resolver(host_api_resolver);
+                let result = host
+                    .dispatch_event(&plugin_id, event, NATIVE_PLUGIN_LIFECYCLE_TIMEOUT)
+                    .await;
+                let _ = delivery_tx.send(NativePluginRuntimeDelivery::EventDispatch {
+                    plugin_id,
+                    audit_context,
+                    result,
+                });
+            },
+        ));
     }
 
     fn start_runtime_deactivation(&mut self, plugin_id: String) {
@@ -663,6 +736,14 @@ impl PluginWorkspaceEntity {
         }
         self.manager_operation_in_flight = true;
         let delivery_tx = self.manager_delivery_tx.clone();
+        let mut audit = plugin_management_audit(
+            expected_id.as_deref(),
+            if overwrite {
+                "plugin_upgrade"
+            } else {
+                "plugin_install"
+            },
+        );
         self.spawn_owned_task(async move {
             let result = match (expected_id.as_deref(), checksum.as_deref()) {
                 (Some(expected_id), Some(checksum)) => {
@@ -687,9 +768,24 @@ impl PluginWorkspaceEntity {
                 }
             };
             let outcome = match result {
-                Ok(result) => plugin_manager::NativePluginInstallOutcome::Installed(result),
+                Ok(result) => {
+                    audit.summary(&result.manifest.id);
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Succeeded,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
+                    plugin_manager::NativePluginInstallOutcome::Installed(result)
+                }
                 Err(error) => {
                     let error = Zeroizing::new(error);
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
                     match plugin_host::native_plugin_conflict_id(&error) {
                         Some(plugin_id) => {
                             plugin_manager::NativePluginInstallOutcome::Conflict { plugin_id }
@@ -743,8 +839,22 @@ impl PluginWorkspaceEntity {
         }
         self.manager_operation_in_flight = true;
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let audit = plugin_management_audit(
+            Some(&expected_id),
+            if overwrite {
+                "plugin_upgrade"
+            } else {
+                "plugin_install"
+            },
+        );
         self.spawn_owned_task(async move {
             if cancellation.is_cancelled() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Cancelled,
+                    oxideterm_audit::AuditEvidence::Lifecycle,
+                    None,
+                    None,
+                );
                 let _ =
                     result_tx.send(Err(NATIVE_PLUGIN_MANAGED_INSTALL_CANCELLED_CODE.to_owned()));
                 return;
@@ -756,6 +866,16 @@ impl PluginWorkspaceEntity {
                 Some(&checksum),
                 &package_bytes,
                 overwrite,
+            );
+            audit.finish(
+                if result.is_ok() {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
             );
             let _ = result_tx.send(result);
         });
@@ -1310,12 +1430,16 @@ impl PluginWorkspaceEntity {
             NativePluginRuntimeDelivery::Deactivation { plugin_id, result } => {
                 self.apply_deactivation_result(plugin_id, result)
             }
-            NativePluginRuntimeDelivery::CommandDispatch { plugin_id, result } => {
-                self.apply_command_dispatch_result(plugin_id, result)
-            }
-            NativePluginRuntimeDelivery::EventDispatch { plugin_id, result } => {
-                self.apply_event_dispatch_result(plugin_id, result)
-            }
+            NativePluginRuntimeDelivery::CommandDispatch {
+                plugin_id,
+                audit_context,
+                result,
+            } => self.apply_command_dispatch_result(plugin_id, audit_context, result),
+            NativePluginRuntimeDelivery::EventDispatch {
+                plugin_id,
+                audit_context,
+                result,
+            } => self.apply_event_dispatch_result(plugin_id, audit_context, result),
         }
     }
 
@@ -1380,6 +1504,7 @@ impl PluginWorkspaceEntity {
 
         PluginRuntimeIntent::ApplyEffects {
             plugin_id,
+            audit_context: None,
             effects,
             refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
         }
@@ -1409,6 +1534,7 @@ impl PluginWorkspaceEntity {
         }
         PluginRuntimeIntent::ApplyEffects {
             plugin_id,
+            audit_context: None,
             effects: Vec::new(),
             refresh: PluginRuntimeAdapterRefresh::All,
         }
@@ -1417,6 +1543,7 @@ impl PluginWorkspaceEntity {
     fn apply_command_dispatch_result(
         &mut self,
         plugin_id: String,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         result: Result<
             plugin_runtime::NativePluginRuntimeCommandDispatch,
             plugin_runtime::PluginError,
@@ -1465,6 +1592,7 @@ impl PluginWorkspaceEntity {
 
         PluginRuntimeIntent::ApplyEffects {
             plugin_id: dispatched_plugin_id,
+            audit_context,
             effects,
             refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
         }
@@ -1473,6 +1601,7 @@ impl PluginWorkspaceEntity {
     fn apply_event_dispatch_result(
         &mut self,
         plugin_id: String,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         result: Result<
             plugin_runtime::NativePluginRuntimeEventDispatch,
             plugin_runtime::PluginError,
@@ -1521,6 +1650,7 @@ impl PluginWorkspaceEntity {
 
         PluginRuntimeIntent::ApplyEffects {
             plugin_id: dispatched_plugin_id,
+            audit_context,
             effects,
             refresh: PluginRuntimeAdapterRefresh::TerminalInputInterceptors,
         }
@@ -1695,6 +1825,18 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
 
+    struct AuditKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for AuditKeys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(Zeroizing::new(vec![4; 32]))
+        }
+
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
     #[gpui::test]
     fn manager_operation_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
         let runtime = Arc::new(
@@ -1864,6 +2006,7 @@ mod tests {
         entity.update(cx, |entity, _cx| {
             entity.enqueue_product_ui_effect(NativePluginProductUiEffect {
                 plugin_id: "plugin.test".to_string(),
+                audit_context: None,
                 namespace: "connections".to_string(),
                 method: "connect".to_string(),
                 args: serde_json::json!({"connectionId": "connection-test"}),
@@ -1912,6 +2055,7 @@ mod tests {
         delivery_tx
             .send(NativePluginRuntimeDelivery::CommandDispatch {
                 plugin_id: "plugin.test".to_string(),
+                audit_context: None,
                 result: Err(plugin_runtime::PluginError::runtime(
                     "command_failed",
                     sensitive_marker,
@@ -2056,6 +2200,27 @@ mod tests {
 
     #[gpui::test]
     fn hidden_plugin_manager_keeps_runtime_and_reliable_deliveries_alive(cx: &mut TestAppContext) {
+        let audit_dir = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&audit_dir.path().join("audit.db"), &AuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let audit_service = oxideterm_audit::AuditService::with_key_provider(
+            audit_dir.path().join("audit.db"),
+            AuditKeys,
+        )
+        .unwrap();
+        let mut command_context = oxideterm_audit::AuditContext::new(
+            audit_service.client(),
+            oxideterm_audit::AuditSource::Plugin,
+        );
+        command_context.agent_id = Some(oxideterm_audit::redact("plugin.test"));
+        command_context.parent_id = Some("command-parent".into());
+        let mut event_context = command_context.clone();
+        event_context.parent_id = Some("event-parent".into());
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -2111,6 +2276,7 @@ mod tests {
         runtime_delivery_tx
             .send(NativePluginRuntimeDelivery::CommandDispatch {
                 plugin_id: "plugin.test".to_string(),
+                audit_context: Some(command_context),
                 result: Ok(plugin_runtime::NativePluginRuntimeCommandDispatch {
                     plugin_id: "plugin.test".to_string(),
                     command: "demo.command".to_string(),
@@ -2126,6 +2292,7 @@ mod tests {
         runtime_delivery_tx
             .send(NativePluginRuntimeDelivery::EventDispatch {
                 plugin_id: "plugin.test".to_string(),
+                audit_context: Some(event_context),
                 result: Ok(plugin_runtime::NativePluginRuntimeEventDispatch {
                     plugin_id: "plugin.test".to_string(),
                     event: plugin_runtime::PluginEvent {
@@ -2162,20 +2329,16 @@ mod tests {
 
         workspace_owner.update(cx, |entity, cx| {
             let mut runtime_intents = entity.take_runtime_intents();
-            assert!(matches!(
-                runtime_intents.pop_front(),
-                Some(PluginRuntimeIntent::ApplyEffects {
-                    refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
-                    ..
-                })
-            ));
-            assert!(matches!(
-                runtime_intents.pop_front(),
-                Some(PluginRuntimeIntent::ApplyEffects {
-                    refresh: PluginRuntimeAdapterRefresh::TerminalInputInterceptors,
-                    ..
-                })
-            ));
+            assert!(matches!(runtime_intents.pop_front(), Some(PluginRuntimeIntent::ApplyEffects {
+                audit_context: Some(context),
+                refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
+                ..
+            }) if context.parent_id.as_deref() == Some("command-parent") && context.agent_id.as_deref().map(String::as_str) == Some("plugin.test")));
+            assert!(matches!(runtime_intents.pop_front(), Some(PluginRuntimeIntent::ApplyEffects {
+                audit_context: Some(context),
+                refresh: PluginRuntimeAdapterRefresh::TerminalInputInterceptors,
+                ..
+            }) if context.parent_id.as_deref() == Some("event-parent") && context.agent_id.as_deref().map(String::as_str) == Some("plugin.test")));
             assert!(runtime_intents.is_empty());
 
             assert!(entity.promote_confirm_request());

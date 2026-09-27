@@ -1,5 +1,23 @@
 use super::*;
 
+fn knowledge_audit(target: &str, action: &str) -> oxideterm_audit::AuditOperation {
+    let context = oxideterm_audit::AuditContext::current_request()
+        .or_else(oxideterm_audit::AuditContext::current)
+        .map(|mut context| {
+            if context.source == oxideterm_audit::AuditSource::Application {
+                context.source = oxideterm_audit::AuditSource::User;
+            }
+            context.target = Some(oxideterm_audit::redact(target));
+            context
+        });
+    oxideterm_audit::AuditOperation::in_context(
+        context.as_ref(),
+        oxideterm_audit::AuditCategory::File,
+        action,
+        None,
+    )
+}
+
 pub(in crate::workspace) enum KnowledgeExternalSyncOutcome {
     NoEdit,
     NoChanges,
@@ -419,11 +437,19 @@ impl AiWorkspaceEntity {
             Some(connection_id) => oxideterm_ai::RagDocScopeRequest::Connection { connection_id },
             None => oxideterm_ai::RagDocScopeRequest::Global,
         };
+        let mut audit = knowledge_audit("new_collection", "knowledge_collection_create");
         match oxideterm_ai::rag_create_collection(
             &store,
             oxideterm_ai::RagCreateCollectionRequest { name, scope },
         ) {
             Ok(collection) => {
+                audit.summary(&collection.id);
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Succeeded,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
                 self.select_knowledge_collection(collection.id);
                 self.knowledge_page.new_collection_name.clear();
                 self.knowledge_page.new_collection_connection_id = None;
@@ -431,6 +457,12 @@ impl AiWorkspaceEntity {
                 true
             }
             Err(_) => {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
                 self.knowledge_page.error = Some(error_message);
                 false
             }
@@ -450,6 +482,7 @@ impl AiWorkspaceEntity {
         if title.is_empty() {
             return None;
         }
+        let mut audit = knowledge_audit(&collection_id, "knowledge_document_create");
         match oxideterm_ai::rag_create_blank_document(
             &store,
             oxideterm_ai::RagCreateBlankDocumentRequest {
@@ -459,11 +492,24 @@ impl AiWorkspaceEntity {
             },
         ) {
             Ok(document) => {
+                audit.summary(&document.id);
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Succeeded,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
                 self.knowledge_page.new_document_title.clear();
                 self.knowledge_page.new_document_error = None;
                 Some((document, self.knowledge_page.new_document_open_in_workspace))
             }
             Err(_) => {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
                 self.knowledge_page.new_document_error = Some(error_message);
                 None
             }
@@ -475,10 +521,23 @@ impl AiWorkspaceEntity {
         collection_id: &str,
         error_message: String,
     ) -> bool {
+        let audit = knowledge_audit(collection_id, "knowledge_collection_delete");
         if oxideterm_ai::rag_delete_collection(&self.rag_store(), collection_id).is_err() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
             self.knowledge_page.error = Some(error_message);
             return false;
         }
+        audit.finish(
+            oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
         if self.knowledge_page.selected_collection_id.as_deref() == Some(collection_id) {
             self.knowledge_page.selected_collection_id = None;
         }
@@ -492,10 +551,23 @@ impl AiWorkspaceEntity {
         document_id: &str,
         error_message: String,
     ) -> bool {
+        let audit = knowledge_audit(document_id, "knowledge_document_delete");
         if oxideterm_ai::rag_remove_document(&self.rag_store(), document_id).is_err() {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
             self.knowledge_page.error = Some(error_message);
             return false;
         }
+        audit.finish(
+            oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
         if self
             .knowledge_page
             .external_edit
@@ -645,6 +717,8 @@ impl AiWorkspaceEntity {
             return false;
         }
         let store = self.rag_store();
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current);
         let task = cx.spawn(async move |entity, cx| {
             let Some(paths) = paths.await.filter(|paths| !paths.is_empty()) else {
                 let _ = entity.update(cx, |entity, _cx| {
@@ -653,17 +727,32 @@ impl AiWorkspaceEntity {
                 return;
             };
             let total = paths.len();
+            let mut audit = audit_context.as_ref().map(|context| {
+                let mut context = context.clone();
+                if context.source == oxideterm_audit::AuditSource::Application {
+                    context.source = oxideterm_audit::AuditSource::User;
+                }
+                context.target = Some(oxideterm_audit::redact(&collection_id));
+                context.operation(
+                    oxideterm_audit::AuditCategory::File,
+                    "knowledge_import",
+                    None,
+                )
+            });
             let _ = entity.update(cx, |entity, cx| {
                 entity.knowledge_page.import_progress = Some((0, total));
                 entity.knowledge_page.error = None;
                 entity.emit_knowledge_page_changed(cx);
             });
             let mut failed = false;
+            let mut imported = 0usize;
             for (index, path) in paths.iter().enumerate() {
                 if oxideterm_settings_model::import_knowledge_file(&store, &collection_id, path)
                     .is_err()
                 {
                     failed = true;
+                } else {
+                    imported += 1;
                 }
                 let current = index + 1;
                 let _ = entity.update(cx, |entity, cx| {
@@ -673,6 +762,25 @@ impl AiWorkspaceEntity {
                 if failed {
                     break;
                 }
+            }
+            if let Some(audit) = audit.as_mut() {
+                audit.summary(&format!("files={imported}/{total}"));
+            }
+            if let Some(audit) = audit {
+                audit.finish(
+                    if failed {
+                        if imported > 0 {
+                            oxideterm_audit::AuditOutcome::Partial
+                        } else {
+                            oxideterm_audit::AuditOutcome::Failed
+                        }
+                    } else {
+                        oxideterm_audit::AuditOutcome::Succeeded
+                    },
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
             }
             let _ = entity.update(cx, |entity, cx| {
                 entity.knowledge_page.import_progress = None;

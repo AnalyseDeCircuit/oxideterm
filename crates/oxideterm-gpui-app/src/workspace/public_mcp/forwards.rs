@@ -137,17 +137,23 @@ impl WorkspaceApp {
         let persist = args.persist;
         let node_id = lease.node_id;
         let worker_node_id = node_id.clone();
-        let worker = self.forwarding_runtime.spawn(async move {
-            service
-                .public_mcp_open_forward(
-                    &worker_node_id,
-                    owner_connection_id.as_deref(),
-                    rule,
-                    check_health,
-                    persist,
-                )
-                .await
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    service
+                        .public_mcp_open_forward(
+                            &worker_node_id,
+                            owner_connection_id.as_deref(),
+                            rule,
+                            check_health,
+                            persist,
+                        )
+                        .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -189,11 +195,16 @@ impl WorkspaceApp {
             let service = self.forwarding_service.clone();
             let forward_id = mutation.rule.id;
             let persisted = mutation.persisted;
-            self.forwarding_runtime.spawn(async move {
-                service
-                    .public_mcp_revoke_forward(&node_id, &forward_id, persisted)
-                    .await;
-            });
+            let audit_context = request.audit_context.clone();
+            self.forwarding_runtime
+                .spawn(oxideterm_audit::AuditContext::scope_optional(
+                    audit_context,
+                    async move {
+                        service
+                            .public_mcp_revoke_forward(&node_id, &forward_id, persisted)
+                            .await;
+                    },
+                ));
             request.finish(ToolEnvelope::failed(
                 "The forward grant was revoked while opening",
             ));
@@ -243,18 +254,24 @@ impl WorkspaceApp {
         let compensation_record = record.clone();
         let original_rule = current.clone();
         let owner_connection_id = record.owner_connection_id.clone();
-        let worker = self.forwarding_runtime.spawn(async move {
-            service
-                .public_mcp_change_forward(
-                    &record.node_id,
-                    owner_connection_id.as_deref(),
-                    &record.forward_id,
-                    &current,
-                    update,
-                    record.persisted,
-                )
-                .await
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    service
+                        .public_mcp_change_forward(
+                            &record.node_id,
+                            owner_connection_id.as_deref(),
+                            &record.forward_id,
+                            &current,
+                            update,
+                            record.persisted,
+                        )
+                        .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -301,7 +318,13 @@ impl WorkspaceApp {
         };
         let Some(projection) = projection else {
             // A revoked grant must not leave a late edit on an existing UI-owned forward.
-            self.compensate_revoked_forward_mutation(record, original_rule, mutation.rule, cx);
+            self.compensate_revoked_forward_mutation(
+                record,
+                original_rule,
+                mutation.rule,
+                request.audit_context.clone(),
+                cx,
+            );
             request.finish(ToolEnvelope::failed(
                 "The forward grant was revoked while changing",
             ));
@@ -342,16 +365,22 @@ impl WorkspaceApp {
         let service = self.forwarding_service.clone();
         let compensation_record = record.clone();
         let owner_connection_id = record.owner_connection_id.clone();
-        let worker = self.forwarding_runtime.spawn(async move {
-            service
-                .public_mcp_restart_forward(
-                    &record.node_id,
-                    owner_connection_id.as_deref(),
-                    &record.forward_id,
-                    record.persisted,
-                )
-                .await
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    service
+                        .public_mcp_restart_forward(
+                            &record.node_id,
+                            owner_connection_id.as_deref(),
+                            &record.forward_id,
+                            record.persisted,
+                        )
+                        .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -393,7 +422,13 @@ impl WorkspaceApp {
         else {
             drop(handles);
             // Restart begins from a stopped rule, so compensation restores that exact state.
-            self.compensate_revoked_forward_mutation(record, original_rule, mutation.rule, cx);
+            self.compensate_revoked_forward_mutation(
+                record,
+                original_rule,
+                mutation.rule,
+                request.audit_context.clone(),
+                cx,
+            );
             request.finish(ToolEnvelope::failed(
                 "The forward grant was revoked during the operation",
             ));
@@ -409,22 +444,28 @@ impl WorkspaceApp {
         record: PublicMcpForwardRecord,
         original_rule: ForwardRule,
         revoked_rule: ForwardRule,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         cx: &mut Context<Self>,
     ) {
         let service = self.forwarding_service.clone();
         let persisted = record.persisted;
-        let worker = self.forwarding_runtime.spawn(async move {
-            service
-                .public_mcp_restore_forward_after_revocation(
-                    &record.node_id,
-                    record.owner_connection_id.as_deref(),
-                    &original_rule,
-                    &revoked_rule,
-                    record.created_by_client,
-                    persisted,
-                )
-                .await
-        });
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    service
+                        .public_mcp_restore_forward_after_revocation(
+                            &record.node_id,
+                            record.owner_connection_id.as_deref(),
+                            &original_rule,
+                            &revoked_rule,
+                            record.created_by_client,
+                            persisted,
+                        )
+                        .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let restored = worker.await.is_ok_and(|result| result);
             if restored && persisted {
@@ -449,34 +490,41 @@ impl WorkspaceApp {
         let service = self.forwarding_service.clone();
         let handles = self.public_mcp.runtime_handles.clone();
         let owner_connection_id = record.owner_connection_id.clone();
-        self.forwarding_runtime.spawn(async move {
-            let result = service
-                .public_mcp_stop_forward(
-                    &record.node_id,
-                    owner_connection_id.as_deref(),
-                    &record.forward_id,
-                )
-                .await;
-            match result {
-                Ok(rule) => {
-                    let handles = handles.lock();
-                    let Some(live) = handles
-                        .forwards
-                        .get(&forward_ref)
-                        .filter(|live| live.client_ref == request.client_ref)
-                    else {
-                        request.finish(ToolEnvelope::failed(
-                            "The forward grant was revoked during the operation",
-                        ));
-                        return;
-                    };
-                    let projection = public_forward_projection(forward_ref, live, &rule);
-                    drop(handles);
-                    finish_serialized(request, json!({ "forward": projection }));
-                }
-                Err(_) => request.finish(ToolEnvelope::failed("The forward could not be stopped")),
-            }
-        });
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let result = service
+                        .public_mcp_stop_forward(
+                            &record.node_id,
+                            owner_connection_id.as_deref(),
+                            &record.forward_id,
+                        )
+                        .await;
+                    match result {
+                        Ok(rule) => {
+                            let handles = handles.lock();
+                            let Some(live) = handles
+                                .forwards
+                                .get(&forward_ref)
+                                .filter(|live| live.client_ref == request.client_ref)
+                            else {
+                                request.finish(ToolEnvelope::failed(
+                                    "The forward grant was revoked during the operation",
+                                ));
+                                return;
+                            };
+                            let projection = public_forward_projection(forward_ref, live, &rule);
+                            drop(handles);
+                            finish_serialized(request, json!({ "forward": projection }));
+                        }
+                        Err(_) => {
+                            request.finish(ToolEnvelope::failed("The forward could not be stopped"))
+                        }
+                    }
+                },
+            ));
     }
 
     pub(super) fn handle_public_mcp_forwards_remove(
@@ -501,16 +549,22 @@ impl WorkspaceApp {
         let remove_saved = args.remove_saved;
         let node_id = record.node_id.clone();
         let forward_id = record.forward_id.clone();
-        let worker = self.forwarding_runtime.spawn(async move {
-            service
-                .public_mcp_remove_forward(
-                    &node_id,
-                    owner_connection_id.as_deref(),
-                    &forward_id,
-                    remove_saved,
-                )
-                .await
-        });
+        let audit_context = request.audit_context.clone();
+        let worker = self
+            .forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    service
+                        .public_mcp_remove_forward(
+                            &node_id,
+                            owner_connection_id.as_deref(),
+                            &forward_id,
+                            remove_saved,
+                        )
+                        .await
+                },
+            ));
         cx.spawn(async move |workspace, cx| {
             let result = worker.await;
             let _ = workspace.update(cx, |workspace, cx| {
@@ -566,25 +620,33 @@ impl WorkspaceApp {
             return;
         };
         let service = self.forwarding_service.clone();
-        self.forwarding_runtime.spawn(async move {
-            match service
-                .public_mcp_discover_ports(&lease.node_id, lease.saved_connection_id.as_deref())
-                .await
-            {
-                Ok(snapshot) => finish_serialized(
-                    request,
-                    json!({
-                        "has_scanned": snapshot.has_scanned,
-                        "new_ports": snapshot.new_ports,
-                        "closed_ports": snapshot.closed_ports,
-                        "all_ports": snapshot.all_ports,
-                    }),
-                ),
-                Err(_) => request.finish(ToolEnvelope::failed(
-                    "Remote listening ports could not be discovered",
-                )),
-            }
-        });
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    match service
+                        .public_mcp_discover_ports(
+                            &lease.node_id,
+                            lease.saved_connection_id.as_deref(),
+                        )
+                        .await
+                    {
+                        Ok(snapshot) => finish_serialized(
+                            request,
+                            json!({
+                                "has_scanned": snapshot.has_scanned,
+                                "new_ports": snapshot.new_ports,
+                                "closed_ports": snapshot.closed_ports,
+                                "all_ports": snapshot.all_ports,
+                            }),
+                        ),
+                        Err(_) => request.finish(ToolEnvelope::failed(
+                            "Remote listening ports could not be discovered",
+                        )),
+                    }
+                },
+            ));
     }
 }
 

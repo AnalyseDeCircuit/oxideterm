@@ -76,11 +76,91 @@ impl RemoteDesktopSessionEntity {
         if let RemoteDesktopHelperRequest::Resize { size, .. } = &request {
             self.state.mark_resize_requested(*size);
         }
-        if let Some(worker) = self.worker.as_ref() {
-            worker.send(request);
-        } else if matches!(request, RemoteDesktopHelperRequest::Close) {
-            self.state
-                .apply_event(RemoteDesktopHelperEvent::Disconnected { reason: None });
+        let clipboard = match &request {
+            RemoteDesktopHelperRequest::ClipboardText { text } => {
+                Some(("local_to_remote text", Some(text.len() as u64)))
+            }
+            RemoteDesktopHelperRequest::PasteText { text } => Some((
+                "local_to_remote text",
+                Some(text.expose_secret().len() as u64),
+            )),
+            RemoteDesktopHelperRequest::ClipboardData { data } => {
+                Some(("local_to_remote image", Some(data.bytes.len() as u64)))
+            }
+            _ => None,
+        };
+        let file_transfer = match &request {
+            RemoteDesktopHelperRequest::ClipboardFiles { transfer_id, paths } => Some((
+                transfer_id.clone(),
+                format!("local_to_remote files={}", paths.len()),
+            )),
+            RemoteDesktopHelperRequest::VncDownloadRemoteFiles {
+                transfer_id,
+                remote_paths,
+                ..
+            } => Some((
+                transfer_id.clone(),
+                format!("remote_to_local files={}", remote_paths.len()),
+            )),
+            _ => None,
+        };
+        let cancelling_transfer = matches!(
+            &request,
+            RemoteDesktopHelperRequest::CancelVncFileTransfer { .. }
+        );
+        let sent = if let Some(worker) = self.worker.as_ref() {
+            worker.send(request)
+        } else {
+            if matches!(request, RemoteDesktopHelperRequest::Close) {
+                self.state
+                    .apply_event(RemoteDesktopHelperEvent::Disconnected { reason: None });
+            }
+            false
+        };
+        if cancelling_transfer {
+            self.observe_desktop(
+                oxideterm_audit::AuditCategory::File,
+                "desktop_file_transfer",
+                "cancel requested",
+                if sent {
+                    oxideterm_audit::AuditOutcome::CancelRequested
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                None,
+            );
+        }
+        if let Some((detail, bytes)) = clipboard {
+            self.observe_desktop(
+                oxideterm_audit::AuditCategory::File,
+                "desktop_clipboard_transfer",
+                detail,
+                if sent {
+                    oxideterm_audit::AuditOutcome::Sent
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                bytes,
+            );
+        }
+        if let Some((transfer_id, detail)) = file_transfer {
+            if let Some(context) = self.audit_context.as_ref() {
+                let audit = context.for_request().operation(
+                    oxideterm_audit::AuditCategory::File,
+                    "desktop_file_transfer",
+                    Some(&detail),
+                );
+                if sent {
+                    self.file_audits.insert(transfer_id, audit);
+                } else {
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Dispatch,
+                        None,
+                        None,
+                    );
+                }
+            }
         }
     }
 

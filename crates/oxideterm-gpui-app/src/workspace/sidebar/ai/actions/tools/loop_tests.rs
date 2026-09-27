@@ -70,6 +70,72 @@ mod agent_loop_tests {
     }
 
     #[tokio::test]
+    async fn ui_tool_delivery_preserves_audit_request_identity() {
+        use oxideterm_audit::{AuditContext, AuditKeyProvider, AuditService, AuditSource};
+        use zeroize::Zeroizing;
+
+        struct Keys;
+        impl AuditKeyProvider for Keys {
+            fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                Ok(Zeroizing::new(vec![31; 32]))
+            }
+            fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+                self.load(id)
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let audit = AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let mut context = AuditContext::new(audit.client(), AuditSource::Ai);
+        context.parent_id = Some("originating-tool-operation".into());
+        context.agent_id = Some(Zeroizing::new("request-agent".into()));
+        let (sender, receiver) = AiStreamDeliverySender::channel();
+        let host = std::thread::spawn(move || {
+            let delivery = receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+            let AiStreamDeliveryEvent::ToolExecutionRequested {
+                audit_context,
+                tool_call_id,
+                name,
+                sender,
+                ..
+            } = delivery.event
+            else {
+                panic!("expected a UI tool request");
+            };
+            let delivered = audit_context.expect("request lost its audit context at the UI boundary");
+            assert_eq!(delivered.source, AuditSource::Ai);
+            assert_eq!(
+                delivered.parent_id.as_deref(),
+                Some("originating-tool-operation")
+            );
+            assert_eq!(
+                delivered.agent_id.as_deref().map(String::as_str),
+                Some("request-agent")
+            );
+            sender.send(executed(tool_call_id, name, "accepted")).unwrap();
+        });
+        let result = context
+            .scope(execute_ai_tool_uncoordinated(
+                &services(directory.path()),
+                &sender,
+                1,
+                &ToolSessionId::new(),
+                "conversation",
+                "assistant",
+                "background-create".into(),
+                "create_background_task".into(),
+                json!({}),
+                false,
+                false,
+                vec![],
+                None,
+            ))
+            .await;
+        host.join().unwrap();
+        assert_eq!(result.tool_call_id, "background-create");
+        assert_eq!(result.output, "accepted");
+    }
+
+    #[tokio::test]
     async fn local_command_cleanup_and_request_ownership_are_independent() {
         use oxideterm_ai::agent::{AgentModel, AgentResourceCoordinator, AgentRuntime, AgentScope, AgentToolLease};
         let runtime = AgentRuntime::new(1);

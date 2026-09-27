@@ -53,6 +53,25 @@ impl WorkspaceApp {
         let store = self.ai_entity.read(cx).rag_store();
         let operation = clipboard.clone();
         let target_for_result = target.clone();
+        let audit_context = oxideterm_audit::AuditContext::current_request()
+            .or_else(oxideterm_audit::AuditContext::current)
+            .map(|mut context| {
+                if context.source == oxideterm_audit::AuditSource::Application {
+                    context.source = oxideterm_audit::AuditSource::User;
+                }
+                context.target = Some(oxideterm_audit::redact(&clipboard.document_id));
+                context
+            });
+        let audit = oxideterm_audit::AuditOperation::in_context(
+            audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::File,
+            if clipboard.cut {
+                "knowledge_document_move"
+            } else {
+                "knowledge_document_copy"
+            },
+            Some(&format!("destination_collection={target}")),
+        );
         let task = cx.spawn(async move |workspace, cx| {
             let result = cx
                 .background_executor()
@@ -66,7 +85,8 @@ impl WorkspaceApp {
                                 )
                             })?;
                     if operation.cut {
-                        let moved = if source.collection_id != target {
+                        let changed = source.collection_id != target;
+                        let moved = if changed {
                             store.edit_document_metadata(
                                 &source.id,
                                 None,
@@ -76,7 +96,7 @@ impl WorkspaceApp {
                         } else {
                             source
                         };
-                        Ok((moved.id, moved.version))
+                        Ok((moved.id, moved.version, changed))
                     } else {
                         oxideterm_ai::rag_copy_document(
                             &store,
@@ -84,10 +104,20 @@ impl WorkspaceApp {
                             target,
                             copy_title.replace("{{title}}", &source.title),
                         )
-                        .map(|doc| (doc.id, doc.version))
+                        .map(|doc| (doc.id, doc.version, true))
                     }
                 })
                 .await;
+            audit.finish(
+                match &result {
+                    Ok((_, _, true)) => oxideterm_audit::AuditOutcome::Succeeded,
+                    Ok((_, _, false)) => oxideterm_audit::AuditOutcome::Unchanged,
+                    Err(_) => oxideterm_audit::AuditOutcome::Failed,
+                },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
             let _ = workspace.update(cx, |workspace, cx| {
                 let selected = workspace
                     .knowledge_workspace
@@ -98,7 +128,7 @@ impl WorkspaceApp {
                 workspace.knowledge_workspace.update(cx, |state, cx| {
                     state.metadata_task = None;
                     match &result {
-                        Ok((id, version)) => {
+                        Ok((id, version, _)) => {
                             if clipboard.cut && state.clipboard.as_ref() == Some(&clipboard) {
                                 state.clipboard = None;
                             }
@@ -120,7 +150,7 @@ impl WorkspaceApp {
                         }
                     }
                 });
-                if let Ok((id, _)) = result {
+                if let Ok((id, _, _)) = result {
                     workspace.refresh_knowledge_navigator(true, cx);
                     let state = workspace.knowledge_workspace.read(cx);
                     if selected.as_ref() == Some(&target_for_result)

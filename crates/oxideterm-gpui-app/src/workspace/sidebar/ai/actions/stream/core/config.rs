@@ -783,6 +783,10 @@ impl WorkspaceApp {
             prompt.push_str(&oxideterm_ai::sanitize_for_ai(task_system_prompt));
         }
         if let Some(skill_catalog_prompt) = self.ai_skill_catalog_prompt() {
+            if let Some(mut context) = oxideterm_audit::AuditContext::current_request().or_else(oxideterm_audit::AuditContext::current) {
+                context.source = oxideterm_audit::AuditSource::Ai;
+                context.observe(oxideterm_audit::AuditCategory::Automation, "ai_context_provided", Some(&format!("provider=skills model={} bytes={}", config.model, skill_catalog_prompt.len())), oxideterm_audit::AuditOutcome::Sent, oxideterm_audit::AuditEvidence::Dispatch, oxideterm_audit::AuditAuthorization::NotRequired);
+            }
             prompt.push_str("\n\n");
             prompt.push_str(&skill_catalog_prompt);
         }

@@ -102,7 +102,22 @@ impl WorkspaceApp {
             ));
             return;
         };
+        let mut audit = session.read(cx).audit_context().map(|context| {
+            context.for_request().operation(
+                oxideterm_audit::AuditCategory::File,
+                "desktop_screenshot",
+                Some("png"),
+            )
+        });
         if after_generation == Some(frame.generation) {
+            if let Some(audit) = audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Unchanged,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
+            }
             finish_serialized(
                 request,
                 json!({
@@ -116,6 +131,14 @@ impl WorkspaceApp {
         }
         let pixel_count = u64::from(frame.size.width).saturating_mul(u64::from(frame.size.height));
         if pixel_count > PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS {
+            if let Some(audit) = audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+            }
             request.finish(ToolEnvelope::failed(
                 "The remote framebuffer exceeds the supported artifact dimensions",
             ));
@@ -128,17 +151,23 @@ impl WorkspaceApp {
         let height = frame.size.height;
         let generation = frame.generation;
         let graphics_epoch = frame.graphics_epoch;
-        let encode_task = cx.background_executor().spawn(async move {
-            let png = encode_public_mcp_desktop_png(frame)?;
-            artifact_store
-                .stage(
-                    artifact_client_ref,
-                    &png,
-                    "image/png".to_owned(),
-                    Some(format!("remote-desktop-{generation}.png")),
-                )
-                .map_err(|error| error.to_string())
-        });
+        let encode_context = request.audit_context.clone();
+        let encode_task =
+            cx.background_executor()
+                .spawn(oxideterm_audit::AuditContext::scope_optional(
+                    encode_context,
+                    async move {
+                        let png = encode_public_mcp_desktop_png(frame)?;
+                        artifact_store
+                            .stage(
+                                artifact_client_ref,
+                                &png,
+                                "image/png".to_owned(),
+                                Some(format!("remote-desktop-{generation}.png")),
+                            )
+                            .map_err(|error| error.to_string())
+                    },
+                ));
         cx.spawn(async move |workspace, cx| {
             let result = encode_task.await;
             let _ = workspace.update(cx, move |workspace, _cx| match result {
@@ -165,6 +194,18 @@ impl WorkspaceApp {
                                     && current.observing_frames
                             });
                     if request.is_cancelled() || !artifact_authorized || live.is_none() {
+                        if let Some(audit) = audit.take() {
+                            audit.finish(
+                                if request.is_cancelled() {
+                                    oxideterm_audit::AuditOutcome::Cancelled
+                                } else {
+                                    oxideterm_audit::AuditOutcome::Denied
+                                },
+                                oxideterm_audit::AuditEvidence::Lifecycle,
+                                None,
+                                None,
+                            );
+                        }
                         workspace
                             .public_mcp
                             .state
@@ -186,6 +227,14 @@ impl WorkspaceApp {
                         });
                         live.frame_artifacts.insert(artifact.artifact_ref.clone());
                     }
+                    if let Some(audit) = audit.take() {
+                        audit.finish(
+                            oxideterm_audit::AuditOutcome::Succeeded,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            Some(artifact.size),
+                        );
+                    }
                     finish_serialized(
                         request,
                         json!({
@@ -199,7 +248,17 @@ impl WorkspaceApp {
                         }),
                     );
                 }
-                Err(error) => request.finish(ToolEnvelope::failed(error)),
+                Err(error) => {
+                    if let Some(audit) = audit.take() {
+                        audit.finish(
+                            oxideterm_audit::AuditOutcome::Failed,
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            None,
+                        );
+                    }
+                    request.finish(ToolEnvelope::failed(error));
+                }
             });
         })
         .detach();
@@ -282,10 +341,19 @@ impl WorkspaceApp {
             return;
         };
         match session.read(cx).public_mcp_clipboard_snapshot(args.kind) {
-            Ok(RemoteDesktopPublicClipboardSnapshot::Text(text)) => finish_serialized(
-                request,
-                json!({ "desktop_ref": desktop_ref, "kind": "text", "text": text.as_str() }),
-            ),
+            Ok(RemoteDesktopPublicClipboardSnapshot::Text(text)) => {
+                session.read(cx).observe_desktop(
+                    oxideterm_audit::AuditCategory::File,
+                    "desktop_clipboard_transfer",
+                    "remote_to_mcp text",
+                    oxideterm_audit::AuditOutcome::Sent,
+                    Some(text.len() as u64),
+                );
+                finish_serialized(
+                    request,
+                    json!({ "desktop_ref": desktop_ref, "kind": "text", "text": text.as_str() }),
+                );
+            }
             Ok(RemoteDesktopPublicClipboardSnapshot::Image { format, bytes }) => {
                 let media_type = remote_desktop_clipboard_media_type(format).to_owned();
                 let artifact_store = self.public_mcp.state.artifacts.clone();
@@ -296,6 +364,13 @@ impl WorkspaceApp {
                     Some("remote-clipboard".to_owned()),
                 ) {
                     Ok(artifact) => {
+                        session.read(cx).observe_desktop(
+                            oxideterm_audit::AuditCategory::File,
+                            "desktop_clipboard_transfer",
+                            "remote_to_mcp image",
+                            oxideterm_audit::AuditOutcome::Sent,
+                            Some(bytes.len() as u64),
+                        );
                         if let Some(record) = self.public_mcp.desktops.get_mut(&desktop_ref) {
                             record.clipboard_artifacts.retain(|artifact_ref| {
                                 artifact_store.is_available(&request.client_ref, artifact_ref)
@@ -402,13 +477,22 @@ impl WorkspaceApp {
     ) {
         match effect {
             PublicMcpDesktopWindowEffect::Open(request) => {
-                self.apply_public_mcp_desktop_open(request, window, cx)
+                let audit_context = request.audit_context.clone();
+                oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+                    self.apply_public_mcp_desktop_open(request, window, cx)
+                })
             }
             PublicMcpDesktopWindowEffect::Reconnect(request) => {
-                self.apply_public_mcp_desktop_reconnect(request, window, cx)
+                let audit_context = request.audit_context.clone();
+                oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+                    self.apply_public_mcp_desktop_reconnect(request, window, cx)
+                })
             }
             PublicMcpDesktopWindowEffect::Close(request) => {
-                self.apply_public_mcp_desktop_close(request, window, cx)
+                let audit_context = request.audit_context.clone();
+                oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+                    self.apply_public_mcp_desktop_close(request, window, cx)
+                })
             }
             PublicMcpDesktopWindowEffect::Revoke(tab_ids) => {
                 for tab_id in tab_ids {
@@ -662,31 +746,41 @@ impl WorkspaceApp {
             session_options: saved.session_options,
         };
         if let Some(ssh_gateway_connection_id) = ssh_gateway_connection_id {
-            let pending_tunnel = match self.start_remote_desktop_ssh_tunnel(
-                ssh_gateway_connection_id,
-                profile.endpoint.clone(),
-                cx,
-            ) {
-                Ok(pending_tunnel) => pending_tunnel,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
+            let pending_tunnel =
+                match self.start_remote_desktop_ssh_tunnel(ssh_gateway_connection_id, &profile, cx)
+                {
+                    Ok(pending_tunnel) => pending_tunnel,
+                    Err(error) => {
+                        request.finish(ToolEnvelope::failed(error));
+                        return;
+                    }
+                };
             let window_handle = window.window_handle();
+            let audit_context = request.audit_context.clone();
+            let tunnel_context = audit_context.clone();
             cx.spawn(
-                async move |workspace, cx| match pending_tunnel.finish().await {
+                async move |workspace, cx| match oxideterm_audit::AuditContext::scope_optional(
+                    tunnel_context,
+                    pending_tunnel.finish(),
+                )
+                .await
+                {
                     Ok((transport_endpoint, lease)) => {
                         profile.transport_endpoint = Some(transport_endpoint);
                         let _ = cx.update_window(window_handle, move |_, window, cx| {
                             let _ = workspace.update(cx, |workspace, cx| {
-                                workspace.finish_public_mcp_desktop_open(
-                                    request,
-                                    profile,
-                                    password,
-                                    Some(lease),
-                                    window,
-                                    cx,
+                                oxideterm_audit::AuditContext::with_sync_request(
+                                    audit_context.as_ref(),
+                                    || {
+                                        workspace.finish_public_mcp_desktop_open(
+                                            request,
+                                            profile,
+                                            password,
+                                            Some(lease),
+                                            window,
+                                            cx,
+                                        );
+                                    },
                                 );
                             });
                         });

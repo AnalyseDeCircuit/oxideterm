@@ -398,7 +398,29 @@ impl WorkspaceApp {
         path: &str,
         cx: &mut Context<Self>,
     ) {
-        if let Err(error) = open_path_in_external_app(path) {
+        let audit = oxideterm_audit::AuditContext::current().map(|mut context| {
+            context.source = oxideterm_audit::AuditSource::User;
+            context.target = Some(oxideterm_audit::redact(path));
+            context.operation(
+                oxideterm_audit::AuditCategory::File,
+                "file_external_open",
+                Some("local_application_launch"),
+            )
+        });
+        let result = open_path_in_external_app(path);
+        if let Some(audit) = audit {
+            audit.finish(
+                if result.is_ok() {
+                    oxideterm_audit::AuditOutcome::Sent
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
+        }
+        if let Err(error) = result {
             let error = format!(
                 "{}: {}",
                 self.i18n.t("sftp.toast.open_external_failed"),
@@ -420,8 +442,19 @@ impl WorkspaceApp {
         };
         let tx = self.sftp_view().read(cx).worker_sender();
         let runtime = self.forwarding_runtime.clone();
+        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::User;
+                context
+            })
+        });
         runtime.spawn(async move {
-            let result = load_remote_sftp_preview(backend, &path).await;
+            let task = load_remote_sftp_preview(backend, &path);
+            let result = if let Some(context) = audit_request {
+                context.scope(task).await
+            } else {
+                task.await
+            };
             let _ = tx.send(SftpWorkerResult::PreviewLoaded {
                 generation,
                 path,
@@ -469,8 +502,19 @@ impl WorkspaceApp {
         let tx = self.sftp_view().read(cx).worker_sender();
         let error_prefix = self.i18n.t("sftp.toast.load_more_failed");
         let runtime = self.forwarding_runtime.clone();
+        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::User;
+                context
+            })
+        });
         runtime.spawn(async move {
-            let result = load_remote_sftp_preview_hex(backend, &path, offset).await;
+            let task = load_remote_sftp_preview_hex(backend, &path, offset);
+            let result = if let Some(context) = audit_request {
+                context.scope(task).await
+            } else {
+                task.await
+            };
             let _ = tx.send(SftpWorkerResult::PreviewHexLoaded {
                 generation,
                 path,
@@ -498,15 +542,25 @@ impl WorkspaceApp {
         };
         let network_error_message = self.i18n.t("sftp.preview.network_error");
         let runtime = self.forwarding_runtime.clone();
+        let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
+            oxideterm_audit::AuditContext::current().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::User;
+                context
+            })
+        });
         runtime.spawn(async move {
-            let result = save_remote_sftp_preview(
+            let task = save_remote_sftp_preview(
                 backend,
                 &path,
                 content.as_ref(),
                 encoding.as_ref(),
                 line_ending,
-            )
-            .await;
+            );
+            let result = if let Some(context) = audit_request {
+                context.scope(task).await
+            } else {
+                task.await
+            };
             let _ = tx.send(SftpWorkerResult::PreviewSaved {
                 generation,
                 path,

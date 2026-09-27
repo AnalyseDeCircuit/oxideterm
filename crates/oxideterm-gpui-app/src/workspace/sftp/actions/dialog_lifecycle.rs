@@ -160,7 +160,18 @@ impl WorkspaceApp {
                             let local_path = self.sftp_view().read(cx).local_path.clone();
                             let old_path = join_local_path(&local_path, &old_name);
                             let new_path = join_local_path(&local_path, &new_name);
-                            match std::fs::rename(old_path, new_path) {
+                            let audit = oxideterm_audit::AuditOperation::in_context(
+                                crate::workspace::file_manager::local_file_audit_context(
+                                    oxideterm_audit::AuditSource::User,
+                                )
+                                .as_ref(),
+                                oxideterm_audit::AuditCategory::File,
+                                "file_rename",
+                                Some(&format!("{old_path} → {new_path}")),
+                            );
+                            let result = std::fs::rename(&old_path, &new_path);
+                            audit.result(&result);
+                            match result {
                                 Ok(()) => {
                                     if let Ok(files) = list_local_files(&local_path) {
                                         self.sftp_view().update(cx, |sftp, cx| {
@@ -250,7 +261,18 @@ impl WorkspaceApp {
                         SftpPane::Local => {
                             let local_path = self.sftp_view().read(cx).local_path.clone();
                             let path = join_local_path(&local_path, &name);
-                            match std::fs::create_dir_all(path) {
+                            let audit = oxideterm_audit::AuditOperation::in_context(
+                                crate::workspace::file_manager::local_file_audit_context(
+                                    oxideterm_audit::AuditSource::User,
+                                )
+                                .as_ref(),
+                                oxideterm_audit::AuditCategory::File,
+                                "file_mkdir",
+                                Some(&path),
+                            );
+                            let result = std::fs::create_dir_all(&path);
+                            audit.result(&result);
+                            match result {
                                 Ok(()) => {
                                     if let Ok(files) = list_local_files(&local_path) {
                                         self.sftp_view().update(cx, |sftp, cx| {
@@ -333,20 +355,61 @@ impl WorkspaceApp {
                     SftpPane::Local => {
                         let local_path = self.sftp_view().read(cx).local_path.clone();
                         let count = files.len();
+                        let context = crate::workspace::file_manager::local_file_audit_context(
+                            oxideterm_audit::AuditSource::User,
+                        );
+                        let mut audit = oxideterm_audit::AuditOperation::in_context(
+                            context.as_ref(),
+                            oxideterm_audit::AuditCategory::File,
+                            "file_delete_recursive",
+                            Some(&format!("path={local_path}; requested={count}")),
+                        );
+                        let child_context = context.map(|mut context| {
+                            context.parent_id = audit.id().map(str::to_owned);
+                            context
+                        });
                         let mut result = Ok(());
+                        let mut removed = 0usize;
+                        let mut failed_path = None;
                         for name in files {
                             let path = join_local_path(&local_path, &name);
-                            result = if std::fs::metadata(&path)
-                                .is_ok_and(|metadata| metadata.is_dir())
-                            {
-                                std::fs::remove_dir_all(path)
+                            let is_directory =
+                                std::fs::metadata(&path).is_ok_and(|metadata| metadata.is_dir());
+                            let child = oxideterm_audit::AuditOperation::in_context(
+                                child_context.as_ref(),
+                                oxideterm_audit::AuditCategory::File,
+                                if is_directory {
+                                    "file_delete_recursive"
+                                } else {
+                                    "file_delete"
+                                },
+                                Some(&path),
+                            );
+                            result = if is_directory {
+                                std::fs::remove_dir_all(&path)
                             } else {
-                                std::fs::remove_file(path)
+                                std::fs::remove_file(&path)
                             };
+                            child.result(&result);
                             if result.is_err() {
+                                failed_path = Some(path);
                                 break;
                             }
+                            removed += 1;
                         }
+                        audit.summary(&format!("path={local_path}; requested={count}; removed={removed}; unprocessed={}; failed_path={}; nested_items=unavailable:remove_dir_all", count.saturating_sub(removed + usize::from(result.is_err())), failed_path.as_deref().unwrap_or("none")));
+                        audit.finish(
+                            if result.is_ok() {
+                                oxideterm_audit::AuditOutcome::Succeeded
+                            } else if removed > 0 {
+                                oxideterm_audit::AuditOutcome::Partial
+                            } else {
+                                oxideterm_audit::AuditOutcome::Failed
+                            },
+                            oxideterm_audit::AuditEvidence::Protocol,
+                            None,
+                            None,
+                        );
                         match result {
                             Ok(()) => {
                                 if let Ok(files) = list_local_files(&local_path) {

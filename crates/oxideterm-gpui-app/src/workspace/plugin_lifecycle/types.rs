@@ -26,11 +26,13 @@ pub(in crate::workspace) enum NativePluginRuntimeDelivery {
     },
     CommandDispatch {
         plugin_id: String,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         result:
             Result<plugin_runtime::NativePluginRuntimeCommandDispatch, plugin_runtime::PluginError>,
     },
     EventDispatch {
         plugin_id: String,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         result:
             Result<plugin_runtime::NativePluginRuntimeEventDispatch, plugin_runtime::PluginError>,
     },
@@ -95,6 +97,7 @@ pub(in crate::workspace) enum NativePluginTerminalAction {
 /// Describes a plugin effect that must be applied with a live workspace window.
 pub(in crate::workspace) struct NativePluginProductUiEffect {
     pub(in crate::workspace) plugin_id: String,
+    pub(in crate::workspace) audit_context: Option<oxideterm_audit::AuditContext>,
     pub(in crate::workspace) namespace: String,
     pub(in crate::workspace) method: String,
     pub(in crate::workspace) args: Value,

@@ -250,12 +250,7 @@ impl WorkspaceApp {
             } else {
                 self.notification_center.notifications.unread_count
             };
-            let event_count = if self.notification_center.event_log.dnd_enabled {
-                0
-            } else {
-                self.notification_center.event_log.unread_count
-            };
-            notification_count.saturating_add(event_count)
+            notification_count
         } else if section == SidebarSection::Workspace {
             self.visible_local_terminal_session_count(cx)
                 .saturating_add(self.detached_local_terminals.len())
@@ -264,10 +259,8 @@ impl WorkspaceApp {
             0
         };
         let badge_is_error = section == SidebarSection::Notifications
-            && ((!self.notification_center.notifications.dnd_enabled
-                && self.notification_center.notifications.unread_critical_count > 0)
-                || (!self.notification_center.event_log.dnd_enabled
-                    && self.notification_center.event_log.unread_errors > 0));
+            && !self.notification_center.notifications.dnd_enabled
+            && self.notification_center.notifications.unread_critical_count > 0;
         let badge_color = if badge_is_error {
             theme.error
         } else if section == SidebarSection::Workspace && !self.detached_local_terminals.is_empty()

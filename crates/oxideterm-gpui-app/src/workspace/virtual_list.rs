@@ -161,23 +161,6 @@ fn nearest_virtual_scroll_strategy(
     }
 }
 
-pub(crate) fn tauri_virtual_list_is_near_bottom(
-    handle: &UniformListScrollHandle,
-    threshold: Pixels,
-) -> bool {
-    // Browser scroll containers keep an event log "sticky" while the user is
-    // within a small bottom threshold. GPUI's uniform list owns the same base
-    // scroll handle internally, so expose the threshold test once for migrated
-    // lists instead of reimplementing per sidebar or log view.
-    let base_handle = handle.0.borrow().base_handle.clone();
-    let max_offset = base_handle.max_offset();
-    if max_offset.y <= px(0.0) {
-        return true;
-    }
-    let remaining_to_bottom = max_offset.y + base_handle.offset().y;
-    remaining_to_bottom <= threshold
-}
-
 pub(crate) fn uniform_list_edge_autoscroll(
     handle: &UniformListScrollHandle,
     position: Point<Pixels>,

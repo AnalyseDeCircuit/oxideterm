@@ -1792,7 +1792,8 @@ impl WorkspaceApp {
         };
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
         let services = self.ai_live_tool_services();
-        self.forwarding_runtime.spawn(async move {
+        let audit_context = oxideterm_audit::AuditContext::current_request();
+        let execution = async move {
             let mut sender = sender;
             let operation = async {
                 match tool_name.as_str() {
@@ -1858,7 +1859,11 @@ impl WorkspaceApp {
                     started.elapsed().as_millis(),
                 ));
             }
-        });
+        };
+        self.forwarding_runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+            audit_context,
+            execution,
+        ));
     }
 
     fn send_ai_live_resource_validation_failure(

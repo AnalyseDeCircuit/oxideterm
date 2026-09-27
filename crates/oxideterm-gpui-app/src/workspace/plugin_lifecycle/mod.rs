@@ -1242,11 +1242,24 @@ impl WorkspaceApp {
             match intent {
                 plugin_entity::PluginRuntimeIntent::ApplyEffects {
                     plugin_id,
+                    audit_context,
                     effects,
                     refresh,
                 } => {
+                    let audit_context = audit_context.or_else(|| {
+                        oxideterm_audit::AuditContext::current().map(|mut context| {
+                            context.source = oxideterm_audit::AuditSource::Plugin;
+                            context.agent_id = Some(oxideterm_audit::redact(&plugin_id));
+                            context
+                        })
+                    });
                     for effect in effects {
-                        self.handle_native_plugin_outbound_effect(&plugin_id, effect, cx);
+                        oxideterm_audit::AuditContext::with_sync_request(
+                            audit_context.as_ref(),
+                            || {
+                                self.handle_native_plugin_outbound_effect(&plugin_id, effect, cx);
+                            },
+                        );
                     }
                     self.refresh_native_plugin_event_polling(cx);
                     match refresh {
@@ -1469,141 +1482,229 @@ impl WorkspaceApp {
             .map(|transport| transport.plugin_id.clone())
             .collect::<std::collections::HashSet<_>>();
         Arc::new(move |plugin_id, permissions, call| {
-            if call.namespace == "api" && call.method == "invoke" {
-                return Some(native_plugin_api_invoke_response(
-                    &snapshot,
-                    &plugin_id,
-                    call,
-                    NativePluginBackendAdapters {
-                        permissions: &permissions,
-                        sftp_router: &sftp_router,
-                        sftp_runtime: &sftp_runtime,
-                        forwarding_registry: &forwarding_registry,
-                        forwarding_runtime: &forwarding_runtime,
-                        transfer_manager: &transfer_manager,
-                    },
-                ));
-            }
-            if call.namespace == "ui" && call.method == "showProgress" {
-                return Some(native_plugin_show_progress_response(
-                    &plugin_id,
-                    call,
-                    Some(&request_senders.sync),
-                ));
-            }
-            if call.namespace == "ui" && call.method == "showConfirm" {
-                return Some(native_plugin_show_confirm_response(
-                    &plugin_id,
-                    call,
-                    &request_senders.confirm,
-                ));
-            }
-            if call.namespace == "secrets" {
-                return Some(native_plugin_secret_response(
-                    &plugin_id,
-                    call,
-                    &plugin_secret_store,
-                ));
-            }
-            if call.namespace == "sftp" {
-                return Some(native_plugin_sftp_response(
-                    call,
-                    &permissions,
-                    &sftp_router,
-                    &sftp_runtime,
-                    Some(&transfer_manager),
-                ));
-            }
-            if call.namespace == "scp" {
-                return Some(native_plugin_scp_response(
-                    call,
-                    &permissions,
-                    &sftp_router,
-                    &sftp_runtime,
-                    &transfer_manager,
-                ));
-            }
-            if call.namespace == "forward" {
-                return Some(native_plugin_forward_response(
-                    call,
-                    &permissions,
-                    &forwarding_registry,
-                    &forwarding_runtime,
-                    &forward_valid_owner_connection_ids,
-                ));
-            }
-            if call.namespace == "sync" {
-                return Some(native_plugin_sync_response(
-                    &plugin_id,
-                    call,
-                    &sync_connection_store,
-                    &sync_saved_connections,
-                    sync_saved_connections_snapshot.as_ref(),
-                    sync_local_metadata.as_ref(),
-                    sync_saved_forwards_revision.as_deref(),
-                    &sync_plugin_settings,
-                    &sync_plugin_settings_revisions,
-                    Some(&request_senders.sync),
-                ));
-            }
-            if call.namespace == "transfers" {
-                return Some(native_plugin_transfers_response(call, &transfer_manager));
-            }
-            if call.namespace == "hostTools"
-                && matches!(
-                    call.method.as_str(),
-                    "getExtensions" | "capture" | "execute" | "terminate" | "runExtension"
+            let audit_context = if matches!(
+                call.namespace.as_str(),
+                "api"
+                    | "secrets"
+                    | "sftp"
+                    | "scp"
+                    | "forward"
+                    | "sync"
+                    | "transfers"
+                    | "hostTools"
+                    | "terminal"
+            ) {
+                oxideterm_audit::AuditContext::current_request()
+                    .or_else(oxideterm_audit::AuditContext::current)
+                    .map(|mut context| {
+                        context.source = oxideterm_audit::AuditSource::Plugin;
+                        context.agent_id = Some(oxideterm_audit::redact(&plugin_id));
+                        context
+                    })
+            } else {
+                None
+            };
+            let audit = audit_context.as_ref().map(|context| {
+                context.operation(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "plugin_call",
+                    Some(&format!("{}.{}", call.namespace, call.method)),
                 )
-            {
-                return Some(native_plugin_host_tools_response(
-                    &plugin_id,
-                    call,
-                    &permissions,
-                    snapshot.registry.contributions(),
-                    &sftp_router,
-                    &sftp_runtime,
-                ));
-            }
-            if call.namespace == "profiler" {
-                return Some(native_plugin_profiler_response(
-                    call,
-                    &profiler_registry,
-                    &profiler_node_connection_ids,
-                ));
-            }
-            if call.namespace == "ide" {
-                return Some(native_plugin_ide_response(call, &ide_snapshot));
-            }
-            if call.namespace == "ai" {
-                return Some(native_plugin_ai_response(call, &ai_snapshot));
-            }
-            if call.namespace == "terminal"
-                && matches!(
-                    call.method.as_str(),
-                    "writeToActive" | "writeToNode" | "clearBuffer"
-                )
-            {
-                return Some(native_plugin_terminal_response(
-                    call,
-                    &request_senders.terminal,
-                ));
-            }
-            if call.namespace == "terminal" && call.method == "openTelnet" {
-                if !telnet_transport_plugins.contains(&plugin_id) {
-                    return Some(plugin_runtime::PluginResponse::error(
-                        call.request_id,
-                        plugin_runtime::PluginError::protocol(
-                            "terminal_transport_not_declared",
-                            "terminal.openTelnet requires contributes.terminalTransports to include \"telnet\"",
-                        ),
-                    ));
+            });
+            let request_context = audit_context.map(|mut context| {
+                context.parent_id = audit
+                    .as_ref()
+                    .and_then(|operation| operation.id().map(str::to_owned));
+                context
+            });
+            let response = oxideterm_audit::AuditContext::with_sync_request(
+                request_context.as_ref(),
+                || {
+                    (|| {
+                        if call.namespace == "api" && call.method == "invoke" {
+                            return Some(native_plugin_api_invoke_response(
+                                &snapshot,
+                                &plugin_id,
+                                call,
+                                NativePluginBackendAdapters {
+                                    audit_context: request_context.as_ref(),
+                                    permissions: &permissions,
+                                    sftp_router: &sftp_router,
+                                    sftp_runtime: &sftp_runtime,
+                                    forwarding_registry: &forwarding_registry,
+                                    forwarding_runtime: &forwarding_runtime,
+                                    transfer_manager: &transfer_manager,
+                                },
+                            ));
+                        }
+                        if call.namespace == "ui" && call.method == "showProgress" {
+                            return Some(native_plugin_show_progress_response(
+                                &plugin_id,
+                                call,
+                                Some(&request_senders.sync),
+                            ));
+                        }
+                        if call.namespace == "ui" && call.method == "showConfirm" {
+                            return Some(native_plugin_show_confirm_response(
+                                &plugin_id,
+                                call,
+                                &request_senders.confirm,
+                            ));
+                        }
+                        if call.namespace == "secrets" {
+                            return Some(native_plugin_secret_response(
+                                &plugin_id,
+                                call,
+                                &plugin_secret_store,
+                            ));
+                        }
+                        if call.namespace == "sftp" {
+                            return Some(native_plugin_sftp_response(
+                                call,
+                                &permissions,
+                                &sftp_router,
+                                &sftp_runtime,
+                                Some(&transfer_manager),
+                            ));
+                        }
+                        if call.namespace == "scp" {
+                            return Some(native_plugin_scp_response(
+                                call,
+                                &permissions,
+                                &sftp_router,
+                                &sftp_runtime,
+                                &transfer_manager,
+                                request_context.as_ref(),
+                            ));
+                        }
+                        if call.namespace == "forward" {
+                            return Some(native_plugin_forward_response(
+                                call,
+                                &permissions,
+                                &forwarding_registry,
+                                &forwarding_runtime,
+                                &forward_valid_owner_connection_ids,
+                            ));
+                        }
+                        if call.namespace == "sync" {
+                            return Some(native_plugin_sync_response(
+                                &plugin_id,
+                                call,
+                                &sync_connection_store,
+                                &sync_saved_connections,
+                                sync_saved_connections_snapshot.as_ref(),
+                                sync_local_metadata.as_ref(),
+                                sync_saved_forwards_revision.as_deref(),
+                                &sync_plugin_settings,
+                                &sync_plugin_settings_revisions,
+                                Some(&request_senders.sync),
+                            ));
+                        }
+                        if call.namespace == "transfers" {
+                            return Some(native_plugin_transfers_response(call, &transfer_manager));
+                        }
+                        if call.namespace == "hostTools"
+                            && matches!(
+                                call.method.as_str(),
+                                "getExtensions"
+                                    | "capture"
+                                    | "execute"
+                                    | "terminate"
+                                    | "runExtension"
+                            )
+                        {
+                            return Some(native_plugin_host_tools_response(
+                                &plugin_id,
+                                call,
+                                &permissions,
+                                snapshot.registry.contributions(),
+                                &sftp_router,
+                                &sftp_runtime,
+                            ));
+                        }
+                        if call.namespace == "profiler" {
+                            return Some(native_plugin_profiler_response(
+                                call,
+                                &profiler_registry,
+                                &profiler_node_connection_ids,
+                            ));
+                        }
+                        if call.namespace == "ide" {
+                            return Some(native_plugin_ide_response(call, &ide_snapshot));
+                        }
+                        if call.namespace == "ai" {
+                            return Some(native_plugin_ai_response(call, &ai_snapshot));
+                        }
+                        if call.namespace == "terminal"
+                            && matches!(
+                                call.method.as_str(),
+                                "writeToActive" | "writeToNode" | "clearBuffer"
+                            )
+                        {
+                            return Some(native_plugin_terminal_response(
+                                call,
+                                &request_senders.terminal,
+                            ));
+                        }
+                        if call.namespace == "terminal" && call.method == "openTelnet" {
+                            if !telnet_transport_plugins.contains(&plugin_id) {
+                                return Some(plugin_runtime::PluginResponse::error(
+                                    call.request_id,
+                                    plugin_runtime::PluginError::protocol(
+                                        "terminal_transport_not_declared",
+                                        "terminal.openTelnet requires contributes.terminalTransports to include \"telnet\"",
+                                    ),
+                                ));
+                            }
+                            return Some(native_plugin_terminal_response(
+                                call,
+                                &request_senders.terminal,
+                            ));
+                        }
+                        native_plugin_returnable_host_api_response(&snapshot, &plugin_id, call)
+                    })()
+                },
+            );
+            if let Some(audit) = audit {
+                let mut audit = audit;
+                let mut denied = false;
+                if let Some(response) = response.as_ref() {
+                    let authorization = match &response.result {
+                        plugin_runtime::PluginResponseResult::Ok { .. } => {
+                            oxideterm_audit::AuditAuthorization::Approved
+                        }
+                        plugin_runtime::PluginResponseResult::Error { error }
+                            if error.code.contains("permission")
+                                || error.code.contains("capability")
+                                || error.code.contains("denied") =>
+                        {
+                            oxideterm_audit::AuditAuthorization::Denied
+                        }
+                        _ => oxideterm_audit::AuditAuthorization::Unknown,
+                    };
+                    denied = authorization == oxideterm_audit::AuditAuthorization::Denied;
+                    audit.authorization(authorization, Some("plugin_capabilities"));
                 }
-                return Some(native_plugin_terminal_response(
-                    call,
-                    &request_senders.terminal,
-                ));
+                let outcome = match response.as_ref().map(|response| &response.result) {
+                    Some(plugin_runtime::PluginResponseResult::Ok { .. }) => {
+                        oxideterm_audit::AuditOutcome::Sent
+                    }
+                    Some(plugin_runtime::PluginResponseResult::Error { .. }) if denied => {
+                        oxideterm_audit::AuditOutcome::Denied
+                    }
+                    Some(plugin_runtime::PluginResponseResult::Error { .. }) => {
+                        oxideterm_audit::AuditOutcome::Failed
+                    }
+                    None => oxideterm_audit::AuditOutcome::Unknown,
+                };
+                audit.finish(
+                    outcome,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    None,
+                    None,
+                );
             }
-            native_plugin_returnable_host_api_response(&snapshot, &plugin_id, call)
+            response
         })
     }
 
@@ -1669,8 +1770,28 @@ impl WorkspaceApp {
                 )
         );
         if is_product_effect {
-            let _ =
+            let accepted =
                 self.handle_native_plugin_product_host_call(plugin_id, namespace, method, args, cx);
+            if let Some(mut context) = oxideterm_audit::AuditContext::current_request() {
+                context.source = oxideterm_audit::AuditSource::Plugin;
+                context.agent_id = Some(oxideterm_audit::redact(plugin_id));
+                let mut audit = context.operation(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "plugin_call",
+                    Some(&format!("{namespace}.{method}")),
+                );
+                audit.authorization(oxideterm_audit::AuditAuthorization::NotRequired, None);
+                audit.finish(
+                    if accepted {
+                        oxideterm_audit::AuditOutcome::Sent
+                    } else {
+                        oxideterm_audit::AuditOutcome::Failed
+                    },
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    None,
+                    None,
+                );
+            }
             return;
         }
         if matches!(
@@ -1701,28 +1822,66 @@ impl WorkspaceApp {
             // retained outbound effects are audit records, not a second action.
             return;
         }
+        let mut audit = if namespace == "ui" && method != "showConfirm" {
+            oxideterm_audit::AuditContext::current_request().map(|mut context| {
+                context.source = oxideterm_audit::AuditSource::Plugin;
+                context.agent_id = Some(oxideterm_audit::redact(plugin_id));
+                context.operation(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "plugin_call",
+                    Some(&format!("ui.{method}")),
+                )
+            })
+        } else {
+            None
+        };
+        let mut outcome = oxideterm_audit::AuditOutcome::Sent;
         match (namespace, method) {
             ("ui", "showToast") => self.push_native_plugin_toast(plugin_id, args, cx),
             ("ui", "showNotification") => self.push_native_plugin_notification(plugin_id, args, cx),
-            ("ui", "registerTabView") => self.register_native_plugin_ui_contribution(
-                plugin_id,
-                plugin_runtime::PluginRegistrationKind::Tab,
-                args,
-                cx,
-            ),
-            ("ui", "registerSidebarPanel") => self.register_native_plugin_ui_contribution(
-                plugin_id,
-                plugin_runtime::PluginRegistrationKind::SidebarPanel,
-                args,
-                cx,
-            ),
-            ("ui", "registerActivityBarItem") => self.register_native_plugin_ui_contribution(
-                plugin_id,
-                plugin_runtime::PluginRegistrationKind::ActivityBarItem,
-                args,
-                cx,
-            ),
-            ("ui", "openTab") => self.open_native_plugin_tab_from_args(plugin_id, args, cx),
+            ("ui", "registerTabView") => {
+                outcome = if self.register_native_plugin_ui_contribution(
+                    plugin_id,
+                    plugin_runtime::PluginRegistrationKind::Tab,
+                    args,
+                    cx,
+                ) {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                }
+            }
+            ("ui", "registerSidebarPanel") => {
+                outcome = if self.register_native_plugin_ui_contribution(
+                    plugin_id,
+                    plugin_runtime::PluginRegistrationKind::SidebarPanel,
+                    args,
+                    cx,
+                ) {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                }
+            }
+            ("ui", "registerActivityBarItem") => {
+                outcome = if self.register_native_plugin_ui_contribution(
+                    plugin_id,
+                    plugin_runtime::PluginRegistrationKind::ActivityBarItem,
+                    args,
+                    cx,
+                ) {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                }
+            }
+            ("ui", "openTab") => {
+                outcome = if self.open_native_plugin_tab_from_args(plugin_id, args, cx) {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                }
+            }
             ("ui", "showConfirm") => {
                 // The stdio transport still records returnable host calls as
                 // outbound effects for auditing. The resolver already opened
@@ -1747,6 +1906,15 @@ impl WorkspaceApp {
                 });
             }
         }
+        if let Some(mut audit) = audit.take() {
+            audit.authorization(oxideterm_audit::AuditAuthorization::NotRequired, None);
+            audit.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
+        }
     }
 
     fn register_native_plugin_ui_contribution(
@@ -1755,8 +1923,8 @@ impl WorkspaceApp {
         kind: plugin_runtime::PluginRegistrationKind,
         args: serde_json::Value,
         cx: &mut Context<Self>,
-    ) {
-        match native_plugin_ui_registration_from_args(plugin_id, kind, &args) {
+    ) -> bool {
+        let applied = match native_plugin_ui_registration_from_args(plugin_id, kind, &args) {
             Ok(registration) => {
                 // Runtime protocol frames and ctx.ui calls share one mutation
                 // path so manifest gates and schema validation cannot diverge.
@@ -1772,6 +1940,9 @@ impl WorkspaceApp {
                             format!("Native plugin UI registration failed: {error}"),
                         );
                     });
+                    false
+                } else {
+                    true
                 }
             }
             Err(error) => {
@@ -1781,9 +1952,11 @@ impl WorkspaceApp {
                         format!("Native plugin UI registration failed: {error}"),
                     );
                 });
+                false
             }
-        }
+        };
         cx.notify();
+        applied
     }
 
     fn open_native_plugin_tab_from_args(
@@ -1791,7 +1964,7 @@ impl WorkspaceApp {
         plugin_id: &str,
         args: serde_json::Value,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let Some(tab_id) = native_plugin_ui_tab_id_arg(&args) else {
             self.plugin_entity.update(cx, |plugins, _cx| {
                 plugins.registry_mut().record_manager_error(
@@ -1799,7 +1972,7 @@ impl WorkspaceApp {
                     "Native plugin ui.openTab requires args.tabId".to_string(),
                 );
             });
-            return;
+            return false;
         };
         if let Err(error) = self.open_native_plugin_tab(plugin_id, &tab_id, cx) {
             self.plugin_entity.update(cx, |plugins, _cx| {
@@ -1808,7 +1981,9 @@ impl WorkspaceApp {
                     format!("Native plugin ui.openTab failed: {error}"),
                 );
             });
+            return false;
         }
+        true
     }
 
     fn push_native_plugin_toast(

@@ -250,6 +250,42 @@ fn reusable_direct_root_node_for_saved_config(
 }
 
 impl WorkspaceApp {
+    pub(crate) fn open_native_connection_handoff(
+        &mut self,
+        handoff: oxideterm_ssh_launch::NativeConnectionHandoff,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
+        let Some(parent_id) = handoff.audit_parent_id else {
+            return self.open_native_connection_launch(handoff.launch, window, cx);
+        };
+        let context = oxideterm_audit::AuditContext::current().map(|mut context| {
+            context.parent_id = Some(parent_id);
+            context.source = oxideterm_audit::AuditSource::Cli;
+            context
+        });
+        oxideterm_audit::AuditContext::with_sync_request(context.as_ref(), || {
+            let audit = oxideterm_audit::AuditOperation::begin(
+                oxideterm_audit::AuditCategory::Connection,
+                "connection_dispatch_receive",
+                None,
+                None,
+            );
+            let result = self.open_native_connection_launch(handoff.launch, window, cx);
+            audit.finish(
+                if result.is_ok() {
+                    oxideterm_audit::AuditOutcome::Sent
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+                oxideterm_audit::AuditEvidence::Dispatch,
+                None,
+                None,
+            );
+            result
+        })
+    }
+
     pub(crate) fn open_native_connection_launch(
         &mut self,
         launch: NativeConnectionLaunch,

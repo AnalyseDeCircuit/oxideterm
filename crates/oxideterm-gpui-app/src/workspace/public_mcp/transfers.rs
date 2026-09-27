@@ -211,45 +211,50 @@ impl WorkspaceApp {
         let artifact_store = self.public_mcp.state.artifacts.clone();
         let client_ref = request.client_ref.clone();
         let worker_transfer_ref = transfer_ref.clone();
-        self.forwarding_runtime.spawn(async move {
-            let _guard = guard;
-            let session = match files::refresh_file_session(
-                &router,
-                &handles,
-                &client_ref,
-                &file_session_ref,
-            )
-            .await
-            {
-                Ok(session) => session,
-                Err(_) => {
-                    finish_transfer_failure(
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let _guard = guard;
+                    let session = match files::refresh_file_session(
+                        &router,
+                        &handles,
+                        &client_ref,
+                        &file_session_ref,
+                    )
+                    .await
+                    {
+                        Ok(session) => session,
+                        Err(_) => {
+                            finish_transfer_failure(
+                                &handles,
+                                &worker_transfer_ref,
+                                PublicMcpTransferFailure {
+                                    state: PublicMcpTransferState::Failed,
+                                    error_code: "session_unavailable",
+                                    remote_residue: None,
+                                },
+                            );
+                            return;
+                        }
+                    };
+                    let result = run_transfer_job(
                         &handles,
                         &worker_transfer_ref,
-                        PublicMcpTransferFailure {
-                            state: PublicMcpTransferState::Failed,
-                            error_code: "session_unavailable",
-                            remote_residue: None,
-                        },
-                    );
-                    return;
-                }
-            };
-            let result = run_transfer_job(
-                &handles,
-                &worker_transfer_ref,
-                &client_ref,
-                &remote_path,
-                session,
-                job,
-                manager,
-                artifact_store,
-            )
-            .await;
-            if let Err(error) = result {
-                finish_transfer_failure(&handles, &worker_transfer_ref, error);
-            }
-        });
+                        &client_ref,
+                        &remote_path,
+                        session,
+                        job,
+                        manager,
+                        artifact_store,
+                    )
+                    .await;
+                    if let Err(error) = result {
+                        finish_transfer_failure(&handles, &worker_transfer_ref, error);
+                    }
+                },
+            ));
 
         finish_serialized(
             request,

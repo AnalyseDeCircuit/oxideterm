@@ -41,6 +41,25 @@ use self::actions::{open_path_external, reveal_path_external};
 use self::helpers::*;
 use super::sftp::native_video::{SharedSftpNativeVideoSurface, sftp_native_video_element};
 
+pub(in crate::workspace) fn local_file_audit_context(
+    source: oxideterm_audit::AuditSource,
+) -> Option<oxideterm_audit::AuditContext> {
+    let request = oxideterm_audit::AuditContext::current_request();
+    let is_scoped = request.is_some();
+    let mut context = request.or_else(oxideterm_audit::AuditContext::current)?;
+    if !is_scoped {
+        context.source = source;
+    }
+    context.target = Some(oxideterm_audit::redact("local"));
+    context.protocol = Some("local".into());
+    context.session_id = None;
+    context.consumer_id = None;
+    context.transport_id = None;
+    context.node_id = None;
+    context.connection_id = None;
+    Some(context)
+}
+
 const FILE_MANAGER_HEADER_HEIGHT: f32 = 40.0; // Tauri h-10.
 const FILE_MANAGER_HEADER_GAP: f32 = 6.0;
 const FILE_MANAGER_HEADER_TITLE_MIN_WIDTH: f32 = 32.0;
@@ -510,12 +529,30 @@ impl FileManagerState {
         if self.folder_picker_task.is_some() {
             return;
         }
+        let audit_context = local_file_audit_context(oxideterm_audit::AuditSource::User);
         self.folder_picker_task = Some(cx.spawn(async move |entity, cx| {
             let selected_path = selection.await;
             let _ = entity.update(cx, |file_manager, cx| {
                 file_manager.folder_picker_task = None;
                 if let Some(path) = selected_path {
-                    file_manager.set_path(path.to_string_lossy().to_string());
+                    let path = path.to_string_lossy().to_string();
+                    let audit = oxideterm_audit::AuditOperation::in_context(
+                        audit_context.as_ref(),
+                        oxideterm_audit::AuditCategory::File,
+                        "file_browse",
+                        Some(&path),
+                    );
+                    file_manager.set_path(path);
+                    audit.finish(
+                        if file_manager.error.is_none() {
+                            oxideterm_audit::AuditOutcome::Succeeded
+                        } else {
+                            oxideterm_audit::AuditOutcome::Failed
+                        },
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
                 }
                 cx.notify();
             });

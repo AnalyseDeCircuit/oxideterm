@@ -120,7 +120,6 @@ impl AiModelBackendServices {
             .and_then(|vectors| vectors.into_iter().next())
     }
 
-
     pub(in crate::workspace) async fn execute_tool(
         &self,
         tool_call_id: String,
@@ -238,19 +237,25 @@ impl AiModelBackendServices {
         match self.ai_mcp_registry.read_resource(server_id, uri).await {
             Ok(content) => {
                 let (output, truncated) = oxideterm_ai::mcp_resource_output(&content);
-                snapshot.ok(
-                    format!("Read MCP resource {uri}."),
-                    output,
-                    serde_json::json!(content),
-                    "read",
-                )
-                .with_verified(!truncated)
+                snapshot
+                    .ok(
+                        format!("Read MCP resource {uri}."),
+                        output,
+                        serde_json::json!(content),
+                        "read",
+                    )
+                    .with_verified(!truncated)
             }
             Err(error) => {
-                let mut result = snapshot.fail("MCP resource read failed.", "mcp_resource_read_failed", error.to_string(), "read");
+                let mut result = snapshot.fail(
+                    "MCP resource read failed.",
+                    "mcp_resource_read_failed",
+                    error.to_string(),
+                    "read",
+                );
                 result.data = serde_json::json!({"recovery":error.recovery()});
                 result
-            },
+            }
         }
     }
 
@@ -268,13 +273,14 @@ impl AiModelBackendServices {
             Ok(result) => {
                 let (success, output, truncated) = oxideterm_ai::mcp_tool_output(&result);
                 if success {
-                    snapshot.ok(
-                        format!("Executed MCP tool {tool_name}."),
-                        output,
-                        serde_json::json!(result),
-                        "write",
-                    )
-                    .with_verified(!truncated)
+                    snapshot
+                        .ok(
+                            format!("Executed MCP tool {tool_name}."),
+                            output,
+                            serde_json::json!(result),
+                            "write",
+                        )
+                        .with_verified(!truncated)
                 } else {
                     snapshot.fail(
                         "MCP tool returned an error.",
@@ -492,11 +498,6 @@ impl AiOrchestratorRuntimeSnapshot {
         }
     }
 
-
-
-
-
-
     /// Executes a v2 live read after the UI broker resolved an opaque owner
     /// handle to this exact node. No target identifier crosses this boundary.
     pub(in crate::workspace) async fn read_live_resource(
@@ -534,7 +535,10 @@ impl AiOrchestratorRuntimeSnapshot {
                     "read",
                 );
             };
-            if let Ok(result) = ide_file_system.node_agent_read_file(node_id.0.clone(), path).await {
+            if let Ok(result) = ide_file_system
+                .node_agent_read_file(node_id.0.clone(), path)
+                .await
+            {
                 let data = serde_json::json!({
                     "path": path,
                     "content": result.content,
@@ -611,7 +615,9 @@ impl AiOrchestratorRuntimeSnapshot {
                 .await
                 .map(|entries| serde_json::json!(entries))
             } else {
-                sftp.preview(path).await.map(|preview| serde_json::json!(preview))
+                sftp.preview(path)
+                    .await
+                    .map(|preview| serde_json::json!(preview))
             }
         };
         match result {
@@ -622,7 +628,10 @@ impl AiOrchestratorRuntimeSnapshot {
                 );
                 self.ok(
                     if matches!(resource, "directory" | "sftp") {
-                        format!("Listed {} entries.", data.as_array().map(Vec::len).unwrap_or(0))
+                        format!(
+                            "Listed {} entries.",
+                            data.as_array().map(Vec::len).unwrap_or(0)
+                        )
                     } else {
                         format!("Read remote file preview {path}.")
                     },
@@ -784,8 +793,7 @@ impl AiOrchestratorRuntimeSnapshot {
         match write_result {
             Ok(data) => self.ok(
                 format!("Wrote remote file {path}."),
-                serde_json::to_string_pretty(&data)
-                    .unwrap_or_else(|_| format!("{path} written.")),
+                serde_json::to_string_pretty(&data).unwrap_or_else(|_| format!("{path} written.")),
                 data,
                 "write",
             ),
@@ -1208,7 +1216,6 @@ impl AiOrchestratorRuntimeSnapshot {
         result
     }
 
-
     pub(in crate::workspace) async fn write_remote_file(
         &self,
         services: &AiLiveToolServices,
@@ -1231,17 +1238,17 @@ impl AiOrchestratorRuntimeSnapshot {
             .map_err(|_| AiRemoteFileWriteError::OwnerReplaced)?;
         let sftp = shared.lock().await;
         if let Some(expected) = expected_hash {
-            let current_bytes =
-                sftp.read_file_bytes(path)
-                    .await
-                    .map_err(|error| match error {
-                        oxideterm_ssh::SftpError::FileNotFound(_) => {
-                            AiRemoteFileWriteError::ExpectedFileMissing {
-                                path: path.to_string(),
-                            }
+            let current_bytes = sftp
+                .read_file_bytes(path)
+                .await
+                .map_err(|error| match error {
+                    oxideterm_ssh::SftpError::FileNotFound(_) => {
+                        AiRemoteFileWriteError::ExpectedFileMissing {
+                            path: path.to_string(),
                         }
-                        other => AiRemoteFileWriteError::Sftp(other),
-                    })?;
+                    }
+                    other => AiRemoteFileWriteError::Sftp(other),
+                })?;
             let current_content = String::from_utf8(current_bytes).map_err(|_| {
                 AiRemoteFileWriteError::ExistingFileNotText {
                     path: path.to_string(),
@@ -1386,9 +1393,24 @@ impl AiOrchestratorRuntimeSnapshot {
             0,
             0,
         );
+        let transfer_audit = services
+            .node_router
+            .audit_context(&owner.node_id)
+            .and_then(|node| {
+                resolved
+                    .handle
+                    .audit_context()
+                    .map(|runtime| runtime.with_request(&node))
+            })
+            .or_else(|| {
+                resolved
+                    .handle
+                    .audit_context()
+                    .map(|runtime| runtime.for_request())
+            });
         services
             .sftp_transfer_manager
-            .register_background_transfer(snapshot.clone());
+            .register_background_transfer(snapshot.clone(), transfer_audit.as_ref());
 
         let manager = services.sftp_transfer_manager.clone();
         let runtime = services.backend_runtime.clone();
@@ -1487,6 +1509,10 @@ impl AiOrchestratorRuntimeSnapshot {
                         };
                         match tar_result {
                             Ok(result) => {
+                                manager.record_background_transfer_stream_bytes(
+                                    &transfer_id_for_task,
+                                    result.stream_bytes,
+                                );
                                 return Ok((
                                     result.item_count,
                                     TransferStrategy::DirectoryTar,
@@ -1652,8 +1678,6 @@ impl AiOrchestratorRuntimeSnapshot {
         }
     }
 
-
-
     pub(in crate::workspace) fn to_executed_tool_result(
         &self,
         tool_call_id: String,
@@ -1807,9 +1831,7 @@ fn ai_model_safe_runtime_value(value: &serde_json::Value) -> serde_json::Value {
     ai_model_safe_runtime_value_with_limits(value).0
 }
 
-fn ai_model_safe_runtime_value_with_limits(
-    value: &serde_json::Value,
-) -> (serde_json::Value, bool) {
+fn ai_model_safe_runtime_value_with_limits(value: &serde_json::Value) -> (serde_json::Value, bool) {
     let mut remaining_chars = AI_MODEL_RESULT_DATA_MAX_CHARS;
     let mut remaining_nodes = AI_MODEL_RESULT_DATA_MAX_NODES;
     project_ai_model_runtime_value(
@@ -1928,7 +1950,9 @@ fn redact_runtime_target_prefix(value: &str, prefix: &str) -> String {
         let suffix = &matched[prefix.len()..];
         let identifier_length = suffix
             .chars()
-            .take_while(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '-'))
+            .take_while(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+            })
             .map(char::len_utf8)
             .sum::<usize>();
         if identifier_length == 0 {
@@ -2035,21 +2059,23 @@ fn ai_stable_resource_ref_for_target(
             oxideterm_ai::StableResourceKind::SavedConnection,
             target.refs.get("connectionId")?.clone(),
         ),
-        "settings" => (oxideterm_ai::StableResourceKind::SettingsScope, "app".to_string()),
-        "rag-index" => (oxideterm_ai::StableResourceKind::RagIndex, "default".to_string()),
+        "settings" => (
+            oxideterm_ai::StableResourceKind::SettingsScope,
+            "app".to_string(),
+        ),
+        "rag-index" => (
+            oxideterm_ai::StableResourceKind::RagIndex,
+            "default".to_string(),
+        ),
         _ => return None,
     };
-    oxideterm_ai::StableResourceRef::new(
-        kind,
-        id,
-        Some(ai_model_safe_runtime_text(&target.label)),
-    )
-    .ok()
+    oxideterm_ai::StableResourceRef::new(kind, id, Some(ai_model_safe_runtime_text(&target.label)))
+        .ok()
 }
 
 /// Application surfaces are durable navigation destinations, not live tab identities.
-pub(in crate::workspace) fn ai_app_surface_stable_resources(
-) -> Vec<oxideterm_ai::StableResourceRef> {
+pub(in crate::workspace) fn ai_app_surface_stable_resources() -> Vec<oxideterm_ai::StableResourceRef>
+{
     const SURFACES: &[(&str, &str)] = &[
         ("settings", "Settings"),
         ("connection_manager", "Connection manager"),
@@ -2080,7 +2106,6 @@ pub(in crate::workspace) fn ai_transfer_path_looks_directory(path: &str) -> bool
     // select directory transfer semantics.
     path.ends_with('/') || path.ends_with('\\')
 }
-
 
 pub(in crate::workspace) fn make_ai_state_version(
     scope: &str,
@@ -2113,8 +2138,16 @@ async fn execute_ai_tool_uncoordinated(
     leases: Vec<oxideterm_ai::agent::AgentToolLease>,
     dispatch: Option<oxideterm_ai::agent::AgentDispatch>,
 ) -> AiExecutedToolResult {
-    if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
-        return rejected_ai_tool_result(tool_call_id, tool_name, "agent_direction_changed", "Task direction changed before dispatch.");
+    if dispatch
+        .as_ref()
+        .is_some_and(|guard| guard.check().is_err())
+    {
+        return rejected_ai_tool_result(
+            tool_call_id,
+            tool_name,
+            "agent_direction_changed",
+            "Task direction changed before dispatch.",
+        );
     }
     if ai_rejects_legacy_live_target_argument(&tool_name, &args) {
         return rejected_ai_tool_result(
@@ -2132,6 +2165,7 @@ async fn execute_ai_tool_uncoordinated(
             conversation_id,
             assistant_id,
             AiStreamDeliveryEvent::ToolExecutionRequested {
+                audit_context: oxideterm_audit::AuditContext::current_request(),
                 dispatch,
                 leases,
                 tool_session_id: tool_session_id.clone(),

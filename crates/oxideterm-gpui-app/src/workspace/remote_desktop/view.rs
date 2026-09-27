@@ -107,21 +107,18 @@ impl WorkspaceApp {
             ));
         }
         let reconnect_gateway_connection_id = ssh_gateway_connection_id.clone();
-        let pending_tunnel = match self.start_remote_desktop_ssh_tunnel(
-            ssh_gateway_connection_id,
-            profile.endpoint.clone(),
-            cx,
-        ) {
-            Ok(pending_tunnel) => pending_tunnel,
-            Err(error) => {
-                self.report_remote_desktop_ssh_gateway_error(error, cx);
-                if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
-                    self.standalone_connections
-                        .mark_attempt_error(connection_attempt_id);
+        let pending_tunnel =
+            match self.start_remote_desktop_ssh_tunnel(ssh_gateway_connection_id, &profile, cx) {
+                Ok(pending_tunnel) => pending_tunnel,
+                Err(error) => {
+                    self.report_remote_desktop_ssh_gateway_error(error, cx);
+                    if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
+                        self.standalone_connections
+                            .mark_attempt_error(connection_attempt_id);
+                    }
+                    return;
                 }
-                return;
-            }
-        };
+            };
         let window_handle = window.window_handle();
         cx.spawn(async move |workspace, cx| {
             match pending_tunnel.finish().await {
@@ -169,76 +166,107 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn start_remote_desktop_ssh_tunnel(
         &mut self,
         ssh_gateway_connection_id: String,
-        target_endpoint: RemoteDesktopEndpoint,
+        profile: &RemoteDesktopConnectionProfile,
         cx: &mut Context<Self>,
     ) -> Result<PendingRemoteDesktopSshTunnel, String> {
-        let Some(gateway) = self
-            .connection_store
-            .get(&ssh_gateway_connection_id)
-            .cloned()
-        else {
-            return Err(self
-                .i18n
-                .t("modals.new_connection.remote_desktop_ssh_gateway_missing"));
-        };
-        let Some(config) = ssh_config_from_saved_connection(
-            &self.connection_store,
-            self.settings_store.settings(),
-            &gateway,
-        ) else {
-            return Err(self
-                .i18n
-                .t("modals.new_connection.remote_desktop_ssh_gateway_credentials_missing"));
-        };
-        let node_id = if config
-            .proxy_chain
-            .as_ref()
-            .is_some_and(|chain| !chain.is_empty())
-        {
-            match self.expand_saved_connection_tree(
-                &ssh_gateway_connection_id,
-                config,
-                gateway.name,
-            ) {
-                Ok(expansion) => expansion.target_node_id,
-                Err(error) => {
-                    return Err(error.to_string());
-                }
-            }
-        } else {
-            self.materialize_ssh_root_node(
-                config,
-                gateway.name,
-                Some(ssh_gateway_connection_id.clone()),
-            )
-        };
-        if !self.ensure_node_connection_started(&node_id, cx) {
-            return Err(self
-                .i18n
-                .t("modals.new_connection.remote_desktop_ssh_gateway_connect_failed"));
-        }
-        let _ = self.connection_store.mark_used(&ssh_gateway_connection_id);
-
-        let lease_id = uuid::Uuid::new_v4().to_string();
-        let forwarding_service = self.forwarding_service.clone();
-        let worker_service = forwarding_service.clone();
-        let worker_lease_id = lease_id.clone();
-        let worker = self.forwarding_runtime.spawn(async move {
-            worker_service
-                .open_remote_desktop_tunnel(
-                    worker_lease_id,
-                    &node_id,
+        let audit_context = remote_desktop_audit_context(profile);
+        let mut connect_audit =
+            desktop_connection_audit(audit_context.as_ref(), "desktop_connect", None);
+        let target_endpoint = profile.endpoint.clone();
+        let result = (|| {
+            let Some(gateway) = self
+                .connection_store
+                .get(&ssh_gateway_connection_id)
+                .cloned()
+            else {
+                return Err(self
+                    .i18n
+                    .t("modals.new_connection.remote_desktop_ssh_gateway_missing"));
+            };
+            let Some(config) = ssh_config_from_saved_connection(
+                &self.connection_store,
+                self.settings_store.settings(),
+                &gateway,
+            ) else {
+                return Err(self
+                    .i18n
+                    .t("modals.new_connection.remote_desktop_ssh_gateway_credentials_missing"));
+            };
+            let node_id = if config
+                .proxy_chain
+                .as_ref()
+                .is_some_and(|chain| !chain.is_empty())
+            {
+                match self.expand_saved_connection_tree(
                     &ssh_gateway_connection_id,
-                    target_endpoint.host,
-                    target_endpoint.port,
+                    config,
+                    gateway.name,
+                ) {
+                    Ok(expansion) => expansion.target_node_id,
+                    Err(error) => {
+                        return Err(error.to_string());
+                    }
+                }
+            } else {
+                self.materialize_ssh_root_node(
+                    config,
+                    gateway.name,
+                    Some(ssh_gateway_connection_id.clone()),
                 )
-                .await
-        });
-        Ok(PendingRemoteDesktopSshTunnel::new(
-            lease_id,
-            forwarding_service,
-            worker,
-        ))
+            };
+            if !self.ensure_node_connection_started(&node_id, cx) {
+                return Err(self
+                    .i18n
+                    .t("modals.new_connection.remote_desktop_ssh_gateway_connect_failed"));
+            }
+            let _ = self.connection_store.mark_used(&ssh_gateway_connection_id);
+
+            let lease_id = uuid::Uuid::new_v4().to_string();
+            let forwarding_service = self.forwarding_service.clone();
+            let worker_service = forwarding_service.clone();
+            let worker_lease_id = lease_id.clone();
+            let tunnel_context = audit_context.clone().map(|mut context| {
+                context.parent_id = connect_audit
+                    .as_ref()
+                    .and_then(|audit| audit.id())
+                    .map(str::to_owned);
+                context
+            });
+            let worker =
+                self.forwarding_runtime
+                    .spawn(oxideterm_audit::AuditContext::scope_optional(
+                        tunnel_context,
+                        async move {
+                            worker_service
+                                .open_remote_desktop_tunnel(
+                                    worker_lease_id,
+                                    &node_id,
+                                    &ssh_gateway_connection_id,
+                                    target_endpoint.host,
+                                    target_endpoint.port,
+                                )
+                                .await
+                        },
+                    ));
+            Ok(PendingRemoteDesktopSshTunnel::new(
+                lease_id,
+                forwarding_service,
+                worker,
+                audit_context,
+                connect_audit.take(),
+            ))
+        })();
+        if result.is_err() {
+            if let Some(audit) = connect_audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+            }
+        }
+        result
     }
 
     fn report_remote_desktop_ssh_gateway_error(&mut self, detail: String, cx: &mut Context<Self>) {
@@ -422,6 +450,14 @@ impl WorkspaceApp {
                 frame_slot,
                 window.window_handle(),
             );
+            if let Some(context) = ssh_tunnel
+                .as_ref()
+                .and_then(|lease| lease.audit_context.clone())
+            {
+                // Tunnel setup and the eventual desktop share the original identity,
+                // even when UI delivery resumes outside the initiating request scope.
+                session.audit_context = Some(context);
+            }
             session.ssh_tunnel = ssh_tunnel;
             session.install_release_handler(cx);
             session

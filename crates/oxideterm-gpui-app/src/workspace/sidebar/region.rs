@@ -851,198 +851,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_event_log_center_content(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let filtered = self
-            .notification_center
-            .event_log
-            .entries
-            .iter()
-            .filter(|entry| self.event_log_entry_matches_filter(entry))
-            .cloned()
-            .collect::<Vec<_>>();
-        let row_count = filtered.len();
-        let event_log_scroll = self.event_log_sidebar_scroll_handle.clone();
-        let event_log_spec = TauriVirtualListSpec::new(
-            px(EVENT_LOG_SIDEBAR_ROW_HEIGHT),
-            EVENT_LOG_SIDEBAR_VIRTUAL_OVERSCAN,
-        );
-        if row_count > 0 {
-            self.schedule_event_log_virtual_scroll_to_bottom_if_sticky(
-                event_log_scroll.clone(),
-                row_count - 1,
-                event_log_spec,
-                cx,
-            );
-        }
-        let event_log_rows = Arc::new(filtered);
-        let workspace = cx.entity();
-
-        div()
-            .flex_1()
-            .min_h(px(0.0))
-            .w_full()
-            .flex()
-            .flex_col()
-            .child(self.render_event_log_toolbar(cx))
-            .child(
-                div()
-                    .id("event-log-sidebar-scroll")
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .w_full()
-                    .overflow_hidden()
-                    .when(row_count == 0, |content| {
-                        content.child(self.render_activity_empty_state(
-                            LucideIcon::History,
-                            self.i18n.t("event_log.empty"),
-                        ))
-                    })
-                    .when(row_count > 0, |content| {
-                        content.child(tauri_virtual_uniform_list(
-                            "event-log-sidebar-virtual",
-                            row_count,
-                            event_log_scroll,
-                            event_log_spec,
-                            move |range, _window, app| {
-                                let mut rendered = Vec::new();
-                                let rows = event_log_rows.clone();
-                                let _ = workspace.update(app, |this, cx| {
-                                    for index in range {
-                                        let Some(entry) = rows.get(index) else {
-                                            continue;
-                                        };
-                                        rendered.push(this.render_event_log_row(entry, cx));
-                                    }
-                                });
-                                rendered
-                            },
-                        ))
-                    }),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn schedule_event_log_virtual_scroll_to_bottom_if_sticky(
-        &self,
-        handle: UniformListScrollHandle,
-        last_index: usize,
-        spec: TauriVirtualListSpec,
-        cx: &mut Context<Self>,
-    ) {
-        if !tauri_virtual_list_is_near_bottom(&handle, px(EVENT_LOG_STICKY_BOTTOM_THRESHOLD_PX)) {
-            return;
-        }
-        // Tauri defers the bottom scroll until after React commits the new row.
-        // GPUI likewise needs a post-layout turn before the uniform-list extent
-        // is current, otherwise the newest event can remain just below view.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(16)).await;
-            let _ = weak.update(cx, move |_this, cx| {
-                scroll_tauri_virtual_list_to_index(
-                    &handle,
-                    last_index,
-                    spec,
-                    TauriVirtualScrollAlign::End,
-                );
-                cx.notify();
-            });
-        })
-        .detach();
-    }
-
-    fn render_event_log_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
-        let theme = self.tokens.ui;
-        let counts = self.filtered_event_log_counts();
-        self.activity_toolbar_shell()
-            .flex()
-            .items_center()
-            .child(
-                self.activity_toolbar_group().child(
-                    div()
-                        .px(px(self.tokens.spacing.one))
-                        .flex()
-                        .items_center()
-                        .gap(px(self.tokens.spacing.two))
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .child(self.render_count_chip(
-                            LucideIcon::AlertCircle,
-                            theme.error,
-                            counts.2,
-                            cx,
-                        ))
-                        .child(self.render_count_chip(
-                            LucideIcon::AlertTriangle,
-                            theme.warning,
-                            counts.1,
-                            cx,
-                        ))
-                        .child(self.render_count_chip(
-                            LucideIcon::Info,
-                            theme.accent,
-                            counts.0,
-                            cx,
-                        )),
-                ),
-            )
-            .child(div().flex_1())
-            .when(self.notification_center.event_log.dnd_enabled, |toolbar| {
-                toolbar.child(oxideterm_gpui_ui::status_pill(
-                    &self.tokens,
-                    self.i18n.t("event_log.dnd.on"),
-                    oxideterm_gpui_ui::StatusPillOptions::new(
-                        oxideterm_gpui_ui::StatusTone::Warning,
-                    )
-                    .compact(),
-                ))
-            })
-            .child(
-                self.activity_toolbar_group()
-                    .child(self.render_activity_icon_button(
-                        LucideIcon::Bell,
-                        self.notification_center.event_log.dnd_enabled,
-                        |this, _event, _window, cx| {
-                            this.notification_center.event_log.dnd_enabled =
-                                !this.notification_center.event_log.dnd_enabled;
-                            cx.notify();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_activity_icon_button(
-                        LucideIcon::ListTree,
-                        self.notification_center.event_log.filter.severity
-                            != WorkspaceEventSeverityFilter::All,
-                        |this, _event, _window, cx| {
-                            this.cycle_event_log_severity_filter();
-                            cx.notify();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_activity_icon_button(
-                        LucideIcon::Search,
-                        self.notification_center.event_log.filter.category
-                            != WorkspaceEventCategoryFilter::All,
-                        |this, _event, _window, cx| {
-                            this.cycle_event_log_category_filter();
-                            cx.notify();
-                        },
-                        cx,
-                    ))
-                    .child(self.render_activity_icon_button(
-                        LucideIcon::Trash2,
-                        false,
-                        |this, _event, _window, cx| {
-                            this.clear_event_log();
-                            cx.notify();
-                        },
-                        cx,
-                    )),
-            )
-            .into_any_element()
-    }
-
     fn render_activity_icon_button(
         &self,
         icon: LucideIcon,
@@ -1114,75 +922,6 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_count_chip(
-        &self,
-        icon: LucideIcon,
-        color: u32,
-        count: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(2.0))
-            .text_color(rgb(color))
-            .child(Self::render_lucide_icon(icon, 11.0, rgb(color)))
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "event-log-count-chip",
-                (icon as u8, color),
-                count.to_string(),
-                color,
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn filtered_event_log_counts(&self) -> (usize, usize, usize) {
-        let mut info = 0;
-        let mut warn = 0;
-        let mut error = 0;
-        for entry in self
-            .notification_center
-            .event_log
-            .entries
-            .iter()
-            .filter(|entry| self.event_log_entry_matches_filter(entry))
-        {
-            match entry.severity {
-                WorkspaceEventSeverity::Info => info += 1,
-                WorkspaceEventSeverity::Warn => warn += 1,
-                WorkspaceEventSeverity::Error => error += 1,
-            }
-        }
-        (info, warn, error)
-    }
-
-    pub(in crate::workspace) fn resolve_event_log_title(
-        &self,
-        entry: &WorkspaceEventLogEntry,
-    ) -> String {
-        resolve_event_log_text(&self.i18n, &entry.title).unwrap_or_else(|| entry.title.clone())
-    }
-
-    pub(in crate::workspace) fn resolve_event_log_detail(
-        &self,
-        entry: &WorkspaceEventLogEntry,
-    ) -> Option<String> {
-        let detail = entry.detail.as_ref()?;
-        if let Some(resolved) = resolve_event_log_text(&self.i18n, detail) {
-            return Some(resolved);
-        }
-        if entry.source == "reconnect_orchestrator" {
-            let phase_key = format!("event_log.phase.{detail}");
-            let translated = self.i18n.t(&phase_key);
-            if translated != phase_key {
-                return Some(translated);
-            }
-        }
-        Some(detail.clone())
-    }
-
     pub(in crate::workspace) fn render_notification_row(
         &self,
         entry: &WorkspaceNotificationEntry,
@@ -1208,6 +947,13 @@ impl WorkspaceApp {
             WorkspaceNotificationScope::Node(node_id) => node_id.clone(),
             WorkspaceNotificationScope::Connection(connection_id) => connection_id.clone(),
         };
+
+        let audit_entry = entry.clone();
+        let show_audit = entry.kind == WorkspaceNotificationKind::Security
+            || matches!(
+                entry.severity,
+                WorkspaceNotificationSeverity::Error | WorkspaceNotificationSeverity::Critical
+            );
 
         div()
             .w_full()
@@ -1306,6 +1052,17 @@ impl WorkspaceApp {
                                     )),
                             ),
                     )
+                    .when(show_audit, |row| {
+                        row.child(self.workspace_toolbar_action_button(
+                            self.i18n.t("event_log.actions.audit_view"),
+                            None,
+                            oxideterm_gpui_ui::button::ToolbarButtonOptions::default(),
+                            cx.listener(move |this, _, window, cx| {
+                                this.open_notification_audit(&audit_entry, window, cx);
+                                cx.stop_propagation();
+                            }),
+                        ))
+                    })
                     .child(
                         div()
                             .size(px(20.0))
@@ -1346,141 +1103,6 @@ impl WorkspaceApp {
                     cx.notify();
                 }),
             )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_event_log_row(
-        &self,
-        entry: &WorkspaceEventLogEntry,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let (icon, accent) = match entry.severity {
-            WorkspaceEventSeverity::Info => (LucideIcon::Info, theme.accent),
-            WorkspaceEventSeverity::Warn => (LucideIcon::AlertTriangle, theme.warning),
-            WorkspaceEventSeverity::Error => (LucideIcon::AlertCircle, theme.error),
-        };
-        let category = match entry.category {
-            WorkspaceEventCategory::Connection => "connection",
-            WorkspaceEventCategory::Reconnect => "reconnect",
-            WorkspaceEventCategory::Node => "node",
-        };
-        let timestamp = entry
-            .timestamp
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|duration| duration.as_secs().to_string())
-            .unwrap_or_else(|_| "0".to_string());
-        let node_label = entry
-            .node_id
-            .as_ref()
-            .or(entry.connection_id.as_ref())
-            .cloned();
-
-        div()
-            .w_full()
-            .h(px(EVENT_LOG_SIDEBAR_ROW_HEIGHT))
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .px_3()
-            .py_1()
-            .overflow_hidden()
-            .text_size(px(12.0))
-            .font_family(settings_mono_font_family(self.settings_store.settings()))
-            .bg(rgb(theme.bg))
-            .hover(move |row| row.bg(rgb(theme.bg_hover)))
-            .child(
-                div()
-                    .w(px(60.0))
-                    .flex_none()
-                    .truncate()
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_selectable_text_scoped(
-                        "event-log-timestamp",
-                        entry.id,
-                        timestamp,
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .child(Self::render_lucide_icon(icon, 14.0, rgb(accent)))
-            .child(self.render_event_log_category_badge(category, cx))
-            .when_some(node_label, |row, node| {
-                row.child(
-                    div()
-                        .max_w(px(120.0))
-                        .flex_none()
-                        .truncate()
-                        .text_color(rgb(theme.accent))
-                        .child(self.render_selectable_text_scoped(
-                            "event-log-node",
-                            entry.id,
-                            node,
-                            theme.accent,
-                            cx,
-                        )),
-                )
-            })
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .truncate()
-                    .text_color(rgb(theme.text))
-                    .child(self.render_selectable_text_scoped(
-                        "event-log-title",
-                        entry.id,
-                        self.resolve_event_log_title(entry),
-                        theme.text,
-                        cx,
-                    )),
-            )
-            .when_some(self.resolve_event_log_detail(entry), |row, detail| {
-                row.child(
-                    div()
-                        .min_w(px(0.0))
-                        .flex_1()
-                        .truncate()
-                        .text_color(rgb(theme.text_muted))
-                        .child(self.render_selectable_text_scoped(
-                            "event-log-detail",
-                            entry.id,
-                            format!("- {detail}"),
-                            theme.text_muted,
-                            cx,
-                        )),
-                )
-            })
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_event_log_category_badge(
-        &self,
-        category: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let (bg, text) = match category {
-            "connection" => (0x10b981, 0x34d399),
-            "reconnect" => (0xf59e0b, 0xfbbf24),
-            _ => (0x3b82f6, 0x60a5fa),
-        };
-        div()
-            .flex_none()
-            .px(px(6.0))
-            .py(px(2.0))
-            .rounded(px(self.tokens.radii.md))
-            .bg(rgba((bg << 8) | 0x26))
-            .text_size(px(10.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(text))
-            .child(self.render_display_text_with_role(
-                SelectableTextRole::PlainDocument,
-                "event-log-category",
-                category,
-                self.i18n.t(&format!("event_log.category.{category}")),
-                text,
-                cx,
-            ))
             .into_any_element()
     }
 
@@ -1560,24 +1182,6 @@ pub(in crate::workspace) fn notification_kind_label(
         WorkspaceNotificationKind::Plugin => "plugin",
         WorkspaceNotificationKind::Agent => "agent",
     }
-}
-
-pub(in crate::workspace) fn resolve_event_log_text(i18n: &I18n, raw: &str) -> Option<String> {
-    if !raw.starts_with("event_log.") {
-        return None;
-    }
-    let (key, count) = raw
-        .split_once(':')
-        .map(|(key, value)| (key, value.parse::<usize>().ok()))
-        .unwrap_or((raw, None));
-    let mut translated = i18n.t(key);
-    if translated == key {
-        return Some(raw.to_string());
-    }
-    if let Some(count) = count {
-        translated = translated.replace("{{count}}", &count.to_string());
-    }
-    Some(translated)
 }
 
 pub(in crate::workspace) fn notification_sidebar_row_signatures(

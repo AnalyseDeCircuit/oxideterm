@@ -15,6 +15,49 @@ const TERMINAL_FONT_SIZE_MAX: i64 = 32;
 const TERMINAL_FONT_SIZE_DEFAULT: i64 = 14;
 const TERMINAL_FONT_SIZE_HUD_DURATION: Duration = Duration::from_millis(1200);
 
+fn dispatch_quick_command_batch(
+    command_id: &str,
+    targets: impl IntoIterator<Item = (PaneId, Zeroizing<String>)>,
+    target_count: usize,
+    active_pane_id: Option<PaneId>,
+    mut send: impl FnMut(PaneId, &str, TerminalCommandMarkDetectionSource, Option<&str>) -> bool,
+) -> usize {
+    let mut batch = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Automation,
+        "quick_command_batch",
+        None,
+        Some(command_id),
+    );
+    let parent_id = batch.id().map(str::to_string);
+    let mut sent_count = 0usize;
+    for (pane_id, command) in targets {
+        let source = if Some(pane_id) == active_pane_id {
+            TerminalCommandMarkDetectionSource::QuickCommand
+        } else {
+            TerminalCommandMarkDetectionSource::Broadcast
+        };
+        if send(pane_id, &command, source, parent_id.as_deref()) {
+            sent_count += 1;
+        }
+    }
+    batch.summary(&format!(
+        "config={command_id}; targets={target_count}; sent={sent_count}"
+    ));
+    batch.finish(
+        if sent_count == target_count && target_count > 0 {
+            oxideterm_audit::AuditOutcome::Sent
+        } else if sent_count > 0 {
+            oxideterm_audit::AuditOutcome::Partial
+        } else {
+            oxideterm_audit::AuditOutcome::Failed
+        },
+        oxideterm_audit::AuditEvidence::Dispatch,
+        None,
+        None,
+    );
+    sent_count
+}
+
 fn adjusted_terminal_font_size(current: i64, delta: i64) -> Option<i64> {
     let next = (current + delta).clamp(TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX);
     (next != current).then_some(next)
@@ -862,6 +905,29 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(
+            self.active_ime_target_for_window(window.window_handle().window_id(), cx),
+            Some(WorkspaceImeTarget::AuditPolicy(_))
+        ) && self.ime_marked_text.is_none()
+            && event.keystroke.key == "enter"
+        {
+            self.apply_audit_policy_inputs(cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.active_ime_target_for_window(window.window_handle().window_id(), cx)
+            == Some(WorkspaceImeTarget::AuditSearch)
+            && self.ime_marked_text.is_none()
+            && event.keystroke.key == "enter"
+        {
+            self.apply_audit_search(cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.handle_audit_filter_key(&event.keystroke.key, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.session_sort_menu_open {
             if event.keystroke.key == "escape" {
                 self.session_sort_menu_open = false;
@@ -2142,6 +2208,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let target_count = prepared.targets.len();
         // Expansion is target-specific, so broadcast delivery cannot reuse the
         // old single-string path without losing per-pane context semantics.
         let active_pane_id = self.active_pane_id(cx);
@@ -2149,27 +2216,22 @@ impl WorkspaceApp {
             .targets
             .first()
             .map(|target| target.command.clone());
-        let mut sent = false;
-        for target in prepared.targets {
-            let Some((pane_id, _)) = target_contexts
+        let targets = prepared.targets.into_iter().filter_map(|target| {
+            target_contexts
                 .iter()
                 .find(|(_, context)| context.target_id == target.target_id)
-            else {
-                continue;
-            };
-            self.send_terminal_command_to_pane(
-                *pane_id,
-                &target.command,
-                if Some(*pane_id) == active_pane_id {
-                    TerminalCommandMarkDetectionSource::CommandBar
-                } else {
-                    TerminalCommandMarkDetectionSource::Broadcast
-                },
-                cx,
-            );
-            sent = true;
-        }
-        if sent {
+                .map(|(pane_id, _)| (*pane_id, target.command))
+        });
+        let sent_count = dispatch_quick_command_batch(
+            &prepared.command_id,
+            targets,
+            target_count,
+            active_pane_id,
+            |pane_id, command, source, parent_id| {
+                self.send_terminal_command_to_pane(pane_id, command, source, parent_id, cx)
+            },
+        );
+        if sent_count > 0 {
             if focus_command
                 .as_deref()
                 .is_some_and(|command| self.terminal_command_should_handoff_focus(command))
@@ -2449,9 +2511,11 @@ impl WorkspaceApp {
         let Some(content) = content else {
             return;
         };
+        let audit_context = pane.read(cx).audit_context();
         self.prompt_save_terminal_recording(
             terminal_recording_default_name_label(&session_label),
             content,
+            audit_context,
             cx,
         );
         cx.notify();
@@ -2461,6 +2525,7 @@ impl WorkspaceApp {
         &mut self,
         session_label: String,
         content: String,
+        audit_context: Option<oxideterm_audit::AuditContext>,
         cx: &mut Context<Self>,
     ) {
         let directory = std::env::var_os("HOME")
@@ -2473,15 +2538,39 @@ impl WorkspaceApp {
             .unwrap_or_default();
         let suggested = format!("oxideterm-{session_label}-{timestamp}.cast");
         let receiver = cx.prompt_for_new_path(&directory, Some(&suggested));
+        let mut audit = oxideterm_audit::AuditOperation::in_request(
+            audit_context.as_ref(),
+            oxideterm_audit::AuditCategory::Automation,
+            "terminal_recording_export",
+            Some(&format!("bytes={}", content.len())),
+        );
         cx.spawn(async move |weak, cx| {
+            let content = Zeroizing::new(content);
             let result = match receiver.await {
-                Ok(Ok(Some(path))) => fs::write(&path, content)
+                Ok(Ok(Some(path))) => fs::write(&path, content.as_bytes())
                     .map(|_| Some(path))
                     .map_err(|error| error.to_string()),
                 Ok(Ok(None)) => Ok(None),
                 Ok(Err(error)) => Err(error.to_string()),
                 Err(error) => Err(error.to_string()),
             };
+            if let Ok(Some(path)) = &result {
+                audit.summary(&format!("bytes={}; path={}", content.len(), path.display()));
+            }
+            audit.finish(
+                match &result {
+                    Ok(Some(_)) => oxideterm_audit::AuditOutcome::Succeeded,
+                    Ok(None) => oxideterm_audit::AuditOutcome::Cancelled,
+                    Err(_) => oxideterm_audit::AuditOutcome::Failed,
+                },
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                result
+                    .as_ref()
+                    .ok()
+                    .and_then(|path| path.as_ref())
+                    .map(|_| content.len() as u64),
+            );
             let _ = weak.update(cx, |this, cx| {
                 match result {
                     Ok(Some(path)) => {
@@ -2521,14 +2610,15 @@ impl WorkspaceApp {
         pane_id: PaneId,
         command: &str,
         mark_source: TerminalCommandMarkDetectionSource,
+        parent_id: Option<&str>,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
-            let _ = pane.update(cx, |pane, cx| {
-                pane.begin_command_mark(command, mark_source, cx);
-                pane.send_command_line(command, cx);
+            return pane.update(cx, |pane, cx| {
+                pane.send_command_line_with_mark(command, mark_source, parent_id, cx)
             });
         }
+        false
     }
 
     pub(super) fn terminal_broadcast_target_panes(
@@ -3354,6 +3444,156 @@ mod keybinding_update_tests {
                 assert_eq!(target.input, expected_input, "{label}");
                 assert_eq!(target.actions, expected_actions, "{label}");
             });
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod quick_command_audit_tests {
+    use super::*;
+    use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
+    use oxideterm_audit::{AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource};
+
+    struct Root;
+    impl Render for Root {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    struct Keys;
+    impl oxideterm_audit::AuditKeyProvider for Keys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(Zeroizing::new(vec![7; 32]))
+        }
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[gpui::test]
+    fn quick_command_three_target_dispatch_records_partial_and_target_results(
+        cx: &mut TestAppContext,
+    ) {
+        cx.executor().allow_parking();
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let _registration = AuditContext::new(service.client(), AuditSource::User).install();
+        let (_, cx) = cx.add_window_view(|_, _| Root);
+        let panes = cx.update(|window, cx| {
+            (0..3)
+                .map(|_| {
+                    let config = oxideterm_terminal::LocalPtyConfig {
+                        shell: Some(oxideterm_terminal::ShellInfo::new(
+                            "test-cat", "cat", "/bin/cat",
+                        )),
+                        load_profile: false,
+                        ..Default::default()
+                    };
+                    cx.new(|cx| {
+                        TerminalPane::new_local_with_config_and_preferences(
+                            config,
+                            Default::default(),
+                            window,
+                            cx,
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect::<Vec<_>>()
+        });
+        let sessions = panes
+            .iter()
+            .map(|pane| {
+                pane.read_with(cx, |pane, _| {
+                    pane.audit_context().unwrap().session_id.unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(sessions.iter().collect::<HashSet<_>>().len(), 3);
+        panes[2].update(cx, |pane, cx| pane.set_input_locked(true, cx));
+        let targets = vec![
+            (PaneId(10), Zeroizing::new("one".to_string())),
+            (PaneId(20), Zeroizing::new("two".to_string())),
+            (PaneId(30), Zeroizing::new("three".to_string())),
+        ];
+        let sent = dispatch_quick_command_batch(
+            "config-three",
+            targets,
+            3,
+            Some(PaneId(10)),
+            |pane_id, command, source, parent_id| {
+                let index = match pane_id {
+                    PaneId(10) => 0,
+                    PaneId(20) => 1,
+                    PaneId(30) => 2,
+                    _ => unreachable!(),
+                };
+                panes[index].update(cx, |pane, cx| {
+                    pane.send_command_line_with_mark(command, source, parent_id, cx)
+                })
+            },
+        );
+        assert_eq!(sent, 2);
+
+        let page = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(service.client().query(AuditQuery {
+                limit: 80,
+                ..Default::default()
+            }))
+            .unwrap();
+        let operations = page
+            .records
+            .iter()
+            .filter_map(|record| record.details.operation.as_ref())
+            .collect::<Vec<_>>();
+        let batch = operations
+            .iter()
+            .find(|operation| {
+                operation.action == "quick_command_batch"
+                    && operation.outcome == AuditOutcome::Partial
+            })
+            .unwrap();
+        let commands = operations
+            .iter()
+            .filter(|operation| {
+                operation.action == "command_execute"
+                    && operation.parent_id.as_deref() == Some(batch.id.as_str())
+            })
+            .collect::<Vec<_>>();
+        let dispatches = operations
+            .iter()
+            .filter(|operation| {
+                operation.action == "command_dispatch"
+                    && operation.phase == Some(oxideterm_audit::AuditPhase::Result)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(dispatches.len(), 3);
+        for (session, expected) in
+            sessions
+                .iter()
+                .zip([AuditOutcome::Sent, AuditOutcome::Sent, AuditOutcome::Failed])
+        {
+            let dispatch = dispatches
+                .iter()
+                .find(|operation| operation.session_id.as_deref() == Some(session.as_str()))
+                .unwrap();
+            assert_eq!(dispatch.outcome, expected);
+            assert!(
+                dispatch.parent_id.as_deref() == Some(batch.id.as_str())
+                    || commands
+                        .iter()
+                        .any(|command| command.id == *dispatch.parent_id.as_ref().unwrap())
+            );
         }
     }
 }

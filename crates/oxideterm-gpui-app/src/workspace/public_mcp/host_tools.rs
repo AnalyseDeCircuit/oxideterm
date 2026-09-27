@@ -91,62 +91,68 @@ impl WorkspaceApp {
         let limit = args.limit as usize;
         let cancellation = request.cancellation_token();
         let router = self.node_router.clone();
-        self.forwarding_runtime.spawn(async move {
-            let resolved = tokio::select! {
-                _ = cancellation.cancelled() => return,
-                result = router.resolve_connection(&lease.node_id) => result,
-            };
-            let resolved = match resolved {
-                Ok(resolved) => resolved,
-                Err(_) => {
-                    request.finish(ToolEnvelope::failed("The SSH node is no longer ready"));
-                    return;
-                }
-            };
-            let os_type = resolved
-                .handle
-                .remote_env()
-                .map_or_else(|| "Unknown".to_owned(), |environment| environment.os_type);
-            let command = match host_tools_capture_command(resource, log_preset, limit, &os_type) {
-                Ok(command) => Zeroizing::new(command),
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
-            let output = tokio::select! {
-                _ = cancellation.cancelled() => return,
-                result = resolved.handle.run_secret_command_capture(
-                    command.as_str(),
-                    HOST_TOOLS_CAPTURE_TIMEOUT,
-                    HOST_TOOLS_CAPTURE_OUTPUT_LIMIT,
-                ) => result,
-            };
-            let output = match output {
-                Ok(output) => output,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(public_command_error(error)));
-                    return;
-                }
-            };
-            let stdout = String::from_utf8_lossy(output.stdout.as_slice());
-            let snapshot = match host_tools_capture_value(resource, &stdout, limit) {
-                Ok(snapshot) => snapshot,
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
-            finish_serialized(
-                request,
-                json!({
-                    "resource": resource,
-                    "snapshot": snapshot,
-                    "exit_code": output.exit_code,
-                    "truncated": output.truncated,
-                }),
-            );
-        });
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let resolved = tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        result = router.resolve_connection(&lease.node_id) => result,
+                    };
+                    let resolved = match resolved {
+                        Ok(resolved) => resolved,
+                        Err(_) => {
+                            request.finish(ToolEnvelope::failed("The SSH node is no longer ready"));
+                            return;
+                        }
+                    };
+                    let os_type = resolved
+                        .handle
+                        .remote_env()
+                        .map_or_else(|| "Unknown".to_owned(), |environment| environment.os_type);
+                    let command =
+                        match host_tools_capture_command(resource, log_preset, limit, &os_type) {
+                            Ok(command) => Zeroizing::new(command),
+                            Err(error) => {
+                                request.finish(ToolEnvelope::failed(error));
+                                return;
+                            }
+                        };
+                    let output = tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        result = resolved.handle.run_secret_command_capture(
+                            command.as_str(),
+                            HOST_TOOLS_CAPTURE_TIMEOUT,
+                            HOST_TOOLS_CAPTURE_OUTPUT_LIMIT,
+                        ) => result,
+                    };
+                    let output = match output {
+                        Ok(output) => output,
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(public_command_error(error)));
+                            return;
+                        }
+                    };
+                    let stdout = String::from_utf8_lossy(output.stdout.as_slice());
+                    let snapshot = match host_tools_capture_value(resource, &stdout, limit) {
+                        Ok(snapshot) => snapshot,
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(error));
+                            return;
+                        }
+                    };
+                    finish_serialized(
+                        request,
+                        json!({
+                            "resource": resource,
+                            "snapshot": snapshot,
+                            "exit_code": output.exit_code,
+                            "truncated": output.truncated,
+                        }),
+                    );
+                },
+            ));
     }
 
     pub(super) fn handle_public_mcp_host_tools_operate(&self, request: DomainRequest) {
@@ -164,51 +170,56 @@ impl WorkspaceApp {
         let operation = args.operation.clone();
         let cancellation = request.cancellation_token();
         let router = self.node_router.clone();
-        self.forwarding_runtime.spawn(async move {
-            let resolved = tokio::select! {
-                _ = cancellation.cancelled() => return,
-                result = router.resolve_connection(&lease.node_id) => result,
-            };
-            let resolved = match resolved {
-                Ok(resolved) => resolved,
-                Err(_) => {
-                    request.finish(ToolEnvelope::failed("The SSH node is no longer ready"));
-                    return;
-                }
-            };
-            let os_type = resolved
-                .handle
-                .remote_env()
-                .map_or_else(|| "Unknown".to_owned(), |environment| environment.os_type);
-            let command = match host_tools_operation_command(&operation, &os_type) {
-                Ok(command) => Zeroizing::new(command),
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(error));
-                    return;
-                }
-            };
-            let output = tokio::select! {
-                _ = cancellation.cancelled() => return,
-                result = resolved.handle.run_secret_command_capture(
-                    command.as_str(),
-                    HOST_TOOLS_CAPTURE_TIMEOUT,
-                    HOST_TOOLS_CAPTURE_OUTPUT_LIMIT,
-                ) => result,
-            };
-            match output {
-                Ok(output) => finish_serialized(
-                    request,
-                    json!({
-                        "success": output.exit_code == Some(0),
-                        "exit_code": output.exit_code,
-                        "truncated": output.truncated,
-                    }),
-                ),
-                Err(error) => {
-                    request.finish(ToolEnvelope::failed(public_command_error(error)));
-                }
-            }
-        });
+        let audit_context = request.audit_context.clone();
+        self.forwarding_runtime
+            .spawn(oxideterm_audit::AuditContext::scope_optional(
+                audit_context,
+                async move {
+                    let resolved = tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        result = router.resolve_connection(&lease.node_id) => result,
+                    };
+                    let resolved = match resolved {
+                        Ok(resolved) => resolved,
+                        Err(_) => {
+                            request.finish(ToolEnvelope::failed("The SSH node is no longer ready"));
+                            return;
+                        }
+                    };
+                    let os_type = resolved
+                        .handle
+                        .remote_env()
+                        .map_or_else(|| "Unknown".to_owned(), |environment| environment.os_type);
+                    let command = match host_tools_operation_command(&operation, &os_type) {
+                        Ok(command) => Zeroizing::new(command),
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(error));
+                            return;
+                        }
+                    };
+                    let output = tokio::select! {
+                        _ = cancellation.cancelled() => return,
+                        result = resolved.handle.run_secret_command_capture(
+                            command.as_str(),
+                            HOST_TOOLS_CAPTURE_TIMEOUT,
+                            HOST_TOOLS_CAPTURE_OUTPUT_LIMIT,
+                        ) => result,
+                    };
+                    match output {
+                        Ok(output) => finish_serialized(
+                            request,
+                            json!({
+                                "success": output.exit_code == Some(0),
+                                "exit_code": output.exit_code,
+                                "truncated": output.truncated,
+                            }),
+                        ),
+                        Err(error) => {
+                            request.finish(ToolEnvelope::failed(public_command_error(error)));
+                        }
+                    }
+                },
+            ));
     }
 }
 

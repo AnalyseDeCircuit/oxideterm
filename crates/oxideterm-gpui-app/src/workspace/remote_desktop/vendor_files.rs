@@ -5,9 +5,9 @@ use super::*;
 
 #[derive(Clone, Debug)]
 pub(super) struct RemoteDesktopVncDownloadProgress {
-    transfer_id: String,
+    pub(super) transfer_id: String,
     file_name: String,
-    transferred_bytes: u64,
+    pub(super) transferred_bytes: u64,
     total_bytes: u64,
     completed_files: u32,
     total_files: u32,

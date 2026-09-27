@@ -4,6 +4,67 @@
 use super::*;
 
 impl RemoteDesktopSessionEntity {
+    pub(in crate::workspace) fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.audit_context.clone()
+    }
+
+    fn start_connection_audit(
+        &mut self,
+        action: &str,
+        source: Option<oxideterm_audit::AuditSource>,
+    ) {
+        if action == "desktop_connect" {
+            if let Some(audit) = self
+                .ssh_tunnel
+                .as_mut()
+                .and_then(|lease| lease.connect_audit.take())
+            {
+                self.connect_audit = Some(audit);
+                return;
+            }
+        }
+        self.connect_audit = desktop_connection_audit(self.audit_context.as_ref(), action, source);
+    }
+
+    fn finish_connection_audit(&mut self, outcome: oxideterm_audit::AuditOutcome) {
+        if let Some(audit) = self.connect_audit.take() {
+            audit.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+        }
+    }
+
+    pub(in crate::workspace) fn observe_desktop(
+        &self,
+        category: oxideterm_audit::AuditCategory,
+        action: &str,
+        detail: &str,
+        outcome: oxideterm_audit::AuditOutcome,
+        bytes: Option<u64>,
+    ) {
+        if let Some(context) = self.audit_context.as_ref() {
+            let context = context.for_request();
+            let mut audit = context.operation(category, action, Some(detail));
+            let authorization = if matches!(
+                context.source,
+                oxideterm_audit::AuditSource::Mcp | oxideterm_audit::AuditSource::Plugin
+            ) {
+                oxideterm_audit::AuditAuthorization::Approved
+            } else {
+                oxideterm_audit::AuditAuthorization::NotRequired
+            };
+            audit.authorization(authorization, None);
+            audit.finish(
+                outcome,
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                bytes,
+            );
+        }
+    }
     pub(super) fn install_release_handler(&self, cx: &mut Context<Self>) {
         cx.on_release(|session, _cx| {
             // Entity destruction owns helper shutdown, but never shared SSH
@@ -44,6 +105,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn mark_connection_established(&mut self) {
+        self.finish_connection_audit(oxideterm_audit::AuditOutcome::Succeeded);
         self.has_connected = true;
         self.automatic_reconnect_worker_generation = None;
         self.automatic_reconnect_attempt = 0;
@@ -100,7 +162,11 @@ impl RemoteDesktopSessionEntity {
                         return;
                     }
                     session.automatic_reconnect_worker_generation = None;
-                    session.restart_worker_preserving_frame(window, cx);
+                    session.restart_worker_preserving_frame(
+                        oxideterm_audit::AuditSource::System,
+                        window,
+                        cx,
+                    );
                     cx.notify();
                 });
             });
@@ -109,11 +175,24 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn shutdown(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
+        let had_worker = self.worker.is_some();
+        if self.connect_audit.is_some() {
+            self.finish_connection_audit(oxideterm_audit::AuditOutcome::Cancelled);
+        }
         self.cancel_automatic_reconnect();
         if let Some(worker_wake) = self.worker_wake.take() {
             worker_wake.stop();
         }
         self.shutdown_worker();
+        if had_worker {
+            self.observe_desktop(
+                oxideterm_audit::AuditCategory::Connection,
+                "desktop_disconnect",
+                "helper close requested",
+                oxideterm_audit::AuditOutcome::Sent,
+                None,
+            );
+        }
         self.public_mcp_clipboard = None;
         drop(self.ssh_tunnel.take());
         drop(self.password.take());
@@ -175,6 +254,13 @@ impl RemoteDesktopSessionEntity {
                         RemoteDesktopHelperEvent::ClipboardText { text }
                             if self.profile.session_options.clipboard.text =>
                         {
+                            self.observe_desktop(
+                                oxideterm_audit::AuditCategory::File,
+                                "desktop_clipboard_transfer",
+                                "remote_to_local text",
+                                oxideterm_audit::AuditOutcome::Succeeded,
+                                Some(text.len() as u64),
+                            );
                             // Keep a session-scoped zeroizing copy for explicitly authorized
                             // Public MCP reads; the platform clipboard remains the UI boundary.
                             self.public_mcp_clipboard = Some(RemoteDesktopPublicClipboard::Text(
@@ -186,6 +272,13 @@ impl RemoteDesktopSessionEntity {
                         RemoteDesktopHelperEvent::ClipboardData { data }
                             if self.profile.session_options.clipboard.images =>
                         {
+                            self.observe_desktop(
+                                oxideterm_audit::AuditCategory::File,
+                                "desktop_clipboard_transfer",
+                                "remote_to_local image",
+                                oxideterm_audit::AuditOutcome::Succeeded,
+                                Some(data.bytes.len() as u64),
+                            );
                             self.public_mcp_clipboard = Some(RemoteDesktopPublicClipboard::Image {
                                 format: data.format,
                                 bytes: Zeroizing::new(data.bytes.clone()),
@@ -198,6 +291,13 @@ impl RemoteDesktopSessionEntity {
                         RemoteDesktopHelperEvent::ClipboardFilesReady { paths, .. }
                             if self.profile.session_options.clipboard.files =>
                         {
+                            self.observe_desktop(
+                                oxideterm_audit::AuditCategory::File,
+                                "desktop_file_transfer",
+                                &format!("remote_to_local files={}", paths.len()),
+                                oxideterm_audit::AuditOutcome::Sent,
+                                None,
+                            );
                             cx.write_to_clipboard(ClipboardItem {
                                 entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
                                     paths.into(),
@@ -205,7 +305,17 @@ impl RemoteDesktopSessionEntity {
                             });
                             changed = true;
                         }
-                        RemoteDesktopHelperEvent::ClipboardTransferFailed { .. } => {
+                        RemoteDesktopHelperEvent::ClipboardTransferFailed {
+                            transfer_id, ..
+                        } => {
+                            if let Some(audit) = self.file_audits.remove(&transfer_id) {
+                                audit.finish(
+                                    oxideterm_audit::AuditOutcome::Failed,
+                                    oxideterm_audit::AuditEvidence::Protocol,
+                                    None,
+                                    None,
+                                );
+                            }
                             // Helper text may include remote paths or protocol
                             // details. Only a typed, content-free failure crosses
                             // into the workspace notification adapter.
@@ -217,12 +327,77 @@ impl RemoteDesktopSessionEntity {
                         | RemoteDesktopHelperEvent::VncFileTransferProgress { .. }
                         | RemoteDesktopHelperEvent::VncFileTransferCompleted { .. }
                         | RemoteDesktopHelperEvent::VncFileTransferFailed { .. }) => {
+                            match &event {
+                                RemoteDesktopHelperEvent::VncFileTransferCompleted {
+                                    transfer_id,
+                                    paths,
+                                    skipped_files,
+                                    ..
+                                } => {
+                                    if let Some(mut audit) = self.file_audits.remove(transfer_id) {
+                                        let bytes = self
+                                            .vnc_files
+                                            .transfer
+                                            .as_ref()
+                                            .filter(|transfer| &transfer.transfer_id == transfer_id)
+                                            .map(|transfer| transfer.transferred_bytes);
+                                        audit.summary(&format!(
+                                            "remote_to_local files={} skipped={skipped_files}",
+                                            paths.len()
+                                        ));
+                                        audit.finish(
+                                            oxideterm_audit::AuditOutcome::Succeeded,
+                                            oxideterm_audit::AuditEvidence::Protocol,
+                                            None,
+                                            bytes,
+                                        );
+                                    }
+                                }
+                                RemoteDesktopHelperEvent::VncFileTransferFailed {
+                                    transfer_id,
+                                    kind,
+                                } => {
+                                    if let Some(audit) = self.file_audits.remove(transfer_id) {
+                                        let bytes = self
+                                            .vnc_files
+                                            .transfer
+                                            .as_ref()
+                                            .filter(|transfer| &transfer.transfer_id == transfer_id)
+                                            .map(|transfer| transfer.transferred_bytes);
+                                        audit.finish(
+                                            if *kind
+                                                == RemoteDesktopFileTransferFailureKind::Canceled
+                                            {
+                                                oxideterm_audit::AuditOutcome::Cancelled
+                                            } else {
+                                                oxideterm_audit::AuditOutcome::Failed
+                                            },
+                                            oxideterm_audit::AuditEvidence::Protocol,
+                                            None,
+                                            bytes,
+                                        );
+                                    }
+                                }
+                                _ => {}
+                            }
                             if let Some(intent) = self.apply_vnc_file_event(event) {
                                 intents.push(intent);
                             }
                             changed = true;
                         }
                         RemoteDesktopHelperEvent::ConnectionFailure { message, category } => {
+                            self.finish_connection_audit(oxideterm_audit::AuditOutcome::Failed);
+                            if self.has_connected
+                                && self.automatic_reconnect_worker_generation != Some(generation)
+                            {
+                                self.observe_desktop(
+                                    oxideterm_audit::AuditCategory::Connection,
+                                    "desktop_disconnect",
+                                    "connection failed",
+                                    oxideterm_audit::AuditOutcome::Failed,
+                                    None,
+                                );
+                            }
                             if category == Some(RemoteDesktopErrorCategory::Authentication)
                                 && self
                                     .password
@@ -258,6 +433,19 @@ impl RemoteDesktopSessionEntity {
                             if self.automatic_reconnect_worker_generation == Some(generation) {
                                 continue;
                             }
+                            self.finish_connection_audit(oxideterm_audit::AuditOutcome::Failed);
+                            if self.has_connected
+                                && self.state.snapshot().status
+                                    != RemoteDesktopSessionStatus::Disconnected
+                            {
+                                self.observe_desktop(
+                                    oxideterm_audit::AuditCategory::Connection,
+                                    "desktop_disconnect",
+                                    "helper terminated",
+                                    oxideterm_audit::AuditOutcome::Unknown,
+                                    None,
+                                );
+                            }
                             self.state
                                 .apply_event(RemoteDesktopHelperEvent::Terminated { exit_code });
                             let retired_images = self.state.take_retired_images();
@@ -278,6 +466,28 @@ impl RemoteDesktopSessionEntity {
                                         ..
                                     }
                             );
+                            let disconnected = matches!(
+                                &event,
+                                RemoteDesktopHelperEvent::Disconnected { .. }
+                                    | RemoteDesktopHelperEvent::Status {
+                                        status: RemoteDesktopSessionStatus::Disconnected,
+                                        ..
+                                    }
+                            );
+                            if disconnected {
+                                self.finish_connection_audit(oxideterm_audit::AuditOutcome::Failed);
+                                if self.state.snapshot().status
+                                    == RemoteDesktopSessionStatus::Connected
+                                {
+                                    self.observe_desktop(
+                                        oxideterm_audit::AuditCategory::Connection,
+                                        "desktop_disconnect",
+                                        "helper disconnected",
+                                        oxideterm_audit::AuditOutcome::Succeeded,
+                                        None,
+                                    );
+                                }
+                            }
                             self.state.apply_event(event);
                             if connection_established {
                                 self.mark_connection_established();
@@ -298,6 +508,18 @@ impl RemoteDesktopSessionEntity {
                     debug_assert_eq!(tab_id, self.tab_id);
                     if self.worker_generation != generation {
                         continue;
+                    }
+                    self.finish_connection_audit(oxideterm_audit::AuditOutcome::Failed);
+                    if self.has_connected
+                        && self.automatic_reconnect_worker_generation != Some(generation)
+                    {
+                        self.observe_desktop(
+                            oxideterm_audit::AuditCategory::Connection,
+                            "desktop_disconnect",
+                            "transport failed",
+                            oxideterm_audit::AuditOutcome::Failed,
+                            None,
+                        );
                     }
                     if self.frame_slot.is_visible() {
                         let _ = self.apply_frame_ready(generation, window, cx);
@@ -469,6 +691,7 @@ impl RemoteDesktopSessionEntity {
         if self.worker.is_some() {
             return false;
         }
+        self.start_connection_audit("desktop_connect", None);
         let profile = self.profile.clone();
         let provider = self.provider.clone();
         let password_available = self
@@ -515,7 +738,13 @@ impl RemoteDesktopSessionEntity {
         true
     }
 
-    fn restart_worker_preserving_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn restart_worker_preserving_frame(
+        &mut self,
+        source: oxideterm_audit::AuditSource,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_connection_audit("desktop_reconnect", Some(source));
         let (initial_request_size, initial_viewport_size) =
             initial_remote_desktop_sizes_for_session(self);
         let profile = self.profile.clone();
@@ -987,7 +1216,11 @@ impl WorkspaceApp {
                     session.password = Some(RemoteDesktopSecret::from(Zeroizing::new(
                         std::mem::take(&mut responses[index]),
                     )));
-                    session.restart_worker_preserving_frame(window, cx);
+                    session.restart_worker_preserving_frame(
+                        oxideterm_audit::AuditSource::User,
+                        window,
+                        cx,
+                    );
                     cx.notify();
                 });
             });
@@ -1872,6 +2105,196 @@ mod tests {
     };
 
     struct RemoteDesktopSessionTestRoot;
+
+    struct AuditKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for AuditKeys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(Zeroizing::new(vec![3; 32]))
+        }
+
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[gpui::test]
+    fn desktop_helper_results_audit_connection_and_redact_clipboard(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&dir.path().join("audit.db"), &AuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let audit_service = oxideterm_audit::AuditService::with_key_provider(
+            dir.path().join("audit.db"),
+            AuditKeys,
+        )
+        .unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let mut connections = Vec::new();
+        let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
+        for (tab_id, protocol, succeeds) in [
+            (81, RemoteDesktopProtocol::Rdp, true),
+            (82, RemoteDesktopProtocol::Vnc, false),
+        ] {
+            let profile = preview_remote_desktop_profile(protocol);
+            let provider = builtin_preview_provider_registry()
+                .unwrap()
+                .get_for_protocol(protocol)
+                .cloned()
+                .unwrap();
+            let audit_context = oxideterm_audit::AuditContext::new(
+                audit_service.client(),
+                oxideterm_audit::AuditSource::User,
+            )
+            .session(protocol.provider_id(), &format!("desktop-{tab_id}.test"));
+            let connect =
+                desktop_connection_audit(Some(&audit_context), "desktop_connect", None).unwrap();
+            let operation_id = connect.id().unwrap().to_owned();
+            connections.push((
+                operation_id,
+                audit_context.session_id.clone(),
+                if succeeds {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Failed
+                },
+            ));
+            let pending = PendingRemoteDesktopSshTunnel::new(
+                format!("test-lease-{tab_id}"),
+                forwards::ForwardingRuntimeService::test_fixture(),
+                runtime.spawn(async { Ok(RemoteDesktopEndpoint::new("127.0.0.1", 3390)) }),
+                Some(audit_context.clone()),
+                Some(connect),
+            );
+            let (_, lease) = runtime.block_on(pending.finish()).unwrap();
+            let session = cx.new(|cx| {
+                let mut session = RemoteDesktopSessionEntity::new(
+                    TabId(tab_id),
+                    profile,
+                    provider,
+                    None,
+                    dir.path().join(format!("certificates-{tab_id}.json")),
+                    RemoteDesktopFrameDeliverySlot::new(),
+                    window.into(),
+                );
+                session.audit_context = Some(audit_context.clone());
+                session.ssh_tunnel = Some(lease);
+                session.start_connection_audit("desktop_connect", None);
+                session.worker_generation = 1;
+                session.install_release_handler(cx);
+                session
+            });
+            window
+                .update(cx, |_root, window, cx| {
+                    session.update(cx, |session, cx| {
+                        let event = if succeeds {
+                            RemoteDesktopHelperEvent::Connected {
+                                size: RemoteDesktopSize::clamped(640, 480),
+                            }
+                        } else {
+                            RemoteDesktopHelperEvent::ConnectionFailure {
+                                message: "private helper diagnostic".into(),
+                                category: Some(RemoteDesktopErrorCategory::Network),
+                            }
+                        };
+                        session
+                            .delivery_tx
+                            .send(RemoteDesktopWorkerDelivery::Event {
+                                tab_id: TabId(tab_id),
+                                generation: 1,
+                                event,
+                            })
+                            .unwrap();
+                        if succeeds {
+                            session
+                                .delivery_tx
+                                .send(RemoteDesktopWorkerDelivery::Event {
+                                    tab_id: TabId(tab_id),
+                                    generation: 1,
+                                    event: RemoteDesktopHelperEvent::ClipboardText {
+                                        text: "private clipboard payload".into(),
+                                    },
+                                })
+                                .unwrap();
+                        }
+                        session.poll_deliveries(window, cx);
+                    });
+                })
+                .unwrap();
+        }
+        let page = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(audit_service.client().query(oxideterm_audit::AuditQuery {
+                limit: 20,
+                ..Default::default()
+            }))
+            .unwrap();
+        let results = page
+            .records
+            .iter()
+            .filter_map(|record| {
+                let op = record.details.operation.as_ref()?;
+                (op.phase == Some(oxideterm_audit::AuditPhase::Result)).then_some((
+                    op.action.as_str(),
+                    op.outcome,
+                    op.bytes,
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert!(results.contains(&(
+            "desktop_connect",
+            oxideterm_audit::AuditOutcome::Succeeded,
+            None
+        )));
+        assert!(results.contains(&(
+            "desktop_connect",
+            oxideterm_audit::AuditOutcome::Failed,
+            None
+        )));
+        assert!(results.contains(&(
+            "desktop_clipboard_transfer",
+            oxideterm_audit::AuditOutcome::Succeeded,
+            Some(25)
+        )));
+        for (id, session_id, expected) in connections {
+            let phases = page
+                .records
+                .iter()
+                .filter_map(|record| record.details.operation.as_ref())
+                .filter(|operation| operation.action == "desktop_connect" && operation.id == id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                phases
+                    .iter()
+                    .filter(|operation| operation.phase == Some(oxideterm_audit::AuditPhase::Start))
+                    .count(),
+                1
+            );
+            assert_eq!(phases.iter().filter(|operation| operation.phase == Some(oxideterm_audit::AuditPhase::Result)).count(), 1);
+            assert_eq!(
+                phases
+                    .iter()
+                    .find(|operation| operation.phase == Some(oxideterm_audit::AuditPhase::Result))
+                    .unwrap()
+                    .outcome,
+                expected
+            );
+            assert!(
+                phases
+                    .iter()
+                    .all(|operation| operation.session_id == session_id)
+            );
+        }
+        let serialized = serde_json::to_string(&page.records).unwrap();
+        assert!(!serialized.contains("private clipboard payload"));
+        assert!(!serialized.contains("private helper diagnostic"));
+    }
 
     impl Render for RemoteDesktopSessionTestRoot {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {

@@ -78,6 +78,18 @@ fn sidebar_sftp_target(
 }
 
 impl SftpWorkspaceEntity {
+    fn take_remote_browse_request(
+        &mut self,
+        remote_id: &SftpRemoteId,
+        path: &str,
+    ) -> Option<oxideterm_audit::AuditContext> {
+        self.remote_browse_request
+            .take()
+            .and_then(|(requested_remote, requested_path, context)| {
+                (requested_remote == *remote_id && requested_path == path).then_some(context)
+            })
+    }
+
     fn remote_load_state(&self) -> SftpRemoteLoadState {
         SftpRemoteLoadState {
             loading: self.remote_loading,
@@ -144,7 +156,7 @@ impl SftpWorkspaceEntity {
             .get(&remote_id)
             .cloned()
             .unwrap_or_else(default_download_path);
-        self.apply_local_path(local_path);
+        let _ = self.apply_local_path(local_path);
 
         let remembered_remote = self
             .remote_path_by_remote
@@ -1339,13 +1351,26 @@ impl WorkspaceApp {
         if !self.sftp_surface_is_visible(surface_id, &remote_id, cx) {
             return false;
         }
-        let Some((path, view_generation)) = self.sftp_view().update(cx, |sftp, _cx| {
-            sftp.start_remote_load(surface_id, &remote_id)
-        }) else {
+        let Some((path, view_generation, audit_request)) =
+            self.sftp_view().update(cx, |sftp, _cx| {
+                sftp.start_remote_load(surface_id, &remote_id)
+                    .map(|(path, view_generation)| {
+                        let audit_request = sftp.take_remote_browse_request(&remote_id, &path);
+                        (path, view_generation, audit_request)
+                    })
+            })
+        else {
             return false;
         };
         let delivery = self.sftp_view().read(cx).worker_sender();
-        self.spawn_sftp_remote_load(surface_id, remote_id, path, view_generation, delivery);
+        self.spawn_sftp_remote_load(
+            surface_id,
+            remote_id,
+            path,
+            view_generation,
+            audit_request,
+            delivery,
+        );
         true
     }
 
@@ -1355,11 +1380,26 @@ impl WorkspaceApp {
         remote_id: SftpRemoteId,
         path: String,
         view_generation: u64,
+        audit_request: Option<oxideterm_audit::AuditContext>,
         tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
     ) {
         let session_id = format!("{}:sftp", remote_id.storage_key());
         let runtime = self.forwarding_runtime.clone();
         let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            if let Some(context) = audit_request {
+                context
+                    .operation(
+                        oxideterm_audit::AuditCategory::File,
+                        "file_browse",
+                        Some(&path),
+                    )
+                    .finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Lifecycle,
+                        None,
+                        None,
+                    );
+            }
             let _ = tx.send(SftpWorkerResult::RemoteList {
                 surface_id,
                 remote_id,
@@ -1378,7 +1418,47 @@ impl WorkspaceApp {
             });
         }
         runtime.spawn(async move {
-            let result = load_remote_sftp_listing(backend, &path).await;
+            let audit_context = audit_request.map(|request| {
+                let owner = match &backend {
+                    SftpRemoteBackend::Node {
+                        router, node_id, ..
+                    } => router.audit_context(node_id),
+                    SftpRemoteBackend::Standalone { handle } => handle.audit_context(),
+                    SftpRemoteBackend::Ftp { runtime } => {
+                        let mut context = request.clone();
+                        context.protocol = Some(
+                            if runtime.options.security == oxideterm_ftp::Security::ExplicitTls {
+                                "ftps"
+                            } else {
+                                "ftp"
+                            }
+                            .into(),
+                        );
+                        context.target = Some(oxideterm_audit::redact(&format!(
+                            "{}@{}:{}",
+                            runtime.options.username, runtime.options.host, runtime.options.port
+                        )));
+                        Some(context)
+                    }
+                };
+                owner.map_or(request.clone(), |owner| owner.with_request(&request))
+            });
+            let mut audit = oxideterm_audit::AuditOperation::in_context(
+                audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::File,
+                "file_browse",
+                Some(&path),
+            );
+            let task = load_remote_sftp_listing(backend, &path);
+            let result = if let Some(context) = audit_context {
+                context.scope(task).await
+            } else {
+                task.await
+            };
+            if let Ok(listing) = &result {
+                audit.summary(&format!("path={path}; entries={}", listing.files.len()));
+            }
+            audit.result(&result);
             let _ = tx.send(SftpWorkerResult::RemoteList {
                 surface_id,
                 remote_id,
@@ -1439,11 +1519,15 @@ impl WorkspaceApp {
                     path,
                     view_generation,
                 } => {
+                    let audit_request = self.sftp_view().update(cx, |sftp, _cx| {
+                        sftp.take_remote_browse_request(&remote_id, &path)
+                    });
                     self.spawn_sftp_remote_load(
                         surface_id,
                         remote_id,
                         path,
                         view_generation,
+                        audit_request,
                         delivery.clone(),
                     );
                 }
@@ -2004,6 +2088,60 @@ fn apply_tauri_transfer_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestKeys;
+
+    impl oxideterm_audit::AuditKeyProvider for TestKeys {
+        fn load(
+            &self,
+            _: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![17; 32]))
+        }
+
+        fn create(
+            &self,
+            id: &str,
+        ) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[test]
+    fn queued_navigation_keeps_its_request_and_refresh_does_not_reuse_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = oxideterm_audit::AuditService::with_key_provider(
+            directory.path().join("audit.db"),
+            TestKeys,
+        )
+        .unwrap();
+        let context = oxideterm_audit::AuditContext::new(
+            service.client(),
+            oxideterm_audit::AuditSource::User,
+        );
+        let mut state = SftpWorkspaceEntity::default();
+        let surface = SftpSurfaceId::Sidebar;
+        let remote = SftpRemoteId::Node(NodeId::new("node-a"));
+        state.activate_view(surface, remote.clone());
+        state.remote_path = "/manual".into();
+        state.remote_browse_request = Some((remote.clone(), "/manual".into(), context));
+
+        let (path, _) = state.start_remote_load(surface, &remote).unwrap();
+        assert_eq!(path, "/manual");
+        assert_eq!(
+            state
+                .take_remote_browse_request(&remote, &path)
+                .unwrap()
+                .source,
+            oxideterm_audit::AuditSource::User
+        );
+
+        state.remote_load_inflight = false;
+        state.request_remote_load();
+        let (path, _) = state.start_remote_load(surface, &remote).unwrap();
+        assert_eq!(path, "/manual");
+        assert!(state.take_remote_browse_request(&remote, &path).is_none());
+    }
 
     #[test]
     fn sidebar_follows_focus_unless_pinned_and_stays_closed_until_opened() {

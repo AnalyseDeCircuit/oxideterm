@@ -1045,6 +1045,7 @@ pub(super) struct SftpWorkspaceEntity {
     remote_load_inflight: bool,
     remote_load_retry_count: u8,
     remote_load_retry_task: Option<Task<()>>,
+    remote_browse_request: Option<(SftpRemoteId, String, oxideterm_audit::AuditContext)>,
     pub(in crate::workspace) current_surface_id: Option<SftpSurfaceId>,
     pub(in crate::workspace) current_remote_id: Option<SftpRemoteId>,
     pair_primary_remote_id: Option<SftpRemoteId>,
@@ -1167,6 +1168,7 @@ impl Default for SftpWorkspaceEntity {
             remote_load_inflight: false,
             remote_load_retry_count: 0,
             remote_load_retry_task: None,
+            remote_browse_request: None,
             current_surface_id: None,
             current_remote_id: None,
             pair_primary_remote_id: None,
@@ -1389,6 +1391,9 @@ impl SftpWorkspaceEntity {
         if self.folder_picker_task.is_some() {
             return;
         }
+        let audit_context = crate::workspace::file_manager::local_file_audit_context(
+            oxideterm_audit::AuditSource::User,
+        );
         self.folder_picker_task = Some(cx.spawn(async move |entity, cx| {
             let selected_path = selection.await;
             let _ = entity.update(cx, |sftp, cx| {
@@ -1397,7 +1402,14 @@ impl SftpWorkspaceEntity {
                     if let Some(remote_id) = sftp.current_remote_id.clone() {
                         sftp.local_path_by_remote.insert(remote_id, path.clone());
                     }
-                    sftp.apply_local_path(path);
+                    let audit = oxideterm_audit::AuditOperation::in_context(
+                        audit_context.as_ref(),
+                        oxideterm_audit::AuditCategory::File,
+                        "file_browse",
+                        Some(&path),
+                    );
+                    let result = sftp.apply_local_path(path);
+                    audit.result(&result);
                     cx.notify();
                 }
             });
@@ -1942,12 +1954,12 @@ use helpers::{
     format_sftp_media_time, format_transfer_speed, home_path,
     is_sftp_incomplete_store_compat_error, join_local_path, join_sftp_path, list_local_files,
     load_remote_sftp_completion_listing, load_remote_sftp_listing, load_remote_sftp_preview,
-    load_remote_sftp_preview_hex, local_drives, new_sftp_transfer_id,
+    load_remote_sftp_preview_hex, local_drives, local_files_or_error, new_sftp_transfer_id,
     normalize_external_dropped_path, normalize_remote_path, parent_path, preview_content_text,
-    refreshed_local_files, remote_directory_prefixes, save_remote_sftp_preview, sftp_bg,
-    sftp_border, sftp_card_surface, sftp_conflict_resolution_from_settings, sftp_diff_visual_lines,
-    sftp_editor_language, sftp_editor_language_id, sftp_file_name, sftp_hover_bg, sftp_panel_bg,
-    sftp_path_segments, sftp_preview_editor_is_network_error, sftp_preview_is_markdown,
+    remote_directory_prefixes, save_remote_sftp_preview, sftp_bg, sftp_border, sftp_card_surface,
+    sftp_conflict_resolution_from_settings, sftp_diff_visual_lines, sftp_editor_language,
+    sftp_editor_language_id, sftp_file_name, sftp_hover_bg, sftp_panel_bg, sftp_path_segments,
+    sftp_preview_editor_is_network_error, sftp_preview_is_markdown,
     sftp_source_not_newer_than_target, sftp_transfer_conflicts,
     sftp_transfer_state_from_background, sorted_sftp_files, unique_sftp_conflict_name,
 };
