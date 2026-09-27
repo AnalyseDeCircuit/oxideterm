@@ -1,4 +1,5 @@
 struct PooledSshConnection {
+    audit: Option<oxideterm_audit::AuditContext>,
     target: client::Handle<NativeClientHandler>,
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
     remote_forward_handler: RemoteForwardHandlerSlot,
@@ -38,8 +39,10 @@ impl PooledSshConnection {
         x11_dispatcher: X11ForwardDispatcher,
         auth_banners: AuthBannerSink,
         agent_forwarding_accepted: Arc<AtomicBool>,
+        audit: Option<oxideterm_audit::AuditContext>,
     ) -> Self {
         Self {
+            audit,
             target: handle,
             _jump_handles: Vec::new(),
             remote_forward_handler,
@@ -58,8 +61,10 @@ impl PooledSshConnection {
         x11_dispatcher: X11ForwardDispatcher,
         auth_banners: AuthBannerSink,
         agent_forwarding_accepted: Arc<AtomicBool>,
+        audit: Option<oxideterm_audit::AuditContext>,
     ) -> Self {
         Self {
+            audit,
             target,
             _jump_handles: jump_handles,
             remote_forward_handler,

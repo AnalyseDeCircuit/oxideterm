@@ -18,6 +18,31 @@ use sha2::{Digest, Sha256};
 
 use crate::{ForwardRule, ForwardStatus, ForwardType};
 
+fn forward_configuration_audit(
+    action: &str,
+    forward_id: Option<&str>,
+) -> oxideterm_audit::AuditOperation {
+    if oxideterm_audit::AuditContext::current_request()
+        .as_ref()
+        .is_some_and(|context| context.protocol.as_deref() == Some("cloud_sync_apply"))
+    {
+        // The cross-store transaction owns the final commit or rollback result.
+        oxideterm_audit::AuditOperation::in_context(
+            None,
+            oxideterm_audit::AuditCategory::Configuration,
+            action,
+            None,
+        )
+    } else {
+        oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            action,
+            forward_id,
+            None,
+        )
+    }
+}
+
 pub const FORWARD_TOMBSTONE_RETENTION_DAYS: i64 = 30;
 #[cfg(test)]
 thread_local! {
@@ -244,7 +269,8 @@ impl SavedForwardStore {
         owner_connection_id: Option<String>,
         rule: ForwardRule,
     ) -> Result<Option<PersistedForward>, SavedForwardError> {
-        self.commit_update(|data| {
+        let audit = forward_configuration_audit("forward_rule_save", Some(forward_id));
+        let result = self.commit_update(|data| {
             let saved = if let Some(existing) = data
                 .forwards
                 .iter_mut()
@@ -275,11 +301,23 @@ impl SavedForwardStore {
                 None
             };
             Ok(saved)
-        })
+        });
+        audit.finish(
+            match &result {
+                Ok(Some(_)) => oxideterm_audit::AuditOutcome::Succeeded,
+                Ok(None) => oxideterm_audit::AuditOutcome::Unchanged,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub fn persist_forward(&self, forward: PersistedForward) -> Result<(), SavedForwardError> {
-        self.commit_update(|data| {
+        let audit = forward_configuration_audit("forward_rule_save", Some(&forward.id));
+        let result = self.commit_update(|data| {
             upsert_forward(&mut data.forwards, forward);
             let forward_ids: HashSet<String> = data
                 .forwards
@@ -289,11 +327,15 @@ impl SavedForwardStore {
             data.tombstones
                 .retain(|tombstone| !forward_ids.contains(&tombstone.id));
             Ok(())
-        })
+        });
+        audit.result(&result);
+        result
     }
 
     pub fn delete_persisted_forward(&self, forward_id: &str) -> Result<(), SavedForwardError> {
-        self.commit_update_if(|data| {
+        let audit = forward_configuration_audit("forward_rule_delete", Some(forward_id));
+        let mut changed = false;
+        let result = self.commit_update_if(|data| {
             let Some(index) = data
                 .forwards
                 .iter()
@@ -302,6 +344,7 @@ impl SavedForwardStore {
                 return Ok(((), false));
             };
             let forward = data.forwards.remove(index);
+            changed = true;
             if forward.owner_connection_id.is_some() {
                 upsert_tombstone(
                     &mut data.tombstones,
@@ -312,7 +355,18 @@ impl SavedForwardStore {
                 );
             }
             Ok(((), true))
-        })
+        });
+        audit.finish(
+            match &result {
+                Ok(_) if changed => oxideterm_audit::AuditOutcome::Succeeded,
+                Ok(_) => oxideterm_audit::AuditOutcome::Unchanged,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub fn update_auto_start(
@@ -320,7 +374,10 @@ impl SavedForwardStore {
         forward_id: &str,
         auto_start: bool,
     ) -> Result<(), SavedForwardError> {
-        self.commit_update(|data| {
+        let mut audit = forward_configuration_audit("forward_rule_save", Some(forward_id));
+        audit.summary("field=auto_start");
+        let mut changed = false;
+        let result = self.commit_update_if(|data| {
             let Some(forward) = data
                 .forwards
                 .iter_mut()
@@ -328,10 +385,25 @@ impl SavedForwardStore {
             else {
                 return Err(SavedForwardError::NotFound(forward_id.to_string()));
             };
+            if forward.auto_start == auto_start {
+                return Ok(((), false));
+            }
             forward.auto_start = auto_start;
             forward.mark_updated();
-            Ok(())
-        })
+            changed = true;
+            Ok(((), true))
+        });
+        audit.finish(
+            match &result {
+                Ok(_) if changed => oxideterm_audit::AuditOutcome::Succeeded,
+                Ok(_) => oxideterm_audit::AuditOutcome::Unchanged,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub fn load_owned_forwards(&self, owner_connection_id: &str) -> Vec<PersistedForward> {
@@ -388,7 +460,9 @@ impl SavedForwardStore {
         &self,
         owner_connection_id: &str,
     ) -> Result<usize, SavedForwardError> {
-        self.commit_update(|data| {
+        let mut audit = forward_configuration_audit("forward_rule_delete", None);
+        audit.summary("scope=owner_connection");
+        let result = self.commit_update(|data| {
             let now = Utc::now();
             let mut removed = Vec::new();
             data.forwards.retain(|forward| {
@@ -410,7 +484,18 @@ impl SavedForwardStore {
                 );
             }
             Ok(count)
-        })
+        });
+        audit.finish(
+            match &result {
+                Ok(0) => oxideterm_audit::AuditOutcome::Unchanged,
+                Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub fn apply_owned_forward_import_records(
@@ -419,7 +504,9 @@ impl SavedForwardStore {
         replace_owner_connection_ids: &HashSet<String>,
         merge_owner_connection_ids: &HashSet<String>,
     ) -> Result<usize, SavedForwardError> {
-        self.commit_update(|data| {
+        let mut audit = forward_configuration_audit("forward_rule_import", None);
+        audit.summary(&format!("requested_records={}", records.len()));
+        let result = self.commit_update(|data| {
             let SavedForwardData {
                 forwards,
                 tombstones,
@@ -432,7 +519,18 @@ impl SavedForwardStore {
                 merge_owner_connection_ids,
             )?;
             Ok(records.len())
-        })
+        });
+        audit.finish(
+            match &result {
+                Ok(0) => oxideterm_audit::AuditOutcome::Unchanged,
+                Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     pub fn export_snapshot(&self) -> Result<SavedForwardsSyncSnapshot, SavedForwardError> {
@@ -445,7 +543,8 @@ impl SavedForwardStore {
         snapshot: SavedForwardsSyncSnapshot,
         valid_owner_connection_ids: &HashSet<String>,
     ) -> Result<ApplySavedForwardsSyncSnapshotResult, SavedForwardError> {
-        self.commit_update_if(|data| {
+        let audit = forward_configuration_audit("forward_rule_import", None);
+        let result = self.commit_update_if(|data| {
             let existing_by_id: HashMap<String, PersistedForward> = data
                 .forwards
                 .iter()
@@ -520,7 +619,18 @@ impl SavedForwardStore {
 
             let should_persist = result.applied > 0;
             Ok((result, should_persist))
-        })
+        });
+        audit.finish(
+            match &result {
+                Ok(outcome) if outcome.applied == 0 => oxideterm_audit::AuditOutcome::Unchanged,
+                Ok(_) => oxideterm_audit::AuditOutcome::Succeeded,
+                Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            },
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+        result
     }
 
     fn sorted_forwards(
@@ -1170,6 +1280,31 @@ mod tests {
         assert!(saved[0].auto_start);
         assert_eq!(saved[0].session_id, "session-2");
         assert_eq!(saved[0].rule.bind_port, 9090);
+    }
+
+    #[test]
+    fn unchanged_auto_start_does_not_rewrite_saved_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards.json");
+        let store = SavedForwardStore::load(&path).unwrap();
+        store
+            .persist_forward(persisted_forward(
+                "forward-1",
+                "session-1",
+                Some("connection-1"),
+                8080,
+            ))
+            .unwrap();
+        let before = fs::read(&path).unwrap();
+        let updated_at = store.load_persisted_forwards("session-1")[0].updated_at;
+
+        store.update_auto_start("forward-1", false).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            store.load_persisted_forwards("session-1")[0].updated_at,
+            updated_at
+        );
     }
 
     #[test]

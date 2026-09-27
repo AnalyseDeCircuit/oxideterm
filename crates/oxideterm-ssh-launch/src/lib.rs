@@ -34,6 +34,24 @@ pub enum NativeConnectionLaunch {
     RemoteDesktop(TemporaryRemoteDesktopLaunch),
 }
 
+/// Owner-only CLI handoff metadata; external URI launches never supply an audit parent.
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeConnectionHandoff {
+    pub launch: NativeConnectionLaunch,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_parent_id: Option<String>,
+}
+
+impl From<NativeConnectionLaunch> for NativeConnectionHandoff {
+    fn from(launch: NativeConnectionLaunch) -> Self {
+        Self {
+            launch,
+            audit_parent_id: None,
+        }
+    }
+}
+
 /// Selects a saved SSH profile without copying its connection properties or secrets.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SavedConnectionLaunch {

@@ -1,6 +1,110 @@
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ConnectionPoolConfig;
+    use oxideterm_audit::{
+        AuditContext, AuditError, AuditKeyProvider, AuditQuery, AuditService, AuditSource,
+    };
+
+    struct AuditKeys;
+
+    impl AuditKeyProvider for AuditKeys {
+        fn load(&self, _: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, AuditError> {
+            Ok(zeroize::Zeroizing::new(vec![7; 32]))
+        }
+
+        fn create(&self, id: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn node_rebind_keeps_logical_session_and_changes_transport_audit_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &AuditKeys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let audit =
+            AuditService::with_key_provider(directory.path().join("audit.db"), AuditKeys).unwrap();
+        let registry = SshConnectionRegistry::with_audit(
+            ConnectionPoolConfig::default(),
+            Some(AuditContext::new(audit.client(), AuditSource::User)),
+        );
+        let router = NodeRouter::new(registry.clone());
+        let node = NodeId::new("node-a");
+        let config = SshConfig::password("host.example", 22, "alice", "fixture-secret");
+        router.upsert_node(node.clone(), config.clone());
+
+        let first = registry.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter(node.0.clone()),
+        );
+        let mut first_audit = first.audit_context().unwrap();
+        first_audit.transport_id = Some("transport-a".into());
+        first.set_physical_with_audit(Arc::new(()), Some(first_audit));
+        registry.mark_state(first.connection_id(), ConnectionState::Active);
+        router
+            .bind_connection(&node, first.connection_id().to_string())
+            .unwrap();
+        let first_context = router.audit_context(&node).unwrap();
+
+        router.prepare_node_connection_attempt(&node).unwrap();
+        registry.retire_connection(first.connection_id());
+        let second = registry.acquire(config, ConnectionConsumer::NodeRouter(node.0.clone()));
+        let mut second_audit = second.audit_context().unwrap();
+        second_audit.transport_id = Some("transport-b".into());
+        second.set_physical_with_audit(Arc::new(()), Some(second_audit));
+        registry.mark_state(second.connection_id(), ConnectionState::Active);
+        router
+            .bind_connection(&node, second.connection_id().to_string())
+            .unwrap();
+        let second_context = router.audit_context(&node).unwrap();
+
+        assert_eq!(first_context.session_id, second_context.session_id);
+        assert_eq!(first_context.transport_id.as_deref(), Some("transport-a"));
+        assert_eq!(second_context.transport_id.as_deref(), Some("transport-b"));
+        let records = audit
+            .client()
+            .query(AuditQuery {
+                category: Some(oxideterm_audit::AuditCategory::Connection),
+                limit: 30,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .records;
+        let node_results: Vec<_> = records
+            .iter()
+            .filter_map(|record| {
+                let operation = record.details.operation.as_ref()?;
+                (operation.action == "ssh_node_state"
+                    && operation.outcome == oxideterm_audit::AuditOutcome::Succeeded)
+                    .then_some((
+                        operation.session_id.as_deref(),
+                        operation.transport_id.as_deref(),
+                    ))
+            })
+            .collect();
+        let session = first_context.session_id.as_deref();
+        assert_eq!(
+            node_results,
+            vec![
+                (session, Some("transport-b")),
+                (session, Some("transport-a"))
+            ]
+        );
+        assert!(records.iter().all(|record| {
+            record
+                .details
+                .detail
+                .as_ref()
+                .is_none_or(|detail| !detail.contains("fixture-secret"))
+        }));
+    }
 
     fn bind_active_node(
         registry: &SshConnectionRegistry,

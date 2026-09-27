@@ -116,17 +116,14 @@ async fn request_agent_forwarding_for_shell(
     validate_agent_forwarding_response(response)
 }
 
-fn validate_x11_forwarding_response(
-    response: Option<ChannelMsg>,
-) -> Result<(), SshTransportError> {
+fn validate_x11_forwarding_response(response: Option<ChannelMsg>) -> Result<(), SshTransportError> {
     match response {
         Some(ChannelMsg::Success) => Ok(()),
         Some(ChannelMsg::Failure) => Err(SshTransportError::Channel(
             "SSH server rejected X11 forwarding".to_string(),
         )),
         Some(_) => Err(SshTransportError::Channel(
-            "SSH server returned an unexpected response while enabling X11 forwarding"
-                .to_string(),
+            "SSH server returned an unexpected response while enabling X11 forwarding".to_string(),
         )),
         None => Err(SshTransportError::Channel(
             "SSH channel closed while enabling X11 forwarding".to_string(),
@@ -151,16 +148,13 @@ mod x11_request_response_tests {
         let mut config = SshConfig::password("host", 22, "me", "pw");
         let shared_policy = Some(X11ForwardPolicy::untrusted());
         config.x11_forwarding = shared_policy;
-        let connection = registry.acquire(
-            config,
-            ConnectionConsumer::NodeRouter("node".to_string()),
-        );
+        let connection =
+            registry.acquire(config, ConnectionConsumer::NodeRouter("node".to_string()));
 
         let inherited = ShellRequestConfig::registry(connection.clone(), None);
         let disabled = ShellRequestConfig::registry(connection.clone(), Some(None));
         let overridden_policy = Some(X11ForwardPolicy::trusted());
-        let overridden =
-            ShellRequestConfig::registry(connection.clone(), Some(overridden_policy));
+        let overridden = ShellRequestConfig::registry(connection.clone(), Some(overridden_policy));
 
         assert_eq!(inherited.x11_forwarding(), shared_policy);
         assert_eq!(disabled.x11_forwarding(), None);
@@ -232,12 +226,28 @@ async fn open_interactive_shell_channel(
     (russh::Channel<client::Msg>, Option<X11ForwardRouteGuard>),
     (&'static str, SshTransportError),
 > {
+    let mut x11_audit = x11_forwarding.as_ref().map(|_| {
+        oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Forward,
+            "enable_x11_forwarding",
+            None,
+            Some("SSH X11 forwarding request"),
+        )
+    });
     // Resolve device-local X11 state before allocating a remote session. X11 is
     // optional, so local preparation failures must not block the regular shell.
     let prepared_x11 = match x11_forwarding {
         Some(policy) => match prepare_x11_material(policy).await {
             Ok(prepared) => Some(prepared),
             Err(_error) => {
+                if let Some(audit) = x11_audit.take() {
+                    audit.finish(
+                        oxideterm_audit::AuditOutcome::Failed,
+                        oxideterm_audit::AuditEvidence::Protocol,
+                        None,
+                        None,
+                    );
+                }
                 // Keep this log fixed because preparation errors can contain
                 // device-local display or xauth details.
                 tracing::warn!(
@@ -248,7 +258,20 @@ async fn open_interactive_shell_channel(
         },
         None => None,
     };
-    let mut channel = open_pty_channel(pooled, cols, rows, pty_modes).await?;
+    let mut channel = match open_pty_channel(pooled, cols, rows, pty_modes).await {
+        Ok(channel) => channel,
+        Err(error) => {
+            if let Some(audit) = x11_audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
+            }
+            return Err(error);
+        }
+    };
     let mut x11_route_guard = None;
     if let Some(prepared) = prepared_x11 {
         let (request, guard) = register_x11_route(
@@ -261,17 +284,31 @@ async fn open_interactive_shell_channel(
             .await
             .is_err()
         {
+            if let Some(audit) = x11_audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
+            }
             // Remove the route and its bearer cookie before awaiting channel
             // cleanup. A fresh PTY also isolates any delayed X11 reply from
             // later Agent forwarding requests.
             drop(request);
             drop(guard);
-            tracing::warn!(
-                "X11 forwarding is unavailable; continuing with a regular SSH shell"
-            );
+            tracing::warn!("X11 forwarding is unavailable; continuing with a regular SSH shell");
             let _ = channel.close().await;
             channel = open_pty_channel(pooled, cols, rows, pty_modes).await?;
         } else {
+            if let Some(audit) = x11_audit.take() {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Succeeded,
+                    oxideterm_audit::AuditEvidence::Protocol,
+                    None,
+                    None,
+                );
+            }
             x11_route_guard = Some(guard);
         }
     }
@@ -299,10 +336,7 @@ async fn open_plain_shell(
     x11_forwarding: Option<X11ForwardPolicy>,
     x11_route_id: &str,
     x11_connection_owner: Option<X11ConnectionOwner>,
-) -> Result<
-    (russh::Channel<client::Msg>, Option<X11ForwardRouteGuard>),
-    SshTransportError,
-> {
+) -> Result<(russh::Channel<client::Msg>, Option<X11ForwardRouteGuard>), SshTransportError> {
     let (channel, x11_route_guard) = open_interactive_shell_channel(
         pooled,
         cols,
@@ -336,14 +370,147 @@ async fn open_plain_shell(
     Ok((channel, x11_route_guard))
 }
 
+fn begin_connection_audit(
+    context: Option<&oxideterm_audit::AuditContext>,
+) -> (
+    oxideterm_audit::AuditOperation,
+    Option<oxideterm_audit::AuditContext>,
+) {
+    let context = context
+        .map(oxideterm_audit::AuditContext::for_request)
+        .map(|mut context| {
+            context.transport_id = Some(uuid::Uuid::new_v4().to_string());
+            context
+        });
+    let operation = oxideterm_audit::AuditOperation::in_context(
+        context.as_ref(),
+        oxideterm_audit::AuditCategory::Connection,
+        "ssh_connect",
+        None,
+    );
+    let audit = context.map(|mut context| {
+        context.parent_id = operation.id().map(str::to_owned);
+        context
+    });
+    (operation, audit)
+}
+
+fn node_connection_audit(
+    owner: Option<oxideterm_audit::AuditContext>,
+    consumer: &ConnectionConsumer,
+    connection_id: &str,
+) -> Option<oxideterm_audit::AuditContext> {
+    let mut owner = owner?;
+    if let ConnectionConsumer::NodeRouter(node_id) = consumer
+        && let Some(resolved) = oxideterm_audit::AuditContext::current_request()
+        && resolved.node_id.as_deref().map(String::as_str) == Some(node_id.as_str())
+        && resolved.connection_id.as_deref().map(String::as_str) == Some(connection_id)
+        && resolved.session_id.is_some()
+    {
+        // Only this node's resolved request can bind its stable logical session to the physical connection.
+        owner.session_id = resolved.session_id;
+        owner.node_id = resolved.node_id;
+    }
+    Some(owner)
+}
+
+#[cfg(test)]
+mod node_audit_tests {
+    use super::*;
+    use oxideterm_audit::{AuditError, AuditKeyProvider, AuditService, AuditSource};
+    use zeroize::Zeroizing;
+
+    struct Keys;
+    impl AuditKeyProvider for Keys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+            Ok(Zeroizing::new(vec![21; 32]))
+        }
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn only_the_resolved_node_can_bind_a_logical_session_to_its_connection() {
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let base = oxideterm_audit::AuditContext::new(service.client(), AuditSource::User);
+        let mut owner = base.session("ssh", "physical@target");
+        owner.connection_id = Some(Zeroizing::new("actual-connection".into()));
+        owner.transport_id = Some("actual-transport".into());
+        let mut request = base.session("ssh", "source@other");
+        request.node_id = Some(Zeroizing::new("other-node".into()));
+        request.connection_id = Some(Zeroizing::new("other-connection".into()));
+        let consumer = ConnectionConsumer::NodeRouter("target-node".into());
+
+        let foreign = request
+            .scope(async {
+                node_connection_audit(Some(owner.clone()), &consumer, "actual-connection").unwrap()
+            })
+            .await;
+        assert_eq!(foreign.session_id, owner.session_id);
+        assert_eq!(foreign.node_id, owner.node_id);
+
+        request.node_id = Some(Zeroizing::new("target-node".into()));
+        request.connection_id = Some(Zeroizing::new("actual-connection".into()));
+        let bound = request
+            .scope(async {
+                node_connection_audit(Some(owner.clone()), &consumer, "actual-connection").unwrap()
+            })
+            .await;
+        assert_eq!(bound.session_id, request.session_id);
+        assert_eq!(bound.node_id, request.node_id);
+        assert_eq!(bound.connection_id, owner.connection_id);
+        assert_eq!(bound.transport_id, owner.transport_id);
+        assert_eq!(bound.target, owner.target);
+    }
+}
+
 impl SshTransportClient {
     pub fn new(config: SshConfig) -> Self {
+        let audit = oxideterm_audit::AuditContext::current().map(|context| {
+            let mut session = context.session(
+                "ssh",
+                &format!("{}@{}:{}", config.username, config.host, config.port),
+            );
+            session.remote_account = Some(oxideterm_audit::redact(&config.username));
+            session
+        });
         Self {
+            audit,
             config,
             prompt_handler: None,
             managed_key_resolver: None,
             connection_progress: None,
         }
+    }
+
+    pub fn with_audit_context(mut self, audit: Option<oxideterm_audit::AuditContext>) -> Self {
+        self.audit = audit;
+        self
+    }
+
+    fn audit_for_hop(
+        &self,
+        hop: &ProxyHopConfig,
+        audit: Option<&oxideterm_audit::AuditContext>,
+    ) -> Option<oxideterm_audit::AuditContext> {
+        audit.map(|context| {
+            let mut context = context.clone();
+            context.target = Some(oxideterm_audit::redact(&format!(
+                "{}@{}:{}",
+                hop.username, hop.host, hop.port
+            )));
+            context
+        })
     }
 
     pub fn with_prompt_handler(mut self, prompt_handler: Arc<dyn SshPromptHandler>) -> Self {
@@ -392,11 +559,7 @@ impl SshTransportClient {
     ) -> Result<SshPtyHandle, SshTransportError> {
         if let Some(parent_connection_id) = parent_connection_id {
             return self
-                .connect_shell_with_dedicated_parent(
-                    registry,
-                    consumer,
-                    parent_connection_id,
-                )
+                .connect_shell_with_dedicated_parent(registry, consumer, parent_connection_id)
                 .await;
         }
         self.connect_shell_with_registry_acquisition(
@@ -408,7 +571,7 @@ impl SshTransportClient {
     }
 
     async fn connect_shell_with_registry_acquisition(
-        self,
+        mut self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
         acquisition: ShellRegistryAcquisition,
@@ -421,6 +584,11 @@ impl SshTransportClient {
                 registry.acquire_dedicated(self.config.clone(), consumer.clone())
             }
         };
+        self.audit = node_connection_audit(
+            connection.base_audit_context(),
+            &consumer,
+            connection.connection_id(),
+        );
         let connection_id = connection.connection_id().to_string();
         let mut release_guard =
             RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
@@ -430,7 +598,7 @@ impl SshTransportClient {
                 connection.clear_physical().await;
                 match self.connect_authenticated_connection().await {
                     Ok(pooled) => {
-                        connection.set_physical(pooled.clone());
+                        connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
                         pooled
                     }
                     Err(error) => {
@@ -446,7 +614,7 @@ impl SshTransportClient {
         } else {
             match self.connect_authenticated_connection().await {
                 Ok(pooled) => {
-                    connection.set_physical(pooled.clone());
+                    connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
                     pooled
                 }
                 Err(error) => {
@@ -498,12 +666,10 @@ impl SshTransportClient {
         let connection_id = connection.connection_id().to_string();
         // The parent consumer is tied to the dedicated child entry. Retiring
         // that entry releases this ancestor ownership in the registry.
-        let parent_consumer =
-            ConnectionConsumer::NodeRouter(format!("{connection_id}:ancestor"));
-        let Some(parent) = registry.acquire_consumer_for_connection(
-            &parent_connection_id,
-            parent_consumer.clone(),
-        ) else {
+        let parent_consumer = ConnectionConsumer::NodeRouter(format!("{connection_id}:ancestor"));
+        let Some(parent) = registry
+            .acquire_consumer_for_connection(&parent_connection_id, parent_consumer.clone())
+        else {
             registry.release(&connection_id, &consumer);
             return Err(SshTransportError::ConnectionFailed(
                 "parent SSH connection is unavailable for dedicated terminal".to_string(),
@@ -688,10 +854,9 @@ impl SshTransportClient {
             let connection_id = connection.connection_id().to_string();
             let parent_consumer =
                 ConnectionConsumer::NodeRouter(format!("{connection_id}:ancestor"));
-            let Some(parent) = registry.acquire_consumer_for_connection(
-                &parent_connection_id,
-                parent_consumer.clone(),
-            ) else {
+            let Some(parent) = registry
+                .acquire_consumer_for_connection(&parent_connection_id, parent_consumer.clone())
+            else {
                 registry.release(&connection_id, &consumer);
                 return Err(SshTransportError::ConnectionFailed(
                     "parent SSH connection is unavailable for dedicated consumer".to_string(),
@@ -713,11 +878,16 @@ impl SshTransportClient {
     }
 
     pub async fn connect_existing_node_with_registry(
-        self,
+        mut self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
         connection: SshConnectionHandle,
     ) -> Result<SshConnectionHandle, SshTransportError> {
+        self.audit = node_connection_audit(
+            connection.base_audit_context(),
+            &consumer,
+            connection.connection_id(),
+        );
         let connection_id = connection.connection_id().to_string();
         let mut release_guard =
             RegistryConsumerGuard::new(registry.clone(), connection_id.clone(), consumer.clone());
@@ -739,7 +909,7 @@ impl SshTransportClient {
 
         match pooled {
             Ok(pooled) => {
-                connection.set_physical(pooled);
+                connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
                 let _ = registry.set_parent_connection_id(&connection_id, None);
                 let _ = registry.mark_state(&connection_id, ConnectionState::Active);
                 release_guard.disarm();
@@ -755,13 +925,18 @@ impl SshTransportClient {
     }
 
     pub async fn connect_child_node_via_parent_with_registry(
-        self,
+        mut self,
         registry: SshConnectionRegistry,
         consumer: ConnectionConsumer,
         connection: SshConnectionHandle,
         parent: SshConnectionHandle,
         parent_consumer: ConnectionConsumer,
     ) -> Result<SshConnectionHandle, SshTransportError> {
+        self.audit = node_connection_audit(
+            connection.base_audit_context(),
+            &consumer,
+            connection.connection_id(),
+        );
         let connection_id = connection.connection_id().to_string();
         let parent_connection_id = parent.connection_id().to_string();
         let mut child_release_guard =
@@ -779,6 +954,7 @@ impl SshTransportClient {
         // channel, then stored in the child's registry entry. The child node
         // still gets its own physical target connection and is resolved through
         // NodeRouter afterwards.
+        let (operation, audit) = begin_connection_audit(self.audit.as_ref());
         let pooled = async {
             let Some(parent_pooled) = parent.physical::<PooledSshConnection>() else {
                 return Err(SshTransportError::ConnectionFailed(
@@ -794,8 +970,7 @@ impl SshTransportClient {
             self.report_connection_progress(ConnectionTraceStage::OpeningTransport);
             let stream = {
                 let parent_handle = &parent_pooled.target;
-                open_direct_tcpip_stream(parent_handle, &self.config.host, self.config.port)
-                    .await?
+                open_direct_tcpip_stream(parent_handle, &self.config.host, self.config.port).await?
             };
             let handler = NativeClientHandler::new(
                 self.config.host.clone(),
@@ -809,7 +984,8 @@ impl SshTransportClient {
                 remote_forward_handler.clone(),
                 x11_forward_handler.clone(),
             )?
-            .with_connection_progress(self.connection_progress.clone());
+            .with_connection_progress(self.connection_progress.clone())
+            .with_audit_context(audit.clone());
             let auth_banners = handler.auth_banners();
             let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
             let x11_dispatcher = handler.x11_dispatcher();
@@ -837,6 +1013,7 @@ impl SshTransportClient {
                 self.prompt_handler.as_deref(),
                 self.managed_key_resolver.as_ref(),
                 self.connection_progress.as_ref(),
+                audit.as_ref(),
             )
             .await?;
             Ok(Arc::new(PooledSshConnection::tunneled(
@@ -847,13 +1024,15 @@ impl SshTransportClient {
                 x11_dispatcher,
                 auth_banners,
                 agent_forwarding_accepted,
+                audit.clone(),
             )))
         }
         .await;
+        operation.result(&pooled);
 
         match pooled {
             Ok(pooled) => {
-                connection.set_physical(pooled);
+                connection.set_physical_with_audit(pooled.clone(), pooled.audit.clone());
                 if let Err(error) = commit_child_registry_ownership(
                     &registry,
                     &connection_id,
@@ -896,6 +1075,18 @@ impl SshTransportClient {
     async fn connect_authenticated_connection(
         &self,
     ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
+        let (operation, audit) = begin_connection_audit(self.audit.as_ref());
+        let result = self
+            .connect_authenticated_connection_with_audit(audit.as_ref())
+            .await;
+        operation.result(&result);
+        result
+    }
+
+    async fn connect_authenticated_connection_with_audit(
+        &self,
+        audit: Option<&oxideterm_audit::AuditContext>,
+    ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
         let remote_forward_handler = Arc::new(RwLock::new(None));
         let x11_forward_handler = Arc::new(RwLock::new(None));
         if self
@@ -905,7 +1096,11 @@ impl SshTransportClient {
             .is_some_and(|chain| !chain.is_empty())
         {
             return self
-                .connect_authenticated_proxy_connection(remote_forward_handler, x11_forward_handler)
+                .connect_authenticated_proxy_connection(
+                    remote_forward_handler,
+                    x11_forward_handler,
+                    audit,
+                )
                 .await;
         }
 
@@ -913,9 +1108,11 @@ impl SshTransportClient {
             &self.config,
             remote_forward_handler.clone(),
             x11_forward_handler.clone(),
+            audit,
         )
-            .await
-            .map(|(handle, auth_banners, agent_forwarding_accepted, x11_dispatcher)| {
+        .await
+        .map(
+            |(handle, auth_banners, agent_forwarding_accepted, x11_dispatcher)| {
                 PooledSshConnection::direct(
                     handle,
                     remote_forward_handler,
@@ -923,9 +1120,11 @@ impl SshTransportClient {
                     x11_dispatcher,
                     auth_banners,
                     agent_forwarding_accepted,
+                    audit.cloned(),
                 )
-            })
-            .map(Arc::new)
+            },
+        )
+        .map(Arc::new)
     }
 
     async fn connect_direct_authenticated_handle(
@@ -933,6 +1132,7 @@ impl SshTransportClient {
         config: &SshConfig,
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
+        audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Result<
         (
             client::Handle<NativeClientHandler>,
@@ -977,10 +1177,8 @@ impl SshTransportClient {
             "SSH TCP stream established"
         );
 
-        let client_config = ssh_client_config(
-            config.legacy_ssh_compatibility,
-            &config.ssh_algorithms,
-        )?;
+        let client_config =
+            ssh_client_config(config.legacy_ssh_compatibility, &config.ssh_algorithms)?;
         let handler = NativeClientHandler::new(
             config.host.clone(),
             config.port,
@@ -993,7 +1191,8 @@ impl SshTransportClient {
             remote_forward_handler,
             x11_forward_handler,
         )?
-        .with_connection_progress(self.connection_progress.clone());
+        .with_connection_progress(self.connection_progress.clone())
+        .with_audit_context(audit.cloned());
         let auth_banners = handler.auth_banners();
         let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
         let x11_dispatcher = handler.x11_dispatcher();
@@ -1022,6 +1221,7 @@ impl SshTransportClient {
             self.prompt_handler.as_deref(),
             self.managed_key_resolver.as_ref(),
             self.connection_progress.as_ref(),
+            audit,
         )
         .await?;
         tracing::debug!(
@@ -1041,6 +1241,7 @@ impl SshTransportClient {
         &self,
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
+        audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Result<Arc<PooledSshConnection>, SshTransportError> {
         let chain = self.config.proxy_chain.as_deref().unwrap_or_default();
         if chain.is_empty() {
@@ -1069,9 +1270,10 @@ impl SshTransportClient {
                 "SSH proxy hop connection starting"
             );
             let handle = if let Some(stream) = current_stream.take() {
-                self.connect_proxy_hop_via_stream(hop, stream).await?
+                self.connect_proxy_hop_via_stream(hop, stream, audit)
+                    .await?
             } else {
-                self.connect_proxy_hop_direct(hop).await?
+                self.connect_proxy_hop_direct(hop, audit).await?
             };
 
             let (next_host, next_port) = if let Some(next_hop) = chain.get(index + 1) {
@@ -1108,6 +1310,7 @@ impl SshTransportClient {
                 self.config.timeout_secs,
                 remote_forward_handler.clone(),
                 x11_forward_handler.clone(),
+                audit,
             )
             .await?;
         tracing::debug!(
@@ -1124,12 +1327,14 @@ impl SshTransportClient {
             x11_dispatcher,
             auth_banners,
             agent_forwarding_accepted,
+            audit.cloned(),
         )))
     }
 
     async fn connect_proxy_hop_direct(
         &self,
         hop: &ProxyHopConfig,
+        audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
         tracing::debug!(
             hop_host = hop.host.as_str(),
@@ -1151,7 +1356,8 @@ impl SshTransportClient {
             hop_port = hop.port,
             "SSH proxy hop TCP stream established"
         );
-        let handler = proxy_hop_handler(hop)?;
+        let audit = self.audit_for_hop(hop, audit);
+        let handler = proxy_hop_handler(hop)?.with_audit_context(audit.clone());
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
@@ -1171,6 +1377,7 @@ impl SshTransportClient {
             hop,
             self.prompt_handler.as_deref(),
             self.managed_key_resolver.as_ref(),
+            audit.as_ref(),
         )
         .await?;
         tracing::debug!(
@@ -1185,6 +1392,7 @@ impl SshTransportClient {
         &self,
         hop: &ProxyHopConfig,
         stream: russh::ChannelStream<client::Msg>,
+        audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Result<client::Handle<NativeClientHandler>, SshTransportError> {
         tracing::debug!(
             hop_host = hop.host.as_str(),
@@ -1192,7 +1400,8 @@ impl SshTransportClient {
             legacy_ssh_compatibility = hop.legacy_ssh_compatibility,
             "SSH proxy hop tunneled connection starting"
         );
-        let handler = proxy_hop_handler(hop)?;
+        let audit = self.audit_for_hop(hop, audit);
+        let handler = proxy_hop_handler(hop)?.with_audit_context(audit.clone());
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
@@ -1218,6 +1427,7 @@ impl SshTransportClient {
             hop,
             self.prompt_handler.as_deref(),
             self.managed_key_resolver.as_ref(),
+            audit.as_ref(),
         )
         .await?;
         tracing::debug!(
@@ -1234,6 +1444,7 @@ impl SshTransportClient {
         timeout_secs: u64,
         remote_forward_handler: RemoteForwardHandlerSlot,
         x11_forward_handler: X11ForwardHandlerSlot,
+        audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Result<
         (
             client::Handle<NativeClientHandler>,
@@ -1260,7 +1471,8 @@ impl SshTransportClient {
             self.config.agent_forwarding_socket.clone(),
             remote_forward_handler,
             x11_forward_handler,
-        )?;
+        )?
+        .with_audit_context(audit.cloned());
         let auth_banners = handler.auth_banners();
         let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
         let x11_dispatcher = handler.x11_dispatcher();
@@ -1277,9 +1489,7 @@ impl SshTransportClient {
         )
         .await
         .map_err(|_| SshTransportError::Timeout)?
-        .map_err(|error| {
-            error.with_context("failed to connect to target via proxy stream")
-        })?;
+        .map_err(|error| error.with_context("failed to connect to target via proxy stream"))?;
 
         authenticate(
             &mut handle,
@@ -1287,6 +1497,7 @@ impl SshTransportClient {
             self.prompt_handler.as_deref(),
             self.managed_key_resolver.as_ref(),
             self.connection_progress.as_ref(),
+            audit,
         )
         .await?;
         tracing::debug!(
@@ -1339,21 +1550,20 @@ impl SshTransportClient {
         // Standalone shells have no registry consumer to retain their physical
         // connection. Keep one explicit owner for the terminal task, while the
         // route holds only a weak reference to avoid a dispatcher cycle.
-        let standalone_x11_owner = (registry_release.is_none()
-            && x11_forwarding.is_some())
-        .then(|| {
-            let owner: Arc<dyn Send + Sync> = pooled.clone();
-            owner
-        });
+        let standalone_x11_owner =
+            (registry_release.is_none() && x11_forwarding.is_some()).then(|| {
+                let owner: Arc<dyn Send + Sync> = pooled.clone();
+                owner
+            });
         let x11_connection_owner = registry_release
             .as_ref()
             .and_then(|(registry, _, _)| {
-                ssh_connection.as_ref().map(|connection| {
-                    X11ConnectionOwner::Registry {
+                ssh_connection
+                    .as_ref()
+                    .map(|connection| X11ConnectionOwner::Registry {
                         registry: registry.clone(),
                         connection_id: connection.connection_id().to_string(),
-                    }
-                })
+                    })
             })
             .or_else(|| {
                 standalone_x11_owner
@@ -1381,6 +1591,7 @@ impl SshTransportClient {
         let task_shell_started = shell_started.clone();
         let mut deferred_request_config = deferred_pty.then_some(request_config);
 
+        let audit = pooled.audit.clone();
         tokio::spawn(async move {
             // The bridge lease upgrades the route's weak owner before this guard
             // drops, allowing an established X11 client to outlive the terminal.
@@ -1462,7 +1673,9 @@ impl SshTransportClient {
                                 .await;
                         }
                         let _ = output_tx
-                            .send(format!("\r\nFailed to initialize shell: {error}\r\n").into_bytes())
+                            .send(
+                                format!("\r\nFailed to initialize shell: {error}\r\n").into_bytes(),
+                            )
                             .await;
                         return;
                     }
@@ -1477,24 +1690,42 @@ impl SshTransportClient {
                 // so they cannot consume first-login output before the terminal.
                 let _ = registry.mark_visible_terminal_ready(connection_id);
             }
+            // One pending batch keeps output bounded while the task continues
+            // servicing input and close on this same terminal channel.
+            let mut pending_output: Option<std::pin::Pin<Box<_>>> = None;
+            let mut remote_closed = false;
+            let mut cancelled = false;
             loop {
+                if remote_closed && pending_output.is_none() {
+                    break;
+                }
                 let flush_deadline = output_batcher.flush_due();
                 tokio::select! {
+                    sent = async {
+                        match &mut pending_output {
+                            Some(send) => send.await,
+                            None => std::future::pending::<Result<(), Vec<u8>>>().await,
+                        }
+                    } => {
+                        pending_output = None;
+                        if sent.is_err() {
+                            cancelled = true;
+                            break;
+                        }
+                    }
                     _ = async move {
                         if let Some(deadline) = flush_deadline {
                             sleep_until(deadline).await;
                         } else {
                             std::future::pending::<()>().await;
                         }
-                    } => {
-                        if let Some(bytes) = output_batcher.take_flush()
-                            && output_tx.send(bytes).await.is_err()
-                        {
-                            break;
+                    }, if pending_output.is_none() && !remote_closed => {
+                        if let Some(bytes) = output_batcher.take_flush() {
+                            pending_output = Some(Box::pin(output_tx.send(bytes)));
                         }
                     }
                     command = command_rx.recv() => {
-                        let Some(command) = command else { break };
+                        let Some(command) = command else { cancelled = true; break };
                         match command {
                             SshTransportCommand::Data(data) => {
                                 output_batcher.note_interaction();
@@ -1511,58 +1742,48 @@ impl SshTransportClient {
                                 let _ = channel.window_change(cols as u32, rows as u32, 0, 0).await;
                             }
                             SshTransportCommand::Close => {
-                                if let Some(bytes) = output_batcher.take_flush() {
-                                    let _ = output_tx.send(bytes).await;
-                                }
+                                cancelled = true;
                                 let _ = channel.eof().await;
                                 break;
                             }
                         }
                     }
-                    message = channel.wait() => {
-                        let Some(message) = message else { break };
+                    message = channel.wait(), if pending_output.is_none() && !remote_closed => {
                         match message {
-                            ChannelMsg::Data { data } => {
+                            Some(ChannelMsg::Data { data } | ChannelMsg::ExtendedData { data, ext: 1 }) => {
                                 if output_batcher.push(&data)
                                     && let Some(bytes) = output_batcher.take_flush()
-                                    && output_tx.send(bytes).await.is_err()
                                 {
-                                    break;
+                                    pending_output = Some(Box::pin(output_tx.send(bytes)));
                                 }
                             }
-                            ChannelMsg::ExtendedData { data, ext: 1 } => {
-                                if output_batcher.push(&data)
-                                    && let Some(bytes) = output_batcher.take_flush()
-                                    && output_tx.send(bytes).await.is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            ChannelMsg::Eof | ChannelMsg::Close => {
+                            None | Some(ChannelMsg::Eof | ChannelMsg::Close) => {
+                                remote_closed = true;
                                 if let Some(bytes) = output_batcher.take_flush() {
-                                    let _ = output_tx.send(bytes).await;
+                                    pending_output = Some(Box::pin(output_tx.send(bytes)));
                                 }
-                                break;
                             }
-                            ChannelMsg::ExitStatus { .. } | ChannelMsg::ExitSignal { .. } => {}
                             _ => {}
                         }
                     }
-                    else => break,
                 }
             }
+            drop(pending_output);
             // EOF alone leaves the server session allocated. Close only this
             // consumer channel; other consumers retain the shared transport.
             let _ = channel.close().await;
-            if let Some(bytes) = output_batcher.take_flush() {
-                let _ = output_tx.send(bytes).await;
+            if !cancelled {
+                if let Some(bytes) = output_batcher.take_flush() {
+                    let _ = output_tx.send(bytes).await;
+                }
+                let _ = output_tx
+                    .send(format!("\r\n[ssh session {task_session_id} closed]\r\n").into_bytes())
+                    .await;
             }
-            let _ = output_tx
-                .send(format!("\r\n[ssh session {task_session_id} closed]\r\n").into_bytes())
-                .await;
         });
 
         Ok(SshPtyHandle {
+            audit,
             session_id,
             command_tx,
             output_rx,

@@ -317,6 +317,7 @@ pub struct NodeMetadataSnapshot {
 
 #[derive(Clone, Debug)]
 struct NodeRuntimeEntry {
+    audit_session_id: String,
     config: SshConfig,
     parent_id: Option<NodeId>,
     children_ids: Vec<NodeId>,

@@ -40,18 +40,58 @@ pub(crate) struct ForwardingStopBatch {
     local_forwards: Vec<LocalForward>,
     dynamic_forwards: Vec<DynamicForward>,
     remote_forwards: Vec<RemoteForward>,
+    audit_context: Option<oxideterm_audit::AuditContext>,
 }
 
 impl ForwardingStopBatch {
     pub(crate) async fn stop(self) {
         for forward in self.local_forwards {
+            let rule = forward.rule();
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                self.audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::Forward,
+                "stop_forward",
+                Some(&rule.id),
+            );
             let _ = forward.stop().await;
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Succeeded,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
         }
         for forward in self.dynamic_forwards {
+            let rule = forward.rule();
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                self.audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::Forward,
+                "stop_forward",
+                Some(&rule.id),
+            );
             let _ = forward.stop().await;
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Succeeded,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
         }
         for forward in self.remote_forwards {
+            let rule = forward.rule();
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                self.audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::Forward,
+                "stop_forward",
+                Some(&rule.id),
+            );
             let _ = forward.stop_best_effort().await;
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Unknown,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
         }
     }
 }
@@ -96,48 +136,113 @@ impl ForwardingManager {
         &self.session_id
     }
 
-    pub async fn create_forward(
+    fn audit_rule_operation(&self, action: &str, detail: &str) -> oxideterm_audit::AuditOperation {
+        let context = self
+            .current_ssh_connection()
+            .audit_context()
+            .or_else(oxideterm_audit::AuditContext::current_request)
+            .or_else(oxideterm_audit::AuditContext::current);
+        oxideterm_audit::AuditOperation::in_request(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::Forward,
+            action,
+            Some(detail),
+        )
+    }
+
+    fn automatic_audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        let mut context = self
+            .current_ssh_connection()
+            .audit_context()
+            .or_else(oxideterm_audit::AuditContext::current_request)
+            .or_else(oxideterm_audit::AuditContext::current)?
+            .for_request();
+        if oxideterm_audit::AuditContext::current_request().is_none() {
+            context.source = oxideterm_audit::AuditSource::System;
+        }
+        Some(context)
+    }
+
+    pub async fn create_forward(&self, rule: ForwardRule) -> Result<ForwardRule, ForwardingError> {
+        self.start_forward(rule, "create_forward", false).await
+    }
+
+    async fn start_forward(
         &self,
         mut rule: ForwardRule,
+        action: &str,
+        automatic: bool,
     ) -> Result<ForwardRule, ForwardingError> {
-        rule.normalize_hosts_for_runtime();
-        if self.has_rule(&rule.id) {
-            return Err(ForwardingError::AlreadyExists(rule.id));
+        let mut context = self
+            .current_ssh_connection()
+            .audit_context()
+            .or_else(oxideterm_audit::AuditContext::current_request)
+            .or_else(oxideterm_audit::AuditContext::current)
+            .map(|context| context.for_request());
+        if automatic {
+            if let Some(context) = &mut context {
+                context.source = oxideterm_audit::AuditSource::System;
+            }
         }
+        let detail = format!(
+            "rule={} type={:?} bind={}:{} target={}:{}{}",
+            rule.id,
+            rule.forward_type,
+            rule.bind_address,
+            rule.bind_port,
+            rule.target_host,
+            rule.target_port,
+            if automatic { " source=reconnect" } else { "" }
+        );
+        let audit = oxideterm_audit::AuditOperation::in_context(
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::Forward,
+            action,
+            Some(&detail),
+        );
+        let audit_result = async {
+            rule.normalize_hosts_for_runtime();
+            if self.has_rule(&rule.id) {
+                return Err(ForwardingError::AlreadyExists(rule.id));
+            }
 
-        let result = match rule.forward_type {
-            ForwardType::Local => LocalForward::start(rule, self.current_ssh_connection())
+            let result = match rule.forward_type {
+                ForwardType::Local => LocalForward::start(rule, self.current_ssh_connection())
+                    .await
+                    .map(|forward| {
+                        let active_rule = forward.rule();
+                        self.local_forwards.insert(active_rule.id.clone(), forward);
+                        active_rule
+                    }),
+                ForwardType::Dynamic => DynamicForward::start(rule, self.current_ssh_connection())
+                    .await
+                    .map(|forward| {
+                        let active_rule = forward.rule();
+                        self.dynamic_forwards
+                            .insert(active_rule.id.clone(), forward);
+                        active_rule
+                    }),
+                ForwardType::Remote => RemoteForward::start(
+                    rule,
+                    self.current_ssh_connection(),
+                    self.remote_router.clone(),
+                )
                 .await
                 .map(|forward| {
                     let active_rule = forward.rule();
-                    self.local_forwards.insert(active_rule.id.clone(), forward);
+                    self.remote_forwards.insert(active_rule.id.clone(), forward);
                     active_rule
                 }),
-            ForwardType::Dynamic => DynamicForward::start(rule, self.current_ssh_connection())
-                .await
-                .map(|forward| {
-                    let active_rule = forward.rule();
-                    self.dynamic_forwards
-                        .insert(active_rule.id.clone(), forward);
-                    active_rule
-                }),
-            ForwardType::Remote => RemoteForward::start(
-                rule,
-                self.current_ssh_connection(),
-                self.remote_router.clone(),
-            )
-            .await
-            .map(|forward| {
-                let active_rule = forward.rule();
-                self.remote_forwards.insert(active_rule.id.clone(), forward);
-                active_rule
-            }),
-        };
+            };
 
-        if let Ok(active_rule) = &result {
-            self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None);
+            if let Ok(active_rule) = &result {
+                self.emit_status_changed(&active_rule.id, active_rule.status.clone(), None);
+            }
+            result
         }
-        result
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     pub async fn create_forward_with_health_check(
@@ -169,9 +274,11 @@ impl ForwardingManager {
             match health {
                 Ok(true) => {}
                 Ok(false) => {
+                    self.audit_forward_precheck_failure(&rule);
                     return Err(ForwardingError::InvalidRule(unreachable_message));
                 }
                 Err(error) => {
+                    self.audit_forward_precheck_failure(&rule);
                     let message = build_health_check_error_message(&error.to_string());
                     return Err(match rule.forward_type {
                         ForwardType::Local => ForwardingError::Ssh(message),
@@ -185,42 +292,67 @@ impl ForwardingManager {
         self.create_forward(rule).await
     }
 
+    fn audit_forward_precheck_failure(&self, rule: &ForwardRule) {
+        let audit = self.audit_rule_operation(
+            "create_forward",
+            &format!("rule={} health_check=failed", rule.id),
+        );
+        audit.finish(
+            oxideterm_audit::AuditOutcome::Failed,
+            oxideterm_audit::AuditEvidence::Protocol,
+            None,
+            None,
+        );
+    }
+
     pub async fn stop_forward(&self, rule_id: &str) -> Result<ForwardRule, ForwardingError> {
-        if let Some((_, forward)) = self.local_forwards.remove(rule_id) {
-            let stopped = forward.stop().await;
-            self.stopped_forwards
-                .insert(stopped.id.clone(), stopped.clone());
-            self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
-            return Ok(stopped);
-        }
-        if let Some((_, forward)) = self.dynamic_forwards.remove(rule_id) {
-            let stopped = forward.stop().await;
-            self.stopped_forwards
-                .insert(stopped.id.clone(), stopped.clone());
-            self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
-            return Ok(stopped);
-        }
-        if let Some((_, forward)) = self.remote_forwards.remove(rule_id) {
-            if let Err(error) = forward.cancel_on_server().await {
-                self.remote_forwards.insert(rule_id.to_string(), forward);
-                return Err(error);
+        let audit = self.audit_rule_operation("stop_forward", rule_id);
+        let audit_result = async {
+            if let Some((_, forward)) = self.local_forwards.remove(rule_id) {
+                let stopped = forward.stop().await;
+                self.stopped_forwards
+                    .insert(stopped.id.clone(), stopped.clone());
+                self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
+                return Ok(stopped);
             }
-            let stopped = forward.finish_stop().await;
-            self.stopped_forwards
-                .insert(stopped.id.clone(), stopped.clone());
-            self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
-            return Ok(stopped);
+            if let Some((_, forward)) = self.dynamic_forwards.remove(rule_id) {
+                let stopped = forward.stop().await;
+                self.stopped_forwards
+                    .insert(stopped.id.clone(), stopped.clone());
+                self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
+                return Ok(stopped);
+            }
+            if let Some((_, forward)) = self.remote_forwards.remove(rule_id) {
+                if let Err(error) = forward.cancel_on_server().await {
+                    self.remote_forwards.insert(rule_id.to_string(), forward);
+                    return Err(error);
+                }
+                let stopped = forward.finish_stop().await;
+                self.stopped_forwards
+                    .insert(stopped.id.clone(), stopped.clone());
+                self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
+                return Ok(stopped);
+            }
+            Err(ForwardingError::NotFound(rule_id.to_string()))
         }
-        Err(ForwardingError::NotFound(rule_id.to_string()))
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     pub async fn restart_forward(&self, rule_id: &str) -> Result<ForwardRule, ForwardingError> {
         let Some((_, mut rule)) = self.stopped_forwards.remove(rule_id) else {
-            return Err(ForwardingError::NotFound(rule_id.to_string()));
+            let audit = self.audit_rule_operation("restart_forward", rule_id);
+            let result = Err(ForwardingError::NotFound(rule_id.to_string()));
+            audit.result(&result);
+            return result;
         };
         rule.status = ForwardStatus::Starting;
 
-        match self.create_forward(rule.clone()).await {
+        match self
+            .start_forward(rule.clone(), "restart_forward", false)
+            .await
+        {
             Ok(active) => Ok(active),
             Err(error) => {
                 let mut restored = rule;
@@ -232,29 +364,35 @@ impl ForwardingManager {
     }
 
     pub async fn delete_forward(&self, rule_id: &str) -> Result<(), ForwardingError> {
-        if let Some((_, forward)) = self.local_forwards.remove(rule_id) {
-            let stopped = forward.stop().await;
-            self.emit_status_changed(&stopped.id, stopped.status, None);
-            return Ok(());
-        }
-        if let Some((_, forward)) = self.dynamic_forwards.remove(rule_id) {
-            let stopped = forward.stop().await;
-            self.emit_status_changed(&stopped.id, stopped.status, None);
-            return Ok(());
-        }
-        if let Some((_, forward)) = self.remote_forwards.remove(rule_id) {
-            if let Err(error) = forward.cancel_on_server().await {
-                self.remote_forwards.insert(rule_id.to_string(), forward);
-                return Err(error);
+        let audit = self.audit_rule_operation("delete_forward", rule_id);
+        let audit_result = async {
+            if let Some((_, forward)) = self.local_forwards.remove(rule_id) {
+                let stopped = forward.stop().await;
+                self.emit_status_changed(&stopped.id, stopped.status, None);
+                return Ok(());
             }
-            let stopped = forward.finish_stop().await;
-            self.emit_status_changed(&stopped.id, stopped.status, None);
-            return Ok(());
+            if let Some((_, forward)) = self.dynamic_forwards.remove(rule_id) {
+                let stopped = forward.stop().await;
+                self.emit_status_changed(&stopped.id, stopped.status, None);
+                return Ok(());
+            }
+            if let Some((_, forward)) = self.remote_forwards.remove(rule_id) {
+                if let Err(error) = forward.cancel_on_server().await {
+                    self.remote_forwards.insert(rule_id.to_string(), forward);
+                    return Err(error);
+                }
+                let stopped = forward.finish_stop().await;
+                self.emit_status_changed(&stopped.id, stopped.status, None);
+                return Ok(());
+            }
+            self.stopped_forwards
+                .remove(rule_id)
+                .map(|_| ())
+                .ok_or_else(|| ForwardingError::NotFound(rule_id.to_string()))
         }
-        self.stopped_forwards
-            .remove(rule_id)
-            .map(|_| ())
-            .ok_or_else(|| ForwardingError::NotFound(rule_id.to_string()))
+        .await;
+        audit.result(&audit_result);
+        audit_result
     }
 
     pub fn update_stopped_forward(
@@ -262,24 +400,29 @@ impl ForwardingManager {
         rule_id: &str,
         update: ForwardUpdate,
     ) -> Result<ForwardRule, ForwardingError> {
-        if self.local_forwards.contains_key(rule_id)
-            || self.dynamic_forwards.contains_key(rule_id)
-            || self.remote_forwards.contains_key(rule_id)
-        {
-            return Err(ForwardingError::ActiveRuleCannotBeEdited(
-                rule_id.to_string(),
-            ));
-        }
+        let audit = self.audit_rule_operation("update_stopped_forward", rule_id);
+        let audit_result = (|| {
+            if self.local_forwards.contains_key(rule_id)
+                || self.dynamic_forwards.contains_key(rule_id)
+                || self.remote_forwards.contains_key(rule_id)
+            {
+                return Err(ForwardingError::ActiveRuleCannotBeEdited(
+                    rule_id.to_string(),
+                ));
+            }
 
-        let Some(mut rule) = self.stopped_forwards.get_mut(rule_id) else {
-            return Err(ForwardingError::NotFound(rule_id.to_string()));
-        };
-        rule.apply_update(update);
-        rule.status = ForwardStatus::Stopped;
-        let updated = rule.clone();
-        drop(rule);
-        self.emit_status_changed(&updated.id, updated.status.clone(), None);
-        Ok(updated)
+            let Some(mut rule) = self.stopped_forwards.get_mut(rule_id) else {
+                return Err(ForwardingError::NotFound(rule_id.to_string()));
+            };
+            rule.apply_update(update);
+            rule.status = ForwardStatus::Stopped;
+            let updated = rule.clone();
+            drop(rule);
+            self.emit_status_changed(&updated.id, updated.status.clone(), None);
+            Ok(updated)
+        })();
+        audit.result(&audit_result);
+        audit_result
     }
 
     pub fn update_forward(
@@ -495,30 +638,39 @@ impl ForwardingManager {
         // Tauri `stop_all` drains active handles without preserving them in
         // `stopped_forwards`; only explicit per-rule stop keeps a restartable
         // stopped row. Keep native's bulk stop destructive in the same way.
-        let local_forwards: Vec<LocalForward> = self
+        let local_ids: Vec<_> = self
             .local_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .collect();
+        let local_forwards: Vec<_> = local_ids
+            .into_iter()
             .filter_map(|rule_id| {
                 self.local_forwards
                     .remove(&rule_id)
                     .map(|(_, forward)| forward)
             })
             .collect();
-        let dynamic_forwards: Vec<DynamicForward> = self
+        let dynamic_ids: Vec<_> = self
             .dynamic_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .collect();
+        let dynamic_forwards: Vec<_> = dynamic_ids
+            .into_iter()
             .filter_map(|rule_id| {
                 self.dynamic_forwards
                     .remove(&rule_id)
                     .map(|(_, forward)| forward)
             })
             .collect();
-        let remote_forwards: Vec<RemoteForward> = self
+        let remote_ids: Vec<_> = self
             .remote_forwards
             .iter()
             .map(|entry| entry.key().clone())
+            .collect();
+        let remote_forwards: Vec<_> = remote_ids
+            .into_iter()
             .filter_map(|rule_id| {
                 self.remote_forwards
                     .remove(&rule_id)
@@ -530,6 +682,7 @@ impl ForwardingManager {
             local_forwards,
             dynamic_forwards,
             remote_forwards,
+            audit_context: self.automatic_audit_context(),
         }
     }
 
@@ -539,39 +692,57 @@ impl ForwardingManager {
 
     pub async fn suspend_all_and_save_rules(&self) -> Vec<ForwardRule> {
         let mut suspended = Vec::new();
-        let local_forwards: Vec<LocalForward> = self
+        let mut audit_context = self.automatic_audit_context();
+        if let Some(context) = &mut audit_context {
+            context.source = oxideterm_audit::AuditSource::System;
+        }
+        // Release DashMap iterator guards before removing rules from the same shard.
+        let local_ids: Vec<_> = self
             .local_forwards
             .iter()
             .map(|entry| entry.key().clone())
-            .filter_map(|rule_id| {
-                self.local_forwards
-                    .remove(&rule_id)
-                    .map(|(_, forward)| forward)
-            })
             .collect();
-        let dynamic_forwards: Vec<DynamicForward> = self
+        let local_forwards: Vec<_> = local_ids
+            .into_iter()
+            .filter_map(|id| self.local_forwards.remove(&id).map(|(_, forward)| forward))
+            .collect();
+        let dynamic_ids: Vec<_> = self
             .dynamic_forwards
             .iter()
             .map(|entry| entry.key().clone())
-            .filter_map(|rule_id| {
+            .collect();
+        let dynamic_forwards: Vec<_> = dynamic_ids
+            .into_iter()
+            .filter_map(|id| {
                 self.dynamic_forwards
-                    .remove(&rule_id)
+                    .remove(&id)
                     .map(|(_, forward)| forward)
             })
             .collect();
-        let remote_forwards: Vec<RemoteForward> = self
+        let remote_ids: Vec<_> = self
             .remote_forwards
             .iter()
             .map(|entry| entry.key().clone())
-            .filter_map(|rule_id| {
-                self.remote_forwards
-                    .remove(&rule_id)
-                    .map(|(_, forward)| forward)
-            })
+            .collect();
+        let remote_forwards: Vec<_> = remote_ids
+            .into_iter()
+            .filter_map(|id| self.remote_forwards.remove(&id).map(|(_, forward)| forward))
             .collect();
 
         for forward in local_forwards {
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::Forward,
+                "suspend_forward",
+                Some(&forward.rule().id),
+            );
             let mut rule = forward.stop().await;
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Interrupted,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             rule.status = ForwardStatus::Suspended;
             self.stopped_forwards.insert(rule.id.clone(), rule.clone());
             self.emit_status_changed(
@@ -582,7 +753,19 @@ impl ForwardingManager {
             suspended.push(rule);
         }
         for forward in dynamic_forwards {
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::Forward,
+                "suspend_forward",
+                Some(&forward.rule().id),
+            );
             let mut rule = forward.stop().await;
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Interrupted,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             rule.status = ForwardStatus::Suspended;
             self.stopped_forwards.insert(rule.id.clone(), rule.clone());
             self.emit_status_changed(
@@ -593,7 +776,19 @@ impl ForwardingManager {
             suspended.push(rule);
         }
         for forward in remote_forwards {
+            let audit = oxideterm_audit::AuditOperation::in_context(
+                audit_context.as_ref(),
+                oxideterm_audit::AuditCategory::Forward,
+                "suspend_forward",
+                Some(&forward.rule().id),
+            );
             let mut rule = forward.stop_best_effort().await;
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Partial,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             rule.status = ForwardStatus::Suspended;
             self.stopped_forwards.insert(rule.id.clone(), rule.clone());
             self.emit_status_changed(
@@ -628,7 +823,9 @@ impl ForwardingManager {
             self.stopped_forwards.remove(&rule.id);
             let mut restarting = rule;
             restarting.status = ForwardStatus::Starting;
-            let result = self.create_forward(restarting.clone()).await;
+            let result = self
+                .start_forward(restarting.clone(), "restore_forward", true)
+                .await;
             if result.is_err() {
                 let mut suspended = restarting;
                 suspended.status = ForwardStatus::Suspended;

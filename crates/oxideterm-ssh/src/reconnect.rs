@@ -2,12 +2,16 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt,
     time::{Duration, SystemTime},
 };
 
 use dashmap::DashMap;
+use oxideterm_audit::{
+    AuditCategory, AuditContext, AuditEvidence, AuditOperation, AuditOutcome, AuditSource,
+};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -219,6 +223,9 @@ pub struct ReconnectForwardRestorePlan {
 #[derive(Debug)]
 pub struct ReconnectOrchestratorStore {
     jobs: DashMap<String, ReconnectJob>,
+    audit_contexts: DashMap<String, AuditContext>,
+    audit_jobs: Mutex<HashMap<String, AuditOperation>>,
+    audit_phases: Mutex<HashMap<String, AuditOperation>>,
     timing: ReconnectTiming,
     max_attempts: u32,
 }
@@ -227,6 +234,9 @@ impl ReconnectOrchestratorStore {
     pub fn new(timing: ReconnectTiming, max_attempts: u32) -> Self {
         Self {
             jobs: DashMap::new(),
+            audit_contexts: DashMap::new(),
+            audit_jobs: Mutex::new(HashMap::new()),
+            audit_phases: Mutex::new(HashMap::new()),
             timing,
             max_attempts: max_attempts.max(1),
         }
@@ -274,11 +284,64 @@ impl ReconnectOrchestratorStore {
         job
     }
 
+    pub fn schedule_audited(
+        &self,
+        node_id: impl Into<String>,
+        node_name: impl Into<String>,
+        snapshot: ReconnectSnapshot,
+        audit_context: Option<AuditContext>,
+    ) -> ReconnectJob {
+        let node_id = node_id.into();
+        let active = self.is_active(&node_id);
+        let job = self.schedule(node_id.clone(), node_name, snapshot);
+        if !active {
+            if let Some(mut context) = audit_context {
+                context.source = AuditSource::System;
+                let operation = context.operation(
+                    AuditCategory::Connection,
+                    "ssh_reconnect",
+                    Some(&format!("job={}", job.job_id)),
+                );
+                context.parent_id = operation.id().map(str::to_owned);
+                self.audit_contexts.insert(node_id.clone(), context);
+                self.audit_jobs.lock().insert(node_id.clone(), operation);
+                self.begin_audit_phase(&node_id, &job);
+            }
+        }
+        job
+    }
+
+    fn begin_audit_phase(&self, node_id: &str, job: &ReconnectJob) {
+        if let Some(context) = self.audit_contexts.get(node_id) {
+            let operation = context.operation(
+                AuditCategory::Connection,
+                "ssh_reconnect_phase",
+                Some(&format!(
+                    "job={} phase={:?} attempt={}",
+                    job.job_id, job.status, job.attempt
+                )),
+            );
+            self.audit_phases
+                .lock()
+                .insert(node_id.to_string(), operation);
+        }
+    }
+
+    fn finish_audit_phase(&self, node_id: &str, outcome: AuditOutcome) {
+        if let Some(operation) = self.audit_phases.lock().remove(node_id) {
+            operation.finish(outcome, AuditEvidence::Lifecycle, None, None);
+        }
+    }
+
     pub fn advance(&self, node_id: &str, phase: ReconnectPhase) -> Option<ReconnectJob> {
+        self.finish_audit_phase(node_id, AuditOutcome::Unknown);
         let mut job = self.jobs.get_mut(node_id)?;
         job.status = phase.clone();
         Self::push_phase(&mut job, phase, PhaseResult::Running, None);
-        Some(job.clone())
+        let updated = job.clone();
+        drop(job);
+        self.begin_audit_phase(node_id, &updated);
+        Some(updated)
     }
 
     pub fn complete_phase(
@@ -293,10 +356,27 @@ impl ReconnectOrchestratorStore {
             event.result = result;
             event.detail = detail;
         }
+        let outcome = match result {
+            PhaseResult::Ok => Some(AuditOutcome::Succeeded),
+            PhaseResult::Failed => Some(AuditOutcome::Failed),
+            PhaseResult::Skipped => Some(AuditOutcome::Unchanged),
+            PhaseResult::Running => None,
+        };
+        if let Some(outcome) = outcome {
+            self.finish_audit_phase(node_id, outcome);
+        }
         Some(job.clone())
     }
 
     pub fn finish(&self, node_id: &str, result: Result<u32, String>) -> Option<ReconnectJob> {
+        self.finish_audit_phase(
+            node_id,
+            if result.is_ok() {
+                AuditOutcome::Succeeded
+            } else {
+                AuditOutcome::Failed
+            },
+        );
         let mut job = self.jobs.get_mut(node_id)?;
         job.ended_at = Some(SystemTime::now());
         match result {
@@ -316,7 +396,31 @@ impl ReconnectOrchestratorStore {
                 );
             }
         }
-        Some(job.clone())
+        let finished = job.clone();
+        drop(job);
+        self.begin_audit_phase(node_id, &finished);
+        self.finish_audit_phase(
+            node_id,
+            if finished.status == ReconnectPhase::Done {
+                AuditOutcome::Succeeded
+            } else {
+                AuditOutcome::Failed
+            },
+        );
+        if let Some(operation) = self.audit_jobs.lock().remove(node_id) {
+            operation.finish(
+                if finished.status == ReconnectPhase::Done {
+                    AuditOutcome::Succeeded
+                } else {
+                    AuditOutcome::Failed
+                },
+                AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+        self.audit_contexts.remove(node_id);
+        Some(finished)
     }
 
     pub fn cleanup_terminal_job(&self, node_id: &str, started_at: SystemTime) -> bool {
@@ -326,6 +430,9 @@ impl ReconnectOrchestratorStore {
             .is_some_and(|job| is_terminal_phase(&job.status) && job.started_at == started_at);
         if should_remove {
             self.jobs.remove(node_id);
+            self.audit_contexts.remove(node_id);
+            self.audit_phases.lock().remove(node_id);
+            self.audit_jobs.lock().remove(node_id);
         }
         should_remove
     }
@@ -350,15 +457,32 @@ impl ReconnectOrchestratorStore {
         let to_remove = terminal_jobs.len() - max_retained;
         for (node_id, _, _) in terminal_jobs.into_iter().take(to_remove) {
             self.jobs.remove(&node_id);
+            self.audit_contexts.remove(&node_id);
+            self.audit_phases.lock().remove(&node_id);
+            self.audit_jobs.lock().remove(&node_id);
         }
     }
 
     pub fn cancel(&self, node_id: &str) -> Option<ReconnectJob> {
+        self.finish_audit_phase(node_id, AuditOutcome::Interrupted);
         let mut job = self.jobs.get_mut(node_id)?;
         job.status = ReconnectPhase::Cancelled;
         job.ended_at = Some(SystemTime::now());
         Self::push_phase(&mut job, ReconnectPhase::Cancelled, PhaseResult::Ok, None);
-        Some(job.clone())
+        let cancelled = job.clone();
+        drop(job);
+        self.begin_audit_phase(node_id, &cancelled);
+        self.finish_audit_phase(node_id, AuditOutcome::Interrupted);
+        if let Some(operation) = self.audit_jobs.lock().remove(node_id) {
+            operation.finish(
+                AuditOutcome::Interrupted,
+                AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
+        }
+        self.audit_contexts.remove(node_id);
+        Some(cancelled)
     }
 
     pub fn job(&self, node_id: &str) -> Option<ReconnectJob> {
@@ -505,6 +629,7 @@ impl ReconnectOrchestratorStore {
         if job.ended_at.is_some() || job.attempt >= job.max_attempts {
             return None;
         }
+        self.finish_audit_phase(node_id, AuditOutcome::Unknown);
         let next_attempt = job.attempt + 1;
         let max_attempts = job.max_attempts;
         let delay = retry_delay(self.timing, job.attempt);
@@ -518,6 +643,9 @@ impl ReconnectOrchestratorStore {
                 delay
             )),
         );
+        let updated = job.clone();
+        drop(job);
+        self.begin_audit_phase(node_id, &updated);
         Some(ReconnectRetry {
             attempt: next_attempt,
             max_attempts,
@@ -578,6 +706,96 @@ impl Default for ReconnectOrchestratorStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use oxideterm_audit::{AuditError, AuditKeyProvider, AuditQuery, AuditService};
+    use zeroize::Zeroizing;
+
+    struct Keys;
+
+    impl AuditKeyProvider for Keys {
+        fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+            Ok(Zeroizing::new(vec![7; 32]))
+        }
+
+        fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+            self.load(id)
+        }
+    }
+
+    #[tokio::test]
+    async fn reconnect_phases_keep_job_parent_and_exclude_raw_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let audit =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let context =
+            AuditContext::new(audit.client(), AuditSource::System).session("ssh", "node-a");
+        let store = ReconnectOrchestratorStore::default();
+        store.schedule_audited(
+            "node-a",
+            "Node A",
+            ReconnectSnapshot::default(),
+            Some(context),
+        );
+        store.advance("node-a", ReconnectPhase::SshConnect).unwrap();
+        store
+            .complete_phase(
+                "node-a",
+                PhaseResult::Failed,
+                Some("password=fixture-secret".into()),
+            )
+            .unwrap();
+        store
+            .finish("node-a", Err("password=fixture-secret".into()))
+            .unwrap();
+
+        let records = audit
+            .client()
+            .query(AuditQuery {
+                category: Some(AuditCategory::Connection),
+                limit: 20,
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .records;
+        let parent = records
+            .iter()
+            .find_map(|record| {
+                let operation = record.details.operation.as_ref()?;
+                (operation.action == "ssh_reconnect").then_some(operation.id.as_str())
+            })
+            .unwrap();
+        let phase_results: Vec<_> = records
+            .iter()
+            .filter_map(|record| {
+                let operation = record.details.operation.as_ref()?;
+                (operation.action == "ssh_reconnect_phase"
+                    && operation.outcome != AuditOutcome::Started)
+                    .then_some((operation.parent_id.as_deref(), operation.outcome))
+            })
+            .collect();
+        assert_eq!(
+            phase_results,
+            vec![
+                (Some(parent), AuditOutcome::Failed),
+                (Some(parent), AuditOutcome::Failed),
+                (Some(parent), AuditOutcome::Unknown),
+            ]
+        );
+        assert!(records.iter().all(|record| {
+            record
+                .details
+                .detail
+                .as_ref()
+                .is_none_or(|detail| !detail.contains("fixture-secret"))
+        }));
+    }
 
     #[test]
     fn schedule_is_idempotent_per_node() {

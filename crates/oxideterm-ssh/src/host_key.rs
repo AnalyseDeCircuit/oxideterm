@@ -485,10 +485,21 @@ pub fn learn_host_key(
     server_public_key: &PublicKey,
 ) -> Result<(), SshTransportError> {
     let fingerprint = public_key_fingerprint(server_public_key);
-    let mut store = KnownHostsStore::new()?;
-    store.add_host(host, port, server_public_key)?;
-    accept_host_key_for_session(host, port, fingerprint);
-    Ok(())
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Security,
+        "host_trust_add",
+        Some(host),
+        None,
+    );
+    audit.summary(&format!("port={port},fingerprint={fingerprint}"));
+    let audit_result = (|| {
+        let mut store = KnownHostsStore::new()?;
+        store.add_host(host, port, server_public_key)?;
+        accept_host_key_for_session(host, port, fingerprint);
+        Ok(())
+    })();
+    audit.result(&audit_result);
+    audit_result
 }
 
 pub fn remove_host_key(
@@ -497,7 +508,19 @@ pub fn remove_host_key(
     key_type: &str,
     expected_fingerprint: &str,
 ) -> Result<(), SshTransportError> {
-    KnownHostsStore::new()?.remove_host_key(host, port, key_type, expected_fingerprint)
+    let mut audit = oxideterm_audit::AuditOperation::begin(
+        oxideterm_audit::AuditCategory::Security,
+        "host_trust_remove",
+        Some(host),
+        None,
+    );
+    audit.summary(&format!(
+        "port={port},key_type={key_type},fingerprint={expected_fingerprint}"
+    ));
+    let audit_result =
+        (|| KnownHostsStore::new()?.remove_host_key(host, port, key_type, expected_fingerprint))();
+    audit.result(&audit_result);
+    audit_result
 }
 
 fn default_known_hosts_path() -> Result<PathBuf, SshTransportError> {

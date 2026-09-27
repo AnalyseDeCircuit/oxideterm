@@ -70,13 +70,28 @@ impl SshOutputBatcher {
     }
 }
 
-impl SftpChannelOpener for SshConnectionHandle {
-    fn open_sftp_channel(
-        &self,
-    ) -> impl Future<Output = Result<russh::Channel<client::Msg>, SftpError>> + Send {
+#[derive(Clone)]
+struct SshSftpChannelOpener {
+    _connection: SshConnectionHandle,
+    transport: Arc<PooledSshConnection>,
+}
+
+impl SshConnectionHandle {
+    pub(crate) async fn create_sftp_session(&self) -> Result<oxideterm_sftp::SftpSession, SftpError> {
+        let transport = self.physical::<PooledSshConnection>().ok_or_else(||
+            SftpError::ChannelError("no active SSH connection is available for SFTP".into()))?;
+        let opener = SshSftpChannelOpener { _connection: self.clone(), transport };
+        oxideterm_sftp::SftpSession::new(opener, self.connection_id().to_string()).await
+    }
+}
+
+impl SftpChannelOpener for SshSftpChannelOpener {
+    fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> { self.transport.audit.clone() }
+
+    fn open_sftp_channel(&self) -> impl Future<Output = Result<russh::Channel<client::Msg>, SftpError>> + Send {
         async {
-            self.open_session_channel()
-                .await
+            // Auxiliary channels belong to this SFTP session's transport, never a later registry binding.
+            self.transport.target.channel_open_session().await
                 .map_err(|error| SftpError::ChannelError(error.to_string()))
         }
     }

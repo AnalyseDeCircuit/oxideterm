@@ -56,6 +56,58 @@ impl NodeRouter {
         self.runtime.root_node_ids()
     }
 
+    pub fn audit_context(&self, node_id: &NodeId) -> Option<oxideterm_audit::AuditContext> {
+        let context = self
+            .runtime
+            .connection_id_for_node(node_id)
+            .and_then(|connection_id| self.registry.get(&connection_id))
+            .and_then(|handle| handle.audit_context())
+            .or_else(|| self.registry.audit_context())?;
+        self.runtime.audit_context(node_id, context.for_request())
+    }
+
+    fn observe_node_state(
+        &self,
+        node_id: &NodeId,
+        state: &NodeReadiness,
+        generation: u64,
+        cause: &'static str,
+    ) {
+        let Some(mut context) = self.audit_context(node_id) else {
+            return;
+        };
+        if cause != "explicit_disconnect"
+            || oxideterm_audit::AuditContext::current_request().is_none()
+        {
+            context.source = oxideterm_audit::AuditSource::System;
+        }
+        let state_code = match state {
+            NodeReadiness::Ready => "ready",
+            NodeReadiness::Connecting => "connecting",
+            NodeReadiness::Error => "error",
+            NodeReadiness::Disconnected => "disconnected",
+        };
+        let outcome = match state {
+            NodeReadiness::Ready => oxideterm_audit::AuditOutcome::Succeeded,
+            NodeReadiness::Connecting => oxideterm_audit::AuditOutcome::Started,
+            NodeReadiness::Error => oxideterm_audit::AuditOutcome::Failed,
+            NodeReadiness::Disconnected if cause == "explicit_disconnect" => {
+                oxideterm_audit::AuditOutcome::Succeeded
+            }
+            NodeReadiness::Disconnected => oxideterm_audit::AuditOutcome::Interrupted,
+        };
+        context.observe(
+            oxideterm_audit::AuditCategory::Connection,
+            "ssh_node_state",
+            Some(&format!(
+                "state={state_code} cause={cause} node_generation={generation}"
+            )),
+            outcome,
+            oxideterm_audit::AuditEvidence::Lifecycle,
+            oxideterm_audit::AuditAuthorization::NotRequired,
+        );
+    }
+
     pub fn node_metadata(&self, node_id: &NodeId) -> Option<NodeMetadataSnapshot> {
         self.runtime.metadata_snapshot(node_id)
     }
@@ -183,9 +235,7 @@ impl NodeRouter {
         &self,
         node_id: &NodeId,
     ) -> Result<ResolvedConnection, RouteError> {
-        let runtime = self
-            .runtime
-            .connection_runtime(node_id)?;
+        let runtime = self.runtime.connection_runtime(node_id)?;
         let connection_id = runtime.connection_id;
 
         let handle = self
@@ -209,9 +259,7 @@ impl NodeRouter {
         consumer: ConnectionConsumer,
     ) -> Result<ResolvedConnection, RouteError> {
         self.require_shared_consumer_allowed(node_id, &consumer)?;
-        let runtime = self
-            .runtime
-            .connection_runtime(node_id)?;
+        let runtime = self.runtime.connection_runtime(node_id)?;
         let connection_id = runtime.connection_id;
         let handle = self
             .registry
@@ -225,11 +273,9 @@ impl NodeRouter {
             .acquire_consumer_for_connection(&connection_id, consumer)
             .ok_or_else(|| RouteError::NotConnected(node_id.0.clone()))?;
         let state = handle.state();
-        let _ = self.runtime.update_connection_state_from_parts(
-            node_id,
-            &state,
-            "connection acquired",
-        );
+        let _ =
+            self.runtime
+                .update_connection_state_from_parts(node_id, &state, "connection acquired");
 
         self.require_resolvable_state(node_id, &connection_id, &state)?;
         self.require_physical_transport(node_id, &connection_id, &handle)?;
@@ -312,10 +358,17 @@ impl NodeRouter {
         // terminal panes.
         self.emitter
             .register(connection_id.clone(), node_id.clone());
-        Ok(self
+        let event = self
             .emitter
             .emit_state_from_connection(&connection_id, &connection.state, "connection bound")
-            .unwrap_or(event))
+            .unwrap_or(event);
+        if let NodeStateEvent::ConnectionStateChanged {
+            generation, state, ..
+        } = &event
+        {
+            self.observe_node_state(node_id, state, *generation, "connection_bound");
+        }
+        Ok(event)
     }
 
     pub fn disconnect_node_runtime(
@@ -332,6 +385,12 @@ impl NodeRouter {
             self.emitter.dispatch(&event);
         }
         let event = self.runtime.disconnect_node(node_id, reason)?;
+        if let NodeStateEvent::ConnectionStateChanged {
+            generation, state, ..
+        } = &event
+        {
+            self.observe_node_state(node_id, state, *generation, "explicit_disconnect");
+        }
         self.emitter.dispatch(&event);
         Ok(event)
     }
@@ -368,9 +427,7 @@ impl NodeRouter {
         node_id: &NodeId,
         endpoint: TerminalEndpoint,
     ) -> Result<NodeStateEvent, RouteError> {
-        let event = self
-            .runtime
-            .bind_terminal_endpoint(node_id, endpoint)?;
+        let event = self.runtime.bind_terminal_endpoint(node_id, endpoint)?;
         self.emitter.dispatch(&event);
         Ok(event)
     }
@@ -476,10 +533,7 @@ impl NodeRouter {
             })
     }
 
-    pub async fn acquire_transfer_sftp(
-        &self,
-        node_id: &NodeId,
-    ) -> Result<SftpSession, RouteError> {
+    pub async fn acquire_transfer_sftp(&self, node_id: &NodeId) -> Result<SftpSession, RouteError> {
         Ok(self.acquire_transfer_sftp_with_meta(node_id).await?.session)
     }
 
@@ -487,6 +541,7 @@ impl NodeRouter {
         &self,
         node_id: &NodeId,
     ) -> Result<AcquiredTransferSftp, RouteError> {
+        let request = self.audit_context(node_id);
         let resolved = self
             .resolve_connection_wait(node_id, Duration::from_secs(15))
             .await?;
@@ -498,7 +553,7 @@ impl NodeRouter {
             .map_err(|error| sftp_route_error("Transfer SFTP init failed", error))?;
         Ok(AcquiredTransferSftp {
             connection_id,
-            session,
+            session: session.with_resolved_node_audit(request.as_ref()),
         })
     }
 
@@ -613,6 +668,7 @@ impl NodeRouter {
         connection: &ConnectionInfo,
         reason: impl Into<String>,
     ) -> Result<NodeStateEvent, RouteError> {
+        let previous = self.runtime.snapshot(node_id);
         let reason = reason.into();
         let connection = self
             .registry
@@ -622,10 +678,20 @@ impl NodeRouter {
         let event = self
             .runtime
             .update_connection_state(node_id, &connection, reason.clone())?;
-        Ok(self
+        let event = self
             .emitter
             .emit_state_from_connection(&connection.connection_id, &connection.state, reason)
-            .unwrap_or(event))
+            .unwrap_or(event);
+        if let NodeStateEvent::ConnectionStateChanged {
+            generation, state, ..
+        } = &event
+            && previous
+                .as_ref()
+                .is_none_or(|snapshot| snapshot.state.readiness != *state)
+        {
+            self.observe_node_state(node_id, state, *generation, "transport_state");
+        }
+        Ok(event)
     }
 
     pub fn sync_connection_state_by_connection_id(
@@ -647,8 +713,20 @@ impl NodeRouter {
         readiness: NodeReadiness,
         reason: impl Into<String>,
     ) -> Result<NodeStateEvent, RouteError> {
-        self.runtime
-            .apply_node_readiness(node_id, readiness, reason)
+        let previous = self.runtime.snapshot(node_id);
+        let event = self
+            .runtime
+            .apply_node_readiness(node_id, readiness, reason)?;
+        if let NodeStateEvent::ConnectionStateChanged {
+            generation, state, ..
+        } = &event
+            && previous
+                .as_ref()
+                .is_none_or(|snapshot| snapshot.state.readiness != *state)
+        {
+            self.observe_node_state(node_id, state, *generation, "readiness_event");
+        }
+        Ok(event)
     }
 
     async fn resolve_connection_wait(
@@ -671,9 +749,7 @@ impl NodeRouter {
         }
         let started_at = Instant::now();
         loop {
-            let runtime = self
-                .runtime
-                .connection_runtime(node_id)?;
+            let runtime = self.runtime.connection_runtime(node_id)?;
             let connection_id = runtime.connection_id;
 
             if let Some(handle) = self.registry.get(&connection_id) {
@@ -752,17 +828,14 @@ impl NodeRouter {
         node_id: &NodeId,
         consumer: &ConnectionConsumer,
     ) -> Result<(), RouteError> {
-        let dedicated_consumers_required = self
-            .node_runtime_snapshot(node_id)
-            .is_some_and(|snapshot| {
+        let dedicated_consumers_required =
+            self.node_runtime_snapshot(node_id).is_some_and(|snapshot| {
                 snapshot
                     .config
                     .ssh_channel_strategy
                     .requires_dedicated_consumers()
             });
-        if dedicated_consumers_required
-            && !matches!(consumer, ConnectionConsumer::NodeRouter(_))
-        {
+        if dedicated_consumers_required && !matches!(consumer, ConnectionConsumer::NodeRouter(_)) {
             return Err(RouteError::CapabilityUnavailable(
                 "The SSH node requires a dedicated consumer connection".to_string(),
             ));

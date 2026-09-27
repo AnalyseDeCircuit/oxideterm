@@ -58,6 +58,19 @@ pub enum ConnectionState {
     Error(String),
 }
 
+fn connection_state_label(state: &ConnectionState) -> &'static str {
+    match state {
+        ConnectionState::Connecting => "connecting",
+        ConnectionState::Active => "active",
+        ConnectionState::Idle => "idle",
+        ConnectionState::LinkDown => "link_down",
+        ConnectionState::Reconnecting => "reconnecting",
+        ConnectionState::Disconnecting => "disconnecting",
+        ConnectionState::Disconnected => "disconnected",
+        ConnectionState::Error(_) => "error",
+    }
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionConsumer {
@@ -217,8 +230,15 @@ pub struct ConnectionPoolStats {
     pub errored: usize,
 }
 
+#[derive(Debug, Default)]
+struct PhysicalConnection {
+    transport: Option<Arc<dyn Any + Send + Sync>>,
+    audit: Option<oxideterm_audit::AuditContext>,
+}
+
 #[derive(Debug)]
 struct ConnectionEntry {
+    audit: Option<oxideterm_audit::AuditContext>,
     connection_id: String,
     key: String,
     config: SshConfig,
@@ -229,7 +249,7 @@ struct ConnectionEntry {
     ref_count: AtomicU64,
     keep_alive: AtomicBool,
     consumers: RwLock<Vec<ConnectionConsumer>>,
-    physical: RwLock<Option<Arc<dyn Any + Send + Sync>>>,
+    physical: RwLock<PhysicalConnection>,
     sftp: Mutex<SharedSftpState>,
     sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
@@ -246,9 +266,13 @@ struct ConnectionEntry {
 }
 
 impl ConnectionEntry {
-    fn new(config: SshConfig, pool_config: ConnectionPoolConfig) -> Self {
+    fn new(
+        config: SshConfig,
+        pool_config: ConnectionPoolConfig,
+        audit: Option<&oxideterm_audit::AuditContext>,
+    ) -> Self {
         let key = config.connection_key();
-        Self::new_with_key(config, key, pool_config, false)
+        Self::new_with_key(config, key, pool_config, false, audit)
     }
 
     fn new_with_key(
@@ -256,9 +280,21 @@ impl ConnectionEntry {
         key: String,
         pool_config: ConnectionPoolConfig,
         retire_when_unused: bool,
+        audit: Option<&oxideterm_audit::AuditContext>,
     ) -> Self {
+        let connection_id = Uuid::new_v4().to_string();
+        let audit = audit.map(|context| {
+            let mut context = context.session(
+                "ssh",
+                &format!("{}@{}:{}", config.username, config.host, config.port),
+            );
+            context.remote_account = Some(oxideterm_audit::redact(&config.username));
+            context.connection_id = Some(zeroize::Zeroizing::new(connection_id.clone()));
+            context
+        });
         Self {
-            connection_id: Uuid::new_v4().to_string(),
+            audit,
+            connection_id,
             key,
             config,
             ownership_transition: ParkingMutex::new(()),
@@ -268,7 +304,7 @@ impl ConnectionEntry {
             ref_count: AtomicU64::new(0),
             keep_alive: AtomicBool::new(false),
             consumers: RwLock::new(Vec::new()),
-            physical: RwLock::new(None),
+            physical: RwLock::new(PhysicalConnection::default()),
             sftp: Mutex::new(SharedSftpState::Empty),
             sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
@@ -282,6 +318,52 @@ impl ConnectionEntry {
             last_active_at: RwLock::new(SystemTime::now()),
             idle_timeout: pool_config.idle_timeout,
             retire_when_unused,
+        }
+    }
+
+    fn set_state(&self, state: ConnectionState) {
+        let transition = {
+            let mut current = self.state.write();
+            let transition = (*current != state).then(|| {
+                (
+                    connection_state_label(&current),
+                    connection_state_label(&state),
+                )
+            });
+            *current = state;
+            transition
+        };
+        if let Some((from, to)) = transition {
+            self.audit_observation(
+                "ssh_connection_state",
+                &serde_json::json!({"from": from, "to": to}).to_string(),
+            );
+        }
+    }
+
+    fn audit_observation(&self, action: &str, detail: &str) {
+        if let Some(mut context) = self
+            .physical
+            .read()
+            .audit
+            .clone()
+            .or_else(|| self.audit.clone())
+        {
+            context.source = oxideterm_audit::AuditSource::System;
+            context.observe(
+                oxideterm_audit::AuditCategory::Connection,
+                action,
+                Some(detail),
+                oxideterm_audit::AuditOutcome::Succeeded,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                oxideterm_audit::AuditAuthorization::NotRequired,
+            );
+        }
+    }
+
+    fn audit_consumer(&self, action: &str, consumer: &ConnectionConsumer) {
+        if let Ok(detail) = serde_json::to_string(consumer) {
+            self.audit_observation(action, &detail);
         }
     }
 
@@ -456,6 +538,19 @@ impl Drop for DedicatedConnectionLease {
 }
 
 impl SshConnectionHandle {
+    pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.entry
+            .physical
+            .read()
+            .audit
+            .clone()
+            .or_else(|| self.entry.audit.clone())
+    }
+
+    pub(crate) fn base_audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.entry.audit.clone()
+    }
+
     pub fn connection_id(&self) -> &str {
         &self.entry.connection_id
     }
@@ -492,7 +587,7 @@ impl SshConnectionHandle {
     /// node liveness in the connection registry, so SFTP/forwarding callers
     /// must combine this with `transport_status()` before borrowing a handle.
     pub fn has_physical(&self) -> bool {
-        self.entry.physical.read().is_some()
+        self.entry.physical.read().transport.is_some()
     }
 
     pub fn physical<T>(&self) -> Option<Arc<T>>
@@ -502,6 +597,7 @@ impl SshConnectionHandle {
         self.entry
             .physical
             .read()
+            .transport
             .as_ref()
             .cloned()
             .and_then(|physical| Arc::downcast::<T>(physical).ok())
@@ -511,12 +607,26 @@ impl SshConnectionHandle {
     where
         T: Any + Send + Sync + 'static,
     {
-        *self.entry.physical.write() = Some(physical);
+        self.set_physical_with_audit(physical, None);
+    }
+
+    pub(crate) fn set_physical_with_audit<T>(
+        &self,
+        physical: Arc<T>,
+        audit: Option<oxideterm_audit::AuditContext>,
+    ) where
+        T: Any + Send + Sync + 'static,
+    {
+        *self.entry.physical.write() = PhysicalConnection {
+            transport: Some(physical),
+            audit,
+        };
         self.entry.touch();
     }
 
     pub async fn clear_physical(&self) {
-        *self.entry.physical.write() = None;
+        // Keep the retired transport identity for its final lifecycle observations.
+        self.entry.physical.write().transport = None;
         self.entry.sftp_generation.fetch_add(1, Ordering::AcqRel);
         let mut guard = self.entry.sftp.lock().await;
         match std::mem::replace(&mut *guard, SharedSftpState::Empty) {
@@ -585,7 +695,7 @@ impl SshConnectionHandle {
                 continue;
             }
 
-            let created = SftpSession::new(self.clone(), self.connection_id().to_string()).await;
+            let created = self.create_sftp_session().await;
             let mut guard = self.entry.sftp.lock().await;
             match created {
                 Ok(sftp) => {
@@ -644,7 +754,7 @@ impl SshConnectionHandle {
     }
 
     pub async fn acquire_transfer_sftp(&self) -> Result<SftpSession, SftpError> {
-        SftpSession::new(self.clone(), self.connection_id().to_string()).await
+        self.create_sftp_session().await
     }
 
     pub async fn clear_sftp(&self) {
@@ -680,6 +790,7 @@ impl SshConnectionHandle {
 
 #[derive(Clone, Debug)]
 pub struct SshConnectionRegistry {
+    audit: Option<oxideterm_audit::AuditContext>,
     config: Arc<RwLock<ConnectionPoolConfig>>,
     by_key: Arc<DashMap<String, Arc<ConnectionEntry>>>,
     by_id: Arc<DashMap<String, String>>,
@@ -688,8 +799,20 @@ pub struct SshConnectionRegistry {
 }
 
 impl SshConnectionRegistry {
+    pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
+        self.audit.clone()
+    }
+
     pub fn new(config: ConnectionPoolConfig) -> Self {
+        Self::with_audit(config, oxideterm_audit::AuditContext::current())
+    }
+
+    pub fn with_audit(
+        config: ConnectionPoolConfig,
+        audit: Option<oxideterm_audit::AuditContext>,
+    ) -> Self {
         Self {
+            audit,
             config: Arc::new(RwLock::new(config)),
             by_key: Arc::new(DashMap::new()),
             by_id: Arc::new(DashMap::new()),
@@ -725,7 +848,11 @@ impl SshConnectionRegistry {
             .by_key
             .entry(key.clone())
             .or_insert_with(|| {
-                let entry = Arc::new(ConnectionEntry::new(config, *self.config.read()));
+                let entry = Arc::new(ConnectionEntry::new(
+                    config,
+                    *self.config.read(),
+                    self.audit.as_ref(),
+                ));
                 self.by_id.insert(entry.connection_id.clone(), key);
                 entry
             })
@@ -733,15 +860,18 @@ impl SshConnectionRegistry {
 
         entry.cancel_idle_timer();
         entry.touch();
-        {
+        let added = {
             let mut consumers = entry.consumers.write();
-            if !consumers.contains(&consumer) {
-                consumers.push(consumer);
-                // Consumer identity is the ownership unit. Reacquiring the same
-                // logical consumer must be idempotent or the numeric reference
-                // count can outlive the consumer set and prevent idle cleanup.
+            if consumers.contains(&consumer) {
+                false
+            } else {
+                consumers.push(consumer.clone());
                 entry.ref_count.fetch_add(1, Ordering::SeqCst);
+                true
             }
+        };
+        if added {
+            entry.audit_consumer("ssh_consumer_attached", &consumer);
         }
         // `acquire` only records a logical consumer. The physical SSH transport
         // is established by connect_tree_node / terminal connect paths and
@@ -764,12 +894,14 @@ impl SshConnectionRegistry {
             pool_key.clone(),
             *self.config.read(),
             true,
+            self.audit.as_ref(),
         ));
-        entry.consumers.write().push(consumer);
+        entry.consumers.write().push(consumer.clone());
         entry.ref_count.store(1, Ordering::SeqCst);
         self.by_id
             .insert(entry.connection_id.clone(), pool_key.clone());
         self.by_key.insert(pool_key, entry.clone());
+        entry.audit_consumer("ssh_consumer_attached", &consumer);
         SshConnectionHandle { entry }
     }
 
@@ -794,6 +926,7 @@ impl SshConnectionRegistry {
                     Some(count.saturating_sub(1))
                 })
                 .ok();
+            entry.audit_consumer("ssh_consumer_detached", consumer);
         }
         entry.touch();
         if entry.ref_count.load(Ordering::SeqCst) == 0 {
@@ -803,7 +936,7 @@ impl SshConnectionRegistry {
             }
             if entry.is_keep_alive() {
                 entry.cancel_idle_timer();
-                *entry.state.write() = ConnectionState::Idle;
+                entry.set_state(ConnectionState::Idle);
             } else {
                 self.start_idle_timer_for_entry(entry);
             }
@@ -839,7 +972,7 @@ impl SshConnectionRegistry {
             .map(|key| key.value().clone())?;
         let entry = self.by_key.get(&key)?.clone();
         let became_active = matches!(state, ConnectionState::Active);
-        *entry.state.write() = state;
+        entry.set_state(state);
         entry.touch();
         let info = entry.info();
         if emit_node_event && let Some(emitter) = self.node_event_emitter.read().clone() {
@@ -1314,7 +1447,7 @@ impl SshConnectionRegistry {
                     if matches!(*handle.entry.state.read(), ConnectionState::Idle)
                         && handle.has_physical()
                     {
-                        *handle.entry.state.write() = ConnectionState::Active;
+                        handle.entry.set_state(ConnectionState::Active);
                     }
                 }
             }
@@ -1401,7 +1534,7 @@ impl SshConnectionRegistry {
         let connection_id = entry.connection_id.clone();
         entry.cancel_idle_timer();
         let generation = entry.idle_generation();
-        *entry.state.write() = ConnectionState::Idle;
+        entry.set_state(ConnectionState::Idle);
         entry.touch();
         if let Some(emitter) = self.node_event_emitter.read().clone() {
             // Tauri immediately exposes Active -> Idle before the timeout
@@ -1905,6 +2038,211 @@ impl Default for SshConnectionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn audit_follows_shared_connection_after_terminal_release_and_new_connection() {
+        use oxideterm_audit::*;
+        struct Keys;
+        impl AuditKeyProvider for Keys {
+            fn load(&self, _: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, AuditError> {
+                Ok(zeroize::Zeroizing::new(vec![9; 32]))
+            }
+            fn create(&self, id: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, AuditError> {
+                self.load(id)
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &Keys)
+            .unwrap()
+            .set_policy(oxideterm_audit::AuditPolicy {
+                enabled: true,
+                ..Default::default()
+            })
+            .unwrap();
+        let service =
+            AuditService::with_key_provider(directory.path().join("audit.db"), Keys).unwrap();
+        let registry = SshConnectionRegistry::with_audit(
+            ConnectionPoolConfig::default(),
+            Some(AuditContext::new(service.client(), AuditSource::User)),
+        );
+        let config = SshConfig::password("old.example", 22, "alice", "secret-not-for-audit");
+        let terminal_consumer = ConnectionConsumer::Terminal("term".into());
+        let terminal = registry.acquire(config.clone(), terminal_consumer.clone());
+        registry.acquire(config.clone(), terminal_consumer.clone());
+        let sftp = registry.acquire(config, ConnectionConsumer::Sftp("files".into()));
+        let terminal_context = terminal.audit_context().unwrap().consumer();
+        let sftp_context = sftp.audit_context().unwrap().consumer();
+        assert_eq!(terminal_context.session_id, sftp_context.session_id);
+        assert_ne!(terminal_context.consumer_id, sftp_context.consumer_id);
+        let upload =
+            sftp_context.operation(AuditCategory::File, "file_upload", Some("/tmp/report"));
+        registry.release(terminal.connection_id(), &terminal_consumer);
+        registry.release(sftp.connection_id(), &terminal_consumer);
+        drop(terminal);
+        assert_eq!(sftp.info().ref_count, 1);
+        let next = registry.acquire(
+            SshConfig::password("new.example", 2222, "bob", "other-secret"),
+            ConnectionConsumer::Terminal("next".into()),
+        );
+        let next_context = next.audit_context().unwrap().consumer();
+        assert_ne!(sftp_context.session_id, next_context.session_id);
+        next_context
+            .operation(AuditCategory::Command, "command_execute", Some("pwd"))
+            .finish(
+                AuditOutcome::Succeeded,
+                AuditEvidence::Protocol,
+                Some(0),
+                None,
+            );
+        upload.finish(
+            AuditOutcome::Succeeded,
+            AuditEvidence::Protocol,
+            None,
+            Some(42),
+        );
+        registry.mark_state(sftp.connection_id(), ConnectionState::Active);
+        registry.mark_state(sftp.connection_id(), ConnectionState::Active);
+        registry.mark_state(sftp.connection_id(), ConnectionState::LinkDown);
+        registry.mark_state(
+            sftp.connection_id(),
+            ConnectionState::Error("sensitive-state-error".into()),
+        );
+        let page = service
+            .client()
+            .query(AuditQuery {
+                limit: 20,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let rows = page
+            .records
+            .iter()
+            .filter(|record| {
+                matches!(
+                    record.category,
+                    AuditCategory::File | AuditCategory::Command
+                )
+            })
+            .map(|record| {
+                let op = record.details.operation.as_ref().unwrap();
+                (
+                    record.details.target.as_ref().unwrap().as_str(),
+                    record.details.connection_id.as_ref().unwrap().as_str(),
+                    op.session_id.as_deref(),
+                    op.consumer_id.as_deref(),
+                    op.outcome,
+                    op.bytes,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                (
+                    "alice@old.example:22",
+                    sftp.connection_id(),
+                    sftp_context.session_id.as_deref(),
+                    sftp_context.consumer_id.as_deref(),
+                    AuditOutcome::Succeeded,
+                    Some(42)
+                ),
+                (
+                    "bob@new.example:2222",
+                    next.connection_id(),
+                    next_context.session_id.as_deref(),
+                    next_context.consumer_id.as_deref(),
+                    AuditOutcome::Succeeded,
+                    None
+                ),
+                (
+                    "bob@new.example:2222",
+                    next.connection_id(),
+                    next_context.session_id.as_deref(),
+                    next_context.consumer_id.as_deref(),
+                    AuditOutcome::Started,
+                    None
+                ),
+                (
+                    "alice@old.example:22",
+                    sftp.connection_id(),
+                    sftp_context.session_id.as_deref(),
+                    sftp_context.consumer_id.as_deref(),
+                    AuditOutcome::Started,
+                    None
+                ),
+            ]
+        );
+        let consumers = page
+            .records
+            .iter()
+            .rev()
+            .filter_map(|record| {
+                let op = record.details.operation.as_ref().unwrap();
+                op.action.starts_with("ssh_consumer_").then(|| {
+                    (
+                        op.action.as_str(),
+                        serde_json::from_str::<ConnectionConsumer>(
+                            record.details.detail.as_ref().unwrap(),
+                        )
+                        .unwrap(),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            consumers,
+            [
+                (
+                    "ssh_consumer_attached",
+                    ConnectionConsumer::Terminal("term".into())
+                ),
+                (
+                    "ssh_consumer_attached",
+                    ConnectionConsumer::Sftp("files".into())
+                ),
+                (
+                    "ssh_consumer_detached",
+                    ConnectionConsumer::Terminal("term".into())
+                ),
+                (
+                    "ssh_consumer_attached",
+                    ConnectionConsumer::Terminal("next".into())
+                ),
+            ]
+        );
+        let states = page
+            .records
+            .iter()
+            .rev()
+            .filter(|record| {
+                record.details.operation.as_ref().unwrap().action == "ssh_connection_state"
+            })
+            .map(|record| {
+                serde_json::from_str::<serde_json::Value>(record.details.detail.as_ref().unwrap())
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            states,
+            [
+                serde_json::json!({"from":"connecting","to":"active"}),
+                serde_json::json!({"from":"active","to":"link_down"}),
+                serde_json::json!({"from":"link_down","to":"error"})
+            ]
+        );
+        assert!(
+            !serde_json::to_string(&page.records)
+                .unwrap()
+                .contains("sensitive-state-error")
+        );
+        let debug = format!("{sftp_context:?}");
+        assert!(
+            !debug.contains("alice")
+                && !debug.contains("old.example")
+                && !debug.contains("secret-not-for-audit")
+        );
+    }
+
     #[test]
     fn shares_one_connection_for_many_consumers() {
         let registry = SshConnectionRegistry::default();

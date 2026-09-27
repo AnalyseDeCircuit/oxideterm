@@ -10,6 +10,10 @@ use std::{
     },
 };
 
+use oxideterm_audit::{
+    AuditCategory, AuditContext, AuditError, AuditKeyProvider, AuditOutcome, AuditQuery,
+    AuditService, AuditSource,
+};
 use oxideterm_forwarding::{ForwardRule, ForwardingManager};
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionPoolConfig, SshConfig, SshConnectionHandle,
@@ -26,6 +30,102 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::Mutex,
 };
+use zeroize::Zeroizing;
+
+struct AuditKeys;
+
+impl AuditKeyProvider for AuditKeys {
+    fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+        Ok(Zeroizing::new(vec![7; 32]))
+    }
+
+    fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
+        self.load(id)
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn restart_and_reconnect_restore_keep_distinct_audit_actions() {
+    let directory = tempfile::tempdir().unwrap();
+    oxideterm_audit::AuditStore::open(&directory.path().join("audit.db"), &AuditKeys)
+        .unwrap()
+        .set_policy(oxideterm_audit::AuditPolicy {
+            enabled: true,
+            ..Default::default()
+        })
+        .unwrap();
+    let audit =
+        AuditService::with_key_provider(directory.path().join("audit.db"), AuditKeys).unwrap();
+    let context =
+        AuditContext::new(audit.client(), AuditSource::User).session("ssh", "forward-test");
+    let ssh = start_forwarding_ssh_server().await;
+    let handle = connect_test_client(&ssh).await;
+    let manager = ForwardingManager::new("session-forward-audit", handle.clone());
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        context.scope(async {
+            let rule = manager
+                .create_forward(ForwardRule::local("127.0.0.1", 0, "127.0.0.1", 1234))
+                .await
+                .unwrap();
+            manager.stop_forward(&rule.id).await.unwrap();
+            manager.restart_forward(&rule.id).await.unwrap();
+            manager.suspend_all_and_save_rules().await;
+            let restored = manager.restore_saved_forwards(handle).await;
+            assert_eq!(restored.len(), 1);
+            assert!(restored[0].is_ok());
+            manager.stop_all().await;
+        }),
+    )
+    .await
+    .expect("forward transitions timed out");
+
+    let page = audit
+        .client()
+        .query(AuditQuery {
+            category: Some(AuditCategory::Forward),
+            limit: 20,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let results: Vec<_> = page
+        .records
+        .iter()
+        .filter_map(|record| {
+            let operation = record.details.operation.as_ref()?;
+            (operation.outcome != AuditOutcome::Started).then_some((
+                operation.action.as_str(),
+                operation.outcome,
+                operation.source,
+            ))
+        })
+        .collect();
+    assert_eq!(
+        results,
+        vec![
+            ("stop_forward", AuditOutcome::Succeeded, AuditSource::User),
+            (
+                "restore_forward",
+                AuditOutcome::Succeeded,
+                AuditSource::System
+            ),
+            (
+                "suspend_forward",
+                AuditOutcome::Interrupted,
+                AuditSource::System
+            ),
+            (
+                "restart_forward",
+                AuditOutcome::Succeeded,
+                AuditSource::User
+            ),
+            ("stop_forward", AuditOutcome::Succeeded, AuditSource::User),
+            ("create_forward", AuditOutcome::Succeeded, AuditSource::User),
+        ]
+    );
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn local_forward_moves_bytes_through_real_ssh_server() {
