@@ -367,13 +367,17 @@ impl SessionLogLineFormatter {
     }
 
     fn write(&mut self, writer: &mut BoundedLogWriter, content: &[u8]) -> io::Result<()> {
+        if content.is_empty() {
+            return Ok(());
+        }
         let mut index = 0;
         if self.pending_carriage_return {
             if content.first() == Some(&b'\n') {
                 self.finish_line(writer, b"\r\n")?;
                 index = 1;
-            } else {
-                self.finish_line(writer, b"\r")?;
+            } else if content.first() != Some(&b'\r') {
+                // A bare CR returns to the current line; it must not start another template.
+                writer.write_all(b"\r")?;
             }
             self.pending_carriage_return = false;
         }
@@ -397,7 +401,10 @@ impl SessionLogLineFormatter {
                     self.finish_line(writer, b"\r\n")?;
                     index = line_break + 2;
                 } else {
-                    self.finish_line(writer, b"\r")?;
+                    // Repeated returns to column zero still belong to the same logical line.
+                    if content[line_break + 1] != b'\r' {
+                        writer.write_all(b"\r")?;
+                    }
                     index = line_break + 1;
                 }
             } else {
@@ -999,6 +1006,46 @@ mod tests {
             fs::read_to_string(path).unwrap(),
             "ssh:first [test]\r\nssh:second [test]"
         );
+    }
+
+    #[test]
+    fn content_template_preserves_carriage_return_semantics_across_chunks() {
+        for (input, expected) in [
+            (
+                "first\r\r\nsecond\r\n",
+                "serial:first [test]\r\nserial:second [test]\r\n",
+            ),
+            ("first\r\r\r\n", "serial:first [test]\r\n"),
+            (
+                "first\r\n\r\nsecond",
+                "serial:first [test]\r\nserial: [test]\r\nserial:second [test]",
+            ),
+            ("old\rnew\r\n", "serial:old\rnew [test]\r\n"),
+            ("first\r\r", "serial:first [test]\r"),
+            ("first\nsecond", "serial:first [test]\nserial:second [test]"),
+        ] {
+            for split in 0..=input.len() {
+                let directory = tempfile::tempdir().unwrap();
+                let mut configured = options(directory.path());
+                configured.context.protocol = "serial".to_string();
+                configured.content_template = "{protocol}:{text} [{session}]".to_string();
+                let mut log = TerminalSessionLog::start(configured).unwrap();
+
+                log.write_output(input.as_bytes()[..split].to_vec())
+                    .unwrap();
+                // A control-only chunk leaves no printable bytes and must not resolve a pending CR.
+                log.write_output(b"\x1b[0m".to_vec()).unwrap();
+                log.write_output(input.as_bytes()[split..].to_vec())
+                    .unwrap();
+                let path = log.finish().unwrap();
+
+                assert_eq!(
+                    fs::read(path).unwrap(),
+                    expected.as_bytes(),
+                    "input {input:?}, split {split}"
+                );
+            }
+        }
     }
 
     #[test]
