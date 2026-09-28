@@ -435,11 +435,7 @@ impl WorkspaceApp {
         }
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
-        self.active_sidebar_section = SidebarSection::Connections;
         self.needs_active_pane_focus = false;
-        if self.sidebar_collapsed {
-            self.set_sidebar_collapsed_with_motion(false, cx);
-        }
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window, cx);
         self.persist_sidebar_settings(cx);

@@ -544,16 +544,14 @@ impl WorkspaceApp {
         let entering = !settings.sidebar_ui.zen_mode;
         settings.sidebar_ui.zen_mode = entering;
         if entering {
+            // Zen mode hides chrome without changing the user's sidebar visibility choices.
             self.sidebar_motion.settle(0.0);
             self.context_sidebar_motion.settle(0.0);
-            self.sidebar_collapsed = true;
             self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
             self.context_sidebar_motion_generation =
                 self.context_sidebar_motion_generation.wrapping_add(1);
             self.sidebar_rendered = false;
             self.context_sidebar_rendered = false;
-            settings.sidebar_ui.collapsed = true;
-            settings.sidebar_ui.ai_sidebar_collapsed = true;
             self.clear_ai_sidebar_keyboard_focus(cx);
             const ZEN_HINT_TTL: Duration = Duration::from_millis(2500);
             self.apply_workspace_overlay_intent(
@@ -561,10 +559,11 @@ impl WorkspaceApp {
                 cx,
             );
         } else {
-            self.sidebar_collapsed = false;
             self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-            self.sidebar_rendered = true;
-            settings.sidebar_ui.collapsed = false;
+            self.context_sidebar_motion_generation =
+                self.context_sidebar_motion_generation.wrapping_add(1);
+            self.sidebar_rendered = !self.sidebar_collapsed;
+            self.context_sidebar_rendered = self.context_sidebar_visible();
             self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
         }
         cx.notify();
