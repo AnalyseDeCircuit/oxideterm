@@ -121,27 +121,39 @@ printf '\033[2J\033[HFINAL-OUTPUT'
 
 #[test]
 fn concurrent_local_ptys_keep_output_and_shutdown_independent() {
-    let mut sessions: Vec<_> = (0..4).map(|index| {
-        let config = LocalPtyConfig {
-            shell: Some(ShellInfo::new("test-sh", "Test sh", "/bin/sh").with_args(vec![
-                "-c".into(),
-                r#"
+    let mut sessions: Vec<_> = (0..4)
+        .map(|index| {
+            let config = LocalPtyConfig {
+                shell: Some(
+                    ShellInfo::new("test-sh", "Test sh", "/bin/sh").with_args(vec![
+                        "-c".into(),
+                        r#"
 n=0
 while [ "$n" -lt 2000 ]; do
     printf 'bulk output %s\r\n' "$n"
     n=$((n+1))
 done
 printf '\033[2J\033[Hsession-%s' "$1"
-"#.into(),
-                "pty-isolation-test".into(), index.to_string(),
-            ])),
-            load_profile: false,
-            ..Default::default()
-        };
-        LocalPtySession::spawn_with_config_graphics_and_encoding(
-            80, 24, config, GraphicsOptions::default(), TerminalEncoding::Utf8, 100,
-        ).unwrap()
-    }).collect();
+"#
+                        .into(),
+                        "pty-isolation-test".into(),
+                        index.to_string(),
+                    ]),
+                ),
+                load_profile: false,
+                ..Default::default()
+            };
+            LocalPtySession::spawn_with_config_graphics_and_encoding(
+                80,
+                24,
+                config,
+                GraphicsOptions::default(),
+                TerminalEncoding::Utf8,
+                100,
+            )
+            .unwrap()
+        })
+        .collect();
     assert_eventually(
         Duration::from_secs(10),
         || {

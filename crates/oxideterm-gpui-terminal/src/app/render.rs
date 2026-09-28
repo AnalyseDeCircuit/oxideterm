@@ -1017,20 +1017,24 @@ impl TerminalPane {
             let window_id = tmux_window.id;
             let window_name = tmux_window.name.clone();
             controls.push(
-                self.render_terminal_toolbar_action(labels.rename_window.clone(), state.ready, false)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.open_tmux_prompt(
-                                TmuxPromptKind::RenameWindow(window_id),
-                                window_name.clone(),
-                                cx,
-                            );
-                        }),
-                    )
-                    .into_any_element(),
+                self.render_terminal_toolbar_action(
+                    labels.rename_window.clone(),
+                    state.ready,
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.open_tmux_prompt(
+                            TmuxPromptKind::RenameWindow(window_id),
+                            window_name.clone(),
+                            cx,
+                        );
+                    }),
+                )
+                .into_any_element(),
             );
         }
         controls.push(
@@ -1616,9 +1620,11 @@ impl TerminalPane {
                     .items_center()
                     .child(toggle)
                     .child(
-                        div().min_w(px(0.0)).h_full().flex_1().child(
-                            div().size_full().overflow_x_scrollbar().child(information),
-                        ),
+                        div()
+                            .min_w(px(0.0))
+                            .h_full()
+                            .flex_1()
+                            .child(div().size_full().overflow_x_scrollbar().child(information)),
                     ),
             )
             .when(self.control_bar_expanded, |bar| {
@@ -3046,14 +3052,8 @@ mod tests {
     fn control_bar_toggle_hides_and_restores_the_controls_row(cx: &mut gpui::TestAppContext) {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let pane = cx.new(|cx| {
-                super::TerminalPane::new_recording_playback(
-                    80,
-                    24,
-                    Default::default(),
-                    window,
-                    cx,
-                )
-                .unwrap()
+                super::TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .unwrap()
             });
             cx.observe(&pane, |_, _, cx| cx.notify()).detach();
             ControlBarTestView { pane }
