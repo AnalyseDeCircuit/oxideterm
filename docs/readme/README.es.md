@@ -59,6 +59,21 @@ Tus conexiones y datos operativos siguen bajo tu control. OxideSens utiliza tu p
 
 ---
 
+## Uso de memoria
+
+**Tras la reescritura nativa, el uso de memoria en reposo se redujo a aproximadamente una cuarta parte del de la versión anterior en macOS y una octava parte en Windows.** Estas son las mediciones que el autor registró en sus propios equipos al pasar de Tauri 1.x a la versión nativa con GPUI 2.0:
+
+| Plataforma | Tauri 1.x — en reposo | Versión nativa 2.0 — en reposo | Reducción |
+|---|---:|---:|---:|
+| macOS | 318,7 MB | 81,3 MB | Aproximadamente 74 % |
+| Windows | 182,4 MB | 23,5 MB | Aproximadamente 87 % |
+
+![Comparación del uso de memoria en reposo entre Tauri 1.x y la versión nativa 2.0, con capturas de los procesos del sistema](../screenshots/oxideterm-memory-comparison.png)
+
+El total de la versión anterior incluye OxideTerm y los procesos WebView asociados que aparecen en las capturas. La versión nativa ya no necesita esos procesos del navegador.
+
+---
+
 ## Capturas de pantalla
 
 Las capturas muestran flujos de terminal, archivos, edición y reenvío en OxideTerm.

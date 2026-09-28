@@ -59,6 +59,21 @@ Kết nối và dữ liệu vận hành vẫn do bạn kiểm soát. OxideSens d
 
 ---
 
+## Mức sử dụng bộ nhớ
+
+**Sau khi viết lại thành ứng dụng gốc, mức sử dụng bộ nhớ khi nhàn rỗi giảm còn khoảng một phần tư so với phiên bản cũ trên macOS và một phần tám trên Windows.** Dưới đây là các số đo tác giả ghi nhận trên máy của mình khi chuyển từ Tauri 1.x sang phiên bản gốc dùng GPUI 2.0:
+
+| Nền tảng | Tauri 1.x — khi nhàn rỗi | Bản gốc 2.0 — khi nhàn rỗi | Mức giảm |
+|---|---:|---:|---:|
+| macOS | 318,7 MB | 81,3 MB | Khoảng 74% |
+| Windows | 182,4 MB | 23,5 MB | Khoảng 87% |
+
+![So sánh bộ nhớ khi nhàn rỗi giữa Tauri 1.x và bản gốc 2.0, kèm ảnh chụp các tiến trình hệ thống](../screenshots/oxideterm-memory-comparison.png)
+
+Tổng bộ nhớ của phiên bản cũ bao gồm OxideTerm và các tiến trình WebView liên quan trong ảnh chụp. Phiên bản gốc không còn cần những tiến trình trình duyệt này.
+
+---
+
 ## Ảnh chụp màn hình
 
 Các ảnh dưới đây thể hiện quy trình terminal, tệp, chỉnh sửa và chuyển tiếp của OxideTerm.

@@ -60,6 +60,21 @@ Your connections and operational data stay under your control. OxideTerm require
 
 ---
 
+## Memory Usage
+
+**The native rewrite brought idle memory down to about a quarter of the old version on macOS, and about an eighth on Windows.** These are the maintainer's recorded observations from the transition from Tauri 1.x to native GPUI 2.0:
+
+| Platform | Tauri 1.x — idle | Native 2.0 — idle | Reduction |
+|---|---:|---:|---:|
+| macOS | 318.7 MB | 81.3 MB | About 74% |
+| Windows | 182.4 MB | 23.5 MB | About 87% |
+
+![Idle memory comparison with system process screenshots: Tauri 1.x versus native 2.0](docs/screenshots/oxideterm-memory-comparison.png)
+
+The old version's total includes OxideTerm and its associated WebView processes shown in the screenshots. The native version no longer needs those browser processes.
+
+---
+
 ## Screenshots
 
 The screenshots below show the OxideTerm workspace across terminal, file, editing, and forwarding workflows.
