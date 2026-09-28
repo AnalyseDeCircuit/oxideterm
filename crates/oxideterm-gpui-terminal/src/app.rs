@@ -4125,7 +4125,12 @@ impl TerminalPane {
         let cell_height_px = (line_height * scale_factor).ceil().max(1.0) as u16;
         let resize = (cols, rows, cell_width_px, cell_height_px);
 
-        if self.last_pty_resize == Some(resize) || self.pending_pty_resize == Some(resize) {
+        if self.last_pty_resize == Some(resize) {
+            // Returning to the settled viewport must discard any intermediate animation size.
+            self.pending_pty_resize = None;
+            return;
+        }
+        if self.pending_pty_resize == Some(resize) {
             return;
         }
 
@@ -4642,6 +4647,54 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[gpui::test]
+    fn viewport_returning_to_committed_size_cancels_pending_resize(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+        let bounds = gpui::Bounds::new(
+            gpui::point(px(0.0), px(0.0)),
+            gpui::size(px(640.0), px(320.0)),
+        );
+        pane.update(cx, |pane, cx| pane.apply_viewport_bounds(bounds, 1.0, cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+        cx.run_until_parked();
+        let original_grid = pane.read_with(cx, |pane, _| (pane.snapshot.cols, pane.snapshot.rows));
+
+        pane.update(cx, |pane, cx| {
+            let mut expanded = bounds;
+            expanded.size.height += px(80.0);
+            pane.apply_viewport_bounds(expanded, 1.0, cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE / 2);
+        pane.update(cx, |pane, cx| pane.apply_viewport_bounds(bounds, 1.0, cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+        cx.run_until_parked();
+
+        pane.read_with(cx, |pane, _| {
+            assert_eq!((pane.snapshot.cols, pane.snapshot.rows), original_grid);
+            let backend = pane.terminal.lock().snapshot();
+            assert_eq!((backend.cols, backend.rows), original_grid);
+            assert!(
+                pane.snapshot.rows as f32 * pane.metrics.line_height_f32()
+                    <= f32::from(bounds.size.height) - TERMINAL_CONTENT_PADDING * 2.0
+            );
+        });
     }
 
     #[gpui::test]
