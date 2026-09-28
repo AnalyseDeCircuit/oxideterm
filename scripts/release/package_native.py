@@ -1073,7 +1073,8 @@ def create_windows_installer(
         installer_path=installer_path,
         icon_path=icon_path,
     )
-    script_path.write_text(script + "\n", encoding="utf-8")
+    # NSIS uses the Windows code page for unmarked scripts, even with Unicode true.
+    script_path.write_text(script + "\n", encoding="utf-8-sig")
     run([makensis, str(script_path)])
     sign_windows_file(installer_path)
     shutil.rmtree(installer_root)

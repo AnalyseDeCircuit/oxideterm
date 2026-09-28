@@ -2,6 +2,7 @@
 """Tests for native release packaging helpers."""
 
 from pathlib import Path
+import codecs
 import plistlib
 import shutil
 import subprocess
@@ -110,6 +111,36 @@ class WindowsInstallerScriptTests(unittest.TestCase):
         self.assertNotIn("{{app}}", script)
         self.assertNotIn("{{path}}", script)
 
+    def test_installer_compiler_receives_utf8_with_bom(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "payload"
+            payload.mkdir()
+            compiler_inputs = []
+
+            def capture_compiler_input(command: list[str]) -> None:
+                compiler_inputs.append(Path(command[-1]).read_bytes())
+
+            with (
+                patch.object(package_native, "DIST_DIR", root),
+                patch.object(package_native, "find_makensis", return_value="makensis"),
+                patch.object(package_native, "stage_windows_installer_root", return_value=payload),
+                patch.object(package_native, "run", side_effect=capture_compiler_input),
+                patch.object(package_native, "sign_windows_file"),
+            ):
+                package_native.create_windows_installer(
+                    binary=Path("oxideterm-native.exe"),
+                    update_helper=Path("oxideterm-update-helper.exe"),
+                    target="x86_64-pc-windows-msvc",
+                    version="2.1.0",
+                    label="windows_x64",
+                    identity=self.identity(),
+                )
+
+            script_bytes, = compiler_inputs
+            self.assertTrue(script_bytes.startswith(codecs.BOM_UTF8))
+            self.assertIn("OxideTerm GPUI Preview 仍在运行", script_bytes.decode("utf-8-sig"))
+
     @unittest.skipUnless(shutil.which("makensis"), "NSIS compiler is not installed")
     def test_installer_compiles_with_localized_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -127,7 +158,7 @@ class WindowsInstallerScriptTests(unittest.TestCase):
                 installer_root=payload,
                 installer_path=installer,
                 icon_path=package_native.RESOURCE_DIR / "icons" / "icon.ico",
-            ), encoding="utf-8")
+            ), encoding="utf-8-sig")
             result = subprocess.run(
                 [shutil.which("makensis"), "/V2" if sys.platform == "win32" else "-V2", str(source)],
                 capture_output=True, text=True,
