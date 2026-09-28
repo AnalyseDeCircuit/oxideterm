@@ -101,6 +101,7 @@ impl NativeUpdateRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum NativeUpdateStatus {
     UpToDate,
+    ManagedByNix,
     Available(NativeUpdatePackage),
 }
 
@@ -138,6 +139,10 @@ impl NativeUpdateClient {
         &self,
         request: NativeUpdateRequest,
     ) -> Result<NativeUpdateStatus, NativeUpdateError> {
+        if request.install_flavor == InstallFlavor::LinuxNix {
+            return Ok(NativeUpdateStatus::ManagedByNix);
+        }
+
         let endpoint = endpoint_for_channel(request.channel);
         let response = self
             .http
@@ -777,6 +782,68 @@ fn compute_retry_delay(attempt: u32) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn nix_install_flavor_skips_remote_update_check() {
+        // Pointing the client at a loopback mock proxy ensures no external network
+        // is contacted, while allowing deterministic verification that non-Nix requests
+        // attempt network I/O.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let proxy_settings = UpdateProxySettings {
+            mode: oxideterm_settings::UpdateProxyMode::Custom,
+            protocol: oxideterm_settings::UpdateProxyProtocol::Http,
+            host: "127.0.0.1".to_string(),
+            port,
+            no_proxy: String::new(),
+            extra: oxideterm_settings::ExtraFields::default(),
+        };
+        let client = NativeUpdateClient::with_update_proxy(&proxy_settings).unwrap();
+
+        // The Nix install flavor must short-circuit without attempting network I/O.
+        let result = client
+            .check(NativeUpdateRequest {
+                channel: oxideterm_settings::UpdateChannel::Stable,
+                current_version: "1.0.0".into(),
+                target: PlatformTarget::new("linux", "x86_64"),
+                install_flavor: InstallFlavor::LinuxNix,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(result, NativeUpdateStatus::ManagedByNix);
+
+        // Verify that the listener received zero connections for the Nix request.
+        let connection_attempt =
+            tokio::time::timeout(Duration::from_millis(50), listener.accept()).await;
+        assert!(
+            connection_attempt.is_err(),
+            "Nix check must not connect to proxy"
+        );
+
+        // Counter-check: a non-Nix flavor does attempt network I/O and connects to the proxy.
+        let client_clone = client.clone();
+        let non_nix_task = tokio::spawn(async move {
+            client_clone
+                .check(NativeUpdateRequest {
+                    channel: oxideterm_settings::UpdateChannel::Stable,
+                    current_version: "1.0.0".into(),
+                    target: PlatformTarget::new("linux", "x86_64"),
+                    install_flavor: InstallFlavor::LinuxDeb,
+                })
+                .await
+        });
+
+        let accept_result = tokio::time::timeout(Duration::from_secs(2), listener.accept()).await;
+        let (stream, _) = accept_result
+            .expect("non-nix check must attempt network connection")
+            .expect("listener accept succeeded");
+        drop(stream);
+
+        let non_nix_result = non_nix_task.await.unwrap();
+        assert!(non_nix_result.is_err());
+    }
 
     #[test]
     fn package_file_name_keeps_version_and_removes_path_unsafe_chars() {

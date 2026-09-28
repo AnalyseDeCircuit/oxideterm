@@ -138,7 +138,7 @@ OxideTerm mantiene connessioni, file, forwarding, strumenti host, automazione e 
 
 - macOS: scegli il file `.dmg` per Apple Silicon o Intel.
 - Windows: usa il programma di installazione x64 o ARM64.
-- Linux: scegli AppImage, `.deb` o `.rpm`.
+- Linux: scegli AppImage, `.deb`, `.rpm` o esegui tramite Nix (`nix run github:AnalyseDeCircuit/oxideterm`; gli aggiornamenti sono gestiti da Nix).
 - Verifica i download con il file `sha256sums.txt` nella pagina della release.
 
 Per compilare dal codice sorgente, consulta la sezione « Esegui dal codice sorgente » qui sotto.

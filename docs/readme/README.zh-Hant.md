@@ -138,7 +138,7 @@ OxideTerm 將連線、檔案、轉發、主機工具、自動化與 AI 上下文
 
 - macOS：選擇適合 Apple Silicon 或 Intel 的 `.dmg`。
 - Windows：選擇 x64 或 ARM64 安裝程式。
-- Linux：選擇 AppImage、`.deb` 或 `.rpm`。
+- Linux：選擇 AppImage、`.deb`、`.rpm`，或透過 Nix 執行（`nix run github:AnalyseDeCircuit/oxideterm`；更新由 Nix 管理）。
 - 可使用發布頁中的 `sha256sums.txt` 驗證下載檔案。
 
 需要從原始碼建置？請繼續閱讀下方的「從原始碼執行」章節。

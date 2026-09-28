@@ -134,7 +134,7 @@ OxideTerm는 연결, 파일, 포워딩, 호스트 도구, 자동화, AI 컨텍�
 
 - macOS: Apple Silicon 또는 Intel에 맞는 `.dmg`를 선택합니다.
 - Windows: x64 또는 ARM64 설치 프로그램을 사용합니다.
-- Linux: AppImage, `.deb`, `.rpm` 중에서 선택합니다.
+- Linux: AppImage, `.deb`, `.rpm` 중에서 선택하거나 Nix로 실행합니다(`nix run github:AnalyseDeCircuit/oxideterm`; 업데이트는 Nix에서 관리합니다).
 - 릴리스 페이지의 `sha256sums.txt`로 다운로드를 검증할 수 있습니다.
 
 소스에서 빌드하려면 아래의 “소스에서 실행” 섹션을 계속 읽으세요.

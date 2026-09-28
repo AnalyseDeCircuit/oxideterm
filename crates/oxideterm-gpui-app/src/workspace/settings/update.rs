@@ -14,6 +14,7 @@ pub(in crate::workspace) enum NativeUpdateUiState {
     Idle,
     Checking,
     UpToDate,
+    ManagedByNix,
     Available(oxideterm_update::NativeUpdatePackage),
     Downloading(Option<oxideterm_update::ResumableUpdateStatus>),
     Verifying(Option<oxideterm_update::ResumableUpdateStatus>),
@@ -28,6 +29,7 @@ pub(in crate::workspace) enum NativeUpdateRenderState {
     Idle,
     Checking,
     UpToDate,
+    ManagedByNix,
     Available {
         version: String,
         has_release_notes: bool,
@@ -130,6 +132,7 @@ impl SettingsWorkspaceEntity {
             NativeUpdateUiState::Idle => NativeUpdateRenderState::Idle,
             NativeUpdateUiState::Checking => NativeUpdateRenderState::Checking,
             NativeUpdateUiState::UpToDate => NativeUpdateRenderState::UpToDate,
+            NativeUpdateUiState::ManagedByNix => NativeUpdateRenderState::ManagedByNix,
             NativeUpdateUiState::Available(package) => NativeUpdateRenderState::Available {
                 version: package.version.clone(),
                 has_release_notes: package
@@ -270,6 +273,16 @@ impl SettingsWorkspaceEntity {
             }
         };
 
+        if install_flavor == oxideterm_update::InstallFlavor::LinuxNix {
+            self.native_update.state = if request.kind == NativeUpdateCheckKind::Automatic {
+                NativeUpdateUiState::Idle
+            } else {
+                NativeUpdateUiState::ManagedByNix
+            };
+            cx.notify();
+            return true;
+        }
+
         self.native_update.check_task = Some(cx.spawn(async move |settings, cx| {
             let result = request
                 .runtime
@@ -313,6 +326,14 @@ impl SettingsWorkspaceEntity {
                     }
                     Ok(oxideterm_update::NativeUpdateStatus::UpToDate) => {
                         NativeUpdateUiState::UpToDate
+                    }
+                    Ok(oxideterm_update::NativeUpdateStatus::ManagedByNix)
+                        if request.kind == NativeUpdateCheckKind::Automatic =>
+                    {
+                        NativeUpdateUiState::Idle
+                    }
+                    Ok(oxideterm_update::NativeUpdateStatus::ManagedByNix) => {
+                        NativeUpdateUiState::ManagedByNix
                     }
                     Ok(oxideterm_update::NativeUpdateStatus::Available(package)) => {
                         settings.native_update.package = Some(package.clone());

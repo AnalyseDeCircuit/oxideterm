@@ -16,6 +16,8 @@ target/
 
 # Build artifacts
 dist/
+/result
+/result-*
 *.o
 *.a
 *.dylib

@@ -10,11 +10,13 @@ use super::*;
 #[derive(Default)]
 pub(crate) struct SftpNativeVideoSurface {
     path: Option<String>,
+    failed_path: Option<(String, String)>,
     xlib: Option<xlib::Xlib>,
     display: Option<*mut xlib::Display>,
     child: Option<xlib::Window>,
     playbin: Option<gst::Element>,
     snapshot: Option<PlatformVideoSnapshot>,
+    owns_display: bool,
 }
 
 impl SftpNativeVideoSurface {
@@ -25,14 +27,32 @@ impl SftpNativeVideoSurface {
         window: &mut Window,
         _cx: &mut App,
     ) -> PlatformVideoSnapshot {
+        if let Some((failed_path, error)) = &self.failed_path {
+            if failed_path == path {
+                return self
+                    .snapshot
+                    .clone()
+                    .unwrap_or_else(|| PlatformVideoSnapshot {
+                        state: PlatformVideoState::Error,
+                        position: Duration::ZERO,
+                        duration: None,
+                        backend: "GStreamer",
+                        error: Some(error.clone()),
+                    });
+            }
+            self.failed_path = None;
+        }
+
         let result = self.sync_inner(path, bounds, window);
         match result {
             Ok(snapshot) => {
+                self.failed_path = None;
                 self.snapshot = Some(snapshot.clone());
                 snapshot
             }
             Err(error) => {
                 self.detach();
+                self.failed_path = Some((path.to_string(), error.clone()));
                 let snapshot = PlatformVideoSnapshot {
                     state: PlatformVideoState::Error,
                     position: Duration::ZERO,
@@ -64,15 +84,21 @@ impl SftpNativeVideoSurface {
         if let Some(playbin) = self.playbin.take() {
             let _ = playbin.set_state(gst::State::Null);
         }
-        if let (Some(xlib), Some(display), Some(child)) =
-            (self.xlib.as_ref(), self.display, self.child.take())
-        {
+        if let (Some(xlib), Some(display)) = (self.xlib.as_ref(), self.display.take()) {
             unsafe {
-                (xlib.XDestroyWindow)(display, child);
-                (xlib.XFlush)(display);
+                if let Some(child) = self.child.take() {
+                    (xlib.XDestroyWindow)(display, child);
+                    (xlib.XFlush)(display);
+                }
+                if self.owns_display {
+                    (xlib.XCloseDisplay)(display);
+                }
             }
         }
+        self.child = None;
+        self.owns_display = false;
         self.path = None;
+        self.failed_path = None;
     }
 
     fn sync_inner(
@@ -81,23 +107,78 @@ impl SftpNativeVideoSurface {
         bounds: Bounds<Pixels>,
         window: &mut Window,
     ) -> Result<PlatformVideoSnapshot, String> {
-        let (display, parent) = root_x11_window(window)?;
         let rect = child_rect(bounds, window.scale_factor());
         if self.path.as_deref() != Some(path) {
             self.detach();
             gst::init().map_err(|error| format!("failed to initialize GStreamer: {error}"))?;
             let xlib =
                 xlib::Xlib::open().map_err(|error| format!("failed to load Xlib: {error}"))?;
-            let child = create_child_xwindow(&xlib, display, parent, rect);
+            let (display, parent, owns_display) = root_x11_window(window, &xlib)?;
+
+            // Use an RAII guard to roll back resources if any step in playbin
+            // creation or state transition fails, preventing leaks of X connections
+            // and child windows across frames.
+            struct SetupGuard<'a> {
+                xlib: &'a xlib::Xlib,
+                display: *mut xlib::Display,
+                owns_display: bool,
+                child: Option<xlib::Window>,
+                playbin: Option<gst::Element>,
+                committed: bool,
+            }
+
+            impl<'a> SetupGuard<'a> {
+                fn commit(mut self) {
+                    self.committed = true;
+                }
+            }
+
+            impl<'a> Drop for SetupGuard<'a> {
+                fn drop(&mut self) {
+                    if !self.committed {
+                        if let Some(playbin) = self.playbin.take() {
+                            let _ = playbin.set_state(gst::State::Null);
+                        }
+                        unsafe {
+                            if let Some(child) = self.child.take() {
+                                (self.xlib.XDestroyWindow)(self.display, child);
+                                (self.xlib.XFlush)(self.display);
+                            }
+                            if self.owns_display {
+                                (self.xlib.XCloseDisplay)(self.display);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let mut guard = SetupGuard {
+                xlib: &xlib,
+                display,
+                owns_display,
+                child: None,
+                playbin: None,
+                committed: false,
+            };
+
+            let child = create_child_xwindow(&xlib, display, parent, rect)?;
+            guard.child = Some(child);
+
             let playbin = create_gstreamer_playbin(path, child)?;
+            guard.playbin = Some(playbin.clone());
+
             playbin
                 .set_state(gst::State::Playing)
                 .map_err(|error| format!("failed to start GStreamer playback: {error:?}"))?;
+
+            guard.commit();
+
             self.path = Some(path.to_string());
             self.display = Some(display);
             self.child = Some(child);
             self.xlib = Some(xlib);
             self.playbin = Some(playbin);
+            self.owns_display = owns_display;
         } else if let (Some(xlib), Some(display), Some(child)) =
             (self.xlib.as_ref(), self.display, self.child)
         {
@@ -183,24 +264,49 @@ impl Drop for SftpNativeVideoSurface {
     }
 }
 
-fn root_x11_window(window: &mut Window) -> Result<(*mut xlib::Display, xlib::Window), String> {
+fn root_x11_window(
+    window: &mut Window,
+    xlib: &xlib::Xlib,
+) -> Result<(*mut xlib::Display, xlib::Window, bool), String> {
     let window_handle = window
         .window_handle()
         .map_err(|_| "window handle is unavailable".to_string())?;
     let display_handle = window
         .display_handle()
         .map_err(|_| "display handle is unavailable".to_string())?;
-    let RawWindowHandle::Xlib(window_handle) = window_handle.as_raw() else {
-        return Err("Linux native video currently requires an X11 GPUI window; Wayland subsurface support is not wired yet".to_string());
+    let parent = match window_handle.as_raw() {
+        RawWindowHandle::Xcb(handle) => handle.window.get() as xlib::Window,
+        RawWindowHandle::Xlib(handle) => handle.window,
+        RawWindowHandle::Wayland(_) => {
+            return Err("Linux native video currently requires an X11 GPUI window; Wayland subsurface support is not wired yet".to_string());
+        }
+        _ => return Err("Linux native video currently requires an X11 window".to_string()),
     };
-    let RawDisplayHandle::Xlib(display_handle) = display_handle.as_raw() else {
-        return Err("Linux native video currently requires an X11 display".to_string());
+    let (display, owns_display) = match display_handle.as_raw() {
+        RawDisplayHandle::Xlib(handle) => {
+            if let Some(display) = handle.display {
+                (display.as_ptr() as *mut xlib::Display, false)
+            } else {
+                let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
+                if display.is_null() {
+                    return Err("X11 display pointer is unavailable".to_string());
+                }
+                (display, true)
+            }
+        }
+        RawDisplayHandle::Xcb(_) => {
+            let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
+            if display.is_null() {
+                return Err("X11 display pointer is unavailable".to_string());
+            }
+            (display, true)
+        }
+        RawDisplayHandle::Wayland(_) => {
+            return Err("Linux native video currently requires an X11 display; Wayland subsurface support is not wired yet".to_string());
+        }
+        _ => return Err("Linux native video currently requires an X11 display".to_string()),
     };
-    let display = display_handle
-        .display
-        .ok_or_else(|| "X11 display pointer is unavailable".to_string())?
-        .as_ptr() as *mut xlib::Display;
-    Ok((display, window_handle.window))
+    Ok((display, parent, owns_display))
 }
 
 fn child_rect(bounds: Bounds<Pixels>, scale_factor: f32) -> (i32, i32, u32, u32) {
@@ -221,13 +327,37 @@ fn create_child_xwindow(
     display: *mut xlib::Display,
     parent: xlib::Window,
     rect: (i32, i32, u32, u32),
-) -> xlib::Window {
+) -> Result<xlib::Window, String> {
     let (x, y, width, height) = rect;
     unsafe {
-        let child = (xlib.XCreateSimpleWindow)(display, parent, x, y, width, height, 0, 0, 0);
+        let screen = (xlib.XDefaultScreen)(display);
+        let depth = (xlib.XDefaultDepth)(display, screen);
+        let visual = (xlib.XDefaultVisual)(display, screen);
+        let colormap = (xlib.XDefaultColormap)(display, screen);
+        let mut attributes = std::mem::zeroed::<xlib::XSetWindowAttributes>();
+        attributes.colormap = colormap;
+        attributes.border_pixel = 0;
+        let valuemask = xlib::CWBorderPixel | xlib::CWColormap;
+        let child = (xlib.XCreateWindow)(
+            display,
+            parent,
+            x,
+            y,
+            width,
+            height,
+            0,
+            depth,
+            xlib::InputOutput as u32,
+            visual,
+            valuemask,
+            &mut attributes,
+        );
+        if child == 0 {
+            return Err("failed to create child X11 window".to_string());
+        }
         (xlib.XMapRaised)(display, child);
         (xlib.XFlush)(display);
-        child
+        Ok(child)
     }
 }
 
