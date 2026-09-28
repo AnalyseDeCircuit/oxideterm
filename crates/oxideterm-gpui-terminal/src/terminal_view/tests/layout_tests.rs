@@ -157,6 +157,39 @@ fn terminal_element_shapes_rtl_row_as_visual_runs() {
 }
 
 #[test]
+fn terminal_element_keeps_wide_glyphs_on_grid_in_bidi_rows() {
+    // U+05FC appears when GBK output is decoded as UTF-8 and switches the row to bidi layout.
+    let mut snapshot = selection_snapshot("");
+    snapshot.lines = vec![row_from_text_with_wide_spacers("中文a\u{05fc}")];
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .layout();
+
+    assert_eq!(
+        layout
+            .text_runs
+            .iter()
+            .map(|run| (run.col, run.text.to_string(), run.cells))
+            .collect::<Vec<_>>(),
+        vec![
+            (0, "中".to_string(), 2),
+            (2, "文".to_string(), 2),
+            (4, "a\u{05fc}".to_string(), 2),
+        ]
+    );
+}
+
+#[test]
 fn terminal_element_keeps_rtl_text_at_content_start_with_trailing_blanks() {
     let snapshot = selection_snapshot("שלום");
     let layout = TerminalElement::new(

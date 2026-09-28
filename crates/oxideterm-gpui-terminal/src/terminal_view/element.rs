@@ -1982,7 +1982,11 @@ fn push_visual_text_runs(
             continue;
         }
 
-        if let Some(run) = &mut current_run
+        // Runs are painted with a one-cell forced advance, so a wide glyph must stay alone
+        // in its run, matching the logical path where its spacer cell ends the run.
+        let wide = cluster.cells > 1;
+        if !wide
+            && let Some(run) = &mut current_run
             && run.col + run.cells == cluster.visual_col
             && text_run_style_matches(&run.style, &style)
             && current_run_is_drawing == is_drawing
@@ -1996,13 +2000,18 @@ fn push_visual_text_runs(
         if let Some(run) = current_run.take() {
             text_runs.push(run);
         }
-        current_run_is_drawing = is_drawing;
-        current_run = Some(PendingTerminalRowTextRun {
+        let run = PendingTerminalRowTextRun {
             col: cluster.visual_col,
             text: cluster.text.clone(),
             cells: cluster.cells,
             style,
-        });
+        };
+        if wide {
+            text_runs.push(run);
+        } else {
+            current_run_is_drawing = is_drawing;
+            current_run = Some(run);
+        }
     }
 
     if let Some(run) = current_run.take() {

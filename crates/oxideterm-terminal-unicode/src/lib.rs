@@ -191,8 +191,11 @@ pub fn visual_line_for_row_if_bidi(row: &TerminalRow) -> Option<TerminalVisualLi
         let source = &clusters[logical_cluster_index];
         let rtl = levels[logical_cluster_index] % 2 == 1;
         let logical_col = source.logical_col;
-        logical_to_visual[logical_col] = Some(visual_col);
         for offset in 0..source.cells {
+            // Wide spacer cells follow their glyph so per-cell backgrounds move with it.
+            if let Some(slot) = logical_to_visual.get_mut(logical_col + offset) {
+                *slot = Some(visual_col + offset);
+            }
             if visual_col + offset < visual_to_logical.len() {
                 visual_to_logical[visual_col + offset] = Some(logical_col);
             }
@@ -251,11 +254,15 @@ fn is_content_cell(cell: &TerminalCell) -> bool {
 
 fn row_clusters(row: &TerminalRow, span: Range<usize>) -> Vec<SourceCluster> {
     let mut byte_offset = 0;
+    let mut previous_wide = false;
     row.cells
         .iter()
         .enumerate()
         .skip(span.start)
         .take(span.end.saturating_sub(span.start))
+        // A wide cluster already spans its trailing spacer cell; emitting the spacer again
+        // would advance every later visual column by one cell per wide glyph.
+        .filter(|(_, cell)| !std::mem::replace(&mut previous_wide, cell.wide))
         .map(|(logical_col, cell)| {
             let text = normalized_cell_text(cell);
             let byte_range = byte_offset..byte_offset + text.len();
@@ -299,13 +306,8 @@ fn cell_text(cell: &TerminalCell) -> String {
 }
 
 fn cell_width(cell: &TerminalCell) -> usize {
-    if cell.ch.is_whitespace() {
-        1
-    } else if cell.wide {
-        2
-    } else {
-        1
-    }
+    // Wide whitespace such as U+3000 still owns a spacer cell.
+    if cell.wide { 2 } else { 1 }
 }
 
 fn row_contains_bidi_text(row: &TerminalRow, span: Range<usize>) -> bool {
@@ -442,6 +444,33 @@ mod tests {
         assert!(line.clusters.iter().all(|cluster| cluster.visual_col < 4));
         assert_eq!(line.visual_col_for_logical_col(15), 15);
         assert_eq!(line.logical_col_for_visual_col(15), 15);
+    }
+
+    #[test]
+    fn wide_cells_keep_grid_columns_in_bidi_rows() {
+        // Snapshot rows store a wide glyph followed by a blank spacer cell. U+05FC is the
+        // Hebrew-block code point produced when GBK text is decoded as UTF-8.
+        for (text, wide_col, expected) in [
+            ("中 a\u{05fc}", 0, vec![Some(0), Some(1), Some(2), Some(3)]),
+            (
+                "\u{3000} a\u{05fc}",
+                0,
+                vec![Some(0), Some(1), Some(2), Some(3)],
+            ),
+            (
+                "\u{05d0}\u{05d1}中 ",
+                2,
+                vec![Some(3), Some(2), Some(0), Some(1)],
+            ),
+        ] {
+            let mut source = row(text);
+            source.cells_mut()[wide_col].wide = true;
+            source.refresh_signature();
+
+            let line = visual_line_for_row_if_bidi(&source).expect("bidi visual line");
+
+            assert_eq!(line.logical_to_visual, expected, "{text:?}");
+        }
     }
 
     #[test]
