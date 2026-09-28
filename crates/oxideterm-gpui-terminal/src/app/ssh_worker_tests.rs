@@ -203,19 +203,62 @@ fn tmux_selection_replays_the_first_click_and_release_on_the_new_pane(cx: &mut T
     });
     let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(10)).unwrap();
     let layout = "80x24,0,0{40x24,0,0,1,39x24,41,0,2}";
-    let bootstrap = format!(
-        "\x1bP1000p%begin 1 1 1\n%end 1 1 1\n%begin 1 2 1\n3.4\n%end 1 2 1\n\
-         %begin 1 3 1\n$1 demo\n%end 1 3 1\n%begin 1 4 1\n@1 0 1 * shell\n%end 1 4 1\n\
-         %begin 1 5 1\n%1 @1 1 40 24 0 0 {layout}\n%2 @1 0 39 24 0 0 {layout}\n%end 1 5 1\n\
-         %begin 1 6 1\n%end 1 6 1\n%begin 1 7 1\n%end 1 7 1\n\
-         %begin 1 8 1\n%1 0 0\n%2 0 0\n%end 1 8 1\n%begin 1 9 1\n$1 @1 %1\n%end 1 9 1\n\
-         %output %2 \\033[?1000h\\033[?1006h\n"
-    );
     peer.runtime
-        .block_on(sender.data(channel, bootstrap.into_bytes()))
+        .block_on(sender.data(channel, b"\x1bP1000p".to_vec()))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let panes = format!("%1 @1 1 40 24 0 0 {layout}\n%2 @1 0 39 24 0 0 {layout}\n");
+    let mut pending_input = Vec::new();
+    for (index, (query, body)) in [
+        ("refresh-client -C ", ""),
+        ("display-message -p '#{version}'", "3.4\n"),
+        ("list-sessions -F ", "$1 demo\n"),
+        ("list-windows -F ", "@1 0 1 * shell\n"),
+        ("list-panes -s -F ", panes.as_str()),
+        ("capture-pane -p -e -t ", ""),
+        ("capture-pane -p -e -t ", ""),
+        (
+            "list-panes -s -F '#{pane_id} #{cursor_x} #{cursor_y}'",
+            "%1 0 0\n%2 0 0\n",
+        ),
+        (
+            "display-message -p '#{session_id} #{window_id} #{pane_id}'",
+            "$1 @1 %1\n",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        // The controller registers replies when queries are written to the transport.
+        // A real tmux peer cannot answer queries before receiving them.
+        let line_end = loop {
+            if let Some(end) = pending_input.iter().position(|byte| *byte == b'\n') {
+                break end;
+            }
+            let (bytes, _) = peer
+                .input
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("tmux bootstrap query did not reach the peer");
+            pending_input.extend(bytes);
+        };
+        let command = String::from_utf8(pending_input.drain(..=line_end).collect()).unwrap();
+        assert!(
+            command.starts_with(query),
+            "unexpected tmux query: {command}"
+        );
+        let number = index + 1;
+        let reply = format!("%begin 1 {number} 1\n{body}%end 1 {number} 1\n");
+        peer.runtime
+            .block_on(sender.data(channel, reply.into_bytes()))
+            .unwrap();
+    }
+    peer.runtime
+        .block_on(sender.data(
+            channel,
+            b"%output %2 \\033[?1000h\\033[?1006hMOUSE-READY\n".to_vec(),
+        ))
         .unwrap();
     let activity = pane.read_with(cx, |pane, _| pane.terminal.lock().activity_receiver());
-    let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let notified = peer.runtime.block_on(async {
             tokio::time::timeout(Duration::from_millis(2), activity.notified())
@@ -234,10 +277,16 @@ fn tmux_selection_replays_the_first_click_and_release_on_the_new_pane(cx: &mut T
             |_, _| pane.clone().into_element(),
         );
         if pane.read_with(cx, |pane, _| {
-            pane.terminal
-                .lock()
+            let terminal = pane.terminal.lock();
+            terminal
                 .tmux_state()
                 .is_some_and(|state| state.ready && state.pane_count == 2)
+                // Readiness precedes pane output; wait until mouse modes have been parsed too.
+                && terminal
+                    .snapshot()
+                    .lines
+                    .iter()
+                    .any(|row| row.text().contains("MOUSE-READY"))
         }) {
             break;
         }
