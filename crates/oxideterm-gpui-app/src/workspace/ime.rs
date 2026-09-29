@@ -1068,8 +1068,9 @@ impl WorkspaceApp {
 
         if let Some(form) = self.connection_form_state(cx).form.as_ref()
             && form.field_focused
-            && self.new_connection_field_accepts_ime(form.focused_field, cx)
         {
+            // Saved passwords expose an empty draft until edited. Keep that draft on the
+            // shared input path from the first character so text and caret advance together.
             return Some(WorkspaceImeTarget::NewConnection(form.focused_field));
         }
 
@@ -2059,20 +2060,6 @@ impl WorkspaceApp {
             return marked.replacement_range.clone();
         }
         platform_range
-    }
-
-    fn new_connection_field_accepts_ime(&self, field: NewConnectionField, cx: &App) -> bool {
-        if field == NewConnectionField::Password
-            && self.saved_connection_form_uses_unloaded_secret(cx)
-            && self
-                .connection_form_state(cx)
-                .form
-                .as_ref()
-                .is_some_and(|form| !form.password_loaded)
-        {
-            return false;
-        }
-        true
     }
 
     fn ime_index_for_relative_x(
