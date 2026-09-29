@@ -51,6 +51,12 @@ fn terminal_split_supported(
     }
 }
 
+fn terminal_auto_closes_on_exit(kind: oxideterm_terminal::TerminalSessionKind) -> bool {
+    // A remote channel or device can end independently of the user's task. Retain
+    // its pane and scrollback until explicitly closed, even if the node stays connected.
+    kind == oxideterm_terminal::TerminalSessionKind::LocalPty
+}
+
 fn serial_profile_line_ending(
     line_ending: oxideterm_terminal::SerialLineEnding,
 ) -> oxideterm_connections::SerialLineEnding {
@@ -430,15 +436,24 @@ impl WorkspaceApp {
         session_id: TerminalSessionId,
         cx: &mut Context<Self>,
     ) {
-        // Serial sessions report port failures through the same terminal event;
-        // keep local transport panes visible so users can inspect the error
-        // text and reconnect without recreating the whole tab.
-        if self.serial_terminal_configs.contains_key(&session_id) {
+        if !self.terminal_session_auto_closes_on_exit(session_id, cx) {
             return;
         }
         if self.pending_auto_close_terminal_sessions.insert(session_id) {
             cx.notify();
         }
+    }
+
+    fn terminal_session_auto_closes_on_exit(
+        &self,
+        session_id: TerminalSessionId,
+        cx: &App,
+    ) -> bool {
+        self.tab_host
+            .read(cx)
+            .terminal_location(session_id)
+            .and_then(|location| self.terminal_kind_for_pane(location.pane_id, cx))
+            .is_some_and(terminal_auto_closes_on_exit)
     }
 
     pub(super) fn schedule_pending_auto_close_terminal_sessions(
@@ -468,7 +483,7 @@ impl WorkspaceApp {
     ) {
         let session_ids: Vec<_> = self.pending_auto_close_terminal_sessions.drain().collect();
         for session_id in session_ids {
-            if self.serial_terminal_configs.contains_key(&session_id) {
+            if !self.terminal_session_auto_closes_on_exit(session_id, cx) {
                 continue;
             }
             self.close_terminal_session(session_id, window, cx);
@@ -1362,8 +1377,22 @@ impl WorkspaceApp {
 }
 
 #[cfg(test)]
-mod split_tests {
+mod tests {
     use super::*;
+
+    #[test]
+    fn remote_terminal_exit_does_not_request_auto_close() {
+        use oxideterm_terminal::TerminalSessionKind::*;
+        for (kind, auto_close) in [
+            (LocalPty, true),
+            (SshPty, false),
+            (Telnet, false),
+            (Mosh, false),
+            (Serial, false),
+        ] {
+            assert_eq!(terminal_auto_closes_on_exit(kind), auto_close, "{kind:?}");
+        }
+    }
 
     #[test]
     fn terminal_split_support_matches_transport_ownership() {
