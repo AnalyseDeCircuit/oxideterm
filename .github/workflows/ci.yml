@@ -7,6 +7,9 @@ on:
     paths:
       - 'crates/**'
       - 'scripts/**'
+      - 'nix/**'
+      - 'flake.nix'
+      - 'flake.lock'
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'deny.toml'
@@ -85,3 +88,24 @@ jobs:
           node --test
           scripts/quality/tests/*.test.cjs
           scripts/automation/tests/*.test.cjs
+
+  nix:
+    name: Nix package build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: Build OxideTerm via Nix
+        run: nix build .#oxideterm -L --show-trace
+
+      - name: Check Nix flake
+        run: nix flake check -L

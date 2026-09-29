@@ -51,6 +51,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Change persisted settings, export, sync, or migration behavior | [Settings, data, and migrations](settings-data-and-migrations.md) |
 | Make a performance claim or change a hot path | [Performance and benchmarking](performance-and-benchmarking.md) |
 | Prepare a stable release or repair release assets | [Release process](release-process.md) |
+| Maintain Nix packaging, flake checks, or Git dependency hashes | [Nix packaging guide](../../nix/README.md) |
 
 ## Scope
 

@@ -82,9 +82,19 @@ rustPlatform.buildRustPackage {
 
   cargoLock = {
     lockFile = ../Cargo.lock;
+    # rustPlatform.buildRustPackage builds in a network-isolated sandbox.
+    # While crates.io dependencies have checksums recorded in Cargo.lock, Git
+    # dependencies require fixed-output derivation hashes defined in outputHashes.
+    #
+    # When updating or adding Git dependencies in Cargo.toml / Cargo.lock:
+    # 1. Update Cargo.toml and Cargo.lock first.
+    # 2. Run `nix build .#oxideterm -L --show-trace`.
+    # 3. If a hash mismatch occurs, check the locked Git revision and update
+    #    the matching entry below with the `got:` sha256 output.
+    # 4. Run `nix flake check -L` to ensure package checks pass.
     outputHashes = {
       "ironrdp-0.17.0" = "sha256-gBkwaq6m1iunsQ2Xz/5l5ajuI3uRmYkdlFdiE5wx7to=";
-      "russh-0.63.0" = "sha256-o9p0ocNLF0QigbvykApRF+OyVbJ9aFgybaf8I+f17Do=";
+      "russh-0.63.0" = "sha256-ymdLCqupKWdxM96nGE80sOkmorwd99uvJ2bRazA4IYs=";
       "wasm_thread-0.3.3" = "sha256-+lRLCIk0S6Y5ORYjDKsYYHia2FtoSoh+rWkQh7mnPBE=";
     };
   };
