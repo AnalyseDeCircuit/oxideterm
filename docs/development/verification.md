@@ -69,4 +69,6 @@ Do not add tests merely to increase coverage. Add a focused regression test when
 
 ## CI Mapping
 
-The primary CI workflow runs workspace check, formatting, workspace tests, locale auditing, packaging-helper tests, repository-policy tests, and the Nix package build. The Nix job compiles the package via `nix build .#oxideterm -L --show-trace` and runs `nix flake check -L`, ensuring that `cargoLock.outputHashes` in `nix/package.nix` remains in sync whenever Git dependencies are added or updated in `Cargo.lock`. Native platform CI separately checks Windows and macOS GPUI backends and the application. A green Linux workspace job therefore does not establish Windows or macOS native behavior.
+The primary CI workflow runs workspace check, formatting, workspace tests, locale auditing, packaging-helper tests, and repository-policy tests. Native platform CI separately checks Windows and macOS GPUI backends and the application. A green Linux workspace job therefore does not establish Windows or macOS native behavior.
+
+The independent [Nix Package workflow](../../.github/workflows/nix-package.yml) runs `nix build .#oxideterm -L --show-trace` and `nix flake check -L` with a 90-minute timeout. It runs automatically when Nix expressions, the flake lock, Cargo manifests, the Cargo lock, or the workflow itself change. Run it manually before a release or when other changes need Nix verification. See the [Nix packaging guide](../../nix/README.md#package-verification) for the trigger paths and manual workflow.
