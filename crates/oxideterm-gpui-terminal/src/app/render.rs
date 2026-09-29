@@ -1536,6 +1536,7 @@ impl TerminalPane {
                         if this.modem_prompt_active || !this.lifecycle().is_running() {
                             return;
                         }
+                        window.focus(&this.focus_handle, cx);
                         this.open_terminal_context_menu(event, cx);
                         if let Some(menu) = this.context_menu.as_mut() {
                             menu.serial_transfer_menu = true;

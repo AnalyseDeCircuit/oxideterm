@@ -3758,6 +3758,11 @@ impl TerminalPane {
 
     fn handle_focus_change(&mut self, focused: bool, cx: &mut Context<Self>) {
         self.focused = focused;
+        if !focused && self.context_menu.take().is_some() {
+            // Menu actions refer to this pane's selection and command snapshot. Drop them
+            // immediately on focus transfer and invalidate any pending exit animation.
+            self.context_menu_presence.reopen();
+        }
         let _ = self.terminal.lock().set_focused(focused);
         self.reset_cursor_blink();
         // Focus changes must consume already queued output instead of waiting for an old deadline.
@@ -4471,6 +4476,51 @@ mod tests {
                 Some("无法读写传输文件".to_string())
             ]
         );
+    }
+
+    #[gpui::test]
+    fn context_menu_is_discarded_when_keyboard_focus_leaves_the_pane(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx).unwrap()
+        });
+        cx.simulate_resize(gpui::size(px(800.0), px(600.0)));
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let other_focus = cx.update(|_, cx| cx.focus_handle());
+        for serial_transfer_menu in [false, true] {
+            cx.update(|window, cx| {
+                pane.update(cx, |pane, cx| pane.focus(window, cx));
+            });
+            cx.run_until_parked();
+            pane.update(cx, |pane, cx| {
+                pane.bounds = Some(gpui::Bounds::new(
+                    gpui::point(px(0.0), px(0.0)),
+                    gpui::size(px(800.0), px(600.0)),
+                ));
+                pane.open_terminal_context_menu(
+                    &gpui::MouseDownEvent {
+                        position: gpui::point(px(100.0), px(100.0)),
+                        button: gpui::MouseButton::Right,
+                        ..Default::default()
+                    },
+                    cx,
+                );
+                pane.context_menu.as_mut().unwrap().serial_transfer_menu = serial_transfer_menu;
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                window.focus(&other_focus, cx);
+                window.draw(cx).clear(cx);
+            });
+            cx.run_until_parked();
+            pane.read_with(cx, |pane, _| {
+                assert!(
+                    pane.context_menu.is_none(),
+                    "a background pane must not retain its menu"
+                );
+            });
+        }
     }
 
     #[cfg(unix)]
