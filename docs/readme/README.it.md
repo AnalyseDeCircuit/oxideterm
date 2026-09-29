@@ -331,6 +331,18 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ---
 
+## Collaboratori
+
+Grazie a tutte le persone che contribuiscono a migliorare OxideTerm.
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="Collaboratori di OxideTerm">
+  </a>
+</p>
+
+---
+
 ## Supporto e manutenzione
 
 Le segnalazioni di bug e le regressioni riproducibili con diagnostica oscurata hanno priorità. Le richieste di funzionalità vengono valutate in base ad ambito, sicurezza e coerenza con la direzione di OxideTerm come spazio di lavoro per server remoti.

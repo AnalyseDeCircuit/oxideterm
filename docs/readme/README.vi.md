@@ -331,6 +331,18 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ---
 
+## Những người đóng góp
+
+Cảm ơn tất cả những người đã góp phần cải thiện OxideTerm.
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="Những người đóng góp cho OxideTerm">
+  </a>
+</p>
+
+---
+
 ## Hỗ trợ và bảo trì
 
 Báo cáo lỗi và hồi quy có bước tái hiện cùng chẩn đoán đã che được ưu tiên. Yêu cầu tính năng được đánh giá theo phạm vi, an toàn và mức độ phù hợp với định hướng không gian làm việc máy chủ từ xa của OxideTerm.

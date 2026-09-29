@@ -334,6 +334,18 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ---
 
+## 贡献者
+
+感谢每一位让 OxideTerm 变得更好的贡献者。
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="OxideTerm 贡献者">
+  </a>
+</p>
+
+---
+
 ## 支持与维护
 
 带有可复现步骤和脱敏诊断信息的 bug 报告与回归问题会优先处理。功能请求会根据范围、安全性以及是否符合 OxideTerm 的远程服务器工作区方向来评估。

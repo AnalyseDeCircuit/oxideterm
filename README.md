@@ -381,6 +381,18 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ---
 
+## Contributors
+
+Thanks to everyone who helps make OxideTerm better.
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="OxideTerm contributors">
+  </a>
+</p>
+
+---
+
 ## Support and Maintenance
 
 Reproducible bug reports and regressions with redacted diagnostics are prioritized. Feature requests are reviewed based on scope, safety, and alignment with OxideTerm's remote-server workspace direction.

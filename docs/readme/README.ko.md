@@ -327,6 +327,18 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ---
 
+## 기여자
+
+OxideTerm을 더 나은 프로젝트로 만들어 주시는 모든 분께 감사드립니다.
+
+<p align="center">
+  <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="OxideTerm 기여자">
+  </a>
+</p>
+
+---
+
 ## 지원 및 유지관리
 
 재현 단계와 마스킹된 진단이 포함된 버그 보고 및 회귀를 우선합니다. 기능 요청은 범위, 안전성, OxideTerm의 원격 서버 작업 공간 방향성과의 일치 여부를 기준으로 검토합니다.
