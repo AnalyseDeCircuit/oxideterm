@@ -1754,7 +1754,7 @@ impl WorkspaceApp {
             let profile_id = row.local_profile_id.clone();
             children.push(self.render_session_action_item(
                 1,
-                true,
+                row.local_profile_id.is_none(),
                 LucideIcon::Plus,
                 self.i18n.t("sessions.tree.actions.new_terminal"),
                 SessionActionVariant::Primary,
@@ -1768,6 +1768,20 @@ impl WorkspaceApp {
                 }),
                 cx,
             ));
+            if let Some(profile_id) = row.local_profile_id.clone() {
+                children.push(self.render_session_action_item(
+                    1,
+                    true,
+                    LucideIcon::Trash2,
+                    self.i18n.t("sessions.tree.actions.remove_session"),
+                    SessionActionVariant::Danger,
+                    cx.listener(move |this, _, window, cx| {
+                        this.remove_local_profile_session(&profile_id, window, cx);
+                        cx.stop_propagation();
+                    }),
+                    cx,
+                ));
+            }
         }
         let header = self.render_session_node_header(
             row.node_id,
@@ -2530,9 +2544,13 @@ impl WorkspaceApp {
         let row_text = rgb(theme.text);
         let port_text = format!(":{}", node.port);
         let terminal_count = node.terminal_ids.len();
-        let first_terminal_id = local_profile_id
-            .as_ref()
-            .and_then(|_| self.first_running_local_terminal(&node.terminal_ids, cx));
+        let chevron_node_id = node_id.clone();
+        let chevron_is_unsaved_local_group = local_group && local_profile_id.is_none();
+        let chevron_label = self.i18n.t(if expanded {
+            "settings_view.tool_use_collapse"
+        } else {
+            "settings_view.tool_use_expand"
+        });
         self.reorderable_session_row(
             self.session_sidebar_row(selected, SESSION_TREE_NODE_HEIGHT),
             node_id.clone(),
@@ -2542,38 +2560,73 @@ impl WorkspaceApp {
             node.title.clone(),
             cx,
         )
-        .child(self.render_animated_chevron(
-            (
-                gpui::SharedString::from(format!("session-node-chevron-{}", node_id.0)),
-                expanded as usize,
-            ),
-            expanded,
-            12.0,
-            muted_text,
-        ))
         .child(
             div()
-                .ml_1()
-                .mr(px(6.0))
-                .child(if matches!(status.icon, LucideIcon::LoaderCircle) {
-                    self.render_loading_icon(
-                        (
-                            gpui::SharedString::from(format!("session-connecting-{node_id:?}")),
-                            0usize,
-                        ),
-                        SESSION_TREE_ICON_SIZE,
-                        row_text,
-                    )
-                } else if local_group {
-                    Self::render_lucide_icon(
-                        LucideIcon::Terminal,
-                        SESSION_TREE_ICON_SIZE,
-                        muted_text,
-                    )
-                } else {
-                    self.node_session_icon(&node_id)
-                        .render(SESSION_TREE_ICON_SIZE, muted_text)
-                }),
+                .id(gpui::SharedString::from(format!(
+                    "session-node-toggle-{}",
+                    node_id.0
+                )))
+                .size(px(20.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .role(gpui::Role::Button)
+                .aria_label(chevron_label)
+                .focusable()
+                .tab_stop(true)
+                .focus_visible(move |style| style.border_1().border_color(rgb(theme.accent)))
+                .child(self.render_animated_chevron(
+                    (
+                        gpui::SharedString::from(format!("session-node-chevron-{}", node_id.0)),
+                        expanded as usize,
+                    ),
+                    expanded,
+                    12.0,
+                    muted_text,
+                ))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if cx.has_active_drag() {
+                        cx.stop_propagation();
+                        return;
+                    }
+                    let expanded = if chevron_is_unsaved_local_group {
+                        this.local_session_group_expanded = !this.local_session_group_expanded;
+                        this.local_session_group_expanded
+                    } else if !this.expanded_ssh_nodes.insert(chevron_node_id.clone()) {
+                        this.expanded_ssh_nodes.remove(&chevron_node_id);
+                        false
+                    } else {
+                        true
+                    };
+                    this.begin_disclosure_motion(
+                        format!("session:{}:children", chevron_node_id.0),
+                        expanded,
+                        cx,
+                    );
+                    cx.stop_propagation();
+                    cx.notify();
+                })),
+        )
+        .when(
+            !local_group || matches!(status.icon, LucideIcon::LoaderCircle),
+            |row| {
+                row.child(div().ml_1().mr(px(6.0)).child(
+                    if matches!(status.icon, LucideIcon::LoaderCircle) {
+                        self.render_loading_icon(
+                            (
+                                gpui::SharedString::from(format!("session-connecting-{node_id:?}")),
+                                0usize,
+                            ),
+                            SESSION_TREE_ICON_SIZE,
+                            row_text,
+                        )
+                    } else {
+                        self.node_session_icon(&node_id)
+                            .render(SESSION_TREE_ICON_SIZE, muted_text)
+                    },
+                ))
+            },
         )
         .child(
             div()
@@ -2620,11 +2673,13 @@ impl WorkspaceApp {
                     .gap(px(2.0))
                     .text_size(px(SESSION_TREE_META_TEXT_SIZE))
                     .text_color(muted_text)
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Terminal,
-                        12.0,
-                        muted_text,
-                    ))
+                    .when(!local_group, |count| {
+                        count.child(Self::render_lucide_icon(
+                            LucideIcon::Terminal,
+                            12.0,
+                            muted_text,
+                        ))
+                    })
                     .child(self.render_session_control_label(
                         "session-sidebar-node-cell",
                         "terminal-count",
@@ -2642,61 +2697,26 @@ impl WorkspaceApp {
                 muted_text,
             ))
         })
-        .when_some(local_profile_id.clone(), |row, profile_id| {
-            let label = self.i18n.t("sessions.tree.actions.remove_session");
-            let tokens = self.tokens;
-            let button_id = SharedString::from(format!("local-session-remove-{profile_id}"));
-            row.child(
-                self.workspace_icon_action_button(
-                    LucideIcon::Trash2,
-                    12.0,
-                    rgb(theme.error),
-                    IconButtonOptions::opaque_toolbar(22.0, ButtonRadius::Sm),
-                    move |this, _, window, cx| {
-                        this.remove_local_profile_session(&profile_id, window, cx);
-                        cx.stop_propagation();
-                    },
-                    cx,
-                )
-                .id(button_id)
-                .flex_none()
-                .role(gpui::Role::Button)
-                .aria_label(label.clone())
-                .tooltip(move |_, cx| {
-                    oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
-                }),
-            )
-        })
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, window, cx| {
-                let expanded = if let Some(profile_id) = local_profile_id.as_deref() {
-                    if let Some(session_id) = first_terminal_id {
-                        this.focus_terminal_session(session_id, window, cx);
-                    } else {
-                        this.open_saved_local_terminal_profile(profile_id, window, cx);
-                    }
-                    this.expanded_ssh_nodes.insert(node_id.clone());
-                    true
-                } else if local_group {
-                    this.local_session_group_expanded = !this.local_session_group_expanded;
-                    this.local_session_group_expanded
-                } else {
-                    this.active_ssh_node_id = Some(node_id.clone());
-                    if !this.expanded_ssh_nodes.insert(node_id.clone()) {
-                        this.expanded_ssh_nodes.remove(&node_id);
-                    }
-                    this.expanded_ssh_nodes.contains(&node_id)
-                };
-                this.begin_disclosure_motion(
-                    format!("session:{}:children", node_id.0),
-                    expanded,
-                    cx,
-                );
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        )
+        .on_click(cx.listener(move |this, _event, _window, cx| {
+            let expanded = if local_profile_id.is_some() {
+                if !this.expanded_ssh_nodes.insert(node_id.clone()) {
+                    this.expanded_ssh_nodes.remove(&node_id);
+                }
+                this.expanded_ssh_nodes.contains(&node_id)
+            } else if local_group {
+                this.local_session_group_expanded = !this.local_session_group_expanded;
+                this.local_session_group_expanded
+            } else {
+                this.active_ssh_node_id = Some(node_id.clone());
+                if !this.expanded_ssh_nodes.insert(node_id.clone()) {
+                    this.expanded_ssh_nodes.remove(&node_id);
+                }
+                this.expanded_ssh_nodes.contains(&node_id)
+            };
+            this.begin_disclosure_motion(format!("session:{}:children", node_id.0), expanded, cx);
+            cx.stop_propagation();
+            cx.notify();
+        }))
         .into_any_element()
     }
 
