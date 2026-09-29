@@ -324,6 +324,9 @@ impl WorkspaceApp {
                     ConnectionFlowEvent::ConnectionFormClosed => {
                         // Apply runtime cleanup after the Entity has already cleared ownership.
                         workspace.cleanup_cancelled_proxy_connect_runs(cx);
+                        if workspace.active_pane(cx).is_some() {
+                            workspace.needs_active_pane_focus = true;
+                        }
                     }
                     ConnectionFlowEvent::WorkerResultsReady => {
                         workspace.enqueue_connection_flow_window_effect(cx);

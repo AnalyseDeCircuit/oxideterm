@@ -119,19 +119,19 @@ impl<R: Read + Send + 'static> UnblockedReader<R> {
     }
 
     /// Try to read from the reader.
-    pub fn try_read(&mut self, buf: &mut [u8]) -> usize {
+    pub fn try_read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let waker = Waker::from(self.interest.clone());
 
         match self.pipe.poll_drain_bytes(&mut Context::from_waker(&waker), buf) {
-            Poll::Pending => 0,
-            Poll::Ready(n) => n,
+            Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
+            Poll::Ready(n) => Ok(n),
         }
     }
 }
 
 impl<R: Read + Send + 'static> Read for UnblockedReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        Ok(self.try_read(buf))
+        self.try_read(buf)
     }
 }
 
@@ -270,6 +270,48 @@ impl Wake for Registration {
                 if matches!(interest.mode, PollMode::Oneshot | PollMode::EdgeOneshot) {
                     *interest_lock = None;
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    struct WaitingReader(mpsc::Receiver<Vec<u8>>);
+
+    impl Read for WaitingReader {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let Ok(bytes) = self.0.recv() else {
+                return Ok(0);
+            };
+            buf[..bytes.len()].copy_from_slice(&bytes);
+            Ok(bytes.len())
+        }
+    }
+
+    #[test]
+    fn empty_pty_read_does_not_hide_later_output() {
+        let (sender, receiver) = mpsc::channel();
+        let mut reader = UnblockedReader::new(WaitingReader(receiver), 64);
+        let mut buf = [0; 8];
+        assert_eq!(reader.read(&mut buf).unwrap_err().kind(), io::ErrorKind::WouldBlock);
+
+        sender.send(b"ok".to_vec()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match reader.read(&mut buf) {
+                Ok(2) => {
+                    assert_eq!(&buf[..2], b"ok");
+                    break;
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                    thread::yield_now();
+                }
+                result => panic!("expected PTY output after an empty read, got {result:?}"),
             }
         }
     }
