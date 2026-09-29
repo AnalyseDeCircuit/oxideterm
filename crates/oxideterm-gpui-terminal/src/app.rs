@@ -610,7 +610,7 @@ pub struct TerminalPane {
 pub(crate) struct TerminalContextMenu {
     pub x: f32,
     pub y: f32,
-    pub modem_submenu_open: bool,
+    pub serial_transfer_menu: bool,
     pub target: TerminalPoint,
     pub has_selection: bool,
     pub reference_line: usize,
@@ -4446,6 +4446,32 @@ mod tests {
 
     use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    #[gpui::test]
+    fn modem_failure_notice_includes_localized_reason(cx: &mut TestAppContext) {
+        let notices = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let captured = notices.clone();
+        let mut preferences = TerminalUiPreferences::default();
+        preferences.modem_labels.timeout = "等待对端响应超时".into();
+        preferences.modem_labels.file_error = "无法读写传输文件".into();
+        preferences.notice_sink = Some(Arc::new(move |notice| {
+            captured.lock().unwrap().push(notice.description);
+        }));
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(80, 24, preferences, window, cx).unwrap()
+        });
+        pane.update(cx, |pane, cx| {
+            pane.handle_modem_worker_event(ModemWorkerEvent::Failed(ModemFailure::Timeout), cx);
+            pane.handle_modem_worker_event(ModemWorkerEvent::Failed(ModemFailure::FileIo), cx);
+        });
+        assert_eq!(
+            *notices.lock().unwrap(),
+            vec![
+                Some("等待对端响应超时".to_string()),
+                Some("无法读写传输文件".to_string())
+            ]
+        );
+    }
 
     #[cfg(unix)]
     #[test]

@@ -84,6 +84,12 @@
       "clear_screen": "画面をクリア"
     },
     "modem": {
+      "timeout": "相手側からの応答がタイムアウトしました。相手側の転送プログラムを起動してから再試行してください。",
+      "protocol_error": "相手側から無効または予期しない転送データが送信されました。",
+      "file_error": "転送ファイルを読み書きできません。アクセス権と空き容量を確認してください。",
+      "file_too_large": "ファイルがこのプロトコルのサイズ上限を超えています。",
+      "buffer_overflow": "相手側から転送バッファの容量を超えるデータが送信されました。",
+      "worker_stopped": "転送処理が予期せず停止しました。再試行してください。",
       "binary_transfer": "バイナリ転送",
       "xmodem_upload": "XMODEM アップロード",
       "xmodem_receive": "XMODEM 受信",

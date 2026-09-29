@@ -84,6 +84,12 @@
       "clear_screen": "Limpar tela"
     },
     "modem": {
+      "timeout": "O outro dispositivo não respondeu a tempo. Inicie o programa de transferência nele e tente novamente.",
+      "protocol_error": "O outro dispositivo enviou dados de transferência inválidos ou inesperados.",
+      "file_error": "Não foi possível ler ou gravar o arquivo. Verifique as permissões e o espaço disponível.",
+      "file_too_large": "O arquivo excede o limite de tamanho deste protocolo.",
+      "buffer_overflow": "O outro dispositivo enviou mais dados do que o buffer de transferência pode armazenar.",
+      "worker_stopped": "O processo de transferência parou inesperadamente. Tente novamente.",
       "binary_transfer": "Transferência binária",
       "xmodem_upload": "Enviar via XMODEM",
       "xmodem_receive": "Receber via XMODEM",

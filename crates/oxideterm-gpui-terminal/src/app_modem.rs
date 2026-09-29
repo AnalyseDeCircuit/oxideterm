@@ -1,3 +1,4 @@
+use crate::modem_worker::ModemFailure;
 use oxideterm_modem_transfer::{DetectedModemProtocol, ModemTransfer, ModemTransferDirection};
 use oxideterm_terminal::TerminalModemTransferRequest;
 
@@ -242,9 +243,8 @@ impl TerminalPane {
                     }
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         transfer_status.stop();
-                        pending_completion = Some(ModemWorkerEvent::Failed(
-                            "The modem worker stopped unexpectedly".to_string(),
-                        ));
+                        pending_completion =
+                            Some(ModemWorkerEvent::Failed(ModemFailure::WorkerStopped));
                     }
                 }
             }
@@ -282,11 +282,21 @@ impl TerminalPane {
                 }
                 true
             }
-            ModemWorkerEvent::Failed(_message) => {
+            ModemWorkerEvent::Failed(reason) => {
                 if !self.modem_connection_lost {
+                    let labels = &self.preferences.modem_labels;
+                    let detail = match reason {
+                        ModemFailure::Timeout => &labels.timeout,
+                        ModemFailure::Protocol => &labels.protocol_error,
+                        ModemFailure::FileIo => &labels.file_error,
+                        ModemFailure::FileTooLarge => &labels.file_too_large,
+                        ModemFailure::BufferOverflow => &labels.buffer_overflow,
+                        ModemFailure::WorkerStopped => &labels.worker_stopped,
+                    }
+                    .clone();
                     self.emit_trzsz_notice(
                         self.preferences.trzsz_labels.failed_title.clone(),
-                        None,
+                        Some(detail),
                         TerminalNoticeVariant::Error,
                     );
                 }

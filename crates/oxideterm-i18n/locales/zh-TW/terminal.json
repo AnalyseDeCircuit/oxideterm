@@ -84,6 +84,12 @@
       "clear_screen": "清除螢幕"
     },
     "modem": {
+      "timeout": "等待對端回應逾時。請啟動對端的傳輸程式後重試。",
+      "protocol_error": "對端傳送了無效或非預期的傳輸資料。",
+      "file_error": "無法讀寫傳輸檔案，請檢查存取權限和可用空間。",
+      "file_too_large": "檔案超出此協定支援的大小限制。",
+      "buffer_overflow": "對端傳送的資料超出了傳輸緩衝區容量。",
+      "worker_stopped": "傳輸工作意外停止，請重試。",
       "binary_transfer": "二進位傳輸",
       "xmodem_upload": "XMODEM 上傳",
       "xmodem_receive": "XMODEM 接收",

@@ -14,7 +14,7 @@ use oxideterm_gpui_ui::context_menu::{
     ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
     context_menu_event_boundary, context_menu_item, context_menu_item_height_estimate,
     context_menu_item_with_shortcut, context_menu_separator,
-    context_menu_separator_height_estimate, context_menu_sub_content, context_menu_sub_trigger,
+    context_menu_separator_height_estimate,
 };
 use oxideterm_gpui_ui::menu::menu_content;
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
@@ -46,11 +46,9 @@ const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
 const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
 const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 13.0;
-const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 4.0;
-const TERMINAL_MODEM_SUBMENU_ACTION_COUNT: f32 = 6.0;
-const TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM: f32 = 9.0;
-const TERMINAL_CONTEXT_MENU_SEPARATORS_BEFORE_MODEM: f32 = 2.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 12.0;
+const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 3.0;
+const SERIAL_TRANSFER_MENU_ACTION_COUNT: f32 = 6.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
 const TERMINAL_CONTROL_ROW_HEIGHT: f32 = 34.0;
 const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
@@ -208,30 +206,6 @@ fn clamp_terminal_context_menu_position(
         pointer_x.max(margin).min(max_x),
         pointer_y.max(margin).min(max_y),
     )
-}
-
-fn clamp_terminal_context_submenu_position(
-    menu_left: f32,
-    menu_top: f32,
-    trigger_top_offset: f32,
-    viewport_width: f32,
-    viewport_height: f32,
-    submenu_width: f32,
-    submenu_height: f32,
-    margin: f32,
-) -> (f32, f32) {
-    // Prefer the conventional right edge, then flip to the left when the
-    // submenu would cross the window boundary.
-    let right_x = menu_left + TERMINAL_CONTEXT_MENU_WIDTH;
-    let left_x = menu_left - submenu_width;
-    let x = if right_x + submenu_width <= viewport_width - margin {
-        right_x
-    } else {
-        left_x.max(margin)
-    };
-    let max_y = (viewport_height - submenu_height - margin).max(margin);
-    let y = (menu_top + trigger_top_offset).max(margin).min(max_y);
-    (x, y)
 }
 
 const TERMINAL_VISUAL_BELL_OVERLAY_ALPHA: u8 = 0x66;
@@ -1546,6 +1520,30 @@ impl TerminalPane {
                 ),
             );
 
+        let control_row = control_row
+            .child(self.render_terminal_toolbar_separator())
+            .child(
+                self.render_terminal_toolbar_action(
+                    self.preferences.modem_labels.binary_transfer.clone(),
+                    running && !self.modem_prompt_active,
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        if this.modem_prompt_active || !this.lifecycle().is_running() {
+                            return;
+                        }
+                        this.open_terminal_context_menu(event, cx);
+                        if let Some(menu) = this.context_menu.as_mut() {
+                            menu.serial_transfer_menu = true;
+                        }
+                    }),
+                ),
+            );
+
         self.render_terminal_control_bar(information_row, control_row, cx)
     }
 
@@ -1986,7 +1984,6 @@ impl TerminalPane {
             .command_selection_labels
             .clear_screen_shortcut
             .clone();
-        let modem_labels = self.preferences.modem_labels.clone();
         let paste_label = self.preferences.paste_labels.paste.clone();
         let command_mark_id = menu.command_mark_id.clone();
         let has_command_mark = command_mark_id.is_some();
@@ -2001,226 +1998,168 @@ impl TerminalPane {
             self.free_type_context_replace_command_available(&menu);
         let insert_target = menu.target;
         let replace_target = menu.target;
-        let modem_submenu_open = menu.modem_submenu_open;
         let tokens = &self.theme.tokens;
         let menu_visible =
             self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let submenu_height = tokens.metrics.ui_menu_padding * 2.0
-            + TERMINAL_MODEM_SUBMENU_ACTION_COUNT * context_menu_item_height_estimate(tokens);
-        let modem_trigger_top_offset = tokens.metrics.ui_menu_padding
-            + TERMINAL_CONTEXT_MENU_ACTIONS_BEFORE_MODEM
-                * context_menu_item_height_estimate(tokens)
-            + TERMINAL_CONTEXT_MENU_SEPARATORS_BEFORE_MODEM
-                * context_menu_separator_height_estimate(tokens);
-        let viewport = window.viewport_size();
-        let (submenu_left, submenu_top) = clamp_terminal_context_submenu_position(
-            left,
-            top,
-            modem_trigger_top_offset,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-            TERMINAL_CONTEXT_MENU_WIDTH,
-            submenu_height,
-            TERMINAL_CONTEXT_MENU_MARGIN,
-        );
-        let popup = context_menu_event_boundary(
-            context_menu_content(tokens)
-                .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
-                .child(self.render_terminal_context_menu_item(
-                    copy_label,
-                    !menu.has_selection,
-                    |this, _event, _window, cx| {
-                        this.copy_selection_from_context_menu(cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    copy_command_label,
-                    !has_command_text,
-                    move |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.copy_command_mark_command_to_clipboard(
-                            copy_command_mark_id.as_deref(),
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    paste_label,
-                    false,
-                    |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.paste_from_clipboard(cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    insert_selection_label,
-                    !free_type_insert_selection_available,
-                    move |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.insert_selection_into_free_type_command_from_context_menu(
-                            insert_target,
-                            false,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    replace_command_label,
-                    !free_type_replace_command_available,
-                    move |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.insert_selection_into_free_type_command_from_context_menu(
-                            replace_target,
-                            true,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(context_menu_separator(tokens))
-                .child(self.render_terminal_context_menu_item(
-                    send_to_ai_label,
-                    !menu.has_selection,
-                    |this, _event, _window, cx| {
-                        this.request_context_action(
-                            TerminalContextAction::SendSelectionToAi,
-                            true,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    fill_command_bar_label,
-                    !menu.has_selection,
-                    |this, _event, _window, cx| {
-                        this.request_context_action(
-                            TerminalContextAction::FillCommandBarFromSelection,
-                            true,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    find_label,
-                    false,
-                    |this, _event, _window, cx| {
-                        this.request_context_action(TerminalContextAction::OpenSearch, false, cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    manage_triggers_label,
-                    false,
-                    |this, _event, _window, cx| {
-                        this.request_context_action(
-                            TerminalContextAction::OpenSessionTriggers,
-                            false,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(context_menu_separator(tokens))
-                .child(
-                    self.render_terminal_context_submenu_trigger(modem_labels.binary_transfer, cx),
-                )
-                .child(context_menu_separator(tokens))
-                .child(self.render_terminal_context_menu_item(
-                    select_command_label,
-                    !has_command_mark,
-                    move |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.select_command_mark_by_id(select_command_mark_id.clone(), cx);
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    previous_command_label,
-                    !menu.has_previous_command,
-                    move |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.jump_to_command_mark_from_context_menu(
-                            previous_reference_line,
-                            TerminalCommandNavigationDirection::Previous,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(self.render_terminal_context_menu_item(
-                    next_command_label,
-                    !menu.has_next_command,
-                    move |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.jump_to_command_mark_from_context_menu(
-                            next_reference_line,
-                            TerminalCommandNavigationDirection::Next,
-                            cx,
-                        );
-                    },
-                    cx,
-                ))
-                .child(context_menu_separator(tokens))
-                .child(self.render_terminal_context_menu_item_with_shortcut(
-                    clear_screen_label,
-                    clear_screen_shortcut,
-                    false,
-                    |this, _event, _window, cx| {
-                        this.dismiss_terminal_context_menu(cx);
-                        this.clear_buffer(cx);
-                    },
-                    cx,
-                )),
-        );
-
-        let modem_submenu = modem_submenu_open.then(|| {
+        let popup = if menu.serial_transfer_menu {
+            self.render_serial_transfer_menu(cx)
+        } else {
             context_menu_event_boundary(
-                context_menu_sub_content(tokens)
+                context_menu_content(tokens)
                     .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
-                    .child(self.render_terminal_modem_context_menu_item(
-                        modem_labels.xmodem_upload,
-                        DetectedModemProtocol::Xmodem,
-                        ModemTransferDirection::Upload,
+                    .child(self.render_terminal_context_menu_item(
+                        copy_label,
+                        !menu.has_selection,
+                        |this, _event, _window, cx| {
+                            this.copy_selection_from_context_menu(cx);
+                        },
                         cx,
                     ))
-                    .child(self.render_terminal_modem_context_menu_item(
-                        modem_labels.xmodem_receive,
-                        DetectedModemProtocol::Xmodem,
-                        ModemTransferDirection::Download,
+                    .child(self.render_terminal_context_menu_item(
+                        copy_command_label,
+                        !has_command_text,
+                        move |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.copy_command_mark_command_to_clipboard(
+                                copy_command_mark_id.as_deref(),
+                                cx,
+                            );
+                        },
                         cx,
                     ))
-                    .child(self.render_terminal_modem_context_menu_item(
-                        modem_labels.ymodem_upload,
-                        DetectedModemProtocol::Ymodem,
-                        ModemTransferDirection::Upload,
+                    .child(self.render_terminal_context_menu_item(
+                        paste_label,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.paste_from_clipboard(cx);
+                        },
                         cx,
                     ))
-                    .child(self.render_terminal_modem_context_menu_item(
-                        modem_labels.ymodem_receive,
-                        DetectedModemProtocol::Ymodem,
-                        ModemTransferDirection::Download,
+                    .child(self.render_terminal_context_menu_item(
+                        insert_selection_label,
+                        !free_type_insert_selection_available,
+                        move |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.insert_selection_into_free_type_command_from_context_menu(
+                                insert_target,
+                                false,
+                                cx,
+                            );
+                        },
                         cx,
                     ))
-                    .child(self.render_terminal_modem_context_menu_item(
-                        modem_labels.zmodem_upload,
-                        DetectedModemProtocol::Zmodem,
-                        ModemTransferDirection::Upload,
+                    .child(self.render_terminal_context_menu_item(
+                        replace_command_label,
+                        !free_type_replace_command_available,
+                        move |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.insert_selection_into_free_type_command_from_context_menu(
+                                replace_target,
+                                true,
+                                cx,
+                            );
+                        },
                         cx,
                     ))
-                    .child(self.render_terminal_modem_context_menu_item(
-                        modem_labels.zmodem_receive,
-                        DetectedModemProtocol::Zmodem,
-                        ModemTransferDirection::Download,
+                    .child(context_menu_separator(tokens))
+                    .child(self.render_terminal_context_menu_item(
+                        send_to_ai_label,
+                        !menu.has_selection,
+                        |this, _event, _window, cx| {
+                            this.request_context_action(
+                                TerminalContextAction::SendSelectionToAi,
+                                true,
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
+                        fill_command_bar_label,
+                        !menu.has_selection,
+                        |this, _event, _window, cx| {
+                            this.request_context_action(
+                                TerminalContextAction::FillCommandBarFromSelection,
+                                true,
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
+                        find_label,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.request_context_action(
+                                TerminalContextAction::OpenSearch,
+                                false,
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
+                        manage_triggers_label,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.request_context_action(
+                                TerminalContextAction::OpenSessionTriggers,
+                                false,
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(context_menu_separator(tokens))
+                    .child(self.render_terminal_context_menu_item(
+                        select_command_label,
+                        !has_command_mark,
+                        move |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.select_command_mark_by_id(select_command_mark_id.clone(), cx);
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
+                        previous_command_label,
+                        !menu.has_previous_command,
+                        move |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.jump_to_command_mark_from_context_menu(
+                                previous_reference_line,
+                                TerminalCommandNavigationDirection::Previous,
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
+                        next_command_label,
+                        !menu.has_next_command,
+                        move |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.jump_to_command_mark_from_context_menu(
+                                next_reference_line,
+                                TerminalCommandNavigationDirection::Next,
+                                cx,
+                            );
+                        },
+                        cx,
+                    ))
+                    .child(context_menu_separator(tokens))
+                    .child(self.render_terminal_context_menu_item_with_shortcut(
+                        clear_screen_label,
+                        clear_screen_shortcut,
+                        false,
+                        |this, _event, _window, cx| {
+                            this.dismiss_terminal_context_menu(cx);
+                            this.clear_buffer(cx);
+                        },
                         cx,
                     )),
             )
-        });
+        };
 
         deferred(
             context_menu_backdrop()
@@ -2251,19 +2190,55 @@ impl TerminalPane {
                             oxideterm_gpui_ui::motion::MotionDuration::Micro,
                             menu_visible,
                         )),
-                )
-                .when_some(modem_submenu, |backdrop, submenu| {
-                    backdrop.child(
-                        anchored()
-                            .anchor(Anchor::TopLeft)
-                            .position(point(px(submenu_left), px(submenu_top)))
-                            .position_mode(AnchoredPositionMode::Window)
-                            .child(overlay_content_boundary(submenu)),
-                    )
-                }),
+                ),
         )
         .with_priority(TAURI_POPOVER_LAYER_PRIORITY)
         .into_any_element()
+    }
+
+    fn render_serial_transfer_menu(&self, cx: &mut Context<Self>) -> gpui::Div {
+        let tokens = &self.theme.tokens;
+        let modem_labels = self.preferences.modem_labels.clone();
+        context_menu_event_boundary(
+            context_menu_content(tokens)
+                .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                .child(self.render_terminal_modem_context_menu_item(
+                    modem_labels.xmodem_upload,
+                    DetectedModemProtocol::Xmodem,
+                    ModemTransferDirection::Upload,
+                    cx,
+                ))
+                .child(self.render_terminal_modem_context_menu_item(
+                    modem_labels.xmodem_receive,
+                    DetectedModemProtocol::Xmodem,
+                    ModemTransferDirection::Download,
+                    cx,
+                ))
+                .child(self.render_terminal_modem_context_menu_item(
+                    modem_labels.ymodem_upload,
+                    DetectedModemProtocol::Ymodem,
+                    ModemTransferDirection::Upload,
+                    cx,
+                ))
+                .child(self.render_terminal_modem_context_menu_item(
+                    modem_labels.ymodem_receive,
+                    DetectedModemProtocol::Ymodem,
+                    ModemTransferDirection::Download,
+                    cx,
+                ))
+                .child(self.render_terminal_modem_context_menu_item(
+                    modem_labels.zmodem_upload,
+                    DetectedModemProtocol::Zmodem,
+                    ModemTransferDirection::Upload,
+                    cx,
+                ))
+                .child(self.render_terminal_modem_context_menu_item(
+                    modem_labels.zmodem_receive,
+                    DetectedModemProtocol::Zmodem,
+                    ModemTransferDirection::Download,
+                    cx,
+                )),
+        )
     }
 
     fn render_modem_progress_overlay(
@@ -2356,18 +2331,6 @@ impl TerminalPane {
             .into_any_element()
     }
 
-    fn render_terminal_context_menu_item(
-        &self,
-        label: String,
-        disabled: bool,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.render_terminal_context_menu_item_with_submenu_policy(
-            label, disabled, true, listener, cx,
-        )
-    }
-
     fn render_terminal_context_menu_item_with_shortcut(
         &self,
         label: String,
@@ -2409,17 +2372,13 @@ impl TerminalPane {
                 cx.notify();
             }),
         )
-        .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
-            this.set_terminal_modem_submenu_open(false, cx);
-        }))
         .into_any_element()
     }
 
-    fn render_terminal_context_menu_item_with_submenu_policy(
+    fn render_terminal_context_menu_item(
         &self,
         label: String,
         disabled: bool,
-        close_modem_submenu_on_hover: bool,
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -2445,36 +2404,6 @@ impl TerminalPane {
                 cx.notify();
             }),
         )
-        .when(close_modem_submenu_on_hover, |item| {
-            item.on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
-                this.set_terminal_modem_submenu_open(false, cx);
-            }))
-        })
-        .into_any_element()
-    }
-
-    fn render_terminal_context_submenu_trigger(
-        &self,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let disabled =
-            self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
-        let trigger = context_menu_sub_trigger(&self.theme.tokens, label, false, disabled).w_full();
-
-        context_menu_action(
-            trigger,
-            disabled,
-            false,
-            cx.listener(|this, _event, window, cx| {
-                window.prevent_default();
-                this.set_terminal_modem_submenu_open(true, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .on_mouse_move(cx.listener(|this, _event: &MouseMoveEvent, _window, cx| {
-            this.set_terminal_modem_submenu_open(true, cx);
-        }))
         .into_any_element()
     }
 
@@ -2485,9 +2414,8 @@ impl TerminalPane {
         direction: ModemTransferDirection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_terminal_context_menu_item_with_submenu_policy(
+        self.render_terminal_context_menu_item(
             label,
-            false,
             false,
             move |this, _event, _window, cx| {
                 this.dismiss_terminal_context_menu(cx);
@@ -2507,7 +2435,13 @@ impl TerminalPane {
             .bounds
             .map(|bounds| bounds.origin)
             .unwrap_or_else(|| point(px(0.0), px(0.0)));
-        let menu_height = self.terminal_context_menu_height_estimate();
+        let menu_height = if menu.serial_transfer_menu {
+            self.theme.tokens.metrics.ui_menu_padding * 2.0
+                + SERIAL_TRANSFER_MENU_ACTION_COUNT
+                    * context_menu_item_height_estimate(&self.theme.tokens)
+        } else {
+            self.terminal_context_menu_height_estimate()
+        };
         clamp_terminal_context_menu_position(
             f32::from(origin.x) + menu.x,
             f32::from(origin.y) + menu.y,
@@ -2550,24 +2484,10 @@ impl TerminalPane {
         cx.notify();
     }
 
-    fn set_terminal_modem_submenu_open(&mut self, open: bool, cx: &mut Context<Self>) {
-        let Some(menu) = self.context_menu.as_mut() else {
-            return;
-        };
-        if menu.modem_submenu_open == open {
-            return;
-        }
-        // Submenu visibility belongs to the live context-menu instance so a
-        // newly opened terminal menu never inherits stale expansion state.
-        menu.modem_submenu_open = open;
-        cx.notify();
-    }
-
     pub(super) fn dismiss_terminal_context_menu(&mut self, cx: &mut Context<Self>) {
         if self.context_menu.is_none() {
             return;
         }
-        self.set_terminal_modem_submenu_open(false, cx);
         let Some(generation) = self.context_menu_presence.begin_exit() else {
             return;
         };

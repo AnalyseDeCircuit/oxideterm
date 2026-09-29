@@ -84,6 +84,12 @@
       "clear_screen": "화면 지우기"
     },
     "modem": {
+      "timeout": "상대 측의 응답 시간이 초과되었습니다. 상대 측 전송 프로그램을 실행한 뒤 다시 시도하세요.",
+      "protocol_error": "상대 측에서 잘못되었거나 예상치 못한 전송 데이터를 보냈습니다.",
+      "file_error": "전송 파일을 읽거나 쓸 수 없습니다. 접근 권한과 여유 공간을 확인하세요.",
+      "file_too_large": "파일이 이 프로토콜의 크기 제한을 초과합니다.",
+      "buffer_overflow": "상대 측에서 전송 버퍼 용량을 초과하는 데이터를 보냈습니다.",
+      "worker_stopped": "전송 작업이 예기치 않게 중지되었습니다. 다시 시도하세요.",
       "binary_transfer": "바이너리 전송",
       "xmodem_upload": "XMODEM 업로드",
       "xmodem_receive": "XMODEM 수신",

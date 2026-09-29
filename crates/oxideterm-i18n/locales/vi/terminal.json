@@ -84,6 +84,12 @@
       "clear_screen": "Xóa màn hình"
     },
     "modem": {
+      "timeout": "Thiết bị bên kia không phản hồi kịp thời. Hãy khởi động chương trình truyền tệp trên thiết bị đó rồi thử lại.",
+      "protocol_error": "Thiết bị bên kia đã gửi dữ liệu truyền không hợp lệ hoặc ngoài dự kiến.",
+      "file_error": "Không thể đọc hoặc ghi tệp truyền. Hãy kiểm tra quyền truy cập và dung lượng trống.",
+      "file_too_large": "Tệp vượt quá giới hạn kích thước của giao thức này.",
+      "buffer_overflow": "Thiết bị bên kia đã gửi lượng dữ liệu vượt quá sức chứa của bộ đệm truyền.",
+      "worker_stopped": "Tiến trình truyền tệp đã dừng đột ngột. Vui lòng thử lại.",
       "binary_transfer": "Truyền nhị phân",
       "xmodem_upload": "Tải lên XMODEM",
       "xmodem_receive": "Nhận XMODEM",

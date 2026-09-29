@@ -84,6 +84,12 @@
       "clear_screen": "Effacer l'écran"
     },
     "modem": {
+      "timeout": "Le correspondant n’a pas répondu à temps. Lancez son programme de transfert, puis réessayez.",
+      "protocol_error": "Le correspondant a envoyé des données de transfert invalides ou inattendues.",
+      "file_error": "Impossible de lire ou d’écrire le fichier. Vérifiez les permissions et l’espace disponible.",
+      "file_too_large": "Le fichier dépasse la taille maximale autorisée par ce protocole.",
+      "buffer_overflow": "Le correspondant a envoyé plus de données que le tampon de transfert ne peut en contenir.",
+      "worker_stopped": "Le processus de transfert s’est arrêté de façon inattendue. Veuillez réessayer.",
       "binary_transfer": "Transfert binaire",
       "xmodem_upload": "Envoi XMODEM",
       "xmodem_receive": "Réception XMODEM",

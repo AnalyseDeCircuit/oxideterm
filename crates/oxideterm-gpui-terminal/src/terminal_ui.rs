@@ -445,6 +445,12 @@ pub struct TerminalModemLabels {
     pub ymodem_receive: String,
     pub zmodem_upload: String,
     pub zmodem_receive: String,
+    pub timeout: String,
+    pub protocol_error: String,
+    pub file_error: String,
+    pub file_too_large: String,
+    pub buffer_overflow: String,
+    pub worker_stopped: String,
 }
 
 impl Default for TerminalModemLabels {
@@ -457,6 +463,16 @@ impl Default for TerminalModemLabels {
             ymodem_receive: "YMODEM receive".to_string(),
             zmodem_upload: "ZMODEM upload".to_string(),
             zmodem_receive: "ZMODEM receive".to_string(),
+            timeout: "The peer did not respond in time. Start its transfer program, then retry."
+                .to_string(),
+            protocol_error: "The peer sent invalid or unexpected transfer data.".to_string(),
+            file_error:
+                "Unable to read or write the transfer file. Check permissions and free space."
+                    .to_string(),
+            file_too_large: "The file exceeds this protocol's size limit.".to_string(),
+            buffer_overflow: "The peer sent more data than the transfer buffer can hold."
+                .to_string(),
+            worker_stopped: "The transfer worker stopped unexpectedly. Please retry.".to_string(),
         }
     }
 }

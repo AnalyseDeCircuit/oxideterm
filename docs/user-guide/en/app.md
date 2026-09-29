@@ -92,7 +92,7 @@ Use SFTP or the file manager for remote file operations:
 
 File Transfer settings default to **Auto**: SFTP remains the browsing and preferred transfer protocol, while legacy SCP is used only when the connected POSIX host cannot open its SFTP subsystem. You can force SFTP or SCP for compatibility testing. SCP can pause and resume while its current channel is alive, but a retry after disconnect starts from the beginning because legacy SCP has no offset-resume protocol.
 
-Terminal-native modem transfers are separate from SFTP. Use them when the remote program expects X/Y/ZMODEM protocol bytes through the current terminal channel.
+Terminal-native modem transfers are separate from SFTP. Run the remote transfer program (such as `rz` for upload or `sz <file>` for download), then choose the local file or directory when OxideTerm detects the transfer. For serial devices that require manual negotiation, use **Binary transfer** in the serial control bar after starting the device's transfer program.
 
 Before overwriting important remote files, confirm the path and keep a backup. Remote file writes are real writes on the target system.
 

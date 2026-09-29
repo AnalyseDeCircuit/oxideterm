@@ -172,6 +172,12 @@
       "clear_screen": "清屏"
     },
     "modem": {
+      "timeout": "等待对端响应超时。请启动对端的传输程序后重试。",
+      "protocol_error": "对端发送了无效或非预期的传输数据。",
+      "file_error": "无法读写传输文件，请检查访问权限和可用空间。",
+      "file_too_large": "文件超出此协议支持的大小限制。",
+      "buffer_overflow": "对端发送的数据超出了传输缓冲区容量。",
+      "worker_stopped": "传输任务意外停止，请重试。",
       "binary_transfer": "二进制传输",
       "xmodem_upload": "XMODEM 上传",
       "xmodem_receive": "XMODEM 接收",

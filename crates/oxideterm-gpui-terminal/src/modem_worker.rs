@@ -40,7 +40,17 @@ pub(crate) enum ModemWorkerEvent {
     Progress(ModemWorkerProgress),
     Completed,
     Cancelled,
-    Failed(String),
+    Failed(ModemFailure),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ModemFailure {
+    Timeout,
+    Protocol,
+    FileIo,
+    FileTooLarge,
+    BufferOverflow,
+    WorkerStopped,
 }
 
 #[derive(Clone, Debug)]
@@ -121,7 +131,7 @@ pub(crate) fn run_modem_worker_job(
 
 enum ModemWorkerError {
     Cancelled,
-    Failed(String),
+    Failed(ModemFailure),
 }
 
 fn run_modem_worker_job_inner(
@@ -141,9 +151,7 @@ fn run_modem_worker_job_inner(
         (ModemTransferDirection::Upload, ModemPromptSelection::UploadFiles(paths)) => {
             run_upload(job, &paths, event_tx)
         }
-        _ => Err(ModemWorkerError::Failed(
-            "Invalid file selection for modem transfer".to_string(),
-        )),
+        _ => Err(ModemWorkerError::Failed(ModemFailure::FileIo)),
     }
 }
 
@@ -198,9 +206,7 @@ fn run_download(
             .map_err(worker_error)?;
         }
         DetectedModemProtocol::XymodemNegotiation => {
-            return Err(ModemWorkerError::Failed(
-                "The remote side is waiting for an X/YMODEM upload, not a download.".to_string(),
-            ));
+            return Err(ModemWorkerError::Failed(ModemFailure::Protocol));
         }
     }
     downloads
@@ -327,7 +333,7 @@ fn local_file_name(path: &Path) -> Result<String, ModemWorkerError> {
         // The filesystem path remains lossless; only the protocol metadata is
         // converted because classic modem filename fields are byte strings.
         .map(|name| name.to_string_lossy().into_owned())
-        .ok_or_else(|| ModemWorkerError::Failed("Invalid local file name".to_string()))
+        .ok_or(ModemWorkerError::Failed(ModemFailure::FileIo))
 }
 
 #[derive(Clone, Default)]
@@ -459,14 +465,25 @@ fn duplicate_download_name(file_name: &str, index: usize) -> String {
     }
 }
 
-fn failed(error: impl std::fmt::Display) -> ModemWorkerError {
-    ModemWorkerError::Failed(error.to_string())
+fn failed(_error: std::io::Error) -> ModemWorkerError {
+    // File errors may contain paths; only a safe category crosses into UI notices.
+    ModemWorkerError::Failed(ModemFailure::FileIo)
 }
 
 fn worker_error(error: ModemTransferError) -> ModemWorkerError {
     match error {
         ModemTransferError::Cancelled => ModemWorkerError::Cancelled,
-        error => ModemWorkerError::Failed(error.to_string()),
+        ModemTransferError::Timeout => ModemWorkerError::Failed(ModemFailure::Timeout),
+        ModemTransferError::Io(_) => ModemWorkerError::Failed(ModemFailure::FileIo),
+        ModemTransferError::UnsupportedFileSize(_) => {
+            ModemWorkerError::Failed(ModemFailure::FileTooLarge)
+        }
+        ModemTransferError::InputBufferOverflow(_) => {
+            ModemWorkerError::Failed(ModemFailure::BufferOverflow)
+        }
+        ModemTransferError::Protocol(_)
+        | ModemTransferError::UnexpectedByte(_)
+        | ModemTransferError::UnexpectedFrame => ModemWorkerError::Failed(ModemFailure::Protocol),
     }
 }
 

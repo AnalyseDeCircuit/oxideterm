@@ -84,6 +84,12 @@
       "clear_screen": "Bildschirm leeren"
     },
     "modem": {
+      "timeout": "Die Gegenstelle hat nicht rechtzeitig geantwortet. Starten Sie dort das Übertragungsprogramm und versuchen Sie es erneut.",
+      "protocol_error": "Die Gegenstelle hat ungültige oder unerwartete Übertragungsdaten gesendet.",
+      "file_error": "Die Datei kann nicht gelesen oder geschrieben werden. Prüfen Sie die Zugriffsrechte und den freien Speicherplatz.",
+      "file_too_large": "Die Datei überschreitet die Größenbegrenzung dieses Protokolls.",
+      "buffer_overflow": "Die Gegenstelle hat mehr Daten gesendet, als der Übertragungspuffer aufnehmen kann.",
+      "worker_stopped": "Die Übertragung wurde unerwartet beendet. Bitte versuchen Sie es erneut.",
       "binary_transfer": "Binärübertragung",
       "xmodem_upload": "XMODEM hochladen",
       "xmodem_receive": "XMODEM empfangen",

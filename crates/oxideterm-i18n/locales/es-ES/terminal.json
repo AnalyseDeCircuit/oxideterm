@@ -84,6 +84,12 @@
       "clear_screen": "Limpiar pantalla"
     },
     "modem": {
+      "timeout": "El equipo remoto no respondió a tiempo. Inicie su programa de transferencia y vuelva a intentarlo.",
+      "protocol_error": "El equipo remoto envió datos de transferencia no válidos o inesperados.",
+      "file_error": "No se puede leer o escribir el archivo. Compruebe los permisos y el espacio disponible.",
+      "file_too_large": "El archivo supera el límite de tamaño de este protocolo.",
+      "buffer_overflow": "El equipo remoto envió más datos de los que puede almacenar el búfer de transferencia.",
+      "worker_stopped": "El proceso de transferencia se detuvo inesperadamente. Vuelva a intentarlo.",
       "binary_transfer": "Transferencia binaria",
       "xmodem_upload": "Subir con XMODEM",
       "xmodem_receive": "Recibir con XMODEM",

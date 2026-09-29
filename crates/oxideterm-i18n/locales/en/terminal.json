@@ -172,6 +172,12 @@
       "clear_screen": "Clear screen"
     },
     "modem": {
+      "timeout": "The peer did not respond in time. Start its transfer program, then retry.",
+      "protocol_error": "The peer sent invalid or unexpected transfer data.",
+      "file_error": "Unable to read or write the transfer file. Check permissions and free space.",
+      "file_too_large": "The file exceeds this protocol's size limit.",
+      "buffer_overflow": "The peer sent more data than the transfer buffer can hold.",
+      "worker_stopped": "The transfer worker stopped unexpectedly. Please retry.",
       "binary_transfer": "Binary transfer",
       "xmodem_upload": "XMODEM upload",
       "xmodem_receive": "XMODEM receive",
