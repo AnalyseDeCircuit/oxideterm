@@ -22,6 +22,10 @@ impl LocalTerminalInstance {
     }
 }
 
+pub(super) fn local_profile_node_id(id: &str) -> NodeId {
+    NodeId::new(format!("local-profile-{id}"))
+}
+
 impl WorkspaceApp {
     fn local_profile_config(
         &self,
@@ -116,7 +120,10 @@ impl WorkspaceApp {
                 let shell_id = config.shell.as_ref().map(|shell| shell.id.clone());
                 let (session_id, _) =
                     self.create_local_terminal_tab_with_owned_session(config, title, window, cx)?;
-                self.bind_local_profile(session_id, profile_id, cx);
+                if let Some(id) = profile_id.as_deref() {
+                    self.expanded_ssh_nodes.insert(local_profile_node_id(id));
+                }
+                self.bind_local_profile(session_id, profile_id.clone(), cx);
                 if let Some(shell_id) = shell_id {
                     self.edit_settings(
                         |settings| {
@@ -128,6 +135,9 @@ impl WorkspaceApp {
                         cx,
                     );
                 }
+            }
+            if let Some(id) = profile_id.as_deref() {
+                self.show_local_profile_session(id, cx);
             }
             Ok(())
         })();
@@ -158,6 +168,50 @@ impl WorkspaceApp {
         });
     }
 
+    fn show_local_profile_session(&mut self, id: &str, cx: &mut Context<Self>) {
+        let hidden = &mut self
+            .settings_store
+            .settings_mut()
+            .sidebar_ui
+            .hidden_local_terminal_profile_ids;
+        let count = hidden.len();
+        hidden.retain(|hidden_id| hidden_id != id);
+        if hidden.len() != count {
+            self.persist_sidebar_settings(cx);
+        }
+    }
+
+    pub(super) fn remove_local_profile_session(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session_ids = self
+            .tab_host
+            .read(cx)
+            .local_sessions
+            .iter()
+            .filter_map(|(session_id, instance)| {
+                (instance.profile_id.as_deref() == Some(id)).then_some(*session_id)
+            })
+            .collect::<Vec<_>>();
+        for session_id in session_ids {
+            self.close_terminal_session(session_id, window, cx);
+        }
+        self.expanded_ssh_nodes.remove(&local_profile_node_id(id));
+        let hidden = &mut self
+            .settings_store
+            .settings_mut()
+            .sidebar_ui
+            .hidden_local_terminal_profile_ids;
+        if !hidden.iter().any(|hidden_id| hidden_id == id) {
+            hidden.push(id.to_owned());
+            self.persist_sidebar_settings(cx);
+        }
+        cx.notify();
+    }
+
     pub(super) fn open_saved_local_terminal_profile(
         &mut self,
         id: &str,
@@ -179,7 +233,13 @@ impl WorkspaceApp {
                 self.create_local_terminal_tab_with_owned_session(config, profile.name, window, cx)
             });
         match result {
-            Ok((session_id, _)) => self.bind_local_profile(session_id, Some(profile.id), cx),
+            Ok((session_id, _)) => {
+                self.bind_local_profile(session_id, Some(profile.id.clone()), cx);
+                self.show_local_profile_session(&profile.id, cx);
+                self.expanded_ssh_nodes
+                    .insert(local_profile_node_id(&profile.id));
+                self.focus_terminal_session(session_id, window, cx);
+            }
             Err(error) => self.session_manager.update(cx, |manager, cx| {
                 manager.set_status(Some(error.to_string()), cx)
             }),
