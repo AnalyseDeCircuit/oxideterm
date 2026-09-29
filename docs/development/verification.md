@@ -25,6 +25,7 @@ Run checks from the repository root. When a command needs an operating-system-sp
 | Windows framework code | `cargo check -p gpui_windows` and `cargo check -p oxideterm-gpui-app` on Windows | IME, pointer capture, cursor recovery, titlebar, and Direct3D behavior |
 | Linux framework code | Relevant Linux crate and application checks | Both affected compositor paths: Wayland and/or X11 |
 | Repository scripts or workflows | The matching script test module | Dispatch only the workflow needed by the change |
+| Git dependencies, Nix package, or flake | `nix build .#oxideterm -L --show-trace` and `nix flake check -L` | Confirm `result/bin/oxideterm` builds and runs |
 
 ## Selecting The Scope
 
@@ -68,4 +69,4 @@ Do not add tests merely to increase coverage. Add a focused regression test when
 
 ## CI Mapping
 
-The primary CI workflow runs workspace check, formatting, workspace tests, locale auditing, packaging-helper tests, and repository-policy tests. Native platform CI separately checks Windows and macOS GPUI backends and the application. A green Linux workspace job therefore does not establish Windows or macOS native behavior.
+The primary CI workflow runs workspace check, formatting, workspace tests, locale auditing, packaging-helper tests, repository-policy tests, and the Nix package build. The Nix job compiles the package via `nix build .#oxideterm -L --show-trace` and runs `nix flake check -L`, ensuring that `cargoLock.outputHashes` in `nix/package.nix` remains in sync whenever Git dependencies are added or updated in `Cargo.lock`. Native platform CI separately checks Windows and macOS GPUI backends and the application. A green Linux workspace job therefore does not establish Windows or macOS native behavior.

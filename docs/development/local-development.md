@@ -46,6 +46,18 @@ The CI dependency list is maintained in [`scripts/ci/install-linux-deps.sh`](../
 
 Linux CI uses Ubuntu 22.04. A distribution with different package names may need equivalent development packages for X11/XKB, font rendering, GStreamer, audio, Kerberos, OpenSSL, and Vulkan. Keep package substitutions local; do not edit the CI installer merely to match one workstation.
 
+### Nix and Git Dependency Hashes
+
+When building via Nix (`nix build .#oxideterm -L --show-trace`) or Nix Flake checks (`nix flake check -L`), `rustPlatform.buildRustPackage` builds inside an isolated sandbox and requires fixed-output hashes in [`nix/package.nix`](../../nix/package.nix) for all Git dependencies (`ironrdp`, `russh`, `wasm_thread`). Standard crates from crates.io do not need entries in `cargoLock.outputHashes` because their checksums are already recorded in `Cargo.lock`.
+
+Whenever adding or bumping a Git dependency in `Cargo.toml`:
+1. Update `Cargo.toml` and update `Cargo.lock` (`cargo check` or `cargo update -p <crate>`).
+2. Run `nix build .#oxideterm -L --show-trace`.
+3. If a hash mismatch error occurs, verify the locked Git revision in `Cargo.lock`, then copy the `got:` SHA-256 value into `nix/package.nix` under `cargoLock.outputHashes`.
+4. Re-run `nix build .#oxideterm -L --show-trace` and `nix flake check -L` to confirm the package builds cleanly.
+
+For detailed documentation, see [`nix/README.md`](../../nix/README.md).
+
 ## Common Commands
 
 ```sh
