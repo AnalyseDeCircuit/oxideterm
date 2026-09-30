@@ -613,7 +613,7 @@ impl WorkspaceApp {
             tauri_virtual_uniform_list("audit-recording-list", items.len(), self.audit.scroll.clone(), TauriVirtualListSpec::new(px(AUDIT_ROW_HEIGHT), 4), move |range, _, app| owner.update(app, |this, cx| {
                 range.filter_map(|index| items.get(index).map(|recording| {
                     let recording = recording.clone();
-                    div().id(("audit-recording", index)).h(px(AUDIT_ROW_HEIGHT)).px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(theme.border)).hover(|v| v.bg(rgb(theme.bg_hover))).cursor_pointer()
+                    div().id(("audit-recording", index)).w_full().h(px(AUDIT_ROW_HEIGHT)).px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(theme.border)).hover(|v| v.bg(rgb(theme.bg_hover))).cursor_pointer()
                         .child(Self::render_lucide_icon(LucideIcon::Play, 16.0, rgb(theme.text_muted)))
                         .child(div().flex_1().min_w(px(0.0)).flex().flex_col().gap_1()
                             .child(div().truncate().child(recording.details.endpoint.as_ref().map(|s| s.to_string()).unwrap_or_else(|| this.i18n.t("event_log.audit.unknown_target"))))

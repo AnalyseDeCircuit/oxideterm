@@ -96,7 +96,7 @@ impl WorkspaceApp {
                         .replace("{{files}}", &session.file_count.to_string())
                         .replace("{{operations}}", &session.operation_count.to_string())
                         .replace("{{transports}}", &session.transport_count.to_string());
-                    div().id(("audit-session", index)).h(px(88.0)).px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(theme.border)).hover(|v| v.bg(rgb(theme.bg_hover))).cursor_pointer()
+                    div().id(("audit-session", index)).w_full().h(px(88.0)).px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(theme.border)).hover(|v| v.bg(rgb(theme.bg_hover))).cursor_pointer()
                         .child(Self::render_lucide_icon(LucideIcon::Terminal, 16.0, rgb(theme.text_muted)))
                         .child(div().flex_1().min_w(px(0.0)).flex().flex_col().gap_1()
                             .child(div().truncate().child(session.target.as_ref().map(|v| v.to_string()).unwrap_or_else(|| this.i18n.t("event_log.audit.unknown_target"))))
