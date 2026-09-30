@@ -833,7 +833,9 @@ where
                     {
                         state.parser.stop_sync(&mut *self.terminal.lock());
                         self.event_proxy.send_event(Event::Wakeup);
-                        continue;
+                        // Recording capacity can return through a poll notification
+                        // without any fd events. Still refresh PTY interest below;
+                        // otherwise Linux leaves reads disabled after backpressure.
                     }
 
                     if !self.drain_recv_channel(&mut state) {
