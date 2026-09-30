@@ -21,6 +21,7 @@ gpui.workspace = true
 image.workspace = true
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }

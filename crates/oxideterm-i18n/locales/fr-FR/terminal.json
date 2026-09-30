@@ -51,6 +51,11 @@
       "risk_configured": "configuré"
     },
     "paste": {
+      "edit": "Modifier",
+      "edit_title": "Modifier avant de coller",
+      "strip_fence": "Retirer les délimiteurs du bloc de code",
+      "undo": "Annuler",
+      "redo": "Rétablir",
       "title": "Lignes multiples détectées ({{count}} lignes)",
       "more_lines": "... {{count}} lignes supplémentaires",
       "confirm": "Confirmer",

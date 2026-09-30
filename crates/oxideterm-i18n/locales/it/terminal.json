@@ -51,6 +51,11 @@
       "risk_configured": "configurato"
     },
     "paste": {
+      "edit": "Modifica",
+      "edit_title": "Modifica prima di incollare",
+      "strip_fence": "Rimuovi delimitatori del blocco di codice",
+      "undo": "Annulla",
+      "redo": "Ripeti",
       "title": "Rilevate righe multiple ({{count}} righe)",
       "more_lines": "... altre {{count}} righe",
       "confirm": "Conferma",

@@ -58,6 +58,7 @@ use oxideterm_terminal_recording::{
 mod image_cache;
 mod ime;
 mod interactions;
+mod paste;
 mod render;
 mod scrollbar;
 
@@ -478,8 +479,9 @@ pub struct TerminalPane {
     metrics: TerminalMetrics,
     metrics_dirty: bool,
     selection: Option<TerminalSelection>,
-    pending_paste: Option<String>,
-    pending_paste_prefix: Option<Vec<u8>>,
+    pending_paste: Option<Zeroizing<String>>,
+    pending_paste_prefix: Option<Zeroizing<Vec<u8>>>,
+    paste_editor: Option<paste::PasteEditor>,
     // The pane observes only its session's capability and never stores the sandbox path.
     kitty_file_transmission: Option<KittyFileTransmissionControl>,
     kitty_file_transmission_confirm_open: bool,
@@ -1199,6 +1201,7 @@ impl TerminalPane {
             selection: None,
             pending_paste: None,
             pending_paste_prefix: None,
+            paste_editor: None,
             kitty_file_transmission,
             kitty_file_transmission_confirm_open: false,
             tmux_prompt: None,
@@ -1904,6 +1907,7 @@ impl TerminalPane {
         self.background_image_cache
             .set_byte_limit(preferences.render_policy.image_cache_bytes);
         self.preferences = preferences;
+        self.refresh_paste_editor(cx);
         // Font resolution is stable across output frames and changes only with typography
         // preferences, so defer the next measurement until the pane is rendered again.
         self.metrics_dirty |= metrics_changed;
@@ -2941,8 +2945,9 @@ impl TerminalPane {
             return;
         }
         if self.settings.paste_protection && paste_needs_confirmation(&text) {
-            self.pending_paste = Some(text);
-            self.pending_paste_prefix = (!prefix.is_empty()).then(|| prefix.to_vec());
+            self.pending_paste = Some(Zeroizing::new(text));
+            self.pending_paste_prefix =
+                (!prefix.is_empty()).then(|| Zeroizing::new(prefix.to_vec()));
             cx.notify();
             return;
         }

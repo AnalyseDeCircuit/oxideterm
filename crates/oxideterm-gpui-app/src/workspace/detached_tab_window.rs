@@ -152,6 +152,15 @@ impl Render for DetachedTabWindow {
                     if session.app_lock.locked {
                         return false;
                     }
+                    if session
+                        .tab_host
+                        .read(cx)
+                        .panes()
+                        .values()
+                        .any(|pane| pane.read(cx).paste_editor_focused(window, cx))
+                    {
+                        return false;
+                    }
                     let page = session.tab_host.read(cx).focused_page_id(detached.tab_id);
                     let kind = session.tab_by_id(page, cx).map(|tab| tab.kind.clone());
                     let _sftp_scope = (kind == Some(TabKind::Sftp))

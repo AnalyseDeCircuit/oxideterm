@@ -118,6 +118,9 @@ impl TerminalPane {
             }
         }
 
+        if self.paste_editor.is_some() {
+            return false;
+        }
         if self.pending_paste.is_some() && !modifiers.platform && !modifiers.control {
             match key {
                 "enter" => {

@@ -51,6 +51,11 @@
       "risk_configured": "依設定需確認"
     },
     "paste": {
+      "edit": "編輯",
+      "edit_title": "貼上前編輯",
+      "strip_fence": "移除程式碼區塊標記",
+      "undo": "復原",
+      "redo": "重做",
       "title": "偵測到多行內容（{{count}} 行）",
       "more_lines": "... 還有 {{count}} 行",
       "confirm": "確認",

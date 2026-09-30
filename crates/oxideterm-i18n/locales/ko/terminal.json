@@ -51,6 +51,11 @@
       "risk_configured": "구성됨"
     },
     "paste": {
+      "edit": "편집",
+      "edit_title": "붙여넣기 전에 편집",
+      "strip_fence": "코드 블록 구분자 제거",
+      "undo": "실행 취소",
+      "redo": "다시 실행",
       "title": "여러 줄 감지됨 ({{count}}줄)",
       "more_lines": "... {{count}}줄 더",
       "confirm": "확인",

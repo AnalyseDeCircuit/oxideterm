@@ -739,6 +739,12 @@ impl Default for TerminalKittyFileTransmissionLabels {
 
 #[derive(Clone, Debug)]
 pub struct TerminalPasteLabels {
+    pub edit: String,
+    pub edit_title: String,
+    pub strip_fence: String,
+    pub undo: String,
+    pub redo: String,
+    pub editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels,
     pub title_template: String,
     pub more_lines_template: String,
     pub confirm: String,
@@ -749,6 +755,12 @@ pub struct TerminalPasteLabels {
 impl Default for TerminalPasteLabels {
     fn default() -> Self {
         Self {
+            edit: "Edit".into(),
+            edit_title: "Edit before pasting".into(),
+            strip_fence: "Remove code block markers".into(),
+            undo: "Undo".into(),
+            redo: "Redo".into(),
+            editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels::default(),
             title_template: "Multiple lines detected ({{count}} lines)".to_string(),
             more_lines_template: "... {{count}} more lines".to_string(),
             confirm: "Confirm".to_string(),

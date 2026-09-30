@@ -51,6 +51,11 @@
       "risk_configured": "konfiguriert"
     },
     "paste": {
+      "edit": "Bearbeiten",
+      "edit_title": "Vor dem Einfügen bearbeiten",
+      "strip_fence": "Codeblock-Markierungen entfernen",
+      "undo": "Rückgängig",
+      "redo": "Wiederholen",
       "title": "Mehrere Zeilen erkannt ({{count}} Zeilen)",
       "more_lines": "... {{count}} weitere Zeilen",
       "confirm": "Bestätigen",

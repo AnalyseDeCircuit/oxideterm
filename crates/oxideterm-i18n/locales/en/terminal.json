@@ -139,6 +139,11 @@
     "typeLocal": "Local",
     "typeSsh": "SSH",
     "paste": {
+      "edit": "Edit",
+      "edit_title": "Edit before pasting",
+      "strip_fence": "Remove code block markers",
+      "undo": "Undo",
+      "redo": "Redo",
       "title": "Multiple lines detected ({{count}} lines)",
       "more_lines": "... {{count}} more lines",
       "confirm": "Confirm",

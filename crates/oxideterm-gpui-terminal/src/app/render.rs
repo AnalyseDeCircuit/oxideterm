@@ -41,12 +41,8 @@ use crate::terminal_view::*;
 // Bound stale frames under continuous output when the parser repeatedly wins the lock.
 const MAX_SNAPSHOT_DEFER_DURATION: std::time::Duration = std::time::Duration::from_millis(32);
 
-const PASTE_PREVIEW_TEXT_RADIUS: f32 = 4.0;
-const PASTE_CONFIRM_DIALOG_RADIUS: f32 = 8.0;
-const PASTE_CONFIRM_BUTTON_RADIUS: f32 = 4.0;
-const TERMINAL_KEY_HINT_RADIUS: f32 = 4.0;
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 12.0;
+const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 13.0;
 const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 3.0;
 const SERIAL_TRANSFER_MENU_ACTION_COUNT: f32 = 6.0;
 const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
@@ -607,8 +603,8 @@ impl Render for TerminalPane {
             .when_some(self.tmux_prompt.clone(), |pane, prompt| {
                 pane.child(self.render_tmux_prompt_overlay(&prompt, cx))
             })
-            .when_some(self.pending_paste.clone(), |pane, paste| {
-                pane.child(self.render_paste_confirm_overlay(&paste, cx))
+            .when(self.pending_paste.is_some(), |pane| {
+                pane.child(self.render_paste_overlay(window, cx))
             })
             .when(
                 self.kitty_file_transmission_confirm_open && self.pending_paste.is_none(),
@@ -2038,6 +2034,12 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        self.preferences.paste_labels.edit_title.clone(),
+                        false,
+                        |this, _, window, cx| this.edit_clipboard_paste(window, cx),
+                        cx,
+                    ))
+                    .child(self.render_terminal_context_menu_item(
                         insert_selection_label,
                         !free_type_insert_selection_available,
                         move |this, _event, _window, cx| {
@@ -2707,178 +2709,6 @@ impl TerminalPane {
             }),
         )
     }
-
-    fn render_paste_confirm_overlay(&self, content: &str, cx: &mut Context<Self>) -> AnyElement {
-        const PREVIEW_MAX_LINES: usize = 5;
-
-        let lines = content.split('\n').collect::<Vec<_>>();
-        let remaining_lines = lines.len().saturating_sub(PREVIEW_MAX_LINES);
-        let title = label_with_count(&self.preferences.paste_labels.title_template, lines.len());
-        let more_lines = label_with_count(
-            &self.preferences.paste_labels.more_lines_template,
-            remaining_lines,
-        );
-
-        let mut preview = div()
-            .rounded(px(PASTE_PREVIEW_TEXT_RADIUS))
-            .border_1()
-            .border_color(rgb(0x2f343d))
-            .bg(rgb(0x090b0f))
-            .p(px(8.0))
-            .mb(px(12.0))
-            .max_h(px(128.0))
-            .overflow_hidden()
-            .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .font_family(SharedString::from(self.preferences.font_family.clone()))
-            .text_size(px(12.0))
-            .text_color(rgb(0x9ca3af));
-
-        for line in lines.iter().take(PREVIEW_MAX_LINES) {
-            let rendered_line = if line.is_empty() {
-                "\u{00a0}".to_string()
-            } else {
-                (*line).to_string()
-            };
-            preview = preview.child(div().overflow_hidden().child(rendered_line));
-        }
-        if remaining_lines > 0 {
-            preview = preview.child(div().italic().text_color(rgb(0x9ca3af)).child(more_lines));
-        }
-
-        let cancel_label = self.preferences.paste_labels.cancel.clone();
-        let paste_label = self.preferences.paste_labels.paste.clone();
-        div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgba(0x00000033))
-            .child(
-                div()
-                    .w(px(448.0))
-                    .rounded(px(PASTE_CONFIRM_DIALOG_RADIUS))
-                    .border_1()
-                    .border_color(rgba(0xeab30880))
-                    .bg(rgba(0x151922f2))
-                    .shadow_lg()
-                    .p(px(16.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .mb(px(12.0))
-                            .child(
-                                div()
-                                    .size(px(16.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(14.0))
-                                    .text_color(rgb(0xeab308))
-                                    .child("!"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(14.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(0xfef3c7))
-                                    .child(title),
-                            ),
-                    )
-                    .child(preview)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(16.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .text_size(px(12.0))
-                                    .text_color(rgb(0x9ca3af))
-                                    .child(self.render_key_hint(
-                                        "Enter",
-                                        &self.preferences.paste_labels.confirm,
-                                    ))
-                                    .child(div().mx(px(8.0)).text_color(rgb(0x9ca3af)).child("·"))
-                                    .child(self.render_key_hint(
-                                        "Esc",
-                                        &self.preferences.paste_labels.cancel,
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(8.0))
-                                    .child(
-                                        div()
-                                            .px(px(12.0))
-                                            .py(px(4.0))
-                                            .text_size(px(12.0))
-                                            .text_color(rgb(0x9ca3af))
-                                            .cursor_pointer()
-                                            .child(cancel_label)
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.cancel_pending_paste(cx);
-                                                }),
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .rounded(px(PASTE_CONFIRM_BUTTON_RADIUS))
-                                            .bg(rgb(0xca8a04))
-                                            .px(px(12.0))
-                                            .py(px(4.0))
-                                            .text_size(px(12.0))
-                                            .text_color(rgb(0xffffff))
-                                            .cursor_pointer()
-                                            .child(paste_label)
-                                            .on_mouse_down(
-                                                MouseButton::Left,
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.confirm_pending_paste(cx);
-                                                }),
-                                            ),
-                                    ),
-                            ),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_key_hint(&self, key: &'static str, label: &str) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .rounded(px(TERMINAL_KEY_HINT_RADIUS))
-                    .bg(rgb(0x222834))
-                    .px(px(6.0))
-                    .py(px(2.0))
-                    .text_size(px(10.0))
-                    .text_color(rgb(0x9ca3af))
-                    .child(key),
-            )
-            .child(label.to_string())
-            .into_any_element()
-    }
-}
-
-fn label_with_count(template: &str, count: usize) -> String {
-    template.replace("{{count}}", &count.to_string())
 }
 
 fn terminal_background_layer(

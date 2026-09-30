@@ -8009,6 +8009,7 @@ dependencies = [
  "gpui_platform",
  "image",
  "oxideterm-audit",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-ui",
  "oxideterm-modem-transfer",
  "oxideterm-render-policy",

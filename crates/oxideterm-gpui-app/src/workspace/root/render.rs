@@ -424,6 +424,12 @@ impl WorkspaceApp {
                 }
                 if this.active_sftp_editor_owns_key(event.keystroke.key.as_str(), cx)
                     || this.quick_command_text_editor_focused(window, cx)
+                    || this
+                        .tab_host
+                        .read(cx)
+                        .panes()
+                        .values()
+                        .any(|pane| pane.read(cx).paste_editor_focused(window, cx))
                 {
                     // Windows emits committed characters only after an unhandled
                     // keydown. Do not let pane-level capture override the modal

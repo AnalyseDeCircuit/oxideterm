@@ -1175,6 +1175,17 @@ impl WorkspaceApp {
             background: self.terminal_background_preferences(background_key),
             transparent_background: self.window_background_preferences().is_some(),
             paste_labels: TerminalPasteLabels {
+                edit: self.i18n.t("terminal.paste.edit"),
+                edit_title: self.i18n.t("terminal.paste.edit_title"),
+                strip_fence: self.i18n.t("terminal.paste.strip_fence"),
+                undo: self.i18n.t("terminal.paste.undo"),
+                redo: self.i18n.t("terminal.paste.redo"),
+                editor_menu: oxideterm_gpui_editor::EditorContextMenuLabels {
+                    copy: self.i18n.t("menu.copy"),
+                    cut: self.i18n.t("fileManager.cut"),
+                    paste: self.i18n.t("menu.paste"),
+                    select_all: self.i18n.t("fileManager.selectAll"),
+                },
                 title_template: self.i18n.t("terminal.paste.title"),
                 more_lines_template: self.i18n.t("terminal.paste.more_lines"),
                 confirm: self.i18n.t("terminal.paste.confirm"),

@@ -51,6 +51,11 @@
       "risk_configured": "đã cấu hình"
     },
     "paste": {
+      "edit": "Chỉnh sửa",
+      "edit_title": "Chỉnh sửa trước khi dán",
+      "strip_fence": "Xóa dấu phân cách khối mã",
+      "undo": "Hoàn tác",
+      "redo": "Làm lại",
       "title": "Phát hiện nhiều dòng ({{count}} dòng)",
       "more_lines": "... {{count}} dòng nữa",
       "confirm": "Xác nhận",
