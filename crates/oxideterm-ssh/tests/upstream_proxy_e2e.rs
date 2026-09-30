@@ -445,6 +445,7 @@ LogLevel VERBOSE
 
     fn proxy_hop(&self) -> ProxyHopConfig {
         ProxyHopConfig {
+            totp: None,
             host: "127.0.0.1".to_string(),
             port: self.port,
             username: self.username.clone(),

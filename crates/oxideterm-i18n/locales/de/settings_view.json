@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "Zugangsdaten",
+      "description": "Passwörter zur Rechteerhöhung und SSH-Bestätigungscodes verwalten."
+    },
+    "totp": {
+      "title": "TOTP-Zugangsdaten",
+      "description": "Einen geheimen Schlüssel speichern und für jeden SSH-Host oder Sprungserver auswählen.",
+      "add": "Zugangsdaten hinzufügen",
+      "name": "Name",
+      "secret": "Geheimer Schlüssel",
+      "keep_secret": "Leer lassen, um den gespeicherten Schlüssel zu behalten",
+      "secret_hint": "Base32-Schlüssel oder otpauth://-URI",
+      "uri_hint": "Beim Import gelten die Parameter der URI. Nach dem Speichern können Sie sie ändern.",
+      "pattern": "Muster der Abfrage (regulärer Ausdruck)",
+      "algorithm": "Algorithmus",
+      "digits": "Ziffern",
+      "period": "Intervall (Sekunden)",
+      "enabled": "Aktiviert",
+      "disabled": "Deaktiviert",
+      "invalid_secret": "Geben Sie einen gültigen Base32-Schlüssel oder eine TOTP-URI ein.",
+      "invalid_parameters": "Geben Sie einen Namen, 6 oder 8 Ziffern und ein Intervall von 1 bis 300 Sekunden an.",
+      "invalid_pattern": "Geben Sie einen gültigen regulären Ausdruck ein, der keinen leeren Text erfasst.",
+      "in_use": "Diese Zugangsdaten werden noch von einer Verbindung verwendet. Entfernen Sie zuerst die Zuordnung.",
+      "unavailable": "Die Zugangsdaten oder der geschützte Schlüssel sind nicht verfügbar.",
+      "save_failed": "Die Zugangsdaten konnten nicht gespeichert werden. Prüfen Sie den geschützten Speicher und versuchen Sie es erneut.",
+      "none": "Keine",
+      "connection_label": "TOTP-Zugangsdaten",
+      "connection_hint": "Unter Einstellungen → Zugangsdaten erstellen und für jeden Host auswählen."
+    },
     "title": "Einstellungen",
     "search": {
       "open": "Einstellungen durchsuchen",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "Wissensdatenbank",
       "local": "Lokales Terminal",
-      "privilege": "Privileg-Anmeldedaten",
+      "privilege": "Zugangsdaten",
       "reconnect": "Wiederverbindung",
       "help": "Hilfe & Info",
       "keybindings": "Tastenkürzel",

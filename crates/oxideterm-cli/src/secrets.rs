@@ -547,6 +547,7 @@ fn write_connection_secret(
     let post_connect_command = connection.post_connect_command().map(ToOwned::to_owned);
     store
         .upsert(SaveConnectionRequest {
+            totp_credential_id: None,
             id: Some(connection.id),
             name: connection.name,
             group: connection.group,

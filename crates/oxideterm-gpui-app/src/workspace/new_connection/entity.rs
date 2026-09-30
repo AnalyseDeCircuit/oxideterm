@@ -780,6 +780,10 @@ impl ConnectionFlowEntity {
         }
         if let Some(existing) = self.keyboard_interactive_challenge.as_ref()
             && existing.request.flow_id != request.flow_id
+            && existing
+                .response_tx
+                .as_ref()
+                .is_some_and(|tx| !tx.is_closed())
         {
             // Keep the active auth flow as the only owner of the protected dialog.
             let _ = response_tx.send(Err(SshPromptError::Cancelled));

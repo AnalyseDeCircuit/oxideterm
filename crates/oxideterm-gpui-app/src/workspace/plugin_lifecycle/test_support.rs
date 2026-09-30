@@ -178,6 +178,7 @@ pub(super) fn test_connection_store_with_agent_connection(
     let mut store = test_connection_store(name);
     store
         .upsert(oxideterm_connections::SaveConnectionRequest {
+            totp_credential_id: None,
             id: Some("conn-1".to_string()),
             name: "Home".to_string(),
             group: None,

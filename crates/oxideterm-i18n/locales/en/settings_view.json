@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "Credentials",
+      "description": "Manage privilege passwords and SSH verification codes."
+    },
+    "totp": {
+      "title": "TOTP credentials",
+      "description": "Save a verification-code seed once and select it for each SSH host or jump host.",
+      "add": "Add credential",
+      "name": "Name",
+      "secret": "Secret",
+      "keep_secret": "Leave blank to keep the saved secret",
+      "secret_hint": "Base32 secret or otpauth:// URI",
+      "uri_hint": "URI parameters are used when importing a secret. You can change them after saving.",
+      "pattern": "Prompt pattern (regular expression)",
+      "algorithm": "Algorithm",
+      "digits": "Digits",
+      "period": "Period (seconds)",
+      "enabled": "Enabled",
+      "disabled": "Disabled",
+      "invalid_secret": "Enter a valid Base32 secret or TOTP URI.",
+      "invalid_parameters": "Enter a name, 6 or 8 digits, and a period between 1 and 300 seconds.",
+      "invalid_pattern": "Enter a valid, nonempty regular expression that does not match empty text.",
+      "in_use": "This credential is still assigned to a connection. Remove its bindings first.",
+      "unavailable": "The credential or its protected secret is unavailable.",
+      "save_failed": "Could not save the credential. Check protected storage and try again.",
+      "none": "None",
+      "connection_label": "TOTP credential",
+      "connection_hint": "Create credentials in Settings → Credentials. Each host uses its own selection."
+    },
     "title": "Settings",
     "search": {
       "open": "Search settings",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "Knowledge Base",
       "local": "Local Terminal",
-      "privilege": "Privilege Credentials",
+      "privilege": "Credentials",
       "reconnect": "Reconnect",
       "help": "Help & About",
       "keybindings": "Keybindings",

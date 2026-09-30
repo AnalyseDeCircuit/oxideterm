@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "Thông tin xác thực",
+      "description": "Quản lý mật khẩu nâng quyền và mã xác minh SSH."
+    },
+    "totp": {
+      "title": "Thông tin xác thực TOTP",
+      "description": "Lưu khóa bí mật một lần rồi chọn cho từng máy chủ SSH hoặc máy chủ trung gian.",
+      "add": "Thêm thông tin xác thực",
+      "name": "Tên",
+      "secret": "Khóa bí mật",
+      "keep_secret": "Để trống để giữ khóa đã lưu",
+      "secret_hint": "Khóa Base32 hoặc URI otpauth://",
+      "uri_hint": "Khi nhập URI, các tham số trong URI sẽ được sử dụng. Bạn có thể đổi sau khi lưu.",
+      "pattern": "Mẫu lời nhắc (biểu thức chính quy)",
+      "algorithm": "Thuật toán",
+      "digits": "Số chữ số",
+      "period": "Chu kỳ (giây)",
+      "enabled": "Đã bật",
+      "disabled": "Đã tắt",
+      "invalid_secret": "Nhập khóa Base32 hoặc URI TOTP hợp lệ.",
+      "invalid_parameters": "Nhập tên, chọn 6 hoặc 8 chữ số và chu kỳ từ 1 đến 300 giây.",
+      "invalid_pattern": "Nhập biểu thức chính quy hợp lệ không khớp với văn bản rỗng.",
+      "in_use": "Một kết nối vẫn đang dùng thông tin xác thực này. Hãy bỏ liên kết trước.",
+      "unavailable": "Thông tin xác thực hoặc khóa được bảo vệ không khả dụng.",
+      "save_failed": "Không thể lưu thông tin xác thực. Kiểm tra kho lưu trữ được bảo vệ rồi thử lại.",
+      "none": "Không dùng",
+      "connection_label": "Thông tin xác thực TOTP",
+      "connection_hint": "Tạo trong Cài đặt → Thông tin xác thực rồi chọn cho từng máy chủ."
+    },
     "title": "Cài đặt",
     "search": {
       "open": "Tìm kiếm cài đặt",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "Cơ sở tri thức",
       "local": "Terminal cục bộ",
-      "privilege": "Thông tin xác thực đặc quyền",
+      "privilege": "Thông tin xác thực",
       "reconnect": "Tự động kết nối lại",
       "help": "Trợ giúp & Giới thiệu",
       "keybindings": "Phím tắt",

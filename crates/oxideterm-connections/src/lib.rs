@@ -9,6 +9,7 @@ mod ssh_config_sync;
 mod ssh_keys;
 mod ssh_paths;
 mod store;
+pub mod totp;
 pub use connection_import::{
     ConnectionImportApplyRequest, ConnectionImportApplyResult, ConnectionImportDuplicateStrategy,
     ConnectionImportErrorInfo, ConnectionImportPreview, ConnectionImportSource,
@@ -68,3 +69,4 @@ pub use store::{
     TelnetProfilesSyncSnapshot, default_telnet_upstream_proxy, is_profile_credential,
     validate_group_name,
 };
+pub use store::{TotpBinding, TotpResolver};

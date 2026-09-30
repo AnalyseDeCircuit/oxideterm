@@ -9,6 +9,7 @@ pub(super) fn detect_ssh_agent_available(identity_agent: &str) -> Option<bool> {
 }
 
 pub(super) fn proxy_chain_from_form(
+    store: &ConnectionStore,
     form: &mut NewConnectionForm,
     secret_handoff: RuntimeSecretHandoff,
     saved_auth: Vec<Option<AuthMethod>>,
@@ -21,6 +22,7 @@ pub(super) fn proxy_chain_from_form(
     let mut saved_auth = saved_auth.into_iter();
     for hop in form.proxy_hops.iter_mut().filter(|hop| hop.complete()) {
         chain.push(ProxyHopConfig {
+            totp: store.totp_binding(hop.totp_credential_id.as_deref()),
             host: hop.host.trim().to_string(),
             port: hop.port.trim().parse::<u16>().unwrap_or(22),
             username: hop.username.trim().to_string(),
@@ -262,6 +264,7 @@ pub(super) fn form_from_runtime_config(
 pub(super) fn proxy_hop_form_from_runtime_config(config: ProxyHopConfig) -> NewConnectionProxyHop {
     let auth_fields = runtime_auth_form_fields(config.auth);
     NewConnectionProxyHop {
+        totp_credential_id: config.totp.map(|binding| binding.credential_id),
         empty_password: auth_fields.empty_password,
         saved_connection_id: String::new(),
         persisted_proxy_hop_index: None,
@@ -535,9 +538,13 @@ mod runtime_save_tests {
         let saved_auth =
             saved_proxy_hop_auth_from_store(&connection_store, &form, "missing saved credentials")
                 .unwrap();
-        let proxy_chain =
-            proxy_chain_from_form(&mut form, RuntimeSecretHandoff::CopyForTest, saved_auth)
-                .expect("proxy chain");
+        let proxy_chain = proxy_chain_from_form(
+            &connection_store,
+            &mut form,
+            RuntimeSecretHandoff::CopyForTest,
+            saved_auth,
+        )
+        .expect("proxy chain");
 
         assert!(matches!(
             &proxy_chain[0].auth,
@@ -556,6 +563,7 @@ mod runtime_save_tests {
     #[test]
     fn runtime_proxy_hop_form_preserves_password_for_save_as() {
         let hop = proxy_hop_form_from_runtime_config(ProxyHopConfig {
+            totp: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -584,6 +592,7 @@ mod runtime_save_tests {
     #[test]
     fn runtime_proxy_hop_form_preserves_key_passphrase_for_save_as() {
         let hop = proxy_hop_form_from_runtime_config(ProxyHopConfig {
+            totp: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),

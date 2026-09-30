@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "憑證",
+      "description": "管理提權密碼和 SSH 驗證碼。"
+    },
+    "totp": {
+      "title": "動態驗證碼憑證",
+      "description": "儲存一次驗證碼種子，在需要的 SSH 主機或跳板中選用。",
+      "add": "新增憑證",
+      "name": "名稱",
+      "secret": "金鑰",
+      "keep_secret": "留空以保留已儲存的金鑰",
+      "secret_hint": "Base32 金鑰或 otpauth:// 連結",
+      "uri_hint": "匯入連結時使用其中的參數，儲存後可再修改。",
+      "pattern": "提示比對規則（正規表示式）",
+      "algorithm": "演算法",
+      "digits": "位數",
+      "period": "更新週期（秒）",
+      "enabled": "已啟用",
+      "disabled": "已停用",
+      "invalid_secret": "請輸入有效的 Base32 金鑰或動態驗證碼連結。",
+      "invalid_parameters": "請輸入名稱，選擇 6 位或 8 位，週期為 1–300 秒。",
+      "invalid_pattern": "請輸入有效且不會比對空白文字的正規表示式。",
+      "in_use": "仍有連線使用此憑證，請先解除綁定。",
+      "unavailable": "憑證或受保護的金鑰無法使用。",
+      "save_failed": "無法儲存憑證，請檢查受保護儲存空間後重試。",
+      "none": "不使用",
+      "connection_label": "動態驗證碼憑證",
+      "connection_hint": "在設定 → 憑證中建立，各主機分別選擇。"
+    },
     "title": "設定",
     "search": {
       "open": "搜尋設定",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "知識庫",
       "local": "本機終端機",
-      "privilege": "提權憑證",
+      "privilege": "憑證",
       "reconnect": "自動重連",
       "help": "說明與關於",
       "keybindings": "快捷鍵",

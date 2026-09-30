@@ -77,6 +77,18 @@ impl ConnectionStore {
         global_proxy: Option<&'a SavedUpstreamProxyConfig>,
     ) -> Vec<CredentialBinding<'a>> {
         let mut bindings = Vec::new();
+        for credential in &self.data.totp_credentials {
+            bindings.push(CredentialBinding {
+                target: CredentialTarget {
+                    owner: CredentialOwner::Totp(credential.id.clone()),
+                    slot: CredentialSlot::Primary,
+                    identity: credential.secret_revision.clone(),
+                },
+                reference: (!credential.secret_reference.is_empty())
+                    .then_some(credential.secret_reference.as_str()),
+                plaintext: None,
+            });
+        }
         for profile in &self.data.connections {
             let owner = CredentialOwner::Connection(profile.id.clone());
             if let SavedUpstreamProxyPolicy::Custom { proxy } = &profile.upstream_proxy {
@@ -231,7 +243,7 @@ impl ConnectionStore {
     ) -> Result<Vec<EncryptedPortableSecret>> {
         let mut result = Vec::new();
         for binding in self.credential_bindings(global_proxy) {
-            if !selection.contains(&binding.target.owner) {
+            if !self.credential_selected(selection, &binding.target.owner) {
                 continue;
             }
             let secret = if let Some(reference) = binding.reference {

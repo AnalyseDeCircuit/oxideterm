@@ -479,6 +479,7 @@ fn sftp_key_passphrase_and_mosh_hop_password_survive_encrypted_archive() {
     source.data.mosh_profiles[0]
         .proxy_chain
         .push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.test".into(),
             port: 22,
             username: "jump-user".into(),

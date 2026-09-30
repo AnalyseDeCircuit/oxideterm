@@ -1428,6 +1428,7 @@ mod tests {
             remote_metadata: Default::default(),
             manifest,
             connections_snapshot: Some(SavedConnectionsSyncSnapshot {
+                totp_credentials: Vec::new(),
                 local_terminal_profiles: Vec::new(),
                 local_terminal_tombstones: Vec::new(),
                 revision: "empty-connections".to_string(),

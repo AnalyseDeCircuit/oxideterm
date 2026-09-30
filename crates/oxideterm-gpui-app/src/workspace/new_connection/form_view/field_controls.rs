@@ -521,6 +521,8 @@ impl WorkspaceApp {
         select_id: NewConnectionSelect,
     ) -> SelectAnchorId {
         match select_id {
+            NewConnectionSelect::Totp => SelectAnchorId::NewConnectionTotp,
+            NewConnectionSelect::JumpTotp => SelectAnchorId::NewConnectionJumpTotp,
             NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
             NewConnectionSelect::KeyAuthSource => SelectAnchorId::NewConnectionKeyAuthSource,
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
@@ -1253,6 +1255,76 @@ impl WorkspaceApp {
         self.render_managed_key_select_for_target(label, selected_id, select_id, cx)
     }
 
+    pub(super) fn render_connection_totp_select(
+        &self,
+        jump: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .is_none_or(|form| form.transport != NewConnectionTransport::Ssh)
+        {
+            return div().into_any_element();
+        }
+        let select = if jump {
+            NewConnectionSelect::JumpTotp
+        } else {
+            NewConnectionSelect::Totp
+        };
+        let id = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .and_then(|form| {
+                if jump {
+                    form.jump_server_form
+                        .as_ref()
+                        .and_then(|hop| hop.totp_credential_id.as_deref())
+                } else {
+                    form.totp_credential_id.as_deref()
+                }
+            });
+        let label = id
+            .map(|id| {
+                self.connection_store
+                    .totp_credentials()
+                    .iter()
+                    .find(|entry| entry.id == id)
+                    .map(|entry| entry.name.clone())
+                    .unwrap_or_else(|| self.i18n.t("settings_view.totp.unavailable"))
+            })
+            .unwrap_or_else(|| self.i18n.t("settings_view.totp.none"));
+        let trigger = self
+            .new_connection_select_trigger(select, label, id.is_none(), false, cx)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.update_connection_form_state(cx, |state| {
+                        if let Some(form) = &mut state.form {
+                            form.field_focused = false;
+                            form.selected_field = None;
+                        }
+                    });
+                    this.open_new_connection_select_from_pointer(select, cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                }),
+            );
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(form_field(
+                &self.tokens,
+                self.i18n.t("settings_view.totp.connection_label"),
+                self.track_new_connection_select_anchor(select, trigger, cx),
+            ))
+            .child(self.render_connection_hint(self.i18n.t("settings_view.totp.connection_hint")))
+            .into_any_element()
+    }
+
     pub(super) fn render_standalone_sftp_secondary_managed_key_select(
         &self,
         label: String,
@@ -1480,6 +1552,8 @@ impl WorkspaceApp {
                         form.focused_field = NewConnectionField::JumpManagedKeyId;
                     }
                     NewConnectionSelect::Group
+                    | NewConnectionSelect::Totp
+                    | NewConnectionSelect::JumpTotp
                     | NewConnectionSelect::KeyAuthSource
                     | NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource
                     | NewConnectionSelect::JumpSavedConnection

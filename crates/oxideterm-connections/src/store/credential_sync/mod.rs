@@ -16,6 +16,7 @@ pub const CLEARED_PROFILE_CREDENTIAL_KIND: &str = "cleared_profile_credential";
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "type", content = "id", rename_all = "snake_case")]
 pub enum CredentialOwner {
+    Totp(String),
     Connection(String),
     StandaloneSftp(String),
     Mosh(String),
@@ -46,6 +47,7 @@ pub struct CredentialTarget {
 
 #[derive(Clone, Debug, Default)]
 pub struct CredentialSyncSelection {
+    pub totp_ids: BTreeSet<String>,
     pub connection_ids: BTreeSet<String>,
     pub sftp_ids: BTreeSet<String>,
     pub mosh_ids: BTreeSet<String>,
@@ -58,6 +60,7 @@ pub struct CredentialSyncSelection {
 impl CredentialSyncSelection {
     pub fn contains(&self, owner: &CredentialOwner) -> bool {
         match owner {
+            CredentialOwner::Totp(id) => self.totp_ids.contains(id),
             CredentialOwner::Connection(id) => self.connection_ids.contains(id),
             CredentialOwner::StandaloneSftp(id) => self.sftp_ids.contains(id),
             CredentialOwner::Mosh(id) => self.mosh_ids.contains(id),
@@ -76,6 +79,19 @@ struct CredentialBinding<'a> {
 }
 
 impl ConnectionStore {
+    fn credential_selected(
+        &self,
+        selection: &CredentialSyncSelection,
+        owner: &CredentialOwner,
+    ) -> bool {
+        match owner {
+            CredentialOwner::Totp(id) => {
+                selection.totp_ids.contains(id) || self.totp_selected(id, selection)
+            }
+            _ => selection.contains(owner),
+        }
+    }
+
     pub fn profile_credential_count(
         &self,
         selection: &CredentialSyncSelection,
@@ -84,7 +100,7 @@ impl ConnectionStore {
         self.credential_bindings(global_proxy)
             .iter()
             .filter(|binding| {
-                selection.contains(&binding.target.owner)
+                self.credential_selected(selection, &binding.target.owner)
                     && (binding.reference.is_some()
                         || binding.plaintext.is_some()
                         || self.data.cleared_credentials.contains(&binding.target)
@@ -130,6 +146,7 @@ impl ConnectionStore {
                 .map(|p| (&p.id, p.updated_at))
                 .collect::<Vec<_>>(),
             &self.data.ftp_tombstones,
+            &self.data.totp_credentials,
         ))
     }
 

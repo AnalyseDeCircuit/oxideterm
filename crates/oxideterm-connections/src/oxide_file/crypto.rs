@@ -503,6 +503,7 @@ mod tests {
 
     fn payload_with_default_ssh_algorithms() -> EncryptedPayload {
         EncryptedPayload {
+            totp_credentials: Vec::new(),
             version: 1,
             connections: vec![EncryptedConnection {
                 source_connection_id: None,

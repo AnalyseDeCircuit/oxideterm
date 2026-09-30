@@ -230,6 +230,7 @@ mod surface;
 mod terminal_controls;
 mod terminal_display;
 mod terminal_triggers;
+mod totp_credentials_page;
 pub(in crate::workspace) use terminal_triggers::TerminalTriggersSettingsState;
 mod update;
 mod update_ui;

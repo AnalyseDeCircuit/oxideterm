@@ -108,6 +108,14 @@ fn update_reference(
     global: &mut Option<SavedUpstreamProxyConfig>,
 ) -> Result<()> {
     match &target.owner {
+        CredentialOwner::Totp(id) => {
+            let credential = data
+                .totp_credentials
+                .iter_mut()
+                .find(|p| &p.id == id)
+                .context("TOTP credential is unavailable")?;
+            credential.secret_reference = reference.unwrap_or_default();
+        }
         CredentialOwner::Connection(id) => {
             let p = data
                 .connections
@@ -260,12 +268,19 @@ impl ConnectionStore {
             if !seen.insert(target.clone()) {
                 bail!("Duplicate portable credential target");
             }
-            if !selection.contains(&target.owner) || !available.contains_key(&target) {
+            if !self.credential_selected(selection, &target.owner)
+                || !available.contains_key(&target)
+            {
                 prepared.summary.skipped += 1;
                 continue;
             }
             if secret.kind == CLEARED_PROFILE_CREDENTIAL_KIND && !secret.secret.is_empty() {
                 bail!("Credential deletion must not contain a value");
+            }
+            if let CredentialOwner::Totp(_) = &target.owner {
+                if target.slot != CredentialSlot::Primary {
+                    bail!("Invalid TOTP credential slot");
+                }
             }
             selected.push((target, secret));
         }
@@ -284,8 +299,25 @@ impl ConnectionStore {
                         "oxide_sync_credential"
                     };
                     let reference = format!("{prefix}_{}", Uuid::new_v4());
-                    self.keychain
-                        .store(&reference, &SecretString::from(secret.secret.as_str()))?;
+                    let value = if let CredentialOwner::Totp(id) = &target.owner {
+                        let credential = self
+                            .data
+                            .totp_credentials
+                            .iter()
+                            .find(|p| &p.id == id)
+                            .context("TOTP credential is unavailable")?;
+                        let generator = crate::totp::TotpGenerator::parse(
+                            &secret.secret,
+                            credential.parameters,
+                        )?;
+                        if generator.parameters() != credential.parameters {
+                            bail!("TOTP secret parameters do not match its metadata");
+                        }
+                        SecretString::from(generator.encoded_secret())
+                    } else {
+                        SecretString::from(secret.secret.as_str())
+                    };
+                    self.keychain.store(&reference, &value)?;
                     prepared.created.push(reference.clone());
                     Some(reference)
                 };

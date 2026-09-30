@@ -207,7 +207,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Appearance => 5,
         // Reconnect controls share one card and therefore one virtual section.
         SettingsTab::Connections => 6,
-        SettingsTab::Privilege => 1,
+        SettingsTab::Privilege => 2,
         SettingsTab::Network => 4,
         SettingsTab::Sftp => 3,
         SettingsTab::Ide => 4,

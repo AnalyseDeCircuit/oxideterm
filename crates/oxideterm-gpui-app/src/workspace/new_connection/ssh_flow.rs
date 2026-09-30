@@ -289,6 +289,10 @@ impl SshPromptHandler for NativeSshPromptHandler {
         Box<dyn Future<Output = Result<KeyboardInteractiveResponses, SshPromptError>> + Send + '_>,
     > {
         Box::pin(async move {
+            // The application has one protected SSH prompt surface. Keep other
+            // authentication attempts waiting instead of cancelling their challenges.
+            static MANUAL_PROMPT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+            let _prompt_guard = MANUAL_PROMPT.lock().await;
             let (response_tx, response_rx) = oneshot::channel();
             self.tx
                 .send(SshConnectionWorkerResult::KeyboardInteractivePrompt {

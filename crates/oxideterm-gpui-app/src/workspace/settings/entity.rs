@@ -416,6 +416,8 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) network_proxy_test_task: Option<Task<()>>,
     pub(super) network_proxy_test_abort: Option<tokio::task::AbortHandle>,
     pub(super) privilege_draft: PrivilegeCredentialDraft,
+    pub(super) totp_draft: Option<super::totp_credentials_page::TotpDraft>,
+    pub(super) totp_error: Option<oxideterm_connections::totp::TotpError>,
     pub(super) privilege_error: Option<String>,
     pub(super) privilege_editor_open: bool,
     pub(super) privilege_scope_id: Option<String>,
@@ -567,6 +569,8 @@ impl SettingsWorkspaceEntity {
             network_proxy_test_task: None,
             network_proxy_test_abort: None,
             privilege_draft: PrivilegeCredentialDraft::default(),
+            totp_draft: None,
+            totp_error: None,
             privilege_error: None,
             privilege_editor_open: false,
             privilege_scope_id: None,
@@ -646,6 +650,8 @@ impl SettingsWorkspaceEntity {
         if self.route.active_tab == tab {
             return false;
         }
+        self.totp_draft = None;
+        self.totp_error = None;
         self.route.active_tab = tab;
         cx.notify();
         true
@@ -2113,6 +2119,16 @@ impl SettingsWorkspaceEntity {
             SettingsInput::NetworkProxyTestHost => Some(&self.network_proxy_test_host),
             SettingsInput::NetworkProxyTestPort => Some(&self.network_proxy_test_port),
             SettingsInput::LocalPrivilegeLabel => Some(&self.privilege_draft.label),
+            SettingsInput::TotpName => self.totp_draft.as_ref().map(|draft| draft.name.as_str()),
+            SettingsInput::TotpSecret => {
+                self.totp_draft.as_ref().map(|draft| draft.secret.as_str())
+            }
+            SettingsInput::TotpPattern => {
+                self.totp_draft.as_ref().map(|draft| draft.pattern.as_str())
+            }
+            SettingsInput::TotpPeriod => {
+                self.totp_draft.as_ref().map(|draft| draft.period.as_str())
+            }
             SettingsInput::LocalPrivilegeUsernameHint => Some(&self.privilege_draft.username_hint),
             SettingsInput::LocalPrivilegeSecret => Some(&self.privilege_draft.secret),
             SettingsInput::LocalPrivilegePromptPatterns => {
@@ -2162,6 +2178,10 @@ impl SettingsWorkspaceEntity {
             | SettingsInput::NetworkProxyTestHost
             | SettingsInput::NetworkProxyTestPort => true,
             SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::TotpName
+            | SettingsInput::TotpSecret
+            | SettingsInput::TotpPattern
+            | SettingsInput::TotpPeriod
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
             | SettingsInput::LocalPrivilegePromptPatterns => true,
@@ -2254,6 +2274,10 @@ impl SettingsWorkspaceEntity {
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
             | SettingsInput::LocalPrivilegePromptPatterns => self.privilege_error = None,
+            SettingsInput::TotpName
+            | SettingsInput::TotpSecret
+            | SettingsInput::TotpPattern
+            | SettingsInput::TotpPeriod => self.totp_error = None,
             _ => {}
         }
     }
@@ -2295,6 +2319,10 @@ impl SettingsWorkspaceEntity {
             SettingsInput::NetworkProxyTestHost => Some(&mut self.network_proxy_test_host),
             SettingsInput::NetworkProxyTestPort => Some(&mut self.network_proxy_test_port),
             SettingsInput::LocalPrivilegeLabel => Some(&mut self.privilege_draft.label),
+            SettingsInput::TotpName => self.totp_draft.as_mut().map(|draft| &mut draft.name),
+            SettingsInput::TotpSecret => self.totp_draft.as_mut().map(|draft| &mut *draft.secret),
+            SettingsInput::TotpPattern => self.totp_draft.as_mut().map(|draft| &mut draft.pattern),
+            SettingsInput::TotpPeriod => self.totp_draft.as_mut().map(|draft| &mut draft.period),
             SettingsInput::LocalPrivilegeUsernameHint => {
                 Some(&mut self.privilege_draft.username_hint)
             }

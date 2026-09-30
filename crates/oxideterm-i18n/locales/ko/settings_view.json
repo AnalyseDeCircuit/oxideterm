@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "인증 정보",
+      "description": "권한 상승 암호와 SSH 인증 코드를 관리합니다."
+    },
+    "totp": {
+      "title": "TOTP 인증 정보",
+      "description": "인증 코드 시드를 한 번 저장하고 SSH 호스트나 점프 호스트마다 선택하세요.",
+      "add": "인증 정보 추가",
+      "name": "이름",
+      "secret": "비밀 키",
+      "keep_secret": "비워 두면 저장된 비밀 키 유지",
+      "secret_hint": "Base32 비밀 키 또는 otpauth:// URI",
+      "uri_hint": "URI를 가져올 때는 URI의 설정을 사용합니다. 저장 후 변경할 수 있습니다.",
+      "pattern": "프롬프트 일치 규칙 (정규식)",
+      "algorithm": "알고리즘",
+      "digits": "자릿수",
+      "period": "갱신 주기 (초)",
+      "enabled": "사용",
+      "disabled": "사용 안 함",
+      "invalid_secret": "유효한 Base32 비밀 키 또는 TOTP URI를 입력하세요.",
+      "invalid_parameters": "이름, 6자리 또는 8자리, 1~300초의 주기를 지정하세요.",
+      "invalid_pattern": "빈 문자열과 일치하지 않는 유효한 정규식을 입력하세요.",
+      "in_use": "이 인증 정보를 사용하는 연결이 있습니다. 먼저 연결의 할당을 해제하세요.",
+      "unavailable": "인증 정보 또는 보호된 비밀 키를 사용할 수 없습니다.",
+      "save_failed": "인증 정보를 저장할 수 없습니다. 보호된 저장소를 확인하고 다시 시도하세요.",
+      "none": "없음",
+      "connection_label": "TOTP 인증 정보",
+      "connection_hint": "설정 → 인증 정보에서 만들고 각 호스트에서 선택하세요."
+    },
     "title": "설정",
     "search": {
       "open": "설정 검색",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "지식 베이스",
       "local": "로컬 터미널",
-      "privilege": "권한 상승 자격 증명",
+      "privilege": "인증 정보",
       "reconnect": "자동 재연결",
       "help": "도움말 및 정보",
       "keybindings": "키 바인딩",

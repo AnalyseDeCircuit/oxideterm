@@ -166,6 +166,10 @@ impl LaunchSnapshot {
                     .iter()
                     .flatten()
                     .map(|hop| SavedProxyHop {
+                        totp_credential_id: hop
+                            .totp
+                            .as_ref()
+                            .map(|binding| binding.credential_id.clone()),
                         host: hop.host.clone(),
                         port: hop.port,
                         username: hop.username.clone(),

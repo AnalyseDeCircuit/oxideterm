@@ -299,6 +299,8 @@ fn save_profile(
                             && existing_hop.username == hop.username.trim()
                     });
                     Ok(SavedProxyHop {
+                        totp_credential_id: matching_hop
+                            .and_then(|hop| hop.totp_credential_id.clone()),
                         host: hop.host.clone(),
                         port: hop.port,
                         username: hop.username.clone(),
@@ -314,6 +316,13 @@ fn save_profile(
                 })
                 .collect::<Result<Vec<_>, String>>()?;
             let request = SaveConnectionRequest {
+                totp_credential_id: existing
+                    .filter(|connection| {
+                        connection.host == profile.host.trim()
+                            && connection.port == profile.port
+                            && connection.username == profile.username.trim()
+                    })
+                    .and_then(|connection| connection.options.totp_credential_id.clone()),
                 id: existing_id.map(ToOwned::to_owned),
                 name: profile.name.clone(),
                 group: profile.group.clone(),
@@ -440,6 +449,8 @@ fn save_profile(
                                 && existing_hop.username == hop.username.trim()
                         });
                     Ok(SavedProxyHop {
+                        totp_credential_id: matching_hop
+                            .and_then(|hop| hop.totp_credential_id.clone()),
                         host: hop.host.clone(),
                         port: hop.port,
                         username: hop.username.clone(),

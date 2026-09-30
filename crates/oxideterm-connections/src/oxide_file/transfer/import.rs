@@ -94,6 +94,7 @@ fn apply_oxide_import_with_options_inner(
         })?
     };
     let EncryptedPayload {
+        totp_credentials,
         connections,
         app_settings_json,
         quick_commands_json,
@@ -437,6 +438,19 @@ fn apply_oxide_import_with_options_inner(
     // owner state before the first write. Secret-bearing connection upserts run
     // last, leaving no fallible archive stage after credentials are committed.
     let checkpoint = store.create_checkpoint()?;
+    let credential_selection = crate::CredentialSyncSelection {
+        totp_ids: connections_to_save
+            .iter()
+            .flat_map(|p| {
+                p.options.totp_credential_id.iter().cloned().chain(
+                    p.proxy_chain.iter().filter_map(|h| h.totp_credential_id.clone()),
+                )
+            })
+            .collect(),
+        connection_ids: connections_to_save.iter().map(|p| p.id.clone()).collect(),
+        ..Default::default()
+    };
+    let mut prepared_totp = None;
     let apply_result = (|| {
         current_step += 1;
         report_progress("saving_config", current_step);
@@ -524,6 +538,31 @@ fn apply_oxide_import_with_options_inner(
 
         current_step += 1;
         report_progress("applying_connections", current_step);
+        let credentials = totp_credentials
+            .into_iter()
+            .filter(|p| credential_selection.totp_ids.contains(&p.id))
+            .collect();
+        store.merge_totp_credentials(
+            credentials,
+            options.conflict_strategy == ImportConflictStrategy::Replace,
+        )?;
+        if options.import_portable_secrets && !options.defer_totp_secrets {
+            let secrets = portable_secrets
+                .iter()
+                .filter(|secret| {
+                    crate::is_profile_credential(secret)
+                        && serde_json::from_str::<crate::CredentialTarget>(&secret.id)
+                            .is_ok_and(|target| matches!(target.owner, crate::CredentialOwner::Totp(_)))
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            prepared_totp = Some(store.prepare_profile_credentials(
+                &secrets, &credential_selection, &mut None,
+            )?);
+            result.portable_secrets.retain(|secret| {
+                !secrets.iter().any(|handled| handled.id == secret.id && handled.kind == secret.kind)
+            });
+        }
         store.upsert_imported_connections_and_managed_keys_transaction(
             connections_to_save,
             imported_managed_keys,
@@ -532,16 +571,37 @@ fn apply_oxide_import_with_options_inner(
     })();
 
     if let Err(import_error) = apply_result {
+        let secret_rollback = prepared_totp.take()
+            .map(|prepared| store.rollback_profile_credentials(prepared)).transpose();
+        // Restore metadata even if protected-slot cleanup fails.
         return match store.restore_checkpoint(&checkpoint) {
-            Ok(()) => Err(import_error),
+            Ok(()) => {
+                secret_rollback?;
+                Err(import_error)
+            }
             Err(rollback_error) => Err(OxideFileError::Store(format!(
                 "Import transaction failed ({import_error}); the connection store checkpoint also could not be restored ({rollback_error:#})"
             ))),
         };
     }
 
+    if let Some(mut prepared) = prepared_totp {
+        result.restored_profile_credentials += prepared.summary.restored;
+        result.cleared_profile_credentials += prepared.summary.cleared;
+        result.skipped_profile_credentials += prepared.summary.skipped;
+        // Durable metadata is already committed; cleanup retains failed references for retry.
+        let _ = store.commit_profile_credentials(&mut prepared);
+    }
+
     if options.import_portable_secrets {
         for secret in &portable_secrets {
+            if !options.defer_totp_secrets
+                && crate::is_profile_credential(secret)
+                && serde_json::from_str::<crate::CredentialTarget>(&secret.id)
+                    .is_ok_and(|target| matches!(target.owner, crate::CredentialOwner::Totp(_)))
+            {
+                continue;
+            }
             if secret.kind == "ai_provider_key" && !secret.id.trim().is_empty() {
                 result.imported_portable_secrets += 1;
             } else {
@@ -815,6 +875,7 @@ fn import_proxy_hop(
     import_options: &OxideImportOptions,
 ) -> Result<SavedProxyHop, OxideFileError> {
     Ok(SavedProxyHop {
+        totp_credential_id: hop.totp_credential_id,
         host: hop.host,
         port: hop.port,
         username: hop.username,

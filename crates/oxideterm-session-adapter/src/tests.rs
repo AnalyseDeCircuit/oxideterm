@@ -131,6 +131,7 @@ fn manual_proxy_command_uses_runtime_secret_and_overrides_other_routes() {
         plaintext_command: None,
     });
     connection.proxy_chain.push(SavedProxyHop {
+        totp_credential_id: None,
         host: "unused-jump.example.com".to_string(),
         port: 22,
         username: "jump".to_string(),
@@ -182,6 +183,7 @@ fn saved_proxy_chain_becomes_ssh_config_chain() {
     let (store, path) = temp_connection_store("proxy-chain");
     let mut conn = saved_connection(SavedAuth::Agent);
     conn.proxy_chain = vec![SavedProxyHop {
+        totp_credential_id: None,
         host: "jump.example.com".to_string(),
         port: 2222,
         username: "ops".to_string(),
@@ -243,7 +245,9 @@ fn saved_connection_hops_become_independent_runtime_configs() {
     let (store, path) = temp_connection_store("materialized-hops");
     let mut connection = saved_connection(SavedAuth::Agent);
     connection.options.connect_timeout_seconds = Some(180);
+    connection.options.totp_credential_id = Some("target-mfa".into());
     connection.proxy_chain = vec![SavedProxyHop {
+        totp_credential_id: Some("jump-mfa".into()),
         host: "jump.example.com".to_string(),
         port: 2222,
         username: "ops".to_string(),
@@ -262,6 +266,10 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         .expect("target should follow the materialized jumps");
 
     assert_eq!(jump.host, "jump.example.com");
+    assert_eq!(
+        jump.totp.as_ref().map(|p| p.credential_id.as_str()),
+        Some("jump-mfa")
+    );
     assert_eq!(jump.timeout_secs, 180);
     assert!(jump.proxy_chain.is_none());
     assert_eq!(jump.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
@@ -270,6 +278,18 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         Some("/tmp/jump-forward.sock")
     );
     assert_eq!(target.host, "target.example.com");
+    assert_eq!(
+        target.totp.as_ref().map(|p| p.credential_id.as_str()),
+        Some("target-mfa")
+    );
+    let bound_key = target.connection_key();
+    let mut unbound = target.clone();
+    unbound.totp = None;
+    assert_ne!(
+        bound_key,
+        unbound.connection_key(),
+        "different MFA bindings cannot share a pooled transport"
+    );
     assert_eq!(target.timeout_secs, 180);
     assert!(target.proxy_chain.is_none());
     assert!(ssh_config_for_saved_connection_hop(&store, &settings, &connection, 2).is_none());

@@ -1337,6 +1337,10 @@ impl WorkspaceApp {
             | SettingsInput::ManagedKeyRenameName
             | SettingsInput::ConnectionImportTargetGroup => String::new(),
             SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::TotpName
+            | SettingsInput::TotpSecret
+            | SettingsInput::TotpPattern
+            | SettingsInput::TotpPeriod
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
             | SettingsInput::LocalPrivilegePromptPatterns => String::new(),
@@ -1454,6 +1458,10 @@ impl WorkspaceApp {
             | SettingsInput::ManagedKeyRenameName
             | SettingsInput::ConnectionImportTargetGroup => {}
             SettingsInput::LocalPrivilegeLabel
+            | SettingsInput::TotpName
+            | SettingsInput::TotpSecret
+            | SettingsInput::TotpPattern
+            | SettingsInput::TotpPeriod
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
             | SettingsInput::LocalPrivilegePromptPatterns => {}
@@ -1704,6 +1712,8 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::NewConnectionGroup
             | SelectAnchorId::NewConnectionKeyAuthSource
             | SelectAnchorId::NewConnectionManagedKey
+            | SelectAnchorId::NewConnectionTotp
+            | SelectAnchorId::NewConnectionJumpTotp
             | SelectAnchorId::NewConnectionJumpSavedConnection
             | SelectAnchorId::NewConnectionRemoteDesktopSshGateway
             | SelectAnchorId::NewConnectionJumpKeyAuthSource

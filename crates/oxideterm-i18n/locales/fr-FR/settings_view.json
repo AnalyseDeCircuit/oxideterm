@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "Identifiants",
+      "description": "Gérez les mots de passe d’élévation et les codes de vérification SSH."
+    },
+    "totp": {
+      "title": "Identifiants TOTP",
+      "description": "Enregistrez une clé secrète, puis sélectionnez-la pour chaque hôte SSH ou serveur de rebond.",
+      "add": "Ajouter un identifiant",
+      "name": "Nom",
+      "secret": "Clé secrète",
+      "keep_secret": "Laisser vide pour conserver la clé enregistrée",
+      "secret_hint": "Clé Base32 ou URI otpauth://",
+      "uri_hint": "L’import utilise les paramètres de l’URI. Vous pouvez les modifier après l’enregistrement.",
+      "pattern": "Motif de l’invite (expression régulière)",
+      "algorithm": "Algorithme",
+      "digits": "Chiffres",
+      "period": "Période (secondes)",
+      "enabled": "Activé",
+      "disabled": "Désactivé",
+      "invalid_secret": "Saisissez une clé Base32 ou une URI TOTP valide.",
+      "invalid_parameters": "Indiquez un nom, 6 ou 8 chiffres et une période de 1 à 300 secondes.",
+      "invalid_pattern": "Saisissez une expression régulière valide qui ne correspond pas au texte vide.",
+      "in_use": "Cet identifiant est encore utilisé par une connexion. Retirez d’abord ses associations.",
+      "unavailable": "L’identifiant ou sa clé protégée est indisponible.",
+      "save_failed": "Impossible d’enregistrer l’identifiant. Vérifiez le stockage protégé et réessayez.",
+      "none": "Aucun",
+      "connection_label": "Identifiant TOTP",
+      "connection_hint": "Créez les identifiants dans Paramètres → Identifiants, puis sélectionnez-les pour chaque hôte."
+    },
     "title": "Paramètres",
     "search": {
       "open": "Rechercher dans les paramètres",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "Base de connaissances",
       "local": "Terminal local",
-      "privilege": "Identifiants d’élévation",
+      "privilege": "Identifiants",
       "reconnect": "Reconnexion",
       "help": "Aide et À propos",
       "keybindings": "Raccourcis clavier",

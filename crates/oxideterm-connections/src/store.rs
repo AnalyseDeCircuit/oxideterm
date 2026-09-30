@@ -30,8 +30,10 @@ include!("store/local_terminal.rs");
 include!("store/tests.rs");
 
 mod credential_sync;
+mod totp;
 pub use credential_sync::{
     CLEARED_PROFILE_CREDENTIAL_KIND, CredentialOwner, CredentialSlot, CredentialSyncSelection,
     CredentialTarget, PROFILE_CREDENTIAL_KIND, PreparedProfileCredentials,
     ProfileCredentialRestoreSummary, is_profile_credential,
 };
+pub use totp::{TotpBinding, TotpResolver};

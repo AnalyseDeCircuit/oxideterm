@@ -131,6 +131,8 @@ pub struct OxideMetadata {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedPayload {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub totp_credentials: Vec<crate::totp::TotpCredential>,
     pub version: u32,
     pub connections: Vec<EncryptedConnection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -407,6 +409,8 @@ impl fmt::Debug for EncryptedForward {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedProxyHop {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_credential_id: Option<String>,
     pub host: String,
     pub port: u16,
     pub username: String,

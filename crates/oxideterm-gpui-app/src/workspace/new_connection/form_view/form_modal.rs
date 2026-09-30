@@ -725,6 +725,7 @@ impl WorkspaceApp {
                                                 )),
                                         )
                                         .child(selector)
+                                        .child(self.render_connection_totp_select(false, cx))
                                 .when(form.auth_tab == SshAuthTab::Password, |content| {
                                     if edit_properties_mode
                                         && form.saved_password_keychain_id.is_some()

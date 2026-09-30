@@ -16,6 +16,7 @@ mod tests {
 
     fn request(id: &str, auth: SavedAuth) -> SaveConnectionRequest {
         SaveConnectionRequest {
+            totp_credential_id: None,
             id: Some(id.to_string()),
             name: "Home".to_string(),
             group: None,
@@ -247,6 +248,7 @@ mod tests {
             },
         );
         request.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.test".to_string(),
             port: 22,
             username: "jump".to_string(),
@@ -742,6 +744,7 @@ mod tests {
             },
         );
         request.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -1296,6 +1299,7 @@ mod tests {
         let mut store = load_empty_store("proxy-hop-password");
         let mut req = request("conn-1", SavedAuth::Agent);
         req.proxy_chain = vec![SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 2222,
             username: "ops".to_string(),
@@ -1364,6 +1368,7 @@ mod tests {
 
         let mut destination = request("target-with-hop", SavedAuth::Agent);
         destination.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -1463,6 +1468,7 @@ mod tests {
             },
         );
         req.proxy_chain = vec![SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -1728,6 +1734,7 @@ mod tests {
         let mut store = load_empty_store("proxy-hop-passphrase-clear");
         let mut req = request("conn-1", SavedAuth::Agent);
         req.proxy_chain = vec![SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -1754,6 +1761,7 @@ mod tests {
 
         let mut update = request("conn-1", SavedAuth::Agent);
         update.proxy_chain = vec![SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -1788,6 +1796,7 @@ mod tests {
         let mut store = load_empty_store("proxy-hop-passphrase-preserve");
         let mut req = request("conn-1", SavedAuth::Agent);
         req.proxy_chain = vec![SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -2392,6 +2401,7 @@ mod tests {
             },
         };
         source_connection.options = ConnectionOptions {
+            totp_credential_id: None,
             connect_timeout_seconds: Some(180),
             keep_alive_interval: 37,
             compression: true,

@@ -216,6 +216,7 @@ fn saved_standalone_sftp_proxy_hop_from_form(
         hop.gssapi_delegate_credentials,
     );
     Ok(SavedProxyHop {
+        totp_credential_id: hop.totp_credential_id.clone(),
         host,
         port,
         username,
@@ -553,6 +554,7 @@ fn runtime_mosh_auth_from_saved(
 }
 
 fn runtime_mosh_config_from_saved(
+    store: &ConnectionStore,
     profile: &oxideterm_connections::MoshProfile,
     mut secrets: SavedMoshProfileRuntimeSecrets,
     auth_override: Option<AuthMethod>,
@@ -568,6 +570,7 @@ fn runtime_mosh_config_from_saved(
         .zip(secrets.proxy_chain)
         .map(|(hop, secret)| {
             Some(ProxyHopConfig {
+                totp: store.totp_binding(hop.totp_credential_id.as_deref()),
                 host: hop.host.clone(),
                 port: hop.port,
                 username: hop.username.clone(),
@@ -958,6 +961,7 @@ impl WorkspaceApp {
                 let embedded_hops = config.proxy_chain.unwrap_or_default().into_iter();
                 embedded_hops
                     .chain(std::iter::once(ProxyHopConfig {
+                        totp: config.totp,
                         host: config.host,
                         port: config.port,
                         username: config.username,
@@ -1844,8 +1848,12 @@ impl WorkspaceApp {
                         return None;
                     }
                 };
-                let proxy_chain =
-                    proxy_chain_from_form(form, RuntimeSecretHandoff::Move, saved_proxy_hop_auth);
+                let proxy_chain = proxy_chain_from_form(
+                    &this.connection_store,
+                    form,
+                    RuntimeSecretHandoff::Move,
+                    saved_proxy_hop_auth,
+                );
                 let auth = runtime_mosh_auth_from_form(form);
                 let config = SshConfig {
                     host,
@@ -2000,8 +2008,12 @@ impl WorkspaceApp {
             return;
         }
 
-        let Some(config) = runtime_mosh_config_from_saved(&profile, runtime_secrets, auth_override)
-        else {
+        let Some(config) = runtime_mosh_config_from_saved(
+            &self.connection_store,
+            &profile,
+            runtime_secrets,
+            auth_override,
+        ) else {
             self.update_connection_form_state(cx, |state| {
                 if let Some(form) = state.form.as_mut() {
                     form.pending = false;
@@ -3317,7 +3329,9 @@ impl WorkspaceApp {
                 return;
             }
         };
-        let Some(config) = runtime_mosh_config_from_saved(&profile, runtime_secrets, None) else {
+        let Some(config) =
+            runtime_mosh_config_from_saved(&self.connection_store, &profile, runtime_secrets, None)
+        else {
             if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
                 self.standalone_connections
                     .mark_attempt_error(connection_attempt_id);
@@ -3468,6 +3482,7 @@ mod saved_connection_open_tests {
 
     fn password_proxy_hop(auth: SavedAuth) -> SavedProxyHop {
         SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 22,
             username: "ops".to_string(),
@@ -3548,6 +3563,8 @@ mod saved_connection_open_tests {
 
     #[test]
     fn saved_mosh_proxy_chain_becomes_bootstrap_route() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = ConnectionStore::load(directory.path().join("connections.json")).unwrap();
         let mut profile = oxideterm_connections::MoshProfile::new(
             "Mosh through jump",
             "target.example.com",
@@ -3563,6 +3580,7 @@ mod saved_connection_open_tests {
         })];
 
         let config = runtime_mosh_config_from_saved(
+            &store,
             &profile,
             SavedMoshProfileRuntimeSecrets {
                 auth: None,

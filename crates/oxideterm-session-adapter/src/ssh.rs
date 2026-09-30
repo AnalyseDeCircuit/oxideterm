@@ -48,6 +48,7 @@ pub fn ssh_config_from_saved_connection_with_auth(
         upstream_proxy_config_from_saved_policy(store, settings, &conn.upstream_proxy).ok()?
     };
     Some(SshConfig {
+        totp: store.totp_binding(conn.options.totp_credential_id.as_deref()),
         host: conn.host.clone(),
         port: conn.port,
         username: conn.username.clone(),
@@ -116,6 +117,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
             .zip(runtime_secrets.proxy_chain)
             .map(|(hop, secret)| {
                 Some(ProxyHopConfig {
+                    totp: store.totp_binding(hop.totp_credential_id.as_deref()),
                     host: hop.host.clone(),
                     port: hop.port,
                     username: hop.username.clone(),
@@ -145,6 +147,7 @@ pub fn ssh_config_from_saved_connection_with_runtime_secrets(
         )?
     };
     Some(SshConfig {
+        totp: store.totp_binding(conn.options.totp_credential_id.as_deref()),
         host: conn.host.clone(),
         port: conn.port,
         username: conn.username.clone(),
@@ -264,6 +267,7 @@ pub fn ssh_config_from_standalone_sftp_endpoint_with_runtime_secrets(
             .zip(runtime_secrets.proxy_chain)
             .map(|(hop, secret)| {
                 Some(ProxyHopConfig {
+                    totp: store.totp_binding(hop.totp_credential_id.as_deref()),
                     host: hop.host.clone(),
                     port: hop.port,
                     username: hop.username.clone(),
@@ -493,6 +497,7 @@ pub fn proxy_chain_config_from_saved_connection(
         .iter()
         .map(|hop| {
             Some(ProxyHopConfig {
+                totp: store.totp_binding(hop.totp_credential_id.as_deref()),
                 host: hop.host.clone(),
                 port: hop.port,
                 username: hop.username.clone(),
@@ -522,6 +527,7 @@ fn legacy_jump_host_proxy_chain(
     }
     let jump = store.get(jump_id)?;
     Some(vec![ProxyHopConfig {
+        totp: store.totp_binding(jump.options.totp_credential_id.as_deref()),
         host: jump.host.clone(),
         port: jump.port,
         username: jump.username.clone(),
@@ -546,6 +552,7 @@ pub fn ssh_config_for_saved_connection_hop(
     let hop_index = hop_index as usize;
     if let Some(hop) = connection.proxy_chain.get(hop_index) {
         return Some(SshConfig {
+            totp: store.totp_binding(hop.totp_credential_id.as_deref()),
             host: hop.host.clone(),
             port: hop.port,
             username: hop.username.clone(),

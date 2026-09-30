@@ -611,6 +611,7 @@ pub(super) fn edit_properties_saved_keychain_password_starts_unloaded() {
 pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.proxy_chain = vec![SavedProxyHop {
+        totp_credential_id: None,
         host: "jump.example.com".to_string(),
         port: 2222,
         username: "ops".to_string(),
@@ -651,6 +652,7 @@ pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
 pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.proxy_chain = vec![SavedProxyHop {
+        totp_credential_id: None,
         host: "jump.example.com".to_string(),
         port: 22,
         username: "ops".to_string(),
@@ -756,6 +758,7 @@ pub(super) fn new_connection_request_carries_proxy_chain() {
     form.agent_forwarding_socket = Some("/tmp/target-forward.sock".to_string());
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
+            totp_credential_id: None,
             empty_password: false,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: None,
@@ -940,6 +943,7 @@ pub(super) fn proxy_hop_two_factor_is_saved_as_keyboard_interactive() {
     form.auth_tab = SshAuthTab::Agent;
     form.proxy_hops
         .push(crate::workspace::new_connection::NewConnectionProxyHop {
+            totp_credential_id: None,
             empty_password: false,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: None,

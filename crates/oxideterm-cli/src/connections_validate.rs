@@ -342,6 +342,7 @@ mod tests {
 
     fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
         ConnectionInfo {
+            totp_credential_id: None,
             empty_password: false,
             id: id.to_string(),
             name: name.to_string(),

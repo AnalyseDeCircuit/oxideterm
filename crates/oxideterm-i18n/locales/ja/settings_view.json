@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "認証情報",
+      "description": "権限昇格用パスワードと SSH 確認コードを管理します。"
+    },
+    "totp": {
+      "title": "TOTP 認証情報",
+      "description": "確認コードのシークレットを保存し、SSH ホストや踏み台ごとに選択します。",
+      "add": "認証情報を追加",
+      "name": "名前",
+      "secret": "シークレット",
+      "keep_secret": "空欄にすると保存済みのシークレットを保持",
+      "secret_hint": "Base32 シークレットまたは otpauth:// URI",
+      "uri_hint": "URI の読み込み時は URI 内の設定を使用します。保存後に変更できます。",
+      "pattern": "プロンプトの一致条件（正規表現）",
+      "algorithm": "アルゴリズム",
+      "digits": "桁数",
+      "period": "更新間隔（秒）",
+      "enabled": "有効",
+      "disabled": "無効",
+      "invalid_secret": "有効な Base32 シークレットまたは TOTP URI を入力してください。",
+      "invalid_parameters": "名前、6 桁または 8 桁、1～300 秒の更新間隔を指定してください。",
+      "invalid_pattern": "空の文字列に一致しない有効な正規表現を入力してください。",
+      "in_use": "この認証情報を使用中の接続があります。先に割り当てを解除してください。",
+      "unavailable": "認証情報または保護されたシークレットを利用できません。",
+      "save_failed": "認証情報を保存できません。保護されたストレージを確認して再試行してください。",
+      "none": "使用しない",
+      "connection_label": "TOTP 認証情報",
+      "connection_hint": "設定 → 認証情報で作成し、ホストごとに選択します。"
+    },
     "title": "設定",
     "search": {
       "open": "設定を検索",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "ナレッジベース",
       "local": "ローカルターミナル",
-      "privilege": "権限昇格資格情報",
+      "privilege": "認証情報",
       "reconnect": "自動再接続",
       "help": "ヘルプと詳細",
       "keybindings": "キーバインド",

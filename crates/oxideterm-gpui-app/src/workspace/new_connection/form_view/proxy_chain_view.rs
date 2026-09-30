@@ -79,6 +79,51 @@ impl WorkspaceApp {
 
         let mut popup = select_overlay_popup_with_max_height(&self.tokens, width, max_height);
         match select_id {
+            NewConnectionSelect::Totp | NewConnectionSelect::JumpTotp => {
+                let current = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .and_then(|form| {
+                        if select_id == NewConnectionSelect::JumpTotp {
+                            form.jump_server_form
+                                .as_ref()
+                                .and_then(|hop| hop.totp_credential_id.clone())
+                        } else {
+                            form.totp_credential_id.clone()
+                        }
+                    });
+                let choices = std::iter::once((None, self.i18n.t("settings_view.totp.none")))
+                    .chain(
+                        self.connection_store
+                            .totp_credentials()
+                            .iter()
+                            .map(|entry| (Some(entry.id.clone()), entry.name.clone())),
+                    );
+                for (id, label) in choices {
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, label, id == current),
+                        false,
+                        false,
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = &mut state.form {
+                                    if select_id == NewConnectionSelect::JumpTotp {
+                                        if let Some(hop) = &mut form.jump_server_form {
+                                            hop.totp_credential_id = id.clone();
+                                        }
+                                    } else {
+                                        form.totp_credential_id = id.clone();
+                                    }
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
             NewConnectionSelect::Group => {
                 let current_group = self
                     .connection_form_state(cx)
@@ -1148,6 +1193,7 @@ impl WorkspaceApp {
                                 true,
                                 cx,
                             ))
+                            .child(self.render_connection_totp_select(true, cx))
                             .when(jump_form.auth_tab == SshAuthTab::DefaultKey, |content| {
                                 content.child(self.render_connection_hint(
                                     self.i18n.t("ssh.form.default_key_desc"),

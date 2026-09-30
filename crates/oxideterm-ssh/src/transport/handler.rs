@@ -77,6 +77,7 @@ async fn authenticate_proxy_hop(
     audit: Option<&oxideterm_audit::AuditContext>,
 ) -> Result<(), SshTransportError> {
     let config = SshConfig {
+        totp: hop.totp.clone(),
         host: hop.host.clone(),
         port: hop.port,
         username: hop.username.clone(),
@@ -640,11 +641,19 @@ async fn authenticate_flow(
         auth => auth,
     };
 
+    // Local password requests must bypass server-prompt matching, including
+    // when the user has configured a broad TOTP regular expression.
+    let password_prompt_handler = prompt_handler;
+    let totp_handler = config.totp.as_ref().map(|binding| totp::TotpPromptHandler {
+        binding: binding.clone(), manual: prompt_handler,
+        submitted: std::sync::atomic::AtomicBool::new(false),
+    });
+    let prompt_handler = totp_handler.as_ref().map(|handler| handler as &dyn SshPromptHandler).or(prompt_handler);
     let result = match auth {
         AuthMethod::Password { password, prompt } => {
             let prompted;
             let password = if *prompt {
-                let handler = prompt_handler.ok_or(SshTransportError::UnsupportedAuth(
+                let handler = password_prompt_handler.ok_or(SshTransportError::UnsupportedAuth(
                     "password authentication requires a prompt handler",
                 ))?;
                 let request = KeyboardInteractivePromptRequest {

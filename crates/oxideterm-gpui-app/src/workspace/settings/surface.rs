@@ -108,6 +108,8 @@ impl WorkspaceApp {
         self.close_settings_select();
         self.settings_workspace.update(cx, |settings, cx| {
             settings.close_navigation_editor(cx);
+            settings.totp_draft = None;
+            settings.totp_error = None;
             settings.close_settings_search(true, cx);
         });
         self.focused_settings_input = None;
@@ -549,6 +551,20 @@ impl WorkspaceApp {
                 }
             }
             SettingsTab::Privilege => {
+                self.connection_store
+                    .totp_credentials()
+                    .len()
+                    .hash(&mut hasher);
+                self.settings_workspace
+                    .read(cx)
+                    .totp_draft
+                    .is_some()
+                    .hash(&mut hasher);
+                self.settings_workspace
+                    .read(cx)
+                    .totp_error
+                    .is_some()
+                    .hash(&mut hasher);
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.connection_store
                     .connections()

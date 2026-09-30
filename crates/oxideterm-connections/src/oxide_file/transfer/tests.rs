@@ -51,6 +51,7 @@ mod tests {
                 plaintext_passphrase: Some(SecretString::from("phrase")),
             },
             proxy_chain: vec![SavedProxyHop {
+                totp_credential_id: None,
                 host: "jump.example.com".to_string(),
                 port: 22,
                 username: "jump".to_string(),
@@ -64,6 +65,7 @@ mod tests {
             upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
             proxy_command: None,
             options: ConnectionOptions {
+                totp_credential_id: None,
                 connect_timeout_seconds: Some(120),
                 keep_alive_interval: 30,
                 compression: true,
@@ -588,6 +590,7 @@ mod tests {
             secondary_endpoint: None,
         };
         request.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.test".to_string(),
             port: 22,
             username: "jump".to_string(),

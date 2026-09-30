@@ -7,6 +7,7 @@ use super::*;
 
 fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
     ConnectionInfo {
+        totp_credential_id: None,
         empty_password: false,
         id: id.to_string(),
         name: name.to_string(),
@@ -71,6 +72,7 @@ fn filters_connections_by_common_fields() {
 #[test]
 fn snapshot_changes_describe_incoming_records() {
     let snapshot = SavedConnectionsSyncSnapshot {
+        totp_credentials: Vec::new(),
         local_terminal_profiles: Vec::new(),
         local_terminal_tombstones: Vec::new(),
         revision: "rev".to_string(),

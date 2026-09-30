@@ -247,6 +247,7 @@ impl ConnectionStore {
             options.legacy_ssh_compatibility = request.legacy_ssh_compatibility;
             request.ssh_algorithms.validate()?;
             options.ssh_algorithms = request.ssh_algorithms;
+            options.totp_credential_id = request.totp_credential_id;
             options.dedicated_new_terminal_connection = request.dedicated_new_terminal_connection;
             options.ssh_channel_strategy = request.ssh_channel_strategy;
             options.x11_forwarding = request.x11_forwarding;
@@ -3423,6 +3424,7 @@ impl ConnectionStore {
             let (auth, runtime_secret) =
                 self.materialize_auth_with_runtime_secret(hop.auth, None)?;
             materialized.push(SavedProxyHop {
+                totp_credential_id: hop.totp_credential_id,
                 host: non_empty(hop.host.trim(), "Proxy host")?.to_string(),
                 port: hop.port.max(1),
                 username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),
@@ -3642,6 +3644,7 @@ impl ConnectionStore {
             let hop_auth = self.materialize_auth(hop.auth, None)?;
             touched_keychain_ids.extend(collect_keychain_ids_for_auth(&hop_auth));
             proxy_chain.push(SavedProxyHop {
+                totp_credential_id: hop.totp_credential_id,
                 host: non_empty(hop.host.trim(), "Proxy host")?.to_string(),
                 port: hop.port.max(1),
                 username: non_empty(hop.username.trim(), "Proxy username")?.to_string(),

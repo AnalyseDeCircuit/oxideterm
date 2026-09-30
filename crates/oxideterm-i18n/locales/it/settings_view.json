@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "Credenziali",
+      "description": "Gestisci le password di elevazione e i codici di verifica SSH."
+    },
+    "totp": {
+      "title": "Credenziali TOTP",
+      "description": "Salva una chiave segreta e selezionala per ogni host SSH o server di salto.",
+      "add": "Aggiungi credenziale",
+      "name": "Nome",
+      "secret": "Chiave segreta",
+      "keep_secret": "Lascia vuoto per mantenere la chiave salvata",
+      "secret_hint": "Chiave Base32 o URI otpauth://",
+      "uri_hint": "L’importazione usa i parametri dell’URI. Puoi modificarli dopo il salvataggio.",
+      "pattern": "Modello della richiesta (espressione regolare)",
+      "algorithm": "Algoritmo",
+      "digits": "Cifre",
+      "period": "Periodo (secondi)",
+      "enabled": "Abilitata",
+      "disabled": "Disabilitata",
+      "invalid_secret": "Inserisci una chiave Base32 o un URI TOTP valido.",
+      "invalid_parameters": "Specifica un nome, 6 o 8 cifre e un periodo tra 1 e 300 secondi.",
+      "invalid_pattern": "Inserisci un’espressione regolare valida che non corrisponda a testo vuoto.",
+      "in_use": "Una connessione usa ancora questa credenziale. Rimuovi prima le associazioni.",
+      "unavailable": "La credenziale o la chiave protetta non è disponibile.",
+      "save_failed": "Impossibile salvare la credenziale. Controlla l’archivio protetto e riprova.",
+      "none": "Nessuna",
+      "connection_label": "Credenziale TOTP",
+      "connection_hint": "Crea le credenziali in Impostazioni → Credenziali e selezionale per ciascun host."
+    },
     "title": "Impostazioni",
     "search": {
       "open": "Cerca nelle impostazioni",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "Base di conoscenza",
       "local": "Terminale Locale",
-      "privilege": "Credenziali di privilegio",
+      "privilege": "Credenziali",
       "reconnect": "Riconnessione",
       "help": "Aiuto e Info",
       "keybindings": "Scorciatoie da tastiera",

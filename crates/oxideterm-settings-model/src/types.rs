@@ -165,6 +165,10 @@ pub enum SettingsInput {
     LocalPrivilegeLabel,
     LocalPrivilegeUsernameHint,
     LocalPrivilegeSecret,
+    TotpName,
+    TotpSecret,
+    TotpPattern,
+    TotpPeriod,
     LocalPrivilegePromptPatterns,
     ConnectionDefaultUsername,
     ConnectionDefaultPort,
@@ -461,7 +465,7 @@ impl SettingsTab {
             Self::Terminal => "settings_view.terminal.title",
             Self::Appearance => "settings_view.appearance.title",
             Self::Connections => "settings_view.connections.keys_and_connections_title",
-            Self::Privilege => "settings_view.privilege_credentials.title",
+            Self::Privilege => "settings_view.credentials.title",
             Self::Network => "settings_view.network.title",
             Self::Sftp => "settings_view.sftp.title",
             Self::Ide => "settings_view.ide.title",
@@ -479,7 +483,7 @@ impl SettingsTab {
             Self::Terminal => "settings_view.terminal.description",
             Self::Appearance => "settings_view.appearance.description",
             Self::Connections => "settings_view.connections.keys_and_connections_description",
-            Self::Privilege => "settings_view.privilege_credentials.description",
+            Self::Privilege => "settings_view.credentials.description",
             Self::Network => "settings_view.network.description",
             Self::Sftp => "settings_view.sftp.description",
             Self::Ide => "settings_view.ide.description",
@@ -565,6 +569,10 @@ impl SettingsInput {
             Self::LocalPrivilegeLabel => 31_000,
             Self::LocalPrivilegeUsernameHint => 31_001,
             Self::LocalPrivilegeSecret => 31_002,
+            Self::TotpName => 31_010,
+            Self::TotpSecret => 31_011,
+            Self::TotpPattern => 31_012,
+            Self::TotpPeriod => 31_013,
             Self::LocalPrivilegePromptPatterns => 31_003,
             Self::ConnectionDefaultUsername => 9,
             Self::ConnectionDefaultPort => 10,
@@ -703,6 +711,7 @@ impl SettingsInput {
                 | Self::AppLockNewPassword
                 | Self::AppLockConfirmPassword
                 | Self::LocalPrivilegeSecret
+                | Self::TotpSecret
                 | Self::ManagedKeyFilePassphrase
                 | Self::ManagedKeyPastePrivateKey
                 | Self::ManagedKeyPastePassphrase

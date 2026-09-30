@@ -57,6 +57,7 @@ use crate::{
 };
 
 mod gssapi;
+mod totp;
 
 pub fn kerberos_credentials_available() -> bool {
     gssapi::credentials_available()

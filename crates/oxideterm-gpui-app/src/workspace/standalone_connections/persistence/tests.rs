@@ -170,6 +170,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
         ..Default::default()
     };
     config.proxy_chain = Some(vec![oxideterm_ssh::ProxyHopConfig {
+        totp: None,
         host: "jump.test".into(),
         port: 2222,
         username: "jump-user".into(),

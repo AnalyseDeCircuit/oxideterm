@@ -164,6 +164,13 @@ pub(super) fn connection_request_from_spec(
             .unwrap_or_default(),
     };
     Ok(SaveConnectionRequest {
+        totp_credential_id: existing
+            .filter(|connection| {
+                connection.host == host
+                    && connection.username == username
+                    && spec.port.is_none_or(|port| port == connection.port)
+            })
+            .and_then(|connection| connection.options.totp_credential_id.clone()),
         id: existing.map(|connection| connection.id.clone()),
         name,
         group: spec
@@ -325,6 +332,7 @@ fn saved_auth_from_connection_spec(
 
 fn saved_proxy_hop_from_spec(spec: ConnectionProxyHopSpec, json: bool) -> CliResult<SavedProxyHop> {
     Ok(SavedProxyHop {
+        totp_credential_id: None,
         host: spec.host,
         port: spec.port,
         username: spec.username,

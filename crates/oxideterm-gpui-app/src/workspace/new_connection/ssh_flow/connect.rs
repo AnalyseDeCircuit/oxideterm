@@ -193,9 +193,17 @@ impl WorkspaceApp {
             let proxy_chain = if proxy_command.is_some() {
                 None
             } else {
-                proxy_chain_from_form(form, secret_handoff, saved_proxy_hop_auth)
+                proxy_chain_from_form(
+                    &this.connection_store,
+                    form,
+                    secret_handoff,
+                    saved_proxy_hop_auth,
+                )
             };
             let config = SshConfig {
+                totp: this
+                    .connection_store
+                    .totp_binding(form.totp_credential_id.as_deref()),
                 host: host.clone(),
                 port: port.unwrap_or(22),
                 username: username.clone(),

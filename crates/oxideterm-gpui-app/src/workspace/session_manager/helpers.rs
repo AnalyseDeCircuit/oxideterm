@@ -408,6 +408,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     // Preserve compatibility settings when an existing connection enters edit mode.
     form.legacy_ssh_compatibility = conn.options.legacy_ssh_compatibility;
     form.ssh_algorithms = conn.options.ssh_algorithms.clone();
+    form.totp_credential_id = conn.options.totp_credential_id.clone();
     form.connect_timeout_seconds = conn.options.effective_connect_timeout_seconds();
     form.connect_timeout_seconds_text = form.connect_timeout_seconds.to_string();
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
@@ -804,6 +805,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
     persist_password_draft: bool,
 ) -> ConnectionDraft {
     ConnectionDraft {
+        totp_credential_id: form.totp_credential_id.clone(),
         // Both new and edited forms allow an omitted display name; storage requires a label.
         name: if form.name.trim().is_empty() {
             format!("{}@{}", form.username.trim(), form.host.trim())
@@ -843,6 +845,7 @@ pub(super) fn proxy_hop_draft_from_form(
     hop: &mut super::new_connection::NewConnectionProxyHop,
 ) -> ProxyHopDraft {
     ProxyHopDraft {
+        totp_credential_id: hop.totp_credential_id.clone(),
         host: hop.host.clone(),
         port: hop.port.clone(),
         username: hop.username.clone(),

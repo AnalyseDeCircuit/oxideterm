@@ -170,6 +170,7 @@ impl CloudSyncOperationService {
                             import_standalone_sftp_profiles: false,
                             import_remote_desktop_profiles: false,
                             import_portable_secrets: true,
+                            defer_totp_secrets: true,
                             restore_managed_keys: true,
                             restore_managed_key_passphrases: true,
                         },

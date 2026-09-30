@@ -192,6 +192,7 @@ impl ConnectionStore {
             .map(|record| record.updated_at.clone())
             .chain(snapshot.local_terminal_profiles.iter().map(|p| p.updated_at.to_rfc3339()))
             .chain(snapshot.local_terminal_tombstones.iter().map(|p| p.deleted_at.to_rfc3339()))
+            .chain(snapshot.totp_credentials.iter().map(|p| p.updated_at.to_rfc3339()))
             .max()
             .unwrap_or_else(|| snapshot.exported_at.clone());
 
@@ -381,6 +382,7 @@ impl ConnectionStore {
                 result.applied += 1;
             }
             self.apply_local_terminal_profiles(snapshot.local_terminal_profiles, snapshot.local_terminal_tombstones, strategy, &mut result)?;
+            result.applied += self.merge_totp_credentials(snapshot.totp_credentials, strategy == SavedConnectionsConflictStrategy::Replace)?;
             self.normalize();
             if result.applied > 0 {
                 self.save()?;
@@ -776,8 +778,11 @@ fn build_saved_connections_sync_snapshot(
     for profile in &mut local_terminal_profiles { profile.last_used_at = None; }
     let mut local_terminal_tombstones = active_connection_tombstones(&data.local_terminal_tombstones);
     local_terminal_tombstones.sort_by(|a, b| a.id.cmp(&b.id));
-    let revision = sha256_hex(&(&records, &local_terminal_profiles, &local_terminal_tombstones))?;
+    let mut totp_credentials = data.totp_credentials.iter().map(crate::totp::TotpCredential::portable).collect::<Vec<_>>();
+    totp_credentials.sort_by(|a, b| a.id.cmp(&b.id));
+    let revision = sha256_hex(&(&records, &local_terminal_profiles, &local_terminal_tombstones, &totp_credentials))?;
     Ok(SavedConnectionsSyncSnapshot {
+        totp_credentials,
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
@@ -1354,6 +1359,7 @@ fn build_synced_proxy_chain(
                 preserve_local_auth_secret(&mut auth, existing_auth);
             }
             SavedProxyHop {
+                totp_credential_id: hop.totp_credential_id.clone(),
                 host: hop.host.clone(),
                 port: hop.port,
                 username: hop.username.clone(),
@@ -1477,6 +1483,7 @@ mod mosh_tests {
     fn mosh_snapshot_strips_device_local_credential_references() {
         let mut profile = password_profile(Some("local-keychain-entry"));
         profile.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.test".to_string(),
             port: 22,
             username: "jump".to_string(),
@@ -1522,6 +1529,7 @@ mod mosh_tests {
         let mut store = ConnectionStore::load(&path).expect("store must load");
         let mut local = password_profile(Some("local-keychain-entry"));
         local.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.test".to_string(),
             port: 22,
             username: "jump".to_string(),

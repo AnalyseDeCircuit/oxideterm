@@ -43,6 +43,24 @@ pub(super) fn filter_saved_connection_snapshot(
         snapshot
             .records
             .retain(|record| selected_ids.contains(&record.id));
+        let mut credential_ids = BTreeSet::new();
+        for record in &snapshot.records {
+            if let Some(payload) = &record.payload {
+                credential_ids.extend(payload.totp_credential_id.iter().cloned());
+                credential_ids.extend(
+                    payload
+                        .proxy_chain
+                        .iter()
+                        .filter_map(|p| p.totp_credential_id.clone()),
+                );
+            }
+            if let Some(options) = &record.options {
+                credential_ids.extend(options.totp_credential_id.iter().cloned());
+            }
+        }
+        snapshot
+            .totp_credentials
+            .retain(|p| credential_ids.contains(&p.id));
     }
 }
 

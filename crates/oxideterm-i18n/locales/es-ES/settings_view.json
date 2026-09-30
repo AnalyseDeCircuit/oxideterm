@@ -1,5 +1,34 @@
 {
   "settings_view": {
+    "credentials": {
+      "title": "Credenciales",
+      "description": "Gestiona las contraseñas de elevación y los códigos de verificación SSH."
+    },
+    "totp": {
+      "title": "Credenciales TOTP",
+      "description": "Guarda una clave secreta y selecciónala para cada servidor SSH o servidor de salto.",
+      "add": "Añadir credencial",
+      "name": "Nombre",
+      "secret": "Clave secreta",
+      "keep_secret": "Dejar en blanco para conservar la clave guardada",
+      "secret_hint": "Clave Base32 o URI otpauth://",
+      "uri_hint": "Al importar se usan los parámetros de la URI. Puedes modificarlos después de guardar.",
+      "pattern": "Patrón de la solicitud (expresión regular)",
+      "algorithm": "Algoritmo",
+      "digits": "Dígitos",
+      "period": "Periodo (segundos)",
+      "enabled": "Activada",
+      "disabled": "Desactivada",
+      "invalid_secret": "Introduce una clave Base32 o una URI TOTP válida.",
+      "invalid_parameters": "Indica un nombre, 6 u 8 dígitos y un periodo de entre 1 y 300 segundos.",
+      "invalid_pattern": "Introduce una expresión regular válida que no coincida con texto vacío.",
+      "in_use": "Una conexión aún usa esta credencial. Elimina primero sus asociaciones.",
+      "unavailable": "La credencial o su clave protegida no está disponible.",
+      "save_failed": "No se pudo guardar la credencial. Comprueba el almacenamiento protegido e inténtalo de nuevo.",
+      "none": "Ninguna",
+      "connection_label": "Credencial TOTP",
+      "connection_hint": "Crea credenciales en Ajustes → Credenciales y selecciónalas para cada servidor."
+    },
     "title": "Configuración",
     "search": {
       "open": "Buscar ajustes",
@@ -73,7 +102,7 @@
       "ai": "OxideSens",
       "knowledge": "Base de conocimiento",
       "local": "Terminal local",
-      "privilege": "Credenciales de privilegio",
+      "privilege": "Credenciales",
       "reconnect": "Reconexión",
       "help": "Ayuda e Info",
       "keybindings": "Atajos de teclado",

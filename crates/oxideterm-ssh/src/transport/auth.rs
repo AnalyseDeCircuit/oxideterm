@@ -75,6 +75,7 @@ async fn try_password_as_keyboard_interactive(
                     && prompts.len() == 1
                     && !prompts[0].echo
                     && prompt_looks_like_password(&prompts[0].prompt)
+                    && !totp::matches_bound_prompt(config.totp.as_ref(), &prompts[0].prompt).await
                 {
                     password_prompt_consumed = true;
                     vec![password.to_string()]

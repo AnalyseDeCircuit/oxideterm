@@ -149,6 +149,8 @@ pub(in crate::workspace) fn connection_icon_field_visible(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum NewConnectionSelect {
+    Totp,
+    JumpTotp,
     Group,
     KeyAuthSource,
     ManagedKey,
@@ -365,6 +367,7 @@ pub(in crate::workspace) fn toggle_remote_desktop_feature(
 }
 
 pub(in crate::workspace) struct NewConnectionProxyHop {
+    pub(in crate::workspace) totp_credential_id: Option<String>,
     pub(in crate::workspace) saved_connection_id: String,
     pub(in crate::workspace) persisted_proxy_hop_index: Option<usize>,
     pub(in crate::workspace) host: String,
@@ -428,6 +431,7 @@ impl fmt::Debug for NewConnectionProxyHop {
 impl NewConnectionProxyHop {
     pub(in crate::workspace) fn new() -> Self {
         Self {
+            totp_credential_id: None,
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: None,
             host: String::new(),
@@ -457,6 +461,7 @@ impl NewConnectionProxyHop {
     ) -> Self {
         // Reopen only route metadata; protected credentials stay in their current owner.
         Self {
+            totp_credential_id: hop.totp_credential_id.clone(),
             saved_connection_id: String::new(),
             persisted_proxy_hop_index: Some(persisted_proxy_hop_index),
             host: hop.host.clone(),
@@ -509,6 +514,7 @@ impl NewConnectionProxyHop {
         // A saved secret is reusable only while every authentication endpoint field still
         // matches the selected connection, preventing credentials from reaching an edited host.
         self.saved_connection_id == connection.id
+            && self.totp_credential_id == connection.options.totp_credential_id
             && self.host.trim() == connection.host
             && self.port.trim().parse::<u16>().ok() == Some(connection.port)
             && self.username.trim() == connection.username
@@ -536,6 +542,7 @@ impl NewConnectionProxyHop {
     }
 
     pub(in crate::workspace) fn apply_saved_connection(&mut self, connection: &ConnectionInfo) {
+        self.totp_credential_id = connection.totp_credential_id.clone();
         self.saved_connection_id = connection.id.clone();
         self.empty_password = connection.empty_password;
         self.persisted_proxy_hop_index = None;
@@ -762,6 +769,7 @@ impl Drop for StandaloneSftpSecondaryForm {
 }
 
 pub(in crate::workspace) struct NewConnectionForm {
+    pub(in crate::workspace) totp_credential_id: Option<String>,
     // Reauthentication submits into the existing logical session, never a second sidebar row.
     pub(in crate::workspace) standalone_connection_id: Option<String>,
     pub(in crate::workspace) transport: NewConnectionTransport,
@@ -1078,6 +1086,7 @@ impl fmt::Debug for NewConnectionForm {
 impl Default for NewConnectionForm {
     fn default() -> Self {
         Self {
+            totp_credential_id: None,
             standalone_connection_id: None,
             transport: NewConnectionTransport::Ssh,
             local_shell_id: None,
@@ -2713,6 +2722,7 @@ mod tests {
         profile.prediction = MoshPredictionMode::Always;
         profile.locale = Some("en_US.UTF-8".to_string());
         profile.proxy_chain.push(SavedProxyHop {
+            totp_credential_id: None,
             host: "jump.example.com".to_string(),
             port: 2200,
             username: "jump".to_string(),
@@ -2961,6 +2971,7 @@ mod tests {
     #[test]
     fn jump_hop_uses_saved_connection_metadata_without_secrets() {
         let connection = ConnectionInfo {
+            totp_credential_id: None,
             empty_password: false,
             id: "conn-1".to_string(),
             name: "Bastion".to_string(),
