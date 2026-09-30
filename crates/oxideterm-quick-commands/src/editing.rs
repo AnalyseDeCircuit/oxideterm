@@ -9,7 +9,7 @@ use crate::{
     default_quick_command_categories, new_quick_category_id, new_quick_command_id,
 };
 
-const FALLBACK_QUICK_COMMAND_CATEGORY_ID: &str = "custom";
+pub const FALLBACK_QUICK_COMMAND_CATEGORY_ID: &str = "custom";
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct QuickCommandDraft {
@@ -203,20 +203,30 @@ pub fn delete_quick_command_category(
     commands: &mut [QuickCommand],
     id: &str,
 ) -> bool {
-    if default_quick_command_categories()
-        .iter()
-        .any(|category| category.id == id)
+    if id == FALLBACK_QUICK_COMMAND_CATEGORY_ID
         || !categories.iter().any(|category| category.id == id)
     {
         return false;
     }
 
-    // Custom groups are presentation metadata. Preserve their commands by
-    // returning them to the built-in fallback group before removing the group.
+    // Groups are presentation metadata; deleting one must not delete commands.
+    categories.retain(|category| category.id != id);
+    if !categories
+        .iter()
+        .any(|category| category.id == FALLBACK_QUICK_COMMAND_CATEGORY_ID)
+    {
+        // Imported snapshots can omit the fallback group. Recreate it so moved
+        // commands remain visible in the category list.
+        let mut fallback = default_quick_command_categories()
+            .into_iter()
+            .find(|category| category.id == FALLBACK_QUICK_COMMAND_CATEGORY_ID)
+            .expect("default categories contain the fallback group");
+        fallback.sort_order = next_category_sort_order(categories);
+        categories.push(fallback);
+    }
     for command in commands.iter_mut().filter(|command| command.category == id) {
         command.category = FALLBACK_QUICK_COMMAND_CATEGORY_ID.to_string();
     }
-    categories.retain(|category| category.id != id);
     true
 }
 
