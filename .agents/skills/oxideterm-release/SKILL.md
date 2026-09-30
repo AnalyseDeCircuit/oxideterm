@@ -83,6 +83,22 @@ git diff --cached
 
 Do not derive release notes from commit subjects alone. Read the meaningful implementation and user-facing differences. Exclude mechanical version bumps, changelog edits, formatting-only churn, and internal details that have no release impact.
 
+#### Resolve pull requests and contributors
+
+For every release channel, map the changes in the exact release range to their originating pull requests before drafting the notes. The helper's commit list excludes merge commits; inspect merge history and GitHub's commit-to-PR associations as well so merge, squash, and rebase merges receive attribution:
+
+```bash
+git log --format='%H %s' <previous-tag>..<target-ref>
+gh api --paginate repos/<owner>/<repo>/commits/<commit-sha>/pulls \
+  --jq '.[] | {number, title, url: .html_url, author: .user.login, merged_at, merge_commit_sha}'
+gh pr view <number> --repo <owner>/<repo> \
+  --json number,title,url,author,mergedAt,mergeCommit,commits
+```
+
+Keep a working mapping of each included PR's number, URL, author login, and actual contribution. Deduplicate PRs returned for multiple commits. Confirm inclusion against the target history and diff; merge dates alone do not establish release scope. Verify original PR provenance for cherry-picked changes. Fully reverted changes must not be presented as shipped features.
+
+Use the PR author, not the person or bot that merged it. For contributor thanks, exclude confirmed project maintainers and bot accounts; do not assume a human contributor is a maintainer merely because GitHub labels them `COLLABORATOR` or `MEMBER`. Keep credit for external PR work when the maintainer made follow-up fixes. A referenced issue number is not evidence of a PR or its author. If GitHub lookup fails, keep the unresolved attribution in working notes and resolve it before finalizing release notes; do not interpret lookup failure as no contributions.
+
 ### 3. Write the channel changelog
 
 Insert `## <version>` as the newest entry in the selected changelog. The heading must exactly match the version because `.github/scripts/compose_release_notes.py` uses it to locate the entry. The heading is an extraction boundary, not necessarily part of the published release body.
@@ -104,6 +120,34 @@ Write every version entry as two complete language blocks in this order (Chinese
 Keep both blocks structurally aligned: they must describe the same outcomes, limitations, validation status, and upgrade requirements in the same order. Translate for natural release-note language rather than word for word, and keep product names, commands, file names, and protocol names unchanged when translation would reduce precision. Do not merge English and Chinese into the same bullet. Use concise user-facing past tense in English and concise completed-action wording in Chinese. Keep each language's opening summary paragraph on one physical line so the GitHub Release editor does not show an artificial break. Combine related commits into one outcome and avoid raw commit-title dumps, implementation trivia, unsupported performance claims, and claims that were not verified. Use one restrained, semantically relevant emoji on each main stable-release section heading in both blocks; do not decorate every bullet or mix multiple emoji styles within one section.
 
 For a fork release, each language block must clearly separate changes inherited from official OxideTerm upstream from changes implemented by the fork. Use explicit localized headings equivalent to `Upstream changes` / `上游更新` and `Fork-specific changes` / `Fork 自有更新`; subsystem headings may be nested below them when the selected detail level warrants it. Classify merged or cherry-picked official work as upstream regardless of commit author, and classify behavior unique to the publishing fork as fork-specific. When a fork modifies an upstream feature, describe the inherited capability under upstream and the fork's material delta under fork-specific changes. If either category has no changes in the release range, state that explicitly instead of omitting the category. Never let a combined summary or bullet imply that the fork authored upstream work.
+
+#### PR references and contributor thanks
+
+Follow the attribution pattern in [NyaTerm v1.2.12](https://github.com/nyakang/nyaterm/releases/tag/v1.2.12): PR references beside the changes they introduced, plus a dedicated contributor section. Derive the actual entries from OxideTerm's release range.
+
+- Append linked PR numbers to every release-note item introduced through a PR, including maintainer-authored PRs. Use `（PR [#<number>](<pr-url>)）` in Chinese and `(PR [#<number>](<pr-url>))` in English. Put the reference at the end of the relevant bullet or feature paragraph, rather than only in the contributor list or full-changelog link. Keep issue links distinct from PR links. Direct commits have no invented PR number.
+- When several PRs contributed to a grouped item, include all relevant PR numbers once in that item. Attribute only the outcome supported by each PR; separate a maintainer's independent follow-up change when grouping would credit the wrong author. For PRs from another repository, qualify the link label with `owner/repo#number`.
+- Whenever the release includes external PR contributions, add `#### 👥 贡献者` inside the Chinese block and `#### 👥 Contributors` inside the English block, after the change sections and before upgrade notes when present. Thank every external PR author whose contribution is included in this release, including returning contributors and documentation, translation, build, or packaging contributors whose work may not warrant a standalone feature bullet.
+- List each author once per language block using their verified GitHub `@login`, a brief description of their contribution, and linked PR numbers. Match authors and PR references across both languages. A generic thank-you or GitHub's automatic avatar strip does not replace these entries. If identifying first-time contributors, verify prior repository contributions; a `New Contributors` list supplements the full thanks section.
+- Apply attribution at every detail level and in every channel. If the verified range contains no external PR contribution, omit the contributor section rather than adding an empty heading. A PR outside the release range is not credited as a new contribution to this version.
+
+Example contributor entries (replace the placeholders with verified release data):
+
+```markdown
+#### 👥 贡献者
+
+感谢以下外部贡献者参与本次更新：
+
+- @<login>：<具体贡献>（PR [#<number>](<pr-url>)）。
+
+#### 👥 Contributors
+
+Thank you to the external contributors to this release:
+
+- @<login>: <specific contribution> (PR [#<number>](<pr-url>)).
+```
+
+Place the two example sections in their respective language blocks, not together as a third bilingual section.
 
 #### Release-note detail level
 
@@ -158,6 +202,8 @@ python3 .github/scripts/compose_release_notes.py \
 ```
 
 Read the generated file and verify that the intended section appears once, the channel is correct, both `### 中文` and `### English` appear once in that order, their claims and bullet coverage match, and stable download URLs use the target tag. For stable notes, also verify that `[中文](#中文) | [English](#english)` is the first visible content, both navigation links target the language headings, and both language blocks appear before downloads, the GitHub Release title is not repeated in the body, and the order is bilingual changelog, downloads, installation tips, then links.
+
+Compare the composed notes with the PR mapping: each PR-derived change must retain its linked PR number beside the item in both languages, every included external PR author must appear in both contributor sections with the correct contribution and PR links, and the references must resolve to pull requests in the correct repository. Perform this check on the composed output, not just the changelog source.
 
 ### Fork release attribution check
 

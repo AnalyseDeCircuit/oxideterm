@@ -2,12 +2,12 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-09-27T07:07:09.705305Z
+Generated: 2026-09-30T14:18:20.806601Z
 
 ## Summary
 
-- MIT: 1100
-- Apache-2.0: 882
+- MIT: 1102
+- Apache-2.0: 884
 - Apache-2.0 WITH LLVM-exception: 59
 - Zlib: 45
 - BSD-3-Clause: 21
@@ -16,10 +16,10 @@ Generated: 2026-09-27T07:07:09.705305Z
 - ISC: 13
 - BSD-2-Clause: 11
 - Unlicense: 9
-- CC0-1.0: 5
+- CC0-1.0: 6
 - BSL-1.0: 3
+- MIT-0: 3
 - LGPL-2.1-or-later: 2
-- MIT-0: 2
 - 0BSD: 1
 - BSD-1-Clause: 1
 - CDLA-Permissive-2.0: 1
@@ -126,6 +126,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | aws-lc-sys | 0.40.0 | ISC, Apache-2.0, MIT, BSD-3-Clause, MIT-0 | https://crates.io/crates/aws-lc-sys |
 | backtrace | 0.3.76 | MIT, Apache-2.0 | https://crates.io/crates/backtrace |
 | base16ct | 1.0.0 | Apache-2.0, MIT | https://crates.io/crates/base16ct |
+| base32 | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/base32 |
 | base64 | 0.21.7 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
 | base64 | 0.22.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
 | base64 | 0.23.1 | MIT, Apache-2.0 | https://crates.io/crates/base64 |
@@ -212,6 +213,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | const-oid | 0.9.6 | Apache-2.0, MIT | https://crates.io/crates/const-oid |
 | const-random | 0.1.18 | MIT, Apache-2.0 | https://crates.io/crates/const-random |
 | const-random-macro | 0.1.16 | MIT, Apache-2.0 | https://crates.io/crates/const-random-macro |
+| constant_time_eq | 0.4.2 | CC0-1.0, MIT-0, Apache-2.0 | https://crates.io/crates/constant_time_eq |
 | convert_case | 0.10.0 | MIT | https://crates.io/crates/convert_case |
 | convert_case | 0.11.0 | MIT | https://crates.io/crates/convert_case |
 | core-foundation | 0.10.0 | MIT, Apache-2.0 | https://crates.io/crates/core-foundation |
@@ -1026,6 +1028,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | toml_parser | 1.1.2+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml_parser |
 | toml_write | 0.1.2 | MIT, Apache-2.0 | https://crates.io/crates/toml_write |
 | toml_writer | 1.1.1+spec-1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/toml_writer |
+| totp-rs | 6.0.0 | MIT | https://crates.io/crates/totp-rs |
 | tower | 0.5.3 | MIT | https://crates.io/crates/tower |
 | tower-http | 0.6.10 | MIT | https://crates.io/crates/tower-http |
 | tower-layer | 0.3.3 | MIT | https://crates.io/crates/tower-layer |
@@ -1296,8 +1299,8 @@ This section is a review prompt for binary distribution; it does not replace leg
 | zerocopy-derive | 0.8.48 | BSD-2-Clause, Apache-2.0, MIT | https://crates.io/crates/zerocopy-derive |
 | zerofrom | 0.1.7 | Unicode-3.0 | https://crates.io/crates/zerofrom |
 | zerofrom-derive | 0.1.7 | Unicode-3.0 | https://crates.io/crates/zerofrom-derive |
-| zeroize | 1.8.2 | Apache-2.0, MIT | https://crates.io/crates/zeroize |
-| zeroize_derive | 1.4.3 | Apache-2.0, MIT | https://crates.io/crates/zeroize_derive |
+| zeroize | 1.9.0 | Apache-2.0, MIT | https://crates.io/crates/zeroize |
+| zeroize_derive | 1.5.0 | Apache-2.0, MIT | https://crates.io/crates/zeroize_derive |
 | zerotrie | 0.2.4 | Unicode-3.0 | https://crates.io/crates/zerotrie |
 | zerovec | 0.11.6 | Unicode-3.0 | https://crates.io/crates/zerovec |
 | zerovec-derive | 0.11.3 | Unicode-3.0 | https://crates.io/crates/zerovec-derive |
