@@ -213,6 +213,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn local_recording_pressure_preserves_output_and_services_input_and_close() {
+        let _pressure_guard = crate::recording_test_support::RECORDING_PRESSURE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         use oxideterm_audit::{
             AuditContext, AuditPolicy, AuditService, AuditSource, AuditStore, RecordingState,
             StoredRecordingFrameKind,

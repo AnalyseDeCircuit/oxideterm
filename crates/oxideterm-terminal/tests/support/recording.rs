@@ -6,6 +6,10 @@ use std::sync::{
 
 pub struct AuditTestKeys;
 
+// These multi-megabyte fixtures share the CI runner's CPU and disk budget.
+// Acquire before setup so waiting for another fixture does not consume its deadlines.
+pub static RECORDING_PRESSURE_LOCK: Mutex<()> = Mutex::new(());
+
 impl oxideterm_audit::AuditKeyProvider for AuditTestKeys {
     fn load(&self, _: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
         Ok(zeroize::Zeroizing::new(vec![7; 32]))

@@ -1479,6 +1479,9 @@ mod telnet_tests {
 
     #[test]
     fn telnet_recording_pressure_keeps_controls_live_and_preserves_output() {
+        let _pressure_guard = crate::recording_test_support::RECORDING_PRESSURE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         use crate::recording_test_support::{PausedFiles, read_finished};
         use oxideterm_audit::{
             AuditContext, AuditPolicy, AuditService, AuditSource, RecordingState,

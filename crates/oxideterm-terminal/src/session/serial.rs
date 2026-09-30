@@ -2110,6 +2110,9 @@ mod serial_tests {
 
     #[test]
     fn serial_recording_resumes_with_flow_control_and_reports_gaps_without_it() {
+        let _pressure_guard = crate::recording_test_support::RECORDING_PRESSURE_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         use crate::recording_test_support::{AuditTestKeys, PausedFiles, read_finished};
         use oxideterm_audit::{
             AuditContext, AuditPolicy, AuditService, AuditSource, RecordingState,
