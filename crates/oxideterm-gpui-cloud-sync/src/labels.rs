@@ -15,6 +15,7 @@ use crate::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CloudSyncConfirm {
+    ChangePassword,
     ImportPreview,
     ForceUpload,
     ClearSecret { key: String, label: String },
@@ -67,6 +68,7 @@ pub fn cloud_sync_progress_stage_label_key(stage: CloudSyncProgressStage) -> &'s
 
 pub fn cloud_sync_history_action_label_key(action: &str) -> Option<&'static str> {
     match action {
+        "sync" => Some("plugin.cloud_sync.causal.sync"),
         "upload" => Some("plugin.cloud_sync.history.action_upload"),
         "pull" => Some("plugin.cloud_sync.history.action_pull"),
         "restore" => Some("plugin.cloud_sync.history.action_restore"),
@@ -118,6 +120,21 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         return CloudSyncErrorMessageSpec::Raw(error.to_string());
     };
     match code {
+        "password_change_pending" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.password_change_pending")
+        }
+        "password_change_separate_settings" => CloudSyncErrorMessageSpec::Key(
+            "plugin.cloud_sync.causal.password_change_separate_settings",
+        ),
+        "password_too_short" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.password_too_short")
+        }
+        "sync_cleanup_pending" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.cleanup_pending")
+        }
+        "sync_protocol_upgrade_required" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.protocol_upgrade_required")
+        }
         "missing_endpoint" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_endpoint")
         }
@@ -410,6 +427,7 @@ pub fn cloud_sync_select_label_key(label: CloudSyncSelectLabelKey) -> &'static s
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CloudSyncConfirmDescription {
+    ChangePassword,
     None,
     ForceUpload,
     ClearSecret { label: String },
@@ -453,6 +471,12 @@ pub fn cloud_sync_legacy_apply_success_copy_spec(
 
 pub fn cloud_sync_confirm_copy_spec(confirm: &CloudSyncConfirm) -> CloudSyncConfirmCopySpec {
     match confirm {
+        CloudSyncConfirm::ChangePassword => CloudSyncConfirmCopySpec {
+            variant: ConfirmDialogVariant::Default,
+            title_key: "plugin.cloud_sync.causal.change_password",
+            description: CloudSyncConfirmDescription::ChangePassword,
+            confirm_label_key: "plugin.cloud_sync.causal.change_password",
+        },
         CloudSyncConfirm::ImportPreview => CloudSyncConfirmCopySpec {
             variant: ConfirmDialogVariant::Default,
             title_key: "plugin.cloud_sync.confirm.import_title",
@@ -540,6 +564,12 @@ mod tests {
     #[test]
     fn maps_provider_errors_to_copy_specs() {
         for (error, expected) in [
+            (
+                "sync_protocol_upgrade_required: HTTP JSON server must support v3 object enumeration",
+                CloudSyncErrorMessageSpec::Key(
+                    "plugin.cloud_sync.causal.protocol_upgrade_required",
+                ),
+            ),
             (
                 "onedrive_access_denied: tenant policy blocked access",
                 CloudSyncErrorMessageSpec::KeyWithDetail {

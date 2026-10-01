@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "プラグインシステムは利用できません",
     "native_sidebar_empty_description": "現在の native 状態はプラグインタブで確認できます。",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "同期サーバーを新しいクラウド同期プロトコルに対応したバージョンに更新してから、再度同期してください。",
+        "password_change_pending": "パスワードの変更が未完了です。前回入力した新しいパスワードで再試行してください。",
+        "change_password": "同期パスワードを変更",
+        "change_password_description": "新しいパスワードで同期領域を作成し、アップロードの検証後に切り替えます。以前の領域は保持されます。",
+        "password_change_separate_settings": "同期パスワードを変更する前に、ほかの設定を保存してください。",
+        "password_too_short": "パスワードは6文字以上にしてください。",
+        "sync": "同期",
+        "cleanup_pending": "クリーンアップが未完了です。もう一度同期してください。",
+        "keep": "保持",
+        "preview": "同期のプレビュー",
+        "changes": "変更された項目",
+        "upgrade": "既存のクラウドデータを更新します。元のファイルは保持されます。",
+        "candidate": "バージョン",
+        "apply": "適用して同期",
+        "configuration": "設定",
+        "protected": "保護された値",
+        "current": "このデバイス",
+        "conflict_hint": "競合する項目のバージョンを選んでください。未選択の項目はこのデバイスの現在の値を保持します。"
+      },
       "panel_title": "Oxide クラウド同期",
       "backend": {
         "local_file": "ローカルファイル",

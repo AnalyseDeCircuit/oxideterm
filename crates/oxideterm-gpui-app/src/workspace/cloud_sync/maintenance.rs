@@ -15,7 +15,19 @@ impl WorkspaceApp {
                 .secret_hints
                 .clone(),
         );
-        if let Err(error) = provider.store_secret(secret_key, None) {
+        let actual_key = if secret_key == secret_keys::SYNC_PASSWORD {
+            self.cloud_sync
+                .read(cx)
+                .controller
+                .store
+                .state()
+                .settings
+                .password_secret_key()
+                .to_owned()
+        } else {
+            secret_key.into()
+        };
+        if let Err(error) = provider.store_secret(&actual_key, None) {
             self.cloud_sync.update(cx, |cloud_sync, _cx| {
                 cloud_sync.controller.store.state_mut().last_error = Some(error.to_string());
             });
@@ -192,6 +204,7 @@ impl WorkspaceApp {
             return;
         }
         match confirm {
+            Some(CloudSyncConfirm::ChangePassword) => self.start_cloud_sync_password_change(cx),
             Some(CloudSyncConfirm::ImportPreview) => self.start_cloud_sync_apply_preview(cx),
             Some(CloudSyncConfirm::ForceUpload) => {
                 self.start_cloud_sync_upload_with_options(true, false, false, cx)

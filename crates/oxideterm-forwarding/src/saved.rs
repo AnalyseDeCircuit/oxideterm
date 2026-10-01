@@ -133,6 +133,8 @@ pub struct ApplySavedForwardsSyncSnapshotResult {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SavedForwardError {
+    #[error("invalid resolved forward configuration: {message}")]
+    InvalidSnapshot { message: String },
     #[error("saved forward not found: {0}")]
     NotFound(String),
     #[error("I/O error: {0}")]
@@ -158,14 +160,14 @@ struct SavedForwardData {
     tombstones: Vec<DeletedPersistedForwardTombstone>,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 enum SavedForwardFileState {
     Missing,
     Present(Vec<u8>),
 }
 
 /// Opaque owner checkpoint used to restore every saved-forward record exactly.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SavedForwardCheckpoint {
     data: SavedForwardData,
     file_state: SavedForwardFileState,
@@ -631,6 +633,51 @@ impl SavedForwardStore {
             None,
         );
         result
+    }
+
+    /// Apply the complete effective set after causal merge, without timestamp
+    /// arbitration. Session-owned forwards outside sync remain untouched.
+    pub fn replace_resolved(
+        &self,
+        records: Vec<PersistedForwardDto>,
+        owners: &HashSet<String>,
+    ) -> Result<(), SavedForwardError> {
+        let mut resolved = Vec::new();
+        let mut ids = HashSet::new();
+        let now = Utc::now();
+        for record in records {
+            if !ids.insert(record.id.clone())
+                || record
+                    .owner_connection_id
+                    .as_ref()
+                    .is_none_or(|id| !owners.contains(id))
+            {
+                return Err(SavedForwardError::InvalidSnapshot {
+                    message: "Invalid resolved forward identity or owner".into(),
+                });
+            }
+            resolved.push(persisted_forward_from_sync_payload(record, now)?);
+        }
+        self.commit_update_if(|data| {
+            let mut tombstones = data.tombstones.clone();
+            for old in data.forwards.iter().filter(|forward| {
+                forward.owner_connection_id.is_some() && !ids.contains(&forward.id)
+            }) {
+                upsert_tombstone(
+                    &mut tombstones,
+                    DeletedPersistedForwardTombstone {
+                        id: old.id.clone(),
+                        deleted_at: now,
+                    },
+                );
+            }
+            tombstones.retain(|entry| !ids.contains(&entry.id));
+            data.forwards
+                .retain(|forward| forward.owner_connection_id.is_none());
+            data.forwards.extend(resolved);
+            data.tombstones = tombstones;
+            Ok(((), true))
+        })
     }
 
     fn sorted_forwards(

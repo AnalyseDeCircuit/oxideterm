@@ -451,7 +451,7 @@ pub fn get_action_secrets(
     )>::new();
 
     if include_sync_password {
-        reads.push((secret_keys::SYNC_PASSWORD, |secrets, value| {
+        reads.push((settings.password_secret_key(), |secrets, value| {
             secrets.sync_password = value
         }));
     }
@@ -506,9 +506,17 @@ pub fn get_action_secrets(
     }
 
     if matches!(mode, SecretReadMode::Silent)
-        && reads
-            .iter()
-            .any(|(key, _)| provider.has_hint(key) && secret_missing(key, &secrets))
+        && reads.iter().any(|(key, _)| {
+            provider.has_hint(key)
+                && secret_missing(
+                    if Some(*key) == settings.sync_password_ref.as_deref() {
+                        secret_keys::SYNC_PASSWORD
+                    } else {
+                        key
+                    },
+                    &secrets,
+                )
+        })
     {
         return Err(CloudSyncSecretError::UnlockRequired);
     }
@@ -765,6 +773,26 @@ mod tests {
                 ],
                 SecretReadMode::Prompt,
             )]
+        );
+        provider
+            .values
+            .insert("sync-v3-password-fixture".into(), "rotated".into());
+        let mut settings = CloudSyncSettings {
+            sync_password_ref: Some("sync-v3-password-fixture".into()),
+            ..settings
+        };
+        let rotated =
+            get_action_secrets(&settings, &mut provider, true, SecretReadMode::Prompt).unwrap();
+        assert_eq!(
+            rotated.sync_password.as_deref().map(String::as_str),
+            Some("rotated")
+        );
+        settings.local_file_mode = true;
+        let file_password =
+            get_action_secrets(&settings, &mut provider, true, SecretReadMode::Prompt).unwrap();
+        assert_eq!(
+            file_password.sync_password.as_deref().map(String::as_str),
+            Some("sync")
         );
     }
 }

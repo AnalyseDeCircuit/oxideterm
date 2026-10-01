@@ -80,11 +80,11 @@ pub use session_tree_plan::{
 pub use transport::kerberos_credentials_available;
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
-    KeyboardInteractiveResponses, ManagedKeyResolver, RemoteForwardHandler, RemoteForwardedTcpIp,
-    SshCommandOutput, SshForwardStream, SshOutputBoundary, SshOutputCancellation, SshOutputChunk,
-    SshPromptError, SshPromptHandler, SshPtyHandle, SshSecretCommandOutput, SshShellChannel,
-    SshTransportClient, SshTransportCommand, SshTransportError, X11ForwardHandler,
-    X11ForwardedChannel,
+    KeyboardInteractiveResponses, ManagedKeyMaterial, ManagedKeyResolver, RemoteForwardHandler,
+    RemoteForwardedTcpIp, SshCommandOutput, SshForwardStream, SshOutputBoundary,
+    SshOutputCancellation, SshOutputChunk, SshPromptError, SshPromptHandler, SshPtyHandle,
+    SshSecretCommandOutput, SshShellChannel, SshTransportClient, SshTransportCommand,
+    SshTransportError, X11ForwardHandler, X11ForwardedChannel,
 };
 pub use upstream_proxy::{
     UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyError, UpstreamProxyProtocol,

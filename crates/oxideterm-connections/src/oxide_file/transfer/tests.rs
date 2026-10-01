@@ -23,6 +23,111 @@ mod tests {
         ConnectionStore::load(path).unwrap()
     }
 
+    #[test]
+    fn embedded_certificate_migrates_into_protected_managed_auth() {
+        let mut rng = UnwrapErr(SysRng);
+        let private = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
+        let ca = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
+        let mut builder = russh::keys::ssh_key::certificate::Builder::new_with_random_nonce(
+            &mut rng,
+            private.public_key(),
+            1,
+            u64::MAX,
+        )
+        .unwrap();
+        builder.valid_principal("deploy").unwrap();
+        let certificate = builder.sign(&ca).unwrap().to_openssh().unwrap();
+        let private_text = private
+            .encrypt(&mut rng, "certificate-passphrase")
+            .unwrap()
+            .to_openssh(LineEnding::LF)
+            .unwrap();
+        let mut source = temp_store("certificate-source");
+        let mut connection = saved_connection("certificate", "Certificate host");
+        connection.auth = SavedAuth::Agent;
+        connection.proxy_chain.clear();
+        source.upsert_imported_connection(connection).unwrap();
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["certificate".into()],
+            "secret!",
+            Default::default(),
+        )
+        .unwrap();
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        let (metadata, mut payload) =
+            super::super::crypto::decrypt_oxide_archive_with_context_and_progress(
+                &file,
+                &mut OxideBatchDecryptionContext::new("secret!").unwrap(),
+                |_| {},
+            )
+            .unwrap();
+        payload.connections[0].auth = EncryptedAuth::Certificate {
+            key_path: "/original/private".into(),
+            cert_path: "/original/certificate".into(),
+            passphrase: Some(Zeroizing::new("certificate-passphrase".into())),
+            embedded_key: Some(Zeroizing::new(BASE64.encode(private_text.as_bytes()))),
+            embedded_cert: Some(Zeroizing::new(BASE64.encode(certificate.as_bytes()))),
+            managed_key: None,
+        };
+        let mut decoded =
+            decode_archive_sync_connections(&source, payload.connections.clone()).unwrap();
+        let key = decoded.managed_keys.pop().unwrap();
+        assert_eq!(
+            key.metadata.certificate.as_deref(),
+            Some(certificate.as_str())
+        );
+        assert_eq!(key.private_key.expose_secret(), private_text.as_str());
+        assert!(source.managed_ssh_keys().is_empty());
+        payload.checksum = compute_checksum(&payload).unwrap();
+        let bytes = encrypt_oxide_file(&payload, "secret!", metadata)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        let mut target = temp_store("certificate-target");
+        let ordinary = target
+            .create_managed_ssh_key_from_text(
+                SecretString::from(private_text.as_str()),
+                Some("Ordinary key".into()),
+                Some(SecretString::from("certificate-passphrase")),
+            )
+            .unwrap();
+        apply_oxide_import_with_options(&mut target, &bytes, "secret!", Default::default())
+            .unwrap();
+        let SavedAuth::ManagedKey { key_id, .. } = &target.connections()[0].auth else {
+            panic!("certificate must use protected managed auth");
+        };
+        assert_ne!(key_id, &ordinary.id);
+        assert_eq!(
+            target
+                .managed_ssh_key_metadata(key_id)
+                .unwrap()
+                .certificate
+                .as_deref(),
+            Some(certificate.as_str())
+        );
+        assert_eq!(
+            target
+                .resolve_managed_ssh_key_private_key(key_id)
+                .unwrap()
+                .expose_secret(),
+            private_text.as_str()
+        );
+        assert_eq!(
+            target
+                .get_saved_auth_passphrase(&target.connections()[0].auth)
+                .unwrap()
+                .unwrap()
+                .expose_secret(),
+            "certificate-passphrase"
+        );
+        assert!(
+            !fs::read_to_string(target.path())
+                .unwrap()
+                .contains("BEGIN OPENSSH PRIVATE KEY")
+        );
+    }
+
     fn generated_private_key_text() -> String {
         let key_path =
             std::env::temp_dir().join(format!("oxideterm-managed-key-{}.key", Uuid::new_v4()));
@@ -163,9 +268,10 @@ mod tests {
         .unwrap();
 
         let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.num_connections, 1);
-        assert_eq!(file.metadata.quick_commands_count, Some(1));
-        assert_eq!(file.metadata.quick_command_categories_count, Some(1));
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
+        assert_eq!(metadata.num_connections, 1);
+        assert_eq!(metadata.quick_commands_count, Some(1));
+        assert_eq!(metadata.quick_command_categories_count, Some(1));
 
         let preview = preview_oxide_import(
             &temp_store("preview"),
@@ -311,10 +417,11 @@ mod tests {
         // Re-encrypt a checksum-valid archive whose connection fails only in
         // the final store upsert, after the profile stage has been persisted.
         let exported_file = OxideFile::from_bytes(&exported).unwrap();
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&exported_file,&mut OxideBatchDecryptionContext::new(IMPORT_PASSWORD).unwrap(),|_|{}).unwrap();
         let mut payload = decrypt_payload(&exported, IMPORT_PASSWORD).unwrap();
         payload.connections[0].host.clear();
         payload.checksum = compute_checksum(&payload).unwrap();
-        let bytes = encrypt_oxide_file(&payload, IMPORT_PASSWORD, exported_file.metadata)
+        let bytes = encrypt_oxide_file(&payload, IMPORT_PASSWORD, metadata)
             .unwrap()
             .to_bytes()
             .unwrap();
@@ -433,8 +540,9 @@ mod tests {
         )
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.serial_profiles_count, Some(1));
-        assert_eq!(file.metadata.telnet_profiles_count, Some(1));
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
+        assert_eq!(metadata.serial_profiles_count, Some(1));
+        assert_eq!(metadata.telnet_profiles_count, Some(1));
 
         let preview = preview_oxide_import(
             &temp_store("serial-profile-preview"),
@@ -526,7 +634,8 @@ mod tests {
         )
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.mosh_profiles_count, Some(1));
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
+        assert_eq!(metadata.mosh_profiles_count, Some(1));
         let preview = preview_oxide_import(
             &temp_store("mosh-profile-preview"),
             &bytes,
@@ -645,7 +754,8 @@ mod tests {
         )
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.standalone_sftp_profiles_count, Some(2));
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
+        assert_eq!(metadata.standalone_sftp_profiles_count, Some(2));
         let preview = preview_oxide_import(
             &temp_store("standalone-sftp-profile-preview"),
             &bytes,
@@ -741,8 +851,9 @@ mod tests {
         )
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.remote_desktop_profiles_count, Some(1));
-        assert!(!serde_json::to_string(&file.metadata).unwrap().contains(CREDENTIAL));
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
+        assert_eq!(metadata.remote_desktop_profiles_count, Some(1));
+        assert!(!serde_json::to_string(&metadata).unwrap().contains(CREDENTIAL));
         let payload = decrypt_payload(&bytes, "secret!").unwrap();
         assert!(
             !payload
@@ -899,7 +1010,8 @@ mod tests {
         )
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
-        assert_eq!(file.metadata.managed_key_count, Some(1));
+        let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
+        assert_eq!(metadata.managed_key_count, Some(1));
         let payload = decrypt_payload(&bytes, "secret!").unwrap();
         assert!(matches!(
             payload.connections[0].auth,

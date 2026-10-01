@@ -76,6 +76,8 @@ pub(crate) fn command_name(command: &Command) -> Option<&'static str> {
             CloudSyncAction::Preview(..) => "cloud-sync preview",
             CloudSyncAction::Diff(..) => "cloud-sync diff",
             CloudSyncAction::Push(..) => "cloud-sync push",
+            CloudSyncAction::Sync(..) => "cloud-sync sync",
+            CloudSyncAction::ChangePassword(..) => "cloud-sync change-password",
             CloudSyncAction::Pull(..) => "cloud-sync pull",
             CloudSyncAction::Apply(..) => "cloud-sync apply",
             CloudSyncAction::Resolve(..) => "cloud-sync resolve",

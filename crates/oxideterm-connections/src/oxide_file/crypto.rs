@@ -23,9 +23,9 @@ struct KdfParams {
 /// `.oxide` files. Every file still receives a fresh nonce, while the expensive
 /// Argon2id derivation is paid only once for the batch.
 pub struct OxideBatchEncryptionContext {
-    salt: [u8; SALT_LEN],
-    key: Zeroizing<[u8; 32]>,
-    kdf_version: u32,
+    pub(super) salt: [u8; SALT_LEN],
+    pub(super) key: Zeroizing<[u8; 32]>,
+    pub(super) kdf_version: u32,
 }
 
 struct CachedOxideDecryptionKey {
@@ -68,6 +68,25 @@ impl OxideBatchDecryptionContext {
             password: Zeroizing::new(password.to_string()),
             cached: None,
         })
+    }
+
+    pub(super) fn key_for(
+        &mut self,
+        salt: [u8; SALT_LEN],
+        kdf_version: u32,
+    ) -> Result<&[u8; 32], OxideFileError> {
+        if !self
+            .cached
+            .as_ref()
+            .is_some_and(|cached| cached.salt == salt && cached.kdf_version == kdf_version)
+        {
+            self.cached = Some(CachedOxideDecryptionKey {
+                key: derive_key(self.password.as_str(), &salt, kdf_version)?,
+                salt,
+                kdf_version,
+            });
+        }
+        Ok(&self.cached.as_ref().ok_or(OxideFileError::CryptoError)?.key)
     }
 }
 
@@ -123,9 +142,7 @@ where
     F: FnMut(&'static str),
 {
     let mut salt = [0u8; SALT_LEN];
-    let mut nonce = [0u8; NONCE_LEN];
     rand::rngs::OsRng.fill_bytes(&mut salt);
-    rand::rngs::OsRng.fill_bytes(&mut nonce);
     on_progress("generating_salt_nonce");
 
     let key = derive_key(password, &salt, kdf_flags::CURRENT_KDF)?;
@@ -135,7 +152,6 @@ where
         payload,
         metadata,
         salt,
-        nonce,
         &key,
         kdf_flags::CURRENT_KDF,
         on_progress,
@@ -151,15 +167,12 @@ pub fn encrypt_oxide_file_with_context_and_progress<F>(
 where
     F: FnMut(&'static str),
 {
-    let mut nonce = [0u8; NONCE_LEN];
-    rand::rngs::OsRng.fill_bytes(&mut nonce);
     on_progress("generating_nonce");
     on_progress("reusing_derived_key");
     encrypt_oxide_payload(
         payload,
         metadata,
         context.salt,
-        nonce,
         &context.key,
         context.kdf_version,
         on_progress,
@@ -170,7 +183,6 @@ fn encrypt_oxide_payload<F>(
     payload: &EncryptedPayload,
     metadata: OxideMetadata,
     salt: [u8; SALT_LEN],
-    nonce: [u8; NONCE_LEN],
     key: &[u8; 32],
     kdf_version: u32,
     mut on_progress: F,
@@ -178,29 +190,27 @@ fn encrypt_oxide_payload<F>(
 where
     F: FnMut(&'static str),
 {
-    let plaintext = Zeroizing::new(rmp_serde::to_vec_named(payload)?);
+    let plaintext = Zeroizing::new(rmp_serde::to_vec_named(&(&metadata, payload))?);
     on_progress("serializing_payload");
-
-    let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|_| OxideFileError::CryptoError)?;
-    let ciphertext = cipher
-        .encrypt(Nonce::from_slice(&nonce), plaintext.as_ref())
-        .map_err(|_| OxideFileError::EncryptionFailed)?;
+    let archive = super::container::seal(
+        super::OxideDocumentKind::Archive,
+        &plaintext,
+        key,
+        salt,
+        kdf_version,
+    )?;
+    let nonce = archive[21 + SALT_LEN..21 + SALT_LEN + NONCE_LEN]
+        .try_into()
+        .map_err(|_| OxideFileError::CryptoError)?;
     on_progress("encrypting_payload");
-
-    if ciphertext.len() < TAG_LEN {
-        return Err(OxideFileError::CryptoError);
-    }
-    let (encrypted_data, tag_slice) = ciphertext.split_at(ciphertext.len() - TAG_LEN);
-    let mut tag = [0u8; TAG_LEN];
-    tag.copy_from_slice(tag_slice);
     on_progress("finalizing_file");
-
     Ok(OxideFile {
-        metadata,
+        metadata: Some(metadata),
+        archive: Some(archive),
         salt,
         nonce,
-        encrypted_data: encrypted_data.to_vec(),
-        tag,
+        encrypted_data: Vec::new(),
+        tag: [0; TAG_LEN],
         kdf_version,
     })
 }
@@ -223,14 +233,26 @@ where
     let key = derive_key(password, &oxide_file.salt, oxide_file.kdf_version)?;
     on_progress("deriving_key");
 
-    decrypt_oxide_payload(oxide_file, &key, on_progress)
+    decrypt_oxide_payload(oxide_file, &key, on_progress).map(|(_, payload)| payload)
 }
 
 pub fn decrypt_oxide_file_with_context_and_progress<F>(
     oxide_file: &OxideFile,
     context: &mut OxideBatchDecryptionContext,
-    mut on_progress: F,
+    on_progress: F,
 ) -> Result<EncryptedPayload, OxideFileError>
+where
+    F: FnMut(&'static str),
+{
+    decrypt_oxide_archive_with_context_and_progress(oxide_file, context, on_progress)
+        .map(|(_, payload)| payload)
+}
+
+pub fn decrypt_oxide_archive_with_context_and_progress<F>(
+    oxide_file: &OxideFile,
+    context: &mut OxideBatchDecryptionContext,
+    mut on_progress: F,
+) -> Result<(OxideMetadata, EncryptedPayload), OxideFileError>
 where
     F: FnMut(&'static str),
 {
@@ -264,10 +286,20 @@ fn decrypt_oxide_payload<F>(
     oxide_file: &OxideFile,
     key: &[u8; 32],
     mut on_progress: F,
-) -> Result<EncryptedPayload, OxideFileError>
+) -> Result<(OxideMetadata, EncryptedPayload), OxideFileError>
 where
     F: FnMut(&'static str),
 {
+    if let Some(bytes) = &oxide_file.archive {
+        let plaintext = super::container::open(bytes, super::OxideDocumentKind::Archive, key)?;
+        on_progress("decrypting_payload");
+        let (metadata, payload): (OxideMetadata, EncryptedPayload) =
+            rmp_serde::from_slice(&plaintext)?;
+        on_progress("deserializing_payload");
+        verify_checksum(&payload)?;
+        on_progress("verifying_checksum");
+        return Ok((metadata, payload));
+    }
     let cipher = ChaCha20Poly1305::new_from_slice(key).map_err(|_| OxideFileError::CryptoError)?;
     let mut ciphertext_with_tag = oxide_file.encrypted_data.clone();
     ciphertext_with_tag.extend_from_slice(&oxide_file.tag);
@@ -286,7 +318,13 @@ where
     on_progress("deserializing_payload");
     verify_checksum(&payload)?;
     on_progress("verifying_checksum");
-    Ok(payload)
+    Ok((
+        oxide_file
+            .metadata
+            .clone()
+            .ok_or(OxideFileError::CryptoError)?,
+        payload,
+    ))
 }
 
 pub fn compute_checksum(payload: &EncryptedPayload) -> Result<String, OxideFileError> {
@@ -552,5 +590,74 @@ mod tests {
             verify_checksum(&payload),
             Err(OxideFileError::ChecksumMismatch)
         ));
+    }
+
+    #[test]
+    fn archive_v2_hides_metadata_and_authenticates_while_reading_v1() {
+        let mut payload = payload_with_default_ssh_algorithms();
+        payload.checksum = compute_checksum(&payload).unwrap();
+        let metadata = OxideMetadata {
+            num_connections: 1,
+            connection_names: vec!["Legacy host".into()],
+            ..Default::default()
+        };
+        let salt = [0x31; SALT_LEN];
+        let nonce = [0x42; NONCE_LEN];
+        let key = derive_key("archive-password", &salt, kdf_flags::CURRENT_KDF).unwrap();
+        let plaintext = Zeroizing::new(rmp_serde::to_vec_named(&payload).unwrap());
+        let ciphertext = ChaCha20Poly1305::new_from_slice(key.as_slice())
+            .unwrap()
+            .encrypt(Nonce::from_slice(&nonce), plaintext.as_slice())
+            .unwrap();
+        let metadata_json = serde_json::to_vec(&metadata).unwrap();
+        // Build the released wire layout independently of the archive writer.
+        let mut legacy = super::super::MAGIC.to_vec();
+        for value in [
+            1u32,
+            kdf_flags::CURRENT_KDF,
+            metadata_json.len() as u32,
+            (ciphertext.len() - TAG_LEN) as u32,
+        ] {
+            legacy.extend(value.to_le_bytes());
+        }
+        legacy.extend(salt);
+        legacy.extend(nonce);
+        legacy.extend(metadata_json);
+        legacy.extend(ciphertext);
+        let mut decoder = OxideBatchDecryptionContext::new("archive-password").unwrap();
+        let (old_metadata, old_payload) = decrypt_oxide_archive_with_context_and_progress(
+            &OxideFile::from_bytes(&legacy).unwrap(),
+            &mut decoder,
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(old_metadata.connection_names, ["Legacy host"]);
+        assert_eq!(old_payload.connections[0].host, "legacy.example.com");
+        let bytes = encrypt_oxide_file(&payload, "archive-password", metadata)
+            .unwrap()
+            .to_bytes()
+            .unwrap();
+        assert_eq!(&bytes[5..9], &2u32.to_le_bytes());
+        assert!(
+            !bytes
+                .windows(b"Legacy host".len())
+                .any(|part| part == b"Legacy host")
+        );
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        assert!(file.metadata.is_none());
+        let (metadata, payload) =
+            decrypt_oxide_archive_with_context_and_progress(&file, &mut decoder, |_| {}).unwrap();
+        assert_eq!(metadata.connection_names, ["Legacy host"]);
+        assert_eq!(payload.connections[0].username, "operator");
+        let mut damaged = bytes;
+        *damaged.last_mut().unwrap() ^= 1;
+        assert!(
+            decrypt_oxide_archive_with_context_and_progress(
+                &OxideFile::from_bytes(&damaged).unwrap(),
+                &mut decoder,
+                |_| {}
+            )
+            .is_err()
+        );
     }
 }

@@ -98,6 +98,22 @@ impl ForwardingRegistry {
         store.export_snapshot()
     }
 
+    pub fn replace_resolved_forwards(
+        &self,
+        records: Vec<crate::PersistedForwardDto>,
+        owners: &HashSet<String>,
+    ) -> Result<(), SavedForwardError> {
+        let Some(store) = &self.saved_store else {
+            if records.is_empty() {
+                return Ok(());
+            }
+            return Err(SavedForwardError::InvalidSnapshot {
+                message: "Saved-forward store is unavailable".into(),
+            });
+        };
+        store.replace_resolved(records, owners)
+    }
+
     pub fn apply_saved_forwards_snapshot(
         &self,
         snapshot: SavedForwardsSyncSnapshot,

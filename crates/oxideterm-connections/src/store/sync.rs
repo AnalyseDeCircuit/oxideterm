@@ -1,3 +1,4 @@
+#[derive(Serialize, Deserialize)]
 enum SavedConnectionsStoreFileCheckpoint {
     Missing,
     Present(Vec<u8>),
@@ -29,6 +30,7 @@ fn audit_configuration_snapshot<T>(
 /// It deliberately does not read or copy keychain secrets, so operations that
 /// create new keychain entries must separately track those entries for cleanup.
 #[must_use = "connection store checkpoints should be restored or deliberately discarded"]
+#[derive(Serialize, Deserialize)]
 pub struct ConnectionStoreCheckpoint {
     store_path: PathBuf,
     original_data: ConnectionStoreData,
@@ -86,6 +88,7 @@ impl fmt::Debug for PreparedSavedConnectionsSync {
 /// Failed keychain deletions remain pending so callers can retry without
 /// rolling back already committed connection data.
 #[must_use = "committed sync cleanup should be finalized"]
+#[derive(Serialize, Deserialize)]
 pub struct SavedConnectionsSyncCleanup {
     store_path: PathBuf,
     outcome: ApplySavedConnectionsSyncOutcome,

@@ -813,11 +813,16 @@ async fn authenticate_flow(
             // keychain material for this auth attempt and drops it after decode.
             let private_key = resolve_managed_key(key_id)?;
             let key = load_private_key_from_memory(
-                private_key.as_str(),
+                private_key.private_key.as_str(),
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
-            let result =
-                authenticate_publickey_best_algo(handle, &config.username, key, audit).await?;
+            let result = if let Some(certificate) = &private_key.certificate {
+                let certificate = Certificate::from_openssh(certificate).map_err(|_| SshTransportError::AuthenticationFailed("Invalid managed SSH certificate".into()))?;
+                if certificate.public_key() != key.public_key().key_data() {
+                    return Err(SshTransportError::AuthenticationFailed("Managed SSH certificate does not match its private key".into()));
+                }
+                authenticate_certificate_best_algo(handle,&config.username,key,certificate,audit).await?
+            } else { authenticate_publickey_best_algo(handle, &config.username, key, audit).await? };
             log_auth_result("managed-key", &result);
             result
         }

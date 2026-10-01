@@ -72,6 +72,154 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
     }
 }
 
+pub fn reset_destination_state(state: &mut CloudSyncPersistedState) {
+    state.remote_exists = false;
+    state.last_sync_at = None;
+    state.last_upload_at = None;
+    state.last_check_at = None;
+    state.last_known_remote_revision = None;
+    state.last_known_remote_etag = None;
+    state.remote_format = None;
+    state.remote_updated_at = None;
+    state.remote_device_id = None;
+    state.remote_section_revisions = None;
+    state.last_synced_remote_sections = None;
+    state.last_synced_local_metadata = None;
+    state.last_synced_structured_state = None;
+    state.conflict_details = None;
+    state.auto_upload_blocked_by_conflict = false;
+    state.local_dirty = true;
+    state.local_dirty_sections = None;
+    state.status = CloudSyncStatus::Idle;
+    state.last_error = None;
+}
+
+pub fn finish_causal_sync_state(
+    state: &mut CloudSyncPersistedState,
+    outcome: &crate::operation::SyncOutcome,
+    now: String,
+) {
+    if let Some(settings) = &outcome.switched_settings {
+        state.settings = settings.clone();
+    }
+    if let Some(id) = &outcome.created_remote_id {
+        state.settings.git_repository = id.clone();
+    }
+    state.status = if outcome.cleanup_pending {
+        CloudSyncStatus::Error
+    } else if outcome.conflicts.is_empty() {
+        CloudSyncStatus::Idle
+    } else {
+        CloudSyncStatus::Conflict
+    };
+    state.last_error = outcome
+        .cleanup_pending
+        .then(|| "sync_cleanup_pending".into());
+    state.last_sync_at = Some(now.clone());
+    if outcome.published {
+        state.last_upload_at = Some(now);
+    }
+    state.remote_format = Some("oxide-sync-v3".into());
+    state.remote_exists = outcome.publication.is_some();
+    state.last_known_remote_revision = outcome.publication.as_ref().map(|id| id.path());
+    state.remote_device_id = outcome.publication.as_ref().map(|id| id.writer.to_string());
+    state.remote_updated_at = state.last_upload_at.clone();
+    state.last_known_remote_etag = None;
+    state.remote_section_revisions = None;
+    state.last_synced_remote_sections = None;
+    state.conflict_details = None;
+    state.auto_upload_blocked_by_conflict = !outcome.conflicts.is_empty();
+    let summary = {
+        let local = &outcome.local_snapshot;
+        state.last_synced_local_metadata = Some(local.metadata.clone());
+        let scope = &local.scope;
+        let plugin_ids = local
+            .metadata
+            .plugin_settings_revisions
+            .keys()
+            .filter(|id| {
+                scope.sync_plugin_settings
+                    && scope.plugin_ids.as_ref().is_none_or(|ids| ids.contains(id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let selection = StructuredApplySelection {
+            connections: scope.sync_connections,
+            forwards: scope.sync_forwards,
+            quick_commands: scope.sync_quick_commands,
+            serial_profiles: scope.sync_serial_profiles,
+            telnet_profiles: scope.sync_telnet_profiles,
+            mosh_profiles: scope.sync_mosh_profiles,
+            remote_desktop_profiles: scope.sync_remote_desktop_profiles,
+            sensitive_credentials: scope.sync_sensitive_credentials,
+            app_settings_sections: if scope.sync_app_settings {
+                scope.app_settings_sections.clone()
+            } else {
+                Vec::new()
+            },
+            plugin_ids: plugin_ids.clone(),
+        };
+        state.last_synced_structured_state = Some(merge_structured_baseline(
+            state.last_synced_structured_state.as_ref(),
+            &local.dirty.current_state,
+            &selection,
+        ));
+        CloudSyncHistorySummary {
+            connections: if scope.sync_connections {
+                local.connections_record_count
+            } else {
+                0
+            },
+            forwards: if scope.sync_forwards {
+                local.forwards_record_count
+            } else {
+                0
+            },
+            quick_commands: if scope.sync_quick_commands {
+                local.quick_commands_record_count
+            } else {
+                0
+            },
+            serial_profiles: if scope.sync_serial_profiles {
+                local.serial_profiles_record_count
+            } else {
+                0
+            },
+            telnet_profiles: if scope.sync_telnet_profiles {
+                local.telnet_profiles_record_count
+            } else {
+                0
+            },
+            mosh_profiles: if scope.sync_mosh_profiles {
+                local.mosh_profiles_record_count
+            } else {
+                0
+            },
+            remote_desktop_profiles: if scope.sync_remote_desktop_profiles {
+                local.remote_desktop_profiles_record_count
+            } else {
+                0
+            },
+            sensitive_credentials: if scope.sync_sensitive_credentials {
+                local.sensitive_credentials_record_count
+            } else {
+                0
+            },
+            has_app_settings: local.scope.sync_app_settings,
+            plugin_settings_count: plugin_ids.len(),
+        }
+    };
+    state.local_dirty = !outcome.conflicts.is_empty() || outcome.publication_pending;
+    state.local_dirty_sections = None;
+    state.append_history(CloudSyncHistoryEntry::new(
+        "sync",
+        summary,
+        !outcome.cleanup_pending,
+        state.last_error.clone(),
+        state.last_known_remote_revision.clone(),
+    ));
+}
+
 pub fn finish_upload_state(state: &mut CloudSyncPersistedState, outcome: &UploadOutcome) -> String {
     let remote_sections = build_manifest_section_revisions(&outcome.manifest);
     let revision = outcome.manifest.revision.clone();

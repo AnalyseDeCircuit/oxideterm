@@ -4,6 +4,7 @@
 //! Git repository provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
 
 const DEFAULT_GIT_API_ENDPOINT: &str = "https://api.github.com";
 

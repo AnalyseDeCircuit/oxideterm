@@ -8,8 +8,7 @@ use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
     OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, normalize_sync_scope,
     operation::{
-        ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, UploadOptions,
-        UploadOutcome,
+        ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, UploadOutcome,
     },
     progress::CloudSyncProgress,
     secret_keys,
@@ -55,14 +54,13 @@ use oxideterm_gpui_cloud_sync::{
     cloud_sync_sidebar_empty, cloud_sync_status_label_key, cloud_sync_status_list,
     cloud_sync_status_row, cloud_sync_toggle, cloud_sync_toggle_grid, cloud_sync_upload_diff_items,
     cloud_sync_upload_field_diff_items, cloud_sync_value_prefers_mono,
-    cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview, deliver_cloud_sync_check,
+    cloud_sync_version_info_rows, deliver_cloud_sync_apply_preview,
     deliver_cloud_sync_github_oauth, deliver_cloud_sync_google_oauth,
-    deliver_cloud_sync_microsoft_oauth, deliver_cloud_sync_pull_preview,
-    deliver_cloud_sync_restore_backup_preview, deliver_cloud_sync_upload,
-    deliver_cloud_sync_upload_preview, finish_cloud_sync_automatic_upload_error_state,
-    finish_cloud_sync_check_state, finish_cloud_sync_error_state,
-    finish_cloud_sync_pull_preview_state, finish_cloud_sync_upload_state,
-    finish_legacy_cloud_sync_apply_state, finish_structured_cloud_sync_apply_state,
+    deliver_cloud_sync_microsoft_oauth, deliver_cloud_sync_restore_backup_preview,
+    finish_cloud_sync_automatic_upload_error_state, finish_cloud_sync_check_state,
+    finish_cloud_sync_error_state, finish_cloud_sync_pull_preview_state,
+    finish_cloud_sync_upload_state, finish_legacy_cloud_sync_apply_state,
+    finish_structured_cloud_sync_apply_state,
     handle_cloud_sync_select_key as reduce_cloud_sync_select_key,
     normalize_cloud_sync_interval_draft, persist_remote_metadata, reset_cloud_sync_secret_drafts,
     store_cloud_sync_touched_secrets,
@@ -87,6 +85,7 @@ use oxideterm_gpui_ui::select::{
     select_option_action, select_option_highlighted, select_panel_overlay_popup_with_max_height,
 };
 
+mod causal;
 mod config;
 mod confirm_dialog;
 mod delivery;
@@ -160,6 +159,8 @@ pub(super) struct CloudSyncControllerState {
     pub(super) dirty_refresh_scheduled: bool,
     pub(super) dirty_refresh_generation: u64,
     pub(super) upload_after_current: Option<bool>,
+    pub(super) causal_pending: Option<oxideterm_cloud_sync::operation::PreparedSync>,
+    pub(super) password_change: Option<zeroize::Zeroizing<String>>,
 }
 
 impl CloudSyncControllerState {
@@ -175,6 +176,8 @@ impl CloudSyncControllerState {
             dirty_refresh_scheduled: false,
             dirty_refresh_generation: 0,
             upload_after_current: None,
+            causal_pending: None,
+            password_change: None,
         }
     }
 }
@@ -202,6 +205,9 @@ pub(super) struct CloudSyncViewState {
     pub(super) confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) confirm_focused_action: Option<ConfirmDialogAction>,
     pub(super) pending_preview: Option<CloudSyncPendingPreview>,
+    pub(super) causal_summary: Option<oxideterm_cloud_sync::operation::SyncPlanSummary>,
+    pub(super) causal_choices: std::collections::BTreeMap<usize, usize>,
+    pub(super) causal_conflicts: Vec<oxideterm_cloud_sync::operation::SyncConflictPreview>,
     pub(super) upload_preview: Option<CloudSyncPendingPreview>,
     pub(super) preview_selection: Option<CloudSyncPreviewSelection>,
     pub(super) upload_selection: Option<CloudSyncUploadSelection>,
@@ -271,6 +277,9 @@ impl CloudSyncViewState {
             confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             confirm_focused_action: None,
             pending_preview: None,
+            causal_summary: None,
+            causal_choices: Default::default(),
+            causal_conflicts: Vec::new(),
             upload_preview: None,
             preview_selection: None,
             upload_selection: None,
@@ -308,11 +317,16 @@ pub(super) enum CloudSyncUiIntent {
     StartMicrosoftOauth,
     StartGoogleOauth,
     StartUploadPreview,
-    CheckRemote,
     PullPreview,
     RestoreLatestBackup,
     SaveConfiguration,
     ApplyPreview,
+    ApplyCausal,
+    CancelCausal,
+    ChooseCausal {
+        conflict: usize,
+        candidate: usize,
+    },
     StartUpload,
     ForceUpload,
     FinishScopeEdit,
@@ -402,7 +416,7 @@ impl CloudSyncWorkspaceEntity {
             "localDirty": state.local_dirty,
             "remoteExists": state.remote_exists,
             "blockedByConflict": state.auto_upload_blocked_by_conflict,
-            "hasConflict": state.conflict_details.is_some(),
+            "hasConflict": state.auto_upload_blocked_by_conflict || state.conflict_details.is_some(),
             "lastSyncAt": state.last_sync_at,
             "lastUploadAt": state.last_upload_at,
             "lastCheckAt": state.last_check_at,
@@ -482,7 +496,9 @@ impl CloudSyncWorkspaceEntity {
     }
 
     fn has_pending_preview(&self) -> bool {
-        self.view.pending_preview.is_some() || self.view.upload_preview.is_some()
+        self.view.causal_summary.is_some()
+            || self.view.pending_preview.is_some()
+            || self.view.upload_preview.is_some()
     }
 
     fn sections(&self) -> Vec<CloudSyncSection> {
@@ -517,7 +533,15 @@ impl CloudSyncWorkspaceEntity {
             self.controller.progress.is_some(),
             self.view.active_tab,
         );
-        signature ^ u64::from(self.view.local_file_mode)
+        use std::hash::{Hash, Hasher};
+        let mut preview = std::collections::hash_map::DefaultHasher::new();
+        if let Some(summary) = &self.view.causal_summary {
+            summary.changed_fields.hash(&mut preview);
+            summary.conflicts.len().hash(&mut preview);
+            summary.upgrading.hash(&mut preview);
+            self.view.causal_choices.hash(&mut preview);
+        }
+        signature ^ u64::from(self.view.local_file_mode) ^ preview.finish()
     }
 
     fn sync_section_rows(&mut self) {

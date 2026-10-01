@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "外掛系統暫不可用",
     "native_sidebar_empty_description": "開啟外掛標籤頁查看 native 目前狀態。",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "請將同步伺服器升級至支援新版雲端同步協定的版本，然後重新同步。",
+        "password_change_pending": "上次密碼變更尚未完成，請使用上次的新密碼重試。",
+        "change_password": "變更同步密碼",
+        "change_password_description": "使用新密碼建立同步空間，上傳並驗證成功後切換。原本的同步空間會保留。",
+        "password_change_separate_settings": "請先儲存其他設定，再變更同步密碼。",
+        "password_too_short": "密碼至少需要 6 個字元。",
+        "sync": "同步",
+        "cleanup_pending": "清理尚未完成，請再次同步。",
+        "keep": "保留",
+        "preview": "同步預覽",
+        "changes": "變更欄位",
+        "upgrade": "將升級現有雲端資料，原始檔案會保留。",
+        "candidate": "版本",
+        "apply": "套用並同步",
+        "configuration": "設定",
+        "protected": "受保護的內容",
+        "current": "目前裝置",
+        "conflict_hint": "請選擇衝突欄位的版本。未選擇的衝突會保留目前裝置的值。"
+      },
       "panel_title": "Oxide 雲端同步",
       "backend": {
         "local_file": "本機檔案",

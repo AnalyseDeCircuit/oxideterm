@@ -175,6 +175,7 @@ impl ImportConflictStrategy {
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportPreview {
+    pub metadata: OxideMetadata,
     pub total_connections: usize,
     pub unchanged: Vec<String>,
     pub will_rename: Vec<(String, String)>,
@@ -327,6 +328,7 @@ include!("transfer/common.rs");
 include!("transfer/export.rs");
 include!("transfer/preview.rs");
 include!("transfer/import.rs");
+include!("transfer/sync.rs");
 include!("transfer/app_settings.rs");
 include!("transfer/planning.rs");
 include!("transfer/tests.rs");

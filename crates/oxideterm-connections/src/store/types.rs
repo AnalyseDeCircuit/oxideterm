@@ -2054,6 +2054,8 @@ pub enum ManagedSshKeyOrigin {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ManagedSshKey {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<String>,
     pub id: String,
     /// Managed secret ID containing the private key material.
     pub secret_id: String,
@@ -2127,7 +2129,7 @@ pub struct ApplySavedConnectionsSyncSnapshotResult {
     pub conflicts: usize,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ApplySavedConnectionsSyncOutcome {
     pub result: ApplySavedConnectionsSyncSnapshotResult,
     pub deleted_connection_ids: Vec<String>,

@@ -81,11 +81,18 @@ pub fn auth_method_from_saved_auth(
 }
 
 pub fn managed_key_resolver_from_store(store: &ConnectionStore) -> ManagedKeyResolver {
-    let store = store.clone();
+    let path = store.path().to_path_buf();
     Arc::new(move |key_id| {
+        let store = ConnectionStore::load_read_only(&path)
+            .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))?;
         store
             .resolve_managed_ssh_key_private_key(key_id)
-            .map(SecretString::into_zeroizing)
+            .and_then(|private_key| {
+                Ok(oxideterm_ssh::ManagedKeyMaterial {
+                    private_key: private_key.into_zeroizing(),
+                    certificate: store.managed_ssh_key_metadata(key_id)?.certificate,
+                })
+            })
             .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))
     })
 }

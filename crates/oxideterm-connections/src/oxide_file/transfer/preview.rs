@@ -87,14 +87,14 @@ fn preview_oxide_import_inner(
     };
     let file = OxideFile::from_bytes(bytes)?;
     report_progress("parsing_file", current_step);
-    let payload = if let Some(decryption_context) = decryption_context {
-        decrypt_oxide_file_with_context_and_progress(&file, decryption_context, |stage| {
+    let (metadata,payload) = if let Some(decryption_context) = decryption_context {
+        super::crypto::decrypt_oxide_archive_with_context_and_progress(&file, decryption_context, |stage| {
             current_step += 1;
             report_progress(stage, current_step);
         })?
     } else {
         let password = password.ok_or(OxideFileError::CryptoError)?;
-        decrypt_oxide_file_with_progress(&file, password, |stage| {
+        super::crypto::decrypt_oxide_archive_with_context_and_progress(&file, &mut OxideBatchDecryptionContext::new(password)?, |stage| {
             current_step += 1;
             report_progress(stage, current_step);
         })?
@@ -126,6 +126,7 @@ fn preview_oxide_import_inner(
     current_step += 1;
     report_progress("building_preview", current_step);
     let mut preview = ImportPreview {
+        metadata,
         total_connections: connections.len(),
         has_embedded_keys: connections.iter().any(connection_has_embedded_key),
         total_forwards: connections.iter().map(|conn| conn.forwards.len()).sum(),

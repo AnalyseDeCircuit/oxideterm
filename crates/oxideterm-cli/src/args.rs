@@ -152,7 +152,9 @@ fn normalize_command_output_format(command: &mut Command) {
             | CloudSyncAction::Preview(args)
             | CloudSyncAction::Backups(args) => normalize_json_args(args),
             CloudSyncAction::Configure(args) => normalize_write_args(&mut args.write),
-            CloudSyncAction::Push(args) => normalize_write_args(&mut args.write),
+            CloudSyncAction::Push(args)
+            | CloudSyncAction::Sync(args)
+            | CloudSyncAction::ChangePassword(args) => normalize_write_args(&mut args.write),
             CloudSyncAction::Pull(args) => normalize_write_args(&mut args.write),
             CloudSyncAction::Apply(args) => normalize_write_args(&mut args.write),
             CloudSyncAction::Resolve(args) => normalize_write_args(&mut args.write),

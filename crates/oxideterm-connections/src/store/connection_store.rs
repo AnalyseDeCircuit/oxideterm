@@ -3180,6 +3180,7 @@ impl ConnectionStore {
 
         let now = Utc::now();
         let key = ManagedSshKey {
+            certificate: None,
             id,
             secret_id,
             name: managed_key_display_name(name, fallback_name),

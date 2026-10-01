@@ -23,15 +23,21 @@ pub enum CloudSyncAction {
     Status(JsonArgs),
     #[command(about = "Update cloud-sync configuration")]
     Configure(CloudSyncConfigureArgs),
-    #[command(about = "Preview local and remote sync state")]
+    #[command(about = "Inspect cached sync state; use sync --dry-run for a fresh remote preview")]
     Preview(JsonArgs),
-    #[command(about = "Show differences between local and remote sync state")]
+    #[command(about = "Compare cached section revisions with the last sync baseline")]
     Diff(CloudSyncDiffArgs),
-    #[command(about = "Push local state to the configured remote")]
+    #[command(about = "Merge and publish causal sync snapshots (close the desktop app first)")]
+    Sync(CloudSyncWriteArgs),
+    #[command(
+        about = "Read a new sync password from stdin, verify a fresh namespace, then switch to it"
+    )]
+    ChangePassword(CloudSyncWriteArgs),
+    #[command(about = "Merge and publish local and remote changes (alias of sync)")]
     Push(CloudSyncWriteArgs),
-    #[command(about = "Pull remote state into local files")]
+    #[command(about = "Merge remote changes and publish the combined state (alias of sync)")]
     Pull(CloudSyncPullArgs),
-    #[command(about = "Apply either local or remote state through the sync engine")]
+    #[command(about = "Apply a causal merge with --from remote --strategy merge")]
     Apply(CloudSyncApplyArgs),
     #[command(about = "Resolve a cloud-sync conflict")]
     Resolve(CloudSyncResolveArgs),

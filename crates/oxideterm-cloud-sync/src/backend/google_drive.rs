@@ -4,6 +4,8 @@
 //! Google Drive provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
+use publications::google_drive_scoped_object_name;
 
 const GOOGLE_DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
 const GOOGLE_DRIVE_UPLOAD_BASE: &str = "https://www.googleapis.com/upload/drive/v3";
@@ -67,12 +69,15 @@ impl CloudSyncBackend {
 
     pub(super) async fn read_google_drive_object(
         &self,
-        _config: &CloudSyncSettings,
+        config: &CloudSyncSettings,
         secrets: &CloudSyncSecrets,
         relative_path: &str,
     ) -> Result<Option<RemoteObject>> {
         let Some(file) = self
-            .find_google_drive_file(secrets, &google_drive_object_name(relative_path))
+            .find_google_drive_file(
+                secrets,
+                &google_drive_scoped_object_name(config, relative_path),
+            )
             .await?
         else {
             return Ok(None);
@@ -106,14 +111,14 @@ impl CloudSyncBackend {
 
     pub(super) async fn write_google_drive_object(
         &self,
-        _config: &CloudSyncSettings,
+        config: &CloudSyncSettings,
         secrets: &CloudSyncSecrets,
         relative_path: &str,
         bytes: Vec<u8>,
         content_type: Option<&str>,
         expected_etag: Option<&str>,
     ) -> Result<RemoteWriteResult> {
-        let name = google_drive_object_name(relative_path);
+        let name = google_drive_scoped_object_name(config, relative_path);
         let current = self.find_google_drive_file(secrets, &name).await?;
         if let Some(expected_etag) = expected_etag {
             let current_etag = current

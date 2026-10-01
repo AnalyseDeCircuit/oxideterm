@@ -91,6 +91,24 @@ impl ConnectionStore {
         }
         for profile in &self.data.connections {
             let owner = CredentialOwner::Connection(profile.id.clone());
+            bindings.extend(auth_binding(
+                owner.clone(),
+                CredentialSlot::Primary,
+                &profile.host,
+                profile.port,
+                &profile.username,
+                &profile.auth,
+            ));
+            for (index, hop) in profile.proxy_chain.iter().enumerate() {
+                bindings.extend(auth_binding(
+                    owner.clone(),
+                    CredentialSlot::Hop(index),
+                    &hop.host,
+                    hop.port,
+                    &hop.username,
+                    &hop.auth,
+                ));
+            }
             if let SavedUpstreamProxyPolicy::Custom { proxy } = &profile.upstream_proxy {
                 bindings.extend(proxy_binding(owner, CredentialSlot::UpstreamProxy, proxy));
             }
@@ -241,8 +259,31 @@ impl ConnectionStore {
         selection: &CredentialSyncSelection,
         global_proxy: Option<&SavedUpstreamProxyConfig>,
     ) -> Result<Vec<EncryptedPortableSecret>> {
+        self.export_sync_credentials_inner(selection, global_proxy, false)
+    }
+
+    pub fn export_sync_credentials(
+        &self,
+        selection: &CredentialSyncSelection,
+        global_proxy: Option<&SavedUpstreamProxyConfig>,
+    ) -> Result<Vec<EncryptedPortableSecret>> {
+        self.export_sync_credentials_inner(selection, global_proxy, true)
+    }
+
+    fn export_sync_credentials_inner(
+        &self,
+        selection: &CredentialSyncSelection,
+        global_proxy: Option<&SavedUpstreamProxyConfig>,
+        include_ssh: bool,
+    ) -> Result<Vec<EncryptedPortableSecret>> {
         let mut result = Vec::new();
         for binding in self.credential_bindings(global_proxy) {
+            if !include_ssh
+                && matches!(binding.target.owner, CredentialOwner::Connection(_))
+                && binding.target.slot != CredentialSlot::UpstreamProxy
+            {
+                continue;
+            }
             if !self.credential_selected(selection, &binding.target.owner) {
                 continue;
             }

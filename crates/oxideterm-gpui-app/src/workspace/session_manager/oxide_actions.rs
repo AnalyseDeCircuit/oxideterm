@@ -400,18 +400,22 @@ impl SessionManagerState {
                             let metadata = file.metadata;
                             dialog.file_path = Some(path);
                             dialog.file_data = Some(bytes);
-                            dialog.metadata_summary = Some(format!(
-                                "{} 个连接 · {}",
-                                metadata.num_connections,
-                                metadata
-                                    .exported_at
-                                    .with_timezone(&Local)
-                                    .format("%Y-%m-%d %H:%M")
-                            ));
-                            dialog.selected_names =
-                                metadata.connection_names.iter().cloned().collect();
+                            dialog.metadata_summary = metadata.as_ref().map(|metadata| {
+                                format!(
+                                    "{} 个连接 · {}",
+                                    metadata.num_connections,
+                                    metadata
+                                        .exported_at
+                                        .with_timezone(&Local)
+                                        .format("%Y-%m-%d %H:%M")
+                                )
+                            });
+                            dialog.selected_names = metadata
+                                .as_ref()
+                                .map(|metadata| metadata.connection_names.iter().cloned().collect())
+                                .unwrap_or_default();
                             dialog.expanded_app_settings_sections.clear();
-                            dialog.metadata = Some(metadata);
+                            dialog.metadata = metadata;
                             dialog.preview = None;
                             dialog.error = None;
                             dialog.result_summary = None;
@@ -1238,6 +1242,7 @@ impl WorkspaceApp {
                     dialog.progress_stage = None;
                     match result {
                         Ok(preview) => {
+                            dialog.metadata = Some(preview.metadata.clone());
                             dialog.selected_names = preview
                                 .records
                                 .iter()

@@ -35,6 +35,18 @@ pub(crate) fn prepare_write(args: &WriteArgs, has_changes: bool) -> CliResult<Wr
         ));
     }
 
+    if oxideterm_cloud_sync::sync_v3::RecoveryJournal::has_pending(
+        &crate::paths::default_settings_path(),
+    )
+    .map_err(|error| crate::error::runtime_error(error, args.json))?
+    {
+        return Err(CliError::new(
+            "cloud_sync_recovery_required",
+            "An interrupted cloud sync needs recovery. Reopen OxideTerm or run cloud-sync sync --yes before editing saved data.",
+            args.json,
+        ));
+    }
+
     let backup = if should_backup(args) {
         Some(create_backup_file(None, args.json)?)
     } else {

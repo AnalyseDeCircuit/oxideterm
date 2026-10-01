@@ -202,6 +202,26 @@
     "compatibility_title": "Compatibility",
     "manager_compatibility_notice": "Native plugins can use a manifest, WASM, or a separate process. Legacy JavaScript plugins from the Tauri version remain available for inspection or removal, but cannot run in the native version.",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "Update your sync server to a version that supports the new cloud sync protocol, then synchronize again.",
+        "password_change_pending": "A password change is pending. Retry with the same new password.",
+        "change_password": "Change sync password",
+        "change_password_description": "Create a new sync space with the new password and switch after the upload is verified. The previous space stays available.",
+        "password_change_separate_settings": "Save other setting changes before changing the sync password.",
+        "password_too_short": "Use a password of at least 6 characters.",
+        "sync": "Synchronize",
+        "cleanup_pending": "Cleanup is pending. Synchronize again to finish.",
+        "keep": "Keep",
+        "preview": "Sync preview",
+        "changes": "Changed fields",
+        "upgrade": "Existing cloud data will be upgraded. The original files will be kept.",
+        "candidate": "Version",
+        "apply": "Apply and synchronize",
+        "configuration": "Configuration",
+        "protected": "Protected value",
+        "current": "Current device",
+        "conflict_hint": "Choose a version for conflicting fields. Unselected conflicts keep this device’s current value."
+      },
       "panel_title": "Oxide Cloud Sync",
       "backend": {
         "local_file": "Local file",

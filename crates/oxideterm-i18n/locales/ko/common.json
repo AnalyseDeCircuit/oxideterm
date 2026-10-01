@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "플러그인 시스템을 사용할 수 없음",
     "native_sidebar_empty_description": "플러그인 탭에서 현재 native 상태를 확인하세요.",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "동기화 서버를 새 클라우드 동기화 프로토콜을 지원하는 버전으로 업데이트한 후 다시 동기화하세요.",
+        "password_change_pending": "비밀번호 변경이 완료되지 않았습니다. 이전에 입력한 새 비밀번호로 다시 시도해 주세요.",
+        "change_password": "동기화 비밀번호 변경",
+        "change_password_description": "새 비밀번호로 동기화 공간을 만들고 업로드 검증 후 전환합니다. 기존 공간은 유지됩니다.",
+        "password_change_separate_settings": "동기화 비밀번호를 변경하기 전에 다른 설정을 저장해 주세요.",
+        "password_too_short": "비밀번호는 6자 이상이어야 합니다.",
+        "sync": "동기화",
+        "cleanup_pending": "정리가 완료되지 않았습니다. 다시 동기화해 주세요.",
+        "keep": "유지",
+        "preview": "동기화 미리보기",
+        "changes": "변경된 항목",
+        "upgrade": "기존 클라우드 데이터를 업그레이드합니다. 원본 파일은 보존됩니다.",
+        "candidate": "버전",
+        "apply": "적용 및 동기화",
+        "configuration": "설정",
+        "protected": "보호된 값",
+        "current": "현재 기기",
+        "conflict_hint": "충돌하는 항목의 버전을 선택하세요. 선택하지 않은 항목은 이 기기의 현재 값을 유지합니다."
+      },
       "panel_title": "Oxide 클라우드 동기화",
       "backend": {
         "local_file": "로컬 파일",

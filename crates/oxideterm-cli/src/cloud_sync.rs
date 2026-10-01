@@ -86,6 +86,8 @@ pub fn run(command: CloudSyncCommand) -> CliResult<()> {
         CloudSyncAction::Preview(args) => cloud_sync_preview::preview(args),
         CloudSyncAction::Diff(args) => cloud_sync_preview::diff(args),
         CloudSyncAction::Push(args) => cloud_sync_write::push(args),
+        CloudSyncAction::Sync(args) => cloud_sync_write::synchronize(args),
+        CloudSyncAction::ChangePassword(args) => cloud_sync_write::change_password(args),
         CloudSyncAction::Pull(args) => cloud_sync_write::pull(args),
         CloudSyncAction::Apply(args) => cloud_sync_write::apply(args),
         CloudSyncAction::Resolve(args) => cloud_sync_write::resolve(args),
@@ -153,6 +155,9 @@ fn configure(args: CloudSyncConfigureArgs) -> CliResult<()> {
     let changes = cloud_sync_configure_changes(&before, &after);
     let mut guard = write_guard::prepare_write(&args.write, !changes.is_empty())?;
     if !args.write.dry_run && !changes.is_empty() {
+        if !before.same_destination(&after) {
+            oxideterm_cloud_sync::state_transitions::reset_destination_state(store.state_mut());
+        }
         store.state_mut().settings = after.clone();
         store
             .save()

@@ -4,6 +4,7 @@
 //! GitHub Gist provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
 
 const DEFAULT_GIT_API_ENDPOINT: &str = "https://api.github.com";
 const GITHUB_API_VERSION: &str = "2022-11-28";
@@ -245,8 +246,10 @@ impl CloudSyncBackend {
             return Ok(None);
         };
         let content = match file.get("content").and_then(Value::as_str) {
-            Some(content) => content.to_string(),
-            None => {
+            Some(content) if file.get("truncated").and_then(Value::as_bool) != Some(true) => {
+                content.to_string()
+            }
+            _ => {
                 let raw_url = file
                     .get("raw_url")
                     .and_then(Value::as_str)
@@ -410,6 +413,9 @@ fn gist_namespace(config: &CloudSyncSettings) -> String {
 }
 
 fn gist_object_filename(config: &CloudSyncSettings, relative_path: &str) -> String {
+    if let Some(path) = relative_path.strip_prefix("sync-v3/") {
+        return format!("{}{}", gist_v3_prefix(config), path.replace('/', "--"));
+    }
     let prefix = gist_filename_prefix(config);
     let path = trim_slashes(relative_path);
     let readable = gist_safe_filename_component(
@@ -424,6 +430,10 @@ fn gist_object_filename(config: &CloudSyncSettings, relative_path: &str) -> Stri
         readable,
         digest_hex(path.as_bytes())
     )
+}
+
+fn gist_v3_prefix(config: &CloudSyncSettings) -> String {
+    format!("oxide-v3-{}--", digest_hex(config.namespace.as_bytes()))
 }
 
 fn gist_filename_prefix(config: &CloudSyncSettings) -> String {

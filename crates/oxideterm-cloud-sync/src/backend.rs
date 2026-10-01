@@ -350,6 +350,7 @@ mod github_gist;
 mod google_drive;
 mod http_json;
 mod onedrive;
+mod publications;
 mod s3;
 mod webdav;
 
@@ -1093,6 +1094,127 @@ mod tests {
     use std::{collections::VecDeque, sync::Mutex};
 
     use super::*;
+
+    #[tokio::test]
+    async fn v3_enumeration_follows_pages_and_publication_verifies_bytes_after_write_error() {
+        let path = format!(
+            "sync-v3/{}/1-{}.oxide",
+            uuid::Uuid::from_u128(1),
+            "a".repeat(64)
+        );
+        let bytes = b"encrypted-publication-fixture".to_vec();
+        let pending = crate::sync_v3::PendingPublication {
+            path: format!(
+                "sync-v3/{}/2-{}.oxide",
+                uuid::Uuid::from_u128(1),
+                sha256_hex(&bytes).trim_start_matches("sha256:")
+            ),
+            bytes: bytes.clone(),
+        };
+        let executor = Arc::new(FakeHttpExecutor::new([
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({"objects":[{"path":path}], "nextCursor":"page/2"}),
+            ),
+            response(
+                StatusCode::OK,
+                HeaderMap::new(),
+                json!({"objects":[{"path":pending.path}]}),
+            ),
+            response(StatusCode::NOT_FOUND, HeaderMap::new(), Value::Null),
+            response(
+                StatusCode::BAD_REQUEST,
+                HeaderMap::new(),
+                json!({"error":{"message":"response lost after storage"}}),
+            ),
+            HttpResponseSnapshot::new(StatusCode::OK, HeaderMap::new(), bytes.clone()),
+        ]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let config = CloudSyncSettings {
+            backend_type: BackendType::HttpJson,
+            endpoint: "https://sync.test".into(),
+            namespace: "team".into(),
+            auth_mode: crate::AuthMode::None,
+            ..Default::default()
+        };
+        let secrets = CloudSyncSecrets::default();
+        assert_eq!(
+            backend
+                .list_publications(&config, &secrets)
+                .await
+                .unwrap()
+                .iter()
+                .map(|id| id.path())
+                .collect::<Vec<_>>(),
+            [path, pending.path.clone()]
+        );
+        backend
+            .publish_replica(&config, &secrets, &pending)
+            .await
+            .unwrap();
+        let requests = executor.requests();
+        assert!(
+            requests[1]
+                .url
+                .query_pairs()
+                .any(|(key, value)| key == "cursor" && value == "page/2")
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.method.clone())
+                .collect::<Vec<_>>(),
+            [
+                Method::GET,
+                Method::GET,
+                Method::GET,
+                Method::PUT,
+                Method::GET
+            ]
+        );
+        match &requests[3].body {
+            HttpRequestBody::Bytes(body) => assert_eq!(body.as_slice(), bytes),
+            _ => panic!("expected publication bytes"),
+        }
+        assert!(requests[3].url.path().ends_with(&pending.path));
+    }
+
+    #[tokio::test]
+    async fn v3_http_json_requires_listing_and_webdav_reads_writer_directories() {
+        let writer = uuid::Uuid::from_u128(12);
+        let filename = format!("1-{}.oxide", "b".repeat(64));
+        let executor = Arc::new(FakeHttpExecutor::new([
+            response(StatusCode::NOT_FOUND, HeaderMap::new(), Value::Null),
+            HttpResponseSnapshot::new(StatusCode::MULTI_STATUS, HeaderMap::new(), format!("<d:multistatus xmlns:d='DAV:'><d:response><d:href>/team/sync-v3/</d:href></d:response><d:response><d:href>/team/sync-v3/{writer}/</d:href></d:response></d:multistatus>").into_bytes()),
+            HttpResponseSnapshot::new(StatusCode::MULTI_STATUS, HeaderMap::new(), format!("<d:multistatus xmlns:d='DAV:'><d:response><d:href>/team/sync-v3/{writer}/{filename}</d:href></d:response></d:multistatus>").into_bytes()),
+        ]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let mut config = CloudSyncSettings {
+            backend_type: BackendType::HttpJson,
+            endpoint: "https://sync.test".into(),
+            namespace: "team".into(),
+            auth_mode: crate::AuthMode::None,
+            ..Default::default()
+        };
+        let secrets = CloudSyncSecrets::default();
+        assert!(
+            backend
+                .list_publications(&config, &secrets)
+                .await
+                .unwrap_err()
+                .to_string()
+                .starts_with("sync_protocol_upgrade_required:")
+        );
+        config.backend_type = BackendType::Webdav;
+        assert_eq!(
+            backend.list_publications(&config, &secrets).await.unwrap()[0].path(),
+            format!("sync-v3/{writer}/{filename}")
+        );
+        let requests = executor.requests();
+        assert_eq!(requests[1].headers["Depth"], "1");
+        assert_eq!(requests[2].url.path(), format!("/team/sync-v3/{writer}/"));
+    }
 
     #[derive(Clone)]
     struct FakeHttpExecutor {

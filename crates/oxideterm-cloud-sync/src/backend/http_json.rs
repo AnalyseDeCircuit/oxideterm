@@ -4,6 +4,7 @@
 //! HTTP JSON provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
 
 impl CloudSyncBackend {
     pub(super) async fn fetch_http_json_metadata(

@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "Système de plugins indisponible",
     "native_sidebar_empty_description": "Ouvrez l’onglet plugins pour voir l’état native actuel.",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "Mettez à jour votre serveur de synchronisation vers une version compatible avec le nouveau protocole de synchronisation cloud, puis relancez la synchronisation.",
+        "password_change_pending": "Un changement de mot de passe est en attente. Réessayez avec le même nouveau mot de passe.",
+        "change_password": "Changer le mot de passe de synchronisation",
+        "change_password_description": "Un nouvel espace sera créé avec le nouveau mot de passe. Le basculement aura lieu après vérification du transfert. L’ancien espace sera conservé.",
+        "password_change_separate_settings": "Enregistrez les autres réglages avant de changer le mot de passe de synchronisation.",
+        "password_too_short": "Le mot de passe doit contenir au moins 6 caractères.",
+        "sync": "Synchroniser",
+        "cleanup_pending": "Le nettoyage reste à terminer. Relancez la synchronisation.",
+        "keep": "Conserver",
+        "preview": "Aperçu de la synchronisation",
+        "changes": "Champs modifiés",
+        "upgrade": "Les données du cloud seront mises à niveau. Les fichiers d’origine seront conservés.",
+        "candidate": "Version",
+        "apply": "Appliquer et synchroniser",
+        "configuration": "Configuration",
+        "protected": "Valeur protégée",
+        "current": "Cet appareil",
+        "conflict_hint": "Choisissez une version pour les champs en conflit. Sans sélection, la valeur actuelle de cet appareil est conservée."
+      },
       "panel_title": "Synchronisation cloud Oxide",
       "backend": {
         "local_file": "Fichier local",

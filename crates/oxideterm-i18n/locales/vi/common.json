@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "Hệ thống plugin chưa khả dụng",
     "native_sidebar_empty_description": "Mở tab plugin để xem trạng thái native hiện tại.",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "Hãy nâng cấp máy chủ đồng bộ lên phiên bản hỗ trợ giao thức đồng bộ đám mây mới, rồi đồng bộ lại.",
+        "password_change_pending": "Lần đổi mật khẩu trước chưa hoàn tất. Hãy thử lại bằng mật khẩu mới đã nhập lần trước.",
+        "change_password": "Đổi mật khẩu đồng bộ",
+        "change_password_description": "Tạo không gian đồng bộ mới bằng mật khẩu mới và chuyển sang đó sau khi xác minh dữ liệu tải lên. Không gian cũ vẫn được giữ lại.",
+        "password_change_separate_settings": "Hãy lưu các cài đặt khác trước khi đổi mật khẩu đồng bộ.",
+        "password_too_short": "Mật khẩu phải có ít nhất 6 ký tự.",
+        "sync": "Đồng bộ",
+        "cleanup_pending": "Chưa dọn dẹp xong. Hãy đồng bộ lại để hoàn tất.",
+        "keep": "Giữ lại",
+        "preview": "Xem trước đồng bộ",
+        "changes": "Các trường đã thay đổi",
+        "upgrade": "Dữ liệu đám mây hiện có sẽ được nâng cấp. Các tệp gốc sẽ được giữ lại.",
+        "candidate": "Phiên bản",
+        "apply": "Áp dụng và đồng bộ",
+        "configuration": "Cấu hình",
+        "protected": "Giá trị được bảo vệ",
+        "current": "Thiết bị này",
+        "conflict_hint": "Chọn phiên bản cho các trường xung đột. Các trường chưa chọn sẽ giữ giá trị hiện tại của thiết bị này."
+      },
       "panel_title": "Đồng bộ đám mây Oxide",
       "backend": {
         "local_file": "Tệp cục bộ",

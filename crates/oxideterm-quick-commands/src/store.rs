@@ -44,10 +44,12 @@ thread_local! {
 }
 
 /// An opaque copy of the exact Quick Commands file state used for rollback.
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct QuickCommandsCheckpoint {
     state: QuickCommandsCheckpointState,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum QuickCommandsCheckpointState {
     Missing,
     Present(Vec<u8>),

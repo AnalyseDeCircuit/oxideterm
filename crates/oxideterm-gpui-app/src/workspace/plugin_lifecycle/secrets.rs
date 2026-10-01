@@ -56,6 +56,11 @@ fn native_plugin_secret_result(
             let secret = key_store
                 .get_provider_key(&account_id)
                 .map_err(|error| format!("Failed to read plugin secret: {error}"))?;
+            if secret.is_some() {
+                key_store
+                    .register_sync_account(&account_id)
+                    .map_err(|error| error.to_string())?;
+            }
             Ok(secret
                 .map(|secret| json!(secret.as_str()))
                 .unwrap_or(Value::Null))
@@ -72,6 +77,11 @@ fn native_plugin_secret_result(
                 .get_provider_keys(&account_ids)
                 .map_err(|error| format!("Failed to read plugin secrets: {error}"))?;
             let secret_by_account = secrets.into_iter().collect::<HashMap<_, _>>();
+            for account in secret_by_account.keys() {
+                key_store
+                    .register_sync_account(account)
+                    .map_err(|error| error.to_string())?;
+            }
             let mut values = Map::new();
             for (key, account_id) in keys.iter().zip(account_ids.iter()) {
                 let value = secret_by_account
@@ -105,7 +115,13 @@ fn native_plugin_secret_result(
             let key = native_plugin_secret_key_arg(args)?;
             let account_id =
                 oxideterm_plugin_host_api::secrets::plugin_secret_account_id(plugin_id, key)?;
-            Ok(json!(key_store.has_provider_key(&account_id)))
+            let present = key_store.has_provider_key(&account_id);
+            if present {
+                key_store
+                    .register_sync_account(&account_id)
+                    .map_err(|error| error.to_string())?;
+            }
+            Ok(json!(present))
         }
         "delete" => {
             let key = native_plugin_secret_key_arg(args)?;

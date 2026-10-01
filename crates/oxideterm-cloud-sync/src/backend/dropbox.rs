@@ -4,6 +4,7 @@
 //! Dropbox provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
 
 const DROPBOX_API_BASE: &str = "https://api.dropboxapi.com/2";
 const DROPBOX_CONTENT_BASE: &str = "https://content.dropboxapi.com/2";

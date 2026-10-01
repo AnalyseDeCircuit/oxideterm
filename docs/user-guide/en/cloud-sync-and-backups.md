@@ -6,7 +6,7 @@ Use the Cloud Sync and backup surfaces in the desktop app for normal sync status
 
 Open Cloud Sync to see whether sync is configured, when it last ran, and whether local or remote state needs attention. Before changing sync direction, inspect the status and any warnings in the app.
 
-Use manual sync actions from the app when you want to push or pull intentionally. If a conflict appears, resolve it from the visible state rather than guessing from file names or timestamps.
+Synchronize to merge independent changes from both sides. When the same item has conflicting changes, choose the version to keep in the preview.
 
 ## Configure Sync
 
@@ -15,6 +15,20 @@ Configure the backend from the Cloud Sync settings surface. Keep backend names, 
 Secrets should be entered through secret fields or the app's credential storage flow. Status views should show hints, configured flags, or missing-secret warnings, not raw secret values.
 
 ## Backups
+
+### Change the sync password
+
+Enter the new password in Cloud Sync settings and save. After confirmation, OxideTerm creates a new sync space and switches to it once the upload is verified. The previous space and its data remain available. Update the namespace and password on your other devices to join the new space.
+
+If the upload fails, submit the same new password again to resume the change.
+
+Save other settings changes before changing the password. The CLI command `oxideterm cloud-sync change-password --yes` reads the new password from standard input, which can be supplied by a password manager.
+
+### `.oxide` files
+
+New `.oxide` exports encrypt metadata such as connection names and counts. Enter the password to preview their contents. Older files remain readable; new files require a client that supports the new format. Archives containing a complete certificate and private-key pair are imported into managed key storage, preserving certificate authentication and the private-key passphrase.
+
+### Create a backup
 
 Create a backup before high-impact operations:
 

@@ -2114,6 +2114,7 @@ mod tests {
             deleted_at: now,
         });
         store.data.managed_ssh_keys.push(ManagedSshKey {
+            certificate: None,
             id: "managed-key-marker".to_string(),
             secret_id: "managed-secret-reference".to_string(),
             name: "Managed checkpoint key".to_string(),
@@ -2876,6 +2877,7 @@ mod tests {
         let now = Utc::now();
         let data = ConnectionStoreData {
             managed_ssh_keys: vec![ManagedSshKey {
+                certificate: None,
                 id: "managed-key-1".to_string(),
                 secret_id: "managed-key-secret-1".to_string(),
                 name: "Production deploy key".to_string(),
@@ -2930,6 +2932,158 @@ mod tests {
                 .unwrap()
                 .contains("PRIVATE KEY")
         );
+    }
+
+    #[test]
+    fn synced_managed_key_journals_before_creation_and_keeps_old_slot_until_commit() {
+        let mut source = load_empty_store("sync-key-source");
+        let first = SecretString::from(generated_private_key_text(None));
+        let info = source
+            .create_managed_ssh_key_from_text(first.clone(), Some("Deploy".into()), None)
+            .unwrap();
+        let mut target = load_empty_store("sync-key-target");
+        let mut created = Vec::new();
+        target
+            .prepare_managed_key_sync(
+                source.export_managed_key_for_sync(&info.id).unwrap(),
+                |id| {
+                    created.push(id.to_owned());
+                    Ok(())
+                },
+            )
+            .unwrap();
+        target.save().unwrap();
+        assert_eq!(
+            target
+                .resolve_managed_ssh_key_private_key(&info.id)
+                .unwrap(),
+            first
+        );
+        let original = target.create_checkpoint().unwrap();
+        let old_reference = target.managed_ssh_key_metadata(&info.id).unwrap().secret_id;
+        let second = SecretString::from(generated_private_key_text(Some("sync-passphrase")));
+        let replacement = ManagedSshKeySyncRecord::from_private_key(
+            info.id.clone(),
+            "Rotated".into(),
+            second.clone(),
+        )
+        .unwrap();
+        let stale = target
+            .prepare_managed_key_sync(replacement, |id| {
+                created.push(id.to_owned());
+                Ok(())
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(stale, old_reference);
+        assert_eq!(target.managed_keychain.get(&old_reference).unwrap(), first);
+        assert_eq!(
+            target
+                .resolve_managed_ssh_key_private_key(&info.id)
+                .unwrap(),
+            second
+        );
+        assert_eq!(created.len(), 2);
+        let staged_reference = created[1].clone();
+        target.restore_checkpoint(&original).unwrap();
+        target
+            .remove_synced_managed_key_slots(&[staged_reference.clone()])
+            .unwrap();
+        assert!(target.managed_keychain.get(&staged_reference).is_err());
+        assert_eq!(
+            target
+                .resolve_managed_ssh_key_private_key(&info.id)
+                .unwrap(),
+            first
+        );
+        let rejected = ManagedSshKeySyncRecord::from_private_key(
+            "not-created".into(),
+            "Rejected".into(),
+            second,
+        )
+        .unwrap();
+        assert!(
+            target
+                .prepare_managed_key_sync(rejected, |_| bail!("journal failed"))
+                .is_err()
+        );
+        assert!(target.managed_ssh_key_metadata("not-created").is_err());
+    }
+
+    #[test]
+    fn sync_restores_primary_and_hop_passwords_through_protected_slots() {
+        let mut source = load_empty_store("sync-ssh-source");
+        let mut input = request(
+            "ssh-sync",
+            SavedAuth::Password {
+                empty_password: false,
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("primary-sync-fixture")),
+            },
+        );
+        input.proxy_chain.push(SavedProxyHop {
+            host: "jump.example".into(),
+            port: 22,
+            username: "jump".into(),
+            auth: SavedAuth::Password {
+                empty_password: false,
+                keychain_id: None,
+                plaintext_password: Some(SecretString::from("hop-sync-fixture")),
+            },
+            totp_credential_id: None,
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+            ssh_algorithms: Default::default(),
+        });
+        source.upsert(input).unwrap();
+        let selection = CredentialSyncSelection {
+            connection_ids: std::collections::BTreeSet::from(["ssh-sync".into()]),
+            ..Default::default()
+        };
+        let secrets = source.export_sync_credentials(&selection, None).unwrap();
+        let mut target = load_empty_store("sync-ssh-target");
+        let prepared = target
+            .prepare_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+        let mut cleanup = target
+            .commit_prepared_saved_connections_snapshot(prepared)
+            .unwrap();
+        target
+            .finalize_saved_connections_sync_cleanup(&mut cleanup)
+            .unwrap();
+        let mut credentials = target
+            .prepare_profile_credentials(&secrets, &selection, &mut None)
+            .unwrap();
+        target.save().unwrap();
+        target.commit_profile_credentials(&mut credentials).unwrap();
+        let record = target.get("ssh-sync").unwrap();
+        for (auth, expected) in [
+            (&record.auth, "primary-sync-fixture"),
+            (&record.proxy_chain[0].auth, "hop-sync-fixture"),
+        ] {
+            let SavedAuth::Password {
+                keychain_id: Some(reference),
+                plaintext_password: None,
+                ..
+            } = auth
+            else {
+                panic!("restored password must use protected storage");
+            };
+            assert_eq!(
+                target.keychain.get(reference).unwrap().expose_secret(),
+                expected
+            );
+            assert!(
+                !fs::read_to_string(target.path())
+                    .unwrap()
+                    .contains(expected)
+            );
+        }
     }
 
     #[test]

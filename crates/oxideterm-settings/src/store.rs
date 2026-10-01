@@ -82,6 +82,7 @@ pub struct SettingsStore {
     writes_blocked: bool,
 }
 
+#[derive(Serialize, Deserialize)]
 enum SettingsFileCheckpoint {
     Missing,
     Present(Vec<u8>),
@@ -89,6 +90,7 @@ enum SettingsFileCheckpoint {
 
 /// Opaque rollback state for the exact settings file and in-memory envelope.
 #[must_use = "settings checkpoints should be restored or deliberately discarded"]
+#[derive(Serialize, Deserialize)]
 pub struct SettingsStoreCheckpoint {
     path: PathBuf,
     settings: PersistedSettings,

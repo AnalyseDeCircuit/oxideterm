@@ -2,14 +2,14 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-09-30T14:18:20.806601Z
+Generated: 2026-09-30T16:00:41.912555Z
 
 ## Summary
 
-- MIT: 1102
-- Apache-2.0: 884
+- MIT: 1105
+- Apache-2.0: 885
 - Apache-2.0 WITH LLVM-exception: 59
-- Zlib: 45
+- Zlib: 46
 - BSD-3-Clause: 21
 - MPL-2.0: 20
 - Unicode-3.0: 19
@@ -119,6 +119,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | atspi-common | 0.13.0 | Apache-2.0, MIT | https://crates.io/crates/atspi-common |
 | atspi-proxies | 0.13.0 | Apache-2.0, MIT | https://crates.io/crates/atspi-proxies |
 | autocfg | 1.5.0 | Apache-2.0, MIT | https://crates.io/crates/autocfg |
+| automerge | 0.12.0 | MIT | https://crates.io/crates/automerge |
 | av-scenechange | 0.14.1 | MIT | https://crates.io/crates/av-scenechange |
 | av1-grain | 0.2.5 | BSD-2-Clause | https://crates.io/crates/av1-grain |
 | avif-serialize | 0.8.8 | BSD-3-Clause | https://crates.io/crates/avif-serialize |
@@ -449,6 +450,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | hermit-abi | 0.5.2 | MIT, Apache-2.0 | https://crates.io/crates/hermit-abi |
 | hex | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/hex |
 | hex-literal | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/hex-literal |
+| hexane | 1.0.0-alpha.5 | MIT | https://crates.io/crates/hexane |
 | hexf-parse | 0.2.1 | CC0-1.0 | https://crates.io/crates/hexf-parse |
 | hkdf | 0.12.4 | MIT, Apache-2.0 | https://crates.io/crates/hkdf |
 | hkdf | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/hkdf |
@@ -525,6 +527,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | itertools | 0.10.5 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itertools | 0.13.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itertools | 0.14.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
+| itertools | 0.15.0 | MIT, Apache-2.0 | https://crates.io/crates/itertools |
 | itoa | 1.0.18 | MIT, Apache-2.0 | https://crates.io/crates/itoa |
 | jetscii | 0.5.3 | MIT, Apache-2.0 | https://crates.io/crates/jetscii |
 | jni | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/jni |
@@ -1305,6 +1308,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | zerovec | 0.11.6 | Unicode-3.0 | https://crates.io/crates/zerovec |
 | zerovec-derive | 0.11.3 | Unicode-3.0 | https://crates.io/crates/zerovec-derive |
 | zip | 2.4.2 | MIT | https://crates.io/crates/zip |
+| zlib-rs | 0.6.8 | Zlib | https://crates.io/crates/zlib-rs |
 | zmij | 1.0.21 | MIT | https://crates.io/crates/zmij |
 | zopfli | 0.8.3 | Apache-2.0 | https://crates.io/crates/zopfli |
 | zstd | 0.13.3 | MIT | https://crates.io/crates/zstd |

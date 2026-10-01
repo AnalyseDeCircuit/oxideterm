@@ -96,7 +96,7 @@ impl FileHeader {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OxideMetadata {
     pub exported_at: DateTime<Utc>,
     pub exported_by: String,
@@ -431,6 +431,8 @@ impl fmt::Debug for EncryptedProxyHop {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedManagedKeyMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate: Option<String>,
     pub key_id: String,
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -551,7 +553,8 @@ impl fmt::Debug for EncryptedAuth {
 
 #[derive(Debug)]
 pub struct OxideFile {
-    pub metadata: OxideMetadata,
+    pub metadata: Option<OxideMetadata>,
+    pub(super) archive: Option<Vec<u8>>,
     pub salt: [u8; SALT_LEN],
     pub nonce: [u8; NONCE_LEN],
     pub encrypted_data: Vec<u8>,
@@ -561,6 +564,9 @@ pub struct OxideFile {
 
 impl OxideFile {
     pub fn to_bytes(&self) -> Result<Vec<u8>, OxideFileError> {
+        if let Some(bytes) = &self.archive {
+            return Ok(bytes.clone());
+        }
         let metadata_json = serde_json::to_vec(&self.metadata)?;
         let header = FileHeader::new(metadata_json.len() as u32, self.encrypted_data.len() as u32);
 
@@ -577,6 +583,27 @@ impl OxideFile {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, OxideFileError> {
+        if data.get(5..9) == Some(2u32.to_le_bytes().as_slice()) {
+            let flags = super::container::validate_container(data)?;
+            if flags & !kdf_flags::KDF_VERSION_MASK != 0 {
+                return Err(OxideFileError::InvalidFormat(
+                    "Expected a password-encrypted archive".into(),
+                ));
+            }
+            return Ok(Self {
+                metadata: None,
+                archive: Some(data.to_vec()),
+                salt: data[21..21 + SALT_LEN]
+                    .try_into()
+                    .map_err(|_| OxideFileError::CryptoError)?,
+                nonce: data[21 + SALT_LEN..21 + SALT_LEN + NONCE_LEN]
+                    .try_into()
+                    .map_err(|_| OxideFileError::CryptoError)?,
+                encrypted_data: Vec::new(),
+                tag: [0; TAG_LEN],
+                kdf_version: flags & kdf_flags::KDF_VERSION_MASK,
+            });
+        }
         let mut cursor = Cursor::new(data);
         let mut header_bytes = [0u8; 21];
         cursor
@@ -621,7 +648,8 @@ impl OxideFile {
             .map_err(|_| OxideFileError::InvalidFormat("Failed to read tag".into()))?;
 
         Ok(Self {
-            metadata,
+            metadata: Some(metadata),
+            archive: None,
             salt,
             nonce,
             encrypted_data,
@@ -666,6 +694,7 @@ mod tests {
             passphrase: None,
             embedded_key: Some(Zeroizing::new("base64-private-key".to_string())),
             managed_key: Some(EncryptedManagedKeyMetadata {
+                certificate: None,
                 key_id: "managed-key-1".to_string(),
                 name: "Imported managed key".to_string(),
                 fingerprint: Some("SHA256:test".to_string()),

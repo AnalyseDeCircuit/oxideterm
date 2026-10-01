@@ -13,11 +13,13 @@ runtime = ["oxideterm-forwarding/runtime"]
 
 [dependencies]
 anyhow.workspace = true
+automerge = "=0.12.0"
 base64.workspace = true
 chrono.workspace = true
 hmac = "0.12"
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
@@ -26,7 +28,11 @@ oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-secret-store = { path = "../oxideterm-secret-store" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 reqwest.workspace = true
+rmp-serde.workspace = true
+fs2.workspace = true
 rand.workspace = true
+quick-xml.workspace = true
+percent-encoding = "2"
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true

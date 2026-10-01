@@ -432,9 +432,6 @@ impl CloudSyncOperationService {
             .download_remote_snapshot(settings, &secrets)
             .await?;
         report_progress(progress, CloudSyncProgressStage::Validating, 2, 4);
-        let metadata = OxideFile::from_bytes(&remote.bytes)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?
-            .metadata;
         let mut preview_progress = |stage: &str, current: usize, total: usize| {
             let fraction = fractional_import_progress(current, total);
             report_fractional_progress(
@@ -453,6 +450,7 @@ impl CloudSyncOperationService {
         )
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         report_progress(progress, CloudSyncProgressStage::Done, 4, 4);
+        let metadata = preview.metadata.clone();
         Ok(LegacyPreview {
             remote_metadata: remote.metadata,
             bytes: remote.bytes,

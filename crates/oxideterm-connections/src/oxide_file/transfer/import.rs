@@ -927,11 +927,16 @@ fn import_upstream_proxy_auth(auth: EncryptedUpstreamProxyAuth) -> SavedUpstream
 
 fn import_auth(
     store: &ConnectionStore,
-    auth: EncryptedAuth,
+    mut auth: EncryptedAuth,
     restored_managed_keys: &mut HashMap<String, String>,
     imported_managed_keys: &mut Vec<ImportedManagedSshKey>,
     import_options: &OxideImportOptions,
 ) -> Result<SavedAuth, OxideFileError> {
+    if import_options.restore_managed_keys && matches!(&auth,EncryptedAuth::Certificate {embedded_key:Some(_),embedded_cert:Some(_),..}) {
+        prepare_sync_auth(&mut auth,&mut Vec::new(),&mut HashMap::new())?;
+        let options=OxideImportOptions {restore_managed_key_passphrases:true,..import_options.clone()};
+        return import_auth(store,auth,restored_managed_keys,imported_managed_keys,&options);
+    }
     Ok(match auth {
         EncryptedAuth::Password {
             password,
@@ -1047,7 +1052,7 @@ fn prepare_managed_key_restore(
         if let Some(existing) = store
             .managed_ssh_keys()
             .into_iter()
-            .find(|key| key.fingerprint == fingerprint)
+            .find(|key| key.fingerprint == fingerprint && store.managed_ssh_key_metadata(&key.id).is_ok_and(|key|key.certificate==metadata.certificate))
         {
             restored_managed_keys.insert(metadata.key_id, existing.id.clone());
             return Ok(Some(SavedAuth::ManagedKey {
@@ -1059,7 +1064,7 @@ fn prepare_managed_key_restore(
 
         if let Some(pending) = imported_managed_keys
             .iter()
-            .find(|entry| entry.key.fingerprint == fingerprint)
+            .find(|entry| entry.key.fingerprint == fingerprint && entry.key.certificate==metadata.certificate)
         {
             restored_managed_keys.insert(metadata.key_id, pending.key.id.clone());
             return Ok(Some(SavedAuth::ManagedKey {
@@ -1088,6 +1093,7 @@ fn prepare_managed_key_restore(
         .clone()
         .unwrap_or_else(|| format!("imported-{key_id}"));
     let key = ManagedSshKey {
+        certificate: metadata.certificate,
         id: key_id.clone(),
         secret_id,
         name: metadata
@@ -1104,6 +1110,10 @@ fn prepare_managed_key_restore(
         created_at: now,
         updated_at: now,
     };
+    if key.certificate.is_some() {
+        crate::ManagedSshKeySyncRecord {metadata:key.clone(),private_key:SecretString::from(private_key.as_str())}
+            .validate_certificate().map_err(|error|OxideFileError::InvalidFormat(error.to_string()))?;
+    }
     let saved_auth = SavedAuth::ManagedKey {
         key_id: key_id.clone(),
         passphrase_keychain_id: None,

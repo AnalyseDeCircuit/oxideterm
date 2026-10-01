@@ -140,7 +140,12 @@ pub(super) fn native_plugin_sync_response(
                 }
             };
             match OxideFile::from_bytes(&bytes) {
-                Ok(file) => plugin_runtime::PluginResponse::ok(request_id, json!(file.metadata)),
+                Ok(file) => plugin_runtime::PluginResponse::ok(
+                    request_id,
+                    file.metadata
+                        .map(|metadata| json!(metadata))
+                        .unwrap_or_else(|| json!({"metadataEncrypted":true})),
+                ),
                 Err(error) => native_plugin_sync_oxide_error(request_id, error),
             }
         }

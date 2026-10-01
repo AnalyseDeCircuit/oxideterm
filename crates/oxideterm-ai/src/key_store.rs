@@ -10,6 +10,8 @@ use parking_lot::RwLock;
 use zeroize::Zeroizing;
 
 const AI_KEYCHAIN_SERVICE: &str = "com.oxideterm.ai";
+const SYNC_INVENTORY_ACCOUNT: &str = "oxideterm-sync-secret-inventory";
+static SYNC_INVENTORY_LOCK: Mutex<()> = Mutex::new(());
 #[cfg(target_os = "macos")]
 const AI_KEYCHAIN_AUTHENTICATION_REASON: &str = "OxideTerm needs to access your AI API key";
 
@@ -36,6 +38,7 @@ impl AiProviderKeyStore {
     }
 
     pub fn store_provider_key(&self, provider_id: &str, api_key: Zeroizing<String>) -> Result<()> {
+        Self::validate_sync_account(provider_id)?;
         if api_key.is_empty() {
             self.delete_provider_key(provider_id)?;
             return Ok(());
@@ -48,10 +51,12 @@ impl AiProviderKeyStore {
         // Move the existing zeroizing allocation into the cache after the OS
         // write instead of creating a second in-memory secret copy.
         self.cache.write().insert(provider_id.to_string(), api_key);
+        self.record_sync_account(provider_id, false)?;
         Ok(())
     }
 
     pub fn get_provider_key(&self, provider_id: &str) -> Result<Option<Zeroizing<String>>> {
+        Self::validate_sync_account(provider_id)?;
         if let Some(cached) = self.cache.read().get(provider_id) {
             return Ok(Some(Zeroizing::new(cached.to_string())));
         }
@@ -80,6 +85,9 @@ impl AiProviderKeyStore {
         &self,
         provider_ids: &[String],
     ) -> Result<Vec<(String, Zeroizing<String>)>> {
+        for provider_id in provider_ids {
+            Self::validate_sync_account(provider_id)?;
+        }
         let mut secrets = Vec::new();
         let mut missing = Vec::new();
         {
@@ -174,19 +182,21 @@ impl AiProviderKeyStore {
     }
 
     pub fn delete_provider_key(&self, provider_id: &str) -> Result<()> {
-        self.cache.write().remove(provider_id);
+        Self::validate_sync_account(provider_id)?;
         if portable_keychain_enabled()? {
-            return portable_keystore::delete_secret(&self.service, &self.account(provider_id))
+            portable_keystore::delete_secret(&self.service, &self.account(provider_id))
                 .with_context(|| {
                     format!(
                         "failed to delete AI provider key from portable keystore for {provider_id}"
                     )
-                });
+                })?;
+        } else {
+            NativeSecretStore::new(&self.service)
+                .delete(&self.account(provider_id))
+                .with_context(|| format!("failed to delete AI provider key for {provider_id}"))?;
         }
-
-        NativeSecretStore::new(&self.service)
-            .delete(&self.account(provider_id))
-            .with_context(|| format!("failed to delete AI provider key for {provider_id}"))
+        self.cache.write().remove(provider_id);
+        self.record_sync_account(provider_id, true)
     }
 
     fn load_provider_key_from_os(&self, provider_id: &str) -> Result<Option<Zeroizing<String>>> {
@@ -246,6 +256,70 @@ impl AiProviderKeyStore {
 
     fn account(&self, provider_id: &str) -> String {
         format!("{}@{}", whoami::username(), provider_id)
+    }
+
+    /// Account names and explicit removals are tracked separately from values.
+    /// Plugins have arbitrary key names, so their owners need this inventory for export.
+    pub fn sync_accounts(&self) -> Result<std::collections::BTreeMap<String, bool>> {
+        let raw = if portable_keychain_enabled()? {
+            self.load_provider_key_from_portable(SYNC_INVENTORY_ACCOUNT)?
+        } else {
+            self.load_provider_key_from_native(SYNC_INVENTORY_ACCOUNT)?
+        };
+        raw.map(|raw| {
+            serde_json::from_str(raw.as_str())
+                .map_err(|_| anyhow!("Invalid protected secret inventory"))
+        })
+        .transpose()
+        .map(|accounts| accounts.unwrap_or_default())
+    }
+
+    pub fn clear_cache(&self) {
+        self.cache.write().clear();
+    }
+
+    pub fn register_sync_account(&self, provider_id: &str) -> Result<()> {
+        self.record_sync_account(provider_id, false)
+    }
+
+    pub fn validate_sync_account(provider_id: &str) -> Result<()> {
+        if provider_id.is_empty() || provider_id == SYNC_INVENTORY_ACCOUNT {
+            return Err(anyhow!("Reserved or empty secret account"));
+        }
+        Ok(())
+    }
+
+    pub fn restore_sync_accounts(
+        &self,
+        previous: &std::collections::BTreeMap<String, Option<bool>>,
+    ) -> Result<()> {
+        let _lock = SYNC_INVENTORY_LOCK
+            .lock()
+            .map_err(|_| anyhow!("Secret inventory is unavailable"))?;
+        let mut accounts = self.sync_accounts()?;
+        for (id, removed) in previous {
+            if let Some(removed) = removed {
+                accounts.insert(id.clone(), *removed);
+            } else {
+                accounts.remove(id);
+            }
+        }
+        let encoded = Zeroizing::new(serde_json::to_string(&accounts)?);
+        self.store_provider_key_to_os(SYNC_INVENTORY_ACCOUNT, &encoded)
+    }
+
+    fn record_sync_account(&self, provider_id: &str, removed: bool) -> Result<()> {
+        Self::validate_sync_account(provider_id)?;
+        let _lock = SYNC_INVENTORY_LOCK
+            .lock()
+            .map_err(|_| anyhow!("Secret inventory is unavailable"))?;
+        let mut accounts = self.sync_accounts()?;
+        if accounts.get(provider_id) == Some(&removed) {
+            return Ok(());
+        }
+        accounts.insert(provider_id.to_string(), removed);
+        let encoded = Zeroizing::new(serde_json::to_string(&accounts)?);
+        self.store_provider_key_to_os(SYNC_INVENTORY_ACCOUNT, &encoded)
     }
 }
 

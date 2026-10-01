@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "Sistema plugin non disponibile",
     "native_sidebar_empty_description": "Apri la scheda plugin per vedere lo stato native attuale.",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "Aggiorna il server di sincronizzazione a una versione che supporti il nuovo protocollo di sincronizzazione cloud, quindi riprova.",
+        "password_change_pending": "È in sospeso una modifica della password. Riprova con la stessa nuova password.",
+        "change_password": "Cambia password di sincronizzazione",
+        "change_password_description": "Verrà creato un nuovo spazio con la nuova password. Il passaggio avverrà dopo la verifica del caricamento. Lo spazio precedente verrà conservato.",
+        "password_change_separate_settings": "Salva le altre impostazioni prima di cambiare la password di sincronizzazione.",
+        "password_too_short": "La password deve contenere almeno 6 caratteri.",
+        "sync": "Sincronizza",
+        "cleanup_pending": "La pulizia è ancora in sospeso. Sincronizza di nuovo per completarla.",
+        "keep": "Mantieni",
+        "preview": "Anteprima sincronizzazione",
+        "changes": "Campi modificati",
+        "upgrade": "I dati nel cloud verranno aggiornati. I file originali saranno conservati.",
+        "candidate": "Versione",
+        "apply": "Applica e sincronizza",
+        "configuration": "Configurazione",
+        "protected": "Valore protetto",
+        "current": "Questo dispositivo",
+        "conflict_hint": "Scegli una versione per i campi in conflitto. I campi non selezionati mantengono il valore attuale di questo dispositivo."
+      },
       "panel_title": "Sincronizzazione cloud di Oxide",
       "backend": {
         "local_file": "File locale",

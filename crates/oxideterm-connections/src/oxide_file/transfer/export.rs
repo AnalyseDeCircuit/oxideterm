@@ -606,6 +606,7 @@ fn export_auth(
                     private_key.expose_secret().as_bytes(),
                 ))),
                 managed_key: Some(EncryptedManagedKeyMetadata {
+                    certificate: metadata.certificate,
                     key_id: metadata.id,
                     name: metadata.name,
                     fingerprint: Some(metadata.fingerprint),

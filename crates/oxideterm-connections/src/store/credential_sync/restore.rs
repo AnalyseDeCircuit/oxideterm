@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct ProfileCredentialRestoreSummary {
     pub restored: usize,
     pub cleared: usize,
@@ -8,7 +8,7 @@ pub struct ProfileCredentialRestoreSummary {
 }
 
 /// New slots are staged separately; old slots remain usable until metadata commits.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 #[must_use]
 pub struct PreparedProfileCredentials {
     created: Vec<String>,
@@ -122,7 +122,21 @@ fn update_reference(
                 .iter_mut()
                 .find(|p| &p.id == id)
                 .context("Connection is unavailable")?;
-            set_policy_reference(&mut p.upstream_proxy, reference)?;
+            match target.slot {
+                CredentialSlot::Primary => set_auth_reference(&mut p.auth, reference)?,
+                CredentialSlot::Hop(i) => set_auth_reference(
+                    &mut p
+                        .proxy_chain
+                        .get_mut(i)
+                        .context("SSH hop is unavailable")?
+                        .auth,
+                    reference,
+                )?,
+                CredentialSlot::UpstreamProxy => {
+                    set_policy_reference(&mut p.upstream_proxy, reference)?
+                }
+                _ => bail!("Invalid SSH credential slot"),
+            }
         }
         CredentialOwner::Mosh(id) => {
             let p = data
@@ -247,6 +261,18 @@ impl ConnectionStore {
         selection: &CredentialSyncSelection,
         global_proxy: &mut Option<SavedUpstreamProxyConfig>,
     ) -> Result<PreparedProfileCredentials> {
+        self.prepare_profile_credentials_with_journal(secrets, selection, global_proxy, |_| Ok(()))
+    }
+
+    /// Record each new slot durably before touching the protected store so a
+    /// later process can remove creations interrupted by a crash.
+    pub fn prepare_profile_credentials_with_journal(
+        &mut self,
+        secrets: &[EncryptedPortableSecret],
+        selection: &CredentialSyncSelection,
+        global_proxy: &mut Option<SavedUpstreamProxyConfig>,
+        mut record_creation: impl FnMut(&str) -> Result<()>,
+    ) -> Result<PreparedProfileCredentials> {
         let available = self
             .credential_bindings(global_proxy.as_ref())
             .into_iter()
@@ -317,6 +343,7 @@ impl ConnectionStore {
                     } else {
                         SecretString::from(secret.secret.as_str())
                     };
+                    record_creation(&reference)?;
                     self.keychain.store(&reference, &value)?;
                     prepared.created.push(reference.clone());
                     Some(reference)
@@ -350,9 +377,18 @@ impl ConnectionStore {
     }
 
     pub fn rollback_profile_credentials(&self, prepared: PreparedProfileCredentials) -> Result<()> {
+        self.remove_staged_profile_credential_slots(&prepared.created)
+    }
+
+    pub fn remove_staged_profile_credential_slots(&self, references: &[String]) -> Result<()> {
         let mut failed = false;
-        for reference in prepared.created {
-            failed |= self.keychain.delete(&reference).is_err();
+        for reference in references {
+            if !reference.starts_with("oxide_sync_credential_")
+                && !reference.starts_with("oxide_global_proxy_")
+            {
+                bail!("Invalid staged credential slot");
+            }
+            failed |= self.keychain.delete(reference).is_err();
         }
         if failed {
             bail!("Failed to remove staged credential slots");

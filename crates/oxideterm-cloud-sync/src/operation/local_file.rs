@@ -168,9 +168,6 @@ impl CloudSyncOperationService {
         let Some(_permit) = self.guard.begin(CloudSyncOperationKind::Pull, false)? else {
             unreachable!()
         };
-        let metadata = OxideFile::from_bytes(&bytes)
-            .map_err(|error| anyhow::anyhow!(error.to_string()))?
-            .metadata;
         let preview = preview_oxide_import_with_progress(
             connections,
             &bytes,
@@ -179,6 +176,7 @@ impl CloudSyncOperationService {
             |_, _, _| {},
         )
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let metadata = preview.metadata.clone();
         Ok(LegacyPreview {
             bytes,
             metadata,

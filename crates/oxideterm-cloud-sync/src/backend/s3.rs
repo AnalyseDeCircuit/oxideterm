@@ -21,6 +21,7 @@ use super::{
 use crate::{CloudSyncSettings, OXIDE_CONTENT_TYPE, secrets::CloudSyncSecrets};
 
 type HmacSha256 = Hmac<Sha256>;
+mod publications;
 
 impl CloudSyncBackend {
     pub(super) async fn fetch_s3_metadata(

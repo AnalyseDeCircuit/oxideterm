@@ -442,7 +442,17 @@ fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
     };
     let bytes = native_plugin_u8_array(value.as_array().unwrap()).unwrap();
     let file = OxideFile::from_bytes(&bytes).unwrap();
-    assert_eq!(file.metadata.plugin_settings_count, Some(1));
+    let (metadata, _) =
+        oxideterm_connections::oxide_file::decrypt_oxide_archive_with_context_and_progress(
+            &file,
+            &mut oxideterm_connections::oxide_file::OxideBatchDecryptionContext::new(
+                "StrongPass!123",
+            )
+            .unwrap(),
+            |_| {},
+        )
+        .unwrap();
+    assert_eq!(metadata.plugin_settings_count, Some(1));
 
     let revisions = native_plugin_settings_revision_map(&plugin_settings);
     assert!(

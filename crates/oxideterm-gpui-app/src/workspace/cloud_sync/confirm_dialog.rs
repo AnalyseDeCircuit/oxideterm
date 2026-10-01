@@ -75,6 +75,10 @@ impl WorkspaceApp {
         };
         let copy = cloud_sync_confirm_copy_spec(&confirm);
         let description = match copy.description {
+            CloudSyncConfirmDescription::ChangePassword => Some(
+                self.i18n
+                    .t("plugin.cloud_sync.causal.change_password_description"),
+            ),
             CloudSyncConfirmDescription::None => None,
             CloudSyncConfirmDescription::ForceUpload => Some(
                 self.i18n

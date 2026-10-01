@@ -23,13 +23,21 @@ impl WorkspaceApp {
         let window_button_layout_subscription =
             cx.observe_button_layout_changed(window, |_workspace, _window, cx| cx.notify());
         let mut settings_store = SettingsStore::load_default()?;
+        let mut connection_store = ConnectionStore::load(default_connections_path())?;
+        oxideterm_cloud_sync::sync_v3::RecoveryJournal::recover_pending(
+            &mut connection_store,
+            &mut settings_store,
+            &default_saved_forwards_path(),
+            &mut oxideterm_cloud_sync::secrets::CloudSyncKeychainSecretProvider::new(
+                Default::default(),
+            ),
+        )?;
         settings_store.settings_mut().sidebar_ui.zen_mode = false;
         if let Err(error) = ensure_bundled_workspace_backgrounds(settings_store.path()) {
             // A background-gallery failure must not prevent the workspace from opening.
             eprintln!("failed to install built-in workspace backgrounds: {error}");
         }
         let version_migration = VersionMigrationState::from_settings_path(settings_store.path())?;
-        let connection_store = ConnectionStore::load(default_connections_path())?;
         let audit = audit::AuditState::new(settings_store.path().with_file_name("audit.sqlite3"));
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));

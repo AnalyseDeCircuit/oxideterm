@@ -210,6 +210,26 @@
     "native_sidebar_empty_title": "Sistema de plugins no disponible",
     "native_sidebar_empty_description": "Abre la pestaña de plugins para ver el estado native actual.",
     "cloud_sync": {
+      "causal": {
+        "protocol_upgrade_required": "Actualiza el servidor de sincronización a una versión compatible con el nuevo protocolo de sincronización en la nube y vuelve a sincronizar.",
+        "password_change_pending": "Hay un cambio de contraseña pendiente. Reinténtalo con la misma contraseña nueva.",
+        "change_password": "Cambiar contraseña de sincronización",
+        "change_password_description": "Se creará un nuevo espacio con la nueva contraseña y se cambiará a él tras verificar la carga. El espacio anterior se conservará.",
+        "password_change_separate_settings": "Guarda los demás ajustes antes de cambiar la contraseña de sincronización.",
+        "password_too_short": "La contraseña debe tener al menos 6 caracteres.",
+        "sync": "Sincronizar",
+        "cleanup_pending": "La limpieza está pendiente. Vuelve a sincronizar para completarla.",
+        "keep": "Conservar",
+        "preview": "Vista previa de sincronización",
+        "changes": "Campos modificados",
+        "upgrade": "Se actualizarán los datos de la nube. Se conservarán los archivos originales.",
+        "candidate": "Versión",
+        "apply": "Aplicar y sincronizar",
+        "configuration": "Configuración",
+        "protected": "Valor protegido",
+        "current": "Este dispositivo",
+        "conflict_hint": "Elige una versión para los campos en conflicto. Los que no selecciones conservarán el valor actual de este dispositivo."
+      },
       "panel_title": "Oxide sincronización en la nube",
       "backend": {
         "local_file": "Archivo local",

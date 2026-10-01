@@ -36,7 +36,7 @@ use files::{ensure_output_path, read_oxide_file, read_password, write_output_fil
 #[serde(rename_all = "camelCase")]
 struct OxideValidateResponse {
     path: String,
-    metadata: OxideMetadata,
+    metadata: Option<OxideMetadata>,
 }
 
 #[derive(Serialize)]
@@ -384,9 +384,17 @@ fn export(args: OxideExportArgs) -> CliResult<i32> {
     })();
     audit.result(&export_result);
     let bytes = export_result?;
-    let metadata = OxideFile::from_bytes(&bytes)
-        .map_err(|error| CliError::new("oxide_export_failed", error.to_string(), args.json))?
-        .metadata;
+    let file = OxideFile::from_bytes(&bytes).map_err(|error| runtime_error(error, args.json))?;
+    let mut decoder =
+        oxideterm_connections::oxide_file::OxideBatchDecryptionContext::new(&password)
+            .map_err(|error| runtime_error(error, args.json))?;
+    let (metadata, _) =
+        oxideterm_connections::oxide_file::decrypt_oxide_archive_with_context_and_progress(
+            &file,
+            &mut decoder,
+            |_| {},
+        )
+        .map_err(|error| runtime_error(error, args.json))?;
     let response = OxideExportResponse {
         path: args.path,
         size_bytes: bytes.len() as u64,
@@ -794,12 +802,15 @@ fn write_value<T: Serialize>(json: bool, value: &T, text: String) -> CliResult<(
 }
 
 fn format_validate_text(response: &OxideValidateResponse) -> String {
+    let Some(metadata) = &response.metadata else {
+        return "Valid encrypted archive header; use preview-import with its password to authenticate and inspect the contents".into();
+    };
     format!(
         "valid: true connections={} appSettings={} pluginSettings={} portableSecrets={}",
-        response.metadata.num_connections,
-        response.metadata.has_app_settings.unwrap_or(false),
-        response.metadata.plugin_settings_count.unwrap_or_default(),
-        response.metadata.portable_secret_count.unwrap_or_default()
+        metadata.num_connections,
+        metadata.has_app_settings.unwrap_or(false),
+        metadata.plugin_settings_count.unwrap_or_default(),
+        metadata.portable_secret_count.unwrap_or_default()
     )
 }
 

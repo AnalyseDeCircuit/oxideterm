@@ -32,12 +32,14 @@ struct PluginSettingsSnapshot {
     settings: Vec<EncryptedPluginSetting>,
 }
 
+#[derive(Serialize, Deserialize)]
 enum PluginSettingsFileState {
     Missing,
     Present(Vec<u8>),
 }
 
 /// Opaque on-disk state used to restore plugin settings after a failed transaction.
+#[derive(Serialize, Deserialize)]
 pub struct PluginSettingsCheckpoint {
     state: PluginSettingsFileState,
 }
@@ -121,6 +123,32 @@ pub fn upsert_plugin_settings(
     let json = serde_json::to_vec_pretty(&snapshot).map_err(|err| err.to_string())?;
     atomic_write_file(&path, &json).map_err(|err| err.to_string())?;
     Ok(incoming.len())
+}
+
+/// Replaces effective plugin settings after the coordinator has preserved
+/// unselected entries and captured a durable owner checkpoint.
+pub fn replace_resolved_plugin_settings(
+    settings_path: &Path,
+    mut settings: Vec<EncryptedPluginSetting>,
+) -> Result<(), String> {
+    settings.extend(
+        load_plugin_settings(settings_path)?
+            .into_iter()
+            .filter(|entry| {
+                plugin_id_from_setting_storage_key(&entry.storage_key)
+                    .is_none_or(|id| id == crate::CLOUD_SYNC_PLUGIN_ID)
+            }),
+    );
+    let snapshot = PluginSettingsSnapshot {
+        version: PLUGIN_SETTINGS_SCHEMA_VERSION,
+        settings,
+    };
+    let contents = zeroize::Zeroizing::new(
+        serde_json::to_vec_pretty(&snapshot)
+            .map_err(|_| "Cannot encode plugin settings".to_string())?,
+    );
+    atomic_write_file(&plugin_settings_path(settings_path), &contents)
+        .map_err(|error| error.to_string())
 }
 
 pub fn plugin_settings_revision_map(

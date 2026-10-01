@@ -79,6 +79,13 @@ struct CredentialBinding<'a> {
 }
 
 impl ConnectionStore {
+    pub(super) fn credential_reference_ids(&self) -> std::collections::HashSet<String> {
+        self.credential_bindings(None)
+            .into_iter()
+            .filter_map(|binding| binding.reference.map(str::to_owned))
+            .collect()
+    }
+
     fn credential_selected(
         &self,
         selection: &CredentialSyncSelection,
@@ -100,6 +107,11 @@ impl ConnectionStore {
         self.credential_bindings(global_proxy)
             .iter()
             .filter(|binding| {
+                if matches!(binding.target.owner, CredentialOwner::Connection(_))
+                    && binding.target.slot != CredentialSlot::UpstreamProxy
+                {
+                    return false;
+                }
                 self.credential_selected(selection, &binding.target.owner)
                     && (binding.reference.is_some()
                         || binding.plaintext.is_some()

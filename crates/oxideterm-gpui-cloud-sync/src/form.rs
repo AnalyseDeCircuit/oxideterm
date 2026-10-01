@@ -39,6 +39,7 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
         BackendType::Webdav | BackendType::HttpJson => form.auth_mode.clone(),
     };
     let settings = CloudSyncSettings {
+        sync_password_ref: None,
         local_file_mode: false,
         backend_type: form.backend_type.clone(),
         auth_mode,
@@ -174,7 +175,9 @@ pub fn apply_cloud_sync_configuration_patch(
     apply_cloud_sync_scope_patch(&mut scope, object.get("scope"), &mut updated_fields)?;
 
     let form = CloudSyncFormDraft::from_settings(&settings);
+    let password_ref = settings.sync_password_ref.clone();
     settings = cloud_sync_settings_from_form(&form).0;
+    settings.sync_password_ref = password_ref;
     Ok((settings, scope, updated_fields))
 }
 

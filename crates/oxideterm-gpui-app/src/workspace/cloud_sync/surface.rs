@@ -791,32 +791,21 @@ impl CloudSyncPageRenderer {
                                 if local_file {
                                     "plugin.cloud_sync.actions.export_local"
                                 } else {
-                                    "plugin.cloud_sync.actions.upload_now"
+                                    "plugin.cloud_sync.causal.sync"
                                 },
                                 CloudSyncActionTone::Accent,
                                 busy,
                                 self.intent_listener(CloudSyncUiIntent::StartUploadPreview),
                             ))
-                            .when(!local_file, |toolbar| {
+                            .when(local_file, |toolbar| {
                                 toolbar.child(self.render_cloud_sync_toolbar_button(
-                                    LucideIcon::RefreshCw,
-                                    "plugin.cloud_sync.actions.check_remote",
+                                    LucideIcon::Download,
+                                    "plugin.cloud_sync.actions.import_local",
                                     CloudSyncActionTone::Muted,
                                     busy,
-                                    self.intent_listener(CloudSyncUiIntent::CheckRemote),
+                                    self.intent_listener(CloudSyncUiIntent::PullPreview),
                                 ))
                             })
-                            .child(self.render_cloud_sync_toolbar_button(
-                                LucideIcon::Download,
-                                if local_file {
-                                    "plugin.cloud_sync.actions.import_local"
-                                } else {
-                                    "plugin.cloud_sync.actions.pull_preview"
-                                },
-                                CloudSyncActionTone::Muted,
-                                busy,
-                                self.intent_listener(CloudSyncUiIntent::PullPreview),
-                            ))
                             .child(self.render_cloud_sync_toolbar_button(
                                 LucideIcon::RotateCcw,
                                 "plugin.cloud_sync.actions.restore_backup",

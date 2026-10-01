@@ -87,6 +87,15 @@ impl CloudSyncPageRenderer {
             let state = cloud_sync.controller.store.state();
             // Render from this borrow; reading the same entity through App would panic.
             let local_file_mode = cloud_sync.view.local_file_mode;
+            if let Some(summary) = cloud_sync.view.causal_summary.as_ref() {
+                return self.render_causal_preview(
+                    summary,
+                    &cloud_sync.view.causal_conflicts,
+                    &cloud_sync.view.causal_choices,
+                    busy,
+                    cx,
+                );
+            }
             if let Some(preview) = cloud_sync.view.pending_preview.as_ref() {
                 self.render_cloud_sync_preview(
                     preview,

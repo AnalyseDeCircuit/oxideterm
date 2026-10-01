@@ -4,6 +4,7 @@
 //! OneDrive provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
 
 const MICROSOFT_GRAPH_BASE: &str = "https://graph.microsoft.com/v1.0";
 const MICROSOFT_GRAPH_CONFLICT_BEHAVIOR: &str = "@microsoft.graph.conflictBehavior";
@@ -72,6 +73,8 @@ impl CloudSyncBackend {
         secrets: &CloudSyncSecrets,
         relative_path: &str,
     ) -> Result<Option<RemoteObject>> {
+        let physical_path = publications::onedrive_sync_path(config, relative_path);
+        let relative_path = physical_path.as_str();
         let metadata_response = execute_cloud_request(
             self.client
                 .get(onedrive_item_url(config, relative_path))
@@ -147,6 +150,8 @@ impl CloudSyncBackend {
         content_type: Option<&str>,
         expected_etag: Option<&str>,
     ) -> Result<RemoteWriteResult> {
+        let physical_path = publications::onedrive_sync_path(config, relative_path);
+        let relative_path = physical_path.as_str();
         self.ensure_onedrive_parent(config, secrets, relative_path)
             .await?;
         let mut headers = onedrive_headers(secrets)?;

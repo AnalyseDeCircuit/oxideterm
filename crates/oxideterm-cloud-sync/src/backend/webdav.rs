@@ -4,6 +4,7 @@
 //! WebDAV provider request construction, authentication, parsing, and errors.
 
 use super::*;
+mod publications;
 
 impl CloudSyncBackend {
     pub(super) async fn fetch_webdav_metadata(

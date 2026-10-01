@@ -235,8 +235,13 @@ pub enum SshTransportError {
     Channel(String),
 }
 
+pub struct ManagedKeyMaterial {
+    pub private_key: Zeroizing<String>,
+    pub certificate: Option<String>,
+}
+
 pub type ManagedKeyResolver =
-    Arc<dyn Fn(&str) -> Result<Zeroizing<String>, SshTransportError> + Send + Sync>;
+    Arc<dyn Fn(&str) -> Result<ManagedKeyMaterial, SshTransportError> + Send + Sync>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SshAlgorithmKind {

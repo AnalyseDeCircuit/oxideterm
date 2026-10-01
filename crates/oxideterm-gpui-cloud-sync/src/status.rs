@@ -160,7 +160,11 @@ fn sync_password_health_item(
     form: &CloudSyncFormDraft,
     state: &CloudSyncPersistedState,
 ) -> CloudSyncHealthItem {
-    let ready = secret_present(state, secret_keys::SYNC_PASSWORD, &form.sync_password);
+    let ready = secret_present(
+        state,
+        state.settings.password_secret_key(),
+        &form.sync_password,
+    );
     health_item(
         "plugin.cloud_sync.health.sync_password",
         if ready {

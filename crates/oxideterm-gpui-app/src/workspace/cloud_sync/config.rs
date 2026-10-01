@@ -388,16 +388,15 @@ impl CloudSyncPageRenderer {
         secret_key: &'static str,
         cx: &mut App,
     ) -> AnyElement {
-        let stored = self
-            .cloud_sync
-            .read(cx)
-            .controller
-            .store
-            .state()
-            .secret_hints
-            .get(secret_key)
-            .copied()
-            .unwrap_or(false);
+        let stored = {
+            let state = self.cloud_sync.read(cx).controller.store.state();
+            let key = if secret_key == secret_keys::SYNC_PASSWORD {
+                state.settings.password_secret_key()
+            } else {
+                secret_key
+            };
+            state.secret_hints.get(key).copied().unwrap_or(false)
+        };
         let placeholder = if stored {
             "plugin.cloud_sync.placeholders.secret_stored"
         } else {
@@ -995,6 +994,10 @@ impl WorkspaceApp {
         show_success_toast: bool,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.cloud_sync.read(cx).operation_in_flight() {
+            return false;
+        }
+        self.cancel_causal_sync(cx);
         self.apply_focused_cloud_sync_input_draft(cx);
         self.invalidate_cloud_sync_snapshot_caches(cx);
         let (mut settings, interval) = {
@@ -1002,6 +1005,63 @@ impl WorkspaceApp {
             cloud_sync_settings_from_form(&cloud_sync.view.form)
         };
         settings.local_file_mode = self.cloud_sync.read(cx).view.local_file_mode;
+        settings.sync_password_ref = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .store
+            .state()
+            .settings
+            .sync_password_ref
+            .clone();
+        let current = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .store
+            .state()
+            .settings
+            .clone();
+        let destination_changed = !settings.same_destination(&current);
+        let has_replica =
+            match oxideterm_cloud_sync::operation::CloudSyncOperationService::has_local_replica(
+                self.settings_store.path(),
+                &current,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    self.finish_cloud_sync_error("sync", error.to_string(), cx);
+                    return false;
+                }
+            };
+        let changing_password = {
+            let cloud_sync = self.cloud_sync.read(cx);
+            let state = cloud_sync.controller.store.state();
+            !settings.local_file_mode
+                && !destination_changed
+                && cloud_sync.view.form.sync_password_touched
+                && (has_replica || state.remote_exists)
+                && state
+                    .secret_hints
+                    .get(
+                        state
+                            .settings
+                            .sync_password_ref
+                            .as_deref()
+                            .unwrap_or(secret_keys::SYNC_PASSWORD),
+                    )
+                    .copied()
+                    .unwrap_or(false)
+        };
+        if changing_password {
+            self.cloud_sync.update(cx, |cloud_sync, cx| {
+                cloud_sync.view.confirm = Some(CloudSyncConfirm::ChangePassword);
+                cloud_sync.view.confirm_presence.reopen();
+                cloud_sync.view.confirm_focused_action = None;
+                cx.notify();
+            });
+            return false;
+        }
         let mut provider = CloudSyncKeychainSecretProvider::new(
             self.cloud_sync
                 .read(cx)
@@ -1011,10 +1071,23 @@ impl WorkspaceApp {
                 .secret_hints
                 .clone(),
         );
-        let secret_handoff = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+        let mut secret_handoff = self.cloud_sync.update(cx, |cloud_sync, _cx| {
             cloud_sync.view.form.take_secret_handoff()
         });
-        let secret_result = store_cloud_sync_touched_secrets(&secret_handoff, &mut provider);
+        let secret_result = (|| -> anyhow::Result<()> {
+            if !settings.local_file_mode {
+                if let Some(value) = secret_handoff.sync_password.as_deref() {
+                    let reference = format!("sync-v3-password-{}", uuid::Uuid::new_v4());
+                    provider.store_secret(
+                        &reference,
+                        oxideterm_gpui_cloud_sync::non_empty_secret(value),
+                    )?;
+                    settings.sync_password_ref = Some(reference);
+                }
+                secret_handoff.sync_password = None;
+            }
+            store_cloud_sync_touched_secrets(&secret_handoff, &mut provider)
+        })();
         if let Err(error) = secret_result {
             // Credential-store failures contain operation context and platform
             // status details, never the submitted secret values.
@@ -1033,9 +1106,19 @@ impl WorkspaceApp {
             return false;
         }
         let save_result = self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            let previous = cloud_sync.controller.store.state().clone();
             cloud_sync.controller.store.state_mut().settings = settings;
             cloud_sync.controller.store.state_mut().secret_hints = provider.hints().clone();
-            cloud_sync.controller.store.save()
+            if destination_changed {
+                oxideterm_cloud_sync::state_transitions::reset_destination_state(
+                    cloud_sync.controller.store.state_mut(),
+                );
+            }
+            let result = cloud_sync.controller.store.save();
+            if result.is_err() {
+                *cloud_sync.controller.store.state_mut() = previous;
+            }
+            result
         });
         if let Err(error) = save_result {
             self.cloud_sync.update(cx, |cloud_sync, _cx| {
