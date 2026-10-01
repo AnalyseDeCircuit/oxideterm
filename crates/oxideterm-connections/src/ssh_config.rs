@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result, anyhow, bail};
 
-use crate::ssh_paths::{default_ssh_dir, expand_home_path};
+use crate::ssh_paths::{default_ssh_dir, expand_home_path, user_ssh_dir};
 use crate::{
     ConnectionStore, ConnectionX11ForwardingMode, ConnectionX11ForwardingOptions, SecretString,
     saved_connection_from_ssh_host,
@@ -92,7 +92,18 @@ struct SshHostOptions {
 const MAX_PROXY_JUMP_DEPTH: usize = 16;
 
 pub fn default_ssh_config_path() -> PathBuf {
-    default_ssh_dir().join("config")
+    ssh_config_path_in_dirs(default_ssh_dir(), user_ssh_dir())
+}
+
+fn ssh_config_path_in_dirs(ssh_dir: PathBuf, user_dir: PathBuf) -> PathBuf {
+    let preferred = ssh_dir.join("config");
+    // An existing portable config, including an empty one, owns host selection.
+    // Only absence selects the user's config; an access error must not switch profiles.
+    if preferred.try_exists().unwrap_or(true) {
+        preferred
+    } else {
+        user_dir.join("config")
+    }
 }
 
 pub fn list_ssh_config_hosts(existing_names: &HashSet<String>) -> Result<Vec<SshConfigHost>> {
@@ -1225,6 +1236,65 @@ fn alias_contains_pattern(alias: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn portable_config_selection_reads_user_hosts_until_a_portable_config_exists() {
+        let root = tempfile::tempdir().unwrap();
+        let user_dir = root.path().join("profile/.ssh");
+        let portable_dir = root.path().join("data/.ssh");
+        fs::create_dir_all(&user_dir).unwrap();
+        fs::write(
+            user_dir.join("config"),
+            "Host personal\n HostName personal.example\n",
+        )
+        .unwrap();
+        let selected = ssh_config_path_in_dirs(portable_dir.clone(), user_dir.clone());
+        assert_eq!(selected, user_dir.join("config"));
+        let hosts = list_ssh_config_hosts_from_path(&selected, &HashSet::new()).unwrap();
+        assert_eq!(
+            hosts
+                .iter()
+                .map(|host| host.alias.as_str())
+                .collect::<Vec<_>>(),
+            ["personal"]
+        );
+
+        fs::create_dir_all(&portable_dir).unwrap();
+        assert_eq!(
+            ssh_config_path_in_dirs(portable_dir.clone(), user_dir.clone()),
+            selected
+        );
+        fs::write(
+            portable_dir.join("config"),
+            "Host travel\n HostName travel.example\n",
+        )
+        .unwrap();
+        let selected = ssh_config_path_in_dirs(portable_dir.clone(), user_dir.clone());
+        assert_eq!(selected, portable_dir.join("config"));
+        let hosts = list_ssh_config_hosts_from_path(&selected, &HashSet::new()).unwrap();
+        assert_eq!(
+            hosts
+                .iter()
+                .map(|host| host.alias.as_str())
+                .collect::<Vec<_>>(),
+            ["travel"]
+        );
+
+        fs::write(&selected, "").unwrap();
+        assert_eq!(
+            ssh_config_path_in_dirs(portable_dir, user_dir.clone()),
+            selected
+        );
+        assert!(
+            list_ssh_config_hosts_from_path(&selected, &HashSet::new())
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            ssh_config_path_in_dirs(user_dir.clone(), user_dir.clone()),
+            user_dir.join("config")
+        );
+    }
 
     fn block(patterns: &[&str], options: SshHostOptions) -> SshHostBlock {
         SshHostBlock {

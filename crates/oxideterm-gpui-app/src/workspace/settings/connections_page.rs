@@ -785,8 +785,13 @@ impl WorkspaceApp {
             .allow_proxy_command;
         self.connection_section(
             "settings_view.connections.ssh_config.title",
-            "settings_view.connections.ssh_config.description",
+            "",
             vec![
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.ssh_config_source_description())
+                    .into_any_element(),
                 self.setting_row(
                     "settings_view.connections.ssh_config.auto_load",
                     "settings_view.connections.ssh_config.auto_load_hint",
@@ -984,8 +989,7 @@ impl WorkspaceApp {
                     ))
                     .child(dialog_description(
                         &self.tokens,
-                        self.i18n
-                            .t("settings_view.connections.ssh_config.description"),
+                        self.ssh_config_source_description(),
                     )),
             )
             .child(body)
@@ -1303,6 +1307,17 @@ impl WorkspaceApp {
                     .t("settings_view.connections.ssh_config.already_imported"),
             )
             .into_any_element()
+    }
+
+    fn ssh_config_source_description(&self) -> String {
+        self.i18n
+            .t("settings_view.connections.ssh_config.description")
+            .replace(
+                "{{path}}",
+                &oxideterm_connections::default_ssh_config_path()
+                    .display()
+                    .to_string(),
+            )
     }
 
     pub(in crate::workspace) fn ssh_config_empty_state(&self) -> AnyElement {

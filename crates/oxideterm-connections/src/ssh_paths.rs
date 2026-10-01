@@ -5,6 +5,10 @@ pub(crate) fn default_ssh_dir() -> PathBuf {
         return ssh_dir;
     }
 
+    user_ssh_dir()
+}
+
+pub(crate) fn user_ssh_dir() -> PathBuf {
     local_home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".ssh")

@@ -12,6 +12,12 @@ Use groups, colors, and tags for navigation. Do not put passwords, tokens, or en
 
 ## Importing Connections
 
+### OpenSSH configuration
+
+**Settings → Connections → Import from SSH Config** shows the configuration file being scanned. Host discovery, alias lookup, and automatic synchronization use this same path. In portable mode, `<data directory>/.ssh/config` takes priority when it exists; otherwise OxideTerm reads the current user's `~/.ssh/config`. An empty portable config keeps the host list empty. Portable private-key discovery, imported keys, and `known_hosts` continue to use the portable data directory.
+
+### Other clients
+
 Open Settings, go to Connections, and use **Import from Other Clients**. Select a source, choose its file or folder, review the preview, then import the selected connections. Existing names can be skipped or renamed, and an optional target group can override source groups.
 
 Supported sources and inputs:
