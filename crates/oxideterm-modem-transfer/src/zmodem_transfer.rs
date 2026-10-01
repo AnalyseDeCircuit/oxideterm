@@ -21,6 +21,7 @@ const ZMODEM_CAN_OVERLAPPED_IO: u8 = 0x02;
 const ZMODEM_CAN_CRC32: u8 = 0x20;
 const ZMODEM_ESCAPE_CONTROL: u8 = 0x40;
 const ZMODEM_BINARY_FILE_CONVERSION: u8 = 0x01;
+const ZMODEM_FILE_CLOBBER: u8 = 4;
 const ZMODEM_ATTENTION_MAX_BYTES: usize = 32;
 const ZFILE_BINARY_FLAGS: [u8; 4] = [0, 0, 0, ZMODEM_BINARY_FILE_CONVERSION];
 const ZRINIT_FLAGS: [u8; 4] = [
@@ -41,6 +42,7 @@ struct ZmodemPeerCapabilities {
 pub struct ZmodemFileHeader {
     pub file_name: String,
     pub file_size: Option<u64>,
+    pub overwrite: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -81,7 +83,8 @@ where
                     return Err(ModemTransferError::UnexpectedFrame);
                 }
                 let file_header_data = file_header_frame.payload;
-                let Some(file_header) = parse_zfile_header(&file_header_data)? else {
+                let Some(file_header) = parse_zfile_header(&file_header_data, header.position[2])?
+                else {
                     finish_zmodem_receive(io)?;
                     return Ok(received);
                 };
@@ -770,7 +773,10 @@ fn read_hex_nibble<I: ModemIo>(io: &mut I) -> Result<u8, ModemTransferError> {
     }
 }
 
-fn parse_zfile_header(bytes: &[u8]) -> Result<Option<ZmodemFileHeader>, ModemTransferError> {
+fn parse_zfile_header(
+    bytes: &[u8],
+    management: u8,
+) -> Result<Option<ZmodemFileHeader>, ModemTransferError> {
     let nul = bytes
         .iter()
         .position(|byte| *byte == 0)
@@ -792,6 +798,9 @@ fn parse_zfile_header(bytes: &[u8]) -> Result<Option<ZmodemFileHeader>, ModemTra
     Ok(Some(ZmodemFileHeader {
         file_name,
         file_size,
+        // ZF1's exact clobber request is sent by sz -y. Other management modes
+        // retain collision renaming until their conditions are supported.
+        overwrite: management == ZMODEM_FILE_CLOBBER,
     }))
 }
 
@@ -956,7 +965,7 @@ mod tests {
         let zfile_frame =
             read_zmodem_data(&mut probe, false, ZMODEM_MAX_CHUNK).expect("probe zfile data");
         assert!(
-            parse_zfile_header(&zfile_frame.payload)
+            parse_zfile_header(&zfile_frame.payload, zfile_header.position[2])
                 .expect("probe zfile parse")
                 .is_some()
         );

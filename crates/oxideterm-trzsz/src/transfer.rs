@@ -246,7 +246,7 @@ impl TrzszTransfer {
     ) -> Result<Vec<String>, TrzszError> {
         let binary = self.config_bool("binary");
         let directory = self.config_bool("directory");
-        let overwrite = false;
+        let overwrite = self.config_bool("overwrite");
         let timeout = self
             .config_u64("timeout")
             .map(|seconds| Duration::from_secs(seconds.max(1)))
