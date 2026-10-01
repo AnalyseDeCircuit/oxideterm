@@ -39,9 +39,12 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Need | Read |
 | --- | --- |
 | Find the correct crate or entry point | [Crate map](crate-map.md) |
+| Build a product page with existing controls, focus, IME, and overlays | [GPUI product UI](gpui-product-ui.md) |
 | Build and run on macOS, Windows, or Linux | [Local development](local-development.md) |
 | Choose checks for a focused change | [Verification matrix](verification.md) |
 | Change a shared SSH connection or long-running task | [Runtime ownership](runtime-ownership.md) |
+| Combine, detach, reopen, or close workspace pages | [Page, pane, and window lifetime](runtime-ownership.md#pages-panes-and-window-mounts) |
+| Record an operation or integrate terminal-output recording | [Audit integration](audit-integration.md) |
 | Change parent/child AI runs, approvals or execution coordination | [AI agent collaboration](ai-agents.md) |
 | Investigate or modify the vendored UI framework | [GPUI CE maintenance](gpui-ce.md) |
 | Collect a minimal reproduction, logs, or a performance sample | [Debugging](debugging.md) |
@@ -49,6 +52,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Add product copy or a localized control | [Internationalization and product copy](i18n-and-product-copy.md) |
 | Handle credentials, diagnostics, or external process input | [Secrets and sensitive data](secrets-and-sensitive-data.md) |
 | Change persisted settings, export, sync, or migration behavior | [Settings, data, and migrations](settings-data-and-migrations.md) |
+| Add business data to the shared sync coordinator | [Cloud-sync mapping workflow](settings-data-and-migrations.md#include-business-data-in-cloud-sync) |
 | Make a performance claim or change a hot path | [Performance and benchmarking](performance-and-benchmarking.md) |
 | Prepare a stable release or repair release assets | [Release process](release-process.md) |
 | Maintain Nix packaging, flake checks, or Git dependency hashes | [Nix packaging guide](../../nix/README.md) |

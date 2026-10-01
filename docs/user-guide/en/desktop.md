@@ -16,7 +16,7 @@ Use the activity bar as the entry point for app surfaces:
 - Graphics/VNC: open saved RDP/VNC profiles or visual sessions launched from a connected node.
 - Plugins: manage installed plugins and plugin settings.
 - Cloud sync: inspect sync status and run sync actions.
-- Notifications: review recent warnings and errors.
+- Notifications & Audit: review notifications, recorded operations, session history, and terminal-output recordings.
 - Settings: change app behavior and provider configuration.
 
 When a workflow becomes confusing, return to Sessions or Connection Monitor first. Those views show whether a host is saved, connecting, connected, stale, or unavailable.
@@ -25,7 +25,17 @@ When a workflow becomes confusing, return to Sessions or Connection Monitor firs
 
 Use terminal tabs for local shells and SSH sessions. Split panes when a task needs multiple shells in the same workspace. Command marks, shell integration, and terminal history belong to the pane, so closing a pane should not be treated as disconnecting a saved SSH host.
 
-Drag any tab into another tab's content and drop it at the desired edge to arrange pages side by side or vertically. A combined tab holds up to four panes. Terminals, SFTP, IDE, port forwards, notes, settings, cloud sync, audit, remote desktops, and plugin pages can all share a layout. Opening a singleton page again focuses its existing pane. Use the pane header to move a page back to a tab or into its own window. Moving the combined tab to another window preserves its live sessions and layout.
+### Combine pages in one tab
+
+For example, keep a terminal beside SFTP while uploading files:
+
+1. Open the terminal and SFTP as separate tabs.
+2. Drag the SFTP tab into the terminal's content area. Move to the left, right, top, or bottom edge and release over the layout preview.
+3. Drag the divider to adjust the space given to each page. Click inside a pane to make it active.
+4. To separate a page again, use **Move to new tab** in its pane header, or the header's action for moving it to a new window.
+5. To remove a page, use its pane close action. If it has unsaved work or a running process, handle the close prompt. When one page remains, the extra pane header disappears and the main tab takes that page's name.
+
+A combined tab holds up to four panes. Terminals, SFTP, IDE, port forwards, notes, settings, cloud sync, audit, remote desktops, and plugin pages can share a layout. Opening a single-instance page, such as Settings, again focuses its existing pane. Moving the whole combined tab to another window preserves its live sessions and layout.
 
 For long-running jobs, keep the owning connection visible in the connection pool or monitor. Reconnect behavior is tied to the connection/runtime state, not only to the visible terminal tab.
 
@@ -87,6 +97,15 @@ Local terminal sessions provide these adapter paths automatically. For SSH sessi
 
 Settings → Terminal also lets you choose the sequences sent by the physical Backspace and Delete keys. The defaults are `DEL (0x7F)` for Backspace and `CSI 3~` for Delete. Change them only when a legacy shell, serial device, or remote application expects `Ctrl+H (0x08)` or another offered sequence. Kitty keyboard protocol sessions keep their protocol-defined key encoding.
 
+### Edit before pasting
+
+1. Copy the text, then right-click the destination terminal and choose **Edit before pasting**. A multiline paste confirmation also offers **Edit**.
+2. Edit the text in the dialog. You can add or remove lines and use **Undo** and **Redo**.
+3. If you copied a Markdown code block, choose **Remove code block markers** to remove its surrounding fence. This is an explicit action; ordinary paste keeps the text as copied.
+4. Review the destination and the final text, then click **Paste**. **Cancel** closes the dialog without sending the draft.
+
+Newlines are sent with the pasted text and may cause the receiving shell to execute commands. The dialog keeps edits locally until you choose Paste.
+
 ## Saved Connections
 
 Use saved connections for hosts you expect to reuse. Set the host, user, port, group, color, tags, auth method, and optional post-connect command. Prefer SSH agent or key-based auth where possible.
@@ -115,6 +134,57 @@ Use Host Tools for read-oriented host inspection. Keep destructive host actions 
 Use the file manager for remote browsing, uploads, downloads, previews, and basic file operations. Treat remote edits as real remote writes: keep backups for critical files, and verify paths before overwriting.
 
 When a connection is unstable, pause large transfers and reconnect before retrying. Saved connection state and transfer state are separate; a failed transfer should not require deleting the connection.
+
+### Transfer files through a terminal
+
+In an SSH terminal, start the matching transfer program on the remote host. OxideTerm recognizes its transfer request and opens the local file or destination picker.
+
+| Task | Remote command | Local action |
+| --- | --- | --- |
+| Upload with trzsz | `trz` | Choose local files |
+| Download with trzsz | `tsz report.txt` | Choose a destination folder |
+| Upload with ZMODEM | `rz` | Choose local files |
+| Download with ZMODEM | `sz report.txt` | Choose a destination folder |
+
+The remote host needs the corresponding program installed. For a download that should replace an existing local file, run `tsz -y report.txt` or `sz -y report.txt`. Without that overwrite request, a conflicting filename is renamed. OxideTerm keeps the existing file while receiving its replacement: trzsz commits after validation, and ZMODEM commits replacements after the batch succeeds. Cancelling the transfer preserves the existing file.
+
+For serial devices, open **Binary transfer** in the terminal control bar and choose the matching XMODEM, YMODEM, or ZMODEM upload/receive action. Put the device into its matching transfer mode first. XMODEM reception also needs a destination filename because the protocol does not carry one.
+
+Use SFTP when you want to browse directories and manage a transfer queue. See [transfer troubleshooting](troubleshooting.md#connection-and-transfer-checks) if a terminal transfer does not start.
+
+## Audit and session recordings
+
+Open **Notifications & Audit** from the activity bar. Notifications show recent messages; **Audit**, **Sessions**, and **Session recordings** provide operation history and playback.
+
+### Record and find operations
+
+1. Select **Audit** and turn on **Enable audit**. It is off by default and records subsequent operations.
+2. Perform the connection, command, file, or forwarding operation you want to inspect, then return and click **Refresh**.
+3. Choose a time range and other filters. Enter a search and press Enter to apply it.
+4. Open a record to inspect its target, source, result, and result evidence. **Sent** means the input was sent; an exit code or protocol result provides stronger evidence of completion.
+5. Use **Sessions** to find related operations for one session, then open that session's history or recordings.
+
+Disabling audit stops new collection; existing records remain readable. Retention and capacity can be changed in the page's settings and applied with **Save**.
+
+### Record and replay terminal output
+
+1. With audit enabled, select **Session recordings** and turn on **Record terminal output**.
+2. Read and accept the recording prompt. Future displayed output from local terminals, SSH, Telnet, Mosh, and serial sessions is recorded.
+3. Return to Session recordings, refresh the list, and open a recording. Use play/pause, the position control, playback speed, or restart to inspect it.
+4. Turn off Record terminal output when you no longer want new output captured. Disabling audit also stops new output recording.
+
+Recordings contain displayed output and terminal size changes. Typed keys and terminal file-transfer payloads are excluded, but text echoed by a shell or program can still appear in the output. Recordings are encrypted on this device and are not included in cloud sync. An incomplete or expired-content indicator means some output is unavailable for playback.
+
+| Data | Default retention | Default capacity |
+| --- | --- | --- |
+| Operation records | 90 days | 512 MiB |
+| Terminal output | 7 days | 2 GiB |
+
+Both switches are off initially. Each retention setting accepts 1–3650 days and each capacity accepts 1–65536 MiB. Save changes in the corresponding Audit or Session recordings view.
+
+### Export records
+
+Use **Export summaries as JSON** or **Export summaries as CSV** for the selected audit filters. **Export protected details** asks for confirmation and includes commands, paths, endpoints, accounts, and operation details in a plaintext file; it does not include session recordings. Review that file before sharing it. Export records you need to keep before clearing them or reducing retention.
 
 ## IDE Workspace
 

@@ -52,13 +52,37 @@ Duplicate managed keys are matched by fingerprint and should reuse the existing 
 
 ## Cloud Sync Boundary
 
-Cloud Sync can upload encrypted `.oxide` snapshots, but background or plugin-driven sync does not silently include managed SSH keys. Use the manual export or portable migration flow when you need to move complete credential material between machines.
+Cloud Sync uploads encrypted snapshots according to its selected scope. Passwords, managed private keys, AI keys, and other supported credentials require the separate sensitive-sync opt-in. Use a manual `.oxide` export for a one-time credential transfer, and check its individual inclusion options. See [cloud sync setup](cloud-sync-and-backups.md#configure-sync).
 
 ## Portable Runtime
 
 The portable runtime keystore protects portable secrets after import. Set it up through the app's portable runtime or secret storage surface. If the keystore is locked, unlock it before relying on imported portable secrets.
 
 Only reset the portable runtime when you intentionally want to remove the local portable keystore.
+
+### Set up a portable folder
+
+1. Put the application in a writable folder. On macOS, use the folder containing `OxideTerm.app`; for an AppImage, use the folder containing the AppImage; for an unpacked executable, use its folder.
+2. With OxideTerm closed, create an empty file named `portable` in that folder. On the next launch, data will use its `data` subfolder.
+3. Alternatively, create `portable.json` there to choose a relative data directory:
+
+   ```json
+   { "enabled": true, "dataDir": "data" }
+   ```
+
+   `dataDir` must stay inside the portable folder: absolute paths and `.` or `..` path components are rejected. `portable.json` takes precedence over the empty marker.
+4. Launch OxideTerm and complete the portable password setup or unlock prompt. In **Settings → General**, check the displayed data directory and portable status before importing a bundle.
+5. Import the selected `.oxide` data and try a saved connection. When moving the portable installation, close it first and copy the application, marker/configuration, and the complete selected data directory, including `keystore.vault`.
+
+Keep the portable password when moving devices. A device-specific automatic unlock does not replace it. Portable SSH configuration lookup is described in [OpenSSH configuration](connections-and-forwards.md#openssh-configuration).
+
+## Data-directory backups
+
+Find the active location under **Settings → General → Data Directory** or run `oxideterm paths --json`. A normal installation may use a custom directory; portable mode uses the directory selected above.
+
+Quit OxideTerm and stop CLI operations before copying the entire directory. This preserves local databases, history, and recordings together with their files. In an installed profile, protected keys also depend on the original operating system's credential store; a directory copy alone is not a complete credential migration. Use an encrypted `.oxide` export with the needed credential options when moving to another device. Portable profiles instead need their complete keystore and password.
+
+Changing Data Directory requires a restart and does not automatically move existing files. Record the old location, copy the needed data while the app is closed, then check the selected location and data after restarting. Keep the original copy until the restored configuration has been verified.
 
 ## CLI Companion
 

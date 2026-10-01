@@ -10,6 +10,42 @@ Create and edit saved connections from the connection manager or Sessions view. 
 
 Use groups, colors, and tags for navigation. Do not put passwords, tokens, or environment secrets in names, groups, tags, notes, or post-connect labels.
 
+## Kerberos authentication
+
+Use Kerberos when your organization provides a current system sign-in or ticket and the SSH server accepts Kerberos authentication.
+
+1. Create or edit an SSH connection and enable **Prefer Kerberos** under authentication.
+2. Check the credential-availability message. OxideTerm uses credentials from the current operating-system session; obtain or renew them through your organization's sign-in procedure if none are available.
+3. Leave **Kerberos server identity (optional)** empty to use `host/<SSH host>`. When connecting through an alias or load balancer, enter the service identity provided by your administrator, such as `host/server.example.com`.
+4. Choose the **Fallback authentication** method and configure its password, key, or agent as needed.
+5. Save and connect. If authentication fails, check the connection progress, ticket availability, server identity, and the server's Kerberos support.
+
+**Delegate Kerberos credentials to this server** allows the remote host to use delegated credentials to access other Kerberos services as you. Enable it only when that workflow is needed on a trusted server. Configure each jump host's authentication separately.
+
+## Automatic verification codes (TOTP)
+
+1. Open **Settings → Credentials → TOTP credentials**, then choose **Add credential**.
+2. Give it a recognizable name and enter the Base32 secret or `otpauth://` link from the service. This is the setup secret, not the current six-digit code.
+3. Check the algorithm, 6- or 8-digit length, and period of 1–300 seconds against the service. An imported link supplies its own parameters; save it before editing those parameters separately.
+4. Review the prompt-matching regular expression, leave the credential enabled, and save.
+5. Edit the SSH connection and select the credential in **TOTP credential**. Select it separately on each jump host that needs it, then reconnect.
+
+OxideTerm generates a code when a matching SSH authentication prompt appears. Both hidden and visible-input verification prompts are supported, including matching JumpServer prompts. Other prompts still require their own answers. If the code is not filled in, check that the credential is enabled, bound to the correct host, and matches the actual prompt. If it is rejected, check the device clock and the service's code parameters. Existing custom prompt expressions are preserved when updating OxideTerm.
+
+When editing a credential, leave the secret empty to keep its saved value. Remove its bindings from connections and jump hosts before deleting it. See [troubleshooting](troubleshooting.md#connection-and-transfer-checks) for authentication checks.
+
+## Mosh connections
+
+Mosh is useful for a terminal that must continue across brief network changes. The remote host needs `mosh-server` installed and a reachable UDP port; OxideTerm provides the local client itself.
+
+1. Open New Connection and choose **Mosh**. Enter the host, username, SSH port, and authentication used to start the remote session.
+2. In **Mosh Settings**, leave **mosh-server executable** as `mosh-server`, or set its remote path if it is not on the server's command search path.
+3. Leave **UDP port or range** empty for automatic selection, or enter an allowed port such as `60001` or a range such as `60000:61000`. Allow the selected UDP port or range through the server firewall and any network address translation.
+4. Use **UDP host override** if the UDP endpoint must use a different public host or address. Set the remote UTF-8 locale if the server requires one. Local prediction defaults to **Adaptive**.
+5. Save the profile if you want to reuse it, then open the connection and confirm that the terminal accepts input.
+
+SSH and any jump hosts are used to start the remote session. The subsequent UDP connection must be directly reachable from this device; an SSH jump route does not carry it. Each Mosh connection opens one UTF-8 terminal. Open a separate SSH connection for SFTP, IDE, or port forwarding. If startup succeeds but the terminal cannot communicate, check the UDP host, selected port, firewall, and address-family settings.
+
 ## Importing Connections
 
 ### OpenSSH configuration

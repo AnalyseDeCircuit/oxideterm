@@ -33,11 +33,11 @@ For terminal background issues, reopen Settings and confirm the background image
 
 For stale blocks after a full-screen TUI exits, first try `clear` or reopen the terminal pane. If the issue repeats with a command such as `yazi`, treat it as terminal graphics/image-placement state and include the command name in the bug report.
 
-For X/Y/ZMODEM transfer issues, cancel unexpected prompts. Retry with an explicit transfer command such as `rz`, `sz`, `rx`, or `rb`, then choose the local path from the app prompt. Ordinary command output should not be treated as a transfer unless protocol context is clear.
+For terminal file transfers, follow the matching SSH command or serial **Binary transfer** action in [terminal transfers](desktop.md#transfer-files-through-a-terminal). Cancel an unexpected transfer prompt before trying again.
 
 For privilege credential issues, check the dedicated Settings page and the active terminal pane. Do not paste sudo/su passwords into logs, AI prompts, support bundles, quick commands, or connection notes while debugging.
 
-For cloud sync issues, open Cloud Sync, inspect status, and review conflicts before choosing a direction.
+For cloud sync issues, inspect the current preview and follow [conflicts and interrupted sync](cloud-sync-and-backups.md#conflicts-and-interrupted-sync).
 
 For serial terminal issues, start from the device and permission boundary:
 
@@ -46,9 +46,28 @@ For serial terminal issues, start from the device and permission boundary:
 - Device busy: close other terminal programs, debuggers, flashing tools, or OxideTerm tabs that may already hold the port.
 - Device unplugged: close the current serial terminal, reconnect the device, and reopen it. If the OS assigned a new path, update the serial profile.
 
+## Connection and transfer checks
+
+| Symptom | What to check |
+| --- | --- |
+| SSH connection times out before authentication | Check the saved host and port, network/VPN access, and each jump host shown in connection progress |
+| Password or key authentication is rejected | Confirm the username and selected authentication method; make sure the key file or managed key is available on this device |
+| Host-key confirmation or a changed-key warning appears | Compare the fingerprint with a trusted record or the server administrator before accepting it |
+| Kerberos has no usable credentials | Renew the operating system's sign-in or ticket, then check the configured server identity and fallback method |
+| A TOTP code is not filled in or is rejected | Check the binding for that specific host, enabled state, prompt expression, device clock, and code parameters; see [TOTP setup](connections-and-forwards.md#automatic-verification-codes-totp) |
+| Mosh starts through SSH but shows no usable terminal | Check direct UDP access, the port/range and host override, and firewall or address translation rules |
+| SSH works but SFTP fails | Confirm that the server permits SFTP channels and that the selected directory is accessible; inspect the SFTP error before reconnecting |
+| A transfer stops or cannot write its destination | Check free space and permissions at the receiving end, the transfer queue's error, and whether the connection has recovered |
+| A download gets a new filename | The default keeps the existing file; use the sender's explicit overwrite request only when replacement is intended |
+| A remote edit reports a file conflict | Compare your buffer with the current remote file, then choose whether to reload or overwrite; keep a copy of edits you still need |
+
+If output stops during an SSH network interruption, watch the reconnect phase. OxideTerm first probes the existing connection before replacing it. Reopening or deleting the profile is not required for this recovery. Check transfer and editor status after reconnection before repeating an operation that may already have completed.
+
+If no audit recording appears, check both **Enable audit** and **Record terminal output**. They are initially off, so there is no earlier output to replay. Missing or expired-content indicators are explained in [session recordings](desktop.md#audit-and-session-recordings).
+
 ## Backups First
 
-Before applying a restore, import, sync apply, or manual file repair, create or verify a backup from the app. Review the restore plan and apply the smallest section that solves the issue.
+Before applying a restore, import, sync apply, or manual file repair, [create or verify a backup](cloud-sync-and-backups.md#create-a-backup). Review the restore plan and apply the smallest section that solves the issue.
 
 ## CLI Companion Diagnostics
 

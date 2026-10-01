@@ -372,12 +372,12 @@ fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation(
         &plugin_settings_revisions,
         None,
     );
-    let plugin_runtime::PluginResponseResult::Ok { value: metadata } = validate_response.result
-    else {
-        panic!("expected sync.validateOxide to return metadata");
-    };
-    assert_eq!(metadata["description"], "Plugin export");
-    assert_eq!(metadata["connection_names"], serde_json::json!(["Home"]));
+    assert_eq!(
+        validate_response.result,
+        plugin_runtime::PluginResponseResult::Ok {
+            value: serde_json::json!({ "metadataEncrypted": true })
+        }
+    );
 
     let preview_response = native_plugin_sync_response(
         "com.example.demo",
@@ -404,6 +404,11 @@ fn sync_oxide_host_calls_export_validate_and_preview_without_workspace_mutation(
     else {
         panic!("expected sync.previewImport to return an import preview");
     };
+    assert_eq!(preview["metadata"]["description"], "Plugin export");
+    assert_eq!(
+        preview["metadata"]["connection_names"],
+        serde_json::json!(["Home"])
+    );
     assert_eq!(preview["totalConnections"], 1);
     assert_eq!(preview["willSkip"], serde_json::json!(["Home"]));
 }

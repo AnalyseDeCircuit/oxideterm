@@ -45,6 +45,32 @@ Health checks and reconnect jobs belong to the node/runtime owner. A reconnect r
 
 Child-node topology must use recorded parent-child identities. A child that still needs a jump transport retains the parent dependency even when no terminal pane is visible. Matching host strings is not a valid substitute because multiple saved profiles can address the same host differently.
 
+## Pages, Panes, And Window Mounts
+
+The layout model is in [oxideterm-workspace](../../crates/oxideterm-workspace/src/lib.rs). A `PaneNode::Leaf` refers to a `TerminalSessionId`; a `PaneNode::Page` refers to a content `TabId`; a `Group` keeps child nodes and their size shares together. A content page retains its identity when placed in a combined workspace tab.
+
+| Identity | Use it for |
+| --- | --- |
+| Content `TabId` | The page descriptor and feature state, including an embedded singleton page |
+| Container `TabId` | The top-level layout and tab-strip selection |
+| `PaneId` | Focused position, split geometry, and the terminal view mounted there |
+| `TerminalSessionId` | The running terminal session and its consumer registration |
+| `TabMountId` and window identity | The current detached-window mount and its callbacks |
+
+[WorkspaceTabHostEntity](../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs) owns these mappings. Use `container_tab_id`, `focused_page_id`, and `focus_content_page` where the operation needs them. A Settings or SFTP page can be focused inside a container whose top-level kind is `Workspace`; searching only the visible tab strip loses that page's identity.
+
+### Move, Close, And Reopen
+
+- Combining pages changes layout ownership while keeping their descriptors and feature state. Use the tab host's combination and unembedding methods, with [split-drop handling](../../crates/oxideterm-gpui-app/src/workspace/tabs/split_drop.rs) for the actual drop target.
+- Reopening a singleton page focuses its existing content pane, including when it belongs to a detached window. Do not create a second feature runtime merely because the page is embedded.
+- Detaching reserves a mount, creates the native window, then commits or rolls back that reservation. Follow [tabs/detach.rs](../../crates/oxideterm-gpui-app/src/workspace/tabs/detach.rs). Release callbacks must match the current mount so an old window cannot close a newer one.
+- Closing a pane, closing a content page, returning a detached tab, and disconnecting a node are different transitions. Route close confirmation through the existing tab/feature owner, then release only the affected consumers. A layout move does not justify disconnecting a transport.
+- When a group shrinks to one page, keep the remaining page's identity and derive the visible title from it. Avoid storing another independent title or focus state in the container.
+
+Dialogs and menus also need the current window identity. [Root modal rendering](../../crates/oxideterm-gpui-app/src/workspace/root/render.rs) resolves the focused embedded page before rendering its dialogs. See [product UI](gpui-product-ui.md) for focus and overlay integration.
+
+For changes to this path, reuse the tab-host tests for mixed-page identity, group shrinkage, detached drops, stale release callbacks, and consumer retention. Manually combine a terminal with a utility page, move the group to a window, reopen the singleton page, separate it, and close back to one page. An SFTP operation or forward that survives a layout move is a separate runtime check from the layout assertions.
+
 ## Required Design Checks
 
 - Give every long-lived task an explicit owner, cancellation path, and cleanup point.
