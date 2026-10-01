@@ -1045,6 +1045,10 @@ impl WorkspaceApp {
         let active_pane_id = tab_id
             .and_then(|tab_id| self.tab_by_id(tab_id, cx))
             .and_then(|tab| tab.active_pane_id);
+        let split = tab_id
+            .and_then(|id| self.tab_by_id(id, cx))
+            .and_then(|tab| tab.root_pane.as_ref())
+            .is_some_and(|root| root.pane_count() > 1);
         let content = match node {
             PaneNode::Page {
                 pane_id,
@@ -1055,11 +1059,14 @@ impl WorkspaceApp {
                 };
                 let (pane_id, page_id) = (*pane_id, *page_id);
                 let container = tab_id.unwrap_or(page_id);
-                let content = match page.kind {
-                    TabKind::Sftp => self.render_sftp_surface_for_tab(page_id, window, cx),
-                    TabKind::Ide => self.render_ide_surface_for_tab(page_id, cx),
-                    TabKind::Forwards => self.render_forwards_surface_for_tab(page_id, window, cx),
-                    _ => div().into_any_element(),
+                let content = if page.kind == TabKind::Knowledge {
+                    self.render_knowledge_workspace_surface(
+                        KnowledgeWorkspaceLayout::SplitPane,
+                        window,
+                        cx,
+                    )
+                } else {
+                    self.render_tab_content_for_id(page_id, &page.kind, None, window, cx)
                 };
                 div()
                     .id(("workspace-page", pane_id.0))
@@ -1068,6 +1075,10 @@ impl WorkspaceApp {
                     .flex_col()
                     .overflow_hidden()
                     .capture_any_mouse_down(cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                        let previous = this.tab_host.read(cx).focused_page_id(container);
+                        if previous != page_id {
+                            this.release_remote_desktop_inputs_for_tab(previous, cx);
+                        }
                         if this
                             .tab_host
                             .update(cx, |host, _| host.set_active_pane(Some(container), pane_id))
@@ -1079,12 +1090,14 @@ impl WorkspaceApp {
                         }
                         cx.notify();
                     }))
-                    .child(self.render_workspace_page_header(
-                        page_id,
-                        &page.title,
-                        Some(pane_id) == active_pane_id,
-                        cx,
-                    ))
+                    .when(split, |frame| {
+                        frame.child(self.render_workspace_page_header(
+                            page_id,
+                            &page.title,
+                            Some(pane_id) == active_pane_id,
+                            cx,
+                        ))
+                    })
                     .child(div().flex_1().min_h_0().relative().child(content))
                     .into_any_element()
             }
@@ -1094,10 +1107,6 @@ impl WorkspaceApp {
                     return div().size_full().into_any_element();
                 };
                 let sync_header = self.render_terminal_sync_member_header(*pane_id, cx);
-                let split = tab_id
-                    .and_then(|id| self.tab_by_id(id, cx))
-                    .and_then(|tab| tab.root_pane.as_ref())
-                    .is_some_and(|root| root.pane_count() > 1);
                 let terminal_top = if sync_header.is_some() {
                     terminal_command_bar::TERMINAL_SYNC_HEADER_HEIGHT
                 } else {
@@ -1134,6 +1143,7 @@ impl WorkspaceApp {
                                 // Release logical input ownership before focusing the native pane.
                                 this.blur_text_inputs(cx);
                                 if let Some(tab_id) = tab_id {
+                                    this.release_remote_desktop_inputs_for_tab(tab_id, cx);
                                     this.tab_host.update(cx, |tab_host, _| {
                                         tab_host.set_active_pane(Some(tab_id), pane_id);
                                     });

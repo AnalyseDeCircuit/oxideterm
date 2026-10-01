@@ -1324,8 +1324,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn remote_desktop_tab_visible(&self, tab_id: TabId, cx: &App) -> bool {
         let tab_host = self.tab_host.read(cx);
-        let main_tab_visible =
-            self.active_tab_id(cx) == Some(tab_id) && !tab_host.is_outside_main_window(tab_id);
+        let main_tab_visible = tab_host.surface_is_visible(tab_id) && !tab_host.is_detached(tab_id);
         let detached_tab_visible = tab_host.is_detached(tab_id);
         remote_desktop_tab_visible(main_tab_visible, detached_tab_visible)
     }
@@ -1378,8 +1377,17 @@ impl WorkspaceApp {
         tab_id: TabId,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
-            session.update(cx, |session, _cx| session.release_inputs());
+        let mut pages = vec![tab_id];
+        if let Some(root) = self
+            .tab_by_id(tab_id, cx)
+            .and_then(|tab| tab.root_pane.as_ref())
+        {
+            root.collect_page_ids(&mut pages);
+        }
+        for page in pages {
+            if let Some(session) = self.remote_desktop_session_entity(page, cx) {
+                session.update(cx, |session, _cx| session.release_inputs());
+            }
         }
     }
 

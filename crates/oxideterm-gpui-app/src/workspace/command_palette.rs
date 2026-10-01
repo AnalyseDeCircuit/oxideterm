@@ -783,7 +783,7 @@ impl WorkspaceApp {
         let tab_ids = self
             .tabs(cx)
             .iter()
-            .filter(|tab| tab.id != active_tab_id)
+            .filter(|tab| self.tab_host.read(cx).container_tab_id(tab.id) != active_tab_id)
             .map(|tab| tab.id)
             .collect::<Vec<_>>();
         for tab_id in tab_ids {

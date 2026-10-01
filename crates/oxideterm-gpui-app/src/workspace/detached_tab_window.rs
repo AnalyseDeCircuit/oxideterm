@@ -321,10 +321,7 @@ impl Render for DetachedTabWindow {
                         }
                         return session.handle_forwards_key(event, cx);
                     }
-                    let is_knowledge_window = session
-                        .tabs(cx)
-                        .iter()
-                        .any(|tab| tab.id == detached.tab_id && tab.kind == TabKind::Knowledge);
+                    let is_knowledge_window = kind == Some(TabKind::Knowledge);
                     if is_knowledge_window && session.knowledge_leave_confirmation_open(cx) {
                         session.handle_knowledge_leave_confirmation_key(event, window, cx)
                     } else {

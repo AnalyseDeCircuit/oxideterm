@@ -34,6 +34,7 @@ const KNOWLEDGE_NAVIGATOR_REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 pub(in crate::workspace) enum KnowledgeWorkspaceLayout {
     MainWindow,
     DetachedWindow,
+    SplitPane,
 }
 
 fn knowledge_document_matches(title: &str, content: &str, terms: &[String]) -> bool {
@@ -1109,6 +1110,7 @@ pub(super) struct KnowledgeWorkspaceEntity {
     navigator_hidden: bool,
     mobile_navigator_open: bool,
     navigator_width: Option<f32>,
+    surface_width: Option<f32>,
     navigator_resize: Option<(gpui::WindowId, f32, f32)>,
     navigator_closing: bool,
     navigator_motion_task: Option<Task<()>>,
@@ -1404,7 +1406,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if !self
-            .active_tab(cx)
+            .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Knowledge)
             || self.knowledge_text_editor_focused(window, cx)
         {
@@ -1741,6 +1743,14 @@ impl WorkspaceApp {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        let Some(knowledge_tab) = self.knowledge_workspace.read(cx).tab_id() else {
+            return false;
+        };
+        if tab_id != knowledge_tab
+            && self.tab_host.read(cx).container_tab_id(knowledge_tab) != tab_id
+        {
+            return false;
+        }
         let editor = self.knowledge_workspace.read(cx).editor.clone();
         if !editor.is_some_and(|editor| editor.read(cx).is_dirty()) {
             return false;
@@ -1748,6 +1758,13 @@ impl WorkspaceApp {
         self.knowledge_workspace.update(cx, |knowledge, _cx| {
             knowledge.request_close(tab_id, window.window_handle());
         });
+        if self.tab_host.read(cx).is_detached(knowledge_tab) {
+            self.tab_host
+                .update(cx, |host, _| host.focus_content_page(knowledge_tab));
+        } else {
+            self.set_main_window_active_tab(Some(knowledge_tab), cx);
+            self.sync_active_tab_surface(cx);
+        }
         cx.notify();
         true
     }
@@ -1798,9 +1815,7 @@ impl WorkspaceApp {
         }
         // Native detached-window release removes its tab on the current workspace host.
         // Resolve the draft before that release even when other windows remain open.
-        self.tab_by_id(tab_id, cx)
-            .is_some_and(|tab| tab.kind == TabKind::Knowledge)
-            && self.guard_dirty_knowledge_tab_close(tab_id, window, cx)
+        self.guard_dirty_knowledge_tab_close(tab_id, window, cx)
     }
 
     /// Applies the dirty-draft guard for quit intents that do not originate from a focused window.
@@ -2084,6 +2099,11 @@ impl WorkspaceApp {
             ),
             // A detached tab owns the whole native window and has no activity or context sidebars.
             KnowledgeWorkspaceLayout::DetachedWindow => viewport_width,
+            KnowledgeWorkspaceLayout::SplitPane => self
+                .knowledge_workspace
+                .read(cx)
+                .surface_width
+                .unwrap_or(KNOWLEDGE_NARROW_VIEWPORT_WIDTH - 1.0),
         };
         let narrow_layout = available_width < KNOWLEDGE_NARROW_VIEWPORT_WIDTH;
         if !self.tokens.motion.enabled {
@@ -2411,6 +2431,20 @@ impl WorkspaceApp {
                 has_background_image,
                 0x00,
             ))
+            .on_children_prepainted({
+                let knowledge = self.knowledge_workspace.clone();
+                move |bounds, _, cx| {
+                    if let Some(bounds) = bounds.first() {
+                        let width = f32::from(bounds.size.width);
+                        if knowledge.read(cx).surface_width != Some(width) {
+                            knowledge.update(cx, |state, cx| {
+                                state.surface_width = Some(width);
+                                cx.notify();
+                            });
+                        }
+                    }
+                }
+            })
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _window, cx| {
                 let target = ime::WorkspaceImeTarget::KnowledgeSearch;
                 if this.active_ime_target(cx) == Some(target)

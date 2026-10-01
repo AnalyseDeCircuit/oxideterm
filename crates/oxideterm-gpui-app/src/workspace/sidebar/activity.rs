@@ -208,31 +208,31 @@ impl WorkspaceApp {
         let active = match section {
             SidebarSection::Terminal => false,
             SidebarSection::Runtime => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Runtime),
             SidebarSection::Network => {
-                self.active_tab(cx)
+                self.active_content_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Runtime)
                     && self.host_tools.read(cx).active_runtime_section
                         == ConnectionRuntimeSection::Topology
             }
             SidebarSection::Files => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::FileManager),
             SidebarSection::Notifications => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::NotificationCenter),
             SidebarSection::Extensions => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::PluginManager),
             SidebarSection::CloudSync => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::CloudSync),
             SidebarSection::Knowledge => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Knowledge),
             SidebarSection::Settings => self
-                .active_tab(cx)
+                .active_content_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Settings),
             SidebarSection::Assistant => self.ai_sidebar_visible(),
             SidebarSection::HostTools => {

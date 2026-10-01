@@ -554,7 +554,7 @@ impl WorkspaceApp {
     ) -> Option<SessionManagerInput> {
         let input = self.session_manager.read(cx).focused_input?;
         let session_manager_tab_active = self
-            .active_tab(cx)
+            .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager);
         let session_manager = self.session_manager.read(cx);
         session_manager_input_is_active(

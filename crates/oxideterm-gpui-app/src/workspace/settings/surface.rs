@@ -98,7 +98,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let close_active_settings_tab = self
-            .active_tab(cx)
+            .active_content_tab(cx)
             .is_some_and(|tab| tab.kind == TabKind::Settings);
         self.active_surface = ActiveSurface::Terminal;
         self.terminal_trigger_settings_pane = None;
@@ -115,7 +115,9 @@ impl WorkspaceApp {
         self.focused_settings_input = None;
         self.settings_slider_drag = None;
         if close_active_settings_tab {
-            self.close_active_tab(window, cx);
+            if let Some(tab_id) = self.active_content_tab_id(cx) {
+                self.close_tab_by_id(tab_id, window, cx);
+            }
             return;
         }
         self.focus_active_pane(window, cx);

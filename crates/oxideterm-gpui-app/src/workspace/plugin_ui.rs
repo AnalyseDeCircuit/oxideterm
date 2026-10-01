@@ -1398,7 +1398,7 @@ impl WorkspaceApp {
             return false;
         };
         match context.surface_kind.as_str() {
-            "tab" => self.active_tab(cx).is_some_and(|tab| {
+            "tab" => self.active_content_tab(cx).is_some_and(|tab| {
                 matches!(
                     &tab.kind,
                     TabKind::Plugin { plugin_id, tab_id }

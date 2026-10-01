@@ -182,8 +182,8 @@ impl WorkspaceApp {
         let tab_host = self.tab_host.read(cx);
         let main_tab_visible = self.tabs(cx).iter().any(|tab| {
             is_host_tools_tab_kind(&tab.kind)
-                && self.active_tab_id(cx) == Some(tab.id)
-                && !tab_host.is_outside_main_window(tab.id)
+                && tab_host.surface_is_visible(tab.id)
+                && !tab_host.is_detached(tab.id)
         });
         let detached_tab_visible = self
             .tabs(cx)

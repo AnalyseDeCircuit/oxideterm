@@ -1081,7 +1081,7 @@ impl WorkspaceApp {
         }
 
         let settings_tab_visible = self
-            .active_tab(cx)
+            .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Settings);
         // Knowledge dialogs may be owned by a detached Knowledge or Settings window. The focused
         // window's WorkspaceImeElement decides which native window receives the shared draft.
@@ -1116,7 +1116,7 @@ impl WorkspaceApp {
                         .handle_for_role(super::window_registry::WindowRole::Main);
                     !main.is_some_and(|handle| handle.window_id() == owner)
                         || self
-                            .active_tab(cx)
+                            .keyboard_content_tab(cx)
                             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Knowledge)
                 })
         {
@@ -1159,7 +1159,7 @@ impl WorkspaceApp {
         let legacy_settings_input_visible = settings_tab_visible
             || knowledge_dialog_visible
             || self
-                .active_tab(cx)
+                .keyboard_content_tab(cx)
                 .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::CloudSync);
         if legacy_settings_input_visible && let Some(input) = self.focused_settings_input {
             return Some(WorkspaceImeTarget::Settings(input));
@@ -1206,7 +1206,7 @@ impl WorkspaceApp {
             });
         }
 
-        let terminal_tab_visible = self.active_tab(cx).is_some_and(is_terminal_tab);
+        let terminal_tab_visible = self.keyboard_content_tab(cx).is_some_and(is_terminal_tab);
         if terminal_tab_visible {
             if self.terminal.read(cx).broadcast_group_editor().is_some() {
                 return Some(WorkspaceImeTarget::TerminalBroadcastGroupName);
@@ -1260,7 +1260,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab(cx)
+            .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::FileManager)
             && let Some(input) = self.file_manager.read(cx).focused_input()
         {
@@ -1268,7 +1268,7 @@ impl WorkspaceApp {
         }
 
         if self
-            .active_tab(cx)
+            .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Graphics)
             && let Some(input) = self.graphics.read(cx).focused_input()
         {
@@ -1424,7 +1424,7 @@ impl WorkspaceApp {
                 .handle_for_role(super::window_registry::WindowRole::Main);
             if main_window.is_some_and(|handle| handle.window_id() == window_id)
                 && !self
-                    .active_tab(cx)
+                    .keyboard_content_tab(cx)
                     .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Knowledge)
             {
                 return None;

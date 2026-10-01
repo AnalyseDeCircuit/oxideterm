@@ -581,7 +581,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn active_remote_desktop_tab_id(&self, cx: &App) -> Option<TabId> {
-        self.active_tab(cx)
+        self.active_content_tab(cx)
             .filter(|tab| tab.kind == TabKind::RemoteDesktop)
             .map(|tab| tab.id)
     }

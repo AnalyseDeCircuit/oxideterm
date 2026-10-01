@@ -135,6 +135,20 @@ impl WorkspaceApp {
             .tab_by_id(self.active_content_tab_id(cx)?)
     }
 
+    pub(in crate::workspace) fn keyboard_content_tab<'a>(&self, cx: &'a App) -> Option<&'a Tab> {
+        // Shared input drafts follow the focused native window, not the main tab bar.
+        let host = self.tab_host.read(cx);
+        if let Some(window) = cx.active_window()
+            && let Some(tab) = host.tabs().iter().find(|tab| {
+                host.detached_window_handle(tab.id)
+                    .is_some_and(|handle| handle.window_id() == window.window_id())
+            })
+        {
+            return host.tab_by_id(host.focused_page_id(host.container_tab_id(tab.id)));
+        }
+        self.active_content_tab(cx)
+    }
+
     pub(in crate::workspace) fn active_pane_id(&self, cx: &App) -> Option<PaneId> {
         self.active_tab(cx).and_then(|tab| tab.active_pane_id)
     }

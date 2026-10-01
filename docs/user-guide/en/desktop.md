@@ -25,7 +25,7 @@ When a workflow becomes confusing, return to Sessions or Connection Monitor firs
 
 Use terminal tabs for local shells and SSH sessions. Split panes when a task needs multiple shells in the same workspace. Command marks, shell integration, and terminal history belong to the pane, so closing a pane should not be treated as disconnecting a saved SSH host.
 
-To place different hosts or a local shell beside an SSH session, drag one tab into the content of another and drop it at the desired edge. A combined tab can hold up to four panes, including terminal, SFTP, IDE, and port-forward pages. Move that combined tab to a new window to keep its live sessions and split layout together; it can be returned to the main window later. Serial terminals stay in separate tabs because their device access is exclusive.
+Drag any tab into another tab's content and drop it at the desired edge to arrange pages side by side or vertically. A combined tab holds up to four panes. Terminals, SFTP, IDE, port forwards, notes, settings, cloud sync, audit, remote desktops, and plugin pages can all share a layout. Opening a singleton page again focuses its existing pane. Use the pane header to move a page back to a tab or into its own window. Moving the combined tab to another window preserves its live sessions and layout.
 
 For long-running jobs, keep the owning connection visible in the connection pool or monitor. Reconnect behavior is tied to the connection/runtime state, not only to the visible terminal tab.
 

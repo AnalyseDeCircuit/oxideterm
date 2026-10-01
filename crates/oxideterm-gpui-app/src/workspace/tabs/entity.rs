@@ -478,26 +478,12 @@ impl WorkspaceTabHostEntity {
     }
 
     fn pages_fit_together(&self, source: TabId, target: TabId) -> bool {
-        let supported = |tab: &Tab| {
-            matches!(
-                tab.kind,
-                TabKind::LocalTerminal
-                    | TabKind::SshTerminal
-                    | TabKind::MoshTerminal
-                    | TabKind::Workspace
-                    | TabKind::Sftp
-                    | TabKind::Ide
-                    | TabKind::Forwards
-            )
-        };
         self.tab_by_id(source)
             .zip(self.tab_by_id(target))
             .is_some_and(|(a, b)| {
-                supported(a)
-                    && supported(b)
-                    && a.root_pane.as_ref().map_or(1, PaneNode::pane_count)
-                        + b.root_pane.as_ref().map_or(1, PaneNode::pane_count)
-                        <= MAX_PANES_PER_TAB
+                a.root_pane.as_ref().map_or(1, PaneNode::pane_count)
+                    + b.root_pane.as_ref().map_or(1, PaneNode::pane_count)
+                    <= MAX_PANES_PER_TAB
             })
     }
 
@@ -657,6 +643,18 @@ impl WorkspaceTabHostEntity {
         tab.active_pane_id = previous_active
             .filter(|id| *id != pane_id)
             .or(Some(next_active_pane_id));
+        let remaining_page = match &tab.root_pane {
+            Some(PaneNode::Page { tab_id, .. }) => Some(*tab_id),
+            _ => None,
+        };
+        if let Some((title, title_source)) = remaining_page
+            .and_then(|id| self.tab_by_id(id))
+            .map(|page| (page.title.clone(), page.title_source.clone()))
+        {
+            let tab = self.tab_mut_by_id(tab_id)?;
+            tab.title = title;
+            tab.title_source = title_source;
+        }
         Some(next_active_pane_id)
     }
 
@@ -1883,6 +1881,72 @@ mod tests {
                 .session_id_for_pane(pane),
             Some(session)
         );
+    }
+
+    #[test]
+    fn utility_pages_keep_their_identity_and_title_when_groups_shrink() {
+        for kind in [
+            TabKind::Settings,
+            TabKind::Knowledge,
+            TabKind::CloudSync,
+            TabKind::NotificationCenter,
+            TabKind::SessionManager,
+            TabKind::FileManager,
+            TabKind::Graphics,
+            TabKind::Runtime,
+            TabKind::ConnectionPool,
+            TabKind::Topology,
+            TabKind::PluginManager,
+            TabKind::RemoteDesktop,
+            TabKind::Plugin {
+                plugin_id: "example".into(),
+                tab_id: "tools".into(),
+            },
+        ] {
+            let mut host = WorkspaceTabHostEntity::new();
+            let source = host.alloc_tab_id();
+            let target = host.alloc_tab_id();
+            let mut source_tab = test_tab(source, None);
+            source_tab.kind = kind.clone();
+            source_tab.title = "Remaining page".into();
+            let mut target_tab = test_tab(target, None);
+            target_tab.kind = TabKind::Knowledge;
+            host.insert_tab(source_tab);
+            host.insert_and_select_main_tab(target_tab);
+            assert!(host.can_receive_tab_drop(source, target), "{kind:?}");
+            let (combined, removed) = host
+                .combine_pages(source, target, SplitDirection::Horizontal)
+                .unwrap();
+            assert_eq!(removed, Vec::<TabId>::new());
+            let mut pages = Vec::new();
+            combined
+                .root_pane
+                .as_ref()
+                .unwrap()
+                .collect_page_ids(&mut pages);
+            assert_eq!(pages, vec![target, source]);
+            assert_eq!(host.tab_by_id(source).unwrap().kind, kind);
+            host.select_main_tab(Some(source));
+            assert_eq!(host.active_tab_id(), Some(combined.id));
+            assert_eq!(host.focused_page_id(combined.id), source);
+            assert_eq!(host.unembed_page(source), Some(combined.id));
+            assert_eq!(host.container_tab_id(source), source);
+            assert_eq!(host.focused_page_id(combined.id), target);
+            assert_eq!(host.tab_by_id(source).unwrap().kind, kind);
+
+            let (combined, _) = host
+                .combine_pages(source, combined.id, SplitDirection::Vertical)
+                .unwrap();
+            host.remove_tab_at(host.tab_index_by_id(target).unwrap())
+                .unwrap();
+            let remaining = host.tab_by_id(combined.id).unwrap();
+            assert!(
+                matches!(remaining.root_pane, Some(PaneNode::Page { tab_id, .. }) if tab_id == source)
+            );
+            assert_eq!(remaining.title, "Remaining page");
+            assert_eq!(host.focused_page_id(combined.id), source);
+            assert_eq!(host.tab_by_id(source).unwrap().kind, kind);
+        }
     }
 
     #[gpui::test]

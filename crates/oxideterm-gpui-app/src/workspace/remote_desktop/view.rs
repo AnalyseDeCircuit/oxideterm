@@ -543,6 +543,7 @@ impl WorkspaceApp {
         // Rendering is the authoritative mount boundary for both the main
         // workspace and detached windows.
         self.bind_remote_desktop_window(tab_id, window.window_handle(), cx);
+        self.sync_remote_desktop_frame_visibility(tab_id, cx);
         let Some(session_entity) = self.remote_desktop.read(cx).session(tab_id) else {
             return div()
                 .size_full()
