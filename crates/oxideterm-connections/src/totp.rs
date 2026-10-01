@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use totp_rs::{Algorithm, Builder, Secret, Totp};
 use zeroize::Zeroizing;
 
-pub const DEFAULT_TOTP_PROMPT: &str = r"(?i)^\s*(?:mfa\s*code|(?:verification|authentication|authenticator|security)\s+code|one[- ]time\s*(?:code|password)|(?:otp|totp)(?:\s*(?:code|password))?|验证码)\s*[:：]?\s*$";
+pub const DEFAULT_TOTP_PROMPT: &str = r"(?i)^\s*(?:\[\s*)?(?:mfa\s*code|(?:verification|authentication|authenticator|security)\s+code|one[- ]time\s*(?:code|password)|(?:otp|totp)(?:\s*(?:code|password))?|验证码)\s*\]?\s*[:：]?\s*$";
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TotpAlgorithm {
@@ -208,7 +208,13 @@ mod tests {
             assert!(!error.to_string().contains("secret-value"));
         }
         let pattern = validate_totp_pattern(DEFAULT_TOTP_PROMPT).unwrap();
-        for prompt in ["MFA CODE: ", "Verification code:", "OTP:", "验证码："] {
+        for prompt in [
+            "MFA CODE: ",
+            "Verification code:",
+            "OTP:",
+            "验证码：",
+            "[OTP Code]: ",
+        ] {
             assert!(pattern.is_match(prompt));
         }
         for prompt in [

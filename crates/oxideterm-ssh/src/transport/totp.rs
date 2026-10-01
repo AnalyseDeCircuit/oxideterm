@@ -23,11 +23,12 @@ fn autofill_prompt_index(
     pattern: &str,
 ) -> Option<usize> {
     let pattern = validate_totp_pattern(pattern).ok()?;
+    // Echo controls input display, not its purpose. JumpServer requests visible OTP input.
     let mut matches = request
         .prompts
         .iter()
         .enumerate()
-        .filter(|(_, p)| !p.echo && pattern.is_match(&p.prompt));
+        .filter(|(_, p)| pattern.is_match(&p.prompt));
     let (index, _) = matches.next()?;
     matches.next().is_none().then_some(index)
 }
@@ -102,7 +103,7 @@ mod tests {
     use oxideterm_connections::totp::DEFAULT_TOTP_PROMPT;
 
     #[test]
-    fn totp_prompt_selection_requires_one_hidden_match() {
+    fn totp_prompt_selection_requires_one_match_regardless_of_echo() {
         let mut request = KeyboardInteractivePromptRequest {
             flow_id: "auth-flow".into(),
             name: "Authentication".into(),
@@ -128,8 +129,10 @@ mod tests {
             Some(1)
         );
         request.prompts[1].echo = true;
-        assert_eq!(autofill_prompt_index(&request, DEFAULT_TOTP_PROMPT), None);
-        request.prompts[1].echo = false;
+        for pattern in [DEFAULT_TOTP_PROMPT, r".*OTP.*"] {
+            request.prompts[1].prompt = "[OTP Code]: ".into();
+            assert_eq!(autofill_prompt_index(&request, pattern), Some(1));
+        }
         request.prompts.push(KeyboardInteractivePrompt {
             prompt: "OTP:".into(),
             echo: false,
