@@ -8603,6 +8603,7 @@ name = "oxideterm-terminal-encoding"
 version = "2.2.0"
 dependencies = [
  "encoding_rs",
+ "zeroize",
 ]
 
 [[package]]

@@ -143,7 +143,6 @@ fn terminal_element_moves_cursor_to_ime_caret_during_composition() {
     }
 }
 
-
 #[test]
 fn terminal_element_shapes_combining_marks_and_wide_grapheme_clusters() {
     for (base, marks, wide, expected, cells) in [

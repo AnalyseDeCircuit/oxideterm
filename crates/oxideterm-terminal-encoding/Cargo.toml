@@ -9,3 +9,4 @@ version.workspace = true
 
 [dependencies]
 encoding_rs.workspace = true
+zeroize.workspace = true

@@ -8,6 +8,63 @@ use gpui::{
 mod ssh_peer;
 
 #[gpui::test]
+fn confirmed_clipboard_paste_sends_one_bracketed_text_block(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config =
+        SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let (pane, cx) = cx.add_window_view(move |window, cx| {
+        TerminalPane::new_ssh_with_preferences(
+            config,
+            TerminalUiPreferences {
+                paste_protection: true,
+                ..Default::default()
+            },
+            window,
+            cx,
+        )
+        .unwrap()
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(10)).unwrap();
+    peer.runtime
+        .block_on(sender.data(channel, b"\x1b[?2004h".to_vec()))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pane.read_with(cx, |pane, _| {
+        pane.terminal
+            .lock()
+            .mode()
+            .contains(TermMode::BRACKETED_PASTE)
+    }) {
+        assert!(Instant::now() < deadline, "paste mode was not parsed");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    pane.update(cx, |pane, cx| {
+        cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+            "第一段\r\n\r\n第二段\n第三段\r".into(),
+        ));
+        pane.paste_from_clipboard(cx);
+        pane.send_protocol_bytes(b"before-paste", cx);
+    });
+    let (before_confirmation, _) = peer.input.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(before_confirmation, b"before-paste");
+
+    pane.update(cx, |pane, cx| {
+        pane.confirm_pending_paste(cx);
+        pane.send_protocol_bytes(b"after-paste", cx);
+    });
+    let mut received = Vec::new();
+    while !received.ends_with(b"after-paste") {
+        let (bytes, _) = peer.input.recv_timeout(Duration::from_secs(5)).unwrap();
+        received.extend_from_slice(&bytes);
+    }
+    assert_eq!(
+        received,
+        "\x1b[200~第一段\n\n第二段\n第三段\n\x1b[201~after-paste".as_bytes()
+    );
+    pane.update(cx, |pane, _| pane.terminal.lock().shutdown());
+}
+
+#[gpui::test]
 fn application_scroll_accumulates_small_deltas_until_remote_input(cx: &mut TestAppContext) {
     use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase};
 
