@@ -1,3 +1,4 @@
+use super::super::password_prompt::SavedPasswordLoadError;
 use super::*;
 use gpui::{Animation, AnimationExt, App, CursorStyle};
 use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SavedAuth, SshChannelStrategy};
@@ -1040,7 +1041,7 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let loading = form.password_load_id.is_some();
-        let failed = form.password_load_failed;
+        let error = form.password_load_error;
         let button = if loading {
             oxideterm_gpui_ui::button::icon_button(
                 &self.tokens,
@@ -1092,14 +1093,11 @@ impl WorkspaceApp {
                 self.i18n.t("sessionManager.edit_properties.saved_password"),
                 control,
             ))
-            .when(failed, |this| {
-                this.child(
-                    self.render_connection_hint_with_color(
-                        self.i18n
-                            .t("sessionManager.edit_properties.password_load_failed"),
-                        self.tokens.ui.error,
-                    ),
-                )
+            .when_some(error, |this, error| {
+                this.child(self.render_connection_hint_with_color(
+                    self.i18n.t(error.message_key()),
+                    self.tokens.ui.error,
+                ))
             })
             .into_any_element()
     }
@@ -1122,13 +1120,16 @@ impl WorkspaceApp {
                         .spawn(async move {
                             // Native credential access may prompt or block; never run it on the UI thread.
                             store
-                                .get_saved_auth_password(&SavedAuth::Password {
+                                .get_saved_auth_password_optional(&SavedAuth::Password {
                                     empty_password: false,
 
                                     keychain_id: Some(keychain_id),
                                     plaintext_password: None,
                                 })
-                                .map_err(|_| ())
+                                .map_err(|error| SavedPasswordLoadError::from_store_error(&error))
+                                .and_then(|password| {
+                                    password.ok_or(SavedPasswordLoadError::NotFound)
+                                })
                         })
                         .await
                 },

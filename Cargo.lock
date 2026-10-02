@@ -8435,6 +8435,7 @@ name = "oxideterm-session-adapter"
 version = "2.2.0"
 dependencies = [
  "chrono",
+ "keyring",
  "oxideterm-connections",
  "oxideterm-remote-desktop",
  "oxideterm-settings",

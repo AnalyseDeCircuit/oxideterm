@@ -427,6 +427,26 @@ impl WorkspaceApp {
                 } => {
                     self.open_keyboard_interactive_challenge(request, response_tx, window, cx);
                 }
+                SshConnectionWorkerResult::PasswordPrompt {
+                    node_id,
+                    prompt,
+                    response_tx,
+                } => {
+                    self.open_password_prompt(node_id, prompt, response_tx, window, cx);
+                }
+                SshConnectionWorkerResult::PasswordAuthenticated { target, password } => {
+                    self.save_authenticated_prompt_password(target, password, cx);
+                }
+                SshConnectionWorkerResult::AuthenticationCompleted {
+                    node_id,
+                    configured_credentials_confirmed,
+                } => {
+                    self.save_confirmed_connection_auth(
+                        node_id,
+                        configured_credentials_confirmed,
+                        cx,
+                    );
+                }
             }
         }
     }
@@ -493,7 +513,7 @@ impl WorkspaceApp {
         &mut self,
         mut config: SshConfig,
         title: String,
-        intent: SshConnectionIntent,
+        mut intent: SshConnectionIntent,
         save_after_open: Option<SaveConnectionRequest>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -508,7 +528,7 @@ impl WorkspaceApp {
         let upstream_proxy = config.upstream_proxy.take();
         let endpoints = proxy_session_tree_endpoints(&config);
         let expansion_id = match &intent {
-            SshConnectionIntent::ConnectSaved(id) => id.clone(),
+            SshConnectionIntent::ConnectSaved { id, .. } => id.clone(),
             _ => format!("manual-{}", self.next_ssh_node_id),
         };
         let expansion =
@@ -531,6 +551,12 @@ impl WorkspaceApp {
                 return;
             }
         };
+        if let SshConnectionIntent::ConnectSaved {
+            auth_save_target, ..
+        } = &mut intent
+        {
+            self.arm_saved_auth_save(&expansion.target_node_id, auth_save_target.take());
+        }
         let run = NativeProxyConnectRun {
             generation: 0,
             plan,
@@ -929,7 +955,7 @@ impl WorkspaceApp {
                     cx,
                 );
             }
-            SshConnectionIntent::ConnectSaved(id) => {
+            SshConnectionIntent::ConnectSaved { id, .. } => {
                 if let Some(connection_options) = self.connection_store.get(&id).map(|connection| {
                     (
                         connection.options.terminal.clone(),
@@ -1264,7 +1290,10 @@ impl WorkspaceApp {
                     cx,
                 );
             }
-            SshConnectionIntent::ConnectSaved(id) => {
+            SshConnectionIntent::ConnectSaved {
+                id,
+                auth_save_target,
+            } => {
                 self.connection_flow.update(cx, |connection_flow, cx| {
                     connection_flow.clear_host_key_challenge(cx);
                 });
@@ -1274,7 +1303,14 @@ impl WorkspaceApp {
                 self.session_manager.update(cx, |session_manager, cx| {
                     session_manager.set_status(None, cx);
                 });
-                let _ = self.open_or_create_saved_ssh_terminal_tab(id, config, title, window, cx);
+                let _ = self.open_or_create_saved_ssh_terminal_tab(
+                    id,
+                    config,
+                    title,
+                    auth_save_target,
+                    window,
+                    cx,
+                );
             }
             SshConnectionIntent::Mosh(options) => {
                 let public_mcp_open_token = options.public_mcp_open_token.clone();

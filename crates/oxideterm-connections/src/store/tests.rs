@@ -885,12 +885,94 @@ mod tests {
             "replacement"
         );
         assert!(store.get("conn-1").unwrap().last_used_at.is_none());
+        let retained_auth = store.get("conn-1").unwrap().auth.clone();
         assert!(
             store
                 .forget_connection_credential("conn-1", ConnectionCredentialSlot::Primary)
                 .unwrap()
         );
         assert!(store.get_connection_password("conn-1").is_err());
+        assert_eq!(store.get_saved_auth_password_optional(&retained_auth).unwrap(), None);
+    }
+
+    #[test]
+    fn authentication_replacement_preserves_the_saved_route_and_protects_key_passphrases() {
+        let mut store = load_empty_store("auth-replacement");
+        let mut entry = request(
+            "conn-1",
+            SavedAuth::Password {
+                empty_password: false,
+                keychain_id: None,
+                plaintext_password: Some("old-password-marker".into()),
+            },
+        );
+        entry.tags = vec!["production".into()];
+        entry.notes = Some("Keep this note".into());
+        entry.proxy_chain = serde_json::from_value(serde_json::json!([
+            {"host": "jump.test", "username": "jump-user", "auth": {"type": "agent"}}
+        ]))
+        .unwrap();
+        store.upsert(entry).unwrap();
+        let old_auth = store.get("conn-1").unwrap().auth.clone();
+        store
+            .set_connection_auth(
+                "conn-1",
+                SavedAuth::Key {
+                    key_path: "fixture-key-path".into(),
+                    has_passphrase: true,
+                    passphrase_keychain_id: None,
+                    plaintext_passphrase: Some("key-passphrase-marker".into()),
+                },
+            )
+            .unwrap();
+        let restored = ConnectionStore::load_read_only(store.path()).unwrap();
+        let connection = restored.get("conn-1").unwrap();
+        assert_eq!(
+            (
+                &connection.name[..],
+                &connection.host[..],
+                connection.port,
+                &connection.username[..],
+                connection.notes.as_deref(),
+                connection.tags.as_slice()
+            ),
+            (
+                "Home",
+                "192.168.1.2",
+                22,
+                "me",
+                Some("Keep this note"),
+                ["production".to_string()].as_slice()
+            )
+        );
+        assert_eq!(connection.auth.key_path(), Some("fixture-key-path"));
+        let hop = &connection.proxy_chain[0];
+        assert_eq!(
+            (
+                hop.host.as_str(),
+                hop.port,
+                hop.username.as_str(),
+                hop.auth.auth_type()
+            ),
+            ("jump.test", 22, "jump-user", AuthType::Agent)
+        );
+        assert_eq!(
+            // The test keystore belongs to this store; the reloaded record supplies the persisted reference.
+            store
+                .get_saved_auth_passphrase(&connection.auth)
+                .unwrap()
+                .unwrap()
+                .expose_secret(),
+            "key-passphrase-marker"
+        );
+        let persisted = fs::read_to_string(store.path()).unwrap();
+        assert!(!persisted.contains("key-passphrase-marker"));
+        assert!(!persisted.contains("old-password-marker"));
+        assert_eq!(
+            store.get_saved_auth_password_optional(&old_auth).unwrap(),
+            None
+        );
+        assert!(connection.last_used_at.is_none());
     }
 
     #[test]

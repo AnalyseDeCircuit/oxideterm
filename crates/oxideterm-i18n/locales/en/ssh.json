@@ -33,6 +33,9 @@
       "password": "Password",
       "use_empty_password": "Use an empty password",
       "save_password": "Save password to keychain",
+      "save_credentials_after_login": "Save authentication information after successful login",
+      "credentials_saved": "Authentication information saved",
+      "save_credentials_failed": "Failed to save authentication information",
       "group": "Group",
       "notes": "Notes",
       "notes_placeholder": "Add optional context for this connection",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "Save password after successful login",
+      "password_saved": "SSH password saved",
+      "save_password_failed": "Unable to save the SSH password. The connection remains open.",
       "title": "Keyboard-Interactive Authentication",
       "continue": "Continue",
       "cancelled": "Keyboard-interactive authentication was cancelled."

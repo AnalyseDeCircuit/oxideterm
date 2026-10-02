@@ -23,7 +23,12 @@ pub fn auth_method_from_saved_auth(
             keychain_id: Some(_),
             ..
         } => {
-            AuthMethod::password_secret(store.get_saved_auth_password(auth).ok()?.into_zeroizing())
+            // A retained reference does not prove the credential exists in this device's store.
+            // Use the runtime password prompt so its consent and successful-auth save path apply.
+            match store.get_saved_auth_password_optional(auth).ok()? {
+                Some(password) => AuthMethod::password_secret(password.into_zeroizing()),
+                None => AuthMethod::password_prompt(),
+            }
         }
         SavedAuth::Password {
             keychain_id: None,

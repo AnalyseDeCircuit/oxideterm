@@ -64,6 +64,63 @@ fn saved_connection(auth: SavedAuth) -> SavedConnection {
 }
 
 #[test]
+fn missing_referenced_password_uses_runtime_prompt_with_kerberos_and_proxy_hops_preserved() {
+    // This is the only test in this binary that reads a keychain reference. Use an
+    // empty store so headless hosts exercise a missing entry, not an unavailable service.
+    #[cfg(not(target_os = "macos"))]
+    keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+
+    let (store, path) = temp_connection_store("missing-referenced-password");
+    let password = SavedAuth::Password {
+        empty_password: false,
+        keychain_id: Some(format!(
+            "oxideterm-missing-password-regression-{}",
+            std::process::id()
+        )),
+        plaintext_password: None,
+    };
+    let mut connection = saved_connection(SavedAuth::KerberosPreferred {
+        server_identity: Some("host/target.example.com".into()),
+        delegate_credentials: false,
+        fallback: Box::new(password.clone()),
+    });
+    connection.proxy_chain.push(SavedProxyHop {
+        totp_credential_id: None,
+        host: "jump.example.com".into(),
+        port: 2222,
+        username: "jump-user".into(),
+        auth: password,
+        agent_forwarding: false,
+        identity_agent: None,
+        agent_forwarding_socket: None,
+        legacy_ssh_compatibility: false,
+        ssh_algorithms: Default::default(),
+    });
+    let config =
+        ssh_config_from_saved_connection(&store, &PersistedSettings::default(), &connection)
+            .unwrap();
+    assert_eq!(
+        config.auth,
+        AuthMethod::kerberos_preferred(
+            AuthMethod::password_prompt(),
+            Some("host/target.example.com".into()),
+            false
+        )
+    );
+    let hop = &config.proxy_chain.as_ref().unwrap()[0];
+    assert_eq!(
+        (&*hop.host, hop.port, &*hop.username, &hop.auth),
+        (
+            "jump.example.com",
+            2222,
+            "jump-user",
+            &AuthMethod::password_prompt()
+        )
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn runtime_settings_conversion_clamps_persisted_values() {
     let mut settings = PersistedSettings::default();
     settings.sftp.max_concurrent_transfers = 0;

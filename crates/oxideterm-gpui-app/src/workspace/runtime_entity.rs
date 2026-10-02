@@ -890,7 +890,9 @@ impl WorkspaceRuntimeEntity {
         let attempt_id = self.next_node_transport_attempt_id();
         let worker_node_id = node_id.clone();
         let worker_connection_id = connection_id.clone();
-        let prompt_handler = Arc::new(NativeSshPromptHandler::new(self.ssh_worker_tx.clone()));
+        let prompt_handler = Arc::new(
+            NativeSshPromptHandler::new(self.ssh_worker_tx.clone()).for_node(node_id.clone()),
+        );
         let progress_tx = reconnect_tx.clone();
         let progress_node_id = worker_node_id.clone();
         // The node attempt owns progress delivery; terminal panes only observe the resulting trace.

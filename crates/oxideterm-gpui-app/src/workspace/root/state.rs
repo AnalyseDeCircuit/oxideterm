@@ -33,6 +33,7 @@ pub(in crate::workspace) struct WorkspaceSshNode {
     pub(in crate::workspace) ssh_channel_strategy: SshChannelStrategy,
     pub(in crate::workspace) terminal_ids: Vec<TerminalSessionId>,
     pub(in crate::workspace) readiness: NodeReadiness,
+    pub(in crate::workspace) pending_auth_save_target: Option<new_connection::SavedAuthSaveTarget>,
 }
 
 impl WorkspaceSshNode {
@@ -52,6 +53,7 @@ impl WorkspaceSshNode {
             ssh_channel_strategy: config.ssh_channel_strategy,
             terminal_ids,
             readiness,
+            pending_auth_save_target: None,
         }
     }
 }

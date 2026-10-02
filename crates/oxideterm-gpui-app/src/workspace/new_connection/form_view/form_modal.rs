@@ -582,17 +582,6 @@ impl WorkspaceApp {
                                         ))
                                     },
                                 )
-                                .when(prompt_mode && !drill_down_mode, |content| {
-                                    content.child(self.render_connection_group_select(
-                                        if edit_properties_mode || mosh_edit_mode {
-                                            self.i18n.t("sessionManager.edit_properties.group")
-                                        } else {
-                                            self.i18n.t("ssh.form.group")
-                                        },
-                                        &form.group,
-                                        cx,
-                                    ))
-                                })
                                 .when(drill_down_mode, |content| {
                                     content
                                         .child(self.render_drill_saved_next_hop_picker(cx))
@@ -816,6 +805,14 @@ impl WorkspaceApp {
                                             form.password_loaded = true;
                                             if form.empty_password { form.password.zeroize(); }
                                         }, cx,
+                                    ))
+                                })
+                                .when(prompt_mode, |content| {
+                                    content.child(self.render_connection_checkbox(
+                                        self.i18n.t("ssh.form.save_credentials_after_login"),
+                                        form.save_password,
+                                        |form| form.save_password = !form.save_password,
+                                        cx,
                                     ))
                                 })
                                 .when(

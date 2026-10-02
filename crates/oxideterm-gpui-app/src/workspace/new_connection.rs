@@ -5,6 +5,7 @@ mod form_view;
 mod ftp;
 mod host_key_dialog;
 mod kbi_dialog;
+mod password_prompt;
 mod ssh_flow;
 
 pub(super) use entity::{
@@ -24,6 +25,7 @@ pub(super) use form_state::{
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;
+pub(in crate::workspace) use password_prompt::SavedAuthSaveTarget;
 pub(super) use ssh_flow::{
     MoshConnectionOptions, NativeSshPromptHandler, PendingStandaloneSftpPairLaunch,
     SshConnectionIntent, SshConnectionWorkerResult, SshTerminalConnectionOptions,

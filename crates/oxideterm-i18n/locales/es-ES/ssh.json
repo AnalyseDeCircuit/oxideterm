@@ -20,6 +20,9 @@
       "password": "Contraseña",
       "use_empty_password": "Usar una contraseña vacía",
       "save_password": "Guardar contraseña en el llavero",
+      "save_credentials_after_login": "Guardar la información de autenticación tras iniciar sesión correctamente",
+      "credentials_saved": "Información de autenticación guardada",
+      "save_credentials_failed": "No se pudo guardar la información de autenticación",
       "group": "Grupo",
       "notes": "Notas",
       "notes_placeholder": "Añade información opcional sobre esta conexión",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "Guardar la contraseña tras iniciar sesión correctamente",
+      "password_saved": "Contraseña SSH guardada",
+      "save_password_failed": "No se pudo guardar la contraseña SSH. La conexión permanece abierta.",
       "title": "Autenticación interactiva por teclado",
       "continue": "Continuar",
       "cancelled": "Se canceló la autenticación interactiva por teclado."

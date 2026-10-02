@@ -20,6 +20,9 @@
       "password": "Password",
       "use_empty_password": "Usa una password vuota",
       "save_password": "Salva password nel portachiavi",
+      "save_credentials_after_login": "Salva le informazioni di autenticazione dopo l’accesso riuscito",
+      "credentials_saved": "Informazioni di autenticazione salvate",
+      "save_credentials_failed": "Impossibile salvare le informazioni di autenticazione",
       "group": "Gruppo",
       "notes": "Note",
       "notes_placeholder": "Aggiungi informazioni facoltative su questa connessione",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "Salva la password dopo un accesso riuscito",
+      "password_saved": "Password SSH salvata",
+      "save_password_failed": "Impossibile salvare la password SSH. La connessione rimane aperta.",
       "title": "Autenticazione interattiva da tastiera",
       "continue": "Continua",
       "cancelled": "L'autenticazione interattiva da tastiera è stata annullata."

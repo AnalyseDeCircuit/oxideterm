@@ -390,6 +390,45 @@ impl ConnectionStore {
         audit_result
     }
 
+    /// Replaces only the chosen authentication policy after its credentials have been confirmed.
+    pub fn set_connection_auth(&mut self, id: &str, auth: SavedAuth) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "credential_set",
+            Some(id),
+            None,
+        );
+        let audit_result = (|| {
+            let Some(connection) = self.get(id) else {
+                return Ok(false);
+            };
+            let old_keychain_ids = collect_connection_keychain_ids(connection);
+            let previous_credentials =
+                self.stored_credential_targets(&CredentialOwner::Connection(id.to_string()));
+            let auth = self.materialize_auth(auth, Some(&connection.auth))?;
+            let connection = self
+                .data
+                .connections
+                .iter_mut()
+                .find(|connection| connection.id == id)
+                .expect("saved connection checked above");
+            connection.auth = auth;
+            connection.updated_at = Some(Utc::now());
+            let next_keychain_ids = collect_connection_keychain_ids(connection);
+            self.record_cleared_credentials(previous_credentials);
+            self.save()?;
+            for keychain_id in old_keychain_ids
+                .iter()
+                .filter(|keychain_id| !next_keychain_ids.contains(*keychain_id))
+            {
+                let _ = self.keychain.delete(keychain_id);
+            }
+            Ok(true)
+        })();
+        audit.changed(&audit_result);
+        audit_result
+    }
+
     /// Stores a new SSH credential in the selected protected slot without touching recency.
     pub fn store_connection_credential(
         &mut self,
@@ -2725,22 +2764,28 @@ impl ConnectionStore {
     }
 
     pub fn get_saved_auth_password(&self, auth: &SavedAuth) -> Result<SecretString> {
+        self.get_saved_auth_password_optional(auth)?
+            .ok_or_else(|| anyhow::anyhow!("Password not saved for this connection"))
+    }
+
+    /// Distinguishes a missing credential from a locked or unavailable secret store.
+    pub fn get_saved_auth_password_optional(&self, auth: &SavedAuth) -> Result<Option<SecretString>> {
         let auth = auth.conventional_fallback();
         if auth.uses_empty_password() {
-            return Ok(SecretString::default());
+            return Ok(Some(SecretString::default()));
         }
         match auth {
             SavedAuth::Password {
                 keychain_id: Some(keychain_id),
                 ..
-            } => self.keychain.get(keychain_id),
+            } => self.keychain.get_optional(keychain_id),
             SavedAuth::Password {
                 plaintext_password: Some(password),
                 ..
-            } => Ok(password.clone()),
+            } => Ok(Some(password.clone())),
             SavedAuth::Password {
                 keychain_id: None, ..
-            } => bail!("Password not saved for this connection"),
+            } => Ok(None),
             _ => bail!("Connection does not use password auth"),
         }
     }

@@ -9,22 +9,20 @@ use std::{
     time::Duration,
 };
 
+use super::{
+    ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge, NewConnectionField,
+    SshConnectionIntent, SshConnectionWorkerResult, form_state::clear_connection_selection,
+    password_prompt::SavedPasswordLoadError,
+};
+use crate::workspace::delivery;
 use gpui::{Context, EventEmitter, Task, Timer};
 use oxideterm_connections::{SaveConnectionRequest, SecretString};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 use oxideterm_ssh::{
-    HostKeyStatus, KeyboardInteractivePromptRequest, KeyboardInteractiveResponses,
-    NativeSessionTreeConnectAction, NativeSessionTreeConnectPlan, SshPromptError,
-    UpstreamProxyConfig,
+    HostKeyStatus, KeyboardInteractivePromptRequest, NativeSessionTreeConnectAction,
+    NativeSessionTreeConnectPlan, SshPromptError, UpstreamProxyConfig,
 };
-use tokio::sync::oneshot;
-
-use super::{
-    ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge, NewConnectionField,
-    SshConnectionIntent, SshConnectionWorkerResult, form_state::clear_connection_selection,
-};
-use crate::workspace::delivery;
 
 /// Owns one proxy-chain connection attempt without duplicating authentication material.
 pub(in crate::workspace) struct NativeProxyConnectRun {
@@ -487,7 +485,7 @@ impl ConnectionFlowEntity {
 
     pub(in crate::workspace) fn start_password_load(
         &mut self,
-        load: impl std::future::Future<Output = Result<SecretString, ()>> + 'static,
+        load: impl std::future::Future<Output = Result<SecretString, SavedPasswordLoadError>> + 'static,
         cx: &mut Context<Self>,
     ) -> bool {
         let Some(form) = self.form.form.as_mut() else {
@@ -505,7 +503,7 @@ impl ConnectionFlowEntity {
         self.next_password_load_id = self.next_password_load_id.wrapping_add(1);
         let load_id = self.next_password_load_id;
         form.password_load_id = Some(load_id);
-        form.password_load_failed = false;
+        form.password_load_error = None;
         // The form owner cancels the waiter on close or another reveal. A late result
         // owns a zeroizing value and cannot enter a replacement form or edited draft.
         self.password_load_task = Some(cx.spawn(async move |entity, cx| {
@@ -543,7 +541,10 @@ impl ConnectionFlowEntity {
                             clear_connection_selection(form);
                         }
                     }
-                    Err(()) => form.password_load_failed = true,
+                    Err(error) => {
+                        tracing::warn!(category = ?error, "Saved SSH password could not be read");
+                        form.password_load_error = Some(error);
+                    }
                 }
                 cx.notify();
             });
@@ -771,9 +772,10 @@ impl ConnectionFlowEntity {
     pub(in crate::workspace) fn open_keyboard_interactive_challenge(
         &mut self,
         request: KeyboardInteractivePromptRequest,
-        response_tx: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>,
+        response_tx: impl Into<super::kbi_dialog::NativeSshPromptSender>,
         cx: &mut Context<Self>,
     ) -> bool {
+        let response_tx = response_tx.into();
         self.clear_inactive_keyboard_interactive_challenge(cx);
         if response_tx.is_closed() {
             return false;
@@ -976,10 +978,24 @@ impl ConnectionFlowEntity {
         self.keyboard_interactive_timer_task = None;
         if let Some(response_tx) = challenge.response_tx.take() {
             // Move the Zeroizing response owner directly to the SSH prompt waiter.
-            let _ = response_tx.send(Ok(challenge.responses));
+            let _ = response_tx
+                .send_with_remember(Ok(challenge.responses), challenge.remember_password);
         }
         cx.notify();
         KeyboardInteractiveSubmitResult::Submitted
+    }
+
+    pub(super) fn toggle_prompt_password_remember(&mut self, cx: &mut Context<Self>) {
+        if let Some(challenge) = self.keyboard_interactive_challenge.as_mut()
+            && !challenge.timed_out()
+            && challenge
+                .response_tx
+                .as_ref()
+                .is_some_and(|sender| sender.can_remember())
+        {
+            challenge.remember_password = !challenge.remember_password;
+            cx.notify();
+        }
     }
 
     pub(in crate::workspace) fn cancel_keyboard_interactive_challenge(
@@ -1310,6 +1326,38 @@ mod tests {
     }
 
     #[gpui::test]
+    fn password_prompt_requires_opt_in_before_transferring_save_consent(cx: &mut TestAppContext) {
+        for remember in [false, true] {
+            let entity = cx.new(ConnectionFlowEntity::new);
+            let (response_tx, mut response_rx) = oneshot::channel();
+            entity.update(cx, |entity, cx| {
+                entity.open_keyboard_interactive_challenge(
+                    keyboard_interactive_request("password"),
+                    super::super::kbi_dialog::NativeSshPromptSender::Password {
+                        response_tx,
+                        on_authenticated: Some(Box::new(|_| {})),
+                    },
+                    cx,
+                );
+                assert!(
+                    !entity
+                        .keyboard_interactive_challenge()
+                        .unwrap()
+                        .remember_password
+                );
+                if remember {
+                    entity.toggle_prompt_password_remember(cx);
+                }
+                entity.replace_keyboard_interactive_response(0, None, "entered-password", cx);
+                entity.submit_keyboard_interactive_challenge(cx);
+            });
+            let response = response_rx.try_recv().unwrap().unwrap();
+            assert_eq!(response.password.as_str(), "entered-password");
+            assert_eq!(response.on_authenticated.is_some(), remember);
+        }
+    }
+
+    #[gpui::test]
     fn competing_keyboard_interactive_flow_is_cancelled_without_replacing_owner(
         cx: &mut TestAppContext,
     ) {
@@ -1492,6 +1540,7 @@ mod saved_password_tests {
     };
     use crate::workspace::new_connection::{NewConnectionForm, SshAuthTab};
     use gpui::{AppContext, TestAppContext};
+    use tokio::sync::oneshot;
 
     fn saved_form() -> NewConnectionForm {
         let mut form = NewConnectionForm::default();
@@ -1567,7 +1616,7 @@ mod saved_password_tests {
     #[gpui::test]
     fn closing_form_cancels_pending_password_load_before_exit_animation(cx: &mut TestAppContext) {
         let entity = cx.new(ConnectionFlowEntity::new);
-        let (tx, rx) = oneshot::channel::<Result<SecretString, ()>>();
+        let (tx, rx) = oneshot::channel::<Result<SecretString, SavedPasswordLoadError>>();
         entity.update(cx, |entity, cx| {
             entity.form.replace_with_new_form(saved_form());
             entity.start_password_load(async move { rx.await.unwrap() }, cx);
@@ -1592,24 +1641,32 @@ mod saved_password_tests {
 
     #[gpui::test]
     fn saved_password_read_failure_can_be_retried(cx: &mut TestAppContext) {
-        let entity = cx.new(ConnectionFlowEntity::new);
-        entity.update(cx, |entity, cx| {
-            entity.form.replace_with_new_form(saved_form());
-            entity.start_password_load(async { Err(()) }, cx);
-        });
-        cx.run_until_parked();
-        entity.update(cx, |entity, cx| {
-            let form = entity.form.form.as_ref().unwrap();
-            assert!(form.password_load_failed && form.password.is_empty() && !form.password_loaded);
-            assert!(
-                entity.start_password_load(async { Ok(SecretString::from("retry-secret")) }, cx)
-            );
-        });
-        cx.run_until_parked();
-        entity.read_with(cx, |entity, _| {
-            let form = entity.form.form.as_ref().unwrap();
-            assert_eq!(form.password, "retry-secret");
-            assert!(!form.password_load_failed);
-        });
+        for failure in [
+            SavedPasswordLoadError::NotFound,
+            SavedPasswordLoadError::Locked,
+            SavedPasswordLoadError::Unavailable,
+        ] {
+            let entity = cx.new(ConnectionFlowEntity::new);
+            entity.update(cx, |entity, cx| {
+                entity.form.replace_with_new_form(saved_form());
+                entity.start_password_load(async move { Err(failure) }, cx);
+            });
+            cx.run_until_parked();
+            entity.update(cx, |entity, cx| {
+                let form = entity.form.form.as_ref().unwrap();
+                assert_eq!(form.password_load_error, Some(failure));
+                assert!(form.password.is_empty() && !form.password_loaded);
+                assert!(
+                    entity
+                        .start_password_load(async { Ok(SecretString::from("retry-secret")) }, cx)
+                );
+            });
+            cx.run_until_parked();
+            entity.read_with(cx, |entity, _| {
+                let form = entity.form.form.as_ref().unwrap();
+                assert_eq!(form.password, "retry-secret");
+                assert!(form.password_load_error.is_none());
+            });
+        }
     }
 }

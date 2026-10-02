@@ -502,6 +502,11 @@ impl WorkspaceApp {
                     .ssh_nodes
                     .get(&node_id)
                     .map(|node| node.readiness.clone());
+                if matches!(state, NodeReadiness::Error | NodeReadiness::Disconnected)
+                    && let Some(node) = self.ssh_nodes.get_mut(&node_id)
+                {
+                    node.pending_auth_save_target = None;
+                }
                 if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                     node.readiness = state.clone();
                 }
@@ -790,6 +795,7 @@ impl WorkspaceApp {
                 ssh_channel_strategy,
                 terminal_ids: Vec::new(),
                 readiness: snapshot.readiness,
+                pending_auth_save_target: None,
             },
         );
         true

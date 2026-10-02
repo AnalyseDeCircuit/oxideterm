@@ -20,6 +20,9 @@
       "password": "Passwort",
       "use_empty_password": "Leeres Passwort verwenden",
       "save_password": "Passwort im Schlüsselbund speichern",
+      "save_credentials_after_login": "Anmeldedaten nach erfolgreicher Anmeldung speichern",
+      "credentials_saved": "Anmeldedaten gespeichert",
+      "save_credentials_failed": "Anmeldedaten konnten nicht gespeichert werden",
       "group": "Gruppe",
       "notes": "Notizen",
       "notes_placeholder": "Optionale Hinweise zu dieser Verbindung",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "Passwort nach erfolgreicher Anmeldung speichern",
+      "password_saved": "SSH-Passwort gespeichert",
+      "save_password_failed": "Das SSH-Passwort konnte nicht gespeichert werden. Die Verbindung bleibt geöffnet.",
       "title": "Keyboard-Interactive-Authentifizierung",
       "continue": "Fortfahren",
       "cancelled": "Keyboard-Interactive-Authentifizierung wurde abgebrochen."
