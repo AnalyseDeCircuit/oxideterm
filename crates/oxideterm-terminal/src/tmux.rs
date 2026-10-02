@@ -8,7 +8,11 @@ use std::{
 };
 
 use alacritty_terminal::{
-    event::EventListener, grid::Dimensions, sync::FairMutex, term::Term, vte::ansi::Processor,
+    event::EventListener,
+    grid::Dimensions,
+    sync::FairMutex,
+    term::{Term, TermMode},
+    vte::ansi::{NamedColor, Processor},
 };
 use oxideterm_terminal_encoding::{TerminalEncoding, TerminalOutputDecoder};
 use oxideterm_terminal_graphics::{GraphicsIngress, GraphicsOptions, TerminalGraphicsSegment};
@@ -19,9 +23,9 @@ use oxideterm_tmux::{
 
 use crate::{
     AlacEvent, LocalEventListener, LocalEventReceiver, TerminalEvent, TerminalGraphicsState,
-    TerminalImageId, TerminalSize, TerminalSnapshot, blank_snapshot_row, graphics_cursor_from_term,
-    incremental_snapshot_from_term, interactive_terminal_config,
-    shell_integration::TerminalShellIntegration, snapshot_from_term,
+    TerminalImageId, TerminalPalette, TerminalSize, TerminalSnapshot, blank_snapshot_row,
+    default_terminal_cell, graphics_cursor_from_term, incremental_snapshot_from_term,
+    interactive_terminal_config, shell_integration::TerminalShellIntegration, snapshot_from_term,
 };
 
 const INPUT_BYTES_PER_COMMAND: usize = 512;
@@ -133,6 +137,8 @@ struct TmuxDisplayState {
     message: Option<String>,
     message_generation: u64,
     route_keys_through_client: bool,
+    // tmux 3.5+ answers pane color queries from colors the client reported earlier.
+    report_client_colors: bool,
 }
 
 /// Shares only the currently displayed emulator with the pane owner.
@@ -142,6 +148,8 @@ struct TmuxDisplayState {
 #[derive(Default)]
 pub(crate) struct TmuxDisplay {
     state: RwLock<TmuxDisplayState>,
+    // Pane emulators resolve colors from the owning session's palette for rendering and replies.
+    palette: RwLock<TerminalPalette>,
     snapshot_cache: Mutex<HashMap<PaneId, TerminalSnapshot>>,
     external_replies: Mutex<VecDeque<ExternalReply>>,
     written_replies: Mutex<VecDeque<ReplyTag>>,
@@ -154,6 +162,25 @@ pub(crate) enum ReplyTag {
 }
 
 impl TmuxDisplay {
+    pub(crate) fn palette(&self) -> TerminalPalette {
+        *self
+            .palette
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub(crate) fn set_palette(&self, palette: TerminalPalette) {
+        *self
+            .palette
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = palette;
+        // Cached pane rows were resolved with the previous palette.
+        self.snapshot_cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+
     pub(crate) fn is_active(&self) -> bool {
         self.state
             .read()
@@ -467,8 +494,10 @@ impl TmuxDisplay {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         snapshot_cache.retain(|pane, _| state.panes.contains_key(pane));
+        let palette = self.palette();
+        let blank = default_terminal_cell(&palette, &Default::default());
         let mut lines = (0..size.rows)
-            .map(|row| blank_snapshot_row(size, 0, row))
+            .map(|row| blank_snapshot_row(size, 0, row, blank.clone()))
             .collect::<Vec<_>>();
         let mut cursor_col = 0;
         let mut cursor_row = 0;
@@ -494,9 +523,11 @@ impl TmuxDisplay {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 let snapshot = if let Some(previous) = snapshot_cache.get(&pane) {
-                    incremental_snapshot_from_term(&mut term, pane_size, &graphics, previous)
+                    incremental_snapshot_from_term(
+                        &mut term, pane_size, &graphics, &palette, previous,
+                    )
                 } else {
-                    let snapshot = snapshot_from_term(&term, pane_size, &graphics);
+                    let snapshot = snapshot_from_term(&term, pane_size, &graphics, &palette);
                     term.reset_damage();
                     snapshot
                 };
@@ -664,6 +695,49 @@ impl TmuxDisplay {
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .route_keys_through_client = enabled;
+    }
+
+    fn set_client_color_reporting(&self, enabled: bool) {
+        self.state
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .report_client_colors = enabled;
+    }
+
+    /// Refresh tmux's cached colors and notify subscribed applications in their own panes.
+    pub(crate) fn palette_report_commands(&self) -> Vec<Vec<u8>> {
+        let state = self
+            .state
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !state.ready {
+            return Vec::new();
+        }
+        let palette = self.palette();
+        let mut commands = Vec::new();
+        for (pane, shared_pane) in &state.panes {
+            let term = shared_pane.term.lock();
+            if state.report_client_colors {
+                for (osc, slot) in [(10, NamedColor::Foreground), (11, NamedColor::Background)] {
+                    let color =
+                        crate::color_for_alacritty_request(slot as usize, &palette, term.colors());
+                    let response = format!(
+                        "\x1b]{osc};rgb:{0:02x}{0:02x}/{1:02x}{1:02x}/{2:02x}{2:02x}\x07",
+                        color.r, color.g, color.b
+                    );
+                    commands.extend(tmux_client_report_command(*pane, &response));
+                }
+            }
+            if term.mode().contains(TermMode::REPORT_COLOR_SCHEME) {
+                commands.extend(pane_reply_commands(
+                    *pane,
+                    palette.color_scheme_report().as_bytes(),
+                ));
+            }
+        }
+        drop(state);
+        self.expect_ignored_replies(commands.len());
+        commands
     }
 
     fn expect_ignored_replies(&self, count: usize) {
@@ -906,6 +980,7 @@ impl TmuxController {
         self.pane_modes.clear();
         self.route_keys_through_client = false;
         self.report_client_colors = false;
+        self.display.set_client_color_reporting(false);
         self.display.enter();
         self.pending_queries.clear();
         self.active_reply = None;
@@ -950,6 +1025,7 @@ impl TmuxController {
         self.pane_modes.clear();
         self.route_keys_through_client = false;
         self.report_client_colors = false;
+        self.display.set_client_color_reporting(false);
         outcome.exited = true;
         outcome.changed = true;
     }
@@ -1046,6 +1122,8 @@ impl TmuxController {
                 let version = reply.lines.first().map(Vec::as_slice).unwrap_or_default();
                 self.route_keys_through_client = tmux_version_at_least(version, 3, 4);
                 self.report_client_colors = tmux_version_at_least(version, 3, 5);
+                self.display
+                    .set_client_color_reporting(self.report_client_colors);
                 self.display.set_key_routing(self.route_keys_through_client);
             }
             BootstrapQuery::Sessions => {
@@ -1390,12 +1468,18 @@ impl TmuxController {
                 AlacEvent::PtyWrite(text) => {
                     pane_inputs.extend(pane_reply_commands(pane, text.as_bytes()));
                 }
+                AlacEvent::ColorSchemeRequest => {
+                    pane_inputs.extend(pane_reply_commands(
+                        pane,
+                        self.display.palette().color_scheme_report().as_bytes(),
+                    ));
+                }
                 AlacEvent::ColorRequest(index, formatter) => {
-                    let override_color = (index <= 268)
-                        .then(|| pane_state.term.lock().colors()[index])
-                        .flatten();
-                    let color =
-                        crate::color_for_alacritty_request_with_override(index, override_color);
+                    let color = crate::color_for_alacritty_request(
+                        index,
+                        &self.display.palette(),
+                        pane_state.term.lock().colors(),
+                    );
                     let response = formatter(color);
                     pane_inputs.extend(pane_reply_commands(pane, response.as_bytes()));
                     if report_client_colors
@@ -2133,6 +2217,85 @@ mod tests {
             .unwrap();
         assert!(!display.is_active());
         assert!(ordinary.ends_with(b"shell"));
+    }
+
+    #[test]
+    fn palette_change_re_reports_client_colors_only_when_tmux_caches_them() {
+        for (version, expect_reports) in [("3.4", false), ("3.5", true)] {
+            let (listener, _) = crate::local_event_channel();
+            let display = Arc::new(TmuxDisplay::default());
+            let size = TerminalSize {
+                cols: 80,
+                rows: 24,
+                cell_width: 0,
+                cell_height: 0,
+            };
+            let mut controller = TmuxController::new(
+                display.clone(),
+                listener,
+                size,
+                TerminalEncoding::Utf8,
+                100,
+                GraphicsOptions::default(),
+            );
+            let mut advance = |bytes: &[u8]| {
+                let outcome = controller.advance(bytes, |_| {}, false, |_| {}).unwrap();
+                for reply in outcome.replies {
+                    display.register_written_reply(reply);
+                }
+                outcome.commands
+            };
+            advance(b"\x1bP1000p");
+            advance(b"%begin 1 1 1\n%end 1 1 1\n");
+            advance(format!("%begin 1 2 1\n{version}\n%end 1 2 1\n").as_bytes());
+            advance(b"%begin 1 3 1\n$1 demo\n%end 1 3 1\n");
+            advance(b"%begin 1 4 1\n@1 0 1 * shell\n%end 1 4 1\n");
+            advance(b"%begin 1 5 1\n%1 @1 1 80 24 5 2 80x24,0,0,1\n%end 1 5 1\n");
+            advance(b"%begin 1 6 1\n%end 1 6 1\n%begin 1 7 1\n%1 5 2\n%end 1 7 1\n%begin 1 8 1\n$1 @1 %1\n%end 1 8 1\n");
+            assert!(display.is_ready(), "tmux {version} bootstrap");
+
+            let mut ansi = crate::color::OXIDETERM_DARK_THEME.ansi;
+            ansi[0] = crate::TerminalColor::rgb(0x07, 0x36, 0x42);
+            display.set_palette(TerminalPalette::new(
+                crate::TerminalColor::rgb(0x65, 0x7b, 0x83),
+                crate::TerminalColor::rgb(0xfd, 0xf6, 0xe3),
+                crate::TerminalColor::rgb(0x58, 0x6e, 0x75),
+                ansi,
+            ));
+
+            let expected: Vec<Vec<u8>> = if expect_reports {
+                vec![
+                    b"refresh-client -r '%1:\x1b]10;rgb:6565/7b7b/8383\x07'\n".to_vec(),
+                    b"refresh-client -r '%1:\x1b]11;rgb:fdfd/f6f6/e3e3\x07'\n".to_vec(),
+                ]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(
+                display.palette_report_commands(),
+                expected,
+                "tmux {version}"
+            );
+            let theme_report = b"send-keys -H -t %1 1b 5b 3f 39 39 37 3b 32 6e\n".to_vec();
+            assert_eq!(
+                advance(b"%output %1 \\033[?2031h\\033[?996n\n"),
+                vec![theme_report.clone()],
+                "tmux {version} must send DSR to the querying pane"
+            );
+            let mut subscribed = expected.clone();
+            subscribed.push(theme_report);
+            assert_eq!(
+                display.palette_report_commands(),
+                subscribed,
+                "tmux {version}"
+            );
+            advance(b"%output %1 \\033[?2031l\n");
+            assert_eq!(
+                display.palette_report_commands(),
+                expected,
+                "tmux {version}"
+            );
+        }
     }
 
     #[test]

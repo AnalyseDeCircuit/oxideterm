@@ -3,7 +3,10 @@
 
 use std::fmt;
 
-use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
+use alacritty_terminal::{
+    term::cell::{Cell as AlacrittyCell, Flags},
+    vte::ansi::Color,
+};
 use fernomade_predict::{
     PredictionAction, PredictionContext, PredictionDisplay, PredictionOverlay,
     PredictionReconciliation,
@@ -29,6 +32,7 @@ pub struct MoshTerminalSession {
     connection_status: MoshConnectionStatus,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
+    palette: TerminalPalette,
     graphics_alt_screen_active: bool,
     output_queue: VecDeque<crate::backpressure::ByteBoundedItem<MoshTerminalWorkerEvent>>,
     output_processor: Option<TerminalOutputProcessor>,
@@ -160,6 +164,7 @@ impl MoshTerminalSession {
             connection_status: MoshConnectionStatus::Connecting,
             graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
+            palette: TerminalPalette::default(),
             graphics_alt_screen_active: false,
             output_queue: VecDeque::new(),
             output_processor: None,
@@ -534,10 +539,20 @@ impl MoshTerminalSession {
                 self.pending_events.push(TerminalEvent::ClipboardLoad(formatter));
                 false
             }
-            AlacEvent::ColorRequest(_, _)
-            | AlacEvent::TextAreaSizeRequest(_)
-            | AlacEvent::ChildExit(_)
-            | AlacEvent::Exit => false,
+            AlacEvent::ColorSchemeRequest => {
+                let _ = self.write_protocol_bytes(self.palette.color_scheme_report().as_bytes());
+                false
+            }
+            AlacEvent::ColorRequest(index, formatter) => {
+                let color = crate::color_for_alacritty_request(
+                    index,
+                    &self.palette,
+                    self.term.lock().colors(),
+                );
+                let _ = self.write_protocol_bytes(formatter(color).as_bytes());
+                false
+            }
+            AlacEvent::TextAreaSizeRequest(_) | AlacEvent::ChildExit(_) | AlacEvent::Exit => false,
         }
     }
 }
@@ -616,6 +631,16 @@ impl TerminalSessionBackend for MoshTerminalSession {
             text.as_bytes().to_vec()
         };
         self.queue_user_input(&bytes, PredictionAction::Barrier)
+    }
+
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        if self.palette == palette {
+            return;
+        }
+        self.palette = palette;
+        // Unchanged rows still hold colors resolved from the old palette.
+        self.term.lock().mark_fully_damaged();
+        self.term.lock().notify_palette_changed();
     }
 
     fn set_encoding(&mut self, _encoding: TerminalEncoding) {
@@ -704,6 +729,7 @@ impl TerminalSessionBackend for MoshTerminalSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             delta,
             previous,
         )
@@ -763,6 +789,7 @@ impl TerminalSessionBackend for MoshTerminalSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
         )
     }
 
@@ -776,6 +803,7 @@ impl TerminalSessionBackend for MoshTerminalSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             previous,
         )
     }
@@ -790,6 +818,7 @@ impl TerminalSessionBackend for MoshTerminalSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             display_offset,
             rows,
         )
@@ -1000,15 +1029,25 @@ fn prediction_attributes(cell: &AlacrittyCell) -> Vec<u8> {
     if cell.flags.contains(Flags::STRIKEOUT) {
         codes.push("9".to_string());
     }
-    let foreground = crate::color::color_to_rgb(cell.fg);
-    let background = crate::color::color_to_rgb(cell.bg);
-    codes.push(format!(
-        "38;2;{};{};{}",
-        foreground.r, foreground.g, foreground.b
-    ));
-    codes.push(format!(
-        "48;2;{};{};{}",
-        background.r, background.g, background.b
-    ));
+    // Replaying the source color kind keeps predicted text themed like confirmed output.
+    codes.push(sgr_color_code(cell.fg, false));
+    codes.push(sgr_color_code(cell.bg, true));
     format!("\u{1b}[{}m", codes.join(";")).into_bytes()
+}
+
+fn sgr_color_code(color: Color, background: bool) -> String {
+    let (base, bright_base, default_code) = if background {
+        (40, 100, 49)
+    } else {
+        (30, 90, 39)
+    };
+    match color {
+        Color::Named(named) if (named as usize) < 8 => (base + named as usize).to_string(),
+        Color::Named(named) if (named as usize) < 16 => {
+            (bright_base + named as usize - 8).to_string()
+        }
+        Color::Named(_) => default_code.to_string(),
+        Color::Indexed(index) => format!("{};5;{index}", base + 8),
+        Color::Spec(rgb) => format!("{};2;{};{};{}", base + 8, rgb.r, rgb.g, rgb.b),
+    }
 }

@@ -718,6 +718,12 @@ impl TerminalSessionBackend for SshPtySession {
         });
     }
 
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        // Snapshots read the core under this lock, so the next render must already use the
+        // new palette instead of waiting for the parser queue to reach a control command.
+        self.shared.core.lock().set_palette(palette);
+    }
+
     fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
         self.enqueue_control(0, move |core| {
             core.set_output_processor(processor);

@@ -13,7 +13,7 @@ use alacritty_terminal::{
     grid::{Dimensions, Scroll},
     index::Line,
     sync::FairMutex,
-    term::{Config, Osc52, Term, TermDamage, cell::Flags},
+    term::{Config, Osc52, Term, TermDamage, cell::Flags, color::Colors},
     tty::{self, Shell},
 };
 use anyhow::{Context, Result};
@@ -113,9 +113,9 @@ pub use shell_integration::{
     TerminalCommandMarkEvent,
 };
 
+pub use color::TerminalPalette;
 use color::{
-    OXIDETERM_DARK_THEME, attrs_from_flags, color_for_alacritty_request_with_override,
-    style_colors_for_cell, style_origin_for_cell,
+    attrs_from_flags, color_for_alacritty_request, style_colors_for_cell, style_origin_for_cell,
 };
 use local_graphics_event_loop::{
     LocalGraphicsEventLoop, LocalGraphicsMsg, LocalGraphicsNotifier, LocalPtyReadReport,

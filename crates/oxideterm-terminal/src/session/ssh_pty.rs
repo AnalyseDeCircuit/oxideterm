@@ -573,6 +573,10 @@ impl TerminalSessionBackend for SshPtyCore {
         self.parser_state.set_encoding(encoding)
     }
 
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        self.parser_state.set_palette(palette)
+    }
+
     fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
         self.parser_state.set_output_processor(processor)
     }
@@ -710,6 +714,7 @@ impl TerminalSessionBackend for SshPtyCore {
                 cell_height: self.parser_state.resize.cell_height,
             },
             &self.parser_state.graphics,
+            &self.parser_state.palette,
             delta,
             previous,
         )
@@ -807,7 +812,12 @@ impl TerminalSessionBackend for SshPtyCore {
         }
         let term = self.parser_state.display_term();
         let term = term.lock();
-        snapshot_from_term(&term, size, &self.parser_state.graphics)
+        snapshot_from_term(
+            &term,
+            size,
+            &self.parser_state.graphics,
+            &self.parser_state.palette,
+        )
     }
 
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
@@ -826,7 +836,13 @@ impl TerminalSessionBackend for SshPtyCore {
         }
         let term = self.parser_state.display_term();
         let mut term = term.lock();
-        incremental_snapshot_from_term(&mut term, size, &self.parser_state.graphics, previous)
+        incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &self.parser_state.graphics,
+            &self.parser_state.palette,
+            previous,
+        )
     }
 
     fn snapshot_with_display_offset(&self, display_offset: usize, rows: usize) -> TerminalSnapshot {
@@ -848,6 +864,7 @@ impl TerminalSessionBackend for SshPtyCore {
                 ..size
             },
             &self.parser_state.graphics,
+            &self.parser_state.palette,
             display_offset,
             rows,
         )

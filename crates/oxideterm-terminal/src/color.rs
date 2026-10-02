@@ -1,14 +1,18 @@
 use alacritty_terminal::{
-    term::cell::Flags,
+    term::{cell::Flags, color::Colors},
     vte::ansi::{Color, NamedColor, Rgb},
 };
 
 use crate::{TerminalAttrs, TerminalColor, TerminalStyleOrigin};
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct OxideTermTheme {
+/// Colors that resolve ANSI, default, and color-query palette slots for one terminal.
+///
+/// The owner of the visible theme supplies this palette; OSC 4/10/11 overrides kept by the
+/// emulator still take precedence over it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalPalette {
     pub(crate) foreground: TerminalColor,
-    pub(crate) ansi_background: TerminalColor,
+    pub(crate) background: TerminalColor,
     pub(crate) bright_foreground: TerminalColor,
     pub(crate) dim_foreground: TerminalColor,
     pub(crate) cursor: TerminalColor,
@@ -16,9 +20,48 @@ pub(crate) struct OxideTermTheme {
     pub(crate) dim_ansi: [TerminalColor; 8],
 }
 
-pub(crate) const OXIDETERM_DARK_THEME: OxideTermTheme = OxideTermTheme {
+impl TerminalPalette {
+    /// Report the host preference even when an application overrides its background with OSC 11.
+    pub(crate) fn color_scheme_report(&self) -> &'static str {
+        let background = Rgb {
+            r: self.background.r,
+            g: self.background.g,
+            b: self.background.b,
+        };
+        if background.luminance() > 0.5 {
+            "\x1b[?997;2n"
+        } else {
+            "\x1b[?997;1n"
+        }
+    }
+
+    pub fn new(
+        foreground: TerminalColor,
+        background: TerminalColor,
+        cursor: TerminalColor,
+        ansi: [TerminalColor; 16],
+    ) -> Self {
+        Self {
+            foreground,
+            background,
+            bright_foreground: foreground,
+            dim_foreground: dim_color(foreground),
+            cursor,
+            ansi,
+            dim_ansi: std::array::from_fn(|index| dim_color(ansi[index])),
+        }
+    }
+}
+
+impl Default for TerminalPalette {
+    fn default() -> Self {
+        OXIDETERM_DARK_THEME
+    }
+}
+
+pub(crate) const OXIDETERM_DARK_THEME: TerminalPalette = TerminalPalette {
     foreground: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-    ansi_background: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+    background: TerminalColor::rgb(0x0d, 0x0f, 0x12),
     bright_foreground: TerminalColor::rgb(0xff, 0xff, 0xff),
     dim_foreground: TerminalColor::rgb(0x91, 0x98, 0xa1),
     cursor: TerminalColor::rgb(0x52, 0x8b, 0xff),
@@ -64,34 +107,21 @@ pub(crate) fn attrs_from_flags(flags: Flags) -> TerminalAttrs {
     )
 }
 
-pub(crate) fn color_to_rgb(color: Color) -> TerminalColor {
+fn color_to_rgb(color: Color, palette: &TerminalPalette, overrides: &Colors) -> TerminalColor {
     match color {
-        Color::Named(named) => named_color_to_rgb(named),
+        Color::Named(named) => palette_slot_color(named as usize, palette, overrides),
         Color::Spec(rgb) => TerminalColor::rgb(rgb.r, rgb.g, rgb.b),
-        Color::Indexed(index) => indexed_color_to_rgb(index),
+        Color::Indexed(index) => palette_slot_color(usize::from(index), palette, overrides),
     }
 }
 
-pub(crate) fn color_for_alacritty_request_with_override(
+/// Answers OSC 4/10/11/12 queries with the same slot resolution used to paint cells.
+pub(crate) fn color_for_alacritty_request(
     index: usize,
-    override_color: Option<Rgb>,
+    palette: &TerminalPalette,
+    overrides: &Colors,
 ) -> Rgb {
-    if let Some(color) = override_color {
-        return color;
-    }
-
-    let color = match index {
-        0..=15 => OXIDETERM_DARK_THEME.ansi[index],
-        16..=255 => indexed_color_to_rgb(index as u8),
-        256 => OXIDETERM_DARK_THEME.foreground,
-        257 => OXIDETERM_DARK_THEME.ansi_background,
-        258 => OXIDETERM_DARK_THEME.cursor,
-        259..=266 => OXIDETERM_DARK_THEME.dim_ansi[(index - 259).min(7)],
-        267 => OXIDETERM_DARK_THEME.bright_foreground,
-        268 => OXIDETERM_DARK_THEME.ansi[0],
-        _ => TerminalColor::rgb(0, 0, 0),
-    };
-
+    let color = palette_slot_color(index, palette, overrides);
     Rgb {
         r: color.r,
         g: color.g,
@@ -99,59 +129,58 @@ pub(crate) fn color_for_alacritty_request_with_override(
     }
 }
 
-fn named_color_to_rgb(color: NamedColor) -> TerminalColor {
-    match color {
-        NamedColor::Black => OXIDETERM_DARK_THEME.ansi[0],
-        NamedColor::Red => OXIDETERM_DARK_THEME.ansi[1],
-        NamedColor::Green => OXIDETERM_DARK_THEME.ansi[2],
-        NamedColor::Yellow => OXIDETERM_DARK_THEME.ansi[3],
-        NamedColor::Blue => OXIDETERM_DARK_THEME.ansi[4],
-        NamedColor::Magenta => OXIDETERM_DARK_THEME.ansi[5],
-        NamedColor::Cyan => OXIDETERM_DARK_THEME.ansi[6],
-        NamedColor::White => OXIDETERM_DARK_THEME.ansi[7],
-        NamedColor::BrightBlack => OXIDETERM_DARK_THEME.ansi[8],
-        NamedColor::BrightRed => OXIDETERM_DARK_THEME.ansi[9],
-        NamedColor::BrightGreen => OXIDETERM_DARK_THEME.ansi[10],
-        NamedColor::BrightYellow => OXIDETERM_DARK_THEME.ansi[11],
-        NamedColor::BrightBlue => OXIDETERM_DARK_THEME.ansi[12],
-        NamedColor::BrightMagenta => OXIDETERM_DARK_THEME.ansi[13],
-        NamedColor::BrightCyan => OXIDETERM_DARK_THEME.ansi[14],
-        NamedColor::BrightWhite => OXIDETERM_DARK_THEME.ansi[15],
-        NamedColor::Foreground => OXIDETERM_DARK_THEME.foreground,
-        NamedColor::Background => OXIDETERM_DARK_THEME.ansi_background,
-        NamedColor::Cursor => OXIDETERM_DARK_THEME.cursor,
-        NamedColor::DimBlack => OXIDETERM_DARK_THEME.dim_ansi[0],
-        NamedColor::DimRed => OXIDETERM_DARK_THEME.dim_ansi[1],
-        NamedColor::DimGreen => OXIDETERM_DARK_THEME.dim_ansi[2],
-        NamedColor::DimYellow => OXIDETERM_DARK_THEME.dim_ansi[3],
-        NamedColor::DimBlue => OXIDETERM_DARK_THEME.dim_ansi[4],
-        NamedColor::DimMagenta => OXIDETERM_DARK_THEME.dim_ansi[5],
-        NamedColor::DimCyan => OXIDETERM_DARK_THEME.dim_ansi[6],
-        NamedColor::DimWhite => OXIDETERM_DARK_THEME.dim_ansi[7],
-        NamedColor::BrightForeground => OXIDETERM_DARK_THEME.bright_foreground,
-        NamedColor::DimForeground => OXIDETERM_DARK_THEME.dim_foreground,
+/// Returns the default foreground and background after OSC 10/11 overrides.
+pub(crate) fn default_colors(
+    palette: &TerminalPalette,
+    overrides: &Colors,
+) -> (TerminalColor, TerminalColor) {
+    (
+        palette_slot_color(NamedColor::Foreground as usize, palette, overrides),
+        palette_slot_color(NamedColor::Background as usize, palette, overrides),
+    )
+}
+
+/// Resolves an alacritty palette slot, whose layout matches `NamedColor` discriminants.
+fn palette_slot_color(
+    index: usize,
+    palette: &TerminalPalette,
+    overrides: &Colors,
+) -> TerminalColor {
+    if let Some(color) = (index <= NamedColor::DimForeground as usize)
+        .then(|| overrides[index])
+        .flatten()
+    {
+        return TerminalColor::rgb(color.r, color.g, color.b);
+    }
+
+    match index {
+        0..=15 => palette.ansi[index],
+        16..=255 => xterm_extended_color(index as u8),
+        256 => palette.foreground,
+        257 => palette.background,
+        258 => palette.cursor,
+        259..=266 => palette.dim_ansi[index - 259],
+        267 => palette.bright_foreground,
+        268 => palette.dim_foreground,
+        _ => TerminalColor::rgb(0, 0, 0),
     }
 }
 
-pub(crate) fn indexed_color_to_rgb(index: u8) -> TerminalColor {
-    match index {
-        0..=15 => OXIDETERM_DARK_THEME.ansi[index as usize],
-        16..=231 => {
-            let index = index - 16;
-            let r = index / 36;
-            let g = (index % 36) / 6;
-            let b = index % 6;
-            TerminalColor::rgb(
-                if r == 0 { 0 } else { r * 40 + 55 },
-                if g == 0 { 0 } else { g * 40 + 55 },
-                if b == 0 { 0 } else { b * 40 + 55 },
-            )
-        }
-        232..=255 => {
-            let value = (index - 232) * 10 + 8;
-            TerminalColor::rgb(value, value, value)
-        }
+/// Converts the fixed xterm 6x6x6 cube and gray ramp; slots below 16 belong to the palette.
+fn xterm_extended_color(index: u8) -> TerminalColor {
+    if index >= 232 {
+        let value = (index - 232) * 10 + 8;
+        return TerminalColor::rgb(value, value, value);
     }
+    let index = index.saturating_sub(16);
+    let r = index / 36;
+    let g = (index % 36) / 6;
+    let b = index % 6;
+    TerminalColor::rgb(
+        if r == 0 { 0 } else { r * 40 + 55 },
+        if g == 0 { 0 } else { g * 40 + 55 },
+        if b == 0 { 0 } else { b * 40 + 55 },
+    )
 }
 
 fn dim_color(color: TerminalColor) -> TerminalColor {
@@ -184,11 +213,14 @@ pub(crate) fn is_terminal_decoration_glyph(ch: char) -> bool {
         .any(|&(start, end)| (start..=end).contains(&codepoint))
 }
 
+/// Resolves final cell colors so contrast is measured against the background actually painted.
 pub(crate) fn style_colors_for_cell(
     fg: Color,
     bg: Color,
     ch: char,
     attrs: TerminalAttrs,
+    palette: &TerminalPalette,
+    overrides: &Colors,
 ) -> (TerminalColor, TerminalColor) {
     let mut fg_color = fg;
     let mut bg_color = bg;
@@ -196,8 +228,8 @@ pub(crate) fn style_colors_for_cell(
         std::mem::swap(&mut fg_color, &mut bg_color);
     }
 
-    let mut fg = color_to_rgb(fg_color);
-    let bg = color_to_rgb(bg_color);
+    let mut fg = color_to_rgb(fg_color, palette, overrides);
+    let bg = color_to_rgb(bg_color, palette, overrides);
 
     if !is_app_chosen_exact_color(&fg_color) && !is_terminal_decoration_glyph(ch) {
         fg = ensure_minimum_contrast(fg, bg, DEFAULT_MINIMUM_CONTRAST_SCORE);

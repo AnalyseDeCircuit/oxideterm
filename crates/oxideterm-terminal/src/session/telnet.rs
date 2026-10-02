@@ -44,6 +44,7 @@ pub struct TelnetSession {
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
+    palette: TerminalPalette,
     graphics_alt_screen_active: bool,
     output_queue: VecDeque<crate::backpressure::ByteBoundedItem<TelnetWorkerEvent>>,
     magic_scan: MagicScanWindow,
@@ -308,6 +309,7 @@ impl TelnetSession {
             title: None,
             graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
+            palette: TerminalPalette::default(),
             graphics_alt_screen_active: false,
             output_queue: VecDeque::new(),
             magic_scan: MagicScanWindow::default(),
@@ -682,7 +684,20 @@ impl TelnetSession {
                     .push(TerminalEvent::ClipboardLoad(formatter));
                 false
             }
-            AlacEvent::ColorRequest(_, _) | AlacEvent::TextAreaSizeRequest(_) => false,
+            AlacEvent::ColorSchemeRequest => {
+                let _ = self.write_protocol_bytes(self.palette.color_scheme_report().as_bytes());
+                false
+            }
+            AlacEvent::ColorRequest(index, formatter) => {
+                let color = crate::color_for_alacritty_request(
+                    index,
+                    &self.palette,
+                    self.term.lock().colors(),
+                );
+                let _ = self.write_protocol_bytes(formatter(color).as_bytes());
+                false
+            }
+            AlacEvent::TextAreaSizeRequest(_) => false,
             AlacEvent::ChildExit(_) | AlacEvent::Exit => false,
         }
     }
@@ -807,6 +822,16 @@ impl TerminalSessionBackend for TelnetSession {
         self.write_protocol_bytes(&bytes)
     }
 
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        if self.palette == palette {
+            return;
+        }
+        self.palette = palette;
+        // Unchanged rows still hold colors resolved from the old palette.
+        self.term.lock().mark_fully_damaged();
+        self.term.lock().notify_palette_changed();
+    }
+
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
         if self.encoding == encoding {
             return;
@@ -915,6 +940,7 @@ impl TerminalSessionBackend for TelnetSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             delta,
             previous,
         )
@@ -994,6 +1020,7 @@ impl TerminalSessionBackend for TelnetSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
         )
     }
 
@@ -1008,6 +1035,7 @@ impl TerminalSessionBackend for TelnetSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             previous,
         )
     }
@@ -1027,6 +1055,7 @@ impl TerminalSessionBackend for TelnetSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             display_offset,
             rows,
         )

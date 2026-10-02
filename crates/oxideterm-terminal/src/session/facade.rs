@@ -376,6 +376,10 @@ impl TerminalSession {
         self.backend.set_encoding(encoding);
     }
 
+    pub fn set_palette(&mut self, palette: TerminalPalette) {
+        self.backend.set_palette(palette);
+    }
+
     pub fn mosh_connection_status(&self) -> Option<MoshConnectionStatus> {
         self.backend.mosh_connection_status()
     }
