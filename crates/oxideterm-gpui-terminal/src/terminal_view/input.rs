@@ -335,6 +335,17 @@ pub(crate) fn configurable_key_escape_sequence(
 ) -> Option<Cow<'static, str>> {
     let modifiers = TerminalKeyModifiers::from_keystroke(keystroke);
 
+    // ConPTY translates these events into the inner application's input mode.
+    // Printable/IME text still arrives through the platform commit callback.
+    if mode.contains(TermMode::WIN32_INPUT) {
+        if modifiers.control && modifiers.alt && keystroke.key_char.is_some() {
+            return None;
+        }
+        if let Some(sequence) = win32_key_sequence(keystroke, event_type) {
+            return Some(sequence);
+        }
+    }
+
     // Kitty keyboard mode owns its key encodings; compatibility settings only affect legacy mode.
     if let Some(sequence) = kitty_keyboard_escape_sequence(keystroke, mode, event_type) {
         return Some(sequence);
@@ -385,6 +396,69 @@ pub(crate) fn configurable_key_escape_sequence(
     }
 
     None
+}
+
+fn win32_key_sequence(
+    keystroke: &gpui::Keystroke,
+    event_type: KittyKeyEventType,
+) -> Option<Cow<'static, str>> {
+    let modifiers = TerminalKeyModifiers::from_keystroke(keystroke);
+    if modifiers.platform {
+        return None;
+    }
+    let (virtual_key, unicode_char) = match keystroke.key.as_str() {
+        "enter" => (0x0d, if modifiers.control { 0x0a } else { 0x0d }),
+        "tab" => (0x09, 0x09),
+        "escape" => (0x1b, 0x1b),
+        "backspace" | "back" => (0x08, if modifiers.control { 0x7f } else { 0x08 }),
+        "space" | " " if modifiers.control => (0x20, 0),
+        "pageup" => (0x21, 0),
+        "pagedown" => (0x22, 0),
+        "end" => (0x23, 0),
+        "home" => (0x24, 0),
+        "left" => (0x25, 0),
+        "up" => (0x26, 0),
+        "right" => (0x27, 0),
+        "down" => (0x28, 0),
+        "insert" => (0x2d, 0),
+        "delete" => (0x2e, 0),
+        key if key.starts_with('f') && key.len() > 1 => {
+            let number = key[1..]
+                .parse::<u16>()
+                .ok()
+                .filter(|n| (1..=24).contains(n))?;
+            (0x70 + number - 1, 0)
+        }
+        key if (modifiers.control || modifiers.alt) && key.len() == 1 => {
+            let character = key.as_bytes()[0];
+            // GPUI exposes logical keys. Only letters have layout-independent
+            // virtual-key identities; OEM punctuation keeps its existing VT path.
+            if !character.is_ascii_alphabetic() {
+                return None;
+            }
+            let unicode_char = if modifiers.control {
+                character.to_ascii_uppercase() & 0x1f
+            } else if modifiers.shift {
+                character.to_ascii_uppercase()
+            } else {
+                character
+            };
+            (
+                u16::from(character.to_ascii_uppercase()),
+                u16::from(unicode_char),
+            )
+        }
+        _ => return None,
+    };
+    // The protocol permits an unknown scan code (0). Never invent a physical
+    // key position from a logical key on non-US layouts.
+    let control_state = u8::from(modifiers.alt) * 2
+        | u8::from(modifiers.control) * 8
+        | u8::from(modifiers.shift) * 16;
+    let down = u8::from(event_type != KittyKeyEventType::Release);
+    Some(Cow::Owned(format!(
+        "\x1b[{virtual_key};0;{unicode_char};{down};{control_state};1_"
+    )))
 }
 
 fn basic_key_sequence(

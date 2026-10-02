@@ -17,6 +17,8 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from conpty_runtime import stage_runtime as stage_conpty_runtime
+
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 APP_MANIFEST = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "Cargo.toml"
@@ -424,6 +426,8 @@ def copy_runtime_resources(dst: Path, target: str, *, encode_agent_binaries: boo
     if not helper_source.exists():
         raise FileNotFoundError(f"target helper resource directory not found: {helper_source}")
     copy_tree(helper_source, dst / HELPER_RESOURCE_DIR / target)
+    if "windows" in target:
+        stage_conpty_runtime(dst, target)
 
 
 def nsis_path(path: Path) -> str:

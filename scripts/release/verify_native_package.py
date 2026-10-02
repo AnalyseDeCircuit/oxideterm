@@ -14,6 +14,8 @@ import tempfile
 import zipfile
 from pathlib import Path
 
+from conpty_runtime import runtime_files as conpty_runtime_files, verify_digest
+
 
 REQUIRED_DOCUMENTS = {
     "GPUI-CE-LICENSE-APACHE",
@@ -181,6 +183,10 @@ def verify_portable_archive(path: Path, target: str, expected_version: str) -> N
         raise RuntimeError(f"{path.name} portable update manifest is incomplete")
     if {"data", "portable.json"} & set(managed_entries):
         raise RuntimeError(f"{path.name} portable update manifest includes user data")
+    if "windows" in target:
+        for name, (_, digest) in conpty_runtime_files(target).items():
+            entry = f"/resources/conpty/{name}"
+            verify_digest(archive_entry_bytes(path, entry), digest, entry)
 
 
 def verify_macos_app_zip(path: Path, expected_version: str) -> None:
@@ -376,7 +382,7 @@ def verify_appimage(path: Path, expected_version: str) -> None:
             raise RuntimeError(f"{path.name} does not contain version {expected_version}")
 
 
-def verify_windows_installer(path: Path, expected_version: str) -> None:
+def verify_windows_installer(path: Path, expected_version: str, target: str) -> None:
     seven_zip = next((shutil.which(name) for name in ("7z", "7zz", "7za") if shutil.which(name)), None)
     if not seven_zip:
         raise RuntimeError("7-Zip is required for NSIS content verification")
@@ -393,6 +399,12 @@ def verify_windows_installer(path: Path, expected_version: str) -> None:
         versions = list(Path(directory).rglob(PACKAGE_VERSION_FILENAME))
         if not versions or all(item.read_text(encoding="utf-8").strip() != expected_version for item in versions):
             raise RuntimeError(f"{path.name} does not contain version {expected_version}")
+
+        for name, (_, digest) in conpty_runtime_files(target).items():
+            matches = list(Path(directory).glob(f"**/resources/conpty/{name}"))
+            if len(matches) != 1:
+                raise RuntimeError(f"{path.name} must contain one resources/conpty/{name}")
+            verify_digest(matches[0].read_bytes(), digest, name)
 
 
 def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
@@ -421,7 +433,7 @@ def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
             verify_linux_glibc_compatibility(binary)
 
     if "windows" in target:
-        verify_windows_installer(dist / f"OxideTerm_{version}_{label}-setup.exe", version)
+        verify_windows_installer(dist / f"OxideTerm_{version}_{label}-setup.exe", version, target)
     elif "apple-darwin" in target:
         verify_macos_app_zip(dist / f"OxideTerm_{version}_{label}.app.zip", version)
         legacy_archive = dist / f"OxideTerm_{version}_{label}.app.tar.gz"

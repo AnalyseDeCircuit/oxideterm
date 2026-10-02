@@ -40,6 +40,21 @@ Use a supported macOS release with Xcode Command Line Tools available. Native wi
 
 Use the MSVC Rust target and a Visual Studio C++ build environment with a Windows SDK. Run the application from a Developer PowerShell when diagnosing linker or SDK problems. The CI platform check compiles `gpui_windows` and `oxideterm-gpui-app`; it does not replace manual validation of IME, pointer capture, DirectWrite, titlebar, or Direct3D behavior.
 
+Before opening local shells in a development build, stage the pinned ConPTY runtime beside the executable:
+
+```sh
+python scripts/release/conpty_runtime.py --target x86_64-pc-windows-msvc --destination target/debug
+```
+
+Use `aarch64-pc-windows-msvc` for ARM64 and adjust the destination when using `--target` or `--release`. The script downloads Microsoft ConPTY `1.24.260710001` from NuGet and verifies its SHA-256 digest. Windows installers and portable packages include this runtime automatically under `resources/conpty`; the application loads that exact path. A missing runtime is an error, so an unrelated DLL on `PATH` cannot change local shell behavior.
+
+The Windows keyboard integration test launches an isolated console reader. Stage the runtime beside the test executable before running it:
+
+```sh
+python scripts/release/conpty_runtime.py --target x86_64-pc-windows-msvc --destination target/debug/deps
+cargo test -p oxideterm-gpui-terminal bundled_conpty_delivers_distinct_ctrl_j_and_enter_events -- --ignored
+```
+
 ### Linux
 
 The CI dependency list is maintained in [`scripts/ci/install-linux-deps.sh`](../../scripts/ci/install-linux-deps.sh). On an Ubuntu-like development machine, review that list and install the matching packages before building. Test the compositor path that is affected: Wayland and X11 have separate native code paths.

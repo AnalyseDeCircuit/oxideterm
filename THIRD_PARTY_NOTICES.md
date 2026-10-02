@@ -1326,6 +1326,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | Component | Source Revision | License | License File |
 |---|---|---|---|
 | Microsoft Terminal text contrast and gamma correction | 1283c0f5b99a2961673249fa77c6b986efb5086c | MIT | MICROSOFT-TERMINAL-LICENSE-MIT |
+| Microsoft.Windows.Console.ConPTY (Windows runtime) | 1.24.260710001 | MIT | MICROSOFT-TERMINAL-LICENSE-MIT |
 
 ## Bundled Fonts / Assets
 

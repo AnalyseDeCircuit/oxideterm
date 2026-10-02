@@ -2,6 +2,7 @@
 """Tests for native package verification helpers."""
 
 from pathlib import Path
+import hashlib
 import sys
 import tarfile
 import tempfile
@@ -13,6 +14,7 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
 
 import verify_native_package
+import conpty_runtime
 
 
 class ArtifactNameTests(unittest.TestCase):
@@ -65,6 +67,15 @@ class ArtifactNameTests(unittest.TestCase):
 
 
 class PortableArchiveTests(unittest.TestCase):
+    def setUp(self) -> None:
+        digest = hashlib.sha256(b"data").hexdigest()
+        runtime = patch.object(conpty_runtime, "RUNTIMES", {
+            "x86_64-pc-windows-msvc": ("x64", digest, digest),
+            "aarch64-pc-windows-msvc": ("arm64", digest, digest),
+        })
+        runtime.start()
+        self.addCleanup(runtime.stop)
+
     def required_entries(self, root: str, executable: str) -> list[str]:
         return [
             f"{root}/{executable}",
@@ -78,6 +89,10 @@ class PortableArchiveTests(unittest.TestCase):
                 else f"{root}/tools/oxideterm-update-helper"
             ),
             *(f"{root}/{name}" for name in verify_native_package.REQUIRED_DOCUMENTS),
+            *([
+                f"{root}/resources/conpty/conpty.dll",
+                f"{root}/resources/conpty/x64/OpenConsole.exe",
+            ] if executable.endswith(".exe") else []),
         ]
 
     def entry_bytes(self, name: str, executable: str) -> bytes:
@@ -134,6 +149,24 @@ class PortableArchiveTests(unittest.TestCase):
                 verify_native_package.verify_portable_archive(
                     archive_path, "x86_64-unknown-linux-gnu", "2.0.0"
                 )
+
+    def test_windows_portable_rejects_missing_corrupt_or_wrong_architecture_runtime(self) -> None:
+        cases = [(entry, fault) for entry in ("conpty.dll", "OpenConsole.exe") for fault in ("missing", "corrupt")]
+        cases.append(("", "wrong architecture"))
+        for broken_entry, fault in cases:
+            with self.subTest(entry=broken_entry, fault=fault), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "portable.zip"
+                with zipfile.ZipFile(path, "w") as archive:
+                    for name in self.required_entries("OxideTerm", "oxideterm-native.exe"):
+                        if fault == "missing" and name.endswith(broken_entry):
+                            continue
+                        content = self.entry_bytes(name, "oxideterm-native.exe")
+                        if fault == "corrupt" and name.endswith(broken_entry):
+                            content = b"corrupt runtime"
+                        archive.writestr(name, content)
+                target = "aarch64-pc-windows-msvc" if fault == "wrong architecture" else "x86_64-pc-windows-msvc"
+                with self.assertRaisesRegex(RuntimeError, "conpty"):
+                    verify_native_package.verify_portable_archive(path, target, "2.0.0")
 
     def test_portable_archive_rejects_wrong_internal_version(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

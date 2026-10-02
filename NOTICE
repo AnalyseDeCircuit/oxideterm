@@ -71,6 +71,9 @@ Licensed under the MIT License.
 GPUI text contrast and gamma correction code is adapted from Microsoft
 Terminal commit 1283c0f5b99a2961673249fa77c6b986efb5086c. The complete license
 is shipped as MICROSOFT-TERMINAL-LICENSE-MIT.
+Windows packages also include Microsoft.Windows.Console.ConPTY 1.24.260710001
+(conpty.dll and OpenConsole.exe) from the official NuGet package, under the
+same MIT license.
 
 Linux graphics runtime
 The GPUI WGPU backend loads Vulkan and OpenGL/EGL loaders at runtime. As a

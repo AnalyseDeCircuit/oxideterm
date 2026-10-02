@@ -3805,14 +3805,31 @@ impl TerminalPane {
         bytes: &[u8],
         cx: &mut Context<Self>,
     ) -> bool {
+        self.send_user_encoded_key_without_broadcast(bytes, None, cx)
+    }
+
+    fn send_user_encoded_key_without_broadcast(
+        &mut self,
+        semantic_bytes: &[u8],
+        encoded_bytes: Option<&[u8]>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(semantic_bytes) else {
             return false;
         };
         let bytes = Zeroizing::new(bytes);
-        if self.send_protocol_bytes(&bytes, cx) {
+        // Command/secret tracking and plugins consume the logical input. Only
+        // the PTY sees the negotiated Windows envelope; plugin replacements
+        // remain literal input, matching the existing hook contract.
+        let wire_bytes = if bytes.as_slice() == semantic_bytes {
+            encoded_bytes.unwrap_or(&bytes)
+        } else {
+            &bytes
+        };
+        if self.send_protocol_bytes(wire_bytes, cx) {
             self.observe_user_input("protocol", &bytes, cx);
             self.restore_live_output_after_user_input();
             return true;
@@ -4900,6 +4917,21 @@ mod tests {
             pane.commit_text("x", cx);
             pane.send_user_protocol_bytes(b"\x1b[D", cx);
             pane.paste_text("y", cx);
+            pane.terminal.lock().feed_recording_output(b"\x1b[?9001h");
+            assert!(pane.handle_key(
+                &gpui::KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("ctrl-j").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                cx
+            ));
+            pane.handle_key_up(
+                &gpui::KeyUpEvent {
+                    keystroke: gpui::Keystroke::parse("ctrl-j").unwrap(),
+                },
+                cx,
+            );
         });
         let delivered = recorder.read_with(cx, |recorder, _cx| recorder.delivered.clone());
         assert_eq!(
@@ -4908,6 +4940,7 @@ mod tests {
                 (TerminalBroadcastInputKind::Text, b"x".to_vec()),
                 (TerminalBroadcastInputKind::Protocol, b"\x1b[D".to_vec()),
                 (TerminalBroadcastInputKind::Paste, b"y".to_vec()),
+                (TerminalBroadcastInputKind::Protocol, b"\n".to_vec()),
             ]
         );
 
@@ -4916,7 +4949,7 @@ mod tests {
         });
         assert_eq!(
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
-            3
+            4
         );
     }
 

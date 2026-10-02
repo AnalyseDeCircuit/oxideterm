@@ -936,6 +936,7 @@ impl PrivateMode {
             1049 => Self::Named(NamedPrivateMode::SwapScreenAndSetRestoreCursor),
             2004 => Self::Named(NamedPrivateMode::BracketedPaste),
             2026 => Self::Named(NamedPrivateMode::SyncUpdate),
+            9001 => Self::Named(NamedPrivateMode::Win32Input),
             _ => Self::Unknown(mode),
         }
     }
@@ -987,6 +988,8 @@ pub enum NamedPrivateMode {
     BracketedPaste = 2004,
     /// The mode is handled automatically by [`Processor`].
     SyncUpdate = 2026,
+    /// Preserve Windows key identity across the pseudoconsole byte stream.
+    Win32Input = 9001,
 }
 
 /// Mode for clearing line.
