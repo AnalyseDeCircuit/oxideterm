@@ -47,113 +47,52 @@ ${reproduction}
 `;
 }
 
-test('accepts a complete feature request with an unanswered optional section', () => {
-  const report = gate.evaluateIssue({
-    title: '会话录制支持标准格式转换',
-    body: featureBody(),
-    labels: ['enhancement'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.deepEqual(report.blockingFindings, []);
-  assert.deepEqual(report.reviewFindings, []);
-});
-
-test('requires a descriptive title without imposing a type prefix', () => {
-  const report = gate.evaluateIssue({
-    title: '录制',
-    body: featureBody(),
-    labels: ['enhancement'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.deepEqual(report.blockingFindings.map((item) => item.code), ['title_needs_detail']);
-});
-
-test('checks required template sections but ignores optional no-response text', () => {
-  const report = gate.evaluateIssue({
-    title: '会话录制转换功能',
-    body: featureBody({ proposal: '_No response_' }),
-    labels: ['enhancement'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.equal(report.blockingFindings.length, 1);
-  assert.equal(report.blockingFindings[0].code, 'required_section_missing');
-  assert.equal(report.blockingFindings[0].heading, 'Proposed solution / 期望方案');
-});
-
-test('reads the product version only from the dedicated template section', () => {
-  const body = `${bugBody()}\n### Additional environment details / 其他相关环境信息\n\nmacOS 15.0\n`;
-  const report = gate.evaluateIssue({
-    title: '停止录制后文件没有保存',
-    body,
-    labels: ['bug'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.equal(gate.readSubmittedVersion(body), '2.0.5');
-  assert.equal(
-    report.reviewFindings.some((item) => item.code === 'release_version_unverified'),
-    false
-  );
-});
-
-test('blocks an issue that reports a version that was never released', () => {
-  const report = gate.evaluateIssue({
-    title: '停止录制后文件没有保存',
-    body: bugBody({ version: '99.0.0' }),
-    labels: ['bug'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.deepEqual(report.reviewFindings, []);
-  assert.deepEqual(
-    report.blockingFindings.map((item) => item.code),
-    ['release_version_unverified']
-  );
-});
-
-test('accepts a real released version without blocking the issue', () => {
-  const report = gate.evaluateIssue({
-    title: '停止录制后文件没有保存',
-    body: bugBody({ version: '2.0.5' }),
-    labels: ['bug'],
-    releasedVersions: ['2.0.5', '2.0.4', '2.0.3'],
-  });
-
-  assert.deepEqual(report.blockingFindings, []);
-  assert.deepEqual(report.reviewFindings, []);
-});
-
-test('keeps a fabricated future version out of the review labels', () => {
-  const report = gate.evaluateIssue({
-    title: '停止录制后文件没有保存',
-    body: bugBody({ version: '2.1.17' }),
-    labels: ['bug'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.equal(
-    report.blockingFindings.some((item) => item.code === 'release_version_unverified'),
-    true
-  );
-  assert.deepEqual(gate.labelsForReviewFindings(report.reviewFindings), []);
-});
-
-test('keeps thin reproduction evidence as a non-blocking review finding', () => {
-  const report = gate.evaluateIssue({
-    title: '停止录制后文件没有保存',
-    body: bugBody({ reproduction: '点击录制' }),
-    labels: ['bug'],
-    releasedVersions: ['2.0.5'],
-  });
-
-  assert.deepEqual(report.blockingFindings, []);
-  assert.equal(
-    report.reviewFindings.some((item) => item.code === 'reproduction_evidence_thin'),
-    true
-  );
+test('evaluates template evidence without mixing blocking findings and review labels', () => {
+  for (const { name, input, blocking = [], review = [], labels = [] } of [
+    {
+      name: 'complete feature with an unanswered optional section',
+      input: {
+        title: '会话录制支持标准格式转换',
+        body: `${featureBody()}\n### Additional context / 补充信息\n\n_No response_\n`,
+        labels: ['enhancement'],
+      },
+    },
+    {
+      name: 'title needs detail',
+      input: { title: '录制', body: featureBody(), labels: ['enhancement'] },
+      blocking: [{ code: 'title_needs_detail' }],
+    },
+    {
+      name: 'required proposal missing',
+      input: { body: featureBody({ proposal: '_No response_' }), labels: ['enhancement'] },
+      blocking: [{ code: 'required_section_missing', heading: 'Proposed solution / 期望方案' }],
+    },
+    {
+      name: 'environment version is not the product version',
+      input: { body: `${bugBody()}\n### Additional environment details / 其他相关环境信息\n\nmacOS 15.0\n` },
+    },
+    { name: 'released version', input: { body: bugBody({ version: '2.0.5' }) } },
+    ...['99.0.0', '2.1.17'].map((version) => ({
+      name: `unreleased version ${version}`,
+      input: { body: bugBody({ version }) },
+      blocking: [{ code: 'release_version_unverified', version }],
+    })),
+    {
+      name: 'thin reproduction requires review only',
+      input: { body: bugBody({ reproduction: '点击录制' }) },
+      review: [{ code: 'reproduction_evidence_thin' }],
+      labels: ['needs-reproduction-steps'],
+    },
+  ]) {
+    const report = gate.evaluateIssue({
+      title: '停止录制后文件没有保存',
+      labels: ['bug'],
+      releasedVersions: ['2.0.5', '2.0.4', '2.0.3'],
+      ...input,
+    });
+    assert.deepEqual(report, { blockingFindings: blocking, reviewFindings: review }, name);
+    assert.deepEqual(gate.labelsForReviewFindings(report.reviewFindings), labels, name);
+  }
 });
 
 test('uses a stable marker while replacing the correction notice content', () => {
@@ -165,37 +104,17 @@ test('uses a stable marker while replacing the correction notice content', () =>
   assert.notEqual(first, second);
 });
 
-test('closes a newly blocked issue', () => {
-  assert.equal(
-    gate.decideStateChange({
-      currentState: 'open',
-      hasBlockingFindings: true,
-      correctionLabelPresent: false,
-      gateCommentPresent: false,
-    }),
-    'close'
-  );
-});
-
-test('reopens only a corrected closure owned by the quality gate', () => {
-  assert.equal(
-    gate.decideStateChange({
-      currentState: 'closed',
-      hasBlockingFindings: false,
-      correctionLabelPresent: true,
-      gateCommentPresent: true,
-    }),
-    'reopen'
-  );
-  assert.equal(
-    gate.decideStateChange({
-      currentState: 'closed',
-      hasBlockingFindings: false,
-      correctionLabelPresent: false,
-      gateCommentPresent: true,
-    }),
-    'keep'
-  );
+test('closes blocked issues and reopens only corrected closures owned by the gate', () => {
+  for (const [currentState, hasBlockingFindings, correctionLabelPresent, gateCommentPresent, expected] of [
+    ['open', true, false, false, 'close'],
+    ['closed', true, true, true, 'keep'],
+    ['closed', false, true, true, 'reopen'],
+    ['closed', false, false, true, 'keep'],
+    ['closed', false, true, false, 'keep'],
+  ]) {
+    const input = { currentState, hasBlockingFindings, correctionLabelPresent, gateCommentPresent };
+    assert.equal(gate.decideStateChange(input), expected, JSON.stringify(input));
+  }
 });
 
 test('keeps a maintainer-reopened issue outside later automatic closures', () => {

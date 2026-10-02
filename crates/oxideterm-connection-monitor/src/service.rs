@@ -875,52 +875,99 @@ mod tests {
     }
 
     #[test]
-    fn parses_systemd_services_with_enabled_state_and_main_pid() {
-        let output = concat!(
-            "===SERVICES===\n",
-            "__OXIDE_SERVICE_CAPABILITY__\tfull\tlinux_systemd\n",
-            "UNITFILE\tsshd.service\tenabled\n",
-            "UNITFILE\torphan.service\tdisabled\n",
-            "SHOW\tId=sshd.service\tLoadState=loaded\tActiveState=active\tSubState=running\tUnitFileState=enabled\tMainPID=42\tDescription=OpenSSH server daemon\n",
-            "===SERVICES_END===\n",
-        );
-
-        let snapshot = parse_service_snapshot(output);
-
-        assert_eq!(
-            snapshot.status,
-            ResourceServiceStatus::Available {
-                capability: ServiceCommandCapability::Full,
-                platform: "linux_systemd".to_string()
-            }
-        );
-        assert_eq!(snapshot.services.len(), 2);
-        let sshd = snapshot
-            .services
-            .iter()
-            .find(|service| service.id == "sshd.service")
-            .unwrap();
-        assert_eq!(sshd.active_state, "active");
-        assert_eq!(sshd.enabled_state, "enabled");
-        assert_eq!(sshd.main_pid.as_deref(), Some("42"));
-    }
-
-    #[test]
-    fn parses_partial_service_rows_from_non_systemd_platforms() {
-        let output = concat!(
-            "===SERVICES===\n",
-            "__OXIDE_SERVICE_CAPABILITY__\tpartial\twindows_powershell\n",
-            "ROW\tSpooler\t\trunning\tOK\tAutomatic\t123\tPrint Spooler\n",
-            "ROW\tManualSvc\t\tstopped\tStopped\tManual\t\tManual Service\n",
-            "===SERVICES_END===\n",
-        );
-
-        let snapshot = parse_service_snapshot(output);
-
-        assert_eq!(snapshot.services.len(), 2);
-        assert_eq!(snapshot.services[0].id, "ManualSvc");
-        assert_eq!(snapshot.services[1].description, "Print Spooler");
-        assert_eq!(snapshot.services[1].main_pid.as_deref(), Some("123"));
+    fn parses_service_records_and_merges_unit_file_state() {
+        for (platform, capability, output, expected) in [
+            (
+                "linux_systemd",
+                ServiceCommandCapability::Full,
+                concat!(
+                    "===SERVICES===\n",
+                    "__OXIDE_SERVICE_CAPABILITY__\tfull\tlinux_systemd\n",
+                    "UNITFILE\tsshd.service\tenabled\n",
+                    "UNITFILE\torphan.service\tdisabled\n",
+                    "SHOW\tId=sshd.service\tLoadState=loaded\tActiveState=active\tSubState=running\tUnitFileState=enabled\tMainPID=42\tDescription=OpenSSH server daemon\n",
+                    "===SERVICES_END===\n",
+                ),
+                vec![
+                    (
+                        "orphan.service",
+                        "unknown",
+                        "inactive",
+                        "unknown",
+                        "disabled",
+                        None,
+                        "orphan.service",
+                    ),
+                    (
+                        "sshd.service",
+                        "loaded",
+                        "active",
+                        "running",
+                        "enabled",
+                        Some("42"),
+                        "OpenSSH server daemon",
+                    ),
+                ],
+            ),
+            (
+                "windows_powershell",
+                ServiceCommandCapability::Partial,
+                concat!(
+                    "===SERVICES===\n",
+                    "__OXIDE_SERVICE_CAPABILITY__\tpartial\twindows_powershell\n",
+                    "ROW\tSpooler\t\trunning\tOK\tAutomatic\t123\tPrint Spooler\n",
+                    "ROW\tManualSvc\t\tstopped\tStopped\tManual\t\tManual Service\n",
+                    "===SERVICES_END===\n",
+                ),
+                vec![
+                    (
+                        "ManualSvc",
+                        "unknown",
+                        "stopped",
+                        "Stopped",
+                        "Manual",
+                        None,
+                        "Manual Service",
+                    ),
+                    (
+                        "Spooler",
+                        "unknown",
+                        "running",
+                        "OK",
+                        "Automatic",
+                        Some("123"),
+                        "Print Spooler",
+                    ),
+                ],
+            ),
+        ] {
+            let snapshot = parse_service_snapshot(output);
+            assert_eq!(
+                snapshot.status,
+                ResourceServiceStatus::Available {
+                    capability,
+                    platform: platform.to_string(),
+                },
+                "{platform}"
+            );
+            assert_eq!(
+                snapshot
+                    .services
+                    .iter()
+                    .map(|service| (
+                        service.id.as_str(),
+                        service.load_state.as_str(),
+                        service.active_state.as_str(),
+                        service.sub_state.as_str(),
+                        service.enabled_state.as_str(),
+                        service.main_pid.as_deref(),
+                        service.description.as_str(),
+                    ))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{platform}"
+            );
+        }
     }
 
     #[test]

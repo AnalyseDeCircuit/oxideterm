@@ -118,7 +118,7 @@ impl WorkspaceApp {
             vec![
                 self.appearance_theme_target_row(settings, ThemeTarget::Application, cx),
                 self.appearance_theme_target_row(settings, ThemeTarget::Terminal, cx),
-                self.appearance_theme_preview(settings),
+                self.appearance_theme_preview(settings, cx),
             ],
         )
     }
@@ -1068,6 +1068,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn appearance_theme_preview(
         &self,
         settings: &PersistedSettings,
+        cx: &Context<Self>,
     ) -> AnyElement {
         let preview_target = self
             .open_settings_select
@@ -1104,6 +1105,16 @@ impl WorkspaceApp {
                     &self.i18n,
                 ),
                 &self.i18n,
+                self.settings_workspace.read(cx).theme_preview_page,
+                {
+                    let workspace = self.settings_workspace.downgrade();
+                    move |page, _window, cx| {
+                        let _ = workspace.update(cx, |settings, cx| {
+                            settings.theme_preview_page = page;
+                            cx.notify();
+                        });
+                    }
+                },
             ))
             .child(
                 div()
@@ -2146,6 +2157,113 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod theme_preview_tests {
     use super::*;
+
+    struct Preview {
+        page: ThemePreviewPage,
+    }
+
+    impl Render for Preview {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let mut tokens = oxideterm_theme::default_tokens();
+            tokens.ui.bg = 0x102030;
+            tokens.terminal.background = 0x203010;
+            tokens.radii.md = 12.0;
+            let view = cx.entity().downgrade();
+            settings_appearance_theme_preview(
+                &tokens,
+                &PersistedSettings::default(),
+                "Application".into(),
+                "Terminal".into(),
+                String::new(),
+                &I18n::new(oxideterm_i18n::Locale::En),
+                self.page,
+                move |page, _, cx| {
+                    view.update(cx, |view, cx| {
+                        view.page = page;
+                        cx.notify();
+                    })
+                    .unwrap();
+                },
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn theme_preview_navigation_switches_samples_and_preserves_rounded_edges(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (view, cx) = cx.add_window_view(|_, _| Preview {
+            page: ThemePreviewPage::Terminal,
+        });
+        cx.simulate_resize(gpui::size(px(800.0), px(500.0)));
+        for (control, page, content, background) in [
+            (
+                "theme-preview-connections",
+                ThemePreviewPage::Connections,
+                "theme-preview-connections-sample",
+                0x102030,
+            ),
+            (
+                "theme-preview-new-connection",
+                ThemePreviewPage::NewConnection,
+                "theme-preview-new-connection-sample",
+                0x102030,
+            ),
+            (
+                "theme-preview-sftp",
+                ThemePreviewPage::Sftp,
+                "theme-preview-sftp-sample",
+                0x102030,
+            ),
+            (
+                "theme-preview-terminal-tab",
+                ThemePreviewPage::Terminal,
+                "theme-preview-terminal-sample",
+                0x203010,
+            ),
+            (
+                "theme-preview-sftp-tab",
+                ThemePreviewPage::Sftp,
+                "theme-preview-sftp-sample",
+                0x102030,
+            ),
+            (
+                "theme-preview-terminal",
+                ThemePreviewPage::Terminal,
+                "theme-preview-terminal-sample",
+                0x203010,
+            ),
+        ] {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let bounds = cx.debug_bounds(control).unwrap();
+            cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+            assert_eq!(view.read_with(cx, |view, _| view.page), page, "{control}");
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert!(cx.debug_bounds(content).is_some(), "{content}");
+            cx.update(|window, _| {
+                let quads = window.painted_quads();
+                let color: gpui::Hsla = rgb(background).into_color();
+                let sample = quads
+                    .iter()
+                    .filter(|quad| quad.background.as_solid() == Some(color))
+                    .max_by(|a, b| {
+                        a.bounds
+                            .size
+                            .height
+                            .partial_cmp(&b.bounds.size.height)
+                            .unwrap()
+                    })
+                    .unwrap();
+                assert!(sample.corner_radii.bottom_right.0 > 0.0, "{content}");
+                assert!(
+                    quads
+                        .iter()
+                        .all(|quad| quad.border_widths.bottom.0 < 2.0 * window.scale_factor()),
+                    "preview tabs must use the shared filled selection style"
+                );
+            });
+        }
+    }
 
     #[test]
     fn custom_theme_preview_reads_all_displayed_colors() {

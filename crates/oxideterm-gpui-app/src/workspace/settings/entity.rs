@@ -376,6 +376,7 @@ pub(in crate::workspace) enum SettingsNavigationDraftAction {
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     route: SettingsRouteState,
+    pub(super) theme_preview_page: oxideterm_gpui_settings_view::ThemePreviewPage,
     external_store_watch: Option<ExternalStoreWatch>,
     external_store_watch_task: Option<Task<()>>,
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -529,6 +530,7 @@ impl SettingsWorkspaceEntity {
     pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
         Self {
             route: SettingsRouteState::default(),
+            theme_preview_page: Default::default(),
             external_store_watch: None,
             external_store_watch_task: None,
             portable_status: None,

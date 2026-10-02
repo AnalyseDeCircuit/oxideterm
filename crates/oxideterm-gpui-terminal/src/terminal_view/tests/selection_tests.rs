@@ -1,77 +1,57 @@
 use super::*;
 
 #[test]
-fn word_selection_covers_shell_tokens_and_separators() {
-    let snapshot = selection_snapshot("cargo test ./crates/oxideterm-gpui-app");
-    let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 15 })
-        .expect("word selection");
-
-    assert_eq!(
-        selection.normalized(),
+fn word_selection_covers_shell_tokens_urls_and_soft_wrapped_rows() {
+    let mut wrapped = multirow_snapshot(&["hello", "world"]);
+    wrapped.cols = 5;
+    wrapped.lines[0].wrapped = true;
+    wrapped.lines[0].refresh_signature();
+    for (snapshot, (row, col), expected) in [
         (
-            TerminalGridPoint { line: 0, col: 11 },
-            TerminalGridPoint { line: 0, col: 37 }
-        )
-    );
-
-    let snapshot = selection_snapshot("echo (hello)");
-
-    assert!(word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 5 }).is_none());
-
-    let snapshot = selection_snapshot("first&&second");
-    let first = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 1 })
-        .expect("first token selection");
-    let second = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 8 })
-        .expect("second token selection");
-
-    assert_eq!(
-        first.normalized(),
+            selection_snapshot("cargo test ./crates/oxideterm-gpui-app"),
+            (0, 15),
+            Some(((0, 11), (0, 37))),
+        ),
+        (selection_snapshot("echo (hello)"), (0, 5), None),
         (
-            TerminalGridPoint { line: 0, col: 0 },
-            TerminalGridPoint { line: 0, col: 4 }
-        )
-    );
-    assert_eq!(
-        second.normalized(),
+            selection_snapshot("first&&second"),
+            (0, 1),
+            Some(((0, 0), (0, 4))),
+        ),
         (
-            TerminalGridPoint { line: 0, col: 7 },
-            TerminalGridPoint { line: 0, col: 12 }
-        )
-    );
-    assert!(word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 5 }).is_none());
-
-    let snapshot = selection_snapshot("open https://example.com/docs).");
-    let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 13 })
-        .expect("url selection");
-
-    assert_eq!(
-        selection.normalized(),
+            selection_snapshot("first&&second"),
+            (0, 8),
+            Some(((0, 7), (0, 12))),
+        ),
+        (selection_snapshot("first&&second"), (0, 5), None),
         (
-            TerminalGridPoint { line: 0, col: 5 },
-            TerminalGridPoint { line: 0, col: 28 }
-        )
-    );
-
-    let snapshot = selection_snapshot("echo $HOME --color=always");
-    let variable = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 7 })
-        .expect("variable selection");
-    let flag = word_selection_at_point(&snapshot, TerminalPoint { row: 0, col: 15 })
-        .expect("flag selection");
-
-    assert_eq!(
-        variable.normalized(),
+            selection_snapshot("open https://example.com/docs)."),
+            (0, 13),
+            Some(((0, 5), (0, 28))),
+        ),
         (
-            TerminalGridPoint { line: 0, col: 5 },
-            TerminalGridPoint { line: 0, col: 9 }
-        )
-    );
-    assert_eq!(
-        flag.normalized(),
+            selection_snapshot("echo $HOME --color=always"),
+            (0, 7),
+            Some(((0, 5), (0, 9))),
+        ),
         (
-            TerminalGridPoint { line: 0, col: 11 },
-            TerminalGridPoint { line: 0, col: 24 }
-        )
-    );
+            selection_snapshot("echo $HOME --color=always"),
+            (0, 15),
+            Some(((0, 11), (0, 24))),
+        ),
+        (wrapped, (1, 1), Some(((0, 0), (1, 4)))),
+    ] {
+        let actual =
+            word_selection_at_point(&snapshot, TerminalPoint { row, col }).map(|selection| {
+                let (start, end) = selection.normalized();
+                ((start.line, start.col), (end.line, end.col))
+            });
+        assert_eq!(
+            actual, expected,
+            "row {row}, col {col}: {:?}",
+            snapshot.lines
+        );
+    }
 }
 
 #[test]
@@ -148,56 +128,110 @@ fn line_selection_handles_trimmed_and_wrapped_lines() {
 }
 
 #[test]
-fn selected_text_distinguishes_soft_and_hard_wrapped_rows() {
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: 0, col: 0 },
-        head: TerminalGridPoint { line: 1, col: 4 },
-        mode: TerminalSelectionMode::Simple,
-    };
+fn selected_text_preserves_selection_modes_wrapping_and_scrollback() {
     let mut soft_wrapped = multirow_snapshot(&["hello", "world", "next"]);
     soft_wrapped.cols = 5;
     soft_wrapped.lines[0].wrapped = true;
     soft_wrapped.lines[0].refresh_signature();
+    let mut cross_page_wrapped = soft_wrapped.clone();
+    cross_page_wrapped.rows = 2;
+    cross_page_wrapped.display_offset = 1;
+    cross_page_wrapped.scrollback_lines = 1;
+    let mut cross_page = multirow_snapshot(&["old-a", "old-b", "now-a", "now-b"]);
+    cross_page.rows = 2;
+    cross_page.display_offset = 2;
+    cross_page.scrollback_lines = 2;
+    let mut cross_page_block = multirow_snapshot(&["abcdef", "ghijkl", "mnopqr", "stuvwx"]);
+    cross_page_block.rows = 2;
+    cross_page_block.display_offset = 2;
+    cross_page_block.scrollback_lines = 2;
+    let mut combining = selection_snapshot("e");
+    combining.lines[0].cells_mut()[0].set_zerowidth("\u{301}".to_string());
+    combining.lines[0].refresh_signature();
 
-    assert_eq!(
-        selected_text_for_selection(&soft_wrapped, selection).as_deref(),
-        Some("helloworld")
-    );
-
-    assert_eq!(
-        selected_text_for_selection(&multirow_snapshot(&["hello", "world"]), selection).as_deref(),
-        Some("hello\nworld")
-    );
-}
-
-#[test]
-fn line_selection_copy_appends_terminal_line_newline() {
-    let snapshot = selection_snapshot("pwd   ");
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: 0, col: 0 },
-        head: TerminalGridPoint { line: 0, col: 2 },
-        mode: TerminalSelectionMode::Lines,
-    };
-
-    assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
-        Some("pwd\n")
-    );
-}
-
-#[test]
-fn block_selection_copies_rectangular_columns() {
-    let snapshot = multirow_snapshot(&["abcdef", "ghijkl", "mnopqr"]);
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: 0, col: 1 },
-        head: TerminalGridPoint { line: 2, col: 3 },
-        mode: TerminalSelectionMode::Block,
-    };
-
-    assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
-        Some("bcd\nhij\nnop")
-    );
+    for (case, snapshot, mode, (start_line, start_col), (end_line, end_col), expected) in [
+        (
+            "soft wrap",
+            soft_wrapped,
+            TerminalSelectionMode::Simple,
+            (0, 0),
+            (1, 4),
+            "helloworld",
+        ),
+        (
+            "hard wrap",
+            multirow_snapshot(&["hello", "world"]),
+            TerminalSelectionMode::Simple,
+            (0, 0),
+            (1, 4),
+            "hello\nworld",
+        ),
+        (
+            "line ending",
+            selection_snapshot("pwd   "),
+            TerminalSelectionMode::Lines,
+            (0, 0),
+            (0, 2),
+            "pwd\n",
+        ),
+        (
+            "rectangle",
+            multirow_snapshot(&["abcdef", "ghijkl", "mnopqr"]),
+            TerminalSelectionMode::Block,
+            (0, 1),
+            (2, 3),
+            "bcd\nhij\nnop",
+        ),
+        (
+            "reversed cross page",
+            cross_page,
+            TerminalSelectionMode::Simple,
+            (1, 4),
+            (-2, 0),
+            "old-a\nold-b\nnow-a\nnow-b",
+        ),
+        (
+            "cross page rectangle",
+            cross_page_block,
+            TerminalSelectionMode::Block,
+            (-2, 1),
+            (1, 3),
+            "bcd\nhij\nnop\ntuv",
+        ),
+        (
+            "cross page soft wrap",
+            cross_page_wrapped,
+            TerminalSelectionMode::Simple,
+            (-1, 0),
+            (1, 3),
+            "helloworld\nnext",
+        ),
+        (
+            "combining mark",
+            combining,
+            TerminalSelectionMode::Lines,
+            (0, 0),
+            (0, 0),
+            "e\u{301}\n",
+        ),
+    ] {
+        let selection = TerminalSelection {
+            anchor: TerminalGridPoint {
+                line: start_line,
+                col: start_col,
+            },
+            head: TerminalGridPoint {
+                line: end_line,
+                col: end_col,
+            },
+            mode,
+        };
+        assert_eq!(
+            selected_text_for_selection(&snapshot, selection).as_deref(),
+            Some(expected),
+            "{case}"
+        );
+    }
 }
 
 #[test]
@@ -229,63 +263,6 @@ fn selection_snapshot_requests_only_ranges_outside_the_viewport() {
 }
 
 #[test]
-fn reverse_cross_page_selection_reads_rows_beyond_viewport_height() {
-    let mut snapshot = multirow_snapshot(&["old-a", "old-b", "now-a", "now-b"]);
-    snapshot.rows = 2;
-    snapshot.display_offset = 2;
-    snapshot.scrollback_lines = 2;
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: 1, col: 4 },
-        head: TerminalGridPoint { line: -2, col: 0 },
-        mode: TerminalSelectionMode::Simple,
-    };
-
-    assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
-        Some("old-a\nold-b\nnow-a\nnow-b")
-    );
-}
-
-#[test]
-fn cross_page_block_selection_preserves_rectangular_columns() {
-    let mut snapshot = multirow_snapshot(&["abcdef", "ghijkl", "mnopqr", "stuvwx"]);
-    snapshot.rows = 2;
-    snapshot.display_offset = 2;
-    snapshot.scrollback_lines = 2;
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: -2, col: 1 },
-        head: TerminalGridPoint { line: 1, col: 3 },
-        mode: TerminalSelectionMode::Block,
-    };
-
-    assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
-        Some("bcd\nhij\nnop\ntuv")
-    );
-}
-
-#[test]
-fn cross_page_selection_preserves_soft_wrapped_lines() {
-    let mut snapshot = multirow_snapshot(&["hello", "world", "next"]);
-    snapshot.rows = 2;
-    snapshot.display_offset = 1;
-    snapshot.scrollback_lines = 1;
-    snapshot.cols = 5;
-    snapshot.lines[0].wrapped = true;
-    snapshot.lines[0].refresh_signature();
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: -1, col: 0 },
-        head: TerminalGridPoint { line: 1, col: 3 },
-        mode: TerminalSelectionMode::Simple,
-    };
-
-    assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
-        Some("helloworld\nnext")
-    );
-}
-
-#[test]
 fn selection_rects_track_grid_lines_when_scrollback_offset_changes() {
     let mut snapshot = multirow_snapshot(&["row0", "row1", "row2", "row3"]);
     snapshot.display_offset = 2;
@@ -310,40 +287,4 @@ fn selection_rects_track_grid_lines_when_scrollback_offset_changes() {
 
     assert_eq!(layout.selections.len(), 1);
     assert_eq!(layout.selections[0].row, 3);
-}
-
-#[test]
-fn selected_text_preserves_zero_width_marks() {
-    let mut snapshot = selection_snapshot("e");
-    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{301}".to_string());
-    snapshot.lines[0].refresh_signature();
-    let selection = TerminalSelection {
-        anchor: TerminalGridPoint { line: 0, col: 0 },
-        head: TerminalGridPoint { line: 0, col: 0 },
-        mode: TerminalSelectionMode::Lines,
-    };
-
-    assert_eq!(
-        selected_text_for_selection(&snapshot, selection).as_deref(),
-        Some("e\u{301}\n")
-    );
-}
-
-#[test]
-fn semantic_word_selection_crosses_soft_wrapped_rows() {
-    let mut snapshot = multirow_snapshot(&["hello", "world"]);
-    snapshot.cols = 5;
-    snapshot.lines[0].wrapped = true;
-    snapshot.lines[0].refresh_signature();
-
-    let selection = word_selection_at_point(&snapshot, TerminalPoint { row: 1, col: 1 })
-        .expect("semantic selection");
-
-    assert_eq!(
-        selection.normalized(),
-        (
-            TerminalGridPoint { line: 0, col: 0 },
-            TerminalGridPoint { line: 1, col: 4 }
-        )
-    );
 }

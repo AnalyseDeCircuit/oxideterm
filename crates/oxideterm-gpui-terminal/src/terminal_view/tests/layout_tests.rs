@@ -211,90 +211,49 @@ fn terminal_element_shapes_combining_marks_and_wide_grapheme_clusters() {
 }
 
 #[test]
-fn terminal_element_shapes_rtl_row_as_visual_runs() {
-    let snapshot = selection_snapshot("السلام عليكم");
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    assert!(layout.text_runs.len() < "السلام عليكم".chars().count());
-    assert_eq!(
-        layout.text_runs.iter().map(|run| run.cells).sum::<usize>(),
-        "السلام عليكم".chars().filter(|ch| *ch != ' ').count()
-    );
-    assert!(layout.text_runs.iter().any(|run| run.text.contains("س")));
-}
-
-#[test]
-fn terminal_element_keeps_wide_glyphs_on_grid_in_bidi_rows() {
-    // U+05FC appears when GBK output is decoded as UTF-8 and switches the row to bidi layout.
-    let mut snapshot = selection_snapshot("");
-    snapshot.lines = vec![row_from_text_with_wide_spacers("中文a\u{05fc}")];
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    assert_eq!(
-        layout
-            .text_runs
-            .iter()
-            .map(|run| (run.col, run.text.to_string(), run.cells))
-            .collect::<Vec<_>>(),
-        vec![
-            (0, "中".to_string(), 2),
-            (2, "文".to_string(), 2),
-            (4, "a\u{05fc}".to_string(), 2),
-        ]
-    );
-}
-
-#[test]
-fn terminal_element_keeps_rtl_text_at_content_start_with_trailing_blanks() {
-    let snapshot = selection_snapshot("שלום");
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    assert_eq!(
-        layout
-            .text_runs
-            .iter()
-            .map(|run| run.col)
-            .min()
-            .expect("text run"),
-        0
-    );
-    assert!(layout.text_runs.iter().all(|run| run.col < 4));
+fn bidi_text_runs_preserve_content_start_and_wide_cell_geometry() {
+    let mut mixed = selection_snapshot("");
+    mixed.lines = vec![row_from_text_with_wide_spacers("中文a\u{05fc}")];
+    for (case, snapshot, expected) in [
+        (
+            "Arabic",
+            selection_snapshot("السلام عليكم"),
+            vec![(0, "مكيلع", 5), (6, "مالسلا", 6)],
+        ),
+        (
+            "wide mixed row",
+            mixed,
+            vec![(0, "中", 2), (2, "文", 2), (4, "a\u{05fc}", 2)],
+        ),
+        (
+            "Hebrew with trailing blanks",
+            selection_snapshot("שלום"),
+            vec![(0, "םולש", 4)],
+        ),
+    ] {
+        let layout = TerminalElement::new(
+            snapshot,
+            None,
+            test_metrics(),
+            true,
+            None,
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .layout();
+        assert_eq!(
+            layout
+                .text_runs
+                .iter()
+                .map(|run| (run.col, run.text.as_ref(), run.cells,))
+                .collect::<Vec<_>>(),
+            expected,
+            "{case}"
+        );
+    }
 }
 
 #[test]

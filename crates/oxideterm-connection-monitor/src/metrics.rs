@@ -1096,40 +1096,141 @@ Inter-|   Receive                                                |  Transmit
     }
 
     #[test]
-    fn parses_extended_process_snapshot_fields() {
-        let output = r#"===TOPPROCS===
+    fn parses_process_records_with_optional_fields_and_embedded_markers() {
+        for (case, output, expected) in [
+            (
+                "extended_process_snapshot_fields",
+                r#"===TOPPROCS===
 1363656	1	www-data	S	12.3	4.5	262144	524288	01:02:03	node	/usr/bin/node /srv/app/server.js
 1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
-===END==="#;
-
-        let processes = parse_top_processes(output);
-
-        assert_eq!(processes.len(), 2);
-        assert_eq!(processes[0].pid, "1363656");
-        assert_eq!(processes[0].ppid.as_deref(), Some("1"));
-        assert_eq!(processes[0].user.as_deref(), Some("www-data"));
-        assert_eq!(processes[0].state.as_deref(), Some("S"));
-        assert_eq!(processes[0].cpu_percent, Some(12.3));
-        assert_eq!(processes[0].memory_percent, 4.5);
-        assert_eq!(processes[0].rss_bytes, Some(262144 * 1024));
-        assert_eq!(processes[0].vsz_bytes, Some(524288 * 1024));
-        assert_eq!(processes[0].elapsed.as_deref(), Some("01:02:03"));
-        assert_eq!(processes[0].command, "node");
-        assert_eq!(
-            processes[0].full_command.as_deref(),
-            Some("/usr/bin/node /srv/app/server.js")
-        );
-        assert_eq!(processes[1].pid, "1362735");
-        assert_eq!(processes[1].user.as_deref(), Some("lips"));
-        assert_eq!(processes[1].state.as_deref(), Some("R"));
-        assert_eq!(processes[1].cpu_percent, Some(1.5));
-        assert_eq!(processes[1].memory_percent, 1.0);
-        assert_eq!(processes[1].elapsed, None);
-        assert_eq!(processes[1].command, "node");
-        assert_eq!(
-            processes[1].full_command.as_deref(),
-            Some("/usr/bin/node /srv/app/server.js")
-        );
+===END==="#,
+                vec![
+                    (
+                        "1363656",
+                        Some("1"),
+                        Some("www-data"),
+                        Some("S"),
+                        Some(12.3),
+                        4.5,
+                        Some(268435456),
+                        Some(536870912),
+                        Some("01:02:03"),
+                        "node",
+                        Some("/usr/bin/node /srv/app/server.js"),
+                    ),
+                    (
+                        "1362735",
+                        Some("1"),
+                        Some("lips"),
+                        Some("R"),
+                        Some(1.5),
+                        1.0,
+                        Some(268435456),
+                        Some(536870912),
+                        None,
+                        "node",
+                        Some("/usr/bin/node /srv/app/server.js"),
+                    ),
+                ],
+            ),
+            (
+                "processes_when_shell_echoes_sampling_command",
+                r#"echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat; echo '===TOPPROCS==='; ps ww -eo pid=,args=; echo '===END==='
+===STAT===
+cpu  1 2 3 4 5 6 7 8
+===TOPPROCS===
+1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
+===END==="#,
+                vec![(
+                    "1362735",
+                    Some("1"),
+                    Some("lips"),
+                    Some("R"),
+                    Some(1.5),
+                    1.0,
+                    Some(268435456),
+                    Some(536870912),
+                    None,
+                    "node",
+                    Some("/usr/bin/node /srv/app/server.js"),
+                )],
+            ),
+            (
+                "process_command_lines_containing_marker_text",
+                r#"===TOPPROCS===
+1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node --flag ===END=== /srv/app/server.js
+1363656	1	root	S	0.5	0.2	131072	262144		postgres	/usr/lib/postgresql/bin/postgres
+===END==="#,
+                vec![
+                    (
+                        "1362735",
+                        Some("1"),
+                        Some("lips"),
+                        Some("R"),
+                        Some(1.5),
+                        1.0,
+                        Some(268435456),
+                        Some(536870912),
+                        None,
+                        "node",
+                        Some("/usr/bin/node --flag ===END=== /srv/app/server.js"),
+                    ),
+                    (
+                        "1363656",
+                        Some("1"),
+                        Some("root"),
+                        Some("S"),
+                        Some(0.5),
+                        0.2,
+                        Some(134217728),
+                        Some(268435456),
+                        None,
+                        "postgres",
+                        Some("/usr/lib/postgresql/bin/postgres"),
+                    ),
+                ],
+            ),
+            (
+                "busybox_process_fallback_rows_with_empty_extended_fields",
+                r#"===TOPPROCS===
+42					2.5		102400		ash	ash
+===END==="#,
+                vec![(
+                    "42",
+                    None,
+                    None,
+                    None,
+                    None,
+                    2.5,
+                    None,
+                    Some(104857600),
+                    None,
+                    "ash",
+                    Some("ash"),
+                )],
+            ),
+        ] {
+            let processes = parse_top_processes(output);
+            let actual = processes
+                .iter()
+                .map(|process| {
+                    (
+                        process.pid.as_str(),
+                        process.ppid.as_deref(),
+                        process.user.as_deref(),
+                        process.state.as_deref(),
+                        process.cpu_percent,
+                        process.memory_percent,
+                        process.rss_bytes,
+                        process.vsz_bytes,
+                        process.elapsed.as_deref(),
+                        process.command.as_str(),
+                        process.full_command.as_deref(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected, "{case}");
+        }
     }
 
     #[test]
@@ -1144,100 +1245,61 @@ Inter-|   Receive                                                |  Transmit
     }
 
     #[test]
-    fn parses_processes_when_shell_echoes_sampling_command() {
-        let output = r#"echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat; echo '===TOPPROCS==='; ps ww -eo pid=,args=; echo '===END==='
-===STAT===
-cpu  1 2 3 4 5 6 7 8
-===TOPPROCS===
-1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
-===END==="#;
-
-        let processes = parse_top_processes(output);
-
-        assert_eq!(processes.len(), 1);
-        assert_eq!(processes[0].pid, "1362735");
-        assert_eq!(processes[0].command, "node");
-    }
-
-    #[test]
-    fn parses_process_command_lines_containing_marker_text() {
-        let output = r#"===TOPPROCS===
-1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node --flag ===END=== /srv/app/server.js
-1363656	1	root	S	0.5	0.2	131072	262144		postgres	/usr/lib/postgresql/bin/postgres
-===END==="#;
-
-        let processes = parse_top_processes(output);
-
-        assert_eq!(processes.len(), 2);
-        assert_eq!(
-            processes[0].full_command.as_deref(),
-            Some("/usr/bin/node --flag ===END=== /srv/app/server.js")
-        );
-        assert_eq!(processes[1].command, "postgres");
-    }
-
-    #[test]
-    fn parses_busybox_process_fallback_rows_with_empty_extended_fields() {
-        let output = r#"===TOPPROCS===
-42					2.5		102400		ash	ash
-===END==="#;
-
-        let processes = parse_top_processes(output);
-
-        assert_eq!(processes.len(), 1);
-        assert_eq!(processes[0].pid, "42");
-        assert_eq!(processes[0].memory_percent, 2.5);
-        assert_eq!(processes[0].vsz_bytes, Some(102400 * 1024));
-        assert_eq!(processes[0].command, "ash");
-    }
-
-    #[test]
-    fn parses_nvidia_smi_csv_gpu_snapshot() {
-        let output = r#"===GPUS===
+    fn parses_gpu_records_across_sampling_formats() {
+        for (case, output, expected) in [
+            (
+                "nvidia_smi_csv_gpu_snapshot",
+                r#"===GPUS===
 0, NVIDIA RTX 6000 Ada Generation, 97, 12000, 49140
 1, NVIDIA L40S, N/A, 512, 46068
-===END==="#;
-
-        let gpus = parse_gpus(output);
-
-        assert_eq!(gpus.len(), 2);
-        assert_eq!(gpus[0].index, 0);
-        assert_eq!(gpus[0].name, "NVIDIA RTX 6000 Ada Generation");
-        assert_eq!(gpus[0].utilization_percent, Some(97.0));
-        assert_eq!(gpus[0].memory_used, Some(12_000 * 1024 * 1024));
-        assert_eq!(gpus[0].memory_total, Some(49_140 * 1024 * 1024));
-        assert_eq!(gpus[1].index, 1);
-        assert_eq!(gpus[1].utilization_percent, None);
-        assert_eq!(
-            gpus[1].memory_percent,
-            percent(512 * 1024 * 1024, 46_068 * 1024 * 1024)
-        );
-    }
-
-    #[test]
-    fn parses_sysfs_and_windows_gpu_snapshot_rows() {
-        let output = r#"===GPUS===
+===END==="#,
+                vec![
+                    (
+                        0,
+                        "NVIDIA RTX 6000 Ada Generation",
+                        Some(97.0),
+                        Some(12582912000),
+                        Some(51527024640),
+                        Some(24.42002442002442),
+                    ),
+                    (
+                        1,
+                        "NVIDIA L40S",
+                        None,
+                        Some(536870912),
+                        Some(48305799168),
+                        Some(1.1114005383346358),
+                    ),
+                ],
+            ),
+            (
+                "sysfs_and_windows_gpu_snapshot_rows",
+                r#"===GPUS===
 0	AMD GPU	83	2048.5	16384
 1, Intel Arc A770, 12.5, 4096, 16384
-===END==="#;
-
-        let gpus = parse_gpus(output);
-
-        assert_eq!(gpus.len(), 2);
-        assert_eq!(gpus[0].name, "AMD GPU");
-        assert_eq!(gpus[0].utilization_percent, Some(83.0));
-        assert_eq!(
-            gpus[0].memory_used,
-            Some((2048.5_f64 * 1024.0 * 1024.0).round() as u64)
-        );
-        assert_eq!(gpus[1].name, "Intel Arc A770");
-        assert_eq!(gpus[1].utilization_percent, Some(12.5));
-        assert_eq!(gpus[1].memory_percent, Some(25.0));
-    }
-
-    #[test]
-    fn parses_intel_gpu_top_json_fallback() {
-        let output = r#"===GPUS_INTEL_TOP===
+===END==="#,
+                vec![
+                    (
+                        0,
+                        "AMD GPU",
+                        Some(83.0),
+                        Some(2148007936),
+                        Some(17179869184),
+                        Some(12.5030517578125),
+                    ),
+                    (
+                        1,
+                        "Intel Arc A770",
+                        Some(12.5),
+                        Some(4294967296),
+                        Some(17179869184),
+                        Some(25.0),
+                    ),
+                ],
+            ),
+            (
+                "intel_gpu_top_json_fallback",
+                r#"===GPUS_INTEL_TOP===
 [
   {
     "engines": {
@@ -1246,14 +1308,35 @@ cpu  1 2 3 4 5 6 7 8
     }
   }
 ]
-===END==="#;
-
-        let gpus = parse_gpus(output);
-
-        assert_eq!(gpus.len(), 1);
-        assert_eq!(gpus[0].name, "Intel GPU");
-        assert_eq!(gpus[0].utilization_percent, Some(42.5));
-        assert_eq!(gpus[0].memory_used, None);
+===END==="#,
+                vec![(0, "Intel GPU", Some(42.5), None, None, None)],
+            ),
+        ] {
+            let gpus = parse_gpus(output);
+            assert_eq!(gpus.len(), expected.len(), "{case}");
+            for (gpu, (index, name, utilization, used, total, memory_percent)) in
+                gpus.iter().zip(expected)
+            {
+                assert_eq!(
+                    (
+                        gpu.index,
+                        gpu.name.as_str(),
+                        gpu.utilization_percent,
+                        gpu.memory_used,
+                        gpu.memory_total
+                    ),
+                    (index, name, utilization, used, total),
+                    "{case}"
+                );
+                match (gpu.memory_percent, memory_percent) {
+                    (Some(actual), Some(expected)) => assert!(
+                        (actual - expected).abs() < 0.000001,
+                        "{case}: {actual} != {expected}"
+                    ),
+                    (actual, expected) => assert_eq!(actual, expected, "{case}"),
+                }
+            }
+        }
     }
 
     #[test]

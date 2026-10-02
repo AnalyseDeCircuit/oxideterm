@@ -682,131 +682,200 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_journalctl_json_rows() {
-        let output = concat!(
-            "===HOST_LOGS===\n",
-            "__OXIDE_LOG_CAPABILITY__\tfull\tlinux_systemd\n",
-            "JSON\t{\"__REALTIME_TIMESTAMP\":\"1713940000000000\",\"PRIORITY\":\"3\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"_SYSTEMD_UNIT\":\"ssh.service\",\"MESSAGE\":\"Failed password for root\"}\n",
-            "JSON\t{\"PRIORITY\":6,\"_COMM\":\"kernel\",\"MESSAGE\":\"boot complete\"}\n",
-            "===HOST_LOGS_END===\n"
-        );
-
-        let snapshot = parse_log_snapshot(output);
-
-        assert_eq!(
-            snapshot.status,
-            ResourceLogStatus::Available {
-                capability: LogCommandCapability::Full,
-                platform: "linux_systemd".to_string(),
+    fn parses_platform_logs_and_selects_matching_records() {
+        let fields = |entry: &ResourceLogEntry| {
+            [
+                entry.timestamp.clone(),
+                entry.level.clone(),
+                entry.source.clone(),
+                entry.unit.clone(),
+                entry.message.clone(),
+            ]
+        };
+        for (platform, capability, output, expected, searches) in [
+            (
+                "linux_systemd",
+                LogCommandCapability::Full,
+                concat!(
+                    "===HOST_LOGS===\n",
+                    "__OXIDE_LOG_CAPABILITY__\tfull\tlinux_systemd\n",
+                    "JSON\t{\"__REALTIME_TIMESTAMP\":\"1713940000000000\",\"PRIORITY\":\"3\",\"SYSLOG_IDENTIFIER\":\"sshd\",\"_SYSTEMD_UNIT\":\"ssh.service\",\"MESSAGE\":\"Failed password for root\"}\n",
+                    "JSON\t{\"PRIORITY\":6,\"_COMM\":\"kernel\",\"MESSAGE\":\"boot complete\"}\n",
+                    "===HOST_LOGS_END===\n"
+                ),
+                vec![
+                    [
+                        "1713940000000000",
+                        "error",
+                        "sshd",
+                        "ssh.service",
+                        "Failed password for root",
+                    ],
+                    ["", "info", "kernel", "", "boot complete"],
+                ],
+                vec![],
+            ),
+            (
+                "linux_files",
+                LogCommandCapability::Partial,
+                concat!(
+                    "===HOST_LOGS===\n",
+                    "__OXIDE_LOG_CAPABILITY__\tpartial\tlinux_files\n",
+                    "ROW\t\tinfo\t/var/log/syslog\t\tApr 24 host sshd[1]: Accepted publickey\n",
+                    "ROW\t\tinfo\t/var/log/syslog\t\tApr 24 host kernel: disk error\n",
+                    "===HOST_LOGS_END===\n"
+                ),
+                vec![
+                    [
+                        "",
+                        "info",
+                        "/var/log/syslog",
+                        "",
+                        "Apr 24 host sshd[1]: Accepted publickey",
+                    ],
+                    [
+                        "",
+                        "error",
+                        "/var/log/syslog",
+                        "",
+                        "Apr 24 host kernel: disk error",
+                    ],
+                ],
+                vec![
+                    ("", LogPreset::Auth, vec![0]),
+                    ("disk", LogPreset::Errors, vec![1]),
+                ],
+            ),
+            (
+                "macos_log",
+                LogCommandCapability::Partial,
+                concat!(
+                    "===HOST_LOGS===\n",
+                    "__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log\n",
+                    "ROW\t\tinfo\tmacos_log\t\t2026-04-24 18:55:39.194 INFO WindowServer ready\n",
+                    "===HOST_LOGS_END===\n"
+                ),
+                vec![[
+                    "",
+                    "info",
+                    "macos_log",
+                    "",
+                    "2026-04-24 18:55:39.194 INFO WindowServer ready",
+                ]],
+                vec![],
+            ),
+            (
+                "bsd_messages",
+                LogCommandCapability::Partial,
+                concat!(
+                    "===HOST_LOGS===\n",
+                    "__OXIDE_LOG_CAPABILITY__\tpartial\tbsd_messages\n",
+                    "ROW\t\tinfo\t/var/log/messages\t\tApr 24 host cron[10]: job started\n",
+                    "===HOST_LOGS_END===\n"
+                ),
+                vec![[
+                    "",
+                    "info",
+                    "/var/log/messages",
+                    "",
+                    "Apr 24 host cron[10]: job started",
+                ]],
+                vec![],
+            ),
+            (
+                "windows_powershell",
+                LogCommandCapability::Partial,
+                concat!(
+                    "===HOST_LOGS===\n",
+                    "__OXIDE_LOG_CAPABILITY__\tpartial\twindows_powershell\n",
+                    "ROW\t2026-04-24T18:55:39\tError\tService Control Manager\tSystem\tService failed to start\n",
+                    "===HOST_LOGS_END===\n"
+                ),
+                vec![[
+                    "2026-04-24T18:55:39",
+                    "error",
+                    "Service Control Manager",
+                    "System",
+                    "Service failed to start",
+                ]],
+                vec![],
+            ),
+        ] {
+            let snapshot = parse_log_snapshot(output);
+            assert_eq!(
+                snapshot.status,
+                ResourceLogStatus::Available {
+                    capability,
+                    platform: platform.to_string(),
+                },
+                "{platform}"
+            );
+            assert_eq!(
+                snapshot.entries.iter().map(fields).collect::<Vec<_>>(),
+                expected,
+                "{platform}"
+            );
+            for (query, preset, indices) in searches {
+                let rows = visible_log_rows(&snapshot.entries, query, preset);
+                let expected_rows = indices
+                    .into_iter()
+                    .map(|index| expected[index])
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rows.iter().map(fields).collect::<Vec<_>>(),
+                    expected_rows,
+                    "{platform}: {query:?} / {preset:?}"
+                );
             }
-        );
-        assert_eq!(snapshot.entries.len(), 2);
-        assert_eq!(snapshot.entries[0].level, "error");
-        assert_eq!(snapshot.entries[0].source, "sshd");
-        assert_eq!(snapshot.entries[0].unit, "ssh.service");
-        assert_eq!(snapshot.entries[1].level, "info");
+        }
     }
 
     #[test]
-    fn parses_syslog_fallback_rows_and_filters() {
-        let output = concat!(
-            "===HOST_LOGS===\n",
-            "__OXIDE_LOG_CAPABILITY__\tpartial\tlinux_files\n",
-            "ROW\t\tinfo\t/var/log/syslog\t\tApr 24 host sshd[1]: Accepted publickey\n",
-            "ROW\t\tinfo\t/var/log/syslog\t\tApr 24 host kernel: disk error\n",
-            "===HOST_LOGS_END===\n"
-        );
-
-        let snapshot = parse_log_snapshot(output);
-        let auth_rows = visible_log_rows(&snapshot.entries, "", LogPreset::Auth);
-        let error_rows = visible_log_rows(&snapshot.entries, "disk", LogPreset::Errors);
-
-        assert_eq!(snapshot.entries.len(), 2);
-        assert_eq!(auth_rows.len(), 1);
-        assert_eq!(error_rows.len(), 1);
-        assert_eq!(error_rows[0].level, "error");
-    }
-
-    #[test]
-    fn parses_macos_compact_rows() {
-        let output = concat!(
-            "===HOST_LOGS===\n",
-            "__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log\n",
-            "ROW\t\tinfo\tmacos_log\t\t2026-04-24 18:55:39.194 INFO WindowServer ready\n",
-            "===HOST_LOGS_END===\n"
-        );
-
-        let snapshot = parse_log_snapshot(output);
-
-        assert_eq!(snapshot.entries.len(), 1);
-        assert_eq!(snapshot.entries[0].source, "macos_log");
-        assert!(snapshot.entries[0].message.contains("WindowServer"));
-    }
-
-    #[test]
-    fn parses_bsd_tail_rows() {
-        let output = concat!(
-            "===HOST_LOGS===\n",
-            "__OXIDE_LOG_CAPABILITY__\tpartial\tbsd_messages\n",
-            "ROW\t\tinfo\t/var/log/messages\t\tApr 24 host cron[10]: job started\n",
-            "===HOST_LOGS_END===\n"
-        );
-
-        let snapshot = parse_log_snapshot(output);
-
-        assert_eq!(snapshot.entries.len(), 1);
-        assert_eq!(snapshot.entries[0].source, "/var/log/messages");
-    }
-
-    #[test]
-    fn parses_windows_get_winevent_rows() {
-        let output = concat!(
-            "===HOST_LOGS===\n",
-            "__OXIDE_LOG_CAPABILITY__\tpartial\twindows_powershell\n",
-            "ROW\t2026-04-24T18:55:39\tError\tService Control Manager\tSystem\tService failed to start\n",
-            "===HOST_LOGS_END===\n"
-        );
-
-        let snapshot = parse_log_snapshot(output);
-
-        assert_eq!(snapshot.entries.len(), 1);
-        assert_eq!(snapshot.entries[0].level, "error");
-        assert_eq!(snapshot.entries[0].unit, "System");
-    }
-
-    #[test]
-    fn log_commands_keep_windows_powershell_separate() {
-        let linux = build_log_snapshot_command("Linux", LogPreset::All, 300).unwrap();
-        let windows = build_log_snapshot_command("Windows", LogPreset::All, 300).unwrap();
-        let follow = build_log_follow_command("Linux", LogPreset::Kernel).unwrap();
-
-        assert!(linux.command.contains("journalctl"));
-        assert!(linux.command.contains("done | tail -n 300"));
-        assert!(
-            !linux
-                .command
-                .contains("else echo '__OXIDE_LOG_UNAVAILABLE__'; done;")
-        );
-        assert_eq!(linux.capability, LogCommandCapability::Full);
-        assert!(windows.command.contains("Get-WinEvent"));
-        assert!(windows.command.starts_with("powershell "));
-        assert!(follow.command.contains("journalctl -k -f --no-pager"));
-    }
-
-    #[test]
-    fn unix_log_snapshot_commands_stay_single_line_for_exec_shells() {
-        for os_type in ["Linux", "macOS", "FreeBSD"] {
-            let command = build_log_snapshot_command(os_type, LogPreset::All, 300)
-                .unwrap_or_else(|error| panic!("{os_type} log command should build: {error}"));
-
-            // SSH exec channels commonly run the command through the user's
-            // login shell with `-c`; keeping the generated command one-line
-            // avoids zsh parsing marker lines as standalone shell syntax.
+    fn log_commands_preserve_platform_syntax_and_linux_follow() {
+        for (os_type, capability, required) in [
+            (
+                "Linux",
+                LogCommandCapability::Full,
+                vec!["journalctl", "done | tail -n 300"],
+            ),
+            ("macOS", LogCommandCapability::Partial, vec!["log show"]),
+            (
+                "FreeBSD",
+                LogCommandCapability::Partial,
+                vec!["tail -n 300 /var/log/messages"],
+            ),
+            (
+                "Windows",
+                LogCommandCapability::Partial,
+                vec!["Get-WinEvent"],
+            ),
+        ] {
+            let command = build_log_snapshot_command(os_type, LogPreset::All, 300).unwrap();
+            assert_eq!(command.capability, capability, "{os_type}");
+            for fragment in required {
+                assert!(
+                    command.command.contains(fragment),
+                    "{os_type}: missing {fragment}"
+                );
+            }
+            if os_type == "Windows" {
+                assert!(command.command.starts_with("powershell "));
+            } else {
+                // SSH exec uses the login shell; literal newlines can turn markers into commands.
+                assert!(
+                    !command.command.contains('\n'),
+                    "{os_type}: {}",
+                    command.command
+                );
+            }
             assert!(
-                !command.command.contains('\n'),
-                "{os_type} log command contains a literal newline: {}",
-                command.command
+                !command
+                    .command
+                    .contains("else echo '__OXIDE_LOG_UNAVAILABLE__'; done;"),
+                "{os_type}"
             );
         }
+        let follow = build_log_follow_command("Linux", LogPreset::Kernel).unwrap();
+        assert!(follow.command.contains("journalctl -k -f --no-pager"));
     }
 }

@@ -49,44 +49,30 @@ ${extra}
   };
 }
 
-test('routes a bounded non-sensitive bug to the future agent candidate queue', () => {
-  const report = policy.analyzeIssue(bugIssue());
-
-  assert.equal(report.route, 'candidate_for_agent');
-  assert.equal(report.reasons.includes('release_or_update_boundary'), false);
-  assert.equal(report.confidence, 'high');
-  assert.deepEqual(report.recommendedLabels, ['automation:candidate']);
-  assert.equal(report.mutationAllowed, false);
-  assert.equal(report.writesPerformed, false);
-});
-
-test('accepts GraphQL uppercase issue states during offline audits', () => {
-  const report = policy.analyzeIssue(bugIssue({ state: 'OPEN' }));
-
-  assert.equal(report.route, 'candidate_for_agent');
-});
-
-test('keeps Windows-only reports behind platform validation', () => {
-  const report = policy.analyzeIssue(bugIssue({ platform: 'Windows 11' }));
-
-  assert.equal(report.route, 'needs_human');
-  assert.deepEqual(report.platforms, ['windows']);
-  assert.deepEqual(report.recommendedLabels, [
-    'automation:needs-human',
-    'automation:windows-validation',
-  ]);
-  assert.equal(report.reasons.includes('windows_only_validation'), true);
-});
-
-test('keeps credential and authentication work out of automatic implementation', () => {
-  const report = policy.analyzeIssue(bugIssue({
-    title: '私钥认证失败',
-    extra: '使用 private key 登录时 authentication failed。',
-  }));
-
-  assert.equal(report.route, 'needs_human');
-  assert.equal(report.reasons.includes('credential_or_secret_boundary'), true);
-  assert.equal(report.reasons.includes('authentication_boundary'), true);
+test('routes bug reports by state, platform, credentials and quality without authorizing writes', () => {
+  for (const [name, input, route, reasons, recommendedLabels, platforms, confidence] of [
+    ...['open', 'OPEN'].map((state) => [
+      state, { state }, 'candidate_for_agent', ['bounded_bug_with_reproduction'],
+      ['automation:candidate'], ['macos'], 'high',
+    ]),
+    ['Windows', { platform: 'Windows 11' }, 'needs_human', ['windows_only_validation'],
+      ['automation:needs-human', 'automation:windows-validation'], ['windows'], 'medium'],
+    ['credentials', { title: '私钥认证失败', extra: '使用 private key 登录时 authentication failed。' },
+      'needs_human', ['credential_or_secret_boundary', 'authentication_boundary'],
+      ['automation:needs-human'], ['macos'], 'medium'],
+    ['quality gate', { labels: ['bug', 'incomplete'] }, 'blocked_by_quality_gate',
+      ['quality_gate_blocking'], [], ['macos'], 'medium'],
+    ['closed', { state: 'closed' }, 'observe_only', ['issue_not_open'], [], ['macos'], 'medium'],
+  ]) {
+    const report = policy.analyzeIssue(bugIssue(input));
+    assert.equal(report.route, route, name);
+    assert.deepEqual(report.reasons, reasons, name);
+    assert.deepEqual(report.recommendedLabels, recommendedLabels, name);
+    assert.deepEqual(report.platforms, platforms, name);
+    assert.equal(report.confidence, confidence, name);
+    assert.equal(report.mutationAllowed, false, name);
+    assert.equal(report.writesPerformed, false, name);
+  }
 });
 
 test('keeps feature decisions with the maintainer', () => {
@@ -116,15 +102,6 @@ VNC 无法满足虚拟机控制场景中的低延迟和设备共享需求。
   assert.equal(report.reasons.includes('product_decision_required'), true);
 });
 
-test('respects the existing quality gate without taking closure ownership', () => {
-  const report = policy.analyzeIssue(bugIssue({
-    labels: ['bug', 'incomplete'],
-  }));
-
-  assert.equal(report.route, 'blocked_by_quality_gate');
-  assert.equal(report.mutationAllowed, false);
-});
-
 test('never copies raw issue content into the shadow report', () => {
   const sentinel = 'DO-NOT-UPLOAD-RAW-TERMINAL-CONTENT';
   const report = policy.analyzeIssue(bugIssue({ extra: sentinel }));
@@ -132,7 +109,7 @@ test('never copies raw issue content into the shadow report', () => {
   assert.equal(JSON.stringify(report).includes(sentinel), false);
 });
 
-test('managed comments are idempotent and never claim a fix or release', () => {
+test('managed comments are created once and updated in place when routing changes', () => {
   const report = policy.analyzeIssue(bugIssue());
   const body = policy.buildManagedComment(report);
   const existing = {
@@ -153,22 +130,12 @@ test('managed comments are idempotent and never claim a fix or release', () => {
     policy.findManagedComment([existing], 'oxideterm-maintainer[bot]'),
     existing
   );
-});
-
-test('updates one existing managed comment when routing changes', () => {
-  const candidate = policy.buildManagedComment(policy.analyzeIssue(bugIssue()));
   const needsHuman = policy.buildManagedComment(policy.analyzeIssue(
     bugIssue({ platform: 'Windows 11' })
   ));
-  const existing = {
-    id: 43,
-    body: candidate,
-    user: { login: 'oxideterm-maintainer[bot]', type: 'Bot' },
-  };
-
   assert.deepEqual(policy.decideCommentMutation(existing, needsHuman), {
     action: 'update',
-    commentId: 43,
+    commentId: 42,
     body: needsHuman,
   });
 });

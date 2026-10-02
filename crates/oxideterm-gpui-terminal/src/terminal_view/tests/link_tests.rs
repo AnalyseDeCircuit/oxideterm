@@ -1,33 +1,68 @@
 use super::*;
 
 #[test]
-fn link_detection_finds_urls_and_trims_trailing_punctuation() {
-    let snapshot = selection_snapshot("open https://example.com/docs).");
-    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-        &snapshot,
-        0..snapshot.lines.len(),
-        true,
-    );
-
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].kind, TerminalLinkKind::Url);
-    assert_eq!(links[0].start_col, 5);
-    assert_eq!(links[0].end_col, 29);
-    assert_eq!(links[0].target, "https://example.com/docs");
-}
-
-#[test]
-fn link_detection_finds_path_like_targets() {
-    let snapshot = selection_snapshot("see ./crates/oxideterm-gpui-app/src/main.rs");
-    let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-        &snapshot,
-        0..snapshot.lines.len(),
-        true,
-    );
-
-    assert_eq!(links.len(), 1);
-    assert_eq!(links[0].kind, TerminalLinkKind::Path);
-    assert_eq!(links[0].target, "./crates/oxideterm-gpui-app/src/main.rs");
+fn link_detection_preserves_ranges_and_prefers_explicit_targets() {
+    for (source, explicit, kind, start, end, target) in [
+        (
+            "open https://example.com/docs).",
+            None,
+            TerminalLinkKind::Url,
+            5,
+            29,
+            "https://example.com/docs",
+        ),
+        (
+            "see ./crates/oxideterm-gpui-app/src/main.rs",
+            None,
+            TerminalLinkKind::Path,
+            4,
+            43,
+            "./crates/oxideterm-gpui-app/src/main.rs",
+        ),
+        (
+            "click",
+            Some("https://example.com/osc8"),
+            TerminalLinkKind::Url,
+            0,
+            5,
+            "https://example.com/osc8",
+        ),
+        (
+            "https://example.com",
+            Some("https://example.com/osc8"),
+            TerminalLinkKind::Url,
+            0,
+            19,
+            "https://example.com/osc8",
+        ),
+    ] {
+        let mut snapshot = selection_snapshot(source);
+        if let Some(uri) = explicit {
+            for cell in &mut snapshot.lines[0].cells_mut()[..source.len()] {
+                cell.set_hyperlink(Some(uri.to_string()));
+            }
+            snapshot.lines[0].refresh_signature();
+        }
+        let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
+            &snapshot,
+            0..snapshot.lines.len(),
+            true,
+        );
+        assert_eq!(
+            links
+                .iter()
+                .map(|link| (
+                    link.row,
+                    link.kind,
+                    link.start_col,
+                    link.end_col,
+                    link.target.as_ref(),
+                ))
+                .collect::<Vec<_>>(),
+            [(0, kind, start, end, target)],
+            "{source}"
+        );
+    }
 }
 
 #[test]
@@ -86,55 +121,100 @@ fn active_input_paths_are_hidden_while_completed_output_paths_remain_visible() {
 }
 
 #[test]
-fn osc8_targets_take_precedence_over_visible_labels_and_detected_urls() {
-    for label in ["click", "https://example.com"] {
-        let mut snapshot = selection_snapshot(label);
-        for cell in &mut snapshot.lines[0].cells_mut()[..label.len()] {
-            cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
-        }
-        snapshot.lines[0].refresh_signature();
-        let links = super::super::links::detect_link_ranges_for_rows_with_path_detection(
-            &snapshot,
-            0..snapshot.lines.len(),
-            true,
-        );
-        assert_eq!(links.len(), 1);
-        assert_eq!(links[0].kind, TerminalLinkKind::Url);
-        assert_eq!(links[0].start_col, 0);
-        assert_eq!(links[0].end_col, label.len());
-        assert_eq!(links[0].target, "https://example.com/osc8");
-    }
-}
-
-#[test]
-fn terminal_element_underlines_osc8_links_even_on_colored_cells() {
-    let mut snapshot = selection_snapshot("click");
-    for cell in &mut snapshot.lines[0].cells_mut()[..5] {
+fn link_styling_respects_explicit_links_application_colors_and_hover() {
+    let mut explicit = selection_snapshot("click");
+    for cell in &mut explicit.lines[0].cells_mut()[..5] {
         cell.bg = TerminalColor::rgb(0x61, 0xaf, 0xef);
         cell.set_hyperlink(Some("https://example.com/osc8".to_string()));
     }
-    snapshot.lines[0].refresh_signature();
+    explicit.lines[0].refresh_signature();
+    let mut suggestion = selection_snapshot("https://example.com");
+    for cell in &mut suggestion.lines[0].cells_mut()[..19] {
+        cell.fg = TerminalColor::rgb(0x68, 0x70, 0x78);
+        cell.style_origin = oxideterm_terminal::TerminalStyleOrigin::new(true, false);
+    }
+    suggestion.lines[0].active_input = true;
+    suggestion.lines[0].refresh_signature();
+    let mut prompt = selection_snapshot("~/Documents/OxideTerm");
+    for cell in &mut prompt.lines[0].cells_mut()[..21] {
+        cell.bg = TerminalColor::rgb(0x61, 0xaf, 0xef);
+        cell.fg = TerminalColor::rgb(0xff, 0xff, 0xff);
+    }
+    prompt.lines[0].refresh_signature();
+    let path = selection_snapshot("open ./crates/oxideterm-gpui-app/src/main.rs");
 
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    let link_run = layout
-        .text_runs
-        .iter()
-        .find(|run| run.text.contains("click"))
-        .expect("osc8 link run");
-    assert!(link_run.style.underline.is_some());
+    for (case, snapshot, hover, text, color, underline) in [
+        ("OSC8 on color", explicit, false, "click", None, true),
+        (
+            "detected URL",
+            selection_snapshot("open https://example.com"),
+            false,
+            "https://example.com",
+            None,
+            true,
+        ),
+        (
+            "application foreground",
+            suggestion,
+            false,
+            "https://example.com",
+            Some(0x687078),
+            false,
+        ),
+        (
+            "path without hover",
+            path.clone(),
+            false,
+            "./crates/oxideterm-gpui-app/src/main.rs",
+            None,
+            false,
+        ),
+        (
+            "hovered path",
+            path,
+            true,
+            "./crates/oxideterm-gpui-app/src/main.rs",
+            None,
+            true,
+        ),
+        (
+            "painted prompt",
+            prompt,
+            false,
+            "~/Documents/OxideTerm",
+            Some(0xffffff),
+            false,
+        ),
+    ] {
+        let hovered = hover.then(|| {
+            display_link_ranges_with_path_detection(&snapshot, true)
+                .into_iter()
+                .next()
+                .expect("path link")
+        });
+        let layout = TerminalElement::new(
+            snapshot,
+            None,
+            test_metrics(),
+            true,
+            None,
+            None,
+            Vec::new(),
+            None,
+            hovered,
+            None,
+        )
+        .layout();
+        let run = layout
+            .text_runs
+            .iter()
+            .find(|run| run.text == text)
+            .unwrap_or_else(|| panic!("{case}: missing {text}"));
+        assert_eq!(run.style.underline.is_some(), underline, "{case}");
+        if let Some(color) = color {
+            assert_eq!(run.style.color, rgb(color).into_color(), "{case}");
+        }
+    }
 }
 
 #[test]
@@ -151,142 +231,4 @@ fn path_links_resolve_and_percent_encode_file_urls() {
             expected
         );
     }
-}
-
-#[test]
-fn terminal_element_underlines_detected_links() {
-    let snapshot = selection_snapshot("open https://example.com");
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-    let link_run = layout
-        .text_runs
-        .iter()
-        .find(|run| run.text.contains("https"))
-        .expect("link run");
-
-    assert!(link_run.style.underline.is_some());
-}
-
-#[test]
-fn terminal_element_preserves_explicit_foreground_for_detected_urls() {
-    let suggestion = "https://example.com";
-    let mut snapshot = selection_snapshot(suggestion);
-    let suggestion_color = TerminalColor::rgb(0x68, 0x70, 0x78);
-    for cell in snapshot.lines[0]
-        .cells_mut()
-        .iter_mut()
-        .take(suggestion.chars().count())
-    {
-        cell.fg = suggestion_color;
-        cell.style_origin = oxideterm_terminal::TerminalStyleOrigin::new(true, false);
-    }
-    snapshot.lines[0].active_input = true;
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-    let suggestion_run = layout
-        .text_runs
-        .iter()
-        .find(|run| run.text.contains("https"))
-        .expect("suggestion URL run");
-
-    assert_eq!(suggestion_run.style.color, rgb(0x687078).into_color());
-    assert!(suggestion_run.style.underline.is_none());
-}
-
-#[test]
-fn terminal_element_underlines_detected_paths_only_while_hovered() {
-    let snapshot = selection_snapshot("open ./crates/oxideterm-gpui-app/src/main.rs");
-    let hovered_link = display_link_ranges_with_path_detection(&snapshot, true)
-        .into_iter()
-        .next()
-        .expect("detected path");
-    let layout = |hovered_link| {
-        TerminalElement::new(
-            snapshot.clone(),
-            None,
-            test_metrics(),
-            true,
-            None,
-            None,
-            Vec::new(),
-            None,
-            hovered_link,
-            None,
-        )
-        .layout()
-    };
-
-    let unhovered = layout(None);
-    let unhovered_path = unhovered
-        .text_runs
-        .iter()
-        .find(|run| run.text.contains("crates"))
-        .expect("unhovered path run");
-    assert!(unhovered_path.style.underline.is_none());
-
-    let hovered = layout(Some(hovered_link));
-    let hovered_path = hovered
-        .text_runs
-        .iter()
-        .find(|run| run.text.contains("crates"))
-        .expect("hovered path run");
-    assert!(hovered_path.style.underline.is_some());
-}
-
-#[test]
-fn terminal_element_does_not_recolor_path_like_prompt_segments() {
-    let mut snapshot = selection_snapshot("~/Documents/OxideTerm");
-    for cell in &mut snapshot.lines[0].cells_mut()[..21] {
-        cell.bg = TerminalColor::rgb(0x61, 0xaf, 0xef);
-        cell.fg = TerminalColor::rgb(0xff, 0xff, 0xff);
-    }
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    assert!(
-        layout
-            .text_runs
-            .iter()
-            .filter(|run| run.text.contains("Documents") || run.text.contains("OxideTerm"))
-            .all(|run| {
-                run.style.underline.is_none() && run.style.color == rgb(0xffffff).into_color()
-            })
-    );
 }

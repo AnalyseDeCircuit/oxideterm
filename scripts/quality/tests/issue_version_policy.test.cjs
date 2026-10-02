@@ -26,25 +26,25 @@ function release(tagName, options = {}) {
   };
 }
 
-test('reads a stable version from the dedicated issue form field', () => {
-  assert.equal(policy.readReportedStableVersion(issueBody('v2.0.9')).value, '2.0.9');
-  assert.equal(policy.readReportedStableVersion(issueBody('OxideTerm 2.0.9 (stable)')).value, '2.0.9');
-  assert.equal(policy.readReportedStableVersion(issueBody('2.0.9+package.1')).value, '2.0.9');
-});
-
-test('ignores prerelease and non-stable channel versions', () => {
-  const versions = ['2.1.0-beta.1', '2.1.0 beta', 'gpui-v2.1.0', 'native-v2.1.0', 'nightly'];
-  for (const version of versions) {
-    assert.equal(policy.readReportedStableVersion(issueBody(version)), null);
+test('reads only unambiguous stable versions from the dedicated form field', () => {
+  for (const [version, expected] of [
+    ['v2.0.9', '2.0.9'],
+    ['OxideTerm 2.0.9 (stable)', '2.0.9'],
+    ['2.0.9+package.1', '2.0.9'],
+    ['2.1.0-beta.1', null],
+    ['2.1.0 beta', null],
+    ['gpui-v2.1.0', null],
+    ['native-v2.1.0', null],
+    ['nightly', null],
+    ['version two', null],
+    ['2.0.8 or 2.0.9', null],
+    ['2.0.9.1', null],
+    ['2.0.9custom', null],
+  ]) {
+    const actual = policy.readReportedStableVersion(issueBody(version));
+    assert.equal(actual === null ? null : actual.value, expected, version);
   }
-});
-
-test('ignores missing, malformed, and ambiguous version answers', () => {
   assert.equal(policy.readReportedStableVersion('### Summary / 简述\n\nNo version'), null);
-  assert.equal(policy.readReportedStableVersion(issueBody('version two')), null);
-  assert.equal(policy.readReportedStableVersion(issueBody('2.0.8 or 2.0.9')), null);
-  assert.equal(policy.readReportedStableVersion(issueBody('2.0.9.1')), null);
-  assert.equal(policy.readReportedStableVersion(issueBody('2.0.9custom')), null);
 });
 
 test('selects the highest semantic stable release only', () => {
@@ -87,51 +87,26 @@ test('flags a previous-generation major version as obsolete', () => {
   assert.equal(policy.findObsoleteStableVersion(issueBody('1.6.11-beta.1'), releases), null);
 });
 
-test('builds a bilingual obsolete notice with a distinct marker', () => {
-  const message = policy.buildObsoleteVersionNotice({
-    reported: { value: '1.6.11' },
-    latest: { value: '2.0.15', releaseUrl: 'https://github.com/AnalyseDeCircuit/oxideterm/releases/tag/v2.0.15' },
-  });
-
-  assert.equal(message.includes(policy.OBSOLETE_VERSION_NOTICE_MARKER), true);
-  assert.equal(message.includes(policy.VERSION_REMINDER_MARKER), false);
-  assert.equal(message.includes('**v1.6.11**'), true);
-  assert.equal(message.includes('[v2.0.15]('), true);
-});
-
-test('recognizes only an existing bot obsolete notice for retry deduplication', () => {
-  const noticeBody = `${policy.OBSOLETE_VERSION_NOTICE_MARKER}\nNotice`;
-
-  assert.equal(policy.hasObsoleteVersionNotice([
-    { user: { type: 'Bot' }, body: noticeBody },
-  ]), true);
-  assert.equal(policy.hasObsoleteVersionNotice([
-    { user: { type: 'User' }, body: noticeBody },
-    { user: { type: 'Bot' }, body: 'Unrelated comment' },
-  ]), false);
-});
-
-test('builds a bilingual reminder with a stable marker and release link', () => {
-  const result = policy.findOutdatedStableVersion(
-    issueBody('2.0.8'),
-    [release('v2.0.9')]
-  );
-  const message = policy.buildVersionReminder(result);
-
-  assert.equal(message.includes(policy.VERSION_REMINDER_MARKER), true);
-  assert.equal(message.includes('**v2.0.8**'), true);
-  assert.equal(message.includes('[v2.0.9]('), true);
-  assert.equal(message.includes('此提醒仅比较稳定版'), false);
-});
-
-test('recognizes only an existing bot reminder for retry deduplication', () => {
-  const reminderBody = `${policy.VERSION_REMINDER_MARKER}\nReminder`;
-
-  assert.equal(policy.hasVersionReminder([
-    { user: { type: 'Bot' }, body: reminderBody },
-  ]), true);
-  assert.equal(policy.hasVersionReminder([
-    { user: { type: 'User' }, body: reminderBody },
-    { user: { type: 'Bot' }, body: 'Unrelated comment' },
-  ]), false);
+test('version notices carry their own marker and deduplicate only bot comments', () => {
+  const latest = release('v2.0.15');
+  for (const [version, find, build, hasNotice, marker, otherMarker] of [
+    ['1.6.11', policy.findObsoleteStableVersion, policy.buildObsoleteVersionNotice,
+      policy.hasObsoleteVersionNotice, policy.OBSOLETE_VERSION_NOTICE_MARKER, policy.VERSION_REMINDER_MARKER],
+    ['2.0.8', policy.findOutdatedStableVersion, policy.buildVersionReminder,
+      policy.hasVersionReminder, policy.VERSION_REMINDER_MARKER, policy.OBSOLETE_VERSION_NOTICE_MARKER],
+  ]) {
+    const message = build(find(issueBody(version), [latest]));
+    assert.ok(message.includes(marker), version);
+    assert.equal(message.includes(otherMarker), false, version);
+    assert.ok(message.includes(`**v${version}**`), version);
+    assert.ok(message.includes(`[v2.0.15](${latest.html_url})`), version);
+    assert.ok(message.includes('You reported'), version);
+    assert.ok(message.includes('你提交 Issue 时填写的是'), version);
+    assert.equal(hasNotice([{ user: { type: 'Bot' }, body: message }]), true, version);
+    assert.equal(hasNotice([
+      { user: { type: 'User' }, body: message },
+      { user: { type: 'Bot' }, body: `${otherMarker}\nOther notice` },
+      { user: { type: 'Bot' }, body: 'Unrelated comment' },
+    ]), false, version);
+  }
 });

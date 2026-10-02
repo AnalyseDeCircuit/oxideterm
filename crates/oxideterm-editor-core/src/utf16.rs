@@ -326,18 +326,29 @@ mod tests {
     }
 
     #[test]
-    fn multiline_line_ranges_match_textarea_navigation() {
+    fn textarea_line_navigation_and_control_k_agree_at_newline_boundaries() {
         let value = "one\ntwo\nthree";
-        assert_eq!(line_range_for_utf16_offset(value, 1), 0..3);
-        assert_eq!(line_range_for_utf16_offset(value, 5), 4..7);
-        assert_eq!(line_start_for_utf16_offset(value, 10), 8);
-        assert_eq!(line_end_for_utf16_offset(value, 10), 13);
-    }
-
-    #[test]
-    fn control_k_matches_textarea_line_delete() {
-        let value = "one\ntwo\nthree";
-        assert_eq!(control_k_delete_end(value, 5), 7);
-        assert_eq!(control_k_delete_end(value, 7), 8);
+        for (offset, line, delete_end) in
+            [(1, 0..3, 3), (5, 4..7, 7), (7, 4..7, 8), (10, 8..13, 13)]
+        {
+            assert_eq!(
+                line_range_for_utf16_offset(value, offset),
+                line,
+                "offset {offset}"
+            );
+            assert_eq!(
+                (
+                    line_start_for_utf16_offset(value, offset),
+                    line_end_for_utf16_offset(value, offset)
+                ),
+                (line.start, line.end),
+                "offset {offset}",
+            );
+            assert_eq!(
+                control_k_delete_end(value, offset),
+                delete_end,
+                "offset {offset}"
+            );
+        }
     }
 }

@@ -473,68 +473,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn docker_parser_reads_container_rows() {
-        let output = "===DOCKER===\nabc123def456\tweb\tnginx:alpine\trunning\tUp 2 minutes\t0.0.0.0:80->80/tcp\nfff111eee222\tdb\tpostgres:16\texited\tExited (0) 1 hour ago\t\n===DOCKER_END===";
-
-        let snapshot = parse_docker_snapshot(output);
-
-        assert_eq!(snapshot.status, ResourceDockerStatus::Available);
-        assert_eq!(snapshot.containers.len(), 2);
-        assert_eq!(snapshot.containers[0].name, "web");
-        assert_eq!(
-            snapshot.containers[0].ports.as_deref(),
-            Some("0.0.0.0:80->80/tcp")
-        );
-        assert_eq!(snapshot.containers[1].state, "exited");
-    }
-
-    #[test]
-    fn docker_parser_reads_json_container_rows_without_truncating_names() {
-        let output = concat!(
-            "===DOCKER===\n",
-            "PS\t{\"ID\":\"abc123def4567890\",\"Names\":\"oxideterm-cloud-sync\",\"Image\":\"ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest\",\"State\":\"running\",\"Status\":\"Up 7 weeks\",\"Ports\":\"0.0.0.0:8730->8730/tcp\"}\n",
-            "PS\t{\"ID\":\"fff111eee2223334\",\"Names\":\"postgres-data\",\"Image\":\"postgres:16\",\"State\":\"exited\",\"Status\":\"Exited (0) 3 months ago\",\"Ports\":\"\"}\n",
-            "===DOCKER_END===",
-        );
-
-        let snapshot = parse_docker_snapshot(output);
-
-        assert_eq!(snapshot.status, ResourceDockerStatus::Available);
-        assert_eq!(snapshot.containers.len(), 2);
-        assert_eq!(snapshot.containers[0].name, "oxideterm-cloud-sync");
-        assert_eq!(
-            snapshot.containers[0].image,
-            "ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest"
-        );
-        assert_eq!(
-            snapshot.containers[0].ports.as_deref(),
-            Some("0.0.0.0:8730->8730/tcp")
-        );
-        assert_eq!(snapshot.containers[1].name, "postgres-data");
-        assert_eq!(snapshot.containers[1].ports, None);
-    }
-
-    #[test]
-    fn docker_parser_uses_inspect_to_replace_truncated_ps_fields() {
-        let output = concat!(
-            "===DOCKER===\n",
-            "PS\t{\"ID\":\"abc123def4567890\",\"Names\":\"...\",\"Image\":\"...\",\"State\":\"running\",\"Status\":\"Up 7 weeks\",\"Ports\":\"127.0.0.1:2375->2375/tcp\"}\n",
-            "INSPECT\t{\"Id\":\"abc123def4567890\",\"Name\":\"/oxideterm-cloud-sync\",\"Config\":{\"Image\":\"ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest\"}}\n",
-            "===DOCKER_END===",
-        );
-
-        let snapshot = parse_docker_snapshot(output);
-
-        assert_eq!(snapshot.containers.len(), 1);
-        assert_eq!(snapshot.containers[0].name, "oxideterm-cloud-sync");
-        assert_eq!(
-            snapshot.containers[0].image,
-            "ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest"
-        );
-        assert_eq!(
-            snapshot.containers[0].ports.as_deref(),
-            Some("127.0.0.1:2375->2375/tcp")
-        );
+    fn docker_parser_preserves_container_fields_and_applies_inspect_overrides() {
+        for (case, output, expected) in [
+            (
+                "tab rows",
+                "===DOCKER===\nabc123def456\tweb\tnginx:alpine\trunning\tUp 2 minutes\t0.0.0.0:80->80/tcp\nfff111eee222\tdb\tpostgres:16\texited\tExited (0) 1 hour ago\t\n===DOCKER_END===",
+                vec![
+                    (
+                        "abc123def456",
+                        "web",
+                        "nginx:alpine",
+                        "running",
+                        "Up 2 minutes",
+                        Some("0.0.0.0:80->80/tcp"),
+                    ),
+                    (
+                        "fff111eee222",
+                        "db",
+                        "postgres:16",
+                        "exited",
+                        "Exited (0) 1 hour ago",
+                        None,
+                    ),
+                ],
+            ),
+            (
+                "JSON rows",
+                concat!(
+                    "===DOCKER===\n",
+                    "PS\t{\"ID\":\"abc123def4567890\",\"Names\":\"oxideterm-cloud-sync\",\"Image\":\"ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest\",\"State\":\"running\",\"Status\":\"Up 7 weeks\",\"Ports\":\"0.0.0.0:8730->8730/tcp\"}\n",
+                    "PS\t{\"ID\":\"fff111eee2223334\",\"Names\":\"postgres-data\",\"Image\":\"postgres:16\",\"State\":\"exited\",\"Status\":\"Exited (0) 3 months ago\",\"Ports\":\"\"}\n",
+                    "===DOCKER_END===",
+                ),
+                vec![
+                    (
+                        "abc123def4567890",
+                        "oxideterm-cloud-sync",
+                        "ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest",
+                        "running",
+                        "Up 7 weeks",
+                        Some("0.0.0.0:8730->8730/tcp"),
+                    ),
+                    (
+                        "fff111eee2223334",
+                        "postgres-data",
+                        "postgres:16",
+                        "exited",
+                        "Exited (0) 3 months ago",
+                        None,
+                    ),
+                ],
+            ),
+            (
+                "inspect overrides",
+                concat!(
+                    "===DOCKER===\n",
+                    "PS\t{\"ID\":\"abc123def4567890\",\"Names\":\"...\",\"Image\":\"...\",\"State\":\"running\",\"Status\":\"Up 7 weeks\",\"Ports\":\"127.0.0.1:2375->2375/tcp\"}\n",
+                    "INSPECT\t{\"Id\":\"abc123def4567890\",\"Name\":\"/oxideterm-cloud-sync\",\"Config\":{\"Image\":\"ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest\"}}\n",
+                    "===DOCKER_END===",
+                ),
+                vec![(
+                    "abc123def4567890",
+                    "oxideterm-cloud-sync",
+                    "ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest",
+                    "running",
+                    "Up 7 weeks",
+                    Some("127.0.0.1:2375->2375/tcp"),
+                )],
+            ),
+        ] {
+            let snapshot = parse_docker_snapshot(output);
+            assert_eq!(snapshot.status, ResourceDockerStatus::Available, "{case}");
+            assert_eq!(
+                snapshot
+                    .containers
+                    .iter()
+                    .map(|container| (
+                        container.id.as_str(),
+                        container.name.as_str(),
+                        container.image.as_str(),
+                        container.state.as_str(),
+                        container.status.as_str(),
+                        container.ports.as_deref(),
+                    ))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{case}"
+            );
+        }
     }
 
     #[test]

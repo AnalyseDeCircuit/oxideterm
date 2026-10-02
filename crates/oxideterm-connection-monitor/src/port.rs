@@ -743,124 +743,278 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_linux_ss_tcp_listen_and_udp_without_pid() {
-        let output = concat!(
-            "===PORTS===\n",
-            "__OXIDE_PORT_CAPABILITY__\tfull\tlinux_ss\n",
-            "SS\ttcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=123,fd=3))\n",
-            "SS\tudp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*\n",
-            "===PORTS_END===\n"
-        );
-
-        let snapshot = parse_port_snapshot(output);
-        let rows = visible_port_rows(&snapshot.entries, "sshd", PortFilter::All);
-
-        assert_eq!(
-            snapshot.status,
-            ResourcePortStatus::Available {
-                capability: PortCommandCapability::Full,
-                platform: "linux_ss".to_string(),
+    fn parses_platform_snapshots_and_filters_operational_fields() {
+        let fields = |entry: &ResourcePortEntry| {
+            [
+                entry.protocol.clone(),
+                entry.local_address.clone(),
+                entry.local_port.clone(),
+                entry.remote_address.clone(),
+                entry.remote_port.clone(),
+                entry.state.clone(),
+                entry.pid.clone(),
+                entry.process_name.clone(),
+                entry.user.clone(),
+                entry.command.clone(),
+                entry.inode.clone(),
+                entry.source.clone(),
+            ]
+        };
+        for (case, output, capability, platform, expected, searches) in [
+            (
+                "linux_ss_tcp_listen_and_udp_without_pid",
+                concat!(
+                    "===PORTS===\n",
+                    "__OXIDE_PORT_CAPABILITY__\tfull\tlinux_ss\n",
+                    "SS\ttcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=123,fd=3))\n",
+                    "SS\tudp UNCONN 0 0 127.0.0.53%lo:53 0.0.0.0:*\n",
+                    "===PORTS_END===\n"
+                ),
+                PortCommandCapability::Full,
+                "linux_ss",
+                vec![
+                    [
+                        "tcp",
+                        "0.0.0.0",
+                        "22",
+                        "0.0.0.0",
+                        "*",
+                        "LISTEN",
+                        "123",
+                        "sshd",
+                        "",
+                        "users:((\"sshd\",pid=123,fd=3))",
+                        "",
+                        "ss",
+                    ],
+                    [
+                        "udp",
+                        "127.0.0.53%lo",
+                        "53",
+                        "0.0.0.0",
+                        "*",
+                        "UNCONN",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                        "ss",
+                    ],
+                ],
+                vec![("sshd", PortFilter::All, vec![0])],
+            ),
+            (
+                "linux_ss_established_ipv6_and_risky_filter",
+                concat!(
+                    "===PORTS===\n",
+                    "__OXIDE_PORT_CAPABILITY__\tfull\tlinux_ss\n",
+                    "SS\ttcp LISTEN 0 128 [::]:6379 [::]:* users:((\"redis-server\",pid=6379,fd=7))\n",
+                    "SS\ttcp ESTAB 0 0 [2001:db8::1]:22 [2001:db8::2]:51444 users:((\"sshd\",pid=777,fd=4))\n",
+                    "===PORTS_END===\n"
+                ),
+                PortCommandCapability::Full,
+                "linux_ss",
+                vec![
+                    [
+                        "tcp",
+                        "2001:db8::1",
+                        "22",
+                        "2001:db8::2",
+                        "51444",
+                        "ESTAB",
+                        "777",
+                        "sshd",
+                        "",
+                        "users:((\"sshd\",pid=777,fd=4))",
+                        "",
+                        "ss",
+                    ],
+                    [
+                        "tcp",
+                        "::",
+                        "6379",
+                        "::",
+                        "*",
+                        "LISTEN",
+                        "6379",
+                        "redis-server",
+                        "",
+                        "users:((\"redis-server\",pid=6379,fd=7))",
+                        "",
+                        "ss",
+                    ],
+                ],
+                vec![
+                    ("", PortFilter::Risky, vec![1]),
+                    ("51444", PortFilter::Connected, vec![0]),
+                ],
+            ),
+            (
+                "macos_lsof_rows",
+                concat!(
+                    "===PORTS===\n",
+                    "__OXIDE_PORT_CAPABILITY__\tpartial\tmacos_lsof\n",
+                    "LSOF\tCOMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n",
+                    "LSOF\tPython 3456 dominical 12u IPv4 0x123 0t0 TCP 127.0.0.1:8000 (LISTEN)\n",
+                    "LSOF\tssh 3457 dominical 13u IPv4 0x124 0t0 TCP 127.0.0.1:55555->10.0.0.2:22 (ESTABLISHED)\n",
+                    "===PORTS_END===\n"
+                ),
+                PortCommandCapability::Partial,
+                "macos_lsof",
+                vec![
+                    [
+                        "tcp",
+                        "127.0.0.1",
+                        "8000",
+                        "",
+                        "",
+                        "LISTEN",
+                        "3456",
+                        "Python",
+                        "dominical",
+                        "Python",
+                        "",
+                        "lsof",
+                    ],
+                    [
+                        "tcp",
+                        "127.0.0.1",
+                        "55555",
+                        "10.0.0.2",
+                        "22",
+                        "ESTABLISHED",
+                        "3457",
+                        "ssh",
+                        "dominical",
+                        "ssh",
+                        "",
+                        "lsof",
+                    ],
+                ],
+                vec![("dominical", PortFilter::Tcp, vec![0, 1])],
+            ),
+            (
+                "bsd_sockstat_rows",
+                concat!(
+                    "===PORTS===\n",
+                    "__OXIDE_PORT_CAPABILITY__\tpartial\tbsd_sockstat\n",
+                    "SOCKSTAT\tUSER COMMAND PID FD PROTO LOCAL ADDRESS FOREIGN ADDRESS\n",
+                    "SOCKSTAT\troot sshd 159 4 tcp4 *:22 *:*\n",
+                    "SOCKSTAT\twww nginx 456 7 tcp6 [::]:443 *:*\n",
+                    "===PORTS_END===\n"
+                ),
+                PortCommandCapability::Partial,
+                "bsd_sockstat",
+                vec![
+                    [
+                        "tcp", "*", "22", "*", "*", "Listen", "159", "sshd", "root", "sshd", "",
+                        "sockstat",
+                    ],
+                    [
+                        "tcp", "::", "443", "*", "*", "Listen", "456", "nginx", "www", "nginx", "",
+                        "sockstat",
+                    ],
+                ],
+                vec![],
+            ),
+            (
+                "windows_powershell_rows",
+                concat!(
+                    "===PORTS===\n",
+                    "__OXIDE_PORT_CAPABILITY__\tpartial\twindows_powershell\n",
+                    "WIN\ttcp\t0.0.0.0\t3389\t0.0.0.0\t0\tListen\t888\tTermService\n",
+                    "WIN\tudp\t127.0.0.1\t5353\t\t\tOpen\t999\tmDNSResponder\n",
+                    "===PORTS_END===\n"
+                ),
+                PortCommandCapability::Partial,
+                "windows_powershell",
+                vec![
+                    [
+                        "tcp",
+                        "0.0.0.0",
+                        "3389",
+                        "0.0.0.0",
+                        "0",
+                        "Listen",
+                        "888",
+                        "TermService",
+                        "",
+                        "TermService",
+                        "",
+                        "windows_powershell",
+                    ],
+                    [
+                        "udp",
+                        "127.0.0.1",
+                        "5353",
+                        "",
+                        "",
+                        "Open",
+                        "999",
+                        "mDNSResponder",
+                        "",
+                        "mDNSResponder",
+                        "",
+                        "windows_powershell",
+                    ],
+                ],
+                vec![("mdns", PortFilter::Udp, vec![1])],
+            ),
+            (
+                "preserve_command_and_search_all_fields",
+                concat!(
+                    "===PORTS===\n",
+                    "__OXIDE_PORT_CAPABILITY__\tpartial\tfixture\n",
+                    "ROW\ttcp\t127.0.0.1\t3000\t127.0.0.1\t51234\tESTABLISHED\t4242\tnode server\tdominical\tnode server.js --inspect\tinode-1\tfixture\n",
+                    "===PORTS_END===\n"
+                ),
+                PortCommandCapability::Partial,
+                "fixture",
+                vec![[
+                    "tcp",
+                    "127.0.0.1",
+                    "3000",
+                    "127.0.0.1",
+                    "51234",
+                    "ESTABLISHED",
+                    "4242",
+                    "node server",
+                    "dominical",
+                    "node server.js --inspect",
+                    "inode-1",
+                    "fixture",
+                ]],
+                vec![("--inspect", PortFilter::Connected, vec![0])],
+            ),
+        ] {
+            let snapshot = parse_port_snapshot(output);
+            assert_eq!(
+                snapshot.status,
+                ResourcePortStatus::Available {
+                    capability,
+                    platform: platform.to_string(),
+                },
+                "{case}"
+            );
+            assert_eq!(
+                snapshot.entries.iter().map(fields).collect::<Vec<_>>(),
+                expected,
+                "{case}"
+            );
+            for (query, filter, indices) in searches {
+                let rows = visible_port_rows(&snapshot.entries, query, filter);
+                let expected_rows = indices
+                    .into_iter()
+                    .map(|index| expected[index])
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    rows.iter().map(fields).collect::<Vec<_>>(),
+                    expected_rows,
+                    "{case}: {query:?} / {filter:?}"
+                );
             }
-        );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].local_port, "22");
-        assert_eq!(rows[0].pid, "123");
-        assert_eq!(snapshot.entries[1].protocol, "udp");
-        assert_eq!(snapshot.entries[1].pid, "");
-    }
-
-    #[test]
-    fn parses_linux_ss_established_ipv6_and_risky_filter() {
-        let output = concat!(
-            "===PORTS===\n",
-            "__OXIDE_PORT_CAPABILITY__\tfull\tlinux_ss\n",
-            "SS\ttcp LISTEN 0 128 [::]:6379 [::]:* users:((\"redis-server\",pid=6379,fd=7))\n",
-            "SS\ttcp ESTAB 0 0 [2001:db8::1]:22 [2001:db8::2]:51444 users:((\"sshd\",pid=777,fd=4))\n",
-            "===PORTS_END===\n"
-        );
-
-        let snapshot = parse_port_snapshot(output);
-        let risky = visible_port_rows(&snapshot.entries, "", PortFilter::Risky);
-        let connected = visible_port_rows(&snapshot.entries, "51444", PortFilter::Connected);
-
-        assert_eq!(risky.len(), 1);
-        assert_eq!(risky[0].process_name, "redis-server");
-        assert_eq!(connected.len(), 1);
-        assert_eq!(connected[0].remote_address, "2001:db8::2");
-    }
-
-    #[test]
-    fn parses_macos_lsof_rows() {
-        let output = concat!(
-            "===PORTS===\n",
-            "__OXIDE_PORT_CAPABILITY__\tpartial\tmacos_lsof\n",
-            "LSOF\tCOMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n",
-            "LSOF\tPython 3456 dominical 12u IPv4 0x123 0t0 TCP 127.0.0.1:8000 (LISTEN)\n",
-            "LSOF\tssh 3457 dominical 13u IPv4 0x124 0t0 TCP 127.0.0.1:55555->10.0.0.2:22 (ESTABLISHED)\n",
-            "===PORTS_END===\n"
-        );
-
-        let snapshot = parse_port_snapshot(output);
-        let rows = visible_port_rows(&snapshot.entries, "dominical", PortFilter::Tcp);
-
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].local_port, "8000");
-        assert_eq!(rows[0].state, "LISTEN");
-        assert_eq!(rows[1].remote_port, "22");
-        assert_eq!(rows[1].state, "ESTABLISHED");
-    }
-
-    #[test]
-    fn parses_bsd_sockstat_rows() {
-        let output = concat!(
-            "===PORTS===\n",
-            "__OXIDE_PORT_CAPABILITY__\tpartial\tbsd_sockstat\n",
-            "SOCKSTAT\tUSER COMMAND PID FD PROTO LOCAL ADDRESS FOREIGN ADDRESS\n",
-            "SOCKSTAT\troot sshd 159 4 tcp4 *:22 *:*\n",
-            "SOCKSTAT\twww nginx 456 7 tcp6 [::]:443 *:*\n",
-            "===PORTS_END===\n"
-        );
-
-        let snapshot = parse_port_snapshot(output);
-
-        assert_eq!(snapshot.entries.len(), 2);
-        assert_eq!(snapshot.entries[0].user, "root");
-        assert_eq!(snapshot.entries[1].local_address, "::");
-    }
-
-    #[test]
-    fn parses_windows_powershell_rows() {
-        let output = concat!(
-            "===PORTS===\n",
-            "__OXIDE_PORT_CAPABILITY__\tpartial\twindows_powershell\n",
-            "WIN\ttcp\t0.0.0.0\t3389\t0.0.0.0\t0\tListen\t888\tTermService\n",
-            "WIN\tudp\t127.0.0.1\t5353\t\t\tOpen\t999\tmDNSResponder\n",
-            "===PORTS_END===\n"
-        );
-
-        let snapshot = parse_port_snapshot(output);
-        let udp = visible_port_rows(&snapshot.entries, "mdns", PortFilter::Udp);
-
-        assert_eq!(snapshot.entries.len(), 2);
-        assert_eq!(udp.len(), 1);
-        assert_eq!(snapshot.entries[0].local_port, "3389");
-    }
-
-    #[test]
-    fn normalized_rows_preserve_command_and_search_all_fields() {
-        let output = concat!(
-            "===PORTS===\n",
-            "__OXIDE_PORT_CAPABILITY__\tpartial\tfixture\n",
-            "ROW\ttcp\t127.0.0.1\t3000\t127.0.0.1\t51234\tESTABLISHED\t4242\tnode server\tdominical\tnode server.js --inspect\tinode-1\tfixture\n",
-            "===PORTS_END===\n"
-        );
-
-        let snapshot = parse_port_snapshot(output);
-        let rows = visible_port_rows(&snapshot.entries, "--inspect", PortFilter::Connected);
-
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].process_name, "node server");
-        assert_eq!(rows[0].command, "node server.js --inspect");
+        }
     }
 
     #[test]

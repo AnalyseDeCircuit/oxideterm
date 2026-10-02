@@ -866,14 +866,6 @@ mod tests {
     }
 
     #[test]
-    fn unix_tmux_snapshot_command_uses_printable_separator() {
-        let command = build_unix_tmux_snapshot_command();
-
-        assert!(command.contains("SESSION\t|\t#{session_id}"));
-        assert!(!command.contains(TMUX_LEGACY_FIELD_SEPARATOR));
-    }
-
-    #[test]
     fn parses_tmux_sessions_windows_and_panes() {
         let output = format!(
             "===TMUX===\n__OXIDE_TMUX_CAPABILITY__\tfull\ttmux_cli\ttmux 3.4\n{}\n{}\n{}\n{}\n===TMUX_END===\n",
@@ -1139,6 +1131,8 @@ mod tests {
 
         assert!(linux.command.starts_with("/bin/sh -c "));
         assert!(linux.command.contains("command -v tmux"));
+        assert!(linux.command.contains("SESSION\t|\t#{session_id}"));
+        assert!(!linux.command.contains(TMUX_LEGACY_FIELD_SEPARATOR));
         assert_eq!(linux.command, mac.command);
         assert!(windows.command.contains("Get-Command tmux"));
         assert_eq!(linux.capability, TmuxCommandCapability::Unknown);

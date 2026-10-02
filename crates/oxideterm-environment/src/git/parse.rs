@@ -679,202 +679,181 @@ mod tests {
     }
 
     #[test]
-    fn shell_probe_output_parses_nul_records() {
-        let output = "noise\nOXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/tmp/Oxide Term\0branch\0feat/git\0status\0# branch.upstream origin/feat\n# branch.ab +1 -0\n? scratch.txt\n\0operation\0merge\0";
-        let outcome = parse_shell_probe_output(output);
-
-        let GitProbeOutcome::Ready(snapshot) = outcome else {
-            panic!("expected ready shell git snapshot");
-        };
-        assert_eq!(snapshot.repo_root, "/tmp/Oxide Term");
-        assert_eq!(
-            snapshot.branch,
-            GitBranchIdentity::Branch("feat/git".to_string())
-        );
-        assert_eq!(snapshot.status.upstream(), Some("origin/feat"));
-        assert_eq!(snapshot.status.ahead(), 1);
-        assert_eq!(snapshot.status.untracked(), 1);
-        assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Merge));
-        assert_eq!(snapshot.status.paths().len(), 1);
-        assert_eq!(snapshot.status.paths()[0].path(), "scratch.txt");
-        assert!(snapshot.status.paths()[0].untracked());
-    }
-
-    #[test]
-    fn shell_probe_output_accepts_identity_without_status() {
-        let output =
-            "OXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/repo\0branch\0main\0operation\0rebase\0";
-        let outcome = parse_shell_probe_output(output);
-
-        let GitProbeOutcome::Ready(snapshot) = outcome else {
-            panic!("expected ready shell git snapshot");
-        };
-        assert_eq!(snapshot.repo_root, "/repo");
-        assert_eq!(snapshot.branch.display_text(), "main");
-        assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Rebase));
-        assert!(!snapshot.status.is_dirty());
-    }
-
-    #[test]
-    fn shell_probe_output_handles_not_repo() {
-        let output = "OXIDETERM_GIT_PROBE_V1\0state\0not_repo\0";
-        assert_eq!(
-            parse_shell_probe_output(output),
-            GitProbeOutcome::NotRepository
-        );
-    }
-
-    #[test]
-    fn branch_list_output_attaches_worktree_paths() {
-        let outcome = interpret_git_branch_list_outputs(
-            GitCommandOutput::success("*\texperiment/rust-native-v2\n \tmain\n"),
-            GitCommandOutput::success(
-                "worktree /Users/dominical/Documents/OxideTerm\n\
-                 HEAD 1111111\n\
-                 branch refs/heads/experiment/rust-native-v2\n\
-                 \n\
-                 worktree /Users/dominical/Documents/OxideTerm-main\n\
-                 HEAD 2222222\n\
-                 branch refs/heads/main\n",
+    fn shell_probe_records_preserve_identity_status_and_repository_absence() {
+        for (output, root, branch, upstream, ahead, operation, paths) in [
+            (
+                "noise\nOXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/tmp/Oxide Term\0branch\0feat/git\0status\0# branch.upstream origin/feat\n# branch.ab +1 -0\n? scratch.txt\n\0operation\0merge\0",
+                "/tmp/Oxide Term",
+                "feat/git",
+                Some("origin/feat"),
+                1,
+                GitOperationKind::Merge,
+                vec!["scratch.txt"],
             ),
-        );
-
-        let GitBranchListOutcome::Ready(branches) = outcome else {
-            panic!("expected branch list");
-        };
-        assert_eq!(
-            branches,
-            vec![
-                GitBranchReference::with_worktree_path(
-                    "experiment/rust-native-v2",
-                    true,
-                    Some("/Users/dominical/Documents/OxideTerm"),
-                )
-                .unwrap(),
-                GitBranchReference::with_worktree_path(
-                    "main",
-                    false,
-                    Some("/Users/dominical/Documents/OxideTerm-main"),
-                )
-                .unwrap(),
-            ]
-        );
-        assert_eq!(
-            branches[1].worktree_path(),
-            Some("/Users/dominical/Documents/OxideTerm-main")
-        );
-    }
-
-    #[test]
-    fn branch_list_output_ignores_detached_prunable_and_git_admin_worktrees() {
-        let outcome = interpret_git_branch_list_outputs(
-            GitCommandOutput::success("*\tmain\n \tfeature/live\n \tsubmodule-main\n"),
-            GitCommandOutput::success(
-                "worktree /repo/main\n\
-                 HEAD 1111111\n\
-                 branch refs/heads/main\n\
-                 \n\
-                 worktree /repo/detached\n\
-                 HEAD 2222222\n\
-                 detached\n\
-                 \n\
-                 worktree /repo/prunable\n\
-                 HEAD 3333333\n\
-                 branch refs/heads/feature/live\n\
-                 prunable gitdir file points to non-existent location\n\
-                 \n\
-                 worktree /repo/.git/modules/vendor/child\n\
-                 HEAD 4444444\n\
-                 branch refs/heads/submodule-main\n",
+            (
+                "OXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/repo\0branch\0main\0operation\0rebase\0",
+                "/repo",
+                "main",
+                None,
+                0,
+                GitOperationKind::Rebase,
+                vec![],
             ),
-        );
-
+        ] {
+            let GitProbeOutcome::Ready(snapshot) = parse_shell_probe_output(output) else {
+                panic!("expected repository snapshot for {output:?}");
+            };
+            assert_eq!(snapshot.repo_root, root, "{output:?}");
+            assert_eq!(
+                snapshot.branch,
+                GitBranchIdentity::Branch(branch.into()),
+                "{output:?}"
+            );
+            assert_eq!(snapshot.status.upstream(), upstream, "{output:?}");
+            assert_eq!(snapshot.status.ahead(), ahead, "{output:?}");
+            assert_eq!(snapshot.status.operation(), Some(operation), "{output:?}");
+            let actual: Vec<_> = snapshot
+                .status
+                .paths()
+                .iter()
+                .map(|path| (path.path(), path.untracked()))
+                .collect();
+            let expected: Vec<_> = paths.iter().map(|path| (*path, true)).collect();
+            assert_eq!(actual, expected, "{output:?}");
+            assert_eq!(
+                snapshot.status.untracked(),
+                paths.len() as u32,
+                "{output:?}"
+            );
+            assert_eq!(snapshot.status.is_dirty(), !paths.is_empty(), "{output:?}");
+        }
         assert_eq!(
-            outcome,
-            GitBranchListOutcome::Ready(vec![
-                GitBranchReference::with_worktree_path("main", true, Some("/repo/main")).unwrap(),
-                GitBranchReference::new("feature/live", false).unwrap(),
-                GitBranchReference::new("submodule-main", false).unwrap(),
-            ])
+            parse_shell_probe_output("OXIDETERM_GIT_PROBE_V1\0state\0not_repo\0"),
+            GitProbeOutcome::NotRepository,
         );
     }
 
     #[test]
-    fn branch_list_output_ignores_remote_refs() {
-        let outcome = interpret_git_branch_list_output(GitCommandOutput::success(
-            "\trefs/heads/main\tmain\n\
-             \trefs/remotes/origin/feature/shared\torigin/feature/shared\n\
-             \trefs/remotes/upstream/feature/shared\tupstream/feature/shared\n",
-        ));
-
-        assert_eq!(
-            outcome,
-            GitBranchListOutcome::Ready(vec![GitBranchReference::new("main", false).unwrap()])
-        );
+    fn branch_lists_attach_only_live_worktrees_and_exclude_remote_refs() {
+        for (branches, worktrees, expected) in [
+            (
+                "*\texperiment/rust-native-v2\n \tmain\n",
+                Some(
+                    "worktree /repo/feature\nHEAD 1111111\nbranch refs/heads/experiment/rust-native-v2\n\nworktree /repo/main\nHEAD 2222222\nbranch refs/heads/main\n",
+                ),
+                vec![
+                    ("experiment/rust-native-v2", true, Some("/repo/feature")),
+                    ("main", false, Some("/repo/main")),
+                ],
+            ),
+            (
+                "*\tmain\n \tfeature/live\n \tsubmodule-main\n",
+                Some(
+                    "worktree /repo/main\nHEAD 1111111\nbranch refs/heads/main\n\nworktree /repo/detached\nHEAD 2222222\ndetached\n\nworktree /repo/prunable\nHEAD 3333333\nbranch refs/heads/feature/live\nprunable gitdir file points to non-existent location\n\nworktree /repo/.git/modules/vendor/child\nHEAD 4444444\nbranch refs/heads/submodule-main\n",
+                ),
+                vec![
+                    ("main", true, Some("/repo/main")),
+                    ("feature/live", false, None),
+                    ("submodule-main", false, None),
+                ],
+            ),
+            (
+                "\trefs/heads/main\tmain\n\trefs/remotes/origin/feature/shared\torigin/feature/shared\n\trefs/remotes/upstream/feature/shared\tupstream/feature/shared\n",
+                None,
+                vec![("main", false, None)],
+            ),
+        ] {
+            let output = GitCommandOutput::success(branches);
+            let outcome = match worktrees {
+                Some(worktrees) => {
+                    interpret_git_branch_list_outputs(output, GitCommandOutput::success(worktrees))
+                }
+                None => interpret_git_branch_list_output(output),
+            };
+            let GitBranchListOutcome::Ready(actual) = outcome else {
+                panic!("expected branch list for {branches:?}");
+            };
+            let actual: Vec<_> = actual
+                .iter()
+                .map(|branch| (branch.name(), branch.current(), branch.worktree_path()))
+                .collect();
+            assert_eq!(actual, expected, "{branches:?} {worktrees:?}");
+        }
     }
 
     #[test]
-    fn shell_branch_list_output_parses_branches() {
-        let output = "noise\nOXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0main\0current\x001\0branch\0feature/x\0current\x000\0worktree\0feature/x\0path\0/tmp/feature-x\0";
-
-        assert_eq!(
-            parse_shell_branch_list_output(output),
-            GitBranchListOutcome::Ready(vec![
-                GitBranchReference::new("main", true).unwrap(),
-                GitBranchReference::with_worktree_path("feature/x", false, Some("/tmp/feature-x"))
-                    .unwrap(),
-            ])
-        );
+    fn shell_branch_records_preserve_current_branch_and_filter_admin_worktrees() {
+        for (output, expected) in [
+            (
+                "noise\nOXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0main\0current\x001\0branch\0feature/x\0current\x000\0worktree\0feature/x\0path\0/tmp/feature-x\0",
+                vec![
+                    ("main", true, None),
+                    ("feature/x", false, Some("/tmp/feature-x")),
+                ],
+            ),
+            (
+                "OXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0master\0current\x001\0worktree\0master\0path\0/repo/.git/modules/vendor/child\0",
+                vec![("master", true, None)],
+            ),
+        ] {
+            let GitBranchListOutcome::Ready(branches) = parse_shell_branch_list_output(output)
+            else {
+                panic!("expected branch list for {output:?}");
+            };
+            let actual: Vec<_> = branches
+                .iter()
+                .map(|branch| (branch.name(), branch.current(), branch.worktree_path()))
+                .collect();
+            assert_eq!(actual, expected, "{output:?}");
+        }
     }
 
     #[test]
-    fn shell_branch_list_output_ignores_submodule_git_admin_paths() {
-        let output = "OXIDETERM_GIT_BRANCH_LIST_V1\0state\0ok\0branch\0master\0current\x001\0worktree\0master\0path\0/repo/.git/modules/vendor/child\0";
-
-        assert_eq!(
-            parse_shell_branch_list_output(output),
-            GitBranchListOutcome::Ready(vec![GitBranchReference::new("master", true).unwrap()])
-        );
-    }
-
-    #[test]
-    fn staged_diff_outputs_preserve_stat_and_patch_or_report_empty() {
-        let outcome = interpret_git_staged_diff_outputs(
-            GitCommandOutput::success(" src/lib.rs | 2 ++\n"),
-            GitCommandOutput::success("diff --git a/src/lib.rs b/src/lib.rs\n"),
-        );
-
-        assert_eq!(
-            outcome,
-            GitStagedDiffOutcome::Ready(
-                GitStagedDiffContext::new(
+    fn staged_diff_parsers_preserve_complete_stat_and_patch_or_report_empty() {
+        for (name, outcome, expected) in [
+            (
+                "command output",
+                interpret_git_staged_diff_outputs(
+                    GitCommandOutput::success(" src/lib.rs | 2 ++\n"),
+                    GitCommandOutput::success("diff --git a/src/lib.rs b/src/lib.rs\n"),
+                ),
+                Some((
                     " src/lib.rs | 2 ++\n",
-                    "diff --git a/src/lib.rs b/src/lib.rs\n"
-                )
-                .unwrap()
-            )
-        );
-        assert_eq!(
-            interpret_git_staged_diff_outputs(
-                GitCommandOutput::success(""),
-                GitCommandOutput::success(""),
+                    "diff --git a/src/lib.rs b/src/lib.rs\n",
+                )),
             ),
-            GitStagedDiffOutcome::Empty
-        );
-    }
-
-    #[test]
-    fn shell_staged_diff_output_parses_nul_records_and_empty_state() {
-        let output = "noise\nOXIDETERM_GIT_STAGED_DIFF_V1\0state\0ok\0stat\0 src/lib.rs | 1 +\0patch\0diff --git a/src/lib.rs b/src/lib.rs\n+added\n\0";
-
-        let GitStagedDiffOutcome::Ready(context) = parse_shell_staged_diff_output(output) else {
-            panic!("expected staged diff context");
-        };
-        assert_eq!(context.stat(), " src/lib.rs | 1 +");
-        assert!(context.patch().contains("+added"));
-        assert_eq!(
-            parse_shell_staged_diff_output("OXIDETERM_GIT_STAGED_DIFF_V1\0state\0empty\0"),
-            GitStagedDiffOutcome::Empty
-        );
+            (
+                "shell records",
+                parse_shell_staged_diff_output(
+                    "noise\nOXIDETERM_GIT_STAGED_DIFF_V1\0state\0ok\0stat\0 src/lib.rs | 1 +\0patch\0diff --git a/src/lib.rs b/src/lib.rs\n+added\n\0",
+                ),
+                Some((
+                    " src/lib.rs | 1 +",
+                    "diff --git a/src/lib.rs b/src/lib.rs\n+added\n",
+                )),
+            ),
+            (
+                "empty command output",
+                interpret_git_staged_diff_outputs(
+                    GitCommandOutput::success(""),
+                    GitCommandOutput::success(""),
+                ),
+                None,
+            ),
+            (
+                "empty shell records",
+                parse_shell_staged_diff_output("OXIDETERM_GIT_STAGED_DIFF_V1\0state\0empty\0"),
+                None,
+            ),
+        ] {
+            if let Some((stat, patch)) = expected {
+                let GitStagedDiffOutcome::Ready(context) = outcome else {
+                    panic!("expected staged diff for {name}");
+                };
+                assert_eq!((context.stat(), context.patch()), (stat, patch), "{name}");
+            } else {
+                assert_eq!(outcome, GitStagedDiffOutcome::Empty, "{name}");
+            }
+        }
     }
 }

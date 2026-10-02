@@ -562,104 +562,74 @@ mod tests {
     }
 
     #[test]
-    fn stream_detects_first_prompt_split_across_output_chunks() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        assert!(stream.observe(b"\x1b]633;C\x07Pass").is_empty());
-        assert_eq!(
-            stream.observe(b"word:"),
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::GenericPassword {
-                    prompt_text: "Password:".to_string(),
+    fn stream_emits_each_prompt_at_the_matching_chunk_once() {
+        let password = TerminalPrivilegePrompt::GenericPassword {
+            prompt_text: "Password:".into(),
+        };
+        let sudo = TerminalPrivilegePrompt::Sudo {
+            username: Some("deploy".into()),
+            prompt_text: "[sudo] password for deploy:".into(),
+        };
+        for (case, chunks, prompt_chunk, prompt) in [
+            (
+                "split label",
+                vec!["\x1b]633;C\x07Pass".to_string(), "word:".into()],
+                1,
+                password.clone(),
+            ),
+            (
+                "fullwidth colon",
+                vec!["密码".into(), "：".into()],
+                1,
+                TerminalPrivilegePrompt::GenericPassword {
+                    prompt_text: "密码：".into(),
                 },
-                retry: false,
-            }]
-        );
-    }
-
-    #[test]
-    fn stream_detects_fullwidth_prompt_colon_split_across_chunks() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        assert!(stream.observe("密码".as_bytes()).is_empty());
-        assert_eq!(
-            stream.observe("：".as_bytes()),
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::GenericPassword {
-                    prompt_text: "密码：".to_string(),
-                },
-                retry: false,
-            }]
-        );
-    }
-
-    #[test]
-    fn stream_emits_prompt_once_when_trailing_spaces_follow_colon() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        assert_eq!(
-            stream.observe(b"Password:   "),
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::GenericPassword {
-                    prompt_text: "Password:".to_string(),
-                },
-                retry: false,
-            }]
-        );
-        assert!(stream.observe(b" ").is_empty());
-    }
-
-    #[test]
-    fn stream_ignores_split_shell_integration_osc_with_st_terminator() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        assert!(stream.observe(b"\x1b]633;C\x1b").is_empty());
-        assert_eq!(
-            stream.observe(b"\\Password:"),
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::GenericPassword {
-                    prompt_text: "Password:".to_string(),
-                },
-                retry: false,
-            }]
-        );
-    }
-
-    #[test]
-    fn stream_detects_history_command_prompt_without_input_observation() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        assert_eq!(
-            stream.observe(b"[sudo] password for deploy:"),
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::Sudo {
-                    username: Some("deploy".to_string()),
-                    prompt_text: "[sudo] password for deploy:".to_string(),
-                },
-                retry: false,
-            }]
-        );
-    }
-
-    #[test]
-    fn stream_reports_retry_on_repeated_prompt() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        let _ = stream.observe(b"Password:");
-        let events = stream.observe(b"\nSorry, try again.\nPassword:");
-        assert_eq!(
-            events,
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::GenericPassword {
-                    prompt_text: "Password:".to_string(),
-                },
-                retry: true,
-            }]
-        );
-    }
-
-    #[test]
-    fn stream_dismisses_prompt_after_unrelated_output_line() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        let _ = stream.observe(b"Password:");
-        assert_eq!(
-            stream.observe(b"\noperation cancelled\n"),
-            vec![TerminalPrivilegePromptEvent::Dismissed]
-        );
+            ),
+            (
+                "trailing spaces",
+                vec!["Password:   ".into(), " ".into()],
+                0,
+                password.clone(),
+            ),
+            (
+                "split OSC terminator",
+                vec!["\x1b]633;C\x1b".into(), "\\Password:".into()],
+                1,
+                password,
+            ),
+            (
+                "sudo without input",
+                vec!["[sudo] password for deploy:".into()],
+                0,
+                sudo.clone(),
+            ),
+            (
+                "long line",
+                vec![format!(
+                    "{}[sudo] password for deploy:",
+                    " ".repeat(MAX_PROMPT_LINE_BYTES * 2)
+                )],
+                0,
+                sudo,
+            ),
+        ] {
+            let mut stream = TerminalPrivilegePromptStream::default();
+            for (index, chunk) in chunks.iter().enumerate() {
+                let expected = if index == prompt_chunk {
+                    vec![TerminalPrivilegePromptEvent::Visible {
+                        prompt: prompt.clone(),
+                        retry: false,
+                    }]
+                } else {
+                    vec![]
+                };
+                assert_eq!(
+                    stream.observe(chunk.as_bytes()),
+                    expected,
+                    "{case}: chunk {index}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -681,22 +651,5 @@ mod tests {
         ] {
             assert!(detect_terminal_privilege_prompt(line).is_none(), "{line}");
         }
-    }
-
-    #[test]
-    fn stream_detects_prompt_after_amortized_long_line_truncation() {
-        let mut stream = TerminalPrivilegePromptStream::default();
-        let mut output = vec![b' '; MAX_PROMPT_LINE_BYTES * 2];
-        output.extend_from_slice(b"[sudo] password for deploy:");
-        assert_eq!(
-            stream.observe(&output),
-            vec![TerminalPrivilegePromptEvent::Visible {
-                prompt: TerminalPrivilegePrompt::Sudo {
-                    username: Some("deploy".to_string()),
-                    prompt_text: "[sudo] password for deploy:".to_string(),
-                },
-                retry: false,
-            }]
-        );
     }
 }

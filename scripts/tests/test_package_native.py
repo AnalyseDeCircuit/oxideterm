@@ -380,138 +380,36 @@ class MacosDmgDetachTests(unittest.TestCase):
             {"/dev/disk4", "/dev/disk4s1", "/dev/disk8"},
         )
 
-    def test_retries_busy_dmg_before_succeeding(self) -> None:
+    def test_detach_retries_only_busy_attached_devices_with_bounded_force_fallback(self) -> None:
         device = "/dev/disk9"
-        detach_command = ["hdiutil", "detach", device]
-        busy_error = subprocess.CalledProcessError(
-            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
-        )
-
-        with (
-            patch.object(
-                package_native, "run", side_effect=[busy_error, None]
-            ) as run_mock,
-            patch.object(
-                package_native, "macos_dmg_device_is_attached", return_value=True
-            ),
-            patch.object(package_native.time, "sleep") as sleep,
-        ):
-            package_native.detach_macos_dmg(device)
-
-        self.assertEqual(
-            run_mock.call_args_list, [call(detach_command), call(detach_command)]
-        )
-        sleep.assert_called_once_with(
-            package_native.MACOS_DMG_DETACH_RETRY_DELAY_SECONDS
-        )
-
-    def test_force_detach_succeeds_immediately_or_after_busy_retry(self) -> None:
-        device = "/dev/disk9"
-        detach_command = ["hdiutil", "detach", device]
-        force_detach_command = ["hdiutil", "detach", "-force", device]
-        busy_error = subprocess.CalledProcessError(
-            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
-        )
-        failed_attempts = [
-            busy_error for _ in range(package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS)
-        ]
-
-        for force_busy_attempts in (0, 1):
+        normal = ["hdiutil", "detach", device]
+        forced = ["hdiutil", "detach", "-force", device]
+        busy = subprocess.CalledProcessError(16, normal)
+        permission = subprocess.CalledProcessError(1, normal)
+        for name, results, attached, expected_commands, waits, error in [
+            ("retry", [busy, None], True, [normal] * 2, 1, None),
+            ("force", [busy] * 5 + [None], True, [normal] * 5 + [forced], 4, None),
+            ("force retry", [busy] * 6 + [None], True, [normal] * 5 + [forced] * 2, 5, None),
+            ("exhausted", [busy] * 20, True, [normal] * 5 + [forced] * 15, 18, busy),
+            ("permission", [permission], True, [normal], 0, permission),
+            ("already detached", [busy], False, [normal], 0, None),
+        ]:
             with (
-                self.subTest(force_busy_attempts=force_busy_attempts),
-                patch.object(
-                    package_native,
-                    "run",
-                    side_effect=[*failed_attempts, *([busy_error] * force_busy_attempts), None],
-                ) as run_mock,
-                patch.object(
-                    package_native, "macos_dmg_device_is_attached", return_value=True
-                ),
+                self.subTest(case=name),
+                patch.object(package_native, "run", side_effect=results) as run_mock,
+                patch.object(package_native, "macos_dmg_device_is_attached", return_value=attached) as probe,
                 patch.object(package_native.time, "sleep") as sleep,
             ):
-                package_native.detach_macos_dmg(device)
-
-                self.assertEqual(
-                    run_mock.call_args_list,
-                    [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
-                    + [call(force_detach_command)] * (force_busy_attempts + 1),
-                )
-                self.assertEqual(
-                    sleep.call_args_list,
-                    [call(package_native.MACOS_DMG_DETACH_RETRY_DELAY_SECONDS)]
-                    * (package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS - 1 + force_busy_attempts),
-                )
-
-    def test_reports_busy_after_force_detach_retry_limit(self) -> None:
-        device = "/dev/disk9"
-        detach_command = ["hdiutil", "detach", device]
-        force_detach_command = ["hdiutil", "detach", "-force", device]
-        busy_error = subprocess.CalledProcessError(
-            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
-        )
-        failed_attempt_count = (
-            package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
-            + package_native.MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS
-        )
-
-        with (
-            patch.object(
-                package_native,
-                "run",
-                side_effect=[busy_error for _ in range(failed_attempt_count)],
-            ) as run_mock,
-            patch.object(
-                package_native, "macos_dmg_device_is_attached", return_value=True
-            ),
-            patch.object(package_native.time, "sleep") as sleep,
-            self.assertRaises(subprocess.CalledProcessError),
-        ):
-            package_native.detach_macos_dmg(device)
-
-        self.assertEqual(
-            run_mock.call_args_list,
-            [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
-            + [call(force_detach_command)]
-            * package_native.MACOS_DMG_FORCE_DETACH_MAX_ATTEMPTS,
-        )
-        self.assertEqual(sleep.call_count, failed_attempt_count - 2)
-
-    def test_does_not_retry_non_busy_detach_error(self) -> None:
-        device = "/dev/disk9"
-        detach_command = ["hdiutil", "detach", device]
-        permission_error = subprocess.CalledProcessError(1, detach_command)
-
-        with (
-            patch.object(
-                package_native, "run", side_effect=permission_error
-            ) as run_mock,
-            patch.object(package_native.time, "sleep") as sleep,
-            self.assertRaises(subprocess.CalledProcessError),
-        ):
-            package_native.detach_macos_dmg(device)
-
-        run_mock.assert_called_once_with(detach_command)
-        sleep.assert_not_called()
-
-    def test_accepts_async_detach_after_busy_result(self) -> None:
-        device = "/dev/disk9"
-        detach_command = ["hdiutil", "detach", device]
-        busy_error = subprocess.CalledProcessError(
-            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
-        )
-
-        with (
-            patch.object(package_native, "run", side_effect=busy_error) as run_mock,
-            patch.object(
-                package_native, "macos_dmg_device_is_attached", return_value=False
-            ) as device_is_attached,
-            patch.object(package_native.time, "sleep") as sleep,
-        ):
-            package_native.detach_macos_dmg(device)
-
-        run_mock.assert_called_once_with(detach_command)
-        device_is_attached.assert_called_once_with(device)
-        sleep.assert_not_called()
+                if error:
+                    with self.assertRaises(subprocess.CalledProcessError) as raised:
+                        package_native.detach_macos_dmg(device)
+                    self.assertIs(raised.exception, error)
+                else:
+                    package_native.detach_macos_dmg(device)
+                self.assertEqual(run_mock.call_args_list, [call(command) for command in expected_commands])
+                self.assertEqual(sleep.call_args_list, [call(2)] * waits)
+                expected_probes = sum(result is busy for result in results)
+                self.assertEqual(probe.call_args_list, [call(device)] * expected_probes)
 
 
 class ReleaseDocumentTests(unittest.TestCase):
@@ -617,29 +515,23 @@ class LinuxDesktopEntryTests(unittest.TestCase):
 
 
 class PlatformSigningTests(unittest.TestCase):
-    def test_macos_developer_id_enables_hardened_runtime_and_timestamp(self) -> None:
-        with patch.dict(
-            package_native.os.environ,
-            {"MACOS_CODESIGN_IDENTITY": "Developer ID Application: OxideTerm"},
-            clear=False,
-        ):
-            command = package_native.macos_codesign_command(
-                "codesign", Path("OxideTerm.app")
-            )
-
-        self.assertIn("--options", command)
-        self.assertIn("runtime", command)
-        self.assertIn("--timestamp", command)
-        self.assertIn("Developer ID Application: OxideTerm", command)
-
-    def test_macos_development_build_uses_ad_hoc_identity(self) -> None:
-        with patch.dict(package_native.os.environ, {}, clear=True):
-            command = package_native.macos_codesign_command(
-                "codesign", Path("OxideTerm.app")
-            )
-
-        self.assertNotIn("--timestamp", command)
-        self.assertEqual(command[-2:], ["-", "OxideTerm.app"])
+    def test_macos_signing_options_follow_the_selected_identity(self) -> None:
+        for environment, identity, hardened in [
+            ({"MACOS_CODESIGN_IDENTITY": "Developer ID Application: OxideTerm"},
+             "Developer ID Application: OxideTerm", True),
+            ({}, "-", False),
+        ]:
+            with (
+                self.subTest(identity=identity),
+                patch.dict(package_native.os.environ, environment, clear=True),
+            ):
+                command = package_native.macos_codesign_command("codesign", Path("OxideTerm.app"))
+                self.assertEqual(command[-3:], ["--sign", identity, "OxideTerm.app"])
+                if hardened:
+                    self.assertEqual(command[3:6], ["--options", "runtime", "--timestamp"])
+                else:
+                    self.assertNotIn("--options", command)
+                    self.assertNotIn("--timestamp", command)
 
     def test_macos_notarization_is_optional_for_development_builds(self) -> None:
         with patch.dict(package_native.os.environ, {}, clear=True):
@@ -649,62 +541,39 @@ class PlatformSigningTests(unittest.TestCase):
 
         self.assertFalse(submitted)
 
-    def test_signed_or_preview_dmg_omits_stable_gatekeeper_notice(self) -> None:
-        stable = package_native.release_identity("v2.0.0", "2.0.0")
-        preview = package_native.release_identity(
-            "gpui-v2.0.0-gpui-preview.16", "2.0.0-gpui-preview.16"
-        )
-
-        with patch.dict(
-            package_native.os.environ,
-            {"MACOS_CODESIGN_IDENTITY": "Developer ID Application: OxideTerm"},
-            clear=True,
-        ):
-            self.assertFalse(
-                package_native.should_include_macos_unsigned_install_notice(stable)
-            )
-        with patch.dict(package_native.os.environ, {}, clear=True):
-            self.assertFalse(
-                package_native.should_include_macos_unsigned_install_notice(preview)
-            )
-
-    def test_unsigned_notice_is_copied_into_stable_dmg_root(self) -> None:
-        identity = package_native.release_identity("v2.0.0", "2.0.0")
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "notice-source.png"
-            source.write_bytes(b"png notice")
-            background = root / "background-source.png"
-            background.write_bytes(b"png background")
-            dmg_root = root / "dmg"
-            dmg_root.mkdir()
-
-            with (
-                patch.object(
-                    package_native, "MACOS_UNSIGNED_INSTALL_NOTICE", source
-                ),
-                patch.object(
-                    package_native, "MACOS_UNSIGNED_DMG_BACKGROUND", background
-                ),
-                patch.dict(package_native.os.environ, {}, clear=True),
-            ):
-                copied = package_native.copy_macos_unsigned_install_notice(
-                    dmg_root, identity
-                )
-
-            self.assertTrue(copied)
-            self.assertEqual(
-                (dmg_root / package_native.MACOS_UNSIGNED_INSTALL_NOTICE_NAME).read_bytes(),
-                b"png notice",
-            )
-            self.assertEqual(
-                (
-                    dmg_root
-                    / package_native.MACOS_DMG_BACKGROUND_DIR_NAME
+    def test_gatekeeper_artwork_is_copied_only_for_unsigned_stable_images(self) -> None:
+        for tag, version, signer, expected in [
+            ("v2.0.0", "2.0.0", "", True),
+            ("v2.0.0", "2.0.0", "Developer ID Application: OxideTerm", False),
+            ("gpui-v2.0.0-gpui-preview.16", "2.0.0-gpui-preview.16", "", False),
+        ]:
+            with self.subTest(tag=tag, signer=signer), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source = root / "notice-source.png"
+                source.write_bytes(b"png notice")
+                background = root / "background-source.png"
+                background.write_bytes(b"png background")
+                dmg_root = root / "dmg"
+                dmg_root.mkdir()
+                with (
+                    patch.object(package_native, "MACOS_UNSIGNED_INSTALL_NOTICE", source),
+                    patch.object(package_native, "MACOS_UNSIGNED_DMG_BACKGROUND", background),
+                    patch.dict(package_native.os.environ, {"MACOS_CODESIGN_IDENTITY": signer}, clear=True),
+                ):
+                    copied = package_native.copy_macos_unsigned_install_notice(
+                        dmg_root, package_native.release_identity(tag, version)
+                    )
+                self.assertEqual(copied, expected)
+                notice_path = dmg_root / package_native.MACOS_UNSIGNED_INSTALL_NOTICE_NAME
+                background_path = (
+                    dmg_root / package_native.MACOS_DMG_BACKGROUND_DIR_NAME
                     / package_native.MACOS_DMG_BACKGROUND_NAME
-                ).read_bytes(),
-                b"png background",
-            )
+                )
+                if expected:
+                    self.assertEqual(notice_path.read_bytes(), b"png notice")
+                    self.assertEqual(background_path.read_bytes(), b"png background")
+                else:
+                    self.assertEqual(list(dmg_root.iterdir()), [])
 
     def test_unsigned_finder_layout_keeps_primary_icons_and_notice_separate(self) -> None:
         script = package_native.macos_dmg_finder_script()

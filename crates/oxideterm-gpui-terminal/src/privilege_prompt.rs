@@ -1129,7 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn detects_supported_sudo_prompt_labels_without_accepting_unknown_credentials() {
+    fn snapshot_classifies_standard_prompts_and_rejects_result_lines() {
         let cases = [
             (
                 "sudo -k true\n[sudo] password for dominical:",
@@ -1174,40 +1174,25 @@ mod tests {
                 }),
             ),
             ("sudo true\n[sudo] deploy 的通行码：", None),
-        ];
-
-        for (text, expected) in cases {
-            assert_eq!(detect_privilege_prompt(text), expected);
-        }
-    }
-
-    #[test]
-    fn detects_localized_sudo_prompt_after_retry() {
-        assert_eq!(
-            detect_privilege_prompt(
-                "sudo yazi\n[sudo] lipsc 的密码:\n对不起，请重试。\n[sudo] lipsc 的密码:"
+            (
+                "sudo yazi\n[sudo] lipsc 的密码:\n对不起，请重试。\n[sudo] lipsc 的密码:",
+                Some(PrivilegePromptMatch::Sudo {
+                    username: Some("lipsc".into()),
+                    prompt_text: "[sudo] lipsc 的密码:".into(),
+                }),
             ),
-            Some(PrivilegePromptMatch::Sudo {
-                username: Some("lipsc".to_string()),
-                prompt_text: "[sudo] lipsc 的密码:".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn detects_su_prompts_with_explicit_prefix() {
-        assert_eq!(
-            detect_privilege_prompt("su - root\nsu: Password:"),
-            Some(PrivilegePromptMatch::Su {
-                target_user: None,
-                prompt_text: "su: Password:".to_string(),
-            })
-        );
-    }
-
-    #[test]
-    fn generic_password_prompts_are_classified_by_command_context() {
-        let cases = [
+            (
+                "su - root\nsu: Password:",
+                Some(PrivilegePromptMatch::Su {
+                    target_user: None,
+                    prompt_text: "su: Password:".into(),
+                }),
+            ),
+            ("password changed", None),
+            ("error: password failed", None),
+            ("Usage: --password: value", None),
+        ];
+        let contextual = [
             (
                 "❯ sudo yazi\nPassword:",
                 PrivilegePromptMatch::Sudo {
@@ -1249,48 +1234,35 @@ mod tests {
                 },
             ),
         ];
-
-        for (text, expected) in cases {
-            assert_eq!(detect_privilege_prompt(text), Some(expected));
+        for (text, expected) in cases.into_iter().chain(
+            contextual
+                .into_iter()
+                .map(|(text, expected)| (text, Some(expected))),
+        ) {
+            assert_eq!(detect_privilege_prompt(text), expected, "{text:?}");
         }
     }
 
     #[test]
-    fn detects_custom_prompt_patterns_without_password_label() {
-        assert_eq!(
-            detect_custom_privilege_prompt(
+    fn custom_prompt_patterns_match_prompts_but_ignore_password_results() {
+        for (text, pattern, expected) in [
+            (
                 "deploy-tool unlock\nEnter deployment approval token >",
-                "custom-1",
-                &["approval token".to_string()],
+                "approval token",
+                Some(PrivilegePromptMatch::Custom {
+                    credential_id: "custom-1".into(),
+                    prompt_text: "Enter deployment approval token >".into(),
+                }),
             ),
-            Some(PrivilegePromptMatch::Custom {
-                credential_id: "custom-1".to_string(),
-                prompt_text: "Enter deployment approval token >".to_string(),
-            })
-        );
-        assert_eq!(
-            detect_privilege_prompt("deploy-tool unlock\nEnter deployment approval token >"),
-            None
-        );
-    }
-
-    #[test]
-    fn custom_prompt_patterns_ignore_password_result_lines() {
-        assert_eq!(
-            detect_custom_privilege_prompt(
-                "password updated successfully",
-                "custom-1",
-                &["password updated".to_string()],
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn rejects_result_and_help_lines() {
-        assert_eq!(detect_privilege_prompt("password changed"), None);
-        assert_eq!(detect_privilege_prompt("error: password failed"), None);
-        assert_eq!(detect_privilege_prompt("Usage: --password: value"), None);
+            ("password updated successfully", "password updated", None),
+        ] {
+            assert_eq!(
+                detect_custom_privilege_prompt(text, "custom-1", &[pattern.into()]),
+                expected,
+                "{text}"
+            );
+            assert_eq!(detect_privilege_prompt(text), None, "{text}");
+        }
     }
 
     #[test]
@@ -1332,100 +1304,68 @@ mod tests {
     }
 
     #[test]
-    fn tracker_observes_first_prompt_after_shell_history_submission() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        // The semantic output event is authoritative even though shell history
-        // changed and submitted text that the frontend never observed.
-        tracker.observe_user_input_bytes(b"echo stale", start);
-        tracker.observe_user_input_bytes(b"\x1b[A", start);
-        tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::GenericPassword {
-                    prompt_text: "Password:".to_string(),
+    fn tracker_uses_only_current_reliable_command_context() {
+        for (case, input, submitted, delay, expected, confidence) in [
+            (
+                "unobserved history",
+                b"echo stale\x1b[A\r".as_slice(),
+                None,
+                Duration::from_millis(40),
+                PrivilegePromptMatch::GenericPassword {
+                    prompt_text: "Password:".into(),
                 },
-                confidence: PrivilegePromptConfidence::GenericPrompt,
-                retry_count: 0,
-            })
-        );
-    }
-
-    #[test]
-    fn tracker_uses_shell_integration_context_after_history_submission() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"\x1b[A\r", start);
-        tracker.observe_submitted_command("sudo true", start);
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(10),
-        );
-
-        assert!(matches!(
-            tracker.snapshot(start + Duration::from_millis(10)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo { .. },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn tracker_keeps_plain_password_prompt_generic_without_command_context() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        observe_standard_prompt(&mut tracker, "Password:", false, start);
-
-        assert_eq!(
-            tracker.snapshot(start),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::GenericPassword {
-                    prompt_text: "Password:".to_string(),
+                PrivilegePromptConfidence::GenericPrompt,
+            ),
+            (
+                "authoritative history",
+                b"\x1b[A\r".as_slice(),
+                Some("sudo true"),
+                Duration::from_millis(10),
+                PrivilegePromptMatch::Sudo {
+                    username: None,
+                    prompt_text: "Password:".into(),
                 },
-                confidence: PrivilegePromptConfidence::GenericPrompt,
-                retry_count: 0,
-            })
-        );
-    }
-
-    #[test]
-    fn tracker_expires_stale_command_context_before_generic_prompt() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"sudo id\r", start);
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2,
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + PRIVILEGE_COMMAND_CONTEXT_TTL * 2),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::GenericPassword {
-                    prompt_text: "Password:".to_string(),
+                PrivilegePromptConfidence::CommandContext,
+            ),
+            (
+                "no command",
+                b"".as_slice(),
+                None,
+                Duration::ZERO,
+                PrivilegePromptMatch::GenericPassword {
+                    prompt_text: "Password:".into(),
                 },
-                confidence: PrivilegePromptConfidence::GenericPrompt,
-                retry_count: 0,
-            })
-        );
+                PrivilegePromptConfidence::GenericPrompt,
+            ),
+            (
+                "expired command",
+                b"sudo id\r".as_slice(),
+                None,
+                PRIVILEGE_COMMAND_CONTEXT_TTL * 2,
+                PrivilegePromptMatch::GenericPassword {
+                    prompt_text: "Password:".into(),
+                },
+                PrivilegePromptConfidence::GenericPrompt,
+            ),
+        ] {
+            let start = Instant::now();
+            let mut tracker = PrivilegePromptTracker::default();
+            tracker.observe_user_input_bytes(input, start);
+            if let Some(command) = submitted {
+                tracker.observe_submitted_command(command, start);
+            }
+            let now = start + delay;
+            observe_standard_prompt(&mut tracker, "Password:", false, now);
+            assert_eq!(
+                tracker.snapshot(now),
+                Some(PrivilegePromptSnapshot {
+                    prompt: expected,
+                    confidence,
+                    retry_count: 0,
+                }),
+                "{case}"
+            );
+        }
     }
 
     #[test]
@@ -1468,6 +1408,8 @@ mod tests {
             start + Duration::from_millis(10),
         );
         tracker.mark_secret_filled(start + Duration::from_millis(20));
+        assert_eq!(tracker.snapshot(start + Duration::from_millis(20)), None);
+        assert!(tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(20)));
         observe_standard_prompt(
             &mut tracker,
             "Password:",
@@ -1486,24 +1428,6 @@ mod tests {
                 retry_count: 1,
             })
         );
-    }
-
-    #[test]
-    fn tracker_does_not_reopen_filled_prompt_on_full_screen_entry() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"sudo vim /etc/hosts\r", start);
-        observe_standard_prompt(
-            &mut tracker,
-            "[sudo] password for alice:",
-            false,
-            start + Duration::from_millis(10),
-        );
-        tracker.mark_secret_filled(start + Duration::from_millis(20));
-
-        assert_eq!(tracker.snapshot(start + Duration::from_millis(30)), None);
-        assert!(tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(30)));
     }
 
     #[test]
