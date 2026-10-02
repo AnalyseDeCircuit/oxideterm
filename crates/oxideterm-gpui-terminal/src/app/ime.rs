@@ -49,11 +49,11 @@ impl TerminalPane {
         &mut self,
         _range: Option<Range<usize>>,
         new_text: &str,
-        _new_selected_range: Option<Range<usize>>,
+        new_selected_range: Option<Range<usize>>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.set_marked_text(new_text, cx);
+        self.set_marked_text(new_text, new_selected_range, cx);
     }
 
     fn bounds_for_range_for_ime(
@@ -66,7 +66,10 @@ impl TerminalPane {
         let mut bounds = ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics)?;
         bounds.origin += element_bounds.origin
             + point(
-                px(range_utf16.start as f32 * self.metrics.cell_width_f32()),
+                px(
+                    self.marked_text_cells_before_utf16(range_utf16.start) as f32
+                        * self.metrics.cell_width_f32(),
+                ),
                 px(0.0),
             );
         Some(bounds)

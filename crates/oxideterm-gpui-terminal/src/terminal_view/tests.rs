@@ -276,25 +276,39 @@ fn ime_cursor_bounds_expand_for_wide_cursor_cell() {
 
 #[test]
 fn marked_text_is_laid_out_at_terminal_cursor() {
-    let layout = TerminalElement::new(
-        cursor_snapshot(),
-        None,
-        test_metrics(),
-        true,
-        Some("拼".to_string()),
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
+    for (foreground, background) in [(0x102030, 0xfdf6e3), (0xe6e8eb, 0x0d0f12)] {
+        let theme = TerminalUiTheme {
+            foreground,
+            background,
+            ..Default::default()
+        };
+        let layout = TerminalElement::new_with_images(
+            cursor_snapshot(),
+            Vec::new(),
+            None,
+            test_metrics(),
+            theme,
+            true,
+            Some("拼".to_string()),
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .layout();
 
-    let marked_text = layout.marked_text.unwrap();
-    assert_eq!(marked_text.row, 0);
-    assert_eq!(marked_text.col, 0);
-    assert_eq!(marked_text.text, "拼");
-    assert!(layout.ime_cursor_bounds.is_some());
+        let marked_text = layout.marked_text.unwrap();
+        assert_eq!(marked_text.row, 0);
+        assert_eq!(marked_text.col, 0);
+        assert_eq!(marked_text.text, "拼");
+        assert_eq!(marked_text.style.color, rgb(foreground).into_color());
+        assert_eq!(
+            marked_text.style.background_color,
+            Some(rgb(background).into_color())
+        );
+        assert!(layout.ime_cursor_bounds.is_some());
+    }
 }
 
 #[test]

@@ -444,6 +444,7 @@ impl Render for TerminalPane {
                 last_viewport_scale_factor_bits: self.viewport_scale_factor_bits,
             }),
         )
+        .marked_text_caret(self.marked_text_caret_utf16)
         .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)
         .precomputed_search_matches()
         .selection_highlight_query(selection_highlight_query)

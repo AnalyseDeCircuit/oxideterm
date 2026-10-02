@@ -522,7 +522,7 @@ impl TerminalPane {
         self.pending_search_reveal = false;
 
         if mouse_mode(mode, event.modifiers.shift) {
-            self.clear_smooth_scroll_remainder();
+            self.clear_smooth_scroll_animation();
             let rows = scroll_delta.rows;
             if rows == 0 {
                 return;
@@ -540,7 +540,7 @@ impl TerminalPane {
         if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
             && !event.modifiers.shift
         {
-            self.clear_smooth_scroll_remainder();
+            self.clear_smooth_scroll_animation();
             if scroll_delta.rows == 0 {
                 return;
             }
@@ -639,13 +639,18 @@ impl TerminalPane {
     }
 
     pub(super) fn clear_smooth_scroll_remainder(&mut self) -> bool {
-        let had_remainder = f32::from(self.scroll_input_remainder_px).abs() > f32::EPSILON
-            || f32::from(self.smooth_scroll_offset_px).abs() > f32::EPSILON
-            || self.smooth_scroll_animation.is_some();
+        let had_remainder = f32::from(self.scroll_input_remainder_px).abs() > f32::EPSILON;
         self.scroll_input_remainder_px = px(0.0);
+        self.clear_smooth_scroll_animation() || had_remainder
+    }
+
+    fn clear_smooth_scroll_animation(&mut self) -> bool {
+        // Application mouse and alternate-scroll input must accumulate sub-row touchpad deltas.
+        let had_animation = f32::from(self.smooth_scroll_offset_px).abs() > f32::EPSILON
+            || self.smooth_scroll_animation.is_some();
         self.smooth_scroll_offset_px = px(0.0);
         self.smooth_scroll_animation = None;
-        had_remainder
+        had_animation
     }
 
     fn start_smooth_scroll_row_animation(&mut self, applied_rows: f32) {
