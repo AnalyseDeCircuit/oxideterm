@@ -210,7 +210,7 @@ pub fn merge_oxide_settings_snapshot(
 ) -> Result<PersistedSettings> {
     let parsed: Value =
         serde_json::from_str(snapshot_json).context("failed to parse app settings snapshot")?;
-    let (snapshot_settings, snapshot_sections) =
+    let (mut snapshot_settings, snapshot_sections) =
         if parsed.get("format").and_then(Value::as_str) == Some(OXIDE_SETTINGS_FORMAT) {
             let settings = parsed
                 .get("settings")
@@ -242,6 +242,15 @@ pub fn merge_oxide_settings_snapshot(
                     .collect(),
             )
         };
+
+    // Materialize the released shared theme before current settings fill this key.
+    // Copying sections below still limits it to imports that include appearance.
+    if snapshot_settings.pointer("/appearance/theme").is_none()
+        && let Some(theme) = snapshot_settings.pointer("/terminal/theme").cloned()
+    {
+        ensure_object_path(&mut snapshot_settings, &["appearance"])
+            .insert("theme".to_string(), theme);
+    }
 
     let requested = selected_sections
         .cloned()
@@ -464,6 +473,47 @@ mod tests {
             .unwrap();
             assert_eq!(restored.appearance.theme, application, "{section}");
             assert_eq!(restored.terminal.theme, terminal, "{section}");
+        }
+
+        let mut current = PersistedSettings::default();
+        current.appearance.theme = "solarized-light".into();
+        current.terminal.font_size = 19;
+        // Released backups stored one shared theme, including in sectioned exports.
+        let legacy_settings = json!({"terminal": {"theme": "monokai"}});
+        for legacy in [
+            legacy_settings.clone(),
+            json!({
+                "format": OXIDE_SETTINGS_FORMAT,
+                "sectionIds": ["appearance", "terminalAppearance"],
+                "settings": legacy_settings,
+            }),
+        ] {
+            for (sections, application, terminal) in [
+                (None, "monokai", "monokai"),
+                (Some(vec!["appearance"]), "monokai", "default"),
+                (
+                    Some(vec!["terminalAppearance"]),
+                    "solarized-light",
+                    "monokai",
+                ),
+                (Some(vec!["general"]), "solarized-light", "default"),
+            ] {
+                let selected = sections.map(|sections| {
+                    sections
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect::<HashSet<_>>()
+                });
+                let restored =
+                    merge_oxide_settings_snapshot(&current, &legacy.to_string(), selected.as_ref())
+                        .unwrap();
+                assert_eq!(
+                    restored.appearance.theme, application,
+                    "{legacy}: {selected:?}"
+                );
+                assert_eq!(restored.terminal.theme, terminal, "{legacy}: {selected:?}");
+                assert_eq!(restored.terminal.font_size, 19);
+            }
         }
     }
 
