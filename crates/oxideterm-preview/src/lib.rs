@@ -17,7 +17,7 @@ mod video;
 pub use asset::{PreviewAssetOwner, PreviewAssetOwnership};
 pub use audio::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewSnapshot, AudioPreviewState,
-    MemoryAudioPreviewBackend, RodioAudioPreviewBackend, UnsupportedAudioPreviewBackend,
+    RodioAudioPreviewBackend, UnsupportedAudioPreviewBackend,
 };
 pub use renderer::PreviewRenderer;
 pub use session::{

@@ -92,24 +92,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn caches_rendered_mermaid_svg_images() {
-        let tokens = default_tokens();
-        let opts = MarkdownOptions::from_theme(&tokens);
-
-        let first = render_mermaid_svg_image("graph TD\nA --> B", &tokens, &opts).unwrap();
-        let second = render_mermaid_svg_image("graph TD\nA --> B", &tokens, &opts).unwrap();
-
-        assert!(Arc::ptr_eq(&first, &second));
-    }
-
-    #[test]
-    fn caches_raster_scales_separately() {
+    fn reuses_rendered_images_and_caches_raster_scales_separately() {
         let tokens = default_tokens();
         let opts = MarkdownOptions::from_theme(&tokens);
 
         let normal = render_mermaid_svg_scaled("graph TD\nA --> B", &tokens, &opts, 1.0).unwrap();
         let zoomed = render_mermaid_svg_scaled("graph TD\nA --> B", &tokens, &opts, 3.0).unwrap();
+        let default = render_mermaid_svg_image("graph TD\nA --> B", &tokens, &opts).unwrap();
+        let repeated = render_mermaid_svg_image("graph TD\nA --> B", &tokens, &opts).unwrap();
 
+        assert!(Arc::ptr_eq(&default, &repeated));
         assert_eq!(normal.display_width, zoomed.display_width);
         assert_eq!(normal.display_height, zoomed.display_height);
         assert!(!Arc::ptr_eq(&normal.image, &zoomed.image));

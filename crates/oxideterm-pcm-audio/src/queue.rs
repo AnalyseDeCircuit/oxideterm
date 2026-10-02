@@ -109,20 +109,9 @@ mod tests {
     }
 
     #[test]
-    fn queue_ignores_trailing_partial_frames() {
+    fn queue_ignores_partial_frames_and_emits_silence_after_complete_audio() {
         let queue = BoundedPcmQueue::new(4, 2);
-        queue.push_pcm(&pcm_bytes(&[1, 2, 3]));
-        let mut output = [0_i16; 4];
-
-        queue.fill(&mut output);
-
-        assert_eq!(output, [1, 2, 0, 0]);
-    }
-
-    #[test]
-    fn queue_emits_silence_after_buffered_audio_is_consumed() {
-        let queue = BoundedPcmQueue::new(4, 2);
-        queue.push_pcm(&pcm_bytes(&[10, -10]));
+        queue.push_pcm(&pcm_bytes(&[10, -10, 3]));
         let mut output = [1_i16; 4];
 
         queue.fill(&mut output);

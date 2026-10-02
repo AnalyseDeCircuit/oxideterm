@@ -1509,23 +1509,25 @@ mod tests {
     }
 
     #[test]
-    fn privilege_credential_secret_is_stored_outside_connection_json() {
+    fn privilege_credential_secret_is_protected_through_save_duplicate_and_delete() {
         let mut store = load_empty_store("privilege-save");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
 
-        let credential = store
-            .save_privilege_credential(SavePrivilegeCredentialRequest {
-                connection_id: "conn-1".to_string(),
-                credential_id: None,
-                label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
-                username_hint: Some("root".to_string()),
-                prompt_patterns: Vec::new(),
-                secret: Some(SecretString::from("sudo-secret")),
-                enabled: true,
-                require_click_to_send: true,
-            })
-            .unwrap();
+        let credential_request = SavePrivilegeCredentialRequest {
+            connection_id: "conn-1".to_string(),
+            credential_id: None,
+            label: "sudo".to_string(),
+            kind: PrivilegeCredentialKind::SudoPassword,
+            username_hint: Some("root".to_string()),
+            prompt_patterns: Vec::new(),
+            secret: Some(SecretString::from("sudo-secret")),
+            enabled: true,
+            require_click_to_send: true,
+        };
+        let debug = format!("{credential_request:?}");
+        assert!(debug.contains("[redacted secret]"));
+        assert!(!debug.contains("sudo-secret"));
+        let credential = store.save_privilege_credential(credential_request).unwrap();
 
         assert_eq!(
             store
@@ -1536,6 +1538,21 @@ mod tests {
         let saved = fs::read_to_string(store.path()).unwrap();
         assert!(saved.contains("\"privilege_credentials\""));
         assert!(!saved.contains("sudo-secret"));
+        let duplicate = store.duplicate("conn-1").unwrap().unwrap();
+        assert!(
+            store
+                .get(&duplicate.id)
+                .unwrap()
+                .privilege_credentials
+                .is_empty()
+        );
+        let keychain_id = credential.keychain_id.unwrap();
+        assert_eq!(
+            store.privilege_keychain.get(&keychain_id).unwrap(),
+            "sudo-secret"
+        );
+        assert!(store.delete("conn-1").unwrap());
+        assert!(store.privilege_keychain.get(&keychain_id).is_err());
     }
 
 
@@ -1654,78 +1671,6 @@ mod tests {
                 .get_privilege_credential_secret("conn-1", "cred-1")
                 .unwrap(),
             SecretString::from("sudo-secret")
-        );
-    }
-
-    #[test]
-    fn privilege_credential_request_debug_redacts_secret() {
-        let request = SavePrivilegeCredentialRequest {
-            connection_id: "conn-1".to_string(),
-            credential_id: Some("cred-1".to_string()),
-            label: "sudo".to_string(),
-            kind: PrivilegeCredentialKind::SudoPassword,
-            username_hint: None,
-            prompt_patterns: Vec::new(),
-            secret: Some(SecretString::from("sudo-secret")),
-            enabled: true,
-            require_click_to_send: true,
-        };
-
-        let debug = format!("{request:?}");
-
-        assert!(debug.contains("[redacted secret]"));
-        assert!(!debug.contains("sudo-secret"));
-    }
-
-    #[test]
-    fn deleting_connection_removes_privilege_keychain_entries() {
-        let mut store = load_empty_store("privilege-delete");
-        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
-        let credential = store
-            .save_privilege_credential(SavePrivilegeCredentialRequest {
-                connection_id: "conn-1".to_string(),
-                credential_id: Some("cred-1".to_string()),
-                label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
-                username_hint: None,
-                prompt_patterns: Vec::new(),
-                secret: Some(SecretString::from("sudo-secret")),
-                enabled: true,
-                require_click_to_send: true,
-            })
-            .unwrap();
-        let keychain_id = credential.keychain_id.unwrap();
-
-        assert!(store.delete("conn-1").unwrap());
-        assert!(store.privilege_keychain.get(&keychain_id).is_err());
-    }
-
-    #[test]
-    fn duplicated_connection_does_not_copy_privilege_credentials() {
-        let mut store = load_empty_store("privilege-duplicate");
-        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
-        store
-            .save_privilege_credential(SavePrivilegeCredentialRequest {
-                connection_id: "conn-1".to_string(),
-                credential_id: Some("cred-1".to_string()),
-                label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
-                username_hint: None,
-                prompt_patterns: Vec::new(),
-                secret: Some(SecretString::from("sudo-secret")),
-                enabled: true,
-                require_click_to_send: true,
-            })
-            .unwrap();
-
-        let duplicate = store.duplicate("conn-1").unwrap().unwrap();
-
-        assert!(
-            store
-                .get(&duplicate.id)
-                .unwrap()
-                .privilege_credentials
-                .is_empty()
         );
     }
 
@@ -2873,36 +2818,6 @@ mod tests {
     }
 
     #[test]
-    fn managed_ssh_key_metadata_round_trips_without_private_key() {
-        let now = Utc::now();
-        let data = ConnectionStoreData {
-            managed_ssh_keys: vec![ManagedSshKey {
-                certificate: None,
-                id: "managed-key-1".to_string(),
-                secret_id: "managed-key-secret-1".to_string(),
-                name: "Production deploy key".to_string(),
-                fingerprint: "SHA256:test".to_string(),
-                public_key: "ssh-ed25519 AAAATEST".to_string(),
-                requires_passphrase: true,
-                origin: ManagedSshKeyOrigin::ImportedFile,
-                created_at: now,
-                updated_at: now,
-            }],
-            ..ConnectionStoreData::default()
-        };
-
-        let value = serde_json::to_value(&data).unwrap();
-
-        assert_eq!(value["managed_ssh_keys"][0]["id"], "managed-key-1");
-        assert_eq!(value["managed_ssh_keys"][0]["origin"], "imported_file");
-        assert!(value.to_string().contains("ssh-ed25519 AAAATEST"));
-        assert!(!value.to_string().contains("PRIVATE KEY"));
-
-        let round_trip: ConnectionStoreData = serde_json::from_value(value).unwrap();
-        assert_eq!(round_trip.managed_ssh_keys, data.managed_ssh_keys);
-    }
-
-    #[test]
     fn managed_key_create_stores_secret_and_returns_metadata_only() {
         let mut store = load_empty_store("managed-key-create");
         let private_key = generated_private_key_text(None);
@@ -2932,6 +2847,18 @@ mod tests {
                 .unwrap()
                 .contains("PRIVATE KEY")
         );
+        let persisted = fs::read_to_string(store.path()).unwrap();
+        assert!(!persisted.contains("PRIVATE KEY"));
+        let value: serde_json::Value = serde_json::from_str(&persisted).unwrap();
+        assert_eq!(value["managed_ssh_keys"][0]["id"], info.id);
+        assert_eq!(value["managed_ssh_keys"][0]["origin"], "pasted_text");
+        assert_eq!(value["managed_ssh_keys"][0]["public_key"], info.public_key);
+        assert_eq!(
+            serde_json::to_value(ManagedSshKeyOrigin::ImportedFile).unwrap(),
+            "imported_file"
+        );
+        let reloaded = ConnectionStore::load(store.path().to_path_buf()).unwrap();
+        assert_eq!(reloaded.data.managed_ssh_keys, store.data.managed_ssh_keys);
     }
 
     #[test]
@@ -3192,29 +3119,6 @@ mod tests {
     }
 
     #[test]
-    fn managed_key_secret_file_round_trips_large_private_key_material() {
-        let data_dir =
-            std::env::temp_dir().join(format!("oxideterm-managed-key-secret-{}", Uuid::new_v4()));
-        let config_key = [42u8; CONFIG_ENCRYPTION_KEY_LEN];
-        let secret_id = "managed-key-large-rsa";
-        let private_key = SecretString::from(format!(
-            "-----BEGIN OPENSSH PRIVATE KEY-----\n{}\n-----END OPENSSH PRIVATE KEY-----\n",
-            "A".repeat(4096)
-        ));
-
-        write_managed_ssh_key_secret_file(&data_dir, secret_id, &private_key, &config_key).unwrap();
-
-        let secret_path = managed_ssh_key_secret_file_path(&data_dir, secret_id).unwrap();
-        let secret_file = fs::read_to_string(secret_path).unwrap();
-        assert!(!secret_file.contains(private_key.expose_secret()));
-
-        let restored = read_managed_ssh_key_secret_file(&data_dir, secret_id, &config_key).unwrap();
-        assert_eq!(restored, private_key);
-
-        let _ = fs::remove_dir_all(data_dir);
-    }
-
-    #[test]
     fn managed_key_create_falls_back_to_secret_file_for_large_rsa_keychain_failure() {
         let _config_key = with_config_encryption_key_for_tests([43u8; CONFIG_ENCRYPTION_KEY_LEN]);
         let mut store = load_empty_store("managed-key-large-rsa-fallback");
@@ -3277,6 +3181,13 @@ mod tests {
             .unwrap();
 
         assert!(info.requires_passphrase);
+        let reloaded = ConnectionStore::load(store.path().to_path_buf()).unwrap();
+        assert!(
+            reloaded
+                .managed_ssh_key_metadata(&info.id)
+                .unwrap()
+                .requires_passphrase
+        );
     }
 
     #[test]

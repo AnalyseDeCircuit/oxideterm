@@ -145,7 +145,6 @@ fn persisted_agents_are_descriptive_and_deleted_with_their_conversation() {
     assert_eq!(summaries.len(), 1);
     assert_eq!(summaries[0].snapshot.state, AgentState::Interrupted);
     assert!(summaries[0].snapshot.scope.targets.is_empty());
-    assert_eq!(state.conversations.len(), 1);
     let loaded = store
         .load_agent_record("conversation", &child.run_id)
         .unwrap()

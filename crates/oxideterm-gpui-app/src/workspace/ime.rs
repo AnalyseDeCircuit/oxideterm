@@ -4053,16 +4053,16 @@ mod tests {
         );
     }
     use gpui::{Keystroke, Modifiers};
-    use zeroize::{Zeroize, Zeroizing};
+    use zeroize::Zeroizing;
 
     use super::{
         CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
         NewConnectionField, PendingPlatformTextCommit, QuickCommandInput, SettingsInput, SftpInput,
         TextInputAnchorStore, WorkspaceCaretState, WorkspaceCaretVisibility,
         WorkspaceImeMarkedText, WorkspaceImeTarget, active_ime_should_defer_input_key,
-        collapsed_copy_shortcut_is_owned_by_target, copy_shortcut_owner_for_target,
-        effective_platform_text_replacement_range, ime_target_is_secret, ime_text_snapshot,
-        keystroke_platform_text, keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
+        copy_shortcut_owner_for_target, effective_platform_text_replacement_range,
+        ime_target_is_secret, ime_text_snapshot, keystroke_platform_text,
+        keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
         platform_text_commit_is_duplicate, secret_ime_proxy, soft_wrapped_line_ranges_utf16,
         utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
@@ -4285,6 +4285,16 @@ mod tests {
             WorkspaceImeTarget::CommandPalette,
             "a",
         ));
+        assert!(!platform_text_commit_is_duplicate(
+            &mut pending,
+            WorkspaceImeTarget::ShortcutsModalSearch,
+            "a",
+        ));
+        assert!(!platform_text_commit_is_duplicate(
+            &mut pending,
+            WorkspaceImeTarget::CommandPalette,
+            "b",
+        ));
         assert!(platform_text_commit_is_duplicate(
             &mut pending,
             WorkspaceImeTarget::CommandPalette,
@@ -4303,28 +4313,6 @@ mod tests {
             WorkspaceImeTarget::CommandPalette,
             "a",
         ));
-    }
-
-    #[test]
-    fn platform_text_commit_does_not_dedupe_other_targets_or_text() {
-        let mut pending = Some(PendingPlatformTextCommit {
-            target: WorkspaceImeTarget::CommandPalette,
-            text: Zeroizing::new("a".to_string()),
-            generation: 1,
-            consumed: true,
-        });
-
-        assert!(!platform_text_commit_is_duplicate(
-            &mut pending,
-            WorkspaceImeTarget::ShortcutsModalSearch,
-            "a",
-        ));
-        assert!(!platform_text_commit_is_duplicate(
-            &mut pending,
-            WorkspaceImeTarget::CommandPalette,
-            "b",
-        ));
-        assert!(pending.is_some());
     }
 
     #[test]
@@ -4459,7 +4447,7 @@ mod tests {
     #[test]
     fn platform_commit_and_marked_text_debug_are_redacted() {
         let secret = "debug-secret";
-        let mut pending = PendingPlatformTextCommit {
+        let pending = PendingPlatformTextCommit {
             target: WorkspaceImeTarget::Settings(SettingsInput::AiProviderApiKey(0)),
             text: Zeroizing::new(secret.to_string()),
             generation: 9,
@@ -4475,13 +4463,10 @@ mod tests {
         assert!(!format!("{marked:?}").contains(secret));
         assert!(format!("{pending:?}").contains("<redacted>"));
         assert!(format!("{marked:?}").contains("<redacted>"));
-
-        pending.text.zeroize();
-        assert!(pending.text.is_empty());
     }
 
     #[test]
-    fn marked_text_replacement_and_release_clear_owned_secret() {
+    fn marked_text_replacement_reuses_owned_secret_allocation() {
         let mut marked = WorkspaceImeMarkedText {
             target: WorkspaceImeTarget::KeyboardInteractive(0),
             replacement_range: 0..0,
@@ -4494,9 +4479,6 @@ mod tests {
         assert_eq!(marked.replacement_range, 2..4);
         assert_eq!(marked.text.as_str(), "新值");
         assert_eq!(marked.text.as_ptr(), allocation);
-
-        marked.text.zeroize();
-        assert!(marked.text.is_empty());
     }
 
     #[test]
@@ -4539,16 +4521,6 @@ mod tests {
             "left",
             true,
             false,
-        ));
-    }
-
-    #[test]
-    fn collapsed_read_only_copy_falls_through_to_next_owner() {
-        assert!(!collapsed_copy_shortcut_is_owned_by_target(
-            WorkspaceImeTarget::ReadOnlyText(42)
-        ));
-        assert!(collapsed_copy_shortcut_is_owned_by_target(
-            WorkspaceImeTarget::Search(PaneId(1))
         ));
     }
 

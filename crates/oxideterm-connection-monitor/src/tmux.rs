@@ -966,59 +966,52 @@ mod tests {
     }
 
     #[test]
-    fn parser_rejects_tab_delimited_rows_before_ui_layout_gets_blamed() {
-        let output = concat!(
-            "===TMUX===\n",
-            "__OXIDE_TMUX_CAPABILITY__\tfull\ttmux_cli\ttmux 3.4\n",
-            "SESSION\t$1\tlegacy\t1\t0\t1713990000\t1713990300\n",
-            "===TMUX_END===\n"
-        );
-
-        let snapshot = parse_tmux_snapshot(&output);
-
-        assert!(matches!(snapshot.status, ResourceTmuxStatus::Error { .. }));
-    }
-
-    #[test]
-    fn no_server_running_is_available_empty() {
-        let output = concat!(
-            "===TMUX===\n",
-            "__OXIDE_TMUX_CAPABILITY__\tfull\ttmux_cli\ttmux 3.4\n",
-            "===TMUX_END===\n"
-        );
-
-        let snapshot = parse_tmux_snapshot(&output);
-
-        assert!(matches!(
-            snapshot.status,
-            ResourceTmuxStatus::Available { .. }
-        ));
-        assert!(snapshot.sessions.is_empty());
-    }
-
-    #[test]
-    fn tmux_not_installed_is_unavailable() {
-        let output = concat!(
-            "===TMUX===\n",
-            "__OXIDE_TMUX_UNAVAILABLE__\n",
-            "===TMUX_END===\n"
-        );
-
-        let snapshot = parse_tmux_snapshot(&output);
-
-        assert_eq!(snapshot.status, ResourceTmuxStatus::Unavailable);
-    }
-
-    #[test]
-    fn malformed_old_format_is_error() {
-        let output = format!(
-            "===TMUX===\n__OXIDE_TMUX_CAPABILITY__\tpartial\ttmux_cli\ttmux 1.8\n{}\n===TMUX_END===\n",
-            tmux_row("SESSION", &["$1", "missing-fields"])
-        );
-
-        let snapshot = parse_tmux_snapshot(&output);
-
-        assert!(matches!(snapshot.status, ResourceTmuxStatus::Error { .. }));
+    fn parser_distinguishes_empty_unavailable_and_malformed_snapshots() {
+        for (name, capability, rows, expected) in [
+            (
+                "no server",
+                "full\ttmux_cli\ttmux 3.4",
+                "",
+                ResourceTmuxStatus::Available {
+                    capability: TmuxCommandCapability::Full,
+                    platform: "tmux_cli".to_string(),
+                    version: "tmux 3.4".to_string(),
+                },
+            ),
+            (
+                "not installed",
+                "",
+                "__OXIDE_TMUX_UNAVAILABLE__",
+                ResourceTmuxStatus::Unavailable,
+            ),
+            (
+                "tab-delimited rows",
+                "full\ttmux_cli\ttmux 3.4",
+                "SESSION\t$1\tlegacy\t1\t0\t1713990000\t1713990300",
+                ResourceTmuxStatus::Error {
+                    message: "tmux output did not include the required fields.".to_string(),
+                },
+            ),
+            (
+                "missing fields",
+                "partial\ttmux_cli\ttmux 1.8",
+                "SESSION\t|\t$1\t|\tmissing-fields",
+                ResourceTmuxStatus::Error {
+                    message: "tmux output did not include the required fields.".to_string(),
+                },
+            ),
+        ] {
+            let output = if capability.is_empty() {
+                format!("===TMUX===\n{rows}\n===TMUX_END===\n")
+            } else {
+                format!(
+                    "===TMUX===\n__OXIDE_TMUX_CAPABILITY__\t{capability}\n{rows}\n===TMUX_END===\n"
+                )
+            };
+            let snapshot = parse_tmux_snapshot(&output);
+            assert_eq!(snapshot.status, expected, "{name}");
+            assert!(snapshot.sessions.is_empty(), "{name}");
+        }
     }
 
     #[test]

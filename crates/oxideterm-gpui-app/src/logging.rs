@@ -210,7 +210,7 @@ mod tests {
     }
 
     #[test]
-    fn size_limited_writer_keeps_latest_logs_in_one_bounded_file() {
+    fn size_limited_writer_compacts_history_and_replaces_oversized_entries() {
         let directory = TestDirectory::new("bounded-file");
         let log_path = directory.0.join(LOG_FILE_NAME);
         let mut writer = SizeLimitedLogWriter::open(&log_path, 64).expect("open bounded log");
@@ -228,6 +228,12 @@ mod tests {
         assert!(contents.contains("new-entry-that-must-remain-after-size-compaction"));
         assert!(!contents.contains("old-entry-one"));
         assert_eq!(std::fs::read_dir(&directory.0).unwrap().count(), 1);
+
+        writer.write_all(&[b'x'; 128]).unwrap();
+        writer.flush().unwrap();
+        let contents = std::fs::read_to_string(log_path).unwrap();
+        assert_eq!(contents, "[oversized log entry omitted]\n");
+        assert!(contents.len() <= 64);
     }
 
     #[test]
@@ -245,22 +251,5 @@ mod tests {
         assert!(!legacy_log.exists());
         assert!(current_log.exists());
         assert!(unrelated_log.exists());
-    }
-
-    #[test]
-    fn oversized_log_entry_is_replaced_without_exceeding_the_limit() {
-        let directory = TestDirectory::new("oversized-entry");
-        let log_path = directory.0.join(LOG_FILE_NAME);
-        let mut writer = SizeLimitedLogWriter::open(&log_path, 64).expect("open bounded log");
-
-        writer.write_all(&[b'x'; 128]).unwrap();
-        writer.flush().unwrap();
-
-        let contents = std::fs::read_to_string(log_path).unwrap();
-        assert_eq!(
-            contents,
-            std::str::from_utf8(OVERSIZED_LOG_ENTRY_MARKER).unwrap()
-        );
-        assert!(contents.len() <= 64);
     }
 }

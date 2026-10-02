@@ -550,20 +550,21 @@ mod tests {
     }
 
     #[test]
-    fn maps_snapshot_limit_error_to_copy_spec() {
-        let spec = cloud_sync_error_message_spec("snapshot_too_large: max 2097152 bytes");
-
-        assert_eq!(
-            spec,
-            CloudSyncErrorMessageSpec::SnapshotTooLarge {
-                limit: Some("2.0 MB".to_string())
-            }
-        );
-    }
-
-    #[test]
-    fn maps_provider_errors_to_copy_specs() {
+    fn maps_errors_to_copy_specs() {
         for (error, expected) in [
+            (
+                "snapshot_too_large: max 2097152 bytes",
+                CloudSyncErrorMessageSpec::SnapshotTooLarge {
+                    limit: Some("2.0 MB".to_string()),
+                },
+            ),
+            (
+                "onedrive_bad_request: Invalid request [operation=onedrive_metadata_upload, status=400, graph_code=badRequest, request_id=request-123]",
+                CloudSyncErrorMessageSpec::KeyWithDetail {
+                    key: "plugin.cloud_sync.errors.onedrive_bad_request",
+                    detail: "Invalid request [operation=onedrive_metadata_upload, status=400, graph_code=badRequest, request_id=request-123]".to_string(),
+                },
+            ),
             (
                 "sync_protocol_upgrade_required: HTTP JSON server must support v3 object enumeration",
                 CloudSyncErrorMessageSpec::Key(
@@ -600,20 +601,7 @@ mod tests {
                 CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.google_oauth_bad_client"),
             ),
         ] {
-            assert_eq!(cloud_sync_error_message_spec(error), expected);
+            assert_eq!(cloud_sync_error_message_spec(error), expected, "{error}");
         }
-    }
-
-    #[test]
-    fn keeps_onedrive_graph_diagnostics_beside_localized_copy() {
-        assert_eq!(
-            cloud_sync_error_message_spec(
-                "onedrive_bad_request: Invalid request [operation=onedrive_metadata_upload, status=400, graph_code=badRequest, request_id=request-123]"
-            ),
-            CloudSyncErrorMessageSpec::KeyWithDetail {
-                key: "plugin.cloud_sync.errors.onedrive_bad_request",
-                detail: "Invalid request [operation=onedrive_metadata_upload, status=400, graph_code=badRequest, request_id=request-123]".to_string(),
-            }
-        );
     }
 }

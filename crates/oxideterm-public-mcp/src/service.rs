@@ -3026,9 +3026,9 @@ mod tests {
     }
 
     #[test]
-    fn quick_command_save_roundtrips_advanced_fields_without_debugging_defaults() {
+    fn quick_command_save_preserves_advanced_fields_and_rejects_secret_defaults() {
         let secret_default = "sensitive-default";
-        let arguments = json!({
+        let mut arguments = json!({
             "name": "Deploy",
             "command": "deploy {{param.service}}",
             "category": "custom",
@@ -3049,32 +3049,29 @@ mod tests {
         .cloned()
         .unwrap();
 
-        let parsed = parse_quick_commands_save(arguments).unwrap();
+        let parsed = parse_quick_commands_save(arguments.clone()).unwrap();
 
-        assert_eq!(parsed.host_patterns.as_ref().map(Vec::len), Some(2));
-        assert_eq!(parsed.protocols.as_ref().map(Vec::len), Some(2));
-        assert_eq!(parsed.parameters.as_ref().map(Vec::len), Some(1));
+        assert_eq!(
+            parsed.host_patterns.as_deref(),
+            Some(["*.prod".to_string(), "bastion.*".to_string()].as_slice())
+        );
+        assert!(matches!(
+            parsed.protocols.as_deref(),
+            Some([
+                crate::PublicQuickCommandTargetProtocol::Ssh,
+                crate::PublicQuickCommandTargetProtocol::Mosh,
+            ])
+        ));
+        let parameters = parsed.parameters.as_deref().unwrap();
+        assert_eq!(parameters.len(), 1);
+        assert_eq!(parameters[0].name, "service");
+        assert_eq!(parameters[0].default_value.as_deref(), Some(secret_default));
+        assert_eq!(parameters[0].choices, [secret_default, "worker"]);
         assert!(!format!("{parsed:?}").contains(secret_default));
-    }
 
-    #[test]
-    fn quick_command_save_rejects_persisted_defaults_for_secret_parameters() {
-        let arguments = json!({
-            "name": "Login",
-            "command": "login {{param.password}}",
-            "category": "custom",
-            "expected_revision": 7,
-            "parameters": [{
-                "name": "password",
-                "label": "Password",
-                "kind": "secret",
-                "default_value": "must-not-persist",
-                "required": true
-            }]
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
+        let parameter = &mut arguments.get_mut("parameters").unwrap()[0];
+        parameter["kind"] = json!("secret");
+        parameter["choices"] = json!([]);
 
         assert!(parse_quick_commands_save(arguments).is_err());
     }

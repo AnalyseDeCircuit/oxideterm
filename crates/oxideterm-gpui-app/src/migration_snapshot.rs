@@ -564,20 +564,6 @@ mod tests {
     }
 
     #[test]
-    fn absent_source_is_marked_complete_without_creating_a_backup() {
-        let root = TestDirectory::new("no-source");
-        let data_dir = root.path().join("data");
-        let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
-
-        assert_eq!(
-            ensure_versioned_snapshot(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap(),
-            MigrationSnapshotOutcome::NoSourceData
-        );
-        assert!(!paths.snapshot.exists());
-        assert!(paths.marker.is_file());
-    }
-
-    #[test]
     fn empty_or_runtime_only_source_does_not_create_a_backup() {
         let root = TestDirectory::new("runtime-only");
         let data_dir = root.path().join("data");
@@ -657,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn migration_notice_only_opens_for_existing_snapshot() {
+    fn migration_notice_requires_a_snapshot_and_stays_closed_after_acknowledgement() {
         let root = TestDirectory::new("notice-source");
         let data_dir = root.path().join("data");
         let settings_path = data_dir.join("settings.json");
@@ -667,6 +653,9 @@ mod tests {
             MigrationSnapshotOutcome::NoSourceData
         );
         assert!(!pre_2_0_migration_notice_pending(&settings_path).unwrap());
+        let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
+        assert!(!paths.snapshot.exists());
+        assert!(paths.marker.is_file());
 
         let second_root = TestDirectory::new("notice-existing");
         let second_data_dir = second_root.path().join("data");
@@ -679,21 +668,9 @@ mod tests {
             MigrationSnapshotOutcome::Created
         );
         assert!(pre_2_0_migration_notice_pending(&second_settings_path).unwrap());
-    }
-
-    #[test]
-    fn acknowledged_migration_notice_stays_closed() {
-        let root = TestDirectory::new("notice-acknowledged");
-        let data_dir = root.path().join("data");
-        let settings_path = data_dir.join("settings.json");
-        fs::create_dir_all(&data_dir).unwrap();
-        fs::write(&settings_path, b"legacy settings").unwrap();
-
-        ensure_pre_2_0_migration_snapshot(&settings_path).unwrap();
-        acknowledge_pre_2_0_migration_notice(&settings_path).unwrap();
-
-        assert!(!pre_2_0_migration_notice_pending(&settings_path).unwrap());
-        let paths = SnapshotPaths::new(&data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
+        acknowledge_pre_2_0_migration_notice(&second_settings_path).unwrap();
+        assert!(!pre_2_0_migration_notice_pending(&second_settings_path).unwrap());
+        let paths = SnapshotPaths::new(&second_data_dir, PRE_2_0_SOURCE_VERSION).unwrap();
         assert_eq!(
             fs::read(paths.notice_marker).unwrap(),
             NOTICE_MARKER_CONTENT

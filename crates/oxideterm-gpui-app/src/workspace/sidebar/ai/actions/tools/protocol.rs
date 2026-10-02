@@ -688,12 +688,15 @@ mod tests {
 
     #[test]
     pub(in crate::workspace) fn long_tool_output_uses_head_tail_preview_metadata() {
-        let output = "a".repeat(30_000);
+        let output = format!("HEAD{}OMITTED{}TAIL", "a".repeat(15_000), "b".repeat(15_000));
 
         let (preview, raw_output, output_preview, truncated) = prepare_ai_tool_output(&output);
 
         assert!(truncated);
-        assert!(raw_output.is_some());
+        assert_eq!(raw_output.as_deref(), Some(output.as_str()));
+        assert!(preview.starts_with("HEAD"));
+        assert!(preview.ends_with("TAIL"));
+        assert!(!preview.contains("OMITTED"));
         assert!(preview.contains("showing head and tail"));
         assert_eq!(
             output_preview.get("strategy"),

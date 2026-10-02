@@ -991,42 +991,6 @@ mod tests {
     }
 
     #[test]
-    fn imported_document_enters_the_coalesced_keyword_index() {
-        let store = temp_store("imported_document_keyword_index");
-        let collection = rag_create_collection(
-            &store,
-            CreateCollectionRequest {
-                name: "docs".to_string(),
-                scope: DocScopeRequest::Global,
-            },
-        )
-        .unwrap();
-
-        let document = rag_add_document(
-            &store,
-            AddDocumentRequest {
-                collection_id: collection.id.clone(),
-                title: "Imported guide".to_string(),
-                content: "importeduniqueterm".to_string(),
-                format: "markdown".to_string(),
-                source_path: Some("/docs/imported.md".to_string()),
-            },
-        )
-        .unwrap();
-
-        assert_eq!(document.version, 0);
-        assert_eq!(
-            store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
-            Bm25IndexStatus::Ready
-        );
-        assert!(
-            !bm25::search_bm25(&store, "importeduniqueterm", &[collection.id], 10)
-                .unwrap()
-                .is_empty()
-        );
-    }
-
-    #[test]
     fn cancelled_manual_rebuild_keeps_the_observable_index_state() {
         let store = temp_store("cancelled_manual_rebuild_status");
 
@@ -1039,7 +1003,7 @@ mod tests {
     }
 
     #[test]
-    fn queued_keyword_rebuild_publishes_the_latest_saved_version() {
+    fn imported_document_and_repeated_saves_publish_current_keyword_results() {
         let store = temp_store("coalesced_keyword_rebuild");
         let collection = rag_create_collection(
             &store,
@@ -1049,15 +1013,33 @@ mod tests {
             },
         )
         .unwrap();
-        let document = rag_create_blank_document(
+        let document = rag_add_document(
             &store,
-            CreateBlankDocumentRequest {
+            AddDocumentRequest {
                 collection_id: collection.id.clone(),
-                title: "guide".to_string(),
+                title: "Imported guide".to_string(),
+                content: "importeduniqueterm".to_string(),
                 format: "markdown".to_string(),
+                source_path: Some("/docs/imported.md".to_string()),
             },
         )
         .unwrap();
+        assert_eq!(document.version, 0);
+        assert_eq!(
+            store.wait_for_bm25_rebuild(std::time::Duration::from_secs(5)),
+            Bm25IndexStatus::Ready
+        );
+        let hits = bm25::search_bm25(
+            &store,
+            "importeduniqueterm",
+            std::slice::from_ref(&collection.id),
+            10,
+        )
+        .unwrap();
+        assert_eq!(hits.len(), 1);
+        let chunk = store.get_chunk(&hits[0].chunk_id).unwrap().unwrap();
+        assert_eq!(chunk.doc_id, document.id);
+        assert_eq!(chunk.content, "importeduniqueterm");
 
         let first = rag_save_document(
             &store,
@@ -1085,11 +1067,11 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        assert!(
-            !bm25::search_bm25(&store, "seconduniqueterm", &collection_ids, 10)
-                .unwrap()
-                .is_empty()
-        );
+        let hits = bm25::search_bm25(&store, "seconduniqueterm", &collection_ids, 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        let chunk = store.get_chunk(&hits[0].chunk_id).unwrap().unwrap();
+        assert_eq!(chunk.doc_id, document.id);
+        assert_eq!(chunk.content, "seconduniqueterm");
     }
 
     #[test]

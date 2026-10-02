@@ -1654,24 +1654,8 @@ mod entity_delivery_tests {
         }
     }
 
-    #[test]
-    fn file_row_selection_is_owned_by_sftp_entity() {
-        let mut sftp = SftpWorkspaceEntity::default();
-        sftp.local_files = vec![file_entry("alpha"), file_entry("beta")];
-
-        sftp.select_file(
-            SftpPane::Local,
-            "alpha".to_string(),
-            gpui::Modifiers::default(),
-        );
-
-        assert_eq!(sftp.local_selected, HashSet::from(["alpha".to_string()]));
-        assert_eq!(sftp.local_last_selected.as_deref(), Some("alpha"));
-        assert_eq!(sftp.active_pane, SftpPane::Local);
-    }
-
     #[gpui::test]
-    fn file_activation_emits_typed_workspace_intent(cx: &mut TestAppContext) {
+    fn local_selection_survives_opening_a_remote_file_with_its_identity(cx: &mut TestAppContext) {
         let entity = cx.new(SftpWorkspaceEntity::new);
         let observed = Arc::new(AtomicBool::new(false));
         let observed_event = observed.clone();
@@ -1690,7 +1674,16 @@ mod entity_delivery_tests {
         });
 
         entity.update(cx, |sftp, cx| {
+            sftp.local_files = vec![file_entry("alpha"), file_entry("beta")];
+            sftp.select_file(
+                SftpPane::Local,
+                "alpha".to_string(),
+                gpui::Modifiers::default(),
+            );
+            assert_eq!(sftp.active_pane, SftpPane::Local);
             sftp.activate_file(SftpPane::Remote, file_entry("remote.txt"), cx);
+            assert_eq!(sftp.local_selected, HashSet::from(["alpha".to_string()]));
+            assert_eq!(sftp.local_last_selected.as_deref(), Some("alpha"));
         });
 
         assert!(observed.load(Ordering::Acquire));
@@ -1816,6 +1809,8 @@ mod entity_delivery_tests {
                 );
                 assert_eq!(state.remote_selected, HashSet::from([name.to_string()]));
                 assert!(!state.remote_load_pending);
+                assert!(!state.remote_load_inflight);
+                assert!(!state.remote_loading);
             });
         }
     }

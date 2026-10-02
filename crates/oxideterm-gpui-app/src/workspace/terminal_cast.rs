@@ -506,22 +506,9 @@ impl WorkspaceApp {
 
 #[cfg(test)]
 mod tests {
+    use super::super::terminal_entity::tests::new_terminal_entity;
     use super::*;
     use gpui::TestAppContext;
-
-    fn new_terminal_entity(cx: &mut TestAppContext) -> Entity<WorkspaceTerminalEntity> {
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("create test runtime"),
-        );
-        let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
-        let settings_path = std::env::temp_dir().join("oxideterm-cast-entity-tests-settings.json");
-        cx.new(|cx| {
-            WorkspaceTerminalEntity::new(runtime, NodeRouter::new(registry), &settings_path, cx)
-        })
-    }
 
     fn sample_cast_player() -> TerminalCastPlayerState {
         // Keep the fixture long enough for playback to remain active while its timer is pending.

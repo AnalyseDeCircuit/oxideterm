@@ -462,7 +462,7 @@ mod tests {
     }
 
     #[test]
-    fn forwards_second_launch_to_primary_instance() {
+    fn forwards_second_launch_after_a_shared_receiver_holder_drops() {
         let data_dir =
             std::env::temp_dir().join(format!("oxideterm-single-instance-test-{}", Uuid::new_v4()));
         let paths = InstancePaths::for_data_dir(&data_dir, "test");
@@ -475,6 +475,8 @@ mod tests {
         else {
             panic!("first launch should become the primary instance");
         };
+        let workspace_receiver = receiver.clone();
+        drop(workspace_receiver);
         let forwarded = acquire_or_forward_with_paths(paths, None, None).unwrap();
         assert!(matches!(forwarded, SingleInstanceOutcome::Forwarded));
 
@@ -626,40 +628,5 @@ mod tests {
 
         assert!(rendered.contains("redacted"));
         assert!(!rendered.contains("sensitive-instance-token"));
-    }
-
-    #[test]
-    fn shared_receiver_survives_workspace_holder_drop() {
-        let (tx, rx) = mpsc::channel();
-        let application_receiver = Arc::new(Mutex::new(rx));
-        let first_workspace_receiver = application_receiver.clone();
-        let ssh_launch = NativeConnectionLaunch::Ssh(oxideterm_ssh_launch::TemporarySshLaunch {
-            username: "test-user".to_string(),
-            host: "example.test".to_string(),
-            port: 22,
-            password: None,
-        });
-
-        drop(first_workspace_receiver);
-        tx.send(SingleInstanceEvent::ShowMainWindow).unwrap();
-        tx.send(SingleInstanceEvent::OpenNativeConnection(ssh_launch.into()))
-            .unwrap();
-
-        let receiver = application_receiver.lock().unwrap();
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            SingleInstanceEvent::ShowMainWindow
-        ));
-        let SingleInstanceEvent::OpenNativeConnection(NativeConnectionHandoff {
-            launch: NativeConnectionLaunch::Ssh(received_launch),
-            ..
-        }) = receiver.try_recv().unwrap()
-        else {
-            panic!("second event should retain the forwarded SSH launch");
-        };
-        assert_eq!(received_launch.username, "test-user");
-        assert_eq!(received_launch.host, "example.test");
-        assert_eq!(received_launch.port, 22);
-        assert!(received_launch.password.is_none());
     }
 }

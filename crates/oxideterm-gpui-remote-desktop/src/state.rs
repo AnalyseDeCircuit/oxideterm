@@ -1374,41 +1374,6 @@ mod tests {
     }
 
     #[test]
-    fn frame_update_patches_existing_frame() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        let size = RemoteDesktopSize {
-            width: 2,
-            height: 1,
-        };
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![1, 1, 1, 1, 2, 2, 2, 2],
-            ),
-        });
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(1, 0, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![9, 9, 9, 9],
-            ),
-        });
-
-        assert_eq!(state.frame_size(), Some(size));
-        assert_eq!(
-            frame_bgra_bytes(&state),
-            [1, 1, 1, 1, 9, 9, 9, 9].as_slice()
-        );
-        let public_snapshot = state.frame_snapshot().expect("frame should be cached");
-        assert_eq!(public_snapshot.generation, 2);
-        assert_eq!(public_snapshot.graphics_epoch, 0);
-        assert_eq!(public_snapshot.bgra_bytes, vec![1, 1, 1, 1, 9, 9, 9, 9]);
-    }
-
-    #[test]
     fn resize_transition_keeps_old_frame_until_new_epoch_base_arrives() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
         let size = RemoteDesktopSize {
@@ -1522,61 +1487,44 @@ mod tests {
     }
 
     #[test]
-    fn full_frame_update_without_base_establishes_frame() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        let size = RemoteDesktopSize {
-            width: 2,
-            height: 1,
-        };
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(0, 0, 2, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0x30, 0x20, 0x10, 0xff, 0x60, 0x50, 0x40, 0xff],
-            ),
-        });
-
-        assert_eq!(state.frame_size(), Some(size));
-        assert_eq!(
-            frame_bgra_bytes(&state),
-            [0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff].as_slice()
-        );
-    }
-
-    #[test]
-    fn full_frame_update_replaces_mismatched_base_frame() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                RemoteDesktopSize {
-                    width: 1,
-                    height: 1,
-                },
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![1, 1, 1, 0xff],
-            ),
-        });
+    fn full_frame_update_recovers_missing_or_mismatched_base() {
         let new_size = RemoteDesktopSize {
             width: 2,
             height: 1,
         };
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                new_size,
-                RemoteDesktopRect::new(0, 0, 2, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![2, 2, 2, 0xff, 3, 3, 3, 0xff],
-            ),
-        });
-
-        assert_eq!(state.snapshot().size, Some(new_size));
-        assert_eq!(
-            frame_bgra_bytes(&state),
-            [2, 2, 2, 0xff, 3, 3, 3, 0xff].as_slice()
-        );
+        for has_mismatched_base in [false, true] {
+            let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+            if has_mismatched_base {
+                state.apply_event(RemoteDesktopHelperEvent::Frame {
+                    frame: RemoteDesktopFrame::new(
+                        RemoteDesktopSize {
+                            width: 1,
+                            height: 1,
+                        },
+                        RemoteDesktopFrameFormat::Rgba8,
+                        vec![1, 1, 1, 0xff],
+                    ),
+                });
+            }
+            state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+                update: RemoteDesktopFrameUpdate::new(
+                    new_size,
+                    RemoteDesktopRect::new(0, 0, 2, 1),
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![0x30, 0x20, 0x10, 0xff, 0x60, 0x50, 0x40, 0xff],
+                ),
+            });
+            assert_eq!(
+                state.frame_size(),
+                Some(new_size),
+                "mismatched base: {has_mismatched_base}"
+            );
+            assert_eq!(state.snapshot().size, Some(new_size));
+            assert_eq!(
+                frame_bgra_bytes(&state),
+                [0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff]
+            );
+        }
     }
 
     #[test]
@@ -1611,43 +1559,17 @@ mod tests {
         let after = frame_texture(&state);
         assert!(Arc::ptr_eq(&before, &after));
         assert_eq!(
-            frame_bgra_bytes(&state),
-            [
-                0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff, 0x70, 0x80, 0x90, 0xff, 0xcc, 0xbb,
-                0xaa, 0xdd,
-            ]
-            .as_slice()
+            state.frame_snapshot(),
+            Some(RemoteDesktopFrameSnapshot {
+                size,
+                graphics_epoch: 0,
+                generation: 2,
+                bgra_bytes: vec![
+                    0x10, 0x20, 0x30, 0xff, 0x40, 0x50, 0x60, 0xff, 0x70, 0x80, 0x90, 0xff, 0xcc,
+                    0xbb, 0xaa, 0xdd,
+                ],
+            })
         );
-    }
-
-    #[test]
-    fn dirty_update_reuses_dynamic_texture() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        let size = RemoteDesktopSize {
-            width: 300,
-            height: 300,
-        };
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0; RemoteDesktopFrame::expected_len(size).unwrap()],
-            ),
-        });
-        let before = frame_texture(&state);
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(10, 10, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0xaa, 0xbb, 0xcc, 0xdd],
-            ),
-        });
-
-        let after = frame_texture(&state);
-        assert!(Arc::ptr_eq(&before, &after));
-        assert_eq!(pending_texture_update_count(&state), 1);
     }
 
     #[test]
@@ -1724,7 +1646,10 @@ mod tests {
         let updates = drain_pending_texture_updates(&state);
         assert_eq!(updates.len(), 1);
         assert_eq!(updates[0].rect, RemoteDesktopRect::new(0, 0, 2, 1));
-        assert_eq!(updates[0].bytes.as_ref(), frame_bgra_bytes(&state));
+        assert_eq!(
+            updates[0].bytes.as_ref(),
+            &[0, 0, 0, 0xff, 0xcc, 0xbb, 0xaa, 0xdd]
+        );
     }
 
     #[test]

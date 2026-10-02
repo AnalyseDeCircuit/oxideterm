@@ -333,20 +333,10 @@ mod tests {
             buffer.state().unwrap(),
             X11SetupBufferState::Complete
         ));
-    }
-
-    #[test]
-    fn setup_rewrite_debug_redacts_packet_bytes() {
-        let fake = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let real = X11AuthCookie::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
-        let auth = X11AuthMaterial::with_fake_cookie(fake, real);
-        let packet = setup_packet(X11ByteOrder::LittleEndian, auth.fake_cookie.as_bytes());
-        let mut buffer = X11SetupBuffer::new();
-
-        let rewrite = buffer.push(&packet, &auth).unwrap().unwrap();
         let debug = format!("{rewrite:?}");
 
         assert!(!debug.contains("bbbb"));
+        assert!(!debug.contains("187, 187"));
         assert!(debug.contains("rewritten_setup_len"));
     }
 

@@ -425,7 +425,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn staged_update_replaces_files_and_retains_old_files() {
+    fn staged_update_retains_old_files_until_startup_is_confirmed() {
         let temp = tempfile::tempdir().unwrap();
         let install_dir = temp.path();
         fs::create_dir_all(install_dir.join("resources")).unwrap();
@@ -470,28 +470,11 @@ mod tests {
             fs::read_to_string(old_dir.join("resources/config.json")).unwrap(),
             "old config"
         );
-    }
 
-    #[test]
-    fn confirmed_update_removes_retained_old_directory() {
-        let temp = tempfile::tempdir().unwrap();
-        let old_dir = temp.path().join(WINDOWS_UPDATE_OLD_DIR);
-        fs::create_dir_all(&old_dir).unwrap();
-        fs::write(old_dir.join("oxideterm-native.exe"), "old app").unwrap();
-
-        confirm_applied_windows_update(temp.path()).unwrap();
+        confirm_applied_windows_update(install_dir).unwrap();
+        confirm_applied_windows_update(install_dir).unwrap();
 
         assert!(!old_dir.exists());
-    }
-
-    #[test]
-    fn confirming_without_old_directory_is_idempotent() {
-        let temp = tempfile::tempdir().unwrap();
-
-        confirm_applied_windows_update(temp.path()).unwrap();
-        confirm_applied_windows_update(temp.path()).unwrap();
-
-        assert!(!temp.path().join(WINDOWS_UPDATE_OLD_DIR).exists());
     }
 
     #[test]

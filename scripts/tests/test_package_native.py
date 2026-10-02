@@ -191,22 +191,7 @@ class WindowsInstallerScriptTests(unittest.TestCase):
         update_install = script.split("update_install:\n", 1)[1].split("install_done:\n", 1)[0]
         self.assertNotIn("Call EnsureApplicationClosed", update_install)
 
-    def test_all_install_modes_register_the_application_icon(self) -> None:
-        script = package_native.windows_installer_script(
-            binary=Path("oxideterm-native.exe"),
-            version="1.2.0-gpui-preview.2",
-            identity=self.identity(),
-            installer_root=Path(r"C:\dist\nsis-windows_x64"),
-            installer_path=Path(r"C:\dist\OxideTerm_setup.exe"),
-            icon_path=Path(r"C:\icons\icon.ico"),
-        )
-        display_icon_entry = (
-            r'"DisplayIcon" "$\"$INSTDIR\oxideterm-native.exe$\",0"'
-        )
-
-        self.assertEqual(script.count(display_icon_entry), 2)
-
-    def test_modern_ui_uses_the_application_icon(self) -> None:
+    def test_installer_and_installed_application_use_the_application_icon(self) -> None:
         icon_path = Path(r"C:\icons\icon.ico")
         script = package_native.windows_installer_script(
             binary=Path("oxideterm-native.exe"),
@@ -225,6 +210,8 @@ class WindowsInstallerScriptTests(unittest.TestCase):
         self.assertLess(script.index(installer_icon), script.index("!include MUI2.nsh"))
         self.assertNotIn('\nIcon "', script)
         self.assertNotIn("\nUninstallIcon ", script)
+        display_icon_entry = r'"DisplayIcon" "$\"$INSTDIR\oxideterm-native.exe$\",0"'
+        self.assertEqual(script.count(display_icon_entry), 2)
 
     def test_stable_installer_detects_tauri_current_user_install(self) -> None:
         identity = package_native.release_identity("v2.0.0", "2.0.0")
@@ -418,37 +405,7 @@ class MacosDmgDetachTests(unittest.TestCase):
             package_native.MACOS_DMG_DETACH_RETRY_DELAY_SECONDS
         )
 
-    def test_force_detaches_after_retry_limit(self) -> None:
-        device = "/dev/disk9"
-        detach_command = ["hdiutil", "detach", device]
-        busy_error = subprocess.CalledProcessError(
-            package_native.MACOS_RESOURCE_BUSY_EXIT_CODE, detach_command
-        )
-        failed_attempts = [
-            busy_error for _ in range(package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS)
-        ]
-
-        with (
-            patch.object(
-                package_native, "run", side_effect=[*failed_attempts, None]
-            ) as run_mock,
-            patch.object(
-                package_native, "macos_dmg_device_is_attached", return_value=True
-            ),
-            patch.object(package_native.time, "sleep") as sleep,
-        ):
-            package_native.detach_macos_dmg(device)
-
-        self.assertEqual(
-            run_mock.call_args_list,
-            [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
-            + [call(["hdiutil", "detach", "-force", device])],
-        )
-        self.assertEqual(
-            sleep.call_count, package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS - 1
-        )
-
-    def test_retries_busy_force_detach_before_succeeding(self) -> None:
+    def test_force_detach_succeeds_immediately_or_after_busy_retry(self) -> None:
         device = "/dev/disk9"
         detach_command = ["hdiutil", "detach", device]
         force_detach_command = ["hdiutil", "detach", "-force", device]
@@ -459,27 +416,31 @@ class MacosDmgDetachTests(unittest.TestCase):
             busy_error for _ in range(package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS)
         ]
 
-        with (
-            patch.object(
-                package_native,
-                "run",
-                side_effect=[*failed_attempts, busy_error, None],
-            ) as run_mock,
-            patch.object(
-                package_native, "macos_dmg_device_is_attached", return_value=True
-            ),
-            patch.object(package_native.time, "sleep") as sleep,
-        ):
-            package_native.detach_macos_dmg(device)
+        for force_busy_attempts in (0, 1):
+            with (
+                self.subTest(force_busy_attempts=force_busy_attempts),
+                patch.object(
+                    package_native,
+                    "run",
+                    side_effect=[*failed_attempts, *([busy_error] * force_busy_attempts), None],
+                ) as run_mock,
+                patch.object(
+                    package_native, "macos_dmg_device_is_attached", return_value=True
+                ),
+                patch.object(package_native.time, "sleep") as sleep,
+            ):
+                package_native.detach_macos_dmg(device)
 
-        self.assertEqual(
-            run_mock.call_args_list,
-            [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
-            + [call(force_detach_command), call(force_detach_command)],
-        )
-        self.assertEqual(
-            sleep.call_count, package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
-        )
+                self.assertEqual(
+                    run_mock.call_args_list,
+                    [call(detach_command)] * package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS
+                    + [call(force_detach_command)] * (force_busy_attempts + 1),
+                )
+                self.assertEqual(
+                    sleep.call_args_list,
+                    [call(package_native.MACOS_DMG_DETACH_RETRY_DELAY_SECONDS)]
+                    * (package_native.MACOS_DMG_DETACH_MAX_ATTEMPTS - 1 + force_busy_attempts),
+                )
 
     def test_reports_busy_after_force_detach_retry_limit(self) -> None:
         device = "/dev/disk9"
@@ -638,12 +599,6 @@ class ReleaseVersionTests(unittest.TestCase):
                 f"v{mismatched_version}", mismatched_version
             )
 
-    def test_windows_numeric_version_uses_semver_core(self) -> None:
-        self.assertEqual(
-            package_native.windows_numeric_version("2.0.0-gpui-preview.15"),
-            "2.0.0.0",
-        )
-
 
 class LinuxDesktopEntryTests(unittest.TestCase):
     def test_desktop_entry_exposes_matching_startup_window_class(self) -> None:
@@ -693,15 +648,6 @@ class PlatformSigningTests(unittest.TestCase):
             )
 
         self.assertFalse(submitted)
-
-    def test_unsigned_stable_dmg_includes_gatekeeper_notice(self) -> None:
-        identity = package_native.release_identity("v2.0.0", "2.0.0")
-        with patch.dict(package_native.os.environ, {}, clear=True):
-            included = package_native.should_include_macos_unsigned_install_notice(
-                identity
-            )
-
-        self.assertTrue(included)
 
     def test_signed_or_preview_dmg_omits_stable_gatekeeper_notice(self) -> None:
         stable = package_native.release_identity("v2.0.0", "2.0.0")

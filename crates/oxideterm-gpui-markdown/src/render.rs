@@ -3524,6 +3524,8 @@ mod tests {
             super::FlatRunStyle::default(),
             &mut flat,
         );
+        assert!(flat[1].link);
+        assert_eq!(flat[1].link_url.as_deref(), Some("https://example.com"));
         let (text, runs, links) = super::flat_text(&flat, &tokens, &opts);
         assert_eq!(text.as_ref(), "中文 long link 后文");
         assert_eq!(
@@ -3633,27 +3635,6 @@ mod tests {
         assert!(!is_shell_language(Some("text")));
         assert!(is_shell_language(Some("bash")));
         assert!(is_shell_language(Some("zsh")));
-    }
-
-    #[test]
-    fn flat_runs_preserve_link_targets_for_click_rendering() {
-        let mut runs = Vec::new();
-        collect_runs(
-            &[Inline::Link {
-                text: vec![Inline::Text("docs".into())],
-                url: "https://example.com/docs".into(),
-            }],
-            FlatRunStyle::default(),
-            &mut runs,
-        );
-
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].text, "docs");
-        assert!(runs[0].link);
-        assert_eq!(
-            runs[0].link_url.as_deref(),
-            Some("https://example.com/docs")
-        );
     }
 
     #[test]

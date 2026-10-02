@@ -131,22 +131,19 @@ mod tests {
     }
 
     #[test]
-    fn detects_binary_zmodem_header() {
-        let mut detector = ModemDetector::new();
-        assert_eq!(
-            detector.scan(&[ZPAD, ZDLE, ZBIN32]),
-            vec![DetectedModemProtocol::Zmodem]
-        );
-    }
-
-    #[test]
     fn reports_the_earliest_zmodem_header_across_encodings() {
         let mut detector = ModemDetector::new();
         let bytes = [ZPAD, ZDLE, ZBIN32, b'x', ZPAD, ZPAD, ZDLE, ZHEX];
 
         let start = detector.scan_first(&bytes).expect("zmodem header");
 
-        assert_eq!(start.offset, 0);
+        assert_eq!(
+            start,
+            DetectedModemStart {
+                protocol: DetectedModemProtocol::Zmodem,
+                offset: 0,
+            }
+        );
     }
 
     #[test]

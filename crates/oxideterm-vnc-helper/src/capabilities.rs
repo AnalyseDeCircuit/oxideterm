@@ -51,6 +51,14 @@ mod tests {
         .unwrap()
         .unwrap();
 
+        assert!(
+            update_vnc_capabilities(&capabilities, |snapshot| {
+                snapshot.qemu_audio = NegotiatedCapabilityStatus::Supported;
+            })
+            .unwrap()
+            .is_none()
+        );
+
         let RemoteDesktopHelperEvent::CapabilitiesNegotiated { capabilities } = event else {
             panic!("expected negotiated capability event");
         };
@@ -61,23 +69,6 @@ mod tests {
         assert_eq!(
             capabilities.qemu_audio,
             NegotiatedCapabilityStatus::Supported
-        );
-    }
-
-    #[test]
-    fn duplicate_observations_do_not_emit_duplicate_events() {
-        let capabilities = Arc::new(Mutex::new(NegotiatedCapabilities::default()));
-        update_vnc_capabilities(&capabilities, |snapshot| {
-            snapshot.qemu_audio = NegotiatedCapabilityStatus::Supported;
-        })
-        .unwrap();
-
-        assert!(
-            update_vnc_capabilities(&capabilities, |snapshot| {
-                snapshot.qemu_audio = NegotiatedCapabilityStatus::Supported;
-            })
-            .unwrap()
-            .is_none()
         );
     }
 }

@@ -833,7 +833,7 @@ mod tests {
     }
 
     #[test]
-    fn portable_replacement_preserves_user_data_and_unknown_files() {
+    fn portable_replacement_preserves_user_data_and_clears_backup_on_confirmation() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         fs::create_dir_all(root.join("data/plugins")).unwrap();
@@ -898,19 +898,11 @@ mod tests {
         );
         assert!(root.join(PORTABLE_UPDATE_BACKUP_DIR).exists());
         assert!(!root.join(PORTABLE_UPDATE_STAGING_DIR).exists());
-    }
 
-    #[test]
-    fn confirmed_portable_update_removes_retained_backup() {
-        let temp = tempfile::tempdir().unwrap();
-        let backup = temp.path().join(PORTABLE_UPDATE_BACKUP_DIR);
-        fs::create_dir(&backup).unwrap();
-        fs::write(backup.join("oxideterm-native"), "old app").unwrap();
+        confirm_applied_portable_update(root).unwrap();
+        confirm_applied_portable_update(root).unwrap();
 
-        confirm_applied_portable_update(temp.path()).unwrap();
-        confirm_applied_portable_update(temp.path()).unwrap();
-
-        assert!(!backup.exists());
+        assert!(!root.join(PORTABLE_UPDATE_BACKUP_DIR).exists());
     }
 
     #[test]

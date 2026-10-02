@@ -643,7 +643,7 @@ mod tests {
 
         assert_eq!(
             gist_object_filename(&first, "latest.json"),
-            gist_object_filename(&first, "latest.json")
+            "oxideterm-team-default-latest.json-b8308695435769ec1730cee70510131863d6e7c6e246c2db04ef0c03ae76cb97.b64"
         );
         assert_ne!(
             gist_object_filename(&first, "latest.json"),
@@ -652,11 +652,12 @@ mod tests {
     }
 
     #[test]
-    fn gist_content_roundtrips_binary_bytes() {
+    fn gist_content_uses_versioned_base64_for_binary_bytes() {
         let bytes = vec![0, 1, 2, b'O', b'X', b'I', b'D', b'E', 255];
-        let encoded = encode_gist_object_content(&bytes);
+        let encoded = "OXIDETERM-GIST-BLOB-V1\nAAECT1hJREX/";
 
-        assert_eq!(decode_gist_object_content(&encoded).unwrap(), bytes);
+        assert_eq!(encode_gist_object_content(&bytes), encoded);
+        assert_eq!(decode_gist_object_content(encoded).unwrap(), bytes);
     }
 
     #[test]

@@ -229,24 +229,12 @@ fn integrated_zsh_loads_history_from_user_config_in_a_real_pty() {
     session.drain_output();
     session.take_events();
     session
-        .write_text("print -r -- OXIDETERM_HISTORY_COUNT=${#history[@]}\n")
-        .expect("query Zsh history count");
+        .write_text("fc -l 1 -1\n")
+        .expect("query Zsh history");
 
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     let mut screen = String::new();
-    let parse_history_count = |output: &str| {
-        output.rsplit("OXIDETERM_HISTORY_COUNT=").find_map(|value| {
-            let digits = value
-                .trim_start()
-                .chars()
-                .take_while(char::is_ascii_digit)
-                .collect::<String>();
-            (!digits.is_empty())
-                .then(|| digits.parse::<usize>().ok())
-                .flatten()
-        })
-    };
-    while std::time::Instant::now() < deadline && parse_history_count(&screen).is_none() {
+    while std::time::Instant::now() < deadline && !screen.contains("oxideterm-history-probe") {
         session.drain_output();
         screen = session
             .snapshot()
@@ -259,9 +247,8 @@ fn integrated_zsh_loads_history_from_user_config_in_a_real_pty() {
     }
     session.shutdown();
 
-    let count = parse_history_count(&screen).expect("history count response");
     assert!(
-        count > 0,
+        screen.contains("oxideterm-history-probe"),
         "integrated Zsh PTY did not load configured history"
     );
 }

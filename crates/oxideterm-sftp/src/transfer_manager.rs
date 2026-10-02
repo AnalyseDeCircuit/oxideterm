@@ -1201,7 +1201,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn interrupted_transfer_exits_without_deleting_resume_progress() {
+    async fn interrupted_transfer_exits_and_records_background_error() {
         let manager = SftpTransferManager::new();
         manager.register("tx-1");
         manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
@@ -1221,43 +1221,6 @@ mod tests {
         assert_eq!(snapshot.state, BackgroundTransferState::Error);
         assert_eq!(snapshot.error.as_deref(), Some("Connection lost"));
         assert_eq!(snapshot.backend_speed, Some(0));
-    }
-
-    #[test]
-    fn pause_and_resume_update_background_snapshot_state() {
-        let manager = SftpTransferManager::new();
-        manager.register("tx-1");
-        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
-        manager.mark_background_transfer_active("tx-1");
-
-        assert!(manager.pause("tx-1"));
-        let paused = manager.get_background_transfer("tx-1").unwrap();
-        assert_eq!(paused.state, BackgroundTransferState::Paused);
-        assert_eq!(paused.backend_speed, Some(0));
-
-        assert!(manager.resume("tx-1"));
-        let resumed = manager.get_background_transfer("tx-1").unwrap();
-        assert_eq!(resumed.state, BackgroundTransferState::Pending);
-    }
-
-    #[test]
-    fn completion_keeps_observed_bytes_when_estimate_is_larger() {
-        let manager = SftpTransferManager::new();
-        let mut snapshot = make_background_snapshot("tx-estimate", "node-a");
-        snapshot.size = 4096;
-        manager.register_background_transfer(snapshot, None);
-        manager.update_background_transfer_progress("tx-estimate", 3072, 4096, 0);
-
-        let finished = manager
-            .finish_background_transfer(
-                "tx-estimate",
-                BackgroundTransferState::Completed,
-                None,
-                Some(1),
-            )
-            .unwrap();
-        assert_eq!(finished.transferred, 3072);
-        assert_eq!(finished.item_count, Some(1));
     }
 
     #[test]
@@ -1285,18 +1248,25 @@ mod tests {
         let mut snapshot = make_background_snapshot("tx-1", "node-a");
         snapshot.kind = BackgroundTransferKind::Directory;
         manager.register_background_transfer(snapshot, Some(&context));
+        manager.mark_background_transfer_active("tx-1");
         manager.update_background_transfer_strategy("tx-1", TransferStrategy::DirectoryTar);
         manager.record_background_transfer_stream_bytes("tx-1", 9);
         assert!(manager.pause("tx-1"));
+        let paused = manager.get_background_transfer("tx-1").unwrap();
+        assert_eq!(paused.state, BackgroundTransferState::Paused);
+        assert_eq!(paused.backend_speed, Some(0));
         assert!(manager.resume("tx-1"));
+        assert_eq!(
+            manager.get_background_transfer("tx-1").unwrap().state,
+            BackgroundTransferState::Pending
+        );
         assert!(manager.cancel("tx-1"));
         manager.update_background_transfer_progress("tx-1", 12, 20, 0);
-        manager.finish_background_transfer(
-            "tx-1",
-            BackgroundTransferState::Completed,
-            None,
-            Some(1),
-        );
+        let finished = manager
+            .finish_background_transfer("tx-1", BackgroundTransferState::Completed, None, Some(1))
+            .unwrap();
+        assert_eq!(finished.transferred, 12);
+        assert_eq!(finished.item_count, Some(1));
         manager.unregister("tx-1");
         manager.register_for_node("tx-1", "node-a");
         let mut retry = make_background_snapshot("tx-1", "node-a");

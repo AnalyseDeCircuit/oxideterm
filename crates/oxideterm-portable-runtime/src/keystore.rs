@@ -755,30 +755,9 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_envelope_encrypts_and_decrypts() {
+    fn encrypted_vault_preserves_secrets_and_requires_a_valid_unlock_credential() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
-        let mut session = sample_session("secret123");
-        session
-            .payload
-            .services
-            .entry("svc".to_string())
-            .or_default()
-            .insert("account".to_string(), Zeroizing::new("value".to_string()));
-
-        persist_session_to_path(&path, &session).unwrap();
-        let restored = load_session_from_path(&path, "secret123").unwrap();
-
-        let restored_secret = restored
-            .payload
-            .services
-            .get("svc")
-            .and_then(|accounts| accounts.get("account"));
-        assert_eq!(restored_secret.map(|secret| secret.as_str()), Some("value"));
-    }
-
-    #[test]
-    fn debug_output_redacts_payload_secret_values() {
         let mut session = sample_session("secret123");
         session
             .payload
@@ -791,9 +770,41 @@ mod tests {
             );
 
         let debug = format!("{session:?}");
-
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("do-not-print"));
+
+        persist_session_to_path(&path, &session).unwrap();
+        let restored = load_session_from_path(&path, "secret123").unwrap();
+
+        let restored_secret = restored
+            .payload
+            .services
+            .get("svc")
+            .and_then(|accounts| accounts.get("account"));
+        assert_eq!(
+            restored_secret.map(|secret| secret.as_str()),
+            Some("do-not-print")
+        );
+
+        assert!(matches!(
+            load_session_from_path(&path, "wrong-password"),
+            Err(PortableKeystoreError::DecryptionFailed)
+        ));
+
+        let token = encode_auto_unlock_key(&session.key);
+        let key = decode_auto_unlock_key(token.as_str()).unwrap();
+        let auto_unlocked =
+            decrypt_session(decode_envelope_from_path(&path).unwrap(), key).unwrap();
+        assert_eq!(auto_unlocked.salt, [7u8; PORTABLE_KEYSTORE_SALT_LEN]);
+        assert_eq!(
+            auto_unlocked
+                .payload
+                .services
+                .get("svc")
+                .and_then(|accounts| accounts.get("account"))
+                .map(|secret| secret.as_str()),
+            Some("do-not-print")
+        );
     }
 
     #[test]
@@ -806,32 +817,6 @@ mod tests {
     }
 
     #[test]
-    fn wrong_password_fails_decryption() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
-        let session = sample_session("secret123");
-
-        persist_session_to_path(&path, &session).unwrap();
-        let error = load_session_from_path(&path, "wrong-password").unwrap_err();
-
-        assert!(matches!(error, PortableKeystoreError::DecryptionFailed));
-    }
-
-    #[test]
-    fn encoded_auto_unlock_key_decrypts_the_vault() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
-        let session = sample_session("secret123");
-        persist_session_to_path(&path, &session).unwrap();
-
-        let token = encode_auto_unlock_key(&session.key);
-        let key = decode_auto_unlock_key(token.as_str()).unwrap();
-        let restored = decrypt_session(decode_envelope_from_path(&path).unwrap(), key).unwrap();
-
-        assert_eq!(restored.salt, session.salt);
-    }
-
-    #[test]
     fn malformed_auto_unlock_key_is_rejected() {
         for token in ["not-base64", "c2hvcnQ="] {
             assert!(matches!(
@@ -839,40 +824,6 @@ mod tests {
                 Err(PortableKeystoreError::InvalidAutoUnlockCredential)
             ));
         }
-    }
-
-    #[test]
-    fn change_password_reencrypts_payload() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join(PORTABLE_KEYSTORE_FILENAME);
-        let mut session = sample_session("secret123");
-        session
-            .payload
-            .services
-            .entry("svc".to_string())
-            .or_default()
-            .insert("account".to_string(), Zeroizing::new("value".to_string()));
-
-        persist_session_to_path(&path, &session).unwrap();
-
-        let restored = load_session_from_path(&path, "secret123").unwrap();
-        let mut new_salt = [0u8; PORTABLE_KEYSTORE_SALT_LEN];
-        rand::rngs::OsRng.fill_bytes(&mut new_salt);
-        let rewritten = PortableKeystoreSession {
-            salt: new_salt,
-            key: derive_key("new-secret123", &new_salt, PORTABLE_KEYSTORE_CURRENT_KDF).unwrap(),
-            payload: restored.payload,
-        };
-        persist_session_to_path(&path, &rewritten).unwrap();
-
-        assert!(load_session_from_path(&path, "secret123").is_err());
-        let updated = load_session_from_path(&path, "new-secret123").unwrap();
-        let updated_secret = updated
-            .payload
-            .services
-            .get("svc")
-            .and_then(|accounts| accounts.get("account"));
-        assert_eq!(updated_secret.map(|secret| secret.as_str()), Some("value"));
     }
 
     #[test]

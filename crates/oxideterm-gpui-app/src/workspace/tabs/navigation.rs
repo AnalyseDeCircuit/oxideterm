@@ -1746,21 +1746,13 @@ mod tests {
     }
 
     #[test]
-    fn focusing_terminal_does_not_mark_node_ready() {
+    fn focusing_terminal_selects_and_expands_its_node() {
         let node_id = NodeId("focus-only".to_string());
-        let node = WorkspaceSshNode::new(
-            None,
-            &SshConfig::default(),
-            "Focus only".to_string(),
-            vec![TerminalSessionId(1)],
-            NodeReadiness::Disconnected,
-        );
         let mut active_node_id = None;
         let mut expanded_node_ids = HashSet::new();
 
         focus_terminal_node_projection(&node_id, &mut active_node_id, &mut expanded_node_ids);
 
-        assert_eq!(node.readiness, NodeReadiness::Disconnected);
         assert_eq!(active_node_id, Some(node_id.clone()));
         assert!(expanded_node_ids.contains(&node_id));
     }

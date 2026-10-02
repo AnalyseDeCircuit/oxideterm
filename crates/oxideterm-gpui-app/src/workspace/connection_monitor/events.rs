@@ -215,8 +215,10 @@ mod tests {
     fn window_request_clones_share_one_consumable_intent() {
         let request = terminal_request("journalctl --follow");
         let cloned = request.clone();
+        let independent = terminal_request("journalctl --follow");
 
         assert!(request == cloned);
+        assert!(request != independent);
         match cloned.take() {
             Some(HostToolsWindowIntent::OpenExistingNodeTerminal { command, .. }) => {
                 assert_eq!(command, "journalctl --follow");
@@ -225,13 +227,8 @@ mod tests {
             None => panic!("cloned request should retain the shared intent"),
         }
         assert!(request.take().is_none());
-    }
-
-    #[test]
-    fn separate_window_requests_are_not_equal() {
-        let first = terminal_request("journalctl --follow");
-        let second = terminal_request("journalctl --follow");
-
-        assert!(first != second);
+        assert!(
+            matches!(independent.take(), Some(HostToolsWindowIntent::OpenExistingNodeTerminal { command, .. }) if command == "journalctl --follow")
+        );
     }
 }

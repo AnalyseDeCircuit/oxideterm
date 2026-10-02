@@ -753,16 +753,17 @@ mod tests {
     #[test]
     fn saving_theme_editor_owns_custom_theme_persistence() {
         let mut settings = PersistedSettings::default();
-        let editor = theme_editor_from_settings(&settings, None, "Mine".to_string());
+        let mut editor = theme_editor_from_settings(&settings, None, "Mine".to_string());
+        editor.terminal_colors[0] = "#123456".to_string();
+        editor.ui_colors[0] = "#abcdef".to_string();
 
         let saved_name = save_theme_editor_to_settings(&mut settings, editor);
 
         assert_eq!(saved_name.as_deref(), Some("Mine"));
-        assert!(settings.terminal.theme.starts_with(CUSTOM_THEME_PREFIX));
-        assert!(
-            settings
-                .custom_themes
-                .contains_key(&settings.terminal.theme)
-        );
+        assert_eq!(settings.terminal.theme, "custom:mine");
+        let saved = &settings.custom_themes["custom:mine"];
+        assert_eq!(saved["name"], "Mine");
+        assert_eq!(saved["terminalColors"]["background"], "#123456");
+        assert_eq!(saved["uiColors"]["bg"], "#abcdef");
     }
 }

@@ -915,22 +915,4 @@ mod tests {
                 .starts_with(".report.txt.oxideterm-")
         );
     }
-
-    #[test]
-    fn legacy_progress_records_default_to_sftp() {
-        let json = r#"{
-            "transfer_id":"tx",
-            "transfer_type":"Upload",
-            "source_path":"/tmp/a",
-            "destination_path":"/tmp/b",
-            "transferred_bytes":0,
-            "total_bytes":1,
-            "status":"Failed",
-            "last_updated":"2026-01-01T00:00:00Z",
-            "session_id":"session",
-            "error":null
-        }"#;
-        let progress: crate::StoredTransferProgress = serde_json::from_str(json).unwrap();
-        assert_eq!(progress.protocol, crate::TransferProtocol::Sftp);
-    }
 }

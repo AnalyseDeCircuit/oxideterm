@@ -2210,28 +2210,6 @@ mod tests {
     }
 
     #[test]
-    fn previews_xshell_session_without_importing_password() {
-        let path = fixture_path("xshell/model.xsh");
-        let preview = preview_connection_import(
-            ConnectionImportSource::Xshell,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.name, "model");
-        assert_eq!(draft.host, "10.0.0.8");
-        assert_eq!(draft.username, "ubuntu");
-        assert!(
-            draft
-                .warnings
-                .iter()
-                .any(|warning| warning == "Password was not imported")
-        );
-    }
-
-    #[test]
     fn previews_xshell_archive_sessions_with_entry_groups() {
         let path = temp_import_file("xts", "");
         {
@@ -2421,7 +2399,7 @@ mod tests {
     }
 
     #[test]
-    fn applies_selected_imports_with_rename_strategy() {
+    fn xshell_preview_and_selected_imports_preserve_metadata_and_rename_conflicts() {
         let store_path = std::env::temp_dir().join(format!(
             "oxideterm-connection-import-test-{}.json",
             Uuid::new_v4()
@@ -2434,7 +2412,17 @@ mod tests {
             &HashSet::new(),
         )
         .unwrap();
-        let draft_id = preview.drafts[0].id.clone();
+        let draft = &preview.drafts[0];
+        assert_eq!(draft.name, "model");
+        assert_eq!(draft.host, "10.0.0.8");
+        assert_eq!(draft.username, "ubuntu");
+        assert!(
+            draft
+                .warnings
+                .iter()
+                .any(|warning| warning == "Password was not imported")
+        );
+        let draft_id = draft.id.clone();
 
         let result = apply_connection_import(
             &mut store,
@@ -2449,6 +2437,12 @@ mod tests {
         .unwrap();
         assert_eq!(result.imported, 1);
         assert_eq!(store.connections()[0].name, "model");
+        assert_eq!(store.connections()[0].host, "10.0.0.8");
+        assert_eq!(store.connections()[0].username, "ubuntu");
+        assert_eq!(
+            store.connections()[0].group.as_deref(),
+            Some("Imported/Xshell")
+        );
 
         let result = apply_connection_import(
             &mut store,

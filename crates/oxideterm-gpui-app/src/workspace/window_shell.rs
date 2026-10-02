@@ -463,21 +463,6 @@ mod tests {
         }
     }
 
-    struct WindowBootstrapSession {
-        background_cache_byte_limit: usize,
-        detached_window_opened: bool,
-    }
-
-    struct BackgroundBootstrapWindow {
-        _background: Entity<WorkspaceWindowBackgroundEntity>,
-    }
-
-    impl Render for BackgroundBootstrapWindow {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            div()
-        }
-    }
-
     struct NotificationSource;
 
     struct ObservingWindowRoot {
@@ -548,32 +533,6 @@ mod tests {
         assert_eq!(drops.load(Ordering::Acquire), 1);
         cx.update(|_| {});
         assert_eq!(drops.load(Ordering::Acquire), 1);
-    }
-
-    #[gpui::test]
-    fn captured_background_budget_bootstraps_window_during_session_update(cx: &mut TestAppContext) {
-        let session = cx.new(|_| WindowBootstrapSession {
-            background_cache_byte_limit: 1024,
-            detached_window_opened: false,
-        });
-
-        session.update(cx, |session, cx| {
-            // Opening a window draws it synchronously, so the builder must not
-            // read the session Entity that owns this active update.
-            let background_cache_byte_limit = session.background_cache_byte_limit;
-            cx.open_window(gpui::WindowOptions::default(), move |_window, cx| {
-                cx.new(|cx| BackgroundBootstrapWindow {
-                    _background: WorkspaceWindowBackgroundEntity::with_byte_limit(
-                        background_cache_byte_limit,
-                        cx,
-                    ),
-                })
-            })
-            .expect("background-only detached window should open");
-            session.detached_window_opened = true;
-        });
-
-        assert!(session.read_with(cx, |session, _cx| { session.detached_window_opened }));
     }
 
     #[gpui::test]

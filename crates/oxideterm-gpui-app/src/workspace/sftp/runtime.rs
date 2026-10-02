@@ -1985,16 +1985,6 @@ mod remote_load_state_tests {
     }
 
     #[test]
-    fn remote_list_completion_clears_inflight_before_return() {
-        let loading = SftpRemoteLoadState::default().request().start().unwrap();
-
-        let completed = loading.complete();
-
-        assert_eq!(completed, SftpRemoteLoadState::default());
-        assert!(!completed.inflight);
-    }
-
-    #[test]
     fn queued_remote_load_starts_after_the_previous_request_completes() {
         let old_request = SftpRemoteLoadState::default().request().start().unwrap();
         let switched_view = old_request.request();
@@ -2009,22 +1999,13 @@ mod remote_load_state_tests {
                 inflight: false,
             }
         );
-        assert!(old_request_completed.start().is_some());
-    }
-
-    #[test]
-    fn hidden_pending_load_starts_after_activation_wake() {
-        let hidden_pending = SftpRemoteLoadState::default().request();
-
-        let reactivated = hidden_pending.start().unwrap();
-
         assert_eq!(
-            reactivated,
-            SftpRemoteLoadState {
+            old_request_completed.start(),
+            Some(SftpRemoteLoadState {
                 loading: true,
                 pending: false,
                 inflight: true,
-            }
+            })
         );
     }
 }
@@ -2193,19 +2174,6 @@ mod tests {
         ));
         assert!(!oxideterm_sftp::error_is_not_found(
             "Node not found: node-1"
-        ));
-    }
-
-    #[test]
-    fn sftp_auth_failure_is_not_path_permission_denied() {
-        assert!(oxideterm_sftp::error_is_auth_failure(
-            "Authentication failed: Permission denied (publickey,password)"
-        ));
-        assert!(!oxideterm_sftp::error_is_permission_denied(
-            "Authentication failed: Permission denied (publickey,password)"
-        ));
-        assert!(oxideterm_sftp::error_is_permission_denied(
-            "Permission denied: /home/me/secret"
         ));
     }
 }

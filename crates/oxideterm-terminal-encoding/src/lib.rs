@@ -412,15 +412,9 @@ mod tests {
     fn bracketed_paste_wraps_raw_protocol_and_encodes_only_content() {
         let encoded =
             TerminalInputEncoder::new(TerminalEncoding::Gbk).encode_paste("你好\n世界\x1b", true);
-        assert!(encoded.starts_with(b"\x1b[200~"));
-        assert!(encoded.ends_with(b"\x1b[201~"));
-        assert!(!encoded[6..encoded.len() - 6].contains(&0x1b));
-
-        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Gbk);
-        let body = &encoded[6..encoded.len() - 6];
         assert_eq!(
-            String::from_utf8(decoder.decode_to_utf8_bytes(body).into_owned()).unwrap(),
-            "你好\r世界"
+            encoded,
+            b"\x1b[200~\xc4\xe3\xba\xc3\r\xca\xc0\xbd\xe7\x1b[201~"
         );
     }
 

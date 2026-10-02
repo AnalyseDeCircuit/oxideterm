@@ -23,168 +23,112 @@ fn terminal_element_batches_adjacent_cells_with_same_style() {
 }
 
 #[test]
-fn terminal_element_lays_out_autosuggest_ghost_text_at_cursor() {
-    let mut snapshot = selection_snapshot("git");
-    snapshot.cursor_row = 0;
-    snapshot.cursor_col = 3;
-    snapshot.lines[0].cells_mut()[3].cursor = true;
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .ghost_text(Some(" status".to_string()))
-    .layout();
-
-    let ghost_text = layout.ghost_text.expect("ghost text");
-    assert_eq!(ghost_text.text, " status");
-    assert_eq!(ghost_text.row, 0);
-    assert_eq!(ghost_text.col, 3);
-    assert_eq!(ghost_text.cells, 7);
-    assert!(
-        !layout
-            .text_runs
-            .iter()
-            .any(|run| run.text.contains(" status"))
-    );
+fn terminal_ghost_text_respects_cursor_width_and_ime_composition() {
+    for (text, cols, cursor_col, marked, suggestion, expected) in [
+        ("git", 40, 3, None, " status", Some((" status", 0, 3, 7))),
+        ("Password:", 12, 9, None, "按Enter", Some(("按E", 0, 9, 3))),
+        ("git", 40, 3, Some("あ"), " status", None),
+    ] {
+        let mut snapshot = selection_snapshot(text);
+        snapshot.cols = cols;
+        snapshot.lines[0].cells_mut().truncate(cols);
+        snapshot.cursor_row = 0;
+        snapshot.cursor_col = cursor_col;
+        snapshot.lines[0].cells_mut()[cursor_col].cursor = true;
+        snapshot.lines[0].refresh_signature();
+        let layout = TerminalElement::new(
+            snapshot,
+            None,
+            test_metrics(),
+            true,
+            marked.map(str::to_owned),
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .ghost_text(Some(suggestion.to_owned()))
+        .layout();
+        assert_eq!(
+            layout
+                .ghost_text
+                .as_ref()
+                .map(|run| (run.text.as_str(), run.row, run.col, run.cells)),
+            expected,
+            "text={text}, cols={cols}, marked={marked:?}",
+        );
+        assert_eq!(
+            layout.marked_text.as_ref().map(|run| run.text.as_str()),
+            marked
+        );
+        assert!(
+            !layout
+                .text_runs
+                .iter()
+                .any(|run| run.text.contains(suggestion))
+        );
+    }
 }
 
 #[test]
 fn terminal_element_segments_mixed_width_ghost_text_for_grid_painting() {
     let segments = ghost_text_grid_segments("按Enter 填充已保存的提权密码");
 
-    assert_eq!(segments.len(), 3);
-    assert_eq!(segments[0].text, "按");
-    assert_eq!(segments[0].col_offset, 0);
-    assert_eq!(segments[0].cell_stride, 2);
-    assert_eq!(segments[1].text, "Enter ");
-    assert_eq!(segments[1].col_offset, 2);
-    assert_eq!(segments[1].cell_stride, 1);
-    assert_eq!(segments[2].text, "填充已保存的提权密码");
-    assert_eq!(segments[2].col_offset, 8);
-    assert_eq!(segments[2].cell_stride, 2);
     assert_eq!(
-        segments.iter().map(|segment| segment.cells).sum::<usize>(),
-        28
+        segments
+            .iter()
+            .map(|segment| (
+                segment.text.as_str(),
+                segment.col_offset,
+                segment.cell_stride,
+                segment.cells
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("按", 0, 2, 2),
+            ("Enter ", 2, 1, 6),
+            ("填充已保存的提权密码", 8, 2, 20)
+        ]
     );
 }
 
 #[test]
-fn terminal_element_truncates_wide_ghost_text_by_cells() {
-    let mut snapshot = selection_snapshot("Password:");
-    snapshot.cols = 12;
-    snapshot.lines[0].cells_mut().truncate(12);
-    snapshot.cursor_row = 0;
-    snapshot.cursor_col = 9;
-    snapshot.lines[0].cells_mut()[9].cursor = true;
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .ghost_text(Some("按Enter".to_string()))
-    .layout();
-
-    let ghost_text = layout.ghost_text.expect("ghost text");
-    assert_eq!(ghost_text.text, "按E");
-    assert_eq!(ghost_text.cells, 3);
-}
-
-#[test]
-fn terminal_element_hides_autosuggest_ghost_text_during_ime_composition() {
-    let mut snapshot = selection_snapshot("git");
-    snapshot.cursor_row = 0;
-    snapshot.cursor_col = 3;
-    snapshot.lines[0].cells_mut()[3].cursor = true;
-    snapshot.lines[0].refresh_signature();
-
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        Some("あ".to_string()),
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .ghost_text(Some(" status".to_string()))
-    .layout();
-
-    assert!(layout.marked_text.is_some());
-    assert!(layout.ghost_text.is_none());
-}
-
-#[test]
-fn terminal_element_shapes_zero_width_marks_with_base_cell() {
-    let mut snapshot = selection_snapshot("e");
-    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{301}".to_string());
-    snapshot.lines[0].refresh_signature();
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-    let first_run = layout.text_runs.first().expect("text run");
-
-    assert_eq!(first_run.text, "e\u{301}");
-    assert_eq!(first_run.cells, 1);
-    assert_eq!(first_run.style.len, "e\u{301}".len());
-}
-
-#[test]
-fn terminal_element_keeps_emoji_zwj_cluster_in_one_wide_cell() {
-    let mut snapshot = selection_snapshot(" ");
-    snapshot.lines[0].cells_mut()[0].ch = '👨';
-    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{200d}👩\u{200d}👧\u{200d}👦".to_string());
-    snapshot.lines[0].cells_mut()[0].wide = true;
-    snapshot.lines[0].refresh_signature();
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-    let first_run = layout.text_runs.first().expect("text run");
-
-    assert_eq!(first_run.text, "👨‍👩‍👧‍👦");
-    assert_eq!(first_run.cells, 2);
-    assert_eq!(first_run.style.len, "👨‍👩‍👧‍👦".len());
+fn terminal_element_shapes_combining_marks_and_wide_grapheme_clusters() {
+    for (base, marks, wide, expected, cells) in [
+        ('e', "\u{301}", false, "e\u{301}", 1),
+        ('👨', "\u{200d}👩\u{200d}👧\u{200d}👦", true, "👨‍👩‍👧‍👦", 2),
+    ] {
+        let mut snapshot = selection_snapshot(" ");
+        let cell = &mut snapshot.lines[0].cells_mut()[0];
+        cell.ch = base;
+        cell.set_zerowidth(marks.to_string());
+        cell.wide = wide;
+        snapshot.lines[0].refresh_signature();
+        let layout = TerminalElement::new(
+            snapshot,
+            None,
+            test_metrics(),
+            true,
+            None,
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .layout();
+        let first_run = layout.text_runs.first().expect("text run");
+        assert_eq!(
+            (
+                first_run.text.as_str(),
+                first_run.cells,
+                first_run.style.len
+            ),
+            (expected, cells, expected.len()),
+            "{expected}"
+        );
+    }
 }
 
 #[test]
@@ -242,39 +186,12 @@ fn terminal_element_keeps_rtl_text_at_content_start_with_trailing_blanks() {
 }
 
 #[test]
-fn terminal_element_maps_rtl_cursor_to_visual_column() {
+fn terminal_element_maps_rtl_cursor_and_search_to_visual_columns() {
     let mut snapshot = selection_snapshot("abc שלום def");
     snapshot.cursor_row = 0;
     snapshot.cursor_col = 4;
     snapshot.lines[0].cells_mut()[4].cursor = true;
     snapshot.lines[0].refresh_signature();
-    let expected_col = oxideterm_terminal_unicode::visual_line_for_row(&snapshot.lines[0])
-        .visual_col_for_logical_col(4);
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    assert_ne!(expected_col, 4);
-    assert_eq!(layout.cursor.expect("cursor").col, expected_col);
-}
-
-#[test]
-fn terminal_element_maps_rtl_search_highlight_to_visual_rect() {
-    let snapshot = selection_snapshot("abc שלום def");
-    let expected_rect = oxideterm_terminal_unicode::visual_line_for_row(&snapshot.lines[0])
-        .visual_rects_for_logical_range(4..8)
-        .next()
-        .expect("visual rect");
     let layout = TerminalElement::new(
         snapshot,
         None,
@@ -289,9 +206,15 @@ fn terminal_element_maps_rtl_search_highlight_to_visual_rect() {
     )
     .layout();
 
-    assert_eq!(layout.search_matches.len(), 1);
-    assert_eq!(layout.search_matches[0].col, expected_rect.start);
-    assert_eq!(layout.search_matches[0].cells, 4);
+    assert_eq!(layout.cursor.expect("cursor").col, 7);
+    assert_eq!(
+        layout
+            .search_matches
+            .iter()
+            .map(|rect| (rect.row, rect.col, rect.cells))
+            .collect::<Vec<_>>(),
+        [(0, 4, 4)]
+    );
 }
 
 #[test]
@@ -409,62 +332,6 @@ fn terminal_element_lays_out_search_highlights() {
 }
 
 #[test]
-fn terminal_element_keeps_highlights_across_output_rescans() {
-    let rules = vec![TerminalHighlightRule {
-        id: "error".to_string(),
-        pattern: "ERROR".to_string(),
-        is_regex: false,
-        case_sensitive: true,
-        foreground: None,
-        background: Some("#ff0000".to_string()),
-        render_mode: TerminalHighlightRenderMode::Background,
-        match_scope: TerminalHighlightMatchScope::Match,
-        preserve_background: false,
-        enabled: true,
-        priority: 0,
-    }];
-
-    let before_output = selection_snapshot("ERROR first pass");
-    let before_layout = TerminalElement::new(
-        before_output,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .highlight_rules(rules.clone())
-    .layout();
-
-    let mut after_output = multirow_snapshot(&["ERROR first pass", "command output"]);
-    after_output.rows = 2;
-    let after_layout = TerminalElement::new(
-        after_output,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .highlight_rules(rules)
-    .layout();
-
-    assert_eq!(before_layout.highlight_backgrounds.len(), 1);
-    assert_eq!(after_layout.highlight_backgrounds.len(), 1);
-    assert_eq!(after_layout.highlight_backgrounds[0].row, 0);
-    assert_eq!(after_layout.highlight_backgrounds[0].col, 0);
-    assert_eq!(after_layout.highlight_backgrounds[0].cells, 5);
-}
-
-#[test]
 fn transient_command_highlight_stays_inside_latest_command_output() {
     let snapshot = multirow_snapshot(&[
         "$ grep dbx",
@@ -535,7 +402,7 @@ fn terminal_highlight_can_preserve_existing_background() {
 }
 
 #[test]
-fn logical_line_scope_highlights_all_soft_wrapped_rows() {
+fn terminal_highlight_scopes_preserve_match_and_logical_line_geometry() {
     let mut snapshot = multirow_snapshot(&["prefix ER", "ROR suffix", "next line"]);
     snapshot.cols = 9;
     for row in &mut snapshot.lines {
@@ -544,37 +411,46 @@ fn logical_line_scope_highlights_all_soft_wrapped_rows() {
     }
     snapshot.lines[1].wrapped = true;
     snapshot.lines[1].refresh_signature();
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .highlight_rules(vec![TerminalHighlightRule {
-        id: "error-line".to_string(),
-        pattern: "ERROR".to_string(),
-        background: Some("#ff0000".to_string()),
-        render_mode: TerminalHighlightRenderMode::Background,
-        match_scope: TerminalHighlightMatchScope::LogicalLine,
-        preserve_background: false,
-        enabled: true,
-        ..TerminalHighlightRule::default()
-    }])
-    .layout();
-
-    assert_eq!(layout.highlight_backgrounds.len(), 2);
-    assert_eq!(layout.highlight_backgrounds[0].row, 0);
-    assert_eq!(layout.highlight_backgrounds[0].col, 0);
-    assert_eq!(layout.highlight_backgrounds[0].cells, 9);
-    assert_eq!(layout.highlight_backgrounds[1].row, 1);
-    assert_eq!(layout.highlight_backgrounds[1].col, 0);
-    assert_eq!(layout.highlight_backgrounds[1].cells, 9);
+    for (scope, expected) in [
+        (TerminalHighlightMatchScope::Match, [(0, 7, 2), (1, 0, 3)]),
+        (
+            TerminalHighlightMatchScope::LogicalLine,
+            [(0, 0, 9), (1, 0, 9)],
+        ),
+    ] {
+        let layout = TerminalElement::new(
+            snapshot.clone(),
+            None,
+            test_metrics(),
+            true,
+            None,
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .highlight_rules(vec![TerminalHighlightRule {
+            id: "error".to_string(),
+            pattern: "ERROR".to_string(),
+            background: Some("#ff0000".to_string()),
+            render_mode: TerminalHighlightRenderMode::Background,
+            match_scope: scope,
+            preserve_background: false,
+            enabled: true,
+            ..TerminalHighlightRule::default()
+        }])
+        .layout();
+        assert_eq!(
+            layout
+                .highlight_backgrounds
+                .iter()
+                .map(|rect| (rect.row, rect.col, rect.cells))
+                .collect::<Vec<_>>(),
+            expected,
+            "{scope:?}"
+        );
+    }
 }
 
 #[test]

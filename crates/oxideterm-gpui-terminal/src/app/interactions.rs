@@ -5129,27 +5129,39 @@ mod tests {
     }
 
     #[test]
-    fn free_type_cursor_delta_uses_tracked_command_range_when_target_row_is_unmarked() {
-        let snapshot = test_snapshot_with_cursor(
-            vec![test_row("$ abc", false), test_row("def", true)],
-            1,
-            2,
-            6,
-        );
+    fn free_type_tracked_cursor_delta_handles_wrapped_and_unmarked_target_rows() {
         let input_state = TerminalAutosuggestInputState {
             value: "abcdef".to_string(),
             cursor_index: 6,
             is_cursor_at_end: true,
         };
-
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 3 },
-                Some(&input_state)
+        for (rows, cursor_col, width, targets) in [
+            (
+                vec![test_row("$ abc", false), test_row("def", true)],
+                2,
+                6,
+                vec![(0, 3, -5)],
             ),
-            Some(-5)
-        );
+            (
+                vec![test_row("$ ab", true), test_row("cdef", true)],
+                4,
+                5,
+                vec![(0, 2, -6), (0, 4, -5), (1, 2, -2)],
+            ),
+        ] {
+            let snapshot = test_snapshot_with_cursor(rows, 1, cursor_col, width);
+            for (row, col, expected) in targets {
+                assert_eq!(
+                    active_input_cursor_delta(
+                        &snapshot,
+                        TerminalPoint { row, col },
+                        Some(&input_state)
+                    ),
+                    Some(expected),
+                    "width={width}, target=({row}, {col})"
+                );
+            }
+        }
     }
 
     #[test]
@@ -5236,46 +5248,6 @@ mod tests {
     }
 
     #[test]
-    fn free_type_cursor_delta_maps_tracked_command_across_wrapped_rows() {
-        let snapshot = test_snapshot_with_cursor(
-            vec![test_row("$ ab", true), test_row("cdef", true)],
-            1,
-            4,
-            5,
-        );
-        let input_state = TerminalAutosuggestInputState {
-            value: "abcdef".to_string(),
-            cursor_index: 6,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 2 },
-                Some(&input_state)
-            ),
-            Some(-6)
-        );
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 0, col: 4 },
-                Some(&input_state)
-            ),
-            Some(-5)
-        );
-        assert_eq!(
-            active_input_cursor_delta(
-                &snapshot,
-                TerminalPoint { row: 1, col: 2 },
-                Some(&input_state)
-            ),
-            Some(-2)
-        );
-    }
-
-    #[test]
     fn free_type_cursor_move_combines_boundary_keys_with_arrow_fallbacks() {
         let input_state = TerminalAutosuggestInputState {
             value: "abcdef".to_string(),
@@ -5310,7 +5282,7 @@ mod tests {
     }
 
     #[test]
-    fn free_type_command_edit_bytes_insert_and_replace_command() {
+    fn free_type_command_edits_and_selection_deletes_preserve_shell_sequences() {
         let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
         let input_state = TerminalAutosuggestInputState {
             value: "abc".to_string(),
@@ -5318,56 +5290,58 @@ mod tests {
             is_cursor_at_end: true,
         };
 
-        assert_eq!(
-            free_type_command_edit_bytes(
-                &snapshot,
-                TerminalPoint { row: 0, col: 3 },
-                &input_state,
-                "XYZ",
-                false,
-                TermMode::default(),
-            )
-            .as_deref(),
-            Some(b"\x1b[D\x1b[DXYZ".as_slice())
-        );
-        assert_eq!(
-            free_type_command_edit_bytes(
-                &snapshot,
-                TerminalPoint { row: 0, col: 3 },
-                &input_state,
-                "XYZ",
-                true,
-                TermMode::default(),
-            )
-            .as_deref(),
-            Some(b"\x08\x08\x08XYZ".as_slice())
-        );
-    }
-
-    #[test]
-    fn free_type_selection_delete_bytes_targets_command_selection() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
-        let selection = TerminalSelection {
-            anchor: TerminalGridPoint { line: 0, col: 3 },
-            head: TerminalGridPoint { line: 0, col: 3 },
-            mode: TerminalSelectionMode::Semantic,
-        };
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            free_type_selection_delete_bytes(
-                &snapshot,
-                selection,
-                &input_state,
-                TermMode::default()
-            )
-            .as_deref(),
-            Some(b"\x1b[D\x08".as_slice())
-        );
+        for (replace, expected) in [
+            (false, b"\x1b[D\x1b[DXYZ".as_slice()),
+            (true, b"\x08\x08\x08XYZ".as_slice()),
+        ] {
+            assert_eq!(
+                free_type_command_edit_bytes(
+                    &snapshot,
+                    TerminalPoint { row: 0, col: 3 },
+                    &input_state,
+                    "XYZ",
+                    replace,
+                    TermMode::default(),
+                )
+                .as_deref(),
+                Some(expected),
+                "replace={replace}"
+            );
+        }
+        for (mode, start, end, expected) in [
+            (
+                TerminalSelectionMode::Semantic,
+                3,
+                3,
+                b"\x1b[D\x08".as_slice(),
+            ),
+            (
+                TerminalSelectionMode::Lines,
+                0,
+                5,
+                b"\x08\x08\x08".as_slice(),
+            ),
+        ] {
+            let selection = TerminalSelection {
+                anchor: TerminalGridPoint {
+                    line: 0,
+                    col: start,
+                },
+                head: TerminalGridPoint { line: 0, col: end },
+                mode,
+            };
+            assert_eq!(
+                free_type_selection_delete_bytes(
+                    &snapshot,
+                    selection,
+                    &input_state,
+                    TermMode::default()
+                )
+                .as_deref(),
+                Some(expected),
+                "selection mode={mode:?}"
+            );
+        }
     }
 
     #[test]
@@ -5480,32 +5454,6 @@ mod tests {
         assert_eq!(
             bytes,
             ["👩‍💻".as_bytes(), b"\x1b[D\x1b[D\x1b[D\x08".as_slice()].concat()
-        );
-    }
-
-    #[test]
-    fn free_type_selection_delete_bytes_clamps_line_selection_to_command() {
-        let snapshot = test_snapshot_with_cursor(vec![test_row("$ abc", true)], 0, 5, 20);
-        let selection = TerminalSelection {
-            anchor: TerminalGridPoint { line: 0, col: 0 },
-            head: TerminalGridPoint { line: 0, col: 5 },
-            mode: TerminalSelectionMode::Lines,
-        };
-        let input_state = TerminalAutosuggestInputState {
-            value: "abc".to_string(),
-            cursor_index: 3,
-            is_cursor_at_end: true,
-        };
-
-        assert_eq!(
-            free_type_selection_delete_bytes(
-                &snapshot,
-                selection,
-                &input_state,
-                TermMode::default()
-            )
-            .as_deref(),
-            Some(b"\x08\x08\x08".as_slice())
         );
     }
 

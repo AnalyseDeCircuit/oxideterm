@@ -320,15 +320,6 @@ impl CommandFactLedger {
             .filter(|suffix| !suffix.is_empty())
     }
 
-    #[cfg(test)]
-    pub(crate) fn autosuggest_candidates(
-        &self,
-        state: &TerminalAutosuggestInputState,
-        limit: usize,
-    ) -> Vec<TerminalAutosuggestCandidate> {
-        autosuggest_candidates_for_records(&self.autosuggest_records, state, limit)
-    }
-
     pub(crate) fn remove_autosuggest_command(&mut self, command: &str) -> bool {
         let previous_len = self.autosuggest_records.len();
         self.autosuggest_records
@@ -1088,6 +1079,15 @@ mod tests {
         assert_eq!(records[0].command, "  git   status  ");
         assert_eq!(records[1].command, "  git   status  ");
         assert_eq!(records[2].command, "git status");
+        assert!(ledger.remove_autosuggest_command("  git   status  "));
+        assert_eq!(
+            ledger
+                .autosuggest_records()
+                .iter()
+                .map(|record| record.command.as_str())
+                .collect::<Vec<_>>(),
+            ["git status"],
+        );
 
         let mut ledger = CommandFactLedger::default();
         ledger.record_runtime_autosuggest_command("git status");
@@ -1116,35 +1116,6 @@ mod tests {
                 is_cursor_at_end: false,
             }),
             None
-        );
-    }
-
-    #[test]
-    fn runtime_autosuggest_candidates_rank_activity_without_changing_history() {
-        let mut ledger = CommandFactLedger::default();
-        ledger.record_runtime_autosuggest_command("docker ps");
-        ledger.record_runtime_autosuggest_command("docker images");
-        ledger.record_runtime_autosuggest_command("docker ps");
-        ledger.record_runtime_autosuggest_command("docker compose up");
-
-        let state = TerminalAutosuggestInputState {
-            value: "dock".to_string(),
-            cursor_index: 4,
-            is_cursor_at_end: true,
-        };
-        let candidates = ledger.autosuggest_candidates(&state, 3);
-
-        assert_eq!(candidates.len(), 3);
-        assert_eq!(candidates[0].command, "docker ps");
-        assert_eq!(candidates[0].use_count, 2);
-        assert_eq!(ledger.autosuggest_records().len(), 4);
-
-        assert!(ledger.remove_autosuggest_command("docker ps"));
-        assert!(
-            ledger
-                .autosuggest_records()
-                .iter()
-                .all(|record| record.command != "docker ps")
         );
     }
 
@@ -1201,19 +1172,17 @@ mod tests {
     }
 
     #[test]
-    fn shell_history_seed_preserves_recency_order() {
+    fn shell_history_seed_preserves_recency_order_and_top_match_suffix() {
         let history = SharedTerminalCommandHistory::from_commands(vec![
             "docker ps".to_string(),
             "docker images".to_string(),
         ]);
-        let candidates = history.candidates(
-            &TerminalAutosuggestInputState {
-                value: "docker ".to_string(),
-                cursor_index: 7,
-                is_cursor_at_end: true,
-            },
-            2,
-        );
+        let state = TerminalAutosuggestInputState {
+            value: "docker ".to_string(),
+            cursor_index: 7,
+            is_cursor_at_end: true,
+        };
+        let candidates = history.candidates(&state, 2);
 
         assert_eq!(
             candidates
@@ -1222,20 +1191,7 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["docker images", "docker ps"]
         );
-    }
-
-    #[test]
-    fn shared_command_history_projects_the_top_match_as_a_suffix() {
-        let history = SharedTerminalCommandHistory::from_commands(vec!["ls -la".to_string()]);
-
-        assert_eq!(
-            history.ghost_text(&TerminalAutosuggestInputState {
-                value: "ls".to_string(),
-                cursor_index: 2,
-                is_cursor_at_end: true,
-            }),
-            Some(" -la".to_string())
-        );
+        assert_eq!(history.ghost_text(&state), Some("images".to_string()));
     }
 
     #[test]

@@ -502,8 +502,8 @@ mod tests {
     }
 
     #[test]
-    fn summary_counts_non_ok_severities() {
-        let checks = vec![
+    fn summary_counts_severities_and_strict_mode_rejects_warnings() {
+        let mut checks = vec![
             DoctorCheck {
                 name: "a",
                 severity: DoctorSeverity::Ok,
@@ -531,15 +531,11 @@ mod tests {
 
         assert_eq!(summary.warning_count, 1);
         assert_eq!(summary.error_count, 1);
-    }
+        assert!(!doctor_ok(&summary, false));
+        assert!(!doctor_ok(&summary, true));
 
-    #[test]
-    fn strict_doctor_fails_on_warnings() {
-        let summary = DoctorSummary {
-            error_count: 0,
-            warning_count: 1,
-            info_count: 0,
-        };
+        checks.pop();
+        let summary = summarize_checks(&checks);
 
         assert!(doctor_ok(&summary, false));
         assert!(!doctor_ok(&summary, true));

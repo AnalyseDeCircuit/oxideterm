@@ -246,7 +246,7 @@ fn gemini_provider_parts_replace_the_visible_assistant_projection() {
 }
 
 #[test]
-fn history_trimming_reserves_fixed_tool_schema_overhead() {
+fn history_trimming_reserves_tool_overhead_and_keeps_latest_when_exhausted() {
     let mut without_overhead = vec![
         message("system", AiChatRole::System, "system"),
         message("user-1", AiChatRole::User, &"a".repeat(800)),
@@ -254,15 +254,28 @@ fn history_trimming_reserves_fixed_tool_schema_overhead() {
         message("user-2", AiChatRole::User, "latest"),
     ];
     let mut with_overhead = without_overhead.clone();
+    let mut exhausted_budget = without_overhead.clone();
 
     let baseline = trim_ai_stream_history_to_budget(&mut without_overhead, 1_000, 100);
     let reserved =
         trim_ai_stream_history_to_budget_with_overhead(&mut with_overhead, 1_000, 100, 450);
 
-    assert!(reserved > baseline);
+    assert_eq!(baseline, 0);
+    assert_eq!(reserved, 2);
     assert_eq!(
         with_overhead.last().map(|message| message.id.as_str()),
         Some("user-2")
+    );
+    assert_eq!(
+        trim_ai_stream_history_to_budget(&mut exhausted_budget, 100, 100),
+        2
+    );
+    assert_eq!(
+        exhausted_budget
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>(),
+        ["system", "user-2"]
     );
 }
 
@@ -318,32 +331,24 @@ fn compaction_plan_preserves_recent_messages() {
 }
 
 #[test]
-fn compaction_snapshot_removes_runtime_only_message_state() {
-    let mut source = message("assistant", AiChatRole::Assistant, "answer");
-    source.model = Some("model".to_string());
-    source.is_streaming = true;
-    source.tool_calls.push(serde_json::json!({"id": "call-1"}));
-
-    let snapshot = ai_compaction_anchor_snapshot(&[source]);
-
-    assert_eq!(snapshot.len(), 1);
-    assert_eq!(snapshot[0].model, None);
-    assert!(!snapshot[0].is_streaming);
-    assert!(snapshot[0].tool_calls.is_empty());
-}
-
-#[test]
 fn compaction_and_provider_history_scrub_runtime_handles() {
     let handle = "rt_0123456789abcdef0123456789abcdef";
-    let source = message(
+    let mut source = message(
         "assistant",
         AiChatRole::Assistant,
         &format!("Earlier authority was {handle}."),
     );
+    source.model = Some("model".to_string());
+    source.is_streaming = true;
+    source.tool_calls.push(serde_json::json!({"id": "call-1"}));
 
     let summary_messages = ai_compaction_summary_messages(std::slice::from_ref(&source));
     assert!(!summary_messages[1].content.contains(handle));
     let snapshot = ai_compaction_anchor_snapshot(std::slice::from_ref(&source));
+    assert_eq!(snapshot.len(), 1);
+    assert_eq!(snapshot[0].model, None);
+    assert!(!snapshot[0].is_streaming);
+    assert!(snapshot[0].tool_calls.is_empty());
     assert!(!snapshot[0].content.contains(handle));
 
     let mut provider_history = vec![source];

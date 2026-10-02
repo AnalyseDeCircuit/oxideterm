@@ -609,10 +609,9 @@ mod tests {
     use super::{
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
         browser_focus_visible, clamp_context_menu_position, clear_browser_highlighted_select_focus,
-        modal_footer_input_key_action, modal_footer_key_action, modal_footer_key_moves_forward,
-        next_required_modal_footer_focus, pointer_capture_needs_workspace_overlay,
-        preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
-        toggle_browser_highlighted_select_from_pointer,
+        modal_footer_input_key_action, modal_footer_key_action,
+        pointer_capture_needs_workspace_overlay, preserve_or_move_context_selection,
+        resolve_browser_pointer_capture_owner, toggle_browser_highlighted_select_from_pointer,
     };
     use std::collections::HashSet;
 
@@ -841,63 +840,33 @@ mod tests {
     }
 
     #[test]
-    fn modal_footer_focus_uses_required_fallback_when_no_action_is_rendered() {
-        let actions: [&str; 0] = [];
-
-        assert_eq!(
-            next_required_modal_footer_focus(&actions, Some("stale"), true, "cancel"),
-            "cancel"
-        );
-    }
-
-    #[test]
-    fn modal_footer_key_direction_matches_browser_tab_and_arrow_rules() {
-        assert!(modal_footer_key_moves_forward("tab", false));
-        assert!(modal_footer_key_moves_forward("arrowright", false));
-        assert!(!modal_footer_key_moves_forward("tab", true));
-        assert!(!modal_footer_key_moves_forward("arrowleft", false));
-        assert!(!modal_footer_key_moves_forward("left", false));
-    }
-
-    #[test]
     fn modal_footer_key_action_centralizes_cancel_focus_and_activate() {
-        let actions = ["cancel", "confirm"];
+        use super::ModalFooterKeyAction::{Activate, Cancel, Focus};
 
+        let actions = ["cancel", "confirm", "extra"];
+        for (key, shift, current, expected) in [
+            ("enter", false, None, Some(Activate("cancel"))),
+            ("tab", false, None, Some(Focus("cancel"))),
+            ("escape", false, Some("confirm"), Some(Cancel)),
+            ("tab", false, Some("cancel"), Some(Focus("confirm"))),
+            ("tab", true, Some("cancel"), Some(Focus("extra"))),
+            ("arrowright", false, Some("confirm"), Some(Focus("extra"))),
+            ("arrowleft", false, Some("confirm"), Some(Focus("cancel"))),
+            ("left", false, Some("confirm"), Some(Focus("cancel"))),
+            ("enter", false, Some("confirm"), Some(Activate("confirm"))),
+            ("home", false, Some("confirm"), Some(Focus("cancel"))),
+            ("end", false, Some("cancel"), Some(Focus("extra"))),
+            ("a", false, Some("confirm"), None),
+        ] {
+            assert_eq!(
+                modal_footer_key_action(key, shift, &actions, current, "cancel"),
+                expected,
+                "{key}, shift={shift}, current={current:?}"
+            );
+        }
         assert_eq!(
-            modal_footer_key_action("enter", false, &actions, None, "cancel"),
-            Some(super::ModalFooterKeyAction::Activate("cancel"))
-        );
-        assert_eq!(
-            modal_footer_key_action("tab", false, &actions, None, "cancel"),
-            Some(super::ModalFooterKeyAction::Focus("cancel"))
-        );
-        assert_eq!(
-            modal_footer_key_action("escape", false, &actions, Some("confirm"), "cancel"),
-            Some(super::ModalFooterKeyAction::Cancel)
-        );
-        assert_eq!(
-            modal_footer_key_action("tab", false, &actions, Some("cancel"), "cancel"),
-            Some(super::ModalFooterKeyAction::Focus("confirm"))
-        );
-        assert_eq!(
-            modal_footer_key_action("tab", true, &actions, Some("cancel"), "cancel"),
-            Some(super::ModalFooterKeyAction::Focus("confirm"))
-        );
-        assert_eq!(
-            modal_footer_key_action("enter", false, &actions, Some("confirm"), "cancel"),
-            Some(super::ModalFooterKeyAction::Activate("confirm"))
-        );
-        assert_eq!(
-            modal_footer_key_action("home", false, &actions, Some("confirm"), "cancel"),
-            Some(super::ModalFooterKeyAction::Focus("cancel"))
-        );
-        assert_eq!(
-            modal_footer_key_action("end", false, &actions, Some("cancel"), "cancel"),
-            Some(super::ModalFooterKeyAction::Focus("confirm"))
-        );
-        assert_eq!(
-            modal_footer_key_action("a", false, &actions, Some("confirm"), "cancel"),
-            None
+            modal_footer_key_action("tab", false, &[], Some("stale"), "cancel"),
+            Some(Focus("cancel"))
         );
     }
 

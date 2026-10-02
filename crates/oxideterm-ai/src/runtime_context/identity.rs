@@ -422,13 +422,13 @@ mod tests {
 
     #[test]
     fn malformed_runtime_handle_is_rejected() {
-        assert!(RuntimeHandleId::parse("rt_not-a-uuid".to_string()).is_err());
-        assert!(RuntimeHandleId::parse("rt_".to_string()).is_err());
-    }
-
-    #[test]
-    fn oversized_runtime_handle_is_rejected_before_lookup() {
-        assert!(RuntimeHandleId::parse(format!("rt_{}", "a".repeat(512))).is_err());
+        for value in [
+            "rt_not-a-uuid".to_string(),
+            "rt_".to_string(),
+            format!("rt_{}", "a".repeat(512)),
+        ] {
+            assert!(RuntimeHandleId::parse(value).is_err());
+        }
     }
 
     #[test]
@@ -438,7 +438,7 @@ mod tests {
         let tool_session = ToolSessionId::new();
 
         assert!(!format!("{owner:?}").contains(&raw_owner));
-        assert!(!format!("{tool_session:?}").contains("tool_"));
+        assert!(!format!("{tool_session:?}").contains(&tool_session.0));
     }
 
     #[test]
@@ -467,7 +467,7 @@ mod tests {
     #[test]
     fn stable_resource_wire_format_rejects_unknown_fields() {
         let decoded = serde_json::from_str::<StableResourceRef>(
-            r#"{\"kind\":\"settings_scope\",\"id\":\"app\",\"unexpected\":true}"#,
+            r#"{"kind":"settings_scope","id":"app","unexpected":true}"#,
         );
 
         assert!(decoded.is_err());

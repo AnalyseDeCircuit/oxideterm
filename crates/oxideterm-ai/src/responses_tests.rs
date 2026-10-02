@@ -413,6 +413,7 @@ async fn responses_cancel_drops_http_stream_before_a_followup_request() {
         Some(AiStreamEvent::Content("started".into()))
     );
     drop(request);
+    let followup_scope = config.response_state_key();
     let mut next = crate::agent::AgentModelRequest::start(
         config,
         vec![chat_message("u", AiChatRole::User, "follow up")],
@@ -422,9 +423,22 @@ async fn responses_cancel_drops_http_stream_before_a_followup_request() {
             next.next_event().await,
             Some(AiStreamEvent::Content("fresh".into()))
         );
-        while let Some(event) = next.next_event().await {
-            assert!(!matches!(event, AiStreamEvent::Error(_)));
-        }
+        assert_eq!(
+            next.next_event().await,
+            Some(AiStreamEvent::ProviderResponsePart {
+                provider_type: followup_scope,
+                part: json!({"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fresh","annotations":[]}]}]}),
+            })
+        );
+        assert_eq!(
+            next.next_event().await,
+            Some(AiStreamEvent::Usage {
+                input_tokens: Some(12),
+                output_tokens: Some(9),
+            })
+        );
+        assert_eq!(next.next_event().await, Some(AiStreamEvent::Done));
+        assert_eq!(next.next_event().await, None);
         server.await.unwrap();
     };
     tokio::time::timeout(std::time::Duration::from_secs(5), work)

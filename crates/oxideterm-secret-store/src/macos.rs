@@ -231,16 +231,19 @@ mod tests {
     }
 
     #[test]
-    fn preview_14_store_arguments_include_permissive_acl() {
-        let source = include_str!("macos.rs");
+    fn keychain_commands_keep_storage_acl_and_metadata_only_existence_lookup() {
+        let source = include_str!("macos.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("production keychain implementation");
+        let store_source = source
+            .split("fn store_password_with_security_tool")
+            .nth(1)
+            .and_then(|source| source.split("pub(super) fn get").next())
+            .expect("storage function precedes secret lookup");
+        assert!(store_source.contains("\"add-generic-password\""));
+        assert!(store_source.contains("\"-A\""));
 
-        assert!(source.contains("\"add-generic-password\""));
-        assert!(source.contains("\"-A\""));
-    }
-
-    #[test]
-    fn existence_lookup_does_not_request_secret_data() {
-        let source = include_str!("macos.rs");
         let exists_source = source
             .split("pub(super) fn exists")
             .nth(1)

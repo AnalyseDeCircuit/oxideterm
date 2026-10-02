@@ -228,7 +228,7 @@ fn tampering_and_swapping_chunks_are_rejected() {
 }
 
 #[test]
-fn retention_rotates_old_chunks_of_a_live_recording_and_keeps_evidence() {
+fn retention_rotates_live_chunks_preserves_pagination_and_detects_state_tampering() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.db");
     let mut store = AuditStore::open(&path, &Keys(3)).unwrap();
@@ -255,11 +255,37 @@ fn retention_rotates_old_chunks_of_a_live_recording_and_keeps_evidence() {
     assert_eq!(page.expired_sequences, vec![1]);
     assert_eq!(page.chunks.len(), 1);
     assert_eq!(page.chunks[0].sequence, 2);
+    let first = store.read_recording_page(&id, None, None, 1).unwrap();
+    assert!(first.chunks.is_empty());
+    assert_eq!(first.expired_sequences, vec![1]);
+    assert_eq!(first.next_cursor, Some(1));
+    let second = store
+        .read_recording_page(&id, first.next_cursor, None, 1)
+        .unwrap();
+    assert_eq!(second.chunks[0].sequence, 2);
+    assert_eq!(second.next_cursor, None);
     store.finish_recording(&id, 86_400_003, false).unwrap();
     assert_eq!(
         store.list_recordings(None, 10).unwrap().recordings[0].state,
         RecordingState::Gaps
     );
+    drop(store);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "UPDATE audit_recordings SET state=1,ended_at=999 WHERE id=?",
+        [&id],
+    )
+    .unwrap();
+    drop(db);
+    let store = AuditStore::open(&path, &Keys(3)).unwrap();
+    assert!(matches!(
+        store.list_recordings(None, 10),
+        Err(AuditError::Integrity)
+    ));
+    assert!(matches!(
+        store.read_recording_page(&id, None, None, 1),
+        Err(AuditError::Integrity)
+    ));
 }
 
 #[test]
@@ -308,35 +334,6 @@ fn oversized_chunk_is_rejected_and_interrupted_state_is_preserved() {
 }
 
 #[test]
-fn abandoned_recording_is_interrupted_on_recovery() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("audit.db");
-    let mut store = AuditStore::open(&path, &Keys(2)).unwrap();
-    enabled(&mut store, 7, 2 * 1024 * 1024);
-    let id = recording(&mut store, 10);
-    store
-        .append_recording_chunk(
-            &id,
-            &[RecordingFrame {
-                occurred_at_ms: 11,
-                kind: RecordingFrameKind::Output(b"survived"),
-            }],
-        )
-        .unwrap();
-    drop(store);
-    let mut restarted = AuditStore::open(&path, &Keys(2)).unwrap();
-    assert_eq!(restarted.recover_abandoned_recordings(&path).unwrap(), 1);
-    assert_eq!(
-        restarted.list_recordings(None, 10).unwrap().recordings[0].state,
-        RecordingState::Interrupted
-    );
-    assert!(
-        matches!(&restarted.read_recording_page(&id, None, None, 10).unwrap().chunks[0].frames[0].kind,
-        StoredRecordingFrameKind::Output(data) if data.as_slice() == b"survived")
-    );
-}
-
-#[test]
 fn capacity_removes_only_oldest_chunks_even_before_time_expiry() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.db");
@@ -369,53 +366,6 @@ fn capacity_removes_only_oldest_chunks_even_before_time_expiry() {
             .collect::<Vec<_>>(),
         vec![2, 3, 4, 5]
     );
-}
-
-#[test]
-fn expired_page_advances_cursor_and_state_index_tampering_fails() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("audit.db");
-    let mut store = AuditStore::open(&path, &Keys(5)).unwrap();
-    enabled(&mut store, 1, 1024 * 1024);
-    let id = recording(&mut store, 0);
-    for (time, value) in [(0, b"old".as_slice()), (86_400_001, b"live".as_slice())] {
-        store
-            .append_recording_chunk(
-                &id,
-                &[RecordingFrame {
-                    occurred_at_ms: time,
-                    kind: RecordingFrameKind::Output(value),
-                }],
-            )
-            .unwrap();
-    }
-    store.prune_recordings(86_400_002).unwrap();
-    let first = store.read_recording_page(&id, None, None, 1).unwrap();
-    assert!(first.chunks.is_empty());
-    assert_eq!(first.expired_sequences, vec![1]);
-    assert_eq!(first.next_cursor, Some(1));
-    let second = store
-        .read_recording_page(&id, first.next_cursor, None, 1)
-        .unwrap();
-    assert_eq!(second.chunks[0].sequence, 2);
-    assert_eq!(second.next_cursor, None);
-    drop(store);
-    let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute(
-        "UPDATE audit_recordings SET state=1,ended_at=999 WHERE id=?",
-        [&id],
-    )
-    .unwrap();
-    drop(db);
-    let store = AuditStore::open(&path, &Keys(5)).unwrap();
-    assert!(matches!(
-        store.list_recordings(None, 10),
-        Err(AuditError::Integrity)
-    ));
-    assert!(matches!(
-        store.read_recording_page(&id, None, None, 1),
-        Err(AuditError::Integrity)
-    ));
 }
 
 #[test]
@@ -506,7 +456,7 @@ fn session_filter_pages_exact_recordings_without_plaintext_index() {
 }
 
 #[test]
-fn startup_removes_only_unindexed_files_from_inactive_recordings() {
+fn startup_cleans_orphan_files_and_interrupts_abandoned_recording_without_losing_output() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.db");
     let mut store = AuditStore::open(&path, &Keys(2)).unwrap();
@@ -531,11 +481,16 @@ fn startup_removes_only_unindexed_files_from_inactive_recordings() {
     ));
     std::fs::copy(&indexed, &temporary).unwrap();
     drop(store);
-    let store = AuditStore::open(&path, &Keys(2)).unwrap();
+    let mut store = AuditStore::open(&path, &Keys(2)).unwrap();
     assert_eq!(store.recover_orphan_recording_files(&path).unwrap(), 2);
     assert!(indexed.exists());
     assert!(!orphan.exists());
     assert!(!temporary.exists());
+    assert_eq!(store.recover_abandoned_recordings(&path).unwrap(), 1);
+    assert_eq!(
+        store.list_recordings(None, 10).unwrap().recordings[0].state,
+        RecordingState::Interrupted
+    );
     let page = store.read_recording_page(&id, None, None, 10).unwrap();
     assert_eq!(
         page.chunks
@@ -544,6 +499,10 @@ fn startup_removes_only_unindexed_files_from_inactive_recordings() {
             .collect::<Vec<_>>(),
         vec![1]
     );
+    assert!(matches!(
+        &page.chunks[0].frames[0].kind,
+        StoredRecordingFrameKind::Output(data) if data.as_slice() == b"indexed-content"
+    ));
 }
 
 #[test]

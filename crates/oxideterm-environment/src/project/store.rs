@@ -144,7 +144,7 @@ mod tests {
     }
 
     #[test]
-    fn loading_keeps_previous_snapshot() {
+    fn loading_keeps_previous_snapshot_and_rejects_stale_completion() {
         let key = key();
         let mut store = ProjectStatusStore::default();
         let first = store.mark_loading(key.clone(), 0);
@@ -155,21 +155,13 @@ mod tests {
         assert_eq!(entry.generation(), second);
         assert!(matches!(entry.state(), ProjectProbeState::Loading));
         assert_eq!(entry.snapshot().unwrap().root_path(), "/repo");
-    }
-
-    #[test]
-    fn stale_probe_result_is_ignored() {
-        let key = key();
-        let mut store = ProjectStatusStore::default();
-        let first = store.mark_loading(key.clone(), 0);
-        let _second = store.mark_loading(key.clone(), 1);
-
-        let applied = store.finish_probe(&key, first, ProjectProbeOutcome::NoProject, 2);
+        let applied = store.finish_probe(&key, first, ProjectProbeOutcome::NoProject, 11);
 
         assert!(!applied);
         assert!(matches!(
             store.get(&key).unwrap().state(),
             ProjectProbeState::Loading
         ));
+        assert_eq!(store.snapshot(&key).unwrap().root_path(), "/repo");
     }
 }

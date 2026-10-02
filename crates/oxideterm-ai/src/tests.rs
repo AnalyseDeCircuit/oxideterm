@@ -116,75 +116,6 @@ fn orchestrator_skill_tools_are_bounded_read_actions() {
 }
 
 #[test]
-fn v2_terminal_and_connection_tools_reject_legacy_target_authority() {
-    let tools = orchestrator_tool_definitions();
-    for name in [
-        "connect_target",
-        "run_command",
-        "observe_terminal",
-        "send_terminal_input",
-    ] {
-        let tool = tools
-            .iter()
-            .find(|tool| tool.name == name)
-            .expect("v2 tool definition");
-        let properties = tool
-            .parameters
-            .get("properties")
-            .and_then(serde_json::Value::as_object)
-            .expect("v2 tool properties");
-
-        assert_eq!(
-            tool.parameters.get("additionalProperties"),
-            Some(&serde_json::json!(false)),
-            "{name} must reject unknown legacy authority fields"
-        );
-        assert!(
-            !properties.contains_key("target_id"),
-            "{name} must not accept a raw runtime target id"
-        );
-    }
-    let connect_target = tools
-        .iter()
-        .find(|tool| tool.name == "connect_target")
-        .expect("connect target definition");
-    assert_eq!(
-        connect_target
-            .parameters
-            .pointer("/properties/resource_ref/required"),
-        Some(&serde_json::json!(["kind", "id"]))
-    );
-
-    for name in [
-        "read_resource",
-        "write_resource",
-        "transfer_resource",
-        "open_app_surface",
-        "get_state",
-    ] {
-        let tool = tools
-            .iter()
-            .find(|tool| tool.name == name)
-            .expect("v2 tool definition");
-        let properties = tool
-            .parameters
-            .get("properties")
-            .and_then(serde_json::Value::as_object)
-            .expect("v2 tool properties");
-
-        assert_eq!(
-            tool.parameters.get("additionalProperties"),
-            Some(&serde_json::json!(false)),
-            "{name} must reject unknown legacy authority fields"
-        );
-        assert!(
-            !properties.contains_key("target_id"),
-            "{name} must not accept a raw runtime target id"
-        );
-    }
-}
-
-#[test]
 fn orchestrator_v2_authority_inventory_covers_every_tool() {
     let mut inventory = serde_json::json!({
         "list_targets": { "authority": "discovery", "fields": [] },
@@ -285,6 +216,12 @@ fn orchestrator_v2_authority_inventory_covers_every_tool() {
             "{} must never restore v1 raw target authority",
             tool.name
         );
+        if tool.name == "connect_target" {
+            assert_eq!(
+                tool.parameters.pointer("/properties/resource_ref/required"),
+                Some(&serde_json::json!(["kind", "id"]))
+            );
+        }
     }
 }
 
@@ -352,33 +289,7 @@ fn canonical_v2_file_write_preserves_the_approved_argument_object() {
 }
 
 #[test]
-fn creates_provider_without_secret_material() {
-    let template = provider_template_by_type("openai");
-    let provider = new_provider_from_template(
-        template,
-        generated_provider_id("openai", 42),
-        "OpenAI".into(),
-        42,
-    );
-
-    assert_eq!(
-        provider_string(&provider, "type").as_deref(),
-        Some("openai")
-    );
-    assert!(provider.get("defaultModel").is_none());
-    assert!(provider.get("apiKey").is_none());
-    assert!(provider.get("secret").is_none());
-    assert_eq!(
-        provider
-            .get("models")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(1)
-    );
-}
-
-#[test]
-fn settings_provider_mutations_stay_out_of_gpui() {
+fn settings_provider_mutations_preserve_selection_and_exclude_secret_material() {
     let openai = provider_template_by_type("openai");
     let ollama = provider_template_by_type("ollama");
     let mut providers = Vec::new();
@@ -394,6 +305,14 @@ fn settings_provider_mutations_stay_out_of_gpui() {
         "OpenAI".into(),
         1,
     );
+    assert_eq!(
+        provider_string(&providers[0], "type").as_deref(),
+        Some("openai")
+    );
+    assert!(providers[0].get("defaultModel").is_none());
+    assert!(providers[0].get("apiKey").is_none());
+    assert!(providers[0].get("secret").is_none());
+    assert_eq!(providers[0]["models"], serde_json::json!(["gpt-4o-mini"]));
     add_provider_from_template(
         &mut providers,
         &mut active_provider_id,
@@ -470,11 +389,8 @@ fn settings_provider_mutations_stay_out_of_gpui() {
         },
     ));
     assert_eq!(
-        providers[1]
-            .get("models")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(2)
+        providers[1]["models"],
+        serde_json::json!(["llama3.2", "qwen2.5"])
     );
     assert_eq!(
         context_windows["custom-ollama-2"]["llama3.2"].as_i64(),
@@ -1606,19 +1522,14 @@ fn chat_persistence_hydrates_round_summaries_from_transcript() {
 }
 
 #[test]
-fn chat_persistence_preserves_message_branches() {
+fn chat_persistence_loads_metadata_before_suggestions_and_message_branches() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("chat_history.redb");
     let store = AiChatPersistenceStore::new(&path);
     let mut state = AiChatState::default();
-    let conversation_id = state.create_conversation(
-        "conversation-branches".into(),
-        Some("Branch".into()),
-        42,
-        None,
-    );
-    let mut edited = chat_message("message-live", AiChatRole::User, "new prompt");
-    edited.branches = Some(AiMessageBranches {
+    let older = state.create_conversation("older".into(), Some("Older".into()), 1, None);
+    let mut older_message = chat_message("older-message", AiChatRole::User, "old");
+    older_message.branches = Some(AiMessageBranches {
         refs: Default::default(),
         total: 2,
         active_index: 1,
@@ -1630,67 +1541,24 @@ fn chat_persistence_preserves_message_branches() {
             ],
         )]),
     });
-    state.add_message(&conversation_id, edited);
-
-    store.save_state(state).unwrap();
-    let reloaded = store.load_state().unwrap();
-    let message = &reloaded.conversations[0].messages[0];
-    let branches = message.branches.as_ref().unwrap();
-    assert_eq!(branches.total, 2);
-    assert_eq!(branches.active_index, 1);
-    assert_eq!(branches.tails[&0][0].content, "old prompt");
-    assert_eq!(branches.tails[&0][1].content, "old reply");
-}
-
-#[test]
-fn chat_persistence_preserves_follow_up_suggestions() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("chat_history.redb");
-    let store = AiChatPersistenceStore::new(&path);
-    let mut state = AiChatState::default();
-    let conversation_id = state.create_conversation(
-        "conversation-suggestions".into(),
-        Some("Suggestions".into()),
-        42,
-        None,
-    );
-    let mut reply = chat_message("reply", AiChatRole::Assistant, "Answer");
+    state.add_message(&older, older_message);
+    let newer = state.create_conversation("newer".into(), Some("Newer".into()), 3, None);
+    let mut reply = chat_message("newer-message", AiChatRole::Assistant, "new");
     reply.suggestions = vec![AiFollowUpSuggestion {
         icon: "Zap".into(),
         text: "Run deploy".into(),
     }];
-    state.add_message(&conversation_id, reply);
-
-    store.save_state(state).unwrap();
-    let reloaded = store.load_state().unwrap();
-    let message = &reloaded.conversations[0].messages[0];
-    assert_eq!(message.suggestions.len(), 1);
-    assert_eq!(message.suggestions[0].icon, "Zap");
-    assert_eq!(message.suggestions[0].text, "Run deploy");
-}
-
-#[test]
-fn chat_persistence_loads_metadata_first_and_conversation_on_demand() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("chat_history.redb");
-    let store = AiChatPersistenceStore::new(&path);
-    let mut state = AiChatState::default();
-    let older = state.create_conversation("older".into(), Some("Older".into()), 1, None);
-    state.add_message(
-        &older,
-        chat_message("older-message", AiChatRole::User, "old"),
-    );
-    let newer = state.create_conversation("newer".into(), Some("Newer".into()), 3, None);
-    state.add_message(
-        &newer,
-        chat_message("newer-message", AiChatRole::User, "new"),
-    );
+    state.add_message(&newer, reply);
     store.save_state(state).unwrap();
 
     let reloaded = store.load_state().unwrap();
     assert_eq!(reloaded.active_conversation_id.as_deref(), Some("newer"));
     assert!(reloaded.conversations[0].messages_loaded);
     assert_eq!(reloaded.conversations[0].messages[0].content, "new");
+    let suggestions = &reloaded.conversations[0].messages[0].suggestions;
+    assert_eq!(suggestions.len(), 1);
+    assert_eq!(suggestions[0].icon, "Zap");
+    assert_eq!(suggestions[0].text, "Run deploy");
     assert!(!reloaded.conversations[1].messages_loaded);
     assert!(reloaded.conversations[1].messages.is_empty());
     assert_eq!(reloaded.conversations[1].message_count, 1);
@@ -1698,17 +1566,18 @@ fn chat_persistence_loads_metadata_first_and_conversation_on_demand() {
     let older_full = store.load_conversation("older").unwrap().unwrap();
     assert!(older_full.messages_loaded);
     assert_eq!(older_full.messages[0].content, "old");
+    let branches = older_full.messages[0].branches.as_ref().unwrap();
+    assert_eq!(branches.total, 2);
+    assert_eq!(branches.active_index, 1);
+    assert_eq!(branches.tails[&0][0].content, "old prompt");
+    assert_eq!(branches.tails[&0][1].content, "old reply");
 }
 
 #[test]
-fn chat_persistence_keeps_more_than_legacy_conversation_limit() {
+fn chat_persistence_keeps_all_conversations_and_long_histories_across_repeated_saves() {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("chat_history.redb");
-    let store = AiChatPersistenceStore::new(&path);
+    let store = AiChatPersistenceStore::new(&dir.path().join("chat_history.redb"));
     let mut state = AiChatState::default();
-
-    // Conversation metadata is cheap to load and must not be truncated because
-    // a later full-state save treats absent IDs as explicit deletions.
     for index in 0..125 {
         state.create_conversation(
             format!("conversation-{index}"),
@@ -1717,39 +1586,39 @@ fn chat_persistence_keeps_more_than_legacy_conversation_limit() {
             None,
         );
     }
-    store.save_state(state).unwrap();
-
-    let reloaded = store.load_state().unwrap();
-    assert_eq!(reloaded.conversations.len(), 125);
-    store.save_state(reloaded).unwrap();
-    assert!(store.load_conversation("conversation-0").unwrap().is_some());
-}
-
-#[test]
-fn chat_persistence_preserves_long_history_across_repeated_saves() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("chat_history.redb");
-    let store = AiChatPersistenceStore::new(&path);
-    let mut state = AiChatState::default();
     let conversation_id =
-        state.create_conversation("long-conversation".into(), Some("Long".into()), 1, None);
-
-    // Cross the former 2,000-message retention boundary with distinguishable content.
+        state.create_conversation("long-conversation".into(), Some("Long".into()), 1000, None);
     for index in 0..2_105 {
-        state.add_message(
-            &conversation_id,
-            chat_message(
-                &format!("message-{index}"),
-                AiChatRole::User,
-                &format!("content-{index}"),
-            ),
+        let mut message = chat_message(
+            &format!("message-{index}"),
+            AiChatRole::User,
+            &format!("content-{index}"),
         );
+        // Equal timestamps preserve the insertion-order contract; the active history is newer.
+        message.timestamp_ms = 1000;
+        state.add_message(&conversation_id, message);
     }
     store.save_state(state).unwrap();
 
     for _ in 0..2 {
         let reloaded = store.load_state().unwrap();
-        let messages = &reloaded.conversations[0].messages;
+        assert_eq!(
+            reloaded
+                .conversations
+                .iter()
+                .map(|conversation| conversation.id.clone())
+                .collect::<std::collections::BTreeSet<_>>(),
+            (0..125)
+                .map(|index| format!("conversation-{index}"))
+                .chain(std::iter::once("long-conversation".to_string()))
+                .collect::<std::collections::BTreeSet<_>>()
+        );
+        let messages = &reloaded
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == "long-conversation")
+            .unwrap()
+            .messages;
         assert_eq!(
             messages
                 .iter()
@@ -1760,6 +1629,14 @@ fn chat_persistence_preserves_long_history_across_repeated_saves() {
                 .collect::<Vec<_>>()
         );
         store.save_state(reloaded).unwrap();
+        assert_eq!(
+            store
+                .load_conversation("conversation-0")
+                .unwrap()
+                .unwrap()
+                .title,
+            "Conversation 0"
+        );
     }
 }
 
@@ -1781,49 +1658,22 @@ fn assistant_tool_call_message(
     thinking_content: Option<&str>,
     tool_call_id: &str,
 ) -> AiChatMessage {
-    AiChatMessage {
-        id: id.into(),
-        role: AiChatRole::Assistant,
-        content: content.into(),
-        timestamp_ms: 2,
-        model: None,
-        context: None,
-        is_streaming: false,
-        thinking_content: thinking_content.map(str::to_string),
-        metadata: None,
-        tool_call_id: None,
-        tool_calls: vec![serde_json::json!({
-            "id": tool_call_id,
-            "name": "open_app_surface",
-            "arguments": "{\"surface\":\"local_terminal\"}"
-        })],
-        turn: None,
-        transcript_ref: None,
-        summary_ref: None,
-        branches: None,
-        suggestions: Vec::new(),
-    }
+    let mut message = chat_message(id, AiChatRole::Assistant, content);
+    message.timestamp_ms = 2;
+    message.thinking_content = thinking_content.map(str::to_string);
+    message.tool_calls = vec![serde_json::json!({
+        "id": tool_call_id,
+        "name": "open_app_surface",
+        "arguments": "{\"surface\":\"local_terminal\"}"
+    })];
+    message
 }
 
 fn tool_result_message(id: &str, tool_call_id: &str) -> AiChatMessage {
-    AiChatMessage {
-        id: id.into(),
-        role: AiChatRole::Tool,
-        content: "{\"ok\":true}".into(),
-        timestamp_ms: 3,
-        model: None,
-        context: None,
-        is_streaming: false,
-        thinking_content: None,
-        metadata: None,
-        tool_call_id: Some(tool_call_id.into()),
-        tool_calls: Vec::new(),
-        turn: None,
-        transcript_ref: None,
-        summary_ref: None,
-        branches: None,
-        suggestions: Vec::new(),
-    }
+    let mut message = chat_message(id, AiChatRole::Tool, "{\"ok\":true}");
+    message.timestamp_ms = 3;
+    message.tool_call_id = Some(tool_call_id.into());
+    message
 }
 
 #[test]

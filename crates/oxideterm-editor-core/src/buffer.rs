@@ -497,7 +497,7 @@ fn apply_delta(offset: usize, delta: isize) -> Result<usize, EditorError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Cursor, piece_table::PieceSource};
+    use crate::Cursor;
 
     #[test]
     fn unused_add_text_is_reclaimed_without_losing_history_or_snapshots() {
@@ -732,22 +732,17 @@ mod tests {
     }
 
     #[test]
-    fn line_char_counts_match_visible_line_text() {
+    fn unicode_line_counts_include_empty_final_line_after_trailing_newline() {
         let buffer = TextBuffer::new("aé\n你b\n");
 
         assert_eq!(buffer.line_char_counts(), vec![2, 2, 0]);
-    }
-
-    #[test]
-    fn trailing_newline_creates_empty_final_line() {
-        let buffer = TextBuffer::new("one\n");
-
-        assert_eq!(buffer.line_count(), 2);
-        assert_eq!(buffer.line_text(0), Some("one".to_string()));
-        assert_eq!(buffer.line_text(1), Some(String::new()));
+        assert_eq!(buffer.line_count(), 3);
+        assert_eq!(buffer.line_text(0), Some("aé".to_string()));
+        assert_eq!(buffer.line_text(1), Some("你b".to_string()));
+        assert_eq!(buffer.line_text(2), Some(String::new()));
         assert_eq!(
-            buffer.line_col_to_offset(LineCol::new(1, 0)).unwrap(),
-            BufferOffset(4)
+            buffer.line_col_to_offset(LineCol::new(2, 0)).unwrap(),
+            BufferOffset(9)
         );
     }
 
@@ -805,47 +800,6 @@ mod tests {
                 .unwrap(),
             LineCol::new(4, 5)
         );
-    }
-
-    #[test]
-    fn stores_edits_as_piece_table_appends() {
-        let mut buffer = TextBuffer::new("hello world");
-
-        buffer
-            .apply_transaction(EditTransaction::new(vec![
-                TextEdit::new(TextRange::new(BufferOffset(0), BufferOffset(5)), "hi"),
-                TextEdit::insert(BufferOffset(11), "!"),
-            ]))
-            .unwrap();
-
-        assert_eq!(buffer.text(), "hi world!");
-        assert_eq!(buffer.storage.original.as_ref(), "hello world");
-        assert!(buffer.storage.add.contains("hi"));
-        assert!(buffer.storage.add.contains('!'));
-        assert!(
-            buffer
-                .storage
-                .pieces
-                .iter()
-                .any(|piece| piece.source == PieceSource::Add)
-        );
-    }
-
-    #[test]
-    fn piece_table_handles_middle_replacement_without_touching_original() {
-        let mut buffer = TextBuffer::new("alpha\nbeta\ngamma");
-
-        buffer
-            .apply_transaction(EditTransaction::single(TextEdit::new(
-                TextRange::new(BufferOffset(6), BufferOffset(10)),
-                "BETA\nextra",
-            )))
-            .unwrap();
-
-        assert_eq!(buffer.text(), "alpha\nBETA\nextra\ngamma");
-        assert_eq!(buffer.storage.original.as_ref(), "alpha\nbeta\ngamma");
-        assert_eq!(buffer.line_count(), 4);
-        assert_eq!(buffer.line_text(2), Some("extra".to_string()));
     }
 
     #[test]

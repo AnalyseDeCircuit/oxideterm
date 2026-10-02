@@ -39,11 +39,15 @@ class ArtifactNameTests(unittest.TestCase):
         names = verify_native_package.expected_artifact_names(
             "aarch64-unknown-linux-gnu", "2.0.0"
         )
-        self.assertEqual(len(names), 4)
-        self.assertTrue(any(name.endswith(".AppImage") for name in names))
-        self.assertTrue(any(name.endswith(".deb") for name in names))
-        self.assertTrue(any(name.endswith(".rpm") for name in names))
-        self.assertTrue(any(name.endswith(".tar.gz") for name in names))
+        self.assertEqual(
+            names,
+            {
+                "OxideTerm_2.0.0_linux_arm64.AppImage",
+                "OxideTerm_2.0.0_linux_arm64.deb",
+                "OxideTerm_2.0.0_linux_arm64.rpm",
+                "OxideTerm_2.0.0_linux_arm64_portable.tar.gz",
+            },
+        )
 
     def test_stable_macos_requires_tauri_bridge_archive(self) -> None:
         stable = verify_native_package.expected_artifact_names(

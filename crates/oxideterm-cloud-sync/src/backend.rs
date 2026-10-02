@@ -1280,15 +1280,18 @@ mod tests {
     }
 
     #[test]
-    fn retry_after_parser_accepts_seconds_and_caps_delay() {
+    fn retry_after_delay_accepts_seconds_caps_wait_and_falls_back_for_invalid_values() {
         assert_eq!(parse_retry_after("2"), Some(Duration::from_secs(2)));
-        assert_eq!(
-            parse_retry_after("120")
-                .unwrap()
-                .min(CLOUD_REQUEST_MAX_RETRY_AFTER),
-            CLOUD_REQUEST_MAX_RETRY_AFTER
-        );
         assert!(parse_retry_after("not a retry-after").is_none());
+        for (header, expected) in [("2", 2), ("120", 30), ("not a retry-after", 4)] {
+            let mut headers = HeaderMap::new();
+            headers.insert(RETRY_AFTER, HeaderValue::from_static(header));
+            let response = response(StatusCode::SERVICE_UNAVAILABLE, headers, Value::Null);
+            assert_eq!(
+                cloud_retry_delay(&response, 2),
+                Duration::from_secs(expected)
+            );
+        }
     }
 
     #[tokio::test]

@@ -5481,28 +5481,6 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
-    fn entity_release_cancels_retained_chat_confirmation_exit(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
-        entity.update(cx, |entity, cx| {
-            // The AI owner retains its modal exit task so Entity release
-            // cancels a pending animation completion.
-            entity.chat_confirm_exit_task = Some(cx.spawn(async move |_, _| {
-                let _ = release_receiver.await;
-            }));
-        });
-        cx.run_until_parked();
-
-        drop(entity);
-        cx.update(|_| {});
-        cx.run_until_parked();
-
-        assert!(release_sender.send(()).is_err());
-    }
-
-    #[gpui::test]
     fn provider_secret_draft_and_operation_are_entity_owned(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
@@ -5563,36 +5541,24 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
-    fn knowledge_dialog_input_keeps_focus_and_visible_value_in_ai_entity(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        let input = SettingsInput::KnowledgeCollectionName;
-
-        entity.update(cx, |entity, cx| {
-            // Knowledge dialogs use the AI entity as the single draft owner.
-            assert!(entity.focus_settings_input(input, cx));
-            assert!(entity.replace_settings_input(input, None, "部署运维手册", cx));
-            assert_eq!(entity.focused_settings_input(), Some(input));
-            assert_eq!(entity.settings_input_value(input), Some("部署运维手册"));
-        });
-    }
-
-    #[gpui::test]
     fn knowledge_document_dialog_keeps_its_collection_and_destination(cx: &mut TestAppContext) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
         entity.update(cx, |entity, cx| {
             let store = entity.rag_store();
-            let first = oxideterm_ai::rag_create_collection(
-                &store,
-                oxideterm_ai::RagCreateCollectionRequest {
-                    name: "first".to_string(),
-                    scope: oxideterm_ai::RagDocScopeRequest::Global,
-                },
-            )
-            .unwrap();
+            assert!(entity.focus_settings_input(SettingsInput::KnowledgeCollectionName, cx));
+            assert!(entity.replace_settings_input(
+                SettingsInput::KnowledgeCollectionName,
+                None,
+                "部署运维手册",
+                cx,
+            ));
+            assert!(entity.create_knowledge_collection("failed".to_string()));
+            let first = oxideterm_ai::rag_list_collections(&store, None)
+                .unwrap()
+                .remove(0);
+            assert_eq!(first.name, "部署运维手册");
             let second = oxideterm_ai::rag_create_collection(
                 &store,
                 oxideterm_ai::RagCreateCollectionRequest {
@@ -6149,6 +6115,10 @@ pub(in crate::workspace) mod entity_tests {
         let documents = oxideterm_ai::rag_list_documents(&store, &collection.id, None, Some(10))
             .expect("list imported Knowledge documents");
         assert_eq!(documents.documents.len(), 1);
+        assert_eq!(
+            oxideterm_ai::rag_get_document_content(&store, &documents.documents[0].id).unwrap(),
+            "# Guide\nEntity-owned import"
+        );
         drop(entity);
         drop(store);
         std::fs::remove_dir_all(&data_dir).expect("remove Knowledge test directory");

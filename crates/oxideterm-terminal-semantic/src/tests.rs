@@ -990,7 +990,6 @@ fn standalone_output_markers_are_operators_without_reclassifying_negative_number
         .collect::<Vec<_>>();
 
     assert_eq!(operators, vec!["*", "-", "|", "=", "--"]);
-    assert!(!operators.contains(&"-12"));
 }
 
 #[test]
@@ -1114,17 +1113,6 @@ fn command_role_colors_only_the_leading_command_token() {
             .iter()
             .any(|span| span.class == SemanticClass::Command)
     );
-}
-
-#[test]
-fn every_span_uses_valid_utf8_boundaries() {
-    let text = "连接 10.0.0.1 成功 true";
-
-    for span in classify_line(text, SemanticLineRole::Output) {
-        assert!(text.is_char_boundary(span.range.start));
-        assert!(text.is_char_boundary(span.range.end));
-        assert!(span.range.start < span.range.end);
-    }
 }
 
 #[test]

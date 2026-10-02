@@ -235,6 +235,25 @@ fn parses_and_highlights_all_supported_languages() {
         let session = SyntaxSession::parse(language, source)
             .unwrap_or_else(|error| panic!("{language:?} query failed: {error}"));
         let spans = session.highlight_spans(source);
+        let expected_scopes: &[SyntaxScope] = match language {
+            LanguageId::Rust | LanguageId::Markdown => &[
+                SyntaxScope::Keyword,
+                SyntaxScope::Function,
+                SyntaxScope::String,
+            ],
+            LanguageId::Bash => &[SyntaxScope::Keyword, SyntaxScope::String],
+            LanguageId::Json => &[SyntaxScope::String],
+            _ => &[],
+        };
+        for scope in expected_scopes {
+            assert!(
+                spans.iter().any(|span| span.scope == *scope),
+                "{language:?}: missing {scope:?}"
+            );
+        }
+        if language == LanguageId::Rust {
+            assert!(!session.root_has_error());
+        }
         let mut structure = StructureCache::default();
         structure.update(&session, source, 4, None);
         let expected_folds: std::collections::BTreeMap<_, _> =
@@ -301,57 +320,6 @@ fn parses_and_highlights_all_supported_languages() {
             "{language:?} produced an out-of-bounds span"
         );
     }
-}
-
-#[test]
-fn parses_and_highlights_rust() {
-    let source = "fn main() {\n    let message = \"hi\";\n}\n";
-    let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
-
-    assert!(!session.root_has_error());
-    let spans = session.highlight_spans(source);
-
-    assert!(spans.iter().any(|span| span.scope == SyntaxScope::Keyword));
-    assert!(spans.iter().any(|span| span.scope == SyntaxScope::Function));
-    assert!(spans.iter().any(|span| span.scope == SyntaxScope::String));
-    assert!(spans.iter().all(|span| span.range.end.0 <= source.len()));
-}
-
-#[test]
-fn parses_and_highlights_common_remote_files() {
-    let json = "{\"scripts\": {\"build\": \"cargo build\"}}";
-    let json_session = SyntaxSession::parse(LanguageId::Json, json).unwrap();
-    assert!(
-        json_session
-            .highlight_spans(json)
-            .iter()
-            .any(|span| span.scope == SyntaxScope::String)
-    );
-
-    let bash = "if command -v cargo; then\n  echo \"ok\"\nfi\n";
-    let bash_session = SyntaxSession::parse(LanguageId::Bash, bash).unwrap();
-    let spans = bash_session.highlight_spans(bash);
-    assert!(spans.iter().any(|span| span.scope == SyntaxScope::Keyword));
-    assert!(spans.iter().any(|span| span.scope == SyntaxScope::String));
-
-    let markdown = "# Title\n\nSee [docs](https://example.com).\n\n```sh\necho ok\n```\n";
-    let markdown_session = SyntaxSession::parse(LanguageId::Markdown, markdown).unwrap();
-    let markdown_spans = markdown_session.highlight_spans(markdown);
-    assert!(
-        markdown_spans
-            .iter()
-            .any(|span| span.scope == SyntaxScope::Keyword)
-    );
-    assert!(
-        markdown_spans
-            .iter()
-            .any(|span| span.scope == SyntaxScope::Function)
-    );
-    assert!(
-        markdown_spans
-            .iter()
-            .any(|span| span.scope == SyntaxScope::String)
-    );
 }
 
 #[test]
@@ -494,17 +462,6 @@ fn markdown_emphasis_highlights_paired_delimiters_symmetrically() {
 }
 
 #[test]
-fn indent_guides_come_from_syntax_blocks() {
-    let source = "fn main() {\n    if true {\n        println!(\"ok\");\n    }\n}\n";
-    let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
-    let guides = session.indent_guides(source, 4);
-
-    assert!(guides.iter().any(|guide| guide.column == 0));
-    assert!(guides.iter().any(|guide| guide.column == 4));
-    assert!(!guides.iter().any(|guide| guide.column == 8));
-}
-
-#[test]
 fn indent_guides_ignore_shell_alignment_continuations() {
     let source = "CHOICE=$(whiptail --title \"Power\" \\\n                --menu \"Current\" 12 40 3 \\\n                \"1\" \"Show\")\n";
     let session = SyntaxSession::parse(LanguageId::Bash, source).unwrap();
@@ -537,39 +494,6 @@ fn indent_guides_keep_body_indentation_for_delimiter_free_languages() {
 
     assert!(guides.iter().any(|guide| guide.column == 4));
     assert!(guides.iter().any(|guide| guide.column == 8));
-}
-
-#[test]
-fn reparses_incrementally_after_edit() {
-    let before = "fn main() {\n    let x = 1;\n}\n";
-    let edit_range = TextRange::new(BufferOffset(22), BufferOffset(23));
-    let edit = SyntaxEdit::replace(before, edit_range, "10");
-    let after = "fn main() {\n    let x = 10;\n}\n";
-    let mut session = SyntaxSession::parse(LanguageId::Rust, before).unwrap();
-
-    session.apply_edit(after, edit).unwrap();
-
-    assert!(!session.root_has_error());
-    assert!(
-        session
-            .highlight_spans(after)
-            .iter()
-            .any(|span| span.scope == SyntaxScope::Number)
-    );
-}
-
-#[test]
-fn computes_bracket_and_fold_ranges() {
-    let source = "fn main() {\n    if true {\n        println!(\"x\");\n    }\n}\n";
-    let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
-
-    assert!(session.bracket_pairs(source).len() >= 3);
-    assert!(
-        session
-            .fold_ranges()
-            .iter()
-            .any(|range| range.start_line == 0 && range.end_line >= 3)
-    );
 }
 
 #[test]
@@ -719,6 +643,11 @@ fn range_queries_follow_boundary_edits_in_sequence() {
     for (language, initial, edits) in [
         (
             LanguageId::Rust,
+            "fn main() {\n    let x = 1;\n}\n",
+            vec![(24, 25, "10")],
+        ),
+        (
+            LanguageId::Rust,
             "fn first() {}\nfn second() {}\n",
             vec![(0, 0, "/*"), (2, 2, "*/"), (0, 4, "")],
         ),
@@ -744,6 +673,13 @@ fn range_queries_follow_boundary_edits_in_sequence() {
             );
             source.replace_range(start..end, replacement);
             let change = session.apply_edit(&source, edit).unwrap();
+            if replacement == "10" {
+                assert!(!session.root_has_error());
+                assert!(session.highlight_spans(&source).contains(&HighlightSpan {
+                    range: TextRange::new(BufferOffset(24), BufferOffset(26)),
+                    scope: SyntaxScope::Number,
+                }));
+            }
             assert_eq!(change.edit.start_byte, start);
             assert_eq!(change.edit.old_end_byte, end);
             assert_eq!(change.edit.new_end_byte, start + replacement.len());

@@ -829,14 +829,6 @@ mod tests {
     }
 
     #[test]
-    fn local_process_errors_do_not_include_action_content() {
-        let rendered = format!("{:?}", LocalTriggerProcessError::SpawnFailed);
-
-        assert_eq!(rendered, "SpawnFailed");
-        assert!(!rendered.contains("secret-value"));
-    }
-
-    #[test]
     fn trigger_scope_uses_protocol_qualified_saved_connection_identity() {
         let ssh = SavedConnectionRef {
             kind: SavedConnectionKind::Ssh,

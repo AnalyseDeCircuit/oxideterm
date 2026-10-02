@@ -7,47 +7,41 @@ mod tests {
     };
 
     #[tokio::test]
-    async fn stdout_reader_dispatches_content_length_framed_response() {
-        let (client, mut server) = duplex(1024);
-        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = oneshot::channel();
-        pending.lock().await.insert(7, tx);
-        let task = tokio::spawn(stdout_reader_loop(
-            BufReader::new(client),
-            pending,
-            broadcast::channel(1).0,
-            "test".to_string(),
-        ));
+    async fn stdout_reader_dispatches_supported_framing_and_header_orders() {
         let body = r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#;
-        let message = format!("Content-Length: {}\r\n\r\n{}", body.len(), body);
-        server.write_all(message.as_bytes()).await.unwrap();
-        let result = rx.await.unwrap().unwrap();
-        assert_eq!(result["ok"].as_bool(), Some(true));
-        drop(server);
-        let _ = task.await;
-    }
-
-    #[tokio::test]
-    async fn stdout_reader_dispatches_line_delimited_response() {
-        let (client, mut server) = duplex(1024);
-        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = oneshot::channel();
-        pending.lock().await.insert(3, tx);
-        let task = tokio::spawn(stdout_reader_loop(
-            BufReader::new(client),
-            pending,
-            broadcast::channel(1).0,
-            "line-json".to_string(),
-        ));
-
-        server
-            .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"ok\":true}}\n")
-            .await
-            .unwrap();
-        let result = rx.await.unwrap().unwrap();
-        assert_eq!(result["ok"].as_bool(), Some(true));
-        drop(server);
-        let _ = task.await;
+        for (name, message) in [
+            (
+                "content-length",
+                format!("Content-Length: {}\r\n\r\n{body}", body.len()),
+            ),
+            ("line-json", format!("{body}\n")),
+            (
+                "header-order",
+                format!(
+                    "Content-Type: application/json\r\nContent-length: {}\r\n\r\n{body}",
+                    body.len()
+                ),
+            ),
+        ] {
+            let (client, mut server) = duplex(1024);
+            let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
+            let (tx, rx) = oneshot::channel();
+            pending.lock().await.insert(7, tx);
+            let task = tokio::spawn(stdout_reader_loop(
+                BufReader::new(client),
+                pending,
+                broadcast::channel(1).0,
+                name.to_string(),
+            ));
+            server.write_all(message.as_bytes()).await.unwrap();
+            assert_eq!(
+                rx.await.unwrap().unwrap(),
+                serde_json::json!({"ok": true}),
+                "{name}"
+            );
+            drop(server);
+            task.await.unwrap();
+        }
     }
 
     #[tokio::test]
@@ -87,10 +81,14 @@ mod tests {
             .write_all(b"Content-Length: 999999999\r\n\r\n{}")
             .await
             .unwrap();
-        drop(server);
 
-        let error = rx.await.unwrap().unwrap_err();
+        let error = tokio::time::timeout(Duration::from_secs(2), rx)
+            .await
+            .expect("invalid frame length must fail while stdout remains open")
+            .unwrap()
+            .unwrap_err();
         assert_eq!(error.to_string(), "MCP server closed stdout");
+        drop(server);
         let _ = task.await;
     }
 
@@ -113,33 +111,6 @@ mod tests {
 
         let error = rx.await.unwrap().unwrap_err();
         assert_eq!(error.to_string(), "MCP response missing result");
-        drop(server);
-        let _ = task.await;
-    }
-
-    #[tokio::test]
-    async fn stdout_reader_accepts_content_length_after_other_headers() {
-        let (client, mut server) = duplex(1024);
-        let pending: PendingMap = Arc::new(Mutex::new(HashMap::new()));
-        let (tx, rx) = oneshot::channel();
-        pending.lock().await.insert(12, tx);
-        let task = tokio::spawn(stdout_reader_loop(
-            BufReader::new(client),
-            pending,
-            broadcast::channel(1).0,
-            "header-order".to_string(),
-        ));
-
-        let body = r#"{"jsonrpc":"2.0","id":12,"result":{"ok":true}}"#;
-        let message = format!(
-            "Content-Type: application/json\r\nContent-length: {}\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        server.write_all(message.as_bytes()).await.unwrap();
-
-        let result = rx.await.unwrap().unwrap();
-        assert_eq!(result["ok"].as_bool(), Some(true));
         drop(server);
         let _ = task.await;
     }
@@ -428,34 +399,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streamable_http_server_connects_and_exposes_tools() {
-        let (url, task) = spawn_streamable_http_mcp_server(false).await;
-        let registry = McpRegistry::new(AiProviderKeyStore::new());
-        registry
-            .connect_config(http_test_config("http", McpTransport::StreamableHttp, &url))
-            .await;
-        let snapshots = registry.snapshots();
-        let snapshot = snapshots
-            .iter()
-            .find(|server| server.config.id == "http")
-            .unwrap();
-        assert_eq!(snapshot.status, "connected");
-        assert_eq!(
-            snapshot.resolved_transport.as_deref(),
-            Some("streamable-http")
-        );
-        assert_eq!(snapshot.session_id.as_deref(), Some("resources-session"));
-        assert_eq!(snapshot.tools[0].name, "ping");
-        assert!(
-            registry
-                .tool_definitions()
-                .iter()
-                .any(|tool| tool.name == "mcp::http::ping")
-        );
-        stop_streamable_http_mcp_server(task).await;
-    }
-
-    #[tokio::test]
     async fn modern_http_discovers_without_initialize_and_sends_routing_headers() {
         let (url, requests, task) = spawn_modern_http_mcp_server().await;
         let registry = McpRegistry::new(AiProviderKeyStore::new());
@@ -616,7 +559,18 @@ mod tests {
             .find(|server| server.config.id == "http")
             .unwrap();
         assert_eq!(snapshot.status, "connected");
+        assert_eq!(
+            snapshot.resolved_transport.as_deref(),
+            Some("streamable-http")
+        );
+        assert_eq!(snapshot.session_id.as_deref(), Some("resources-session"));
         assert_eq!(snapshot.tools[0].name, "ping");
+        assert!(
+            registry
+                .tool_definitions()
+                .iter()
+                .any(|tool| tool.name == "mcp::http::ping")
+        );
         stop_streamable_http_mcp_server(task).await;
     }
 

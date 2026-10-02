@@ -1168,7 +1168,7 @@ mod tests {
         let mut stderr = Vec::new();
         append_bounded(&mut stderr, &[1; 128], 64);
         append_bounded(&mut stderr, &[2; 128], 64);
-        assert_eq!(stderr.len(), 64);
+        assert_eq!(stderr, vec![1; 64]);
     }
 
     #[tokio::test(flavor = "multi_thread")]

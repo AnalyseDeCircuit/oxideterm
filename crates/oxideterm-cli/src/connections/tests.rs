@@ -5,7 +5,7 @@ use oxideterm_connections::{AuthType, SavedUpstreamProxyPolicy};
 
 use super::*;
 
-fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
+pub(crate) fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
     ConnectionInfo {
         totp_credential_id: None,
         empty_password: false,

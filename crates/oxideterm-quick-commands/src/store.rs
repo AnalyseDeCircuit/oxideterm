@@ -1037,17 +1037,6 @@ mod tests {
     }
 
     #[test]
-    fn export_uses_defaults_when_file_is_missing() {
-        let settings_path = temp_settings_path("defaults");
-        let json = export_snapshot_json(&settings_path).unwrap();
-        let snapshot = serde_json::from_str::<QuickCommandsSnapshot>(&json).unwrap();
-
-        assert_eq!(snapshot.version, QUICK_COMMANDS_SCHEMA_VERSION);
-        assert!(!snapshot.categories.is_empty());
-        assert!(!snapshot.commands.is_empty());
-    }
-
-    #[test]
     fn apply_snapshot_persists_imported_commands() {
         let settings_path = temp_settings_path("apply");
         let incoming = QuickCommandsSnapshot {
@@ -1065,10 +1054,23 @@ mod tests {
         let json = serde_json::to_string(&incoming).unwrap();
 
         let result = apply_snapshot_json(&settings_path, &json, QuickCommandImportStrategy::Merge);
-        let exported = export_snapshot_json(&settings_path).unwrap();
+        let loaded = load_snapshot(&settings_path).unwrap();
 
-        assert!(result.imported > 0);
-        assert!(exported.contains("Ops Uptime"));
+        assert_eq!(result.imported, 1);
+        assert!(result.errors.is_empty());
+        let imported = loaded
+            .commands
+            .iter()
+            .find(|command| command.id == "ops-uptime")
+            .unwrap();
+        assert_eq!(
+            (
+                imported.name.as_str(),
+                imported.command.as_str(),
+                imported.category.as_str()
+            ),
+            ("Ops Uptime", "uptime", "ops")
+        );
     }
 
     #[test]
@@ -1151,33 +1153,34 @@ mod tests {
     }
 
     #[test]
-    fn failed_atomic_save_preserves_existing_file() {
-        let settings_path = temp_settings_path("atomic-existing");
-        let path = quick_commands_path(&settings_path);
-        let mut snapshot = default_snapshot();
-        save_snapshot(&settings_path, &snapshot).unwrap();
-        let previous = fs::read(&path).unwrap();
-        snapshot.updated_at = snapshot.updated_at.saturating_add(1);
-        inject_atomic_replace_failure();
+    fn failed_atomic_save_preserves_present_and_missing_file_states() {
+        for (name, existing) in [("atomic-existing", true), ("atomic-missing", false)] {
+            let settings_path = temp_settings_path(name);
+            let path = quick_commands_path(&settings_path);
+            let mut snapshot = default_snapshot();
+            let previous = if existing {
+                save_snapshot(&settings_path, &snapshot).unwrap();
+                Some(fs::read(&path).unwrap())
+            } else {
+                None
+            };
+            snapshot.updated_at = snapshot.updated_at.saturating_add(1);
+            inject_atomic_replace_failure();
 
-        assert!(save_snapshot(&settings_path, &snapshot).is_err());
-        assert_eq!(fs::read(&path).unwrap(), previous);
-        assert_no_temporary_files(path.parent().unwrap());
+            assert!(
+                save_snapshot(&settings_path, &snapshot).is_err(),
+                "existing={existing}"
+            );
+            match previous {
+                Some(bytes) => assert_eq!(fs::read(&path).unwrap(), bytes),
+                None => assert!(!path.exists()),
+            }
+            assert_no_temporary_files(path.parent().unwrap());
+        }
     }
 
     #[test]
-    fn failed_atomic_save_preserves_missing_file_state() {
-        let settings_path = temp_settings_path("atomic-missing");
-        let path = quick_commands_path(&settings_path);
-        inject_atomic_replace_failure();
-
-        assert!(save_snapshot(&settings_path, &default_snapshot()).is_err());
-        assert!(!path.exists());
-        assert_no_temporary_files(path.parent().unwrap());
-    }
-
-    #[test]
-    fn checkpoint_restores_exact_present_file_contents() {
+    fn checkpoint_restores_exact_contents_and_recreates_removed_parent_directory() {
         let settings_path = temp_settings_path("checkpoint-present");
         let path = quick_commands_path(&settings_path);
         let original = b"{ not a parsed snapshot, but exact persisted state }";
@@ -1188,15 +1191,6 @@ mod tests {
         restore_checkpoint(&settings_path, &checkpoint).unwrap();
 
         assert_eq!(fs::read(&path).unwrap(), original);
-    }
-
-    #[test]
-    fn present_checkpoint_restore_recreates_removed_parent_directory() {
-        let settings_path = temp_settings_path("checkpoint-parent");
-        let path = quick_commands_path(&settings_path);
-        let original = b"checkpoint contents";
-        fs::write(&path, original).unwrap();
-        let checkpoint = capture_checkpoint(&settings_path).unwrap();
         fs::remove_dir_all(path.parent().unwrap()).unwrap();
 
         restore_checkpoint(&settings_path, &checkpoint).unwrap();
@@ -1217,38 +1211,43 @@ mod tests {
     }
 
     #[test]
-    fn failed_present_checkpoint_restore_preserves_current_file() {
-        let settings_path = temp_settings_path("checkpoint-present-failure");
-        let path = quick_commands_path(&settings_path);
-        fs::write(&path, b"checkpoint").unwrap();
-        let checkpoint = capture_checkpoint(&settings_path).unwrap();
-        let current = b"current state";
-        fs::write(&path, current).unwrap();
-        inject_atomic_replace_failure();
+    fn failed_checkpoint_restore_preserves_current_file_for_both_states() {
+        for (name, existing) in [
+            ("checkpoint-present-failure", true),
+            ("checkpoint-missing-failure", false),
+        ] {
+            let settings_path = temp_settings_path(name);
+            let path = quick_commands_path(&settings_path);
+            if existing {
+                fs::write(&path, b"checkpoint").unwrap();
+            }
+            let checkpoint = capture_checkpoint(&settings_path).unwrap();
+            let current = b"current state";
+            fs::write(&path, current).unwrap();
+            if existing {
+                inject_atomic_replace_failure();
+            } else {
+                inject_checkpoint_removal_failure();
+            }
 
-        assert!(restore_checkpoint(&settings_path, &checkpoint).is_err());
-        assert_eq!(fs::read(&path).unwrap(), current);
-        assert_no_temporary_files(path.parent().unwrap());
+            assert!(
+                restore_checkpoint(&settings_path, &checkpoint).is_err(),
+                "existing={existing}"
+            );
+            assert_eq!(fs::read(&path).unwrap(), current, "existing={existing}");
+            assert_no_temporary_files(path.parent().unwrap());
+        }
     }
 
     #[test]
-    fn failed_missing_checkpoint_restore_preserves_current_file() {
-        let settings_path = temp_settings_path("checkpoint-missing-failure");
-        let path = quick_commands_path(&settings_path);
-        let checkpoint = capture_checkpoint(&settings_path).unwrap();
-        let current = b"current state";
-        fs::write(&path, current).unwrap();
-        inject_checkpoint_removal_failure();
-
-        assert!(restore_checkpoint(&settings_path, &checkpoint).is_err());
-        assert_eq!(fs::read(&path).unwrap(), current);
-    }
-
-    #[test]
-    fn rename_import_does_not_duplicate_builtin_roundtrip_records() {
+    fn missing_store_defaults_export_and_rename_import_without_duplicates() {
         let source_settings_path = temp_settings_path("roundtrip-source");
         let target_settings_path = temp_settings_path("roundtrip-target");
         let json = export_snapshot_json(&source_settings_path).unwrap();
+        let defaults = serde_json::from_str::<QuickCommandsSnapshot>(&json).unwrap();
+        assert_eq!(defaults.version, QUICK_COMMANDS_SCHEMA_VERSION);
+        assert!(!defaults.categories.is_empty());
+        assert!(!defaults.commands.is_empty());
 
         let result = apply_snapshot_json(
             &target_settings_path,

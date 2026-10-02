@@ -1294,59 +1294,41 @@ mod tests {
     }
 
     #[test]
-    fn tracker_classifies_generic_prompt_after_observed_sudo_command() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        assert_eq!(
-            tracker.observe_user_input_bytes(b"sudo systemctl restart nginx\r", start),
-            PrivilegeInputObservation::Normal
-        );
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
-            })
-        );
-    }
-
-    #[test]
-    fn tracker_classifies_generic_prompt_after_split_sudo_command_input() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"sudo yazi", start);
-        tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(10));
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
-            })
-        );
+    fn tracker_classifies_sudo_prompt_from_plain_split_paste_and_kitty_input() {
+        let cases: [(&str, &[&[u8]]); 4] = [
+            ("plain", &[b"sudo systemctl restart nginx\r"]),
+            ("split", &[b"sudo yazi", b"\r"]),
+            ("bracketed paste", &[b"\x1b[200~sudo yazi\x1b[201~\r"]),
+            ("kitty keyboard", &[b"\x1b[115;1u\x1b[117;1u\x1b[100;1u\x1b[111;1u\x1b[32;1u\x1b[121;1u\x1b[97;1u\x1b[122;1u\x1b[105;1u\x1b[13;1u"]),
+        ];
+        for (scenario, chunks) in cases {
+            let start = Instant::now();
+            let mut tracker = PrivilegePromptTracker::default();
+            for (index, chunk) in chunks.iter().enumerate() {
+                assert_eq!(
+                    tracker.observe_user_input_bytes(
+                        chunk,
+                        start + Duration::from_millis(index as u64 * 10)
+                    ),
+                    PrivilegeInputObservation::Normal,
+                    "{scenario} chunk {index}",
+                );
+            }
+            let prompt_time = start + Duration::from_millis(40);
+            observe_standard_prompt(&mut tracker, "Password:", false, prompt_time);
+            assert_eq!(
+                tracker.snapshot(prompt_time),
+                Some(PrivilegePromptSnapshot {
+                    prompt: PrivilegePromptMatch::Sudo {
+                        username: None,
+                        prompt_text: "Password:".to_string(),
+                    },
+                    confidence: PrivilegePromptConfidence::CommandContext,
+                    retry_count: 0,
+                }),
+                "{scenario}",
+            );
+        }
     }
 
     #[test]
@@ -1400,64 +1382,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[test]
-    fn tracker_classifies_generic_prompt_after_bracketed_paste_protocol_input() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(
-            b"\x1b[200~sudo yazi\x1b[201~\r",
-            start + Duration::from_millis(10),
-        );
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
-            })
-        );
-    }
-
-    #[test]
-    fn tracker_classifies_generic_prompt_after_kitty_keyboard_protocol_input() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(
-            b"\x1b[115;1u\x1b[117;1u\x1b[100;1u\x1b[111;1u\x1b[32;1u\x1b[121;1u\x1b[97;1u\x1b[122;1u\x1b[105;1u\x1b[13;1u",
-            start + Duration::from_millis(10),
-        );
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(40),
-        );
-
-        assert_eq!(
-            tracker.snapshot(start + Duration::from_millis(40)),
-            Some(PrivilegePromptSnapshot {
-                prompt: PrivilegePromptMatch::Sudo {
-                    username: None,
-                    prompt_text: "Password:".to_string(),
-                },
-                confidence: PrivilegePromptConfidence::CommandContext,
-                retry_count: 0,
-            })
-        );
     }
 
     #[test]

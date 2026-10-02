@@ -275,40 +275,23 @@ fn require_non_empty(field: &str, value: &str) -> Result<(), RemoteDesktopProvid
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::PathBuf};
+    use std::fs;
 
     use super::*;
 
-    fn manifest(id: &str, protocol: RemoteDesktopProtocol) -> RemoteDesktopProviderManifest {
-        RemoteDesktopProviderManifest {
-            id: id.to_string(),
-            name: format!("{id} provider"),
-            description: String::new(),
-            version: "0.1.0".to_string(),
-            protocol,
-            entry: RemoteDesktopProviderEntry {
-                command: format!("{id}-helper"),
-                args: vec!["--stdio".to_string()],
-                working_dir: None,
-            },
-            capabilities: RemoteDesktopProviderCapabilities {
-                clipboard_text: true,
-                clipboard_data: matches!(protocol, RemoteDesktopProtocol::Rdp),
-                clipboard_files: false,
-                audio_playback: false,
-                audio_capture: false,
-                multi_monitor: false,
-                resize: true,
-                cursor: true,
-                binary_frames: true,
-            },
-            ui: None,
-        }
-    }
+    const RDP_MANIFEST: &str = r#"{
+        "id": "rdp",
+        "name": "RDP provider",
+        "version": "0.1.0",
+        "protocol": "rdp",
+        "entry": {"command": "rdp-helper", "args": ["--stdio"]}
+    }"#;
 
     #[test]
     fn rejects_provider_id_with_path_segments() {
-        let mut manifest = manifest("../rdp", RemoteDesktopProtocol::Rdp);
+        let mut manifest: RemoteDesktopProviderManifest =
+            serde_json::from_str(RDP_MANIFEST).unwrap();
+        manifest.id = "../rdp".to_string();
 
         let error = manifest.validate().unwrap_err().to_string();
 
@@ -319,24 +302,19 @@ mod tests {
 
     #[test]
     fn registry_loads_manifests_from_provider_directories() {
-        let root = unique_temp_dir("remote-desktop-provider-registry");
-        let provider_dir = root.join("rdp");
+        let root = tempfile::tempdir().unwrap();
+        let provider_dir = root.path().join("rdp");
         fs::create_dir_all(&provider_dir).unwrap();
         fs::write(
             provider_dir.join(REMOTE_DESKTOP_PROVIDER_MANIFEST),
-            serde_json::to_vec(&manifest("rdp", RemoteDesktopProtocol::Rdp)).unwrap(),
+            RDP_MANIFEST,
         )
         .unwrap();
 
-        let registry = RemoteDesktopProviderRegistry::load_from_dir(&root).unwrap();
-
-        assert!(registry.get("rdp").is_some());
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    fn unique_temp_dir(label: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("{label}-{}", uuid::Uuid::new_v4()));
-        fs::create_dir_all(&path).unwrap();
-        path
+        let registry = RemoteDesktopProviderRegistry::load_from_dir(root.path()).unwrap();
+        let provider = registry.get("rdp").unwrap();
+        assert_eq!(provider.protocol, RemoteDesktopProtocol::Rdp);
+        assert_eq!(provider.entry.command, "rdp-helper");
+        assert_eq!(provider.entry.args, ["--stdio"]);
     }
 }

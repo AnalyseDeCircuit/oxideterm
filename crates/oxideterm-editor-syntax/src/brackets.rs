@@ -103,8 +103,23 @@ mod index_tests {
 
     #[test]
     fn caret_priority_and_character_scanning_semantics_are_preserved() {
-        for source in ["()[]", "[()]", "([)]", "你()🙂[]", "// ()\n\"[]\"", "(]"] {
-            let pairs = bracket_pairs(source);
+        for (source, endpoints) in [
+            ("()[]", vec![(0, 1), (2, 3)]),
+            ("[()]", vec![(0, 3), (1, 2)]),
+            ("{([])}", vec![(0, 5), (1, 4), (2, 3)]),
+            ("([)]", vec![(0, 2), (1, 3)]),
+            ("你()🙂[]", vec![(3, 4), (9, 10)]),
+            ("// ()\n\"[]\"", vec![(3, 4), (7, 8)]),
+            ("(]", vec![]),
+        ] {
+            let pairs = endpoints
+                .into_iter()
+                .map(|(open, close)| BracketPair {
+                    open: BufferOffset(open),
+                    close: BufferOffset(close),
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(bracket_pairs(source), pairs, "{source:?}");
             let index = BracketIndex::new(pairs.clone(), None).unwrap();
             for caret in 0..=source.len() + 1 {
                 let expected = pairs.iter().find(|pair| {
@@ -114,20 +129,6 @@ mod index_tests {
             }
         }
         let index = BracketIndex::new(bracket_pairs("[()]"), None).unwrap();
-        assert_eq!(
-            index.pair_at(1),
-            Some(&BracketPair {
-                open: BufferOffset(0),
-                close: BufferOffset(3)
-            })
-        );
-        assert_eq!(
-            index.pair_at(2),
-            Some(&BracketPair {
-                open: BufferOffset(1),
-                close: BufferOffset(2)
-            })
-        );
         assert_eq!(index.pair_at(usize::MAX), None);
     }
 }

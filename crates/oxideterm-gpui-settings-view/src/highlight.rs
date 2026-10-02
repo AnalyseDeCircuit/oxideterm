@@ -467,10 +467,11 @@ mod tests {
         });
 
         assert_eq!(highlight_rule_validation_error(&valid_rule), None);
-        assert_eq!(
-            accepted_highlight_preview_matches("fatal error happened", &[valid_rule]).len(),
-            1
-        );
+        let rules = [valid_rule];
+        let matches = accepted_highlight_preview_matches("terror error happened", &rules);
+        assert_eq!(matches.len(), 1);
+        assert_eq!((matches[0].start, matches[0].end), (7, 12));
+        assert!(std::ptr::eq(matches[0].rule, &rules[0]));
 
         let invalid_rule = create_default_highlight_rule(|rule| {
             rule.pattern = "(".to_string();

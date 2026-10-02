@@ -99,10 +99,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn durable_write_replaces_existing_contents() {
+    fn durable_write_creates_missing_parents_and_replaces_existing_contents() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("state.json");
-        fs::write(&path, b"old").unwrap();
+        let path = directory.path().join("nested").join("state.json");
+
+        durable_write(&path, b"old").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"old");
 
         durable_write(&path, b"new").unwrap();
 
@@ -123,16 +125,6 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert_eq!(fs::read(&path).unwrap(), b"old");
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
-    }
-
-    #[test]
-    fn durable_write_recreates_missing_parent_directories() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("nested").join("state.json");
-
-        durable_write(&path, b"state").unwrap();
-
-        assert_eq!(fs::read(path).unwrap(), b"state");
     }
 
     #[test]

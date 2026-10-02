@@ -1323,79 +1323,20 @@ mod tests {
     }
 
     #[test]
-    fn parser_accepts_equals_separated_options() {
-        let directory = std::env::temp_dir().join(format!(
-            "oxideterm-ssh-config-equals-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory).unwrap();
+    fn file_parser_preserves_mixed_syntax_auth_policy_and_remote_command() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config");
         fs::write(
-            directory.join("config"),
-            "Host=production\nHostName=prod.example.com\nPort=2200\nConnectTimeout=120\n",
-        )
-        .unwrap();
-
-        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
-        let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
-            .unwrap()
-            .unwrap();
-
-        assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
-        assert_eq!(host.port, Some(2200));
-        assert_eq!(host.connect_timeout_seconds, Some(120));
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn parser_preserves_explicit_gssapi_policy() {
-        let directory = std::env::temp_dir().join(format!(
-            "oxideterm-ssh-config-gssapi-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            directory.join("config"),
+            &path,
             concat!(
-                "Host production\n",
-                "  HostName prod.example.com\n",
+                "Host=production\n",
+                "HostName=prod.example.com\n",
+                "Port=2200\n",
+                "ConnectTimeout=120\n",
+                "  User deploy\n",
                 "  GSSAPIAuthentication yes\n",
                 "  GSSAPIServerIdentity host/service.example.com@EXAMPLE.COM\n",
                 "  GSSAPIDelegateCredentials yes\n",
-            ),
-        )
-        .unwrap();
-
-        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
-        let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
-            .unwrap()
-            .unwrap();
-
-        assert!(host.gssapi_authentication);
-        assert_eq!(
-            host.gssapi_server_identity.as_deref(),
-            Some("host/service.example.com@EXAMPLE.COM")
-        );
-        assert!(host.gssapi_delegate_credentials);
-        let _ = fs::remove_dir_all(directory);
-    }
-
-    #[test]
-    fn remote_command_preserves_shell_text_and_expands_connection_tokens() {
-        let directory = std::env::temp_dir().join(format!(
-            "oxideterm-ssh-config-remote-command-{}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory).unwrap();
-        fs::write(
-            directory.join("config"),
-            concat!(
-                "Host production\n",
-                "  HostName prod.example.com\n",
-                "  User deploy\n",
-                "  Port 2200\n",
                 "  RemoteCommand printf '\"%h\" %n %p %r %% # preserved'\n",
                 "Host *\n",
                 "  RemoteCommand echo ignored\n",
@@ -1403,18 +1344,25 @@ mod tests {
         )
         .unwrap();
 
-        let blocks = parse_ssh_config_file(&directory.join("config")).unwrap();
+        let blocks = parse_ssh_config_file(&path).unwrap();
         let host = resolve_ssh_config_alias_from_blocks("production", &blocks)
             .unwrap()
             .unwrap();
-
+        assert_eq!(host.hostname.as_deref(), Some("prod.example.com"));
+        assert_eq!(host.port, Some(2200));
+        assert_eq!(host.connect_timeout_seconds, Some(120));
+        assert!(host.gssapi_authentication);
+        assert_eq!(
+            host.gssapi_server_identity.as_deref(),
+            Some("host/service.example.com@EXAMPLE.COM")
+        );
+        assert!(host.gssapi_delegate_credentials);
         assert_eq!(
             host.remote_command
                 .as_ref()
                 .map(SecretString::expose_secret),
             Some("printf '\"prod.example.com\" production 2200 deploy % # preserved'")
         );
-        let _ = fs::remove_dir_all(directory);
     }
 
     #[test]

@@ -1314,36 +1314,6 @@ mod tests {
     }
 
     #[test]
-    fn ide_restore_skips_when_close_happened_after_snapshot() {
-        let snapshot_at = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
-        let closed_at = snapshot_at + Duration::from_secs(1);
-
-        assert!(ide_restore_was_closed_after_snapshot(
-            Some(closed_at),
-            Some(snapshot_at)
-        ));
-    }
-
-    #[test]
-    fn ide_restore_allows_close_before_snapshot_or_missing_timestamp() {
-        let snapshot_at = SystemTime::UNIX_EPOCH + Duration::from_secs(10);
-        let closed_at = snapshot_at - Duration::from_secs(1);
-
-        assert!(!ide_restore_was_closed_after_snapshot(
-            Some(closed_at),
-            Some(snapshot_at)
-        ));
-        assert!(!ide_restore_was_closed_after_snapshot(
-            None,
-            Some(snapshot_at)
-        ));
-        assert!(!ide_restore_was_closed_after_snapshot(
-            Some(closed_at),
-            None
-        ));
-    }
-
-    #[test]
     fn ide_mount_tracks_main_hidden_detaching_and_detached_locations() {
         assert_eq!(
             ide_surface_mount_for_location(true, false, false),
@@ -1441,6 +1411,12 @@ mod tests {
                 registry.last_closed_at_by_node.get(&node_id).copied(),
                 Some(snapshot_at),
             ));
+            for snapshot in [Some(closed_at + Duration::from_secs(1)), None] {
+                assert!(!ide_restore_was_closed_after_snapshot(
+                    registry.last_closed_at_by_node.get(&node_id).copied(),
+                    snapshot,
+                ));
+            }
         });
     }
 

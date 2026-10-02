@@ -217,12 +217,20 @@ impl ProtocolResponse {
 mod tests {
     use super::*;
     use crate::AcpHostToolDefinition;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn full_executor_queue_rejects_additional_tool_calls() {
         let (call_tx, _call_rx) = mpsc::channel(1);
-        let protocol = Arc::new(AcpHostToolsProtocol::new(
+        let (response_tx, _response_rx) = oneshot::channel();
+        call_tx
+            .try_send(AcpHostToolCall::new(
+                "pending-call".to_string(),
+                "inspect_host_tools".to_string(),
+                json!({}),
+                response_tx,
+            ))
+            .unwrap();
+        let protocol = AcpHostToolsProtocol::new(
             vec![AcpHostToolDefinition::new(
                 "inspect_host_tools",
                 "Inspect Host Tools.",
@@ -230,22 +238,7 @@ mod tests {
             )],
             call_tx,
             "Bearer test",
-        ));
-        let first_protocol = protocol.clone();
-        let first_call = tokio::spawn(async move {
-            first_protocol
-                .handle_message(json!({
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": "inspect_host_tools",
-                        "arguments": {},
-                    },
-                }))
-                .await
-        });
-        tokio::task::yield_now().await;
+        );
 
         let response = protocol
             .handle_message(json!({
@@ -266,6 +259,5 @@ mod tests {
                 .and_then(|body| body.pointer("/error/message").and_then(Value::as_str)),
             Some("OxideTerm tool executor is busy.")
         );
-        first_call.abort();
     }
 }

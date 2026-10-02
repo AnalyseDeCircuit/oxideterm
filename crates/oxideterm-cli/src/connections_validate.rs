@@ -336,45 +336,8 @@ fn format_validation_issue(issue: &ConnectionValidationIssue) -> String {
 
 #[cfg(test)]
 mod tests {
-    use oxideterm_connections::{AuthType, SavedUpstreamProxyPolicy};
-
     use super::*;
-
-    fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
-        ConnectionInfo {
-            totp_credential_id: None,
-            empty_password: false,
-            id: id.to_string(),
-            name: name.to_string(),
-            group: Some("prod".to_string()),
-            notes: None,
-            host: "example.com".to_string(),
-            port: 22,
-            username: "root".to_string(),
-            auth_type: AuthType::Password,
-            key_path: None,
-            cert_path: None,
-            managed_key_id: None,
-            managed_key_name: None,
-            gssapi_authentication: false,
-            gssapi_server_identity: None,
-            gssapi_delegate_credentials: false,
-            proxy_chain: Vec::new(),
-            upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
-            created_at: "2026-05-26T00:00:00Z".to_string(),
-            last_used_at: None,
-            color: None,
-            icon_background_color: None,
-            icon: None,
-            tags: vec!["primary".to_string()],
-            agent_forwarding: false,
-            identity_agent: None,
-            agent_forwarding_socket: None,
-            legacy_ssh_compatibility: false,
-            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-            post_connect_command: None,
-        }
-    }
+    use crate::connections::tests::sample_connection;
 
     #[test]
     fn validation_reports_duplicate_names_and_missing_key_path() {

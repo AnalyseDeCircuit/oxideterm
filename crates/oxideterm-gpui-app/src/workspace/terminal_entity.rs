@@ -840,6 +840,30 @@ pub(super) mod tests {
         _subscription: Subscription,
     }
 
+    fn record_terminal_events(
+        terminal: &Entity<WorkspaceTerminalEntity>,
+        cx: &mut TestAppContext,
+    ) -> Entity<TerminalEventRecorder> {
+        cx.new(|cx| {
+            let subscription = cx.subscribe(
+                terminal,
+                |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
+                    WorkspaceTerminalEvent::GitMetadataChanged => {
+                        recorder.git_metadata_changes += 1;
+                    }
+                    WorkspaceTerminalEvent::ProjectMetadataChanged => {
+                        recorder.project_metadata_changes += 1;
+                    }
+                },
+            );
+            TerminalEventRecorder {
+                git_metadata_changes: 0,
+                project_metadata_changes: 0,
+                _subscription: subscription,
+            }
+        })
+    }
+
     pub(in crate::workspace) fn new_terminal_entity(
         cx: &mut TestAppContext,
     ) -> Entity<WorkspaceTerminalEntity> {
@@ -862,24 +886,7 @@ pub(super) mod tests {
     #[gpui::test]
     fn project_probe_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
         let terminal = new_terminal_entity(cx);
-        let recorder = cx.new(|cx| {
-            let subscription = cx.subscribe(
-                &terminal,
-                |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
-                    WorkspaceTerminalEvent::GitMetadataChanged => {
-                        recorder.git_metadata_changes += 1;
-                    }
-                    WorkspaceTerminalEvent::ProjectMetadataChanged => {
-                        recorder.project_metadata_changes += 1;
-                    }
-                },
-            );
-            TerminalEventRecorder {
-                git_metadata_changes: 0,
-                project_metadata_changes: 0,
-                _subscription: subscription,
-            }
-        });
+        let recorder = record_terminal_events(&terminal, cx);
         let key = ProjectProbeKey::new(ProjectProbeScope::Local, "/missing-project")
             .expect("project probe key");
         let (generation, sender) = terminal.update(cx, |terminal, cx| {
@@ -962,24 +969,7 @@ pub(super) mod tests {
     #[gpui::test]
     fn git_probe_state_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
         let terminal = new_terminal_entity(cx);
-        let recorder = cx.new(|cx| {
-            let subscription = cx.subscribe(
-                &terminal,
-                |recorder: &mut TerminalEventRecorder, _terminal, event, _cx| match event {
-                    WorkspaceTerminalEvent::GitMetadataChanged => {
-                        recorder.git_metadata_changes += 1;
-                    }
-                    WorkspaceTerminalEvent::ProjectMetadataChanged => {
-                        recorder.project_metadata_changes += 1;
-                    }
-                },
-            );
-            TerminalEventRecorder {
-                git_metadata_changes: 0,
-                project_metadata_changes: 0,
-                _subscription: subscription,
-            }
-        });
+        let recorder = record_terminal_events(&terminal, cx);
         let key =
             GitProbeKey::new(GitProbeScope::Local, "/missing-repository").expect("git probe key");
         let (generation, sender) = terminal.update(cx, |terminal, _cx| {

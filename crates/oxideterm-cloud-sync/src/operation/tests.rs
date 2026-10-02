@@ -189,7 +189,7 @@ fn remote_desktop_three_way_merge_preserves_independent_changes() {
 }
 
 #[test]
-fn field_merge_preserves_independent_local_and_remote_changes() {
+fn field_merge_preserves_independent_edits_and_resolves_conflicts_by_strategy() {
     let base = serde_json::json!({
         "name": "Prod",
         "host": "old.example.test",
@@ -197,13 +197,13 @@ fn field_merge_preserves_independent_local_and_remote_changes() {
     });
     let local = serde_json::json!({
         "name": "Production",
-        "host": "old.example.test",
+        "host": "local.example.test",
         "username": "ops"
     });
     let remote = serde_json::json!({
         "name": "Prod",
         "host": "new.example.test",
-        "username": "ops"
+        "username": "remote-ops"
     });
 
     let merged = merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Merge)
@@ -211,26 +211,24 @@ fn field_merge_preserves_independent_local_and_remote_changes() {
         .expect("independent local field should be preserved");
 
     assert_eq!(merged["name"], "Production");
-    assert_eq!(merged["host"], "new.example.test");
-    assert_eq!(merged["username"], "ops");
-}
+    assert_eq!(merged["host"], "local.example.test");
+    assert_eq!(merged["username"], "remote-ops");
+    let replace_result =
+        merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Replace)
+            .expect("replace strategy should succeed")
+            .expect("independent local name should still be preserved");
 
-#[test]
-fn field_merge_uses_strategy_for_same_field_conflicts() {
+    assert_eq!(replace_result["name"], "Production");
+    assert_eq!(replace_result["host"], "new.example.test");
+    assert_eq!(replace_result["username"], "remote-ops");
     let base = serde_json::json!({ "host": "old.example.test" });
     let local = serde_json::json!({ "host": "local.example.test" });
     let remote = serde_json::json!({ "host": "remote.example.test" });
-
-    let merge_result =
-        merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Merge)
-            .expect("merge strategy should succeed")
-            .expect("merge strategy should preserve local conflict");
-    let replace_result =
+    assert!(
         merge_structured_model_fields(&base, &local, &remote, &ConflictStrategy::Replace)
-            .expect("replace strategy should succeed");
-
-    assert_eq!(merge_result["host"], "local.example.test");
-    assert!(replace_result.is_none());
+            .expect("replace strategy should leave a remote-only conflict unchanged")
+            .is_none()
+    );
 }
 
 #[test]

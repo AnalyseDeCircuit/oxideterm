@@ -24,7 +24,7 @@ mod tests {
     }
 
     #[test]
-    fn connection_trace_coalesces_running_progress_before_terminal_state() {
+    fn connection_trace_coalesces_running_progress_but_preserves_terminal_transitions() {
         let events = vec![
             connection_trace_event(
                 ConnectionTraceStatus::Running,
@@ -36,23 +36,6 @@ mod tests {
                 ConnectionTraceStage::Authentication,
                 62.0,
             ),
-            connection_trace_event(
-                ConnectionTraceStatus::Ready,
-                ConnectionTraceStage::Ready,
-                100.0,
-            ),
-        ];
-
-        let coalesced = coalesce_connection_trace_running_events(events);
-
-        assert_eq!(coalesced.len(), 2);
-        assert_eq!(coalesced[0].stage, ConnectionTraceStage::Authentication);
-        assert_eq!(coalesced[1].status, ConnectionTraceStatus::Ready);
-    }
-
-    #[test]
-    fn connection_trace_never_merges_terminal_transitions() {
-        let events = vec![
             connection_trace_event(
                 ConnectionTraceStatus::Ready,
                 ConnectionTraceStage::Ready,
@@ -72,10 +55,11 @@ mod tests {
 
         let coalesced = coalesce_connection_trace_running_events(events);
 
-        assert_eq!(coalesced.len(), 3);
-        assert_eq!(coalesced[0].status, ConnectionTraceStatus::Ready);
-        assert_eq!(coalesced[1].status, ConnectionTraceStatus::Failed);
-        assert_eq!(coalesced[2].status, ConnectionTraceStatus::Cancelled);
+        assert_eq!(coalesced.len(), 4);
+        assert_eq!(coalesced[0].stage, ConnectionTraceStage::Authentication);
+        assert_eq!(coalesced[1].status, ConnectionTraceStatus::Ready);
+        assert_eq!(coalesced[2].status, ConnectionTraceStatus::Failed);
+        assert_eq!(coalesced[3].status, ConnectionTraceStatus::Cancelled);
     }
 
     #[test]

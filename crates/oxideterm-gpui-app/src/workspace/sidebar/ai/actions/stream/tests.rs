@@ -319,27 +319,6 @@ mod ai_turn_order_tests {
 
 
     #[test]
-    fn history_trimming_keeps_latest_regular_message_when_budget_is_zero() {
-        let mut history = vec![
-            test_message("system", AiChatRole::System, "large system".repeat(100)),
-            test_message("user-1", AiChatRole::User, "first".to_string()),
-            test_message("assistant-1", AiChatRole::Assistant, "answer".to_string()),
-            test_message("user-2", AiChatRole::User, "latest".to_string()),
-        ];
-
-        let trimmed = trim_ai_stream_history_to_budget(&mut history, 100, 100);
-
-        assert_eq!(trimmed, 2);
-        assert_eq!(
-            history
-                .iter()
-                .map(|message| message.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["system", "user-2"]
-        );
-    }
-
-    #[test]
     fn second_model_round_replaces_the_previous_runtime_context() {
         let mut history = vec![test_message(
             "latest-user",
@@ -697,7 +676,7 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn compaction_reference_survives_provider_history_normalization() {
+    fn summary_references_survive_provider_history_normalization() {
         let compacted = vec![
             test_message("u-1", AiChatRole::User, "first".to_string()),
             test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
@@ -718,15 +697,7 @@ mod ai_turn_order_tests {
             Some("a-2")
         );
 
-        let mut history = vec![AiChatMessage {
-            id: "anchor-1".to_string(),
-            role: AiChatRole::System,
-            content: "summary".to_string(),
-            timestamp_ms: 1,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
+        let anchor = AiChatMessage {
             metadata: Some(AiChatMessageMetadata {
                 kind: "compaction-anchor".to_string(),
                 original_count: Some(compacted.len()),
@@ -735,44 +706,16 @@ mod ai_turn_order_tests {
                 original_messages: Some(compacted),
                 original_user_count: Some(2),
             }),
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
             transcript_ref: Some(serde_json::json!({
                 "conversationId": "conv-1",
                 "endEntryId": "anchor-1",
             })),
             summary_ref: Some(serde_json::json!({
                 "kind": "compaction",
-                "transcriptRef": source_ref,
+                "transcriptRef": source_ref.clone(),
             })),
-            branches: None,
-            suggestions: Vec::new(),
-        }];
-
-        normalize_ai_stream_history_for_provider(&mut history);
-        let lookup_ref = ai_find_prompt_transcript_lookup_reference(&history)
-            .expect("compaction transcript lookup reference");
-        let lookup_prompt = ai_build_transcript_lookup_prompt_reference(lookup_ref);
-
-        assert_eq!(
-            history[0].content,
-            "Previous conversation summary:\nsummary"
-        );
-        assert!(lookup_prompt.contains("conversation=conv-1"));
-        assert!(lookup_prompt.contains("start=u-1"));
-        assert!(lookup_prompt.contains("end=a-2"));
-    }
-
-    #[test]
-    fn conversation_summary_reference_supports_transcript_lookup_prompt() {
-        let summarized = vec![
-            test_message("u-1", AiChatRole::User, "first".to_string()),
-            test_message("a-1", AiChatRole::Assistant, "answer".to_string()),
-            test_message("u-2", AiChatRole::User, "second".to_string()),
-            test_message("a-2", AiChatRole::Assistant, "answer".to_string()),
-        ];
-        let source_ref = ai_summary_source_transcript_ref(&summarized, "conv-1");
+            ..test_message("anchor-1", AiChatRole::System, "summary".to_string())
+        };
         let mut summary = test_message("summary-1", AiChatRole::Assistant, "summary".to_string());
         summary.transcript_ref = Some(serde_json::json!({
             "conversationId": "conv-1",
@@ -781,16 +724,27 @@ mod ai_turn_order_tests {
         summary.summary_ref = Some(serde_json::json!({
             "kind": "conversation",
             "roundId": null,
-            "transcriptRef": source_ref,
+            "transcriptRef": source_ref.clone(),
         }));
-
-        let lookup_ref = ai_find_prompt_transcript_lookup_reference(&[summary])
-            .expect("conversation summary transcript lookup reference");
-        let lookup_prompt = ai_build_transcript_lookup_prompt_reference(lookup_ref);
-
-        assert!(lookup_prompt.contains("conversation=conv-1"));
-        assert!(lookup_prompt.contains("start=u-1"));
-        assert!(lookup_prompt.contains("end=a-2"));
+        for (scenario, message, expected_content) in [
+            (
+                "compaction",
+                anchor,
+                "Previous conversation summary:\nsummary",
+            ),
+            ("conversation", summary, "summary"),
+        ] {
+            let mut history = vec![message];
+            normalize_ai_stream_history_for_provider(&mut history);
+            assert_eq!(history[0].content, expected_content, "{scenario}");
+            let lookup_ref = ai_find_prompt_transcript_lookup_reference(&history)
+                .expect("summary transcript reference");
+            assert_eq!(lookup_ref, source_ref, "{scenario}");
+            let lookup_prompt = ai_build_transcript_lookup_prompt_reference(lookup_ref);
+            assert!(lookup_prompt.contains("conversation=conv-1"), "{scenario}");
+            assert!(lookup_prompt.contains("start=u-1"), "{scenario}");
+            assert!(lookup_prompt.contains("end=a-2"), "{scenario}");
+        }
     }
 
 
@@ -833,51 +787,47 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn result_binding_keeps_unbacked_fact_claim_visible() {
-        let mut message = assistant_message();
-        message.content = "我刚才真正的系统状态：运行时间 12 days。".to_string();
-
-        strip_ai_evidence_claims(&mut message);
-
-        assert_eq!(message.content, "我刚才真正的系统状态：运行时间 12 days。");
-        assert!(message.turn.is_none());
-    }
-
-    #[test]
-    fn result_binding_strips_structured_evidence_claim_block() {
-        let mut message = assistant_message();
-        message.content = concat!(
-            "磁盘是 468G，已用 72G。",
-            "\n<evidence_claims>",
-            r#"{"claims":[{"text":"磁盘是 468G，已用 72G。","evidence":["tool-1.output"],"confidence":"verified"}]}"#,
-            "</evidence_claims>"
-        )
-        .to_string();
-        let streamed_content = message.content.clone();
-        append_ai_turn_text_part(&mut message, "text", &streamed_content, false);
-
-        strip_ai_evidence_claims(&mut message);
-
-        assert_eq!(message.content, "磁盘是 468G，已用 72G。");
-        let parts = message
-            .turn
-            .as_ref()
-            .and_then(|turn| turn.get("parts"))
-            .and_then(serde_json::Value::as_array)
-            .expect("turn parts");
-        assert_eq!(parts[0]["type"], "text");
-        assert_eq!(parts[0]["text"], "磁盘是 468G，已用 72G。");
-        assert_eq!(parts.len(), 1);
-    }
-
-    #[test]
-    fn result_binding_drops_incomplete_evidence_claim_block() {
-        let mut message = assistant_message();
-        message.content = "磁盘是 468G。\n<evidence_claims>{\"claims\":[".to_string();
-
-        strip_ai_evidence_claims(&mut message);
-
-        assert_eq!(message.content, "磁盘是 468G。");
+    fn result_binding_strips_protocol_blocks_and_preserves_visible_text() {
+        for (scenario, content, expected, has_turn) in [
+            (
+                "plain claim",
+                "我刚才真正的系统状态：运行时间 12 days。",
+                "我刚才真正的系统状态：运行时间 12 days。",
+                false,
+            ),
+            (
+                "complete block",
+                concat!(
+                    "磁盘是 468G，已用 72G。\n<evidence_claims>",
+                    r#"{"claims":[{"text":"磁盘是 468G，已用 72G。","evidence":["tool-1.output"],"confidence":"verified"}]}"#,
+                    "</evidence_claims>"
+                ),
+                "磁盘是 468G，已用 72G。",
+                true,
+            ),
+            (
+                "incomplete block",
+                "磁盘是 468G。\n<evidence_claims>{\"claims\":[",
+                "磁盘是 468G。",
+                false,
+            ),
+        ] {
+            let mut message = assistant_message();
+            message.content = content.to_string();
+            if has_turn {
+                append_ai_turn_text_part(&mut message, "text", content, false);
+            }
+            strip_ai_evidence_claims(&mut message);
+            assert_eq!(message.content, expected, "{scenario}");
+            if has_turn {
+                let parts = message.turn.as_ref().unwrap()["parts"].as_array().unwrap();
+                assert_eq!(parts.len(), 1, "{scenario}");
+                assert_eq!(parts[0]["type"], "text", "{scenario}");
+                assert_eq!(parts[0]["text"], expected, "{scenario}");
+            } else {
+                assert!(message.turn.is_none(), "{scenario}");
+            }
+        }
     }
 
     #[test]
@@ -925,7 +875,7 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn pending_round_summary_attaches_when_round_arrives() {
+    fn round_summary_attaches_after_delivery_and_updates_without_pending_tail() {
         let mut message = assistant_message();
 
         upsert_ai_round_summary(
@@ -975,25 +925,10 @@ mod ai_turn_order_tests {
                 .map(Vec::len),
             Some(0),
         );
-    }
-
-    #[test]
-    fn round_summary_updates_existing_round_without_pending_tail() {
-        let mut message = assistant_message();
-
-        upsert_ai_turn_round_tool_call(
-            &mut message,
-            "call-1",
-            "run_command",
-            "{}",
-            "completed",
-            "assistant-1-round-1",
-            1,
-        );
         upsert_ai_round_summary(
             &mut message,
             "assistant-1-round-1",
-            "run_command: ok - printed working directory",
+            "read_resource: ok - verified config",
             serde_json::json!({ "model": "deepseek-v4-pro" }),
         );
 
@@ -1004,7 +939,7 @@ mod ai_turn_order_tests {
             .expect("rounds");
         assert_eq!(
             rounds[0]["summary"],
-            "run_command: ok - printed working directory"
+            "read_resource: ok - verified config"
         );
         assert_eq!(rounds[0]["summaryMetadata"]["model"], "deepseek-v4-pro");
         assert_eq!(

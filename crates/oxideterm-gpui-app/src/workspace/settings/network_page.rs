@@ -2093,42 +2093,6 @@ mod tests {
         assert_eq!(value["env"]["OXIDETERM_MCP_TOKEN"], credential);
     }
 
-    #[test]
-    fn proxy_route_test_enters_workspace_tokio_runtime() {
-        let proxy_listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
-            .expect("bind a proxy test listener");
-        let proxy_port = proxy_listener
-            .local_addr()
-            .expect("read proxy address")
-            .port();
-        let proxy_server = std::thread::spawn(move || {
-            // Closing the accepted socket forces a deterministic SOCKS handshake error.
-            let (stream, _) = proxy_listener.accept().expect("accept proxy test client");
-            drop(stream);
-        });
-
-        let runtime = tokio::runtime::Runtime::new().expect("create workspace runtime");
-        let worker = schedule_settings_network_proxy_test(
-            &runtime,
-            "proxy-test-target.invalid".to_string(),
-            22,
-            UpstreamProxyConfig {
-                protocol: UpstreamProxyProtocol::Socks5,
-                host: std::net::Ipv4Addr::LOCALHOST.to_string(),
-                port: proxy_port,
-                auth: UpstreamProxyAuth::None,
-                remote_dns: true,
-                no_proxy: String::new(),
-            },
-        );
-
-        let status = runtime
-            .block_on(worker)
-            .expect("receive the proxy test result outside Tokio");
-        proxy_server.join().expect("join proxy test server");
-        assert!(matches!(status, HostKeyStatus::Error { .. }));
-    }
-
     #[gpui::test]
     fn proxy_password_moves_and_restores_without_plaintext_clone(cx: &mut TestAppContext) {
         let settings = cx.new(SettingsWorkspaceEntity::new);

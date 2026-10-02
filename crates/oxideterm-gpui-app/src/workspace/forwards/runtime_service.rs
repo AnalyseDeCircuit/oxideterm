@@ -1373,28 +1373,14 @@ mod tests {
             state.node_for_connection_id("connection-b"),
             Some(NodeId::new("node-a"))
         );
+        state.remove_exact(&session_id, "connection-a", &second_consumer);
+        assert_eq!(
+            state.connection_id(&session_id).as_deref(),
+            Some("connection-b")
+        );
         assert_eq!(
             state.remove(&session_id),
             Some(("connection-b".to_string(), second_consumer))
-        );
-    }
-
-    #[test]
-    fn stale_exact_removal_does_not_delete_reconnected_binding() {
-        let mut state = ForwardingBindingState::default();
-        let session_id = ForwardingRuntimeService::session_id_for_node(&NodeId::new("node-b"));
-        let consumer = ConnectionConsumer::PortForward(session_id.clone());
-        state.replace(
-            session_id.clone(),
-            "connection-new".to_string(),
-            consumer.clone(),
-        );
-
-        state.remove_exact(&session_id, "connection-old", &consumer);
-
-        assert_eq!(
-            state.connection_id(&session_id).as_deref(),
-            Some("connection-new")
         );
     }
 

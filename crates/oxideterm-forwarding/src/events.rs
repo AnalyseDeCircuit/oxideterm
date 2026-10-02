@@ -84,25 +84,31 @@ mod tests {
     #[test]
     fn delivery_sender_wakes_after_event_is_queued() {
         let (sender, receiver) = std::sync::mpsc::channel();
+        let receiver = std::sync::Mutex::new(receiver);
         let woke = Arc::new(AtomicBool::new(false));
         let wake_flag = woke.clone();
         let sender = ForwardEventDeliverySender::with_wake(
             sender,
-            Arc::new(move || wake_flag.store(true, Ordering::Release)),
+            Arc::new(move || {
+                assert_eq!(
+                    receiver.lock().unwrap().try_recv().unwrap(),
+                    ForwardEvent::SessionSuspended {
+                        session_id: "session-1".to_string(),
+                        forward_ids: vec!["one".to_string(), "two".to_string()],
+                    }
+                );
+                wake_flag.store(true, Ordering::Release);
+            }),
         );
 
         sender
             .send(ForwardEvent::SessionSuspended {
                 session_id: "session-1".to_string(),
-                forward_ids: Vec::new(),
+                forward_ids: vec!["one".to_string(), "two".to_string()],
             })
             .unwrap();
 
         assert!(woke.load(Ordering::Acquire));
-        assert!(matches!(
-            receiver.try_recv().unwrap(),
-            ForwardEvent::SessionSuspended { .. }
-        ));
     }
 
     #[test]
@@ -111,10 +117,13 @@ mod tests {
             session_id: "session-1".to_string(),
             forward_ids: vec!["one".to_string(), "two".to_string()],
         };
-        let json = serde_json::to_string(&event).unwrap();
-
-        assert!(json.contains("sessionSuspended"));
-        assert!(json.contains("one"));
-        assert!(json.contains("two"));
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "type": "sessionSuspended",
+                "session_id": "session-1",
+                "forward_ids": ["one", "two"],
+            })
+        );
     }
 }

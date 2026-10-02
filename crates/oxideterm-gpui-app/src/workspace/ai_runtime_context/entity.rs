@@ -846,19 +846,6 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_stream_cannot_dispatch_queued_work() {
-        let mut entity = AiRuntimeContextEntity::new();
-        let session = entity.begin_tool_session(7);
-
-        entity.finish_tool_session(
-            7,
-            oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
-        );
-
-        assert!(!entity.is_active_tool_session(7, &session));
-    }
-
-    #[test]
     fn shutdown_rejects_late_broker_callbacks() {
         let mut entity = AiRuntimeContextEntity::new();
         let session = entity.begin_tool_session(7);

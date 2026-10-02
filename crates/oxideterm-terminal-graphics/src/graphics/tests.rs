@@ -18,7 +18,7 @@ mod tests {
     #[test]
     fn plain_output_is_borrowed_but_split_protocol_payload_is_consumed() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let plain = "ordinary 中文 output\r\n".as_bytes();
+        let plain = "❯ 2025-2026春季毕设安排.pdf\r\n".as_bytes();
         let owned = ingress.advance(plain, cursor());
         assert_eq!(owned.terminal_bytes, plain);
         assert!(owned.events.is_empty());
@@ -55,10 +55,15 @@ mod tests {
                         String::from_utf8(bytes.into_owned()).unwrap()
                     ));
                 }
-                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::ImageReady(_)) => {
+                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::ImageReady(image)) => {
+                    assert_eq!(image.id, TerminalImageId(42));
+                    assert_eq!(image.protocol, TerminalImageProtocol::Kitty);
+                    assert_eq!((image.width, image.height), (1, 1));
+                    assert_eq!(image.rgba.as_ref(), &[0, 255, 0, 255]);
                     seen.push("image".to_string());
                 }
-                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Place(_)) => {
+                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Place(placement)) => {
+                    assert_eq!(placement.id, TerminalImageId(42));
                     seen.push("place".to_string());
                 }
                 TerminalGraphicsSegment::Event(_) => {}
@@ -98,16 +103,7 @@ mod tests {
 
     #[test]
     fn split_osc_sequence_is_consumed() {
-        let mut png = RgbaImage::new(1, 1);
-        png.put_pixel(0, 0, image::Rgba([255, 0, 0, 255]));
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(png)
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-        let payload = BASE64.encode(bytes);
+        let payload = BASE64.encode(one_pixel_png());
         let seq = format!("\x1b]1337;File=inline=1:{payload}\x07");
         let first = ingress_advance_chunks(seq.as_bytes());
         assert!(first.terminal_bytes.contains(&b' '));
@@ -115,7 +111,16 @@ mod tests {
             first
                 .events
                 .iter()
-                .any(|event| matches!(event, TerminalGraphicsEvent::ImageReady(_)))
+                .any(|event| {
+                    matches!(
+                        event,
+                        TerminalGraphicsEvent::ImageReady(image)
+                            if image.protocol == TerminalImageProtocol::Iterm2
+                                && image.width == 1
+                                && image.height == 1
+                                && image.rgba.as_ref() == &[255, 0, 0, 255]
+                    )
+                })
         );
     }
 
@@ -172,28 +177,6 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, TerminalGraphicsEvent::Error(_)))
         );
-    }
-
-    #[test]
-    fn kitty_raw_rgba_image_is_placed_and_respects_no_cursor_move() {
-        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let payload = BASE64.encode([0, 255, 0, 255]);
-        let seq = format!("\x1b_Ga=T,f=32,s=1,v=1,i=42,C=1;{payload}\x1b\\");
-        let result = ingress.advance(seq.as_bytes(), cursor());
-
-        assert!(result.terminal_bytes.is_empty());
-        assert!(result.events.iter().any(|event| {
-            matches!(
-                event,
-                TerminalGraphicsEvent::ImageReady(TerminalImageData {
-                    id: TerminalImageId(42),
-                    protocol: TerminalImageProtocol::Kitty,
-                    width: 1,
-                    height: 1,
-                    ..
-                })
-            )
-        }));
     }
 
     #[test]
@@ -460,16 +443,7 @@ mod tests {
 
     #[test]
     fn kitty_chunked_png_waits_until_final_chunk() {
-        let mut png = RgbaImage::new(1, 1);
-        png.put_pixel(0, 0, image::Rgba([0, 0, 255, 255]));
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(png)
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-        let payload = BASE64.encode(bytes);
+        let payload = BASE64.encode(one_pixel_png());
         let split = payload.len() / 2;
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let first = format!("\x1b_Ga=T,f=100,i=7,m=1;{}\x1b\\", &payload[..split]);
@@ -483,7 +457,16 @@ mod tests {
             second
                 .events
                 .iter()
-                .any(|event| matches!(event, TerminalGraphicsEvent::ImageReady(_)))
+                .any(|event| {
+                    matches!(
+                        event,
+                        TerminalGraphicsEvent::ImageReady(image)
+                            if image.id == TerminalImageId(7)
+                                && image.width == 1
+                                && image.height == 1
+                                && image.rgba.as_ref() == &[255, 0, 0, 255]
+                    )
+                })
         );
     }
 
@@ -667,27 +650,8 @@ mod tests {
     }
 
     #[test]
-    fn utf8_continuation_bytes_are_not_treated_as_c1_graphics_controls() {
-        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let text = "❯ 2025-2026春季毕设安排.pdf";
-        let result = ingress.advance(text.as_bytes(), cursor());
-
-        assert_eq!(result.terminal_bytes, text.as_bytes());
-        assert!(result.events.is_empty());
-    }
-
-    #[test]
     fn eight_bit_c1_graphics_starters_pass_through_to_terminal_parser() {
-        let mut png = RgbaImage::new(1, 1);
-        png.put_pixel(0, 0, image::Rgba([255, 255, 0, 255]));
-        let mut bytes = Vec::new();
-        image::DynamicImage::ImageRgba8(png)
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-        let payload = BASE64.encode(bytes);
+        let payload = BASE64.encode(one_pixel_png());
         let mut seq = b"\x9d1337;File=inline=1:".to_vec();
         seq.extend_from_slice(payload.as_bytes());
         seq.push(0x9c);

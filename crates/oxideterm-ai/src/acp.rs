@@ -2119,35 +2119,6 @@ mod tests {
     }
 
     #[test]
-    fn custom_launcher_preserves_cwd_for_runtime_spawn() {
-        let mut config = launch_config();
-        config.cwd = Some(PathBuf::from("/workspace"));
-
-        let launcher = build_acp_stdio_launcher(config).expect("cwd-aware launcher");
-
-        assert_eq!(
-            launcher.config().cwd.as_ref(),
-            Some(&PathBuf::from("/workspace"))
-        );
-    }
-
-    #[test]
-    fn initialize_request_starts_with_closed_host_capabilities() {
-        let request =
-            build_acp_initialize_request("2.0.0-test", &AcpHostCapabilityPolicy::default());
-
-        assert_eq!(request.protocol_version, ProtocolVersion::V1);
-        assert!(!request.client_capabilities.fs.read_text_file);
-        assert!(!request.client_capabilities.fs.write_text_file);
-        assert!(!request.client_capabilities.terminal);
-        assert!(request.client_capabilities.elicitation.is_none());
-        assert_eq!(
-            request.client_info.as_ref().map(|info| info.name.as_str()),
-            Some("OxideTerm")
-        );
-    }
-
-    #[test]
     fn permission_projection_and_decision_preserve_option_ids() {
         let request = RequestPermissionRequest::new(
             "session-1",
@@ -2236,33 +2207,6 @@ mod tests {
         .await
         .expect_err("path outside root is rejected");
         assert!(error.to_string().contains("outside the session root"));
-    }
-
-    #[tokio::test]
-    async fn initialize_agent_sends_v1_request_to_sdk_agent() {
-        let fake_agent = Agent.builder().on_receive_request(
-            async move |request: InitializeRequest, responder, _connection| {
-                assert_eq!(request.protocol_version, ProtocolVersion::V1);
-                assert!(!request.client_capabilities.fs.read_text_file);
-                assert!(!request.client_capabilities.fs.write_text_file);
-                assert!(!request.client_capabilities.terminal);
-                responder.respond(
-                    InitializeResponse::new(request.protocol_version)
-                        .agent_capabilities(AgentCapabilities::new()),
-                )
-            },
-            agent_client_protocol::on_receive_request!(),
-        );
-
-        let response = initialize_acp_agent(
-            fake_agent,
-            "2.0.0-test".to_string(),
-            AcpHostCapabilityPolicy::default(),
-        )
-        .await
-        .expect("initialize response");
-
-        assert_eq!(response.protocol_version, ProtocolVersion::V1);
     }
 
     #[tokio::test]
@@ -2388,6 +2332,15 @@ mod tests {
             .builder()
             .on_receive_request(
                 async move |request: InitializeRequest, responder, _connection| {
+                    assert_eq!(request.protocol_version, ProtocolVersion::V1);
+                    assert!(!request.client_capabilities.fs.read_text_file);
+                    assert!(!request.client_capabilities.fs.write_text_file);
+                    assert!(!request.client_capabilities.terminal);
+                    assert!(request.client_capabilities.elicitation.is_none());
+                    assert_eq!(
+                        request.client_info.as_ref().map(|info| info.name.as_str()),
+                        Some("OxideTerm")
+                    );
                     let capabilities = AgentCapabilities::new()
                         .auth(AgentAuthCapabilities::new().logout(LogoutCapabilities::new()))
                         .session_capabilities(
@@ -2459,6 +2412,10 @@ mod tests {
             "2.0.0-test".to_string(),
             AcpHostCapabilityPolicy::default(),
             async |runtime| {
+                assert_eq!(
+                    runtime.initialize_response.protocol_version,
+                    ProtocolVersion::V1
+                );
                 runtime.authenticate("agent-auth").await?;
                 let session = runtime
                     .start_session(NewSessionRequest::new(PathBuf::from("/workspace")))

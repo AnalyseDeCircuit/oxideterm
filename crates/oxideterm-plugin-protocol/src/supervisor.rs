@@ -236,3 +236,103 @@ impl fmt::Debug for PluginOutboundEffect {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::PluginRegistrationKind;
+
+    #[test]
+    fn supervisor_auto_disables_and_cleans_registrations_after_repeated_errors() {
+        let mut supervisor =
+            PluginRuntimeSupervisorState::new("com.example.runtime", Duration::from_secs(5));
+        supervisor.mark_active();
+        supervisor
+            .record_registration(PluginRegistration {
+                registration_id: "command-1".to_string(),
+                plugin_id: "com.example.runtime".to_string(),
+                kind: PluginRegistrationKind::Command,
+                metadata: serde_json::json!({ "command": "demo.run" }),
+            })
+            .unwrap();
+        supervisor.record_error(PluginError::runtime("crash", "first"));
+        supervisor.record_error(PluginError::runtime("crash", "second"));
+        assert_eq!(supervisor.state(), PluginRuntimeLifecycleState::Error);
+        assert_eq!(supervisor.registration_count(), 1);
+        supervisor.record_error(PluginError::runtime("crash", "third"));
+        assert_eq!(
+            supervisor.state(),
+            PluginRuntimeLifecycleState::AutoDisabled
+        );
+        assert_eq!(supervisor.registration_count(), 0);
+    }
+
+    #[test]
+    fn supervisor_applies_register_dispose_log_and_error_outbound_messages() {
+        let mut supervisor =
+            PluginRuntimeSupervisorState::new("com.example.runtime", Duration::from_secs(5));
+        let registration = PluginRegistration {
+            registration_id: "status-1".to_string(),
+            plugin_id: "com.example.runtime".to_string(),
+            kind: PluginRegistrationKind::StatusBar,
+            metadata: serde_json::json!({ "text": "ready" }),
+        };
+        assert_eq!(
+            supervisor
+                .handle_outbound_message(PluginOutboundMessage::RegisterContribution {
+                    registration: registration.clone()
+                })
+                .unwrap(),
+            PluginOutboundEffect::RegistrationChanged
+        );
+        assert_eq!(supervisor.registration_count(), 1);
+        assert_eq!(
+            supervisor
+                .handle_outbound_message(PluginOutboundMessage::Log {
+                    level: PluginRuntimeLogLevel::Info,
+                    message: "registered".to_string()
+                })
+                .unwrap(),
+            PluginOutboundEffect::None
+        );
+        assert_eq!(supervisor.log_count(), 1);
+        assert_eq!(
+            supervisor
+                .handle_outbound_message(PluginOutboundMessage::DisposeContribution {
+                    registration_id: registration.registration_id
+                })
+                .unwrap(),
+            PluginOutboundEffect::RegistrationChanged
+        );
+        assert_eq!(supervisor.registration_count(), 0);
+        supervisor
+            .handle_outbound_message(PluginOutboundMessage::RuntimeError {
+                error: PluginError::runtime("crash", "failed"),
+            })
+            .unwrap();
+        assert_eq!(supervisor.state(), PluginRuntimeLifecycleState::Error);
+    }
+
+    #[test]
+    fn supervisor_rejects_foreign_registration_from_outbound_message() {
+        for kind in [
+            PluginRegistrationKind::StatusBar,
+            PluginRegistrationKind::Command,
+        ] {
+            let mut supervisor =
+                PluginRuntimeSupervisorState::new("com.example.runtime", Duration::from_secs(5));
+            let error = supervisor
+                .handle_outbound_message(PluginOutboundMessage::RegisterContribution {
+                    registration: PluginRegistration {
+                        registration_id: "foreign-1".to_string(),
+                        plugin_id: "com.example.other".to_string(),
+                        kind,
+                        metadata: Value::Null,
+                    },
+                })
+                .unwrap_err();
+            assert_eq!(error.code, "invalid_registration", "{kind:?}");
+            assert_eq!(supervisor.registration_count(), 0, "{kind:?}");
+        }
+    }
+}

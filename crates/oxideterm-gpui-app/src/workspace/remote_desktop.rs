@@ -1045,29 +1045,21 @@ mod tests {
     }
 
     #[test]
-    fn manual_reconnect_is_available_after_terminal_states() {
-        assert!(remote_desktop_reconnect_enabled(
-            RemoteDesktopSessionStatus::Disconnected
-        ));
-        assert!(remote_desktop_reconnect_enabled(
-            RemoteDesktopSessionStatus::Failed
-        ));
-        assert!(remote_desktop_reconnect_enabled(
-            RemoteDesktopSessionStatus::Idle
-        ));
-    }
-
-    #[test]
-    fn manual_reconnect_waits_for_in_flight_connection_attempts() {
-        assert!(remote_desktop_reconnect_enabled(
-            RemoteDesktopSessionStatus::Connected
-        ));
-        assert!(!remote_desktop_reconnect_enabled(
-            RemoteDesktopSessionStatus::Connecting
-        ));
-        assert!(!remote_desktop_reconnect_enabled(
-            RemoteDesktopSessionStatus::Reconnecting
-        ));
+    fn manual_reconnect_is_blocked_only_during_connection_attempts() {
+        for (status, expected) in [
+            (RemoteDesktopSessionStatus::Disconnected, true),
+            (RemoteDesktopSessionStatus::Failed, true),
+            (RemoteDesktopSessionStatus::Idle, true),
+            (RemoteDesktopSessionStatus::Connected, true),
+            (RemoteDesktopSessionStatus::Connecting, false),
+            (RemoteDesktopSessionStatus::Reconnecting, false),
+        ] {
+            assert_eq!(
+                remote_desktop_reconnect_enabled(status),
+                expected,
+                "{status:?}"
+            );
+        }
     }
 
     #[test]
@@ -1140,48 +1132,6 @@ mod tests {
             })
         );
         assert_eq!(remainder, remote_desktop_empty_wheel_delta());
-    }
-
-    #[test]
-    fn resize_request_retries_when_initial_frame_size_differs_from_viewport() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        };
-
-        assert!(remote_desktop_resize_request_needed(
-            Some(RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            }),
-            None,
-            Some(viewport),
-            None,
-            viewport,
-            viewport,
-            Some(100),
-        ));
-    }
-
-    #[test]
-    fn resize_request_does_not_repeat_pending_retry() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        };
-
-        assert!(!remote_desktop_resize_request_needed(
-            Some(RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            }),
-            Some(viewport),
-            Some(viewport),
-            None,
-            viewport,
-            viewport,
-            Some(100),
-        ));
     }
 
     #[test]
@@ -1393,112 +1343,108 @@ mod tests {
     }
 
     #[test]
-    fn resize_request_does_not_repeat_ignored_retry() {
+    fn resize_requests_preserve_retry_and_scale_boundaries() {
         let viewport = RemoteDesktopSize {
             width: 1600,
             height: 900,
         };
-
-        assert!(!remote_desktop_resize_request_needed(
-            Some(RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            }),
-            None,
-            Some(viewport),
-            Some(resize_state(viewport, Some(100))),
-            viewport,
-            viewport,
-            Some(100),
-        ));
-    }
-
-    #[test]
-    fn resize_request_skips_when_frame_already_matches_viewport() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
+        let smaller_frame = RemoteDesktopSize {
+            width: 1280,
+            height: 720,
         };
-
-        assert!(!remote_desktop_resize_request_needed(
-            Some(viewport),
-            None,
-            Some(viewport),
-            None,
-            viewport,
-            viewport,
-            None,
-        ));
-    }
-
-    #[test]
-    fn resize_request_does_not_duplicate_initial_scaled_connect() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        };
-        let request_size = RemoteDesktopSize {
+        let scaled_frame = RemoteDesktopSize {
             width: 3200,
             height: 1800,
         };
-
-        assert!(!remote_desktop_resize_request_needed(
-            Some(request_size),
-            None,
-            Some(viewport),
-            None,
-            viewport,
-            request_size,
-            Some(200),
-        ));
-    }
-
-    #[test]
-    fn resize_request_sends_scale_only_change_once() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        };
-
-        assert!(remote_desktop_resize_request_needed(
-            Some(viewport),
-            None,
-            Some(viewport),
-            Some(resize_state(viewport, Some(100))),
-            viewport,
-            viewport,
-            Some(125),
-        ));
-        assert!(!remote_desktop_resize_request_needed(
-            Some(viewport),
-            None,
-            Some(viewport),
-            Some(resize_state(viewport, Some(125))),
-            viewport,
-            viewport,
-            Some(125),
-        ));
-    }
-
-    #[test]
-    fn resize_request_can_replace_pending_scale_change() {
-        let viewport = RemoteDesktopSize {
-            width: 1600,
-            height: 900,
-        };
-
-        assert!(remote_desktop_resize_request_needed(
-            Some(RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            }),
-            Some(viewport),
-            Some(viewport),
-            Some(resize_state(viewport, Some(100))),
-            viewport,
-            viewport,
-            Some(125),
-        ));
+        let cases = [
+            (
+                "initial mismatch",
+                smaller_frame,
+                None,
+                None,
+                viewport,
+                Some(100),
+                true,
+            ),
+            (
+                "pending retry",
+                smaller_frame,
+                Some(viewport),
+                None,
+                viewport,
+                Some(100),
+                false,
+            ),
+            (
+                "ignored retry",
+                smaller_frame,
+                None,
+                Some(resize_state(viewport, Some(100))),
+                viewport,
+                Some(100),
+                false,
+            ),
+            (
+                "matching frame",
+                viewport,
+                None,
+                None,
+                viewport,
+                None,
+                false,
+            ),
+            (
+                "scaled initial connect",
+                scaled_frame,
+                None,
+                None,
+                scaled_frame,
+                Some(200),
+                false,
+            ),
+            (
+                "changed scale",
+                viewport,
+                None,
+                Some(resize_state(viewport, Some(100))),
+                viewport,
+                Some(125),
+                true,
+            ),
+            (
+                "already sent scale",
+                viewport,
+                None,
+                Some(resize_state(viewport, Some(125))),
+                viewport,
+                Some(125),
+                false,
+            ),
+            (
+                "replace pending scale",
+                smaller_frame,
+                Some(viewport),
+                Some(resize_state(viewport, Some(100))),
+                viewport,
+                Some(125),
+                true,
+            ),
+        ];
+        for (scenario, frame, pending, last_sent, request, scale, expected) in cases {
+            assert_eq!(
+                remote_desktop_resize_request_needed(
+                    Some(frame),
+                    pending,
+                    Some(viewport),
+                    last_sent,
+                    viewport,
+                    request,
+                    scale,
+                ),
+                expected,
+                "{scenario}",
+            );
+        }
     }
 
     #[test]

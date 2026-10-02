@@ -328,71 +328,50 @@ fn hextile_rejects_out_of_bounds_subrect() {
 }
 
 #[test]
-fn zrle_raw_tile_decodes_compact_pixels() {
-    let bytes = decode_trle_rect(
-        &[VNC_TRLE_RAW, 1, 2, 3, 4, 5, 6],
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 2,
-            height: 1,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(bytes, vec![1, 2, 3, 0, 4, 5, 6, 0]);
+fn zrle_tile_encodings_decode_to_explicit_pixels() {
+    let cases: [(&str, &[u8], u16, &[u8]); 4] = [
+        (
+            "raw",
+            &[VNC_TRLE_RAW, 1, 2, 3, 4, 5, 6],
+            2,
+            &[1, 2, 3, 0, 4, 5, 6, 0],
+        ),
+        (
+            "packed palette",
+            &[2, 1, 2, 3, 9, 8, 7, 0b0100_0000],
+            2,
+            &[1, 2, 3, 0, 9, 8, 7, 0],
+        ),
+        (
+            "plain RLE",
+            &[VNC_TRLE_PLAIN_RLE, 7, 8, 9, 2],
+            3,
+            &[7, 8, 9, 0, 7, 8, 9, 0, 7, 8, 9, 0],
+        ),
+        (
+            "palette RLE",
+            &[130, 1, 2, 3, 9, 8, 7, 0, 0x81, 1],
+            3,
+            &[1, 2, 3, 0, 9, 8, 7, 0, 9, 8, 7, 0],
+        ),
+    ];
+    for (scenario, payload, width, expected) in cases {
+        let bytes = decode_trle_rect(
+            payload,
+            RfbRect {
+                x: 0,
+                y: 0,
+                width,
+                height: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(bytes, expected, "{scenario}");
+    }
 }
 
 #[test]
-fn zrle_packed_palette_decodes_bit_indices() {
-    let bytes = decode_trle_rect(
-        &[2, 1, 2, 3, 9, 8, 7, 0b0100_0000],
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 2,
-            height: 1,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(bytes, vec![1, 2, 3, 0, 9, 8, 7, 0]);
-}
-
-#[test]
-fn zrle_plain_rle_decodes_run_lengths() {
-    let bytes = decode_trle_rect(
-        &[VNC_TRLE_PLAIN_RLE, 7, 8, 9, 2],
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 3,
-            height: 1,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(bytes, vec![7, 8, 9, 0, 7, 8, 9, 0, 7, 8, 9, 0]);
-}
-
-#[test]
-fn zrle_palette_rle_decodes_single_pixels_and_runs() {
-    let bytes = decode_trle_rect(
-        &[130, 1, 2, 3, 9, 8, 7, 0, 0x81, 1],
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 3,
-            height: 1,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(bytes, vec![1, 2, 3, 0, 9, 8, 7, 0, 9, 8, 7, 0]);
-}
-
-#[test]
-fn zrle_rectangle_inflates_persistent_zlib_stream() {
+fn zrle_rectangle_decodes_length_prefixed_zlib_payload() {
     let trle = [VNC_TRLE_RAW, 1, 2, 3, 4, 5, 6];
     let compressed = zlib_payload(&trle);
     let mut payload = Vec::new();
@@ -1350,35 +1329,31 @@ fn baseline_clipboard_uses_utf8_or_latin1_decode_fallback() {
 }
 
 #[test]
-fn vnc_error_category_identifies_authentication_and_network_errors() {
-    assert_eq!(
-        VncError::authentication("VNC password authentication failed.").category(),
-        RemoteDesktopErrorCategory::Authentication
-    );
-    assert_eq!(
-        VncError::network("VNC TCP connection failed: refused").category(),
-        RemoteDesktopErrorCategory::Network
-    );
-    assert_eq!(
-        VncError::network("VNC security list read failed: timed out").category(),
-        RemoteDesktopErrorCategory::Network
-    );
-}
-
-#[test]
-fn vnc_error_category_separates_security_configuration_and_protocol_errors() {
-    assert_eq!(
-        VncError::security("Unsupported VNC security types: [19].").category(),
-        RemoteDesktopErrorCategory::LegacySecurity
-    );
-    assert_eq!(
-        VncError::configuration("VNC helper received a non-VNC connect request.").category(),
-        RemoteDesktopErrorCategory::Configuration
-    );
-    assert_eq!(
-        VncError::protocol("Unsupported VNC rectangle encoding 99.").category(),
-        RemoteDesktopErrorCategory::Protocol
-    );
+fn vnc_error_categories_follow_typed_failures_instead_of_display_text() {
+    for (error, expected) in [
+        (
+            VncError::authentication("Connection reset by peer"),
+            RemoteDesktopErrorCategory::Authentication,
+        ),
+        (
+            VncError::network("Authentication failed"),
+            RemoteDesktopErrorCategory::Network,
+        ),
+        (
+            VncError::security("Unsupported VNC security types: [19]."),
+            RemoteDesktopErrorCategory::LegacySecurity,
+        ),
+        (
+            VncError::configuration("VNC helper received a non-VNC connect request."),
+            RemoteDesktopErrorCategory::Configuration,
+        ),
+        (
+            VncError::protocol("Unsupported VNC rectangle encoding 99."),
+            RemoteDesktopErrorCategory::Protocol,
+        ),
+    ] {
+        assert_eq!(error.category(), expected, "{error}");
+    }
 }
 
 #[test]

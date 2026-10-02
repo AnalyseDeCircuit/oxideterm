@@ -616,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn preserves_named_captures_and_split_unicode() {
+    fn preserves_named_captures_and_split_unicode_without_debug_disclosure() {
         let mut capture_rule = rule(
             "capture",
             r"用户=(?P<name>\p{Han}{2})",
@@ -634,6 +634,9 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].capture("name"), Some("张三"));
         assert_eq!(events[0].capture("match"), Some("用户=张三"));
+        let debug = format!("{:?}", events[0]);
+        assert!(debug.contains("<redacted>"));
+        assert!(!debug.contains("张三"));
     }
 
     #[test]
@@ -747,20 +750,6 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].trigger_id(), "literal");
         assert_eq!(events[1].trigger_id(), "regex");
-    }
-
-    #[test]
-    fn debug_output_redacts_terminal_content() {
-        let mut stream = make_stream(vec![rule(
-            "redacted",
-            "token-value",
-            TerminalTriggerMatchMode::Literal,
-        )]);
-        let events = observe_at(&mut stream, "token-value", Instant::now());
-        let debug = format!("{:?}", events[0]);
-
-        assert!(debug.contains("<redacted>"));
-        assert!(!debug.contains("token-value"));
     }
 
     #[test]

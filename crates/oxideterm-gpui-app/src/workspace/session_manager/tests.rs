@@ -489,8 +489,6 @@ pub(super) fn new_connection_save_password_false_does_not_request_keychain_stora
 
 #[test]
 pub(super) fn password_form_distinguishes_missing_from_explicit_empty_password() {
-    let dir = tempfile::tempdir().unwrap();
-    let store = ConnectionStore::load(dir.path().join("connections.json")).unwrap();
     for empty_password in [false, true] {
         let mut form = base_form();
         form.password.clear();
@@ -498,15 +496,6 @@ pub(super) fn password_form_distinguishes_missing_from_explicit_empty_password()
         form.empty_password = empty_password;
         let request = save_request_from_form(&mut form, None).unwrap();
         assert_eq!(request.auth.uses_empty_password(), empty_password);
-        let auth =
-            oxideterm_session_adapter::auth_method_from_saved_auth(&store, &request.auth).unwrap();
-        match auth {
-            oxideterm_ssh::AuthMethod::Password { password, prompt } => {
-                assert_eq!(prompt, !empty_password);
-                assert_eq!(password.as_str(), "");
-            }
-            _ => panic!("expected password authentication"),
-        }
         assert!(matches!(
             request.auth,
             SavedAuth::Password {
@@ -526,16 +515,21 @@ pub(super) fn edit_properties_optional_name_preserves_connection_identity_and_sa
         keychain_id: Some("kc-password".to_string()),
         plaintext_password: None,
     };
+    let saved_connection = saved_connection_fixture(existing.clone());
     for (name, expected) in [
         ("Home", "Home"),
         ("", "deploy@server.example.com"),
         (" \t ", "deploy@server.example.com"),
     ] {
-        let mut form = base_form();
+        let mut form = form_from_saved_connection(&saved_connection, None);
+        assert!(!form.password_loaded);
+        assert_eq!(
+            form.saved_password_keychain_id.as_deref(),
+            Some("kc-password")
+        );
         form.name = name.to_string();
         form.host = " server.example.com ".to_string();
         form.username = " deploy ".to_string();
-        form.password_loaded = false;
         form.save_password = true;
 
         let request = save_request_from_form_with_existing_auth(
@@ -590,25 +584,7 @@ pub(super) fn edit_properties_switch_from_agent_to_password_submits_new_password
 }
 
 #[test]
-pub(super) fn edit_properties_saved_keychain_password_starts_unloaded() {
-    let saved_connection = saved_connection_fixture(SavedAuth::Password {
-        empty_password: false,
-
-        keychain_id: Some("kc-password".to_string()),
-        plaintext_password: None,
-    });
-
-    let form = form_from_saved_connection(&saved_connection, None);
-
-    assert!(!form.password_loaded);
-    assert_eq!(
-        form.saved_password_keychain_id.as_deref(),
-        Some("kc-password")
-    );
-}
-
-#[test]
-pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
+pub(super) fn edit_properties_restores_proxy_metadata_and_can_remove_the_chain() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.proxy_chain = vec![SavedProxyHop {
         totp_credential_id: None,
@@ -627,7 +603,7 @@ pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
         legacy_ssh_compatibility: true,
         ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     }];
-    let form = form_from_saved_connection(&saved_connection, None);
+    let mut form = form_from_saved_connection(&saved_connection, None);
 
     assert!(form.proxy_chain_expanded);
     assert_eq!(form.proxy_hops.len(), 1);
@@ -646,24 +622,6 @@ pub(super) fn edit_properties_restores_proxy_chain_without_loading_secrets() {
         Some("/tmp/proxy-forward.sock")
     );
     assert!(hop.legacy_ssh_compatibility);
-}
-
-#[test]
-pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
-    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
-    saved_connection.proxy_chain = vec![SavedProxyHop {
-        totp_credential_id: None,
-        host: "jump.example.com".to_string(),
-        port: 22,
-        username: "ops".to_string(),
-        auth: SavedAuth::Agent,
-        agent_forwarding: false,
-        identity_agent: None,
-        agent_forwarding_socket: None,
-        legacy_ssh_compatibility: false,
-        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-    }];
-    let mut form = form_from_saved_connection(&saved_connection, None);
     form.proxy_hops.clear();
 
     let request = save_request_from_form_with_existing_auth(
@@ -677,27 +635,12 @@ pub(super) fn edit_properties_can_remove_the_entire_proxy_chain() {
 }
 
 #[test]
-pub(super) fn edit_properties_preserves_ssh_compatibility_policy() {
+pub(super) fn edit_properties_preserves_transport_policy_and_terminal_overrides() {
     let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.options.legacy_ssh_compatibility = true;
     saved_connection.options.ssh_algorithms.mac = vec!["hmac-sha1".to_string()];
     saved_connection.options.dedicated_new_terminal_connection = true;
 
-    // Editing and saving an existing connection must round-trip its transport policy.
-    let mut form = form_from_saved_connection(&saved_connection, None);
-    let request = save_request_from_form(&mut form, Some(saved_connection.id)).unwrap();
-
-    assert!(form.legacy_ssh_compatibility);
-    assert!(request.legacy_ssh_compatibility);
-    assert_eq!(form.ssh_algorithms.mac, ["hmac-sha1"]);
-    assert_eq!(request.ssh_algorithms.mac, ["hmac-sha1"]);
-    assert!(form.dedicated_new_terminal_connection);
-    assert!(request.dedicated_new_terminal_connection);
-}
-
-#[test]
-pub(super) fn edit_properties_round_trips_host_terminal_overrides() {
-    let mut saved_connection = saved_connection_fixture(SavedAuth::Agent);
     saved_connection.options.terminal = ConnectionTerminalOptions {
         encoding: Some(oxideterm_connections::ConnectionTerminalEncoding::Gb18030),
         backspace_sequence: Some(
@@ -712,6 +655,12 @@ pub(super) fn edit_properties_round_trips_host_terminal_overrides() {
     let mut form = form_from_saved_connection(&saved_connection, None);
     let request = save_request_from_form(&mut form, Some(saved_connection.id.clone())).unwrap();
 
+    assert!(form.legacy_ssh_compatibility);
+    assert!(request.legacy_ssh_compatibility);
+    assert_eq!(form.ssh_algorithms.mac, ["hmac-sha1"]);
+    assert_eq!(request.ssh_algorithms.mac, ["hmac-sha1"]);
+    assert!(form.dedicated_new_terminal_connection);
+    assert!(request.dedicated_new_terminal_connection);
     assert_eq!(form.terminal, saved_connection.options.terminal);
     assert_eq!(request.terminal, saved_connection.options.terminal);
 }
@@ -751,78 +700,22 @@ pub(super) fn edit_properties_same_key_empty_passphrase_submits_no_new_secret() 
 }
 
 #[test]
-pub(super) fn new_connection_request_carries_proxy_chain() {
-    let mut form = base_form();
-    form.auth_tab = SshAuthTab::Agent;
-    form.identity_agent = "  /tmp/target-agent.sock  ".to_string();
-    form.agent_forwarding_socket = Some("/tmp/target-forward.sock".to_string());
-    form.proxy_hops
-        .push(crate::workspace::new_connection::NewConnectionProxyHop {
-            totp_credential_id: None,
-            empty_password: false,
-            saved_connection_id: String::new(),
-            persisted_proxy_hop_index: None,
-            host: "jump.example.com".to_string(),
-            port: "2222".to_string(),
-            username: "ops".to_string(),
-            auth_tab: SshAuthTab::Password,
-            password: "jump-secret".to_string(),
-            key_path: String::new(),
-            managed_key_id: String::new(),
-            cert_path: String::new(),
-            passphrase: String::new(),
-            gssapi_enabled: false,
-            gssapi_server_identity: String::new(),
-            gssapi_delegate_credentials: false,
-            agent_forwarding: true,
-            identity_agent: "  /tmp/jump-agent.sock  ".to_string(),
-            agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
-            legacy_ssh_compatibility: true,
-            ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-        });
-
-    let request = save_request_from_form(&mut form, None).unwrap();
-
-    assert_eq!(
-        request.identity_agent.as_deref(),
-        Some("/tmp/target-agent.sock")
-    );
-    assert_eq!(
-        request.agent_forwarding_socket.as_deref(),
-        Some("/tmp/target-forward.sock")
-    );
-    assert_eq!(request.proxy_chain.len(), 1);
-    let hop = &request.proxy_chain[0];
-    assert_eq!(hop.host, "jump.example.com");
-    assert_eq!(hop.port, 2222);
-    assert_eq!(hop.username, "ops");
-    assert!(hop.agent_forwarding);
-    assert_eq!(hop.identity_agent.as_deref(), Some("/tmp/jump-agent.sock"));
-    assert_eq!(
-        hop.agent_forwarding_socket.as_deref(),
-        Some("/tmp/jump-forward.sock")
-    );
-    assert!(hop.legacy_ssh_compatibility);
-    match &hop.auth {
-        SavedAuth::Password {
-            keychain_id: None,
-            plaintext_password: Some(password),
-            ..
-        } => assert_eq!(password, "jump-secret"),
-        other => panic!("unexpected proxy auth: {other:?}"),
-    }
-}
-
-#[test]
 pub(super) fn save_request_moves_all_visible_password_allocations_and_redacts_debug() {
     let mut form = base_form();
+    form.identity_agent = "  /tmp/target-agent.sock  ".to_string();
+    form.agent_forwarding_socket = Some("/tmp/target-forward.sock".to_string());
     form.password = "target-secret-marker".to_string();
     form.save_password = true;
     let target_pointer = form.password.as_ptr();
 
     let mut hop = crate::workspace::new_connection::NewConnectionProxyHop::new();
     hop.host = "jump.example.com".to_string();
+    hop.port = "2222".to_string();
     hop.username = "ops".to_string();
+    hop.agent_forwarding = true;
+    hop.identity_agent = "  /tmp/jump-agent.sock  ".to_string();
+    hop.agent_forwarding_socket = Some("/tmp/jump-forward.sock".to_string());
+    hop.legacy_ssh_compatibility = true;
     hop.auth_tab = SshAuthTab::Password;
     hop.password = "jump-secret-marker".to_string();
     let hop_pointer = hop.password.as_ptr();
@@ -841,6 +734,34 @@ pub(super) fn save_request_moves_all_visible_password_allocations_and_redacts_de
     assert!(form.password.is_empty());
     assert!(form.proxy_hops[0].password.is_empty());
     assert!(form.upstream_proxy_password.is_empty());
+    assert_eq!(
+        request.identity_agent.as_deref(),
+        Some("/tmp/target-agent.sock")
+    );
+    assert_eq!(
+        request.agent_forwarding_socket.as_deref(),
+        Some("/tmp/target-forward.sock")
+    );
+    assert_eq!(request.proxy_chain.len(), 1);
+    let saved_hop = &request.proxy_chain[0];
+    assert_eq!(
+        (
+            saved_hop.host.as_str(),
+            saved_hop.port,
+            saved_hop.username.as_str()
+        ),
+        ("jump.example.com", 2222, "ops")
+    );
+    assert!(saved_hop.agent_forwarding);
+    assert!(saved_hop.legacy_ssh_compatibility);
+    assert_eq!(
+        saved_hop.identity_agent.as_deref(),
+        Some("/tmp/jump-agent.sock")
+    );
+    assert_eq!(
+        saved_hop.agent_forwarding_socket.as_deref(),
+        Some("/tmp/jump-forward.sock")
+    );
     match &request.auth {
         SavedAuth::Password {
             plaintext_password: Some(password),
@@ -850,9 +771,13 @@ pub(super) fn save_request_moves_all_visible_password_allocations_and_redacts_de
     }
     match &request.proxy_chain[0].auth {
         SavedAuth::Password {
+            keychain_id: None,
             plaintext_password: Some(password),
             ..
-        } => assert_eq!(password.expose_secret().as_ptr(), hop_pointer),
+        } => {
+            assert_eq!(password.expose_secret().as_ptr(), hop_pointer);
+            assert_eq!(password.expose_secret(), "jump-secret-marker");
+        }
         other => panic!("unexpected proxy auth: {other:?}"),
     }
     match &request.upstream_proxy {

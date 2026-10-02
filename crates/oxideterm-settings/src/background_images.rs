@@ -309,7 +309,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gallery_import_retains_multiple_images() {
+    fn gallery_import_retains_multiple_images_until_cleared() {
         let temporary = tempfile::tempdir().expect("temporary directory");
         let settings_path = temporary.path().join("profile/settings.json");
         let first_source = temporary.path().join("first.png");
@@ -332,6 +332,15 @@ mod tests {
             fs::read(&imported[1]).expect("stored second"),
             b"second image"
         );
+
+        clear_background_images(&settings_path).expect("clear gallery");
+
+        assert!(
+            list_background_images(&settings_path)
+                .expect("list cleared gallery")
+                .is_empty()
+        );
+        assert!(imported.iter().all(|path| !path.exists()));
     }
 
     #[test]
@@ -406,22 +415,5 @@ mod tests {
 
         assert!(result.is_err());
         assert!(external_image.exists());
-    }
-
-    #[test]
-    fn gallery_clear_removes_all_managed_images() {
-        let temporary = tempfile::tempdir().expect("temporary directory");
-        let settings_path = temporary.path().join("profile/settings.json");
-        let source = temporary.path().join("source.webp");
-        fs::write(&source, b"image").expect("source");
-        import_background_images(&settings_path, &[source]).expect("import image");
-
-        clear_background_images(&settings_path).expect("clear gallery");
-
-        assert!(
-            list_background_images(&settings_path)
-                .expect("list gallery")
-                .is_empty()
-        );
     }
 }

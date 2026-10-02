@@ -216,62 +216,6 @@ mod tests {
     }
 
     #[test]
-    fn session_tree_connect_plan_preserves_root_to_target_order() {
-        let plan = NativeSessionTreeConnectPlan::from_expansion(
-            &expansion(),
-            endpoints(),
-            Some(node_id("target")),
-        )
-        .expect("valid plan");
-
-        assert_eq!(
-            plan.steps
-                .iter()
-                .map(|step| step.node_id.0.as_str())
-                .collect::<Vec<_>>(),
-            vec!["hop-1", "hop-2", "target"]
-        );
-        assert_eq!(
-            plan.steps
-                .iter()
-                .map(|step| (step.host.as_str(), step.port))
-                .collect::<Vec<_>>(),
-            vec![("jump-a", 22), ("jump-b", 2200), ("target.internal", 2222)]
-        );
-    }
-
-    #[test]
-    fn session_tree_connect_plan_keeps_target_and_cleanup_node() {
-        let plan = NativeSessionTreeConnectPlan::from_expansion(
-            &expansion(),
-            endpoints(),
-            Some(node_id("target")),
-        )
-        .expect("valid plan");
-
-        assert_eq!(plan.target_node_id, node_id("target"));
-        assert_eq!(plan.cleanup_node_id, Some(node_id("target")));
-        assert_eq!(
-            plan.steps.last().map(|step| &step.node_id),
-            Some(&node_id("target"))
-        );
-        assert_eq!(plan.current_index, 0);
-    }
-
-    #[test]
-    fn session_tree_connect_plan_cleanup_uses_cleanup_node_not_first_step() {
-        let plan = NativeSessionTreeConnectPlan::from_expansion(
-            &expansion(),
-            endpoints(),
-            Some(node_id("target")),
-        )
-        .expect("valid plan");
-
-        assert_eq!(plan.cleanup_root_node_id(), Some(node_id("target")));
-        assert_ne!(plan.cleanup_root_node_id(), Some(node_id("hop-1")));
-    }
-
-    #[test]
     fn session_tree_connect_plan_rejects_endpoint_count_mismatch() {
         let error = NativeSessionTreeConnectPlan::from_expansion(
             &expansion(),
@@ -303,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn session_tree_connect_plan_requests_preflight_before_each_unaccepted_step() {
+    fn session_tree_connect_plan_preflights_each_hop_in_order_and_completes() {
         let mut plan = NativeSessionTreeConnectPlan::from_expansion(
             &expansion(),
             endpoints(),
@@ -311,19 +255,34 @@ mod tests {
         )
         .expect("valid plan");
 
-        assert!(matches!(
+        assert_eq!(plan.target_node_id, node_id("target"));
+        assert_eq!(plan.cleanup_root_node_id(), Some(node_id("target")));
+        for (id, host, port) in [
+            ("hop-1", "jump-a", 22),
+            ("hop-2", "jump-b", 2200),
+            ("target", "target.internal", 2222),
+        ] {
+            match plan.next_action() {
+                NativeSessionTreeConnectAction::Preflight { step } => {
+                    assert_eq!(step.node_id, node_id(id));
+                    assert_eq!((step.host.as_str(), step.port), (host, port));
+                }
+                action => panic!("expected preflight for {id}, got {action:?}"),
+            }
+            plan.mark_current_preflight_verified().unwrap();
+            assert!(matches!(
+                plan.next_action(),
+                NativeSessionTreeConnectAction::Connect { ref step }
+                    if step.node_id == node_id(id)
+            ));
+            plan.advance_after_connected_step();
+        }
+        assert_eq!(
             plan.next_action(),
-            NativeSessionTreeConnectAction::Preflight { ref step }
-                if step.node_id == node_id("hop-1")
-        ));
-        plan.mark_current_preflight_verified()
-            .expect("first preflight is valid");
-        plan.advance_after_connected_step();
-        assert!(matches!(
-            plan.next_action(),
-            NativeSessionTreeConnectAction::Preflight { ref step }
-                if step.node_id == node_id("hop-2")
-        ));
+            NativeSessionTreeConnectAction::Complete {
+                target_node_id: node_id("target")
+            }
+        );
     }
 
     #[test]
@@ -370,25 +329,5 @@ mod tests {
             }
             action => panic!("unexpected action: {action:?}"),
         }
-    }
-
-    #[test]
-    fn session_tree_connect_plan_advances_to_complete_after_last_step() {
-        let mut plan = NativeSessionTreeConnectPlan::from_expansion(
-            &expansion(),
-            endpoints(),
-            Some(node_id("target")),
-        )
-        .expect("valid plan");
-        plan.advance_after_connected_step();
-        plan.advance_after_connected_step();
-        plan.advance_after_connected_step();
-
-        assert_eq!(
-            plan.next_action(),
-            NativeSessionTreeConnectAction::Complete {
-                target_node_id: node_id("target")
-            }
-        );
     }
 }

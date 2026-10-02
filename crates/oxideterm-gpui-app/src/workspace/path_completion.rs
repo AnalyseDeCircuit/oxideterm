@@ -498,23 +498,27 @@ mod tests {
         let first = remote_path_completion_request("/root/a").unwrap();
         let (first_generation, first_parent) = state.request(first).unwrap();
         let second = remote_path_completion_request("/srv/b").unwrap();
-        let (_second_generation, _second_parent) = state.request(second).unwrap();
+        let (second_generation, second_parent) = state.request(second).unwrap();
+        assert!(state.apply_entries(
+            second_generation,
+            &second_parent,
+            vec![PathCompletionCandidate {
+                name: "beta".to_string(),
+                path: "/srv/beta".to_string(),
+                is_directory: true,
+            }],
+        ));
 
         assert!(!state.apply_entries(first_generation, &first_parent, vec![candidate("a", true)],));
-        assert!(state.suggestions().is_empty());
-    }
-
-    #[test]
-    fn completion_retains_more_matches_than_the_visible_viewport() {
-        let mut state = PathCompletionState::default();
-        let request = remote_path_completion_request("/root/").unwrap();
-        let (generation, parent_path) = state.request(request).unwrap();
-        let entries = (0..12)
-            .map(|index| candidate(&format!("folder-{index:02}"), true))
-            .collect();
-
-        assert!(state.apply_entries(generation, &parent_path, entries));
-        assert_eq!(state.suggestions().len(), 12);
+        assert_eq!(
+            state
+                .suggestions()
+                .iter()
+                .map(|entry| (entry.name.as_str(), entry.path.as_str()))
+                .collect::<Vec<_>>(),
+            vec![("beta", "/srv/beta")]
+        );
+        assert_eq!(state.parent_path(), Some("/srv"));
     }
 
     #[test]
@@ -527,6 +531,7 @@ mod tests {
             .collect();
 
         assert!(state.apply_entries(generation, &parent_path, entries));
+        assert_eq!(state.suggestions().len(), 12);
         for _ in 0..PATH_COMPLETION_VISIBLE_ROWS {
             assert!(state.move_selection(1));
         }

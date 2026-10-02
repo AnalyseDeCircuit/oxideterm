@@ -507,12 +507,25 @@ mod tests {
             json!({"id":"grok-provider","type":"xai","apiProtocol":"responses","baseUrl":"https://api.x.ai/v1","models":["grok-4.6"]}),
         ];
         settings.settings_navigation.groups = vec![vec!["terminal".to_string()]];
+        settings.network.upstream_proxy = Some(
+            serde_json::from_value(json!({
+                "protocol": "socks5",
+                "host": "proxy.test",
+                "port": 1080,
+                "auth": {
+                    "type": "password",
+                    "username": "user",
+                    "keychain_id": "device-secret-reference"
+                }
+            }))
+            .expect("proxy settings"),
+        );
         settings.local_terminal.default_cwd = Some("/tmp".to_string());
         settings
             .local_terminal
             .custom_env_vars
             .insert("FOO".to_string(), Value::String("bar".to_string()));
-        let selected = ["ai", "localTerminal", "nativePreferences"]
+        let selected = ["network", "ai", "localTerminal", "nativePreferences"]
             .into_iter()
             .map(str::to_string)
             .collect::<HashSet<_>>();
@@ -520,6 +533,11 @@ mod tests {
         let exported =
             export_oxide_settings_snapshot_json(&settings, Some(&selected), false).expect("export");
         let parsed: Value = serde_json::from_str(&exported).expect("json");
+        assert!(!exported.contains("device-secret-reference"));
+        assert_eq!(
+            parsed["settings"]["network"]["upstreamProxy"]["host"],
+            "proxy.test"
+        );
         let restored = merge_oxide_settings_snapshot(
             &PersistedSettings::default(),
             &exported,
@@ -542,7 +560,7 @@ mod tests {
 
         assert_eq!(
             section_ids,
-            vec!["ai", "localTerminal", "nativePreferences"]
+            vec!["network", "ai", "localTerminal", "nativePreferences"]
         );
         assert!(parsed["settings"].get("ai").is_some());
         assert!(parsed["settings"]["ai"].get("acpAgents").is_some());

@@ -4012,7 +4012,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn explicit_disconnect_rejects_late_node_transport_success(cx: &mut TestAppContext) {
+    fn explicit_disconnect_rejects_late_node_transport_results(cx: &mut TestAppContext) {
         let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
         let node_router = NodeRouter::new(ssh_registry.clone());
         let node_id = NodeId::new("node-a");
@@ -4067,41 +4067,6 @@ mod tests {
             );
         });
         assert!(ssh_registry.get(&connection_id).is_none());
-    }
-
-    #[gpui::test]
-    fn explicit_disconnect_rejects_late_node_transport_failure(cx: &mut TestAppContext) {
-        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
-        let node_router = NodeRouter::new(ssh_registry.clone());
-        let node_id = NodeId::new("node-a");
-        let config = SshConfig {
-            host: "node-a.example.test".to_string(),
-            ..SshConfig::default()
-        };
-        node_router.upsert_node(node_id.clone(), config.clone());
-        let connection =
-            ssh_registry.acquire(config, ConnectionConsumer::NodeRouter(node_id.0.clone()));
-        let connection_id = connection.connection_id().to_string();
-        node_router
-            .bind_connection(&node_id, connection_id.clone())
-            .expect("node connection binding");
-        let entity = cx.new(|cx| {
-            WorkspaceRuntimeEntity::new(
-                ssh_registry,
-                node_router,
-                test_task_runtime(),
-                true,
-                ReconnectTiming::default(),
-                3,
-                cx,
-            )
-        });
-        let (sender, attempt_id) = entity.update(cx, |entity, cx| {
-            let attempt_id = register_test_node_transport_attempt(entity, &node_id, &connection_id);
-            entity.disconnect_node_runtime_subtree(&node_id, cx);
-            (entity.reconnect_worker_sender(), attempt_id)
-        });
-
         sender
             .send(ReconnectWorkerResult::NodeConnectFailed {
                 node_id: node_id.clone(),

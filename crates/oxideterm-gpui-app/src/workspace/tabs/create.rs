@@ -1998,7 +1998,7 @@ mod create_tests {
     }
 
     #[test]
-    fn reused_ssh_node_without_owner_accepts_explicit_saved_owner() {
+    fn reused_ssh_node_accepts_a_saved_owner_without_replacing_it() {
         let mut node = WorkspaceSshNode::new(
             None,
             &SshConfig::default(),
@@ -2009,69 +2009,11 @@ mod create_tests {
 
         assert!(attach_saved_owner_to_reused_ssh_node(&mut node, "home-100"));
         assert_eq!(node.saved_connection_id.as_deref(), Some("home-100"));
-    }
-
-    #[test]
-    fn reused_ssh_node_keeps_existing_saved_owner() {
-        let mut node = WorkspaceSshNode::new(
-            Some("existing-owner".to_string()),
-            &SshConfig::default(),
-            "Production".to_string(),
-            vec![TerminalSessionId(1)],
-            NodeReadiness::Ready,
-        );
-
         assert!(!attach_saved_owner_to_reused_ssh_node(
             &mut node,
             "other-owner"
         ));
-        assert_eq!(node.saved_connection_id.as_deref(), Some("existing-owner"));
-    }
-
-    #[test]
-    fn saved_node_route_rejects_a_stale_direct_target() {
-        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
-        let node_id = NodeId::new("saved-node");
-        router.upsert_node(
-            node_id.clone(),
-            SshConfig::password("old.example.com", 22, "ops", "old-secret"),
-        );
-        let requested = SshConfig::password("new.example.com", 22, "ops", "new-secret");
-
-        assert!(!saved_node_route_matches_config(
-            &router, &node_id, &requested
-        ));
-    }
-
-    #[test]
-    fn saved_node_route_accepts_the_same_direct_target_with_new_auth() {
-        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
-        let node_id = NodeId::new("saved-node");
-        router.upsert_node(
-            node_id.clone(),
-            SshConfig::password("target.example.com", 22, "ops", "old-secret"),
-        );
-        let requested = SshConfig::password("target.example.com", 22, "ops", "new-secret");
-
-        assert!(saved_node_route_matches_config(
-            &router, &node_id, &requested
-        ));
-
-        let mut changed_legacy_policy = requested.clone();
-        changed_legacy_policy.legacy_ssh_compatibility = true;
-        assert!(!saved_node_route_matches_config(
-            &router,
-            &node_id,
-            &changed_legacy_policy,
-        ));
-
-        let mut changed_algorithms = requested;
-        changed_algorithms.ssh_algorithms.mac = vec!["hmac-sha1".to_string()];
-        assert!(!saved_node_route_matches_config(
-            &router,
-            &node_id,
-            &changed_algorithms,
-        ));
+        assert_eq!(node.saved_connection_id.as_deref(), Some("home-100"));
     }
 
     #[test]
@@ -2111,54 +2053,10 @@ mod create_tests {
     }
 
     #[test]
-    fn indexed_saved_node_requires_the_requested_saved_owner() {
+    fn indexed_saved_lookup_requires_current_owner_route_and_negotiation_policy() {
         let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
         let node_id = NodeId::new("saved-node");
-        let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
-        router.upsert_node_with_origin(
-            node_id.clone(),
-            SshConfig::password("shared.example.com", 22, "ops", "pw"),
-            NodeOrigin::Restored {
-                saved_connection_id: "saved-a".to_string(),
-            },
-        );
-        let mut node = WorkspaceSshNode::new(
-            Some("saved-a".to_string()),
-            &requested,
-            "Saved A".to_string(),
-            Vec::new(),
-            NodeReadiness::Ready,
-        );
-
-        assert!(indexed_saved_node_matches_connection(
-            &router, &node_id, &node, &requested, "saved-a"
-        ));
-        assert!(!indexed_saved_node_matches_connection(
-            &router, &node_id, &node, &requested, "saved-b"
-        ));
-
-        router
-            .update_node_origin(
-                &node_id,
-                NodeOrigin::Restored {
-                    saved_connection_id: "saved-b".to_string(),
-                },
-            )
-            .unwrap();
-        assert!(!indexed_saved_node_matches_connection(
-            &router, &node_id, &node, &requested, "saved-b"
-        ));
-        node.saved_connection_id = Some("saved-b".to_string());
-        assert!(indexed_saved_node_matches_connection(
-            &router, &node_id, &node, &requested, "saved-b"
-        ));
-    }
-
-    #[test]
-    fn indexed_saved_lookup_rejects_a_foreign_or_stale_mapping() {
-        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
-        let node_id = NodeId::new("saved-node");
-        let requested = SshConfig::password("shared.example.com", 22, "ops", "runtime-secret");
+        let requested = SshConfig::password("shared.example.com", 22, "ops", "new-secret");
         router.upsert_node_with_origin(
             node_id.clone(),
             SshConfig::password("shared.example.com", 22, "ops", "runtime-secret"),
@@ -2173,7 +2071,7 @@ mod create_tests {
             Vec::new(),
             NodeReadiness::Ready,
         );
-        let ssh_nodes = HashMap::from([(node_id.clone(), node)]);
+        let mut ssh_nodes = HashMap::from([(node_id.clone(), node)]);
         let saved_ssh_nodes = HashMap::from([
             ("saved-a".to_string(), node_id.clone()),
             ("saved-b".to_string(), node_id.clone()),
@@ -2187,7 +2085,7 @@ mod create_tests {
                 "saved-a",
                 &requested,
             ),
-            Some(node_id)
+            Some(node_id.clone())
         );
         assert_eq!(
             reusable_indexed_saved_node_for_config(
@@ -2200,13 +2098,63 @@ mod create_tests {
             None
         );
 
+        let mut changed_legacy_policy = requested.clone();
+        changed_legacy_policy.legacy_ssh_compatibility = true;
+        let mut changed_algorithms = requested.clone();
+        changed_algorithms.ssh_algorithms.mac = vec!["hmac-sha1".to_string()];
+        for config in [changed_legacy_policy, changed_algorithms] {
+            assert_eq!(
+                reusable_indexed_saved_node_for_config(
+                    &saved_ssh_nodes,
+                    &ssh_nodes,
+                    &router,
+                    "saved-a",
+                    &config,
+                ),
+                None,
+            );
+        }
+
+        router
+            .update_node_origin(
+                &node_id,
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-b".to_string(),
+                },
+            )
+            .unwrap();
+        for owner in ["saved-a", "saved-b"] {
+            assert_eq!(
+                reusable_indexed_saved_node_for_config(
+                    &saved_ssh_nodes,
+                    &ssh_nodes,
+                    &router,
+                    owner,
+                    &requested,
+                ),
+                None,
+                "mismatched runtime and workspace owners: {owner}",
+            );
+        }
+        ssh_nodes.get_mut(&node_id).unwrap().saved_connection_id = Some("saved-b".to_string());
+        assert_eq!(
+            reusable_indexed_saved_node_for_config(
+                &saved_ssh_nodes,
+                &ssh_nodes,
+                &router,
+                "saved-b",
+                &requested,
+            ),
+            Some(node_id),
+        );
+
         let stale_config = SshConfig::password("changed.example.com", 22, "ops", "new-secret");
         assert_eq!(
             reusable_indexed_saved_node_for_config(
                 &saved_ssh_nodes,
                 &ssh_nodes,
                 &router,
-                "saved-a",
+                "saved-b",
                 &stale_config,
             ),
             None
@@ -2282,42 +2230,30 @@ mod create_tests {
     }
 
     #[test]
-    fn direct_root_reuse_rejects_another_saved_profiles_logical_node() {
-        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
-        let node_id = NodeId::new("saved-node");
-        let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
-        router.upsert_node_with_origin(
-            node_id.clone(),
-            SshConfig::password("shared.example.com", 22, "ops", "pw"),
-            NodeOrigin::Restored {
-                saved_connection_id: "saved-a".to_string(),
-            },
-        );
+    fn direct_root_reuse_accepts_unowned_nodes_and_rejects_foreign_saved_owners() {
+        for (origin, foreign_owner_allowed) in [
+            (
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-a".to_string(),
+                },
+                false,
+            ),
+            (NodeOrigin::Direct, true),
+        ] {
+            let router =
+                NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+            let node_id = NodeId::new("saved-node");
+            let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
+            router.upsert_node_with_origin(node_id.clone(), requested.clone(), origin);
 
-        assert_eq!(
-            reusable_direct_root_node_for_saved_config(&router, &requested, "saved-a"),
-            Some(node_id)
-        );
-        assert_eq!(
-            reusable_direct_root_node_for_saved_config(&router, &requested, "saved-b"),
-            None
-        );
-    }
-
-    #[test]
-    fn direct_root_reuse_can_attach_an_unowned_logical_node() {
-        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
-        let node_id = NodeId::new("direct-node");
-        let requested = SshConfig::password("shared.example.com", 22, "ops", "pw");
-        router.upsert_node_with_origin(
-            node_id.clone(),
-            SshConfig::password("shared.example.com", 22, "ops", "pw"),
-            NodeOrigin::Direct,
-        );
-
-        assert_eq!(
-            reusable_direct_root_node_for_saved_config(&router, &requested, "saved-a"),
-            Some(node_id)
-        );
+            assert_eq!(
+                reusable_direct_root_node_for_saved_config(&router, &requested, "saved-a"),
+                Some(node_id.clone()),
+            );
+            assert_eq!(
+                reusable_direct_root_node_for_saved_config(&router, &requested, "saved-b"),
+                foreign_owner_allowed.then_some(node_id),
+            );
+        }
     }
 }

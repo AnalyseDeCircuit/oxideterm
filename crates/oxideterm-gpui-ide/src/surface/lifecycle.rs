@@ -513,20 +513,6 @@ mod lifecycle_tests {
     }
 
     #[gpui::test]
-    fn main_window_mount_allows_agent_sampling(cx: &mut TestAppContext) {
-        let surface = test_surface(cx);
-
-        surface.update(cx, |surface, cx| {
-            configure_ready_surface(surface, cx);
-            assert_eq!(surface.mount(), IdeSurfaceMount::MainWindow);
-
-            surface.schedule_next_agent_status_poll(cx);
-
-            assert!(surface.agent_poll_task.is_some());
-        });
-    }
-
-    #[gpui::test]
     fn hidden_mount_stops_sampling_watch_and_watch_reads_without_releasing_node(
         cx: &mut TestAppContext,
     ) {

@@ -907,69 +907,44 @@ mod tests {
     use crate::MetricsSource;
 
     #[test]
-    fn start_is_idempotent_while_running() {
-        let registry = ProfilerRegistry::new();
-
-        assert!(registry.start("conn-1"));
-        assert!(!registry.start("conn-1"));
-        assert_eq!(registry.state("conn-1"), Some(ProfilerState::Running));
-    }
-
-    #[test]
-    fn degraded_profiler_respawns_with_empty_history() {
-        let registry = ProfilerRegistry::new();
-        registry.start("conn-1");
-        registry.record_metrics(ProfilerUpdate {
-            connection_id: "conn-1".into(),
-            metrics: ResourceMetrics::empty(1, MetricsSource::Full),
-        });
-        registry.mark_degraded("conn-1");
-
-        assert!(registry.start("conn-1"));
-        assert_eq!(registry.state("conn-1"), Some(ProfilerState::Running));
-        assert!(registry.latest("conn-1").is_none());
-        assert!(registry.history("conn-1").is_empty());
-    }
-
-    #[test]
-    fn records_only_existing_profiler_updates() {
+    fn profiler_registry_records_registered_samples_and_resets_degraded_history() {
         let registry = ProfilerRegistry::new();
 
         assert!(!registry.record_metrics(ProfilerUpdate {
             connection_id: "missing".into(),
             metrics: ResourceMetrics::empty(1, MetricsSource::Full),
         }));
-
-        registry.start("conn-1");
+        assert!(registry.start("conn-1"));
+        assert!(!registry.start("conn-1"));
+        assert_eq!(registry.state("conn-1"), Some(ProfilerState::Running));
+        for timestamp_ms in 0..2 {
+            assert!(registry.record_metrics(ProfilerUpdate {
+                connection_id: "conn-1".into(),
+                metrics: ResourceMetrics::empty(timestamp_ms, MetricsSource::Full),
+            }));
+        }
         assert!(registry.record_metrics(ProfilerUpdate {
             connection_id: "conn-1".into(),
             metrics: ResourceMetrics::empty(2, MetricsSource::Partial),
         }));
         assert_eq!(
-            registry.latest("conn-1").map(|metrics| metrics.source),
-            Some(MetricsSource::Partial)
+            registry.latest("conn-1"),
+            Some(ResourceMetrics::empty(2, MetricsSource::Partial))
         );
-    }
-
-    #[test]
-    fn current_omits_history_for_lightweight_render_paths() {
-        let registry = ProfilerRegistry::new();
-        registry.start("conn-1");
-        for timestamp_ms in 0..3 {
-            registry.record_metrics(ProfilerUpdate {
-                connection_id: "conn-1".into(),
-                metrics: ResourceMetrics::empty(timestamp_ms, MetricsSource::Full),
-            });
-        }
-
         assert_eq!(
             registry.current("conn-1"),
             Some((
-                Some(ResourceMetrics::empty(2, MetricsSource::Full)),
+                Some(ResourceMetrics::empty(2, MetricsSource::Partial)),
                 ProfilerState::Running,
             ))
         );
         assert_eq!(registry.history("conn-1").len(), 3);
+        registry.mark_degraded("conn-1");
+
+        assert!(registry.start("conn-1"));
+        assert_eq!(registry.state("conn-1"), Some(ProfilerState::Running));
+        assert!(registry.latest("conn-1").is_none());
+        assert!(registry.history("conn-1").is_empty());
     }
 
     #[test]

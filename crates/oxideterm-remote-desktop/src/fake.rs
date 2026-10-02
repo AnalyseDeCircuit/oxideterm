@@ -209,7 +209,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connect_emits_status_connected_and_frame() {
+    fn connect_emits_frame_and_close_clears_the_connected_endpoint() {
         let mut backend = RemoteDesktopFakeBackend::new(RemoteDesktopProtocol::Rdp);
 
         let events = backend.handle_request(RemoteDesktopHelperRequest::Connect {
@@ -229,15 +229,44 @@ mod tests {
         assert_eq!(backend.status(), RemoteDesktopSessionStatus::Connected);
         assert!(matches!(
             events.first(),
-            Some(RemoteDesktopHelperEvent::Status { .. })
+            Some(RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Connecting,
+                ..
+            })
         ));
         assert!(matches!(
             events.get(1),
-            Some(RemoteDesktopHelperEvent::Connected { .. })
+            Some(RemoteDesktopHelperEvent::Connected {
+                size: RemoteDesktopSize {
+                    width: 640,
+                    height: 480,
+                }
+            })
         ));
         assert!(
             matches!(events.get(2), Some(RemoteDesktopHelperEvent::Frame { frame }) if frame.is_complete())
         );
+
+        let events = backend.handle_request(RemoteDesktopHelperRequest::Close);
+        assert_eq!(backend.status(), RemoteDesktopSessionStatus::Disconnected);
+        assert!(matches!(
+            events.as_slice(),
+            [RemoteDesktopHelperEvent::Disconnected { .. }]
+        ));
+        assert!(
+            backend
+                .handle_request(RemoteDesktopHelperRequest::RequestFrame)
+                .is_empty()
+        );
+        assert!(matches!(
+            backend
+                .handle_request(RemoteDesktopHelperRequest::Reconnect)
+                .as_slice(),
+            [RemoteDesktopHelperEvent::ConnectionFailure {
+                category: Some(RemoteDesktopErrorCategory::Configuration),
+                ..
+            }]
+        ));
     }
 
     #[test]
@@ -250,19 +279,6 @@ mod tests {
         assert!(matches!(
             events.as_slice(),
             [RemoteDesktopHelperEvent::ConnectionFailure { .. }]
-        ));
-    }
-
-    #[test]
-    fn close_clears_session() {
-        let mut backend = RemoteDesktopFakeBackend::default();
-
-        let events = backend.handle_request(RemoteDesktopHelperRequest::Close);
-
-        assert_eq!(backend.status(), RemoteDesktopSessionStatus::Disconnected);
-        assert!(matches!(
-            events.as_slice(),
-            [RemoteDesktopHelperEvent::Disconnected { .. }]
         ));
     }
 

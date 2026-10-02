@@ -1184,13 +1184,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn form_close_moves_proxy_run_to_typed_cleanup_queue(cx: &mut TestAppContext) {
+    fn form_close_releases_drafts_and_moves_proxy_run_to_cleanup(cx: &mut TestAppContext) {
         let entity = cx.new(ConnectionFlowEntity::new);
 
         entity.update(cx, |entity, cx| {
-            entity
-                .form
-                .replace_with_new_form(NewConnectionForm::default());
+            let mut form = NewConnectionForm::default();
+            form.password = "secret".to_string();
+            entity.form.replace_with_new_form(form);
+            entity.form.editing_saved_connection_id = Some("saved-id".to_string());
+            entity.form.saved_connection_prompt_action = Some(SavedConnectionPromptAction::Connect);
             assert!(
                 entity
                     .start_proxy_connect_run(proxy_connect_run(), cx)
@@ -1200,6 +1202,9 @@ mod tests {
 
             assert!(entity.begin_connection_form_exit(Duration::ZERO, cx));
             assert!(!entity.has_active_proxy_connect_run());
+            assert!(entity.form.form.is_none());
+            assert!(entity.form.editing_saved_connection_id.is_none());
+            assert!(entity.form.saved_connection_prompt_action.is_none());
             let cancelled = entity.take_cancelled_proxy_connect_runs();
             assert_eq!(cancelled.len(), 1);
             assert_eq!(cancelled[0].generation, 1);
@@ -1267,23 +1272,14 @@ mod tests {
                 .expect("host-key render snapshot");
             assert!(snapshot.visible);
             assert_eq!(snapshot.host, "example.test");
-            assert!(entity.begin_host_key_challenge_exit(Duration::ZERO, cx));
-            assert!(!entity.has_host_key_challenge());
-        });
-    }
-
-    #[gpui::test]
-    fn taking_and_restoring_host_key_challenge_preserves_single_ownership(cx: &mut TestAppContext) {
-        let entity = cx.new(ConnectionFlowEntity::new);
-
-        entity.update(cx, |entity, cx| {
-            entity.open_host_key_challenge(unknown_host_key_challenge(), cx);
             let challenge = entity
                 .take_host_key_challenge(cx)
                 .expect("owned host-key challenge");
             assert!(!entity.has_host_key_challenge());
             entity.restore_host_key_challenge(challenge, cx);
             assert!(entity.has_host_key_challenge());
+            assert!(entity.begin_host_key_challenge_exit(Duration::ZERO, cx));
+            assert!(!entity.has_host_key_challenge());
         });
     }
 
@@ -1421,24 +1417,6 @@ mod tests {
             response_rx.try_recv(),
             Ok(Err(SshPromptError::Cancelled))
         ));
-    }
-
-    #[gpui::test]
-    fn connection_form_close_clears_secret_owner_and_mode_metadata(cx: &mut TestAppContext) {
-        let entity = cx.new(ConnectionFlowEntity::new);
-
-        entity.update(cx, |entity, cx| {
-            let mut form = NewConnectionForm::default();
-            form.password = "secret".to_string();
-            entity.form.replace_with_new_form(form);
-            entity.form.editing_saved_connection_id = Some("saved-id".to_string());
-            entity.form.saved_connection_prompt_action = Some(SavedConnectionPromptAction::Connect);
-
-            assert!(entity.begin_connection_form_exit(Duration::ZERO, cx));
-            assert!(entity.form.form.is_none());
-            assert!(entity.form.editing_saved_connection_id.is_none());
-            assert!(entity.form.saved_connection_prompt_action.is_none());
-        });
     }
 
     #[gpui::test]

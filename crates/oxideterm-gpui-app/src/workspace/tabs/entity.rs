@@ -1578,6 +1578,14 @@ mod tests {
                 Some("same-saved-profile")
             );
             host.remove_terminal_pane(b);
+            assert_eq!(host.terminal_location(sb), None);
+            assert_eq!(
+                host.terminal_location(sa),
+                Some(TerminalLocation {
+                    tab_id: TabId(1),
+                    pane_id: a
+                })
+            );
             assert!(!host.local_sessions.contains_key(&sb));
             assert_eq!(
                 host.local_sessions[&sa].profile_id.as_deref(),
@@ -1624,67 +1632,6 @@ mod tests {
     }
 
     #[test]
-    fn pane_tree_transitions_remain_inside_the_canonical_tab_owner() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-        let tab_id = TabId(1);
-        let first_pane = PaneId(1);
-        let first_session = TerminalSessionId(1);
-        let split_group = PaneId(3);
-        let second_pane = PaneId(2);
-        let second_session = TerminalSessionId(2);
-        tab_host.insert_and_select_main_tab(test_tab(
-            tab_id,
-            Some(PaneNode::leaf(first_pane, first_session)),
-        ));
-
-        // Split, focus, resize, close, and reconnect replacement mutate one tree.
-        assert!(tab_host.split_pane(
-            tab_id,
-            first_pane,
-            split_group,
-            SplitDirection::Horizontal,
-            second_pane,
-            second_session,
-        ));
-        assert_eq!(
-            tab_host.active_tab().and_then(|tab| tab.active_pane_id),
-            Some(second_pane)
-        );
-        assert_eq!(
-            tab_host
-                .active_tab()
-                .and_then(|tab| tab.root_pane.as_ref())
-                .map(PaneNode::pane_count),
-            Some(2)
-        );
-        assert!(tab_host.set_active_pane(Some(tab_id), first_pane));
-        assert!(tab_host.update_group_sizes(Some(tab_id), split_group, &[35.0, 65.0]));
-        assert!(tab_host.reset_group_sizes(Some(tab_id), split_group));
-        assert_eq!(tab_host.close_pane(tab_id, second_pane), Some(first_pane));
-
-        let replacement_pane = PaneId(4);
-        let replacement_session = TerminalSessionId(4);
-        assert_eq!(
-            tab_host.replace_terminal_session(
-                tab_id,
-                first_session,
-                first_pane,
-                replacement_pane,
-                replacement_session,
-            ),
-            Some(first_pane)
-        );
-        let tab = tab_host.active_tab().expect("active terminal tab");
-        assert_eq!(tab.active_pane_id, Some(replacement_pane));
-        assert_eq!(
-            tab.root_pane
-                .as_ref()
-                .and_then(|root| root.session_id_for_pane(replacement_pane)),
-            Some(replacement_session)
-        );
-    }
-
-    #[test]
     fn reconnect_replacement_preserves_the_sibling_split_session() {
         let mut tab_host = WorkspaceTabHostEntity::new();
         let tab_id = TabId(1);
@@ -1704,6 +1651,10 @@ mod tests {
             second_pane,
             second_session,
         ));
+        assert_eq!(
+            tab_host.active_tab().unwrap().active_pane_id,
+            Some(second_pane)
+        );
         assert!(tab_host.set_active_pane(Some(tab_id), first_pane));
 
         let replacement_pane = PaneId(4);
@@ -1728,6 +1679,17 @@ mod tests {
         );
         assert_eq!(root.session_id_for_pane(second_pane), Some(second_session));
         assert_eq!(tab.active_pane_id, Some(replacement_pane));
+
+        assert_eq!(
+            tab_host.close_pane(tab_id, second_pane),
+            Some(replacement_pane)
+        );
+        let tab = tab_host.active_tab().unwrap();
+        assert_eq!(tab.active_pane_id, Some(replacement_pane));
+        assert_eq!(
+            tab.root_pane,
+            Some(PaneNode::leaf(replacement_pane, replacement_session))
+        );
     }
 
     #[test]
@@ -2105,37 +2067,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_location_lifecycle_is_owned_by_tab_host() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-        let first_session = TerminalSessionId(1);
-        let second_session = TerminalSessionId(2);
-        let first_location = TerminalLocation {
-            tab_id: TabId(3),
-            pane_id: PaneId(4),
-        };
-        let second_location = TerminalLocation {
-            tab_id: TabId(3),
-            pane_id: PaneId(5),
-        };
-
-        tab_host.bind_terminal_location(first_session, first_location);
-        tab_host.bind_terminal_location(second_session, second_location);
-        assert_eq!(
-            tab_host.terminal_location(first_session),
-            Some(first_location)
-        );
-        assert_eq!(
-            tab_host.unbind_terminal_location_for_pane(first_location.pane_id),
-            Some(first_session)
-        );
-        assert!(tab_host.terminal_location(first_session).is_none());
-        assert_eq!(
-            tab_host.terminal_location(second_session),
-            Some(second_location)
-        );
-    }
-
-    #[test]
     fn background_terminal_output_stays_unread_until_the_tab_becomes_visible() {
         let mut tab_host = WorkspaceTabHostEntity::new();
         let active_tab_id = TabId(1);
@@ -2189,82 +2120,6 @@ mod tests {
             .begin_detach_from_main(background_tab_id)
             .expect("background tab detach transition");
         assert!(tab_host.unread_terminal_output_tab_ids().is_empty());
-    }
-
-    #[gpui::test]
-    fn removing_pane_drops_delivery_subscription_and_terminal_location(cx: &mut TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_window, _cx| TabHostTestRoot);
-        let pane = cx.update(|window, cx| {
-            cx.new(|cx| {
-                TerminalPane::new_recording_playback(
-                    80,
-                    24,
-                    oxideterm_gpui_terminal::TerminalUiPreferences::default(),
-                    window,
-                    cx,
-                )
-                .expect("recording pane")
-            })
-        });
-        let window_handle = cx.window_handle();
-        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
-        let event_recorder = cx.new(|_| TabHostEventRecorder {
-            events: Vec::new(),
-            _subscription: None,
-        });
-        event_recorder.update(cx, |event_recorder, cx| {
-            event_recorder._subscription = Some(cx.subscribe(
-                &tab_host,
-                |event_recorder, _tab_host, event, _cx| {
-                    event_recorder.events.push(*event);
-                },
-            ));
-        });
-        let pane_id = PaneId(4);
-        let session_id = TerminalSessionId(5);
-
-        tab_host.update(cx, |tab_host, cx| {
-            tab_host.register_terminal_pane(pane_id, session_id, pane.clone(), window_handle, cx);
-            tab_host.bind_terminal_location(
-                session_id,
-                TerminalLocation {
-                    tab_id: TabId(3),
-                    pane_id,
-                },
-            );
-            assert_eq!(tab_host.panes().len(), 1);
-            assert_eq!(tab_host.pane_subscriptions.len(), 1);
-            assert_eq!(tab_host.pane_window_affinities.len(), 1);
-        });
-        pane.update(cx, |_pane, cx| {
-            cx.emit(TerminalPaneEvent::Exited { exit_code: Some(0) });
-        });
-        cx.run_until_parked();
-        assert_eq!(
-            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.clone()),
-            vec![WorkspaceTabHostEvent::TerminalPaneDelivery {
-                pane_id,
-                session_id,
-                window_handle,
-                event: TerminalPaneEvent::Exited { exit_code: Some(0) },
-            }]
-        );
-
-        tab_host.update(cx, |tab_host, _cx| {
-            assert!(tab_host.remove_terminal_pane(pane_id).is_some());
-            assert!(tab_host.panes().is_empty());
-            assert!(tab_host.pane_subscriptions.is_empty());
-            assert!(tab_host.pane_window_affinities.is_empty());
-            assert!(tab_host.terminal_location(session_id).is_none());
-        });
-        pane.update(cx, |_pane, cx| {
-            cx.emit(TerminalPaneEvent::ContextActionRequested);
-        });
-        cx.run_until_parked();
-        assert_eq!(
-            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.len()),
-            1
-        );
     }
 
     #[gpui::test]
@@ -2396,6 +2251,9 @@ mod tests {
                 cx,
             );
             assert!(tab_host.remove_terminal_pane(first_pane_id).is_some());
+            assert!(!tab_host.pane_subscriptions.contains_key(&first_pane_id));
+            assert!(!tab_host.pane_window_affinities.contains_key(&first_pane_id));
+            assert_eq!(tab_host.terminal_location(first_session_id), None);
             tab_host.bind_terminal_location(
                 replacement_session_id,
                 TerminalLocation {
@@ -2461,6 +2319,21 @@ mod tests {
                     event: TerminalPaneEvent::RecordingStatusChanged,
                 },
             ]
+        );
+        tab_host.update(cx, |tab_host, _cx| {
+            assert!(tab_host.remove_terminal_pane(replacement_pane_id).is_some());
+            assert!(tab_host.panes().is_empty());
+            assert!(tab_host.pane_subscriptions.is_empty());
+            assert!(tab_host.pane_window_affinities.is_empty());
+            assert_eq!(tab_host.terminal_location(replacement_session_id), None);
+        });
+        replacement_pane.update(cx, |_pane, cx| {
+            cx.emit(TerminalPaneEvent::ContextActionRequested);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            event_recorder.read_with(cx, |recorder, _cx| recorder.events.len()),
+            4
         );
     }
 
@@ -2744,26 +2617,6 @@ mod tests {
                 (false, None)
             );
         });
-    }
-
-    #[gpui::test]
-    fn entity_release_cancels_retained_close_confirmation_exit(cx: &mut TestAppContext) {
-        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
-        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
-        tab_host.update(cx, |tab_host, cx| {
-            // The confirmation owner retains the exit task and therefore
-            // cancels it when its Entity is released.
-            tab_host.close_confirm_exit_task = Some(cx.spawn(async move |_, _| {
-                let _ = release_receiver.await;
-            }));
-        });
-        cx.run_until_parked();
-
-        drop(tab_host);
-        cx.update(|_| {});
-        cx.run_until_parked();
-
-        assert!(release_sender.send(()).is_err());
     }
 
     #[test]

@@ -450,27 +450,16 @@ mod cli_companion_tests {
     }
 
     #[test]
-    pub(in crate::workspace) fn identical_cli_files_match_bundled_copy() {
-        let temp_dir = temp_test_dir("identical");
-        let installed_path = temp_dir.join("installed-oxideterm");
-        let bundled_path = temp_dir.join("bundled-oxideterm");
-
-        std::fs::write(&installed_path, b"same-cli-binary").unwrap();
-        std::fs::write(&bundled_path, b"same-cli-binary").unwrap();
-
-        assert!(installed_cli_matches_bundle(&installed_path, &bundled_path).unwrap());
-        let _ = std::fs::remove_dir_all(temp_dir);
-    }
-
-    #[test]
-    pub(in crate::workspace) fn different_cli_files_require_reinstall() {
-        let temp_dir = temp_test_dir("different");
+    pub(in crate::workspace) fn changed_bundled_cli_requires_reinstall() {
+        let temp_dir = temp_test_dir("changed-bundle");
         let installed_path = temp_dir.join("installed-oxideterm");
         let bundled_path = temp_dir.join("bundled-oxideterm");
 
         std::fs::write(&installed_path, b"old-cli-binary").unwrap();
-        std::fs::write(&bundled_path, b"new-cli-binary").unwrap();
+        std::fs::write(&bundled_path, b"old-cli-binary").unwrap();
 
+        assert!(installed_cli_matches_bundle(&installed_path, &bundled_path).unwrap());
+        std::fs::write(&bundled_path, b"new-cli-binary").unwrap();
         assert!(!installed_cli_matches_bundle(&installed_path, &bundled_path).unwrap());
         let _ = std::fs::remove_dir_all(temp_dir);
     }

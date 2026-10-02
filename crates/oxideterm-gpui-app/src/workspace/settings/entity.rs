@@ -2432,7 +2432,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn hidden_settings_page_keeps_worker_completion_exact_once(cx: &mut TestAppContext) {
+    fn hidden_settings_page_keeps_single_flight_worker_completion_exact_once(
+        cx: &mut TestAppContext,
+    ) {
         let entity = cx.new(SettingsWorkspaceEntity::new);
         let runtime = Arc::new(
             tokio::runtime::Builder::new_multi_thread()
@@ -2449,7 +2451,7 @@ mod tests {
             entity.set_active_tab(SettingsTab::Portable, cx);
             assert!(entity.start_portable_status_refresh(
                 true,
-                runtime,
+                Arc::clone(&runtime),
                 move || {
                     worker_release_rx
                         .recv()
@@ -2460,9 +2462,15 @@ mod tests {
                         .expect("worker completion receiver should remain alive");
                     super::PortableStatusRefresh {
                         status: Err("portable unavailable while hidden".to_string()),
-                        exportable_secret_count: 0,
+                        exportable_secret_count: 2,
                     }
                 },
+                cx,
+            ));
+            assert!(!entity.start_portable_status_refresh(
+                false,
+                runtime,
+                || unreachable!("single-flight worker"),
                 cx,
             ));
             // The worker result remains lifecycle-significant after the page hides.
@@ -2493,6 +2501,7 @@ mod tests {
                 snapshot.error.as_deref(),
                 Some("portable unavailable while hidden")
             );
+            assert_eq!(snapshot.exportable_secret_count, Some(2));
             assert!(entity.portable_refresh_task.is_none());
         });
     }
@@ -2549,59 +2558,6 @@ mod tests {
         drop(entity);
         cx.update(|_cx| {});
         cx.run_until_parked();
-    }
-
-    #[gpui::test]
-    fn portable_status_refresh_is_single_flight_and_entity_owned(cx: &mut TestAppContext) {
-        let entity = cx.new(SettingsWorkspaceEntity::new);
-        let runtime = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(1)
-                .enable_all()
-                .build()
-                .expect("test runtime"),
-        );
-
-        entity.update(cx, |entity, cx| {
-            assert!(entity.start_portable_status_refresh(
-                false,
-                runtime,
-                || super::PortableStatusRefresh {
-                    status: Err("unavailable".to_string()),
-                    exportable_secret_count: 2,
-                },
-                cx,
-            ));
-            assert!(
-                !entity.start_portable_status_refresh(
-                    false,
-                    Arc::new(
-                        tokio::runtime::Builder::new_multi_thread()
-                            .worker_threads(1)
-                            .enable_all()
-                            .build()
-                            .expect("second test runtime"),
-                    ),
-                    || unreachable!("single-flight worker"),
-                    cx,
-                )
-            );
-            entity.portable_refresh_task = None;
-            entity.finish_portable_status_refresh(
-                Ok(super::PortableStatusRefresh {
-                    status: Err("unavailable".to_string()),
-                    exportable_secret_count: 2,
-                }),
-                cx,
-            );
-        });
-
-        entity.update(cx, |entity, _cx| {
-            let snapshot = entity.portable_status_snapshot();
-            assert!(!snapshot.refresh_pending);
-            assert_eq!(snapshot.error.as_deref(), Some("unavailable"));
-            assert_eq!(snapshot.exportable_secret_count, Some(2));
-        });
     }
 
     #[gpui::test]

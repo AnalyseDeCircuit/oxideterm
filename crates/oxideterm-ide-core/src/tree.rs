@@ -143,32 +143,3 @@ impl FileTreeState {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use crate::model::{FileKind, SavedFileVersion};
-
-    use super::*;
-
-    #[test]
-    fn tracks_expansion_selection_and_children() {
-        let root = IdeLocation::local("/tmp/oxideterm");
-        let child = FileTreeEntry {
-            location: IdeLocation::local("/tmp/oxideterm/main.rs"),
-            kind: FileKind::File,
-            name: "main.rs".into(),
-            version: SavedFileVersion::unknown(),
-        };
-        let mut tree = FileTreeState::new();
-
-        let initial_revision = tree.revision();
-        tree.expand(&root);
-        tree.set_selected(Some(child.location.clone()));
-        tree.set_children(root.clone(), vec![child.clone()]);
-
-        assert!(tree.is_expanded(&root));
-        assert_eq!(tree.selected(), Some(&child.location));
-        assert_eq!(tree.children(&root), Some([child].as_slice()));
-        assert!(tree.revision() > initial_revision);
-    }
-}

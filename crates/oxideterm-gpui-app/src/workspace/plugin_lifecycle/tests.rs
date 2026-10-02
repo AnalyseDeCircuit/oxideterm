@@ -447,7 +447,7 @@ fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
     };
     let bytes = native_plugin_u8_array(value.as_array().unwrap()).unwrap();
     let file = OxideFile::from_bytes(&bytes).unwrap();
-    let (metadata, _) =
+    let (metadata, payload) =
         oxideterm_connections::oxide_file::decrypt_oxide_archive_with_context_and_progress(
             &file,
             &mut oxideterm_connections::oxide_file::OxideBatchDecryptionContext::new(
@@ -458,6 +458,19 @@ fn sync_plugin_settings_export_filters_selected_plugins_and_revisions() {
         )
         .unwrap();
     assert_eq!(metadata.plugin_settings_count, Some(1));
+    assert_eq!(
+        payload
+            .plugin_settings
+            .iter()
+            .map(|setting| {
+                (
+                    setting.storage_key.as_str(),
+                    setting.serialized_value.as_str(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![("oxide-plugin-com.example.demo-setting-mode", "\"auto\"")]
+    );
 
     let revisions = native_plugin_settings_revision_map(&plugin_settings);
     assert!(
@@ -1373,7 +1386,10 @@ fn terminal_search_scroll_and_size_are_bounded() {
 
 #[test]
 fn terminal_search_supports_regex_whole_word_and_invalid_regex() {
-    let snapshot = test_host_api_snapshot_with_terminal();
+    let mut snapshot = test_host_api_snapshot_with_terminal();
+    let terminal = snapshot.terminal_nodes.get_mut("node-1").unwrap();
+    terminal.buffer.push_str("\nalphabet");
+    terminal.current_lines = 4;
     let whole_word = native_plugin_returnable_host_api_response(
         &snapshot,
         "com.example.demo",

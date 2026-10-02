@@ -1099,11 +1099,12 @@ Inter-|   Receive                                                |  Transmit
     fn parses_extended_process_snapshot_fields() {
         let output = r#"===TOPPROCS===
 1363656	1	www-data	S	12.3	4.5	262144	524288	01:02:03	node	/usr/bin/node /srv/app/server.js
+1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
 ===END==="#;
 
         let processes = parse_top_processes(output);
 
-        assert_eq!(processes.len(), 1);
+        assert_eq!(processes.len(), 2);
         assert_eq!(processes[0].pid, "1363656");
         assert_eq!(processes[0].ppid.as_deref(), Some("1"));
         assert_eq!(processes[0].user.as_deref(), Some("www-data"));
@@ -1118,6 +1119,17 @@ Inter-|   Receive                                                |  Transmit
             processes[0].full_command.as_deref(),
             Some("/usr/bin/node /srv/app/server.js")
         );
+        assert_eq!(processes[1].pid, "1362735");
+        assert_eq!(processes[1].user.as_deref(), Some("lips"));
+        assert_eq!(processes[1].state.as_deref(), Some("R"));
+        assert_eq!(processes[1].cpu_percent, Some(1.5));
+        assert_eq!(processes[1].memory_percent, 1.0);
+        assert_eq!(processes[1].elapsed, None);
+        assert_eq!(processes[1].command, "node");
+        assert_eq!(
+            processes[1].full_command.as_deref(),
+            Some("/usr/bin/node /srv/app/server.js")
+        );
     }
 
     #[test]
@@ -1129,28 +1141,6 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(metrics.source, MetricsSource::Partial);
         assert_eq!(metrics.top_processes.len(), 1);
         assert_eq!(metrics.cpu_percent, None);
-    }
-
-    #[test]
-    fn parses_proc_process_snapshot_with_user_and_command() {
-        let output = r#"===TOPPROCS===
-1362735	1	lips	R	1.5	1.0	262144	524288		node	/usr/bin/node /srv/app/server.js
-===END==="#;
-
-        let processes = parse_top_processes(output);
-
-        assert_eq!(processes.len(), 1);
-        assert_eq!(processes[0].pid, "1362735");
-        assert_eq!(processes[0].user.as_deref(), Some("lips"));
-        assert_eq!(processes[0].state.as_deref(), Some("R"));
-        assert_eq!(processes[0].cpu_percent, Some(1.5));
-        assert_eq!(processes[0].memory_percent, 1.0);
-        assert_eq!(processes[0].elapsed, None);
-        assert_eq!(processes[0].command, "node");
-        assert_eq!(
-            processes[0].full_command.as_deref(),
-            Some("/usr/bin/node /srv/app/server.js")
-        );
     }
 
     #[test]

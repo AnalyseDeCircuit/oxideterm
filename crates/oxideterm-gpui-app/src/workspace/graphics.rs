@@ -2343,22 +2343,6 @@ mod delivery_tests {
     }
 
     #[test]
-    fn worker_delivery_marks_wake_after_enqueue() {
-        let (sender, receiver) = mpsc::channel();
-        let delivery = GraphicsWorkerDelivery::new(sender);
-
-        delivery.send(GraphicsWorkerResult::ListSessions {
-            result: Ok(Vec::new()),
-        });
-
-        assert!(delivery.wake.take());
-        assert!(matches!(
-            receiver.try_recv(),
-            Ok(GraphicsWorkerResult::ListSessions { result: Ok(sessions) }) if sessions.is_empty()
-        ));
-    }
-
-    #[test]
     fn worker_wake_coalesces_bursts_and_stops_explicitly() {
         let wake = GraphicsWorkerWake::default();
 

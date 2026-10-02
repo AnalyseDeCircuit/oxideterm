@@ -449,40 +449,26 @@ mod runtime_save_tests {
     use zeroize::Zeroizing;
 
     #[test]
-    fn test_secret_handoff_keeps_the_form_reusable() {
-        let mut form_secret = "target-secret".to_string();
-
-        let runtime_secret = RuntimeSecretHandoff::CopyForTest.zeroizing(&mut form_secret);
-
-        assert_eq!(runtime_secret.as_str(), "target-secret");
-        assert_eq!(form_secret, "target-secret");
-    }
-
-    #[test]
-    fn connection_secret_handoff_moves_the_form_allocation() {
-        let mut form_secret = "target-secret".to_string();
-        let form_secret_pointer = form_secret.as_ptr();
-
-        let runtime_secret = RuntimeSecretHandoff::Move.zeroizing(&mut form_secret);
-
-        assert_eq!(runtime_secret.as_str(), "target-secret");
-        assert_eq!(runtime_secret.as_ptr(), form_secret_pointer);
-        assert!(form_secret.is_empty());
-    }
-
-    #[test]
-    fn proxy_test_secret_handoff_keeps_the_hop_reusable() {
-        let mut hop = NewConnectionProxyHop::new();
-        hop.auth_tab = SshAuthTab::Password;
-        hop.password = "jump-secret".to_string();
-
-        let auth = auth_method_from_proxy_hop(&mut hop, RuntimeSecretHandoff::CopyForTest);
-
-        assert!(matches!(
-            auth,
-            AuthMethod::Password { ref password, .. } if password.as_str() == "jump-secret"
-        ));
-        assert_eq!(hop.password, "jump-secret");
+    fn proxy_auth_handoff_preserves_test_drafts_and_moves_connect_drafts() {
+        for (handoff, expected_draft) in [
+            (RuntimeSecretHandoff::CopyForTest, "jump-secret"),
+            (RuntimeSecretHandoff::Move, ""),
+        ] {
+            let mut hop = NewConnectionProxyHop::new();
+            hop.auth_tab = SshAuthTab::Password;
+            hop.password = "jump-secret".to_string();
+            let allocation = hop.password.as_ptr();
+            let auth = auth_method_from_proxy_hop(&mut hop, handoff);
+            let AuthMethod::Password { password, prompt } = auth else {
+                panic!("expected password authentication");
+            };
+            assert_eq!(password.as_str(), "jump-secret", "{handoff:?}");
+            assert!(!prompt, "{handoff:?}");
+            assert_eq!(hop.password, expected_draft, "{handoff:?}");
+            if matches!(handoff, RuntimeSecretHandoff::Move) {
+                assert_eq!(password.as_ptr(), allocation);
+            }
+        }
     }
 
     #[test]

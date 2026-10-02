@@ -1061,22 +1061,26 @@ mod tests {
         let refreshed_rows = state.sorted_file_rows();
         assert!(!Arc::ptr_eq(&filtered, &refreshed));
         assert!(!Arc::ptr_eq(&filtered_rows, &refreshed_rows));
-        assert_eq!(refreshed.len(), 2);
-    }
-
-    #[test]
-    fn file_row_selection_is_owned_by_file_manager_entity() {
-        let mut state = FileManagerState::default();
-        let visible = vec![cache_entry("alpha"), cache_entry("beta")];
-
-        state.select_entry("alpha".to_string(), gpui::Modifiers::default(), &visible);
-
-        assert_eq!(state.selected, HashSet::from(["alpha".to_string()]));
-        assert_eq!(state.last_selected.as_deref(), Some("alpha"));
+        assert_eq!(
+            refreshed
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["beta", "beta-2"]
+        );
+        assert_eq!(
+            refreshed_rows
+                .iter()
+                .map(|row| row.display_name.as_ref())
+                .collect::<Vec<_>>(),
+            vec!["beta", "beta-2"]
+        );
     }
 
     #[gpui::test]
-    fn file_activation_emits_typed_workspace_intent(cx: &mut TestAppContext) {
+    fn selecting_and_opening_a_file_preserves_selection_and_emits_its_identity(
+        cx: &mut TestAppContext,
+    ) {
         let file_manager = cx.new(|_| FileManagerState::default());
         let observed = Arc::new(AtomicBool::new(false));
         let observed_event = observed.clone();
@@ -1095,7 +1099,11 @@ mod tests {
         });
 
         file_manager.update(cx, |file_manager, cx| {
+            let visible = vec![cache_entry("alpha"), cache_entry("beta")];
+            file_manager.select_entry("alpha".to_string(), gpui::Modifiers::default(), &visible);
             file_manager.activate_entry(cache_entry("alpha"), cx);
+            assert_eq!(file_manager.selected, HashSet::from(["alpha".to_string()]));
+            assert_eq!(file_manager.last_selected.as_deref(), Some("alpha"));
         });
 
         assert!(observed.load(Ordering::Acquire));

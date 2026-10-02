@@ -446,21 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn transfer_swallow_inputs_except_ctrl_c() {
-        let mut filter = TrzszFilter::default();
-        let handshake = parse_trzsz_handshake("::TRZSZ:TRANSFER:R:1.1.6:1", false).unwrap();
-        filter.begin_transfer_for_detected_handshake(handshake);
-
-        assert_eq!(filter.process_terminal_input("abc"), None);
-        assert_eq!(filter.process_binary_input("abc"), None);
-        assert_eq!(
-            filter.process_terminal_input("\x03"),
-            Some(TrzszFilterOutput::CancelTransfer)
-        );
-    }
-
-    #[test]
-    fn idle_inputs_are_forwarded_to_server() {
+    fn idle_inputs_forward_to_server_and_transfer_inputs_only_allow_ctrl_c() {
         let mut filter = TrzszFilter::default();
         assert_eq!(
             filter.process_terminal_input("ls\r"),
@@ -469,6 +455,15 @@ mod tests {
         assert_eq!(
             filter.process_binary_input("\u{0101}A"),
             Some(TrzszFilterOutput::SendServer(vec![1, 65]))
+        );
+        let handshake = parse_trzsz_handshake("::TRZSZ:TRANSFER:R:1.1.6:1", false).unwrap();
+        filter.begin_transfer_for_detected_handshake(handshake);
+
+        assert_eq!(filter.process_terminal_input("abc"), None);
+        assert_eq!(filter.process_binary_input("abc"), None);
+        assert_eq!(
+            filter.process_terminal_input("\x03"),
+            Some(TrzszFilterOutput::CancelTransfer)
         );
     }
 }

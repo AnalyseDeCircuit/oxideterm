@@ -231,24 +231,6 @@ mod tests {
     }
 
     #[test]
-    fn runtime_index_parses_host_update_channels() {
-        let descriptor = sample_descriptor();
-
-        assert!(
-            descriptor
-                .supports
-                .oxideterm_channels
-                .contains(&WasmRuntimeHostChannel::Stable)
-        );
-        assert!(
-            descriptor
-                .supports
-                .oxideterm_channels
-                .contains(&WasmRuntimeHostChannel::Beta)
-        );
-    }
-
-    #[test]
     fn runtime_supports_stable_and_beta_hosts() {
         let descriptor = sample_descriptor();
 

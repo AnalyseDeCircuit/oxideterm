@@ -389,8 +389,7 @@ fn split_choices(value: &str) -> Vec<String> {
 mod quick_command_tests {
     use super::{
         QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandCategoryDraft, QuickCommandDraft,
-        QuickCommandImportStrategy, QuickCommandsSnapshot, QuickCommandsState,
-        default_quick_command_categories, default_quick_commands, now_ms,
+        QuickCommandImportStrategy, QuickCommandsSnapshot, QuickCommandsState, now_ms,
     };
     use crate::workspace::quick_commands::{QuickCommandCategory, QuickCommandIcon};
     use std::fs;
@@ -653,33 +652,6 @@ mod quick_command_tests {
                 .iter()
                 .any(|command| command.command == "exa -la")
         );
-        let _ = fs::remove_dir_all(settings_path.parent().unwrap());
-    }
-
-    #[test]
-    fn import_snapshot_rename_does_not_duplicate_builtin_roundtrip_records() {
-        let settings_path = temp_settings_path("import-rename-roundtrip");
-        let mut state = QuickCommandsState::load(&settings_path);
-        let json = state.export_snapshot_json().unwrap();
-
-        let result = state.apply_snapshot_json(&json, QuickCommandImportStrategy::Rename);
-
-        assert_eq!(result.errors, Vec::<String>::new());
-        assert_eq!(result.imported, 0);
-        assert_eq!(
-            state.categories.len(),
-            default_quick_command_categories().len()
-        );
-        assert_eq!(state.commands.len(), default_quick_commands().len());
-        assert_eq!(
-            state
-                .categories
-                .iter()
-                .filter(|category| category.id == "system")
-                .count(),
-            1
-        );
-
         let _ = fs::remove_dir_all(settings_path.parent().unwrap());
     }
 

@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_rate_limiter_reserves_one_batch_budget() {
+    fn shared_rate_limiter_shares_a_batch_budget_and_resets_when_limit_changes() {
         let limiter = DirectoryRateLimiter::new();
         let now = Instant::now();
         let bytes_per_second = 64 * 1024;
@@ -170,14 +170,6 @@ mod tests {
 
         assert_eq!(first, std::time::Duration::from_millis(750));
         assert_eq!(second, std::time::Duration::from_millis(1_750));
-    }
-
-    #[test]
-    fn shared_rate_limiter_resets_when_limit_changes() {
-        let limiter = DirectoryRateLimiter::new();
-        let now = Instant::now();
-        let _ = limiter.reserve_delay_at(64 * 1024, 64 * 1024, now);
-
         let changed = limiter.reserve_delay_at(128 * 1024, 128 * 1024, now);
         let disabled = limiter.reserve_delay_at(128 * 1024, 0, now);
 

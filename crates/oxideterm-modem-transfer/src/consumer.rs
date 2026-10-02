@@ -754,14 +754,6 @@ mod tests {
     }
 
     #[test]
-    fn zmodem_upload_detection_waits_until_header_is_complete() {
-        let mut consumer = ModemConsumer::new();
-        assert!(consumer.process_server_output(&[b'*', b'*']).is_empty());
-        let events = consumer.process_server_output(&[0x18, b'B', b'0']);
-        assert!(events.is_empty());
-    }
-
-    #[test]
     fn incomplete_modem_prefix_is_released_after_idle_timeout() {
         let mut consumer = ModemConsumer::new();
         let started_at = Instant::now();
@@ -844,10 +836,11 @@ mod tests {
             b"ordinary output\r\n"
         );
         let header = encode_hex_header(ZFrameType::ZrqInit, position_header(0), true);
-        let split = 3;
 
-        assert!(consumer.process_server_output(&header[..split]).is_empty());
-        let events = consumer.process_server_output(&header[split..]);
+        assert!(consumer.process_server_output(&header[..2]).is_empty());
+        assert!(consumer.process_server_output(&header[2..3]).is_empty());
+        assert!(consumer.process_server_output(&header[3..5]).is_empty());
+        let events = consumer.process_server_output(&header[5..]);
 
         assert!(events.iter().any(|event| matches!(
             event,
@@ -891,41 +884,48 @@ mod tests {
     }
 
     #[test]
-    fn xymodem_upload_negotiation_uses_receiver_command_hint() {
-        // Receiver command names select the upload protocol before payload transfer.
-        let cases: [(&[u8], DetectedModemProtocol); 2] = [
-            (b"\r\n$ rx upload.bin\r\nC", DetectedModemProtocol::Xmodem),
-            (b"\r\n$ rb\r\nC", DetectedModemProtocol::Ymodem),
+    fn xymodem_commands_select_protocol_and_direction_before_payload_transfer() {
+        let cases: [(&[u8], DetectedModemProtocol, ModemTransferDirection); 6] = [
+            (
+                b"\r\n$ rx upload.bin\r\nC",
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Upload,
+            ),
+            (
+                b"\r\n$ rb\r\nC",
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Upload,
+            ),
+            (
+                b"\r\n$ sx download.bin\r\n",
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Download,
+            ),
+            (
+                b"\r\n$ sb download.bin\r\n",
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Download,
+            ),
+            (
+                b"\r\n$ lrx upload.bin\r\nC",
+                DetectedModemProtocol::Xmodem,
+                ModemTransferDirection::Upload,
+            ),
+            (
+                b"\r\n$ lsb file.bin\r\n",
+                DetectedModemProtocol::Ymodem,
+                ModemTransferDirection::Download,
+            ),
         ];
 
-        for (output, protocol) in cases {
+        for (output, protocol, direction) in cases {
             let mut consumer = ModemConsumer::new();
             let events = consumer.process_server_output(output);
             assert!(matches!(
                 events.last(),
                 Some(ModemConsumerEvent::TransferStarted(request))
                     if request.protocol == protocol
-                        && request.direction == ModemTransferDirection::Upload
-            ));
-        }
-    }
-
-    #[test]
-    fn xymodem_sender_commands_start_download_before_sender_data() {
-        // Sender command names select the download protocol before payload transfer.
-        let cases: [(&[u8], DetectedModemProtocol); 2] = [
-            (b"\r\n$ sx download.bin\r\n", DetectedModemProtocol::Xmodem),
-            (b"\r\n$ sb download.bin\r\n", DetectedModemProtocol::Ymodem),
-        ];
-
-        for (output, protocol) in cases {
-            let mut consumer = ModemConsumer::new();
-            let events = consumer.process_server_output(output);
-            assert!(matches!(
-                events.last(),
-                Some(ModemConsumerEvent::TransferStarted(request))
-                    if request.protocol == protocol
-                        && request.direction == ModemTransferDirection::Download
+                        && request.direction == direction
             ));
         }
     }
@@ -946,29 +946,6 @@ mod tests {
             submitted_events.last(),
             Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
                 protocol: DetectedModemProtocol::Xmodem,
-                direction: ModemTransferDirection::Download
-            }))
-        ));
-    }
-
-    #[test]
-    fn lrzsz_prefixed_command_names_are_detected() {
-        let mut upload_consumer = ModemConsumer::new();
-        let upload_events = upload_consumer.process_server_output(b"\r\n$ lrx upload.bin\r\nC");
-        let mut download_consumer = ModemConsumer::new();
-        let download_events = download_consumer.process_server_output(b"\r\n$ lsb file.bin\r\n");
-
-        assert!(matches!(
-            upload_events.last(),
-            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
-                protocol: DetectedModemProtocol::Xmodem,
-                direction: ModemTransferDirection::Upload
-            }))
-        ));
-        assert!(matches!(
-            download_events.last(),
-            Some(ModemConsumerEvent::TransferStarted(ModemTransferRequest {
-                protocol: DetectedModemProtocol::Ymodem,
                 direction: ModemTransferDirection::Download
             }))
         ));

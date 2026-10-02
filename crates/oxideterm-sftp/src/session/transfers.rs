@@ -1509,8 +1509,8 @@ mod transfer_safety_tests {
     }
 
     #[test]
-    fn accepts_resume_only_for_the_exact_incomplete_download() {
-        let progress = resumable_download();
+    fn resume_requires_the_exact_incomplete_download() {
+        let mut progress = resumable_download();
 
         assert!(
             validate_download_resume_progress(
@@ -1522,12 +1522,6 @@ mod transfer_safety_tests {
             )
             .is_ok()
         );
-    }
-
-    #[test]
-    fn rejects_resume_when_the_local_destination_does_not_match() {
-        let progress = resumable_download();
-
         assert!(
             validate_download_resume_progress(
                 &progress,
@@ -1538,11 +1532,6 @@ mod transfer_safety_tests {
             )
             .is_err()
         );
-    }
-
-    #[test]
-    fn rejects_resume_without_an_incomplete_status() {
-        let mut progress = resumable_download();
         progress.mark_completed();
 
         assert!(
@@ -1558,7 +1547,7 @@ mod transfer_safety_tests {
     }
 
     #[test]
-    fn retries_direct_upload_when_empty_temporary_file_is_denied() {
+    fn direct_upload_retry_requires_an_empty_denied_temporary_file() {
         let temporary_path = "/virtual/host/file.txt.oxide-part";
         let error = SftpError::PermissionDenied(temporary_path.to_string());
 
@@ -1567,22 +1556,11 @@ mod transfer_safety_tests {
             temporary_path,
             0
         ));
-    }
-
-    #[test]
-    fn does_not_retry_direct_upload_after_partial_transfer() {
-        let temporary_path = "/virtual/host/file.txt.oxide-part";
-        let error = SftpError::PermissionDenied(temporary_path.to_string());
-
         assert!(!should_retry_upload_without_temporary_file(
             &error,
             temporary_path,
             1
         ));
-    }
-
-    #[test]
-    fn does_not_retry_direct_upload_for_another_denied_path() {
         let error = SftpError::PermissionDenied("/virtual/host/file.txt".to_string());
 
         assert!(!should_retry_upload_without_temporary_file(

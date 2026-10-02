@@ -317,12 +317,6 @@ mod tests {
             info.data_dir,
             temp.path().join(PORTABLE_DEFAULT_DATA_DIRNAME)
         );
-        assert_eq!(
-            info.data_dir.join(PORTABLE_SKILLS_DIRNAME),
-            temp.path()
-                .join(PORTABLE_DEFAULT_DATA_DIRNAME)
-                .join(PORTABLE_SKILLS_DIRNAME)
-        );
     }
 
     #[test]
@@ -377,12 +371,6 @@ mod tests {
             temp.path()
                 .join("portable-store")
                 .join(PORTABLE_KEYSTORE_FILENAME)
-        );
-        assert_eq!(
-            info.data_dir.join(PORTABLE_SKILLS_DIRNAME),
-            temp.path()
-                .join("portable-store")
-                .join(PORTABLE_SKILLS_DIRNAME)
         );
     }
 

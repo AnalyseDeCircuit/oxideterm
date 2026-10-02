@@ -838,7 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_progress_defaults_to_a_non_relay_transfer() {
+    fn legacy_progress_defaults_to_sftp_without_relay_metadata() {
         let progress: StoredTransferProgress = serde_json::from_value(serde_json::json!({
             "transfer_id": "legacy-transfer",
             "transfer_type": "Download",
@@ -854,6 +854,7 @@ mod tests {
         .expect("deserialize legacy progress");
 
         assert!(progress.remote_relay.is_none());
+        assert_eq!(progress.protocol, TransferProtocol::Sftp);
     }
 
     #[test]

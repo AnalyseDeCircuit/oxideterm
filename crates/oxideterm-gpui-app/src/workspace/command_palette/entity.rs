@@ -363,10 +363,7 @@ impl CommandPaletteEntity {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        rc::Rc,
-        sync::atomic::{AtomicBool, Ordering},
-    };
+    use std::rc::Rc;
 
     use gpui::{AppContext, TestAppContext};
 
@@ -426,9 +423,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn stale_load_generation_is_rejected(cx: &mut TestAppContext) {
+    fn replaced_load_and_reopened_palette_reject_stale_completions(cx: &mut TestAppContext) {
         let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, _cx| {
+        entity.update(cx, |entity, cx| {
+            entity.open(false, HashSet::new(), cx);
             let stale = entity.begin_load_generation();
             let current = entity.begin_load_generation();
 
@@ -436,14 +434,6 @@ mod tests {
             assert!(entity.ssh_config_hosts_loading);
             assert!(entity.apply_ssh_config_load(current, Ok(Vec::new())));
             assert!(!entity.ssh_config_hosts_loading);
-        });
-    }
-
-    #[gpui::test]
-    fn close_and_reopen_reject_stale_completion(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, cx| {
-            entity.open(false, HashSet::new(), cx);
             let stale = entity.begin_load_generation();
             entity.close(cx);
             entity.open(false, HashSet::new(), cx);
@@ -494,36 +484,8 @@ mod tests {
         });
     }
 
-    struct DropSignal(Arc<AtomicBool>);
-
-    impl Drop for DropSignal {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::Release);
-        }
-    }
-
     #[gpui::test]
-    fn entity_release_cancels_retained_worker(cx: &mut TestAppContext) {
-        let dropped = Arc::new(AtomicBool::new(false));
-        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, cx| {
-            let dropped = dropped.clone();
-            entity.load_task = Some(cx.spawn(async move |_, _| {
-                let _signal = DropSignal(dropped);
-                std::future::pending::<()>().await;
-            }));
-        });
-        cx.run_until_parked();
-
-        drop(entity);
-        cx.update(|_cx| {});
-        cx.run_until_parked();
-
-        assert!(dropped.load(Ordering::Acquire));
-    }
-
-    #[gpui::test]
-    fn disabled_item_produces_no_action(cx: &mut TestAppContext) {
+    fn only_enabled_items_execute_and_the_action_is_taken_once(cx: &mut TestAppContext) {
         let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
         entity.update(cx, |entity, cx| {
             entity.open(false, HashSet::new(), cx);
@@ -533,14 +495,6 @@ mod tests {
                     .is_none()
             );
             assert!(entity.is_open());
-        });
-    }
-
-    #[gpui::test]
-    fn enabled_item_is_taken_exactly_once(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, cx| {
-            entity.open(false, HashSet::new(), cx);
             let item = palette_item(false);
             let execution = entity
                 .take_item_action(&item, Duration::from_millis(200), cx)

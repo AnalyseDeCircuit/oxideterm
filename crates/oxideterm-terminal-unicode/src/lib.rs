@@ -436,22 +436,7 @@ mod tests {
 
     #[test]
     fn rtl_content_ignores_terminal_trailing_blanks() {
-        let mut row = row("שלום");
-        while row.cells.len() < 16 {
-            row.cells_mut().push(TerminalCell {
-                ch: ' ',
-                wide: false,
-                fg: TerminalColor::rgb(0xff, 0xff, 0xff),
-                bg: TerminalColor::rgb(0, 0, 0),
-                style_origin: Default::default(),
-                attrs: TerminalAttrs::default(),
-                extra: None,
-                cursor: false,
-            });
-        }
-        row.refresh_signature();
-
-        let line = visual_line_for_row(&row);
+        let line = visual_line_for_row(&row("שלום            "));
 
         assert!(line.has_bidi);
         assert!(line.clusters.iter().all(|cluster| cluster.visual_col < 4));

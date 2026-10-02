@@ -3,28 +3,6 @@ use oxideterm_settings::{TerminalBackspaceSequence, TerminalDeleteSequence};
 
 #[test]
 fn legacy_navigation_emits_normal_application_and_modified_sequences() {
-    let normal = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "down".to_string(),
-            ..Default::default()
-        },
-        &TermMode::default(),
-        false,
-        KittyKeyEventType::Repeat,
-    );
-    assert_eq!(normal.as_deref(), Some("\x1b[B"));
-
-    let app_cursor = oxideterm_key_escape_sequence(
-        &Keystroke {
-            key: "up".to_string(),
-            ..Default::default()
-        },
-        &(TermMode::default() | TermMode::APP_CURSOR),
-        false,
-        KittyKeyEventType::Repeat,
-    );
-    assert_eq!(app_cursor.as_deref(), Some("\x1bOA"));
-
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {
             modifiers: Modifiers {
@@ -51,27 +29,31 @@ fn legacy_navigation_emits_normal_application_and_modified_sequences() {
     ];
 
     for (key, normal, app_cursor) in cases {
-        let normal_sequence = oxideterm_key_escape_sequence(
-            &Keystroke {
-                key: key.to_string(),
-                ..Default::default()
-            },
-            &TermMode::default(),
-            false,
-            KittyKeyEventType::Press,
-        );
-        assert_eq!(normal_sequence.as_deref(), Some(normal));
+        let keystroke = Keystroke {
+            key: key.to_string(),
+            ..Default::default()
+        };
+        for event_type in [KittyKeyEventType::Press, KittyKeyEventType::Repeat] {
+            let normal_sequence =
+                oxideterm_key_escape_sequence(&keystroke, &TermMode::default(), false, event_type);
+            assert_eq!(
+                normal_sequence.as_deref(),
+                Some(normal),
+                "{key} {event_type:?}"
+            );
 
-        let app_cursor_sequence = oxideterm_key_escape_sequence(
-            &Keystroke {
-                key: key.to_string(),
-                ..Default::default()
-            },
-            &(TermMode::default() | TermMode::APP_CURSOR),
-            false,
-            KittyKeyEventType::Press,
-        );
-        assert_eq!(app_cursor_sequence.as_deref(), Some(app_cursor));
+            let app_cursor_sequence = oxideterm_key_escape_sequence(
+                &keystroke,
+                &(TermMode::default() | TermMode::APP_CURSOR),
+                false,
+                event_type,
+            );
+            assert_eq!(
+                app_cursor_sequence.as_deref(),
+                Some(app_cursor),
+                "{key} {event_type:?}"
+            );
+        }
     }
 }
 

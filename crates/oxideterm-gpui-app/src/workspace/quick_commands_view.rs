@@ -3814,7 +3814,7 @@ mod terminal_command_bar_quick_command_tests {
     }
 
     #[test]
-    fn quick_command_editor_rejects_unknown_template_parameter() {
+    fn quick_command_editor_validates_templates_and_secret_defaults() {
         let mut draft = QuickCommandEditorDraft {
             id: None,
             name: "Deploy".to_string(),
@@ -3839,32 +3839,11 @@ mod terminal_command_bar_quick_command_tests {
         assert!(!quick_command_editor_can_save(&draft));
         draft.command = "deploy {{param.service|sh}}".to_string();
         assert!(quick_command_editor_can_save(&draft));
-    }
-
-    #[test]
-    fn quick_command_editor_rejects_secret_defaults() {
-        let draft = QuickCommandEditorDraft {
-            id: None,
-            name: "Login".to_string(),
-            command: "login {{param.password}}".to_string(),
-            category: "custom".to_string(),
-            description: String::new(),
-            host_patterns: String::new(),
-            parameters: vec![QuickCommandParameterEditorDraft {
-                name: "password".to_string(),
-                label: "Password".to_string(),
-                kind: QuickCommandParameterKind::Secret,
-                default_value: "must-not-persist".to_string(),
-                choices: String::new(),
-                required: true,
-            }],
-            protocols: Vec::new(),
-            confirmation: QuickCommandConfirmationPolicy::Inherit,
-            created_at: 1,
-            sort_order: 0,
-        };
-
+        draft.parameters[0].kind = QuickCommandParameterKind::Secret;
+        draft.parameters[0].default_value = "must-not-persist".to_string();
         assert!(!quick_command_editor_can_save(&draft));
+        draft.parameters[0].default_value.clear();
+        assert!(quick_command_editor_can_save(&draft));
     }
 
     #[test]

@@ -2055,12 +2055,16 @@ mod tests {
             state.editor.as_ref().map(|trigger| trigger.name.as_str()),
             Some("Prompt ready")
         );
+        let saved = load_snapshot(&state.settings_path).expect("saved trigger snapshot");
+        assert_eq!(saved.triggers.len(), 1);
+        assert_eq!(saved.triggers[0].name, "Prompt ready");
+        assert_eq!(saved.triggers[0].matcher.pattern, "ready> ");
         assert_eq!(
-            load_snapshot(&state.settings_path)
-                .expect("saved trigger snapshot")
-                .triggers
-                .len(),
-            1
+            saved.triggers[0].action,
+            TerminalTriggerAction::SendText {
+                text: "status".to_string(),
+                append_enter: true,
+            }
         );
     }
 

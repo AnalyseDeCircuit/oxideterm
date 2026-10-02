@@ -745,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn native_launch_wire_redacts_credentials_and_round_trips() {
+    fn native_launch_wire_preserves_identity_and_redacts_credential_debug() {
         let temporary: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
             "kind": "ssh",
             "username": "alice",
@@ -755,7 +755,15 @@ mod tests {
         }))
         .unwrap();
         assert!(!format!("{temporary:?}").contains("wire-secret"));
-        assert!(matches!(temporary, NativeConnectionLaunch::Ssh(_)));
+        assert!(matches!(
+            temporary,
+            NativeConnectionLaunch::Ssh(TemporarySshLaunch {
+                username,
+                host,
+                port: 22,
+                password: Some(password),
+            }) if username == "alice" && host == "example.com" && password.as_str() == "wire-secret"
+        ));
 
         let remote_desktop: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
             "kind": "remote_desktop",
@@ -768,6 +776,20 @@ mod tests {
         }))
         .unwrap();
         assert!(!format!("{remote_desktop:?}").contains("remote-secret"));
+        assert!(matches!(
+            remote_desktop,
+            NativeConnectionLaunch::RemoteDesktop(TemporaryRemoteDesktopLaunch {
+                protocol: RemoteDesktopLaunchProtocol::Rdp,
+                host,
+                port: 3389,
+                username: Some(username),
+                domain: Some(domain),
+                password: Some(password),
+            }) if host == "desktop.example.com"
+                && username == "alice"
+                && domain == "CORP"
+                && password.as_str() == "remote-secret"
+        ));
 
         let saved: NativeConnectionLaunch = serde_json::from_value(serde_json::json!({
             "kind": "saved_connection",

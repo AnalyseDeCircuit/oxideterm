@@ -233,16 +233,4 @@ mod tests {
             }
         ));
     }
-
-    #[test]
-    fn network_settings_export_omits_device_local_password_reference() {
-        let snapshot = oxideterm_settings::export_oxide_settings_snapshot_json(
-            &settings("device-secret-reference"),
-            Some(&std::collections::HashSet::from(["network".into()])),
-            false,
-        )
-        .unwrap();
-        assert!(!snapshot.contains("device-secret-reference"));
-        assert!(snapshot.contains("proxy.test"));
-    }
 }

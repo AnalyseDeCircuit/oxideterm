@@ -173,24 +173,14 @@ mod tests {
     }
 
     #[test]
-    fn saves_and_loads_a_versioned_snapshot() {
+    fn saves_and_loads_a_versioned_snapshot_in_a_missing_settings_directory() {
         let directory = tempfile::tempdir().unwrap();
-        let settings = settings_path(directory.path());
+        let settings = directory.path().join("nested").join("settings.json");
         let snapshot = snapshot();
 
         save_snapshot(&settings, &snapshot).unwrap();
 
         assert_eq!(load_snapshot(&settings).unwrap(), snapshot);
-    }
-
-    #[test]
-    fn creates_a_missing_settings_directory() {
-        let directory = tempfile::tempdir().unwrap();
-        let settings = directory.path().join("nested").join("settings.json");
-
-        save_snapshot(&settings, &snapshot()).unwrap();
-
-        assert!(terminal_triggers_path(&settings).is_file());
     }
 
     #[test]

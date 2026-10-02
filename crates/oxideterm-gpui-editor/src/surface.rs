@@ -1888,13 +1888,19 @@ mod tests {
 
 #[cfg(test)]
 mod line_ending_tests {
+    use gpui::AppContext;
+
     use super::*;
-    #[test]
-    fn clipboard_crlf_and_cr_become_single_newlines() {
-        assert_eq!(
-            normalize_editor_text("first\r\nsecond\rthird\n".into()),
-            "first\nsecond\nthird\n"
-        );
+    #[gpui::test]
+    fn clipboard_crlf_and_cr_become_single_newlines(cx: &mut gpui::TestAppContext) {
+        let editor = cx.new(|cx| TextEditorView::new("", &oxideterm_theme::default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                "first\r\nsecond\rthird\n".into(),
+            ));
+            editor.paste_from_clipboard(cx);
+            assert_eq!(editor.buffer().text(), "first\nsecond\nthird\n");
+        });
     }
 }
 

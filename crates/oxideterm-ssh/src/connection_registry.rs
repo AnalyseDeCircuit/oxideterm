@@ -2244,18 +2244,6 @@ mod tests {
     }
 
     #[test]
-    fn shares_one_connection_for_many_consumers() {
-        let registry = SshConnectionRegistry::default();
-        let config = SshConfig::password("host", 22, "me", "pw");
-        let first = registry.acquire(config.clone(), ConnectionConsumer::Terminal("a".into()));
-        let second = registry.acquire(config, ConnectionConsumer::Sftp("b".into()));
-
-        assert_eq!(first.connection_id(), second.connection_id());
-        assert_eq!(first.info().ref_count, 2);
-        assert_eq!(first.state(), ConnectionState::Connecting);
-    }
-
-    #[test]
     fn remote_env_is_stored_once_on_connection_entry() {
         let registry = SshConnectionRegistry::default();
         let handle = registry.acquire(
@@ -2340,21 +2328,6 @@ mod tests {
     }
 
     #[test]
-    fn release_moves_unused_connection_to_idle() {
-        let registry = SshConnectionRegistry::default();
-        let consumer = ConnectionConsumer::Terminal("a".into());
-        let handle = registry.acquire(
-            SshConfig::password("host", 22, "me", "pw"),
-            consumer.clone(),
-        );
-
-        registry.release(handle.connection_id(), &consumer);
-
-        assert_eq!(handle.info().ref_count, 0);
-        assert_eq!(handle.state(), ConnectionState::Idle);
-    }
-
-    #[test]
     fn release_ignores_unknown_consumer_without_decrementing_ref_count() {
         let registry = SshConnectionRegistry::default();
         let consumer = ConnectionConsumer::Terminal("a".into());
@@ -2372,6 +2345,7 @@ mod tests {
         assert_eq!(handle.state(), ConnectionState::Connecting);
         registry.release(handle.connection_id(), &consumer);
         assert_eq!(handle.info().ref_count, 0);
+        assert_eq!(handle.state(), ConnectionState::Idle);
     }
 
     #[tokio::test]
@@ -2425,23 +2399,18 @@ mod tests {
 
         assert_ne!(shared.connection_id(), dedicated.connection_id());
         assert_eq!(shared.connection_id(), pooled_again.connection_id());
-        assert_eq!(dedicated.info().consumers, vec![terminal_consumer]);
+        assert_eq!(dedicated.info().consumers, vec![terminal_consumer.clone()]);
         assert!(dedicated.key().contains("|dedicated="));
-    }
-
-    #[test]
-    fn dedicated_connection_retires_after_its_terminal_releases() {
-        let registry = SshConnectionRegistry::default();
-        let consumer = ConnectionConsumer::Terminal("term-1".into());
-        let dedicated = registry.acquire_dedicated(
-            SshConfig::password("dedicated.example", 22, "alice", "pw"),
-            consumer.clone(),
+        registry.release(dedicated.connection_id(), &terminal_consumer);
+        assert!(registry.get(dedicated.connection_id()).is_none());
+        assert_eq!(
+            registry
+                .get(shared.connection_id())
+                .unwrap()
+                .info()
+                .consumers,
+            vec![ConnectionConsumer::NodeRouter("node-1".into())]
         );
-        let connection_id = dedicated.connection_id().to_string();
-
-        registry.release(&connection_id, &consumer);
-
-        assert!(registry.get(&connection_id).is_none());
     }
 
     #[test]
@@ -2638,6 +2607,9 @@ mod tests {
             SshConfig::password("host", 22, "me", "pw"),
             ConnectionConsumer::Sftp("b".into()),
         );
+        assert_eq!(first.connection_id(), second.connection_id());
+        assert_eq!(first.info().ref_count, 2);
+        assert_eq!(first.state(), ConnectionState::Connecting);
         first.set_physical(Arc::new(String::from("authenticated")));
 
         assert_eq!(

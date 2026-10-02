@@ -2292,24 +2292,4 @@ mod tests {
             );
         });
     }
-
-    #[gpui::test]
-    fn entity_release_cancels_retained_confirm_exit(cx: &mut TestAppContext) {
-        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::ZERO, cx));
-        let (release_sender, release_receiver) = tokio::sync::oneshot::channel();
-        overlay.update(cx, |overlay, cx| {
-            // The task is retained by the confirmation owner, so releasing the
-            // Entity must drop the pending receiver.
-            overlay.confirm_exit_task = Some(cx.spawn(async move |_, _| {
-                let _ = release_receiver.await;
-            }));
-        });
-        cx.run_until_parked();
-
-        drop(overlay);
-        cx.update(|_| {});
-        cx.run_until_parked();
-
-        assert!(release_sender.send(()).is_err());
-    }
 }

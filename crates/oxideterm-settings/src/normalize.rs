@@ -1416,36 +1416,6 @@ mod tests {
     }
 
     #[test]
-    fn existing_tool_policy_receives_new_skill_tool_defaults() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "toolUse": {
-                    "autoApproveTools": {
-                        "run_command": true
-                    }
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        let policy = sanitized.settings.ai.tool_use.auto_approve_tools;
-        assert_eq!(
-            policy.get("run_command").and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            policy.get(AI_TOOL_LOAD_SKILL).and_then(Value::as_bool),
-            Some(true)
-        );
-        assert_eq!(
-            policy
-                .get(AI_TOOL_READ_SKILL_RESOURCE)
-                .and_then(Value::as_bool),
-            Some(true)
-        );
-    }
-
-    #[test]
     fn missing_execution_profiles_keep_active_ai_settings() {
         let sanitized = sanitize_settings_value(json!({
             "ai": {
@@ -1501,6 +1471,16 @@ mod tests {
 
         assert_eq!(
             policy.get("run_command").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            policy.get(AI_TOOL_LOAD_SKILL).and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            policy
+                .get(AI_TOOL_READ_SKILL_RESOURCE)
+                .and_then(Value::as_bool),
             Some(true)
         );
         assert_eq!(

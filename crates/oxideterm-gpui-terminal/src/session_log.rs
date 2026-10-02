@@ -859,31 +859,31 @@ mod tests {
     }
 
     #[test]
-    fn printable_log_strips_split_ansi_sequences_without_losing_text() {
+    fn printable_log_strips_split_ansi_and_skips_output_while_paused() {
         let directory = tempfile::tempdir().unwrap();
         let mut log = TerminalSessionLog::start(options(directory.path())).unwrap();
 
         log.write_output(b"plain \x1b[3".to_vec()).unwrap();
         log.write_output("1m红色\x1b[0m\r\nnext".as_bytes().to_vec())
             .unwrap();
-        let path = log.finish().unwrap();
-
-        assert_eq!(fs::read_to_string(path).unwrap(), "plain 红色\r\nnext");
-    }
-
-    #[test]
-    fn paused_log_skips_output_and_resumes_in_order() {
-        let directory = tempfile::tempdir().unwrap();
-        let mut log = TerminalSessionLog::start(options(directory.path())).unwrap();
-
-        log.write_output(b"before\n".to_vec()).unwrap();
         log.pause().unwrap();
         log.write_output(b"secret\n".to_vec()).unwrap();
         log.resume();
-        log.write_output(b"after\n".to_vec()).unwrap();
+        log.write_output(b"\nafter\n".to_vec()).unwrap();
         let path = log.finish().unwrap();
 
-        assert_eq!(fs::read_to_string(path).unwrap(), "before\nafter\n");
+        assert_eq!(
+            fs::read_to_string(&path).unwrap(),
+            "plain 红色\r\nnext\nafter\n"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]
@@ -971,22 +971,6 @@ mod tests {
                 .and_then(Path::file_name)
                 .and_then(|name| name.to_str()),
             Some("test")
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn session_log_file_is_private_to_the_current_user() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let directory = tempfile::tempdir().unwrap();
-        let log = TerminalSessionLog::start(options(directory.path())).unwrap();
-        let path = log.status().path.unwrap();
-        log.finish().unwrap();
-
-        assert_eq!(
-            fs::metadata(path).unwrap().permissions().mode() & 0o777,
-            0o600
         );
     }
 

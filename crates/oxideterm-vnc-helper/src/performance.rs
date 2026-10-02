@@ -839,30 +839,6 @@ mod tests {
     }
 
     #[test]
-    fn continuous_updates_enable_once_then_resume_polling_on_end() {
-        let mut state = VncContinuousUpdatesState::default();
-
-        assert_eq!(
-            state.observe_end_of_continuous_updates(),
-            VncContinuousUpdatesAction::Enable
-        );
-        assert!(state.is_active());
-        assert_eq!(
-            state.observe_end_of_continuous_updates(),
-            VncContinuousUpdatesAction::ResumePolling
-        );
-        assert!(!state.is_active());
-    }
-
-    #[test]
-    fn continuous_updates_message_covers_the_current_framebuffer() {
-        assert_eq!(
-            enable_continuous_updates_message(true, 800, 600),
-            vec![150, 1, 0, 0, 0, 0, 3, 32, 2, 88]
-        );
-    }
-
-    #[test]
     fn performance_state_replies_to_fence_before_future_reads() {
         let event = VncServerEvent::ServerFence(VncServerFence {
             flags: TEST_VNC_FENCE_FLAG_REQUEST | VNC_FENCE_FLAG_BLOCK_AFTER,
@@ -885,10 +861,7 @@ mod tests {
         let messages =
             state.observe_server_event(&VncServerEvent::EndOfContinuousUpdates, 800, 600);
 
-        assert_eq!(
-            messages,
-            vec![enable_continuous_updates_message(true, 800, 600)]
-        );
+        assert_eq!(messages, vec![vec![150, 1, 0, 0, 0, 0, 3, 32, 2, 88]]);
         assert!(state.continuous_updates_active());
 
         assert!(

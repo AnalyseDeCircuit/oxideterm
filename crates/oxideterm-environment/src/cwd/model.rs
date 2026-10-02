@@ -259,34 +259,23 @@ mod tests {
     }
 
     #[test]
-    fn parent_handles_home_and_root_paths() {
-        assert_eq!(
-            current_directory_parent("~/Documents").as_deref(),
-            Some("~")
-        );
-        assert_eq!(
-            current_directory_parent("~/Documents/OxideTerm").as_deref(),
-            Some("~/Documents")
-        );
-        assert_eq!(current_directory_parent("/Users").as_deref(), Some("/"));
-        assert_eq!(
-            current_directory_parent("/Users/dominical").as_deref(),
-            Some("/Users")
-        );
-        assert_eq!(current_directory_parent("/"), None);
-    }
-
-    #[test]
-    fn parent_handles_windows_drive_paths() {
-        assert_eq!(
-            current_directory_parent("C:\\Users\\dominical").as_deref(),
-            Some("C:\\Users")
-        );
-        assert_eq!(
-            current_directory_parent("C:\\Users").as_deref(),
-            Some("C:\\")
-        );
-        assert_eq!(current_directory_parent("C:\\"), None);
+    fn parent_handles_home_posix_and_windows_roots() {
+        for (path, expected) in [
+            ("~/Documents", Some("~")),
+            ("~/Documents/OxideTerm", Some("~/Documents")),
+            ("/Users", Some("/")),
+            ("/Users/dominical", Some("/Users")),
+            ("/", None),
+            ("C:\\Users\\dominical", Some("C:\\Users")),
+            ("C:\\Users", Some("C:\\")),
+            ("C:\\", None),
+        ] {
+            assert_eq!(
+                current_directory_parent(path).as_deref(),
+                expected,
+                "{path}"
+            );
+        }
     }
 
     #[test]

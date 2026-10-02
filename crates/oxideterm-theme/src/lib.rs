@@ -893,21 +893,6 @@ mod tests {
     }
 
     #[test]
-    fn density_profiles_change_spatial_metrics_without_changing_type_or_color() {
-        let mut compact = default_tokens();
-        let comfortable = default_tokens();
-        compact.apply_density(UiDensityProfile::Compact);
-        let mut spacious = default_tokens();
-        spacious.apply_density(UiDensityProfile::Spacious);
-
-        assert!(compact.metrics.ui_control_height < comfortable.metrics.ui_control_height);
-        assert!(spacious.metrics.ui_control_height > comfortable.metrics.ui_control_height);
-        assert!(compact.spacing.two < comfortable.spacing.two);
-        assert_eq!(compact.metrics.ui_text_sm, comfortable.metrics.ui_text_sm);
-        assert_eq!(compact.ui, comfortable.ui);
-    }
-
-    #[test]
     fn ui_font_scale_changes_type_without_changing_spatial_metrics() {
         let mut enlarged = default_tokens();
         let default = default_tokens();
@@ -933,6 +918,16 @@ mod tests {
 
             assert_eq!(compact.ui, comfortable.ui, "{} compact colors", theme.id);
             assert_eq!(spacious.ui, comfortable.ui, "{} spacious colors", theme.id);
+            assert!(
+                compact.spacing.two < comfortable.spacing.two,
+                "{} spacing",
+                theme.id
+            );
+            assert_eq!(
+                compact.metrics.ui_text_sm, comfortable.metrics.ui_text_sm,
+                "{} font size",
+                theme.id
+            );
             assert!(
                 compact.metrics.ui_control_height < comfortable.metrics.ui_control_height,
                 "{} compact controls",

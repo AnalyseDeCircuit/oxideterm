@@ -422,25 +422,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cloud_sync_secret_input_marks_field_touched() {
-        let settings = CloudSyncSettings::default();
-        let mut draft = CloudSyncFormDraft::from_settings(&settings);
-
-        apply_cloud_sync_form_input_owned(
-            &mut draft,
-            SettingsInput::CloudSyncToken,
-            "token".to_string(),
-        )
-        .expect("cloud sync token input");
-
-        assert_eq!(
-            cloud_sync_form_input_value_ref(&draft, SettingsInput::CloudSyncToken),
-            Some("token")
-        );
-        assert!(draft.token_touched);
-    }
-
-    #[test]
     fn cloud_sync_form_debug_redacts_secret_values() {
         let mut draft = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
         draft.token = "token-secret".to_string();
@@ -482,8 +463,12 @@ mod tests {
     #[test]
     fn secret_handoff_moves_values_and_can_restore_without_clone() {
         let mut draft = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
-        draft.token = "token-secret".to_string();
-        draft.token_touched = true;
+        apply_cloud_sync_form_input_owned(
+            &mut draft,
+            SettingsInput::CloudSyncToken,
+            "token-secret".to_string(),
+        )
+        .expect("cloud sync token input");
         let original_pointer = draft.token.as_ptr();
 
         let handoff = draft.take_secret_handoff();

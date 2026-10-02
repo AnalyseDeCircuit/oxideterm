@@ -538,7 +538,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn diff_marks_changed_connection_revision_dirty() {
+    fn diff_preserves_connection_revisions_and_includes_remote_only_sections() {
         let current = StructuredLocalState {
             connections: Some("conn-2".to_string()),
             ..StructuredLocalState::default()
@@ -551,14 +551,16 @@ mod tests {
             connections: true,
             ..StructuredDirtySections::default()
         };
+        let scope = SyncScope {
+            app_settings_sections: vec!["general".to_string()],
+            ..SyncScope::default()
+        };
+        let remote = StructuredSectionRevisions {
+            app_settings: BTreeMap::from([("appearance".to_string(), "remote-rev".to_string())]),
+            ..StructuredSectionRevisions::default()
+        };
 
-        let sections = section_diffs(
-            &SyncScope::default(),
-            &current,
-            Some(&baseline),
-            &dirty,
-            None,
-        );
+        let sections = section_diffs(&scope, &current, Some(&baseline), &dirty, Some(&remote));
 
         let connections = sections
             .iter()
@@ -567,23 +569,14 @@ mod tests {
         assert!(connections.dirty);
         assert_eq!(connections.local_revision.as_deref(), Some("conn-2"));
         assert_eq!(connections.baseline_revision.as_deref(), Some("conn-1"));
-    }
-
-    #[test]
-    fn app_setting_ids_include_remote_only_sections() {
-        let remote = StructuredSectionRevisions {
-            app_settings: BTreeMap::from([("appearance".to_string(), "remote-rev".to_string())]),
-            ..StructuredSectionRevisions::default()
-        };
-
-        let ids = app_setting_ids(
-            &SyncScope::default(),
-            &StructuredLocalState::default(),
-            None,
-            Some(&remote),
-        );
-
-        assert!(ids.contains(&"appearance".to_string()));
+        let appearance = sections
+            .iter()
+            .find(|section| section.id == "appearance")
+            .unwrap();
+        assert_eq!(appearance.category, "appSettings");
+        assert_eq!(appearance.remote_revision.as_deref(), Some("remote-rev"));
+        assert_eq!(appearance.local_revision, None);
+        assert!(!appearance.in_scope);
     }
 
     #[test]

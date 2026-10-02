@@ -90,23 +90,6 @@ fn manifest_json(id: &str, version: &str) -> String {
 }
 
 #[test]
-fn native_wasm_runtime_uses_explicit_runtime_block() {
-    let mut manifest = minimal_manifest();
-    manifest.runtime = Some(NativePluginRuntime {
-        kind: NativePluginRuntimeKind::Wasm,
-        entry: "plugin.wasm".to_string(),
-    });
-
-    let plan = native_runtime_plan_for_manifest(&manifest).unwrap();
-    assert_eq!(
-        plan,
-        NativePluginRuntimePlan::Wasm {
-            entry: "plugin.wasm".to_string()
-        }
-    );
-}
-
-#[test]
 fn plugin_paths_cannot_escape_install_directory() {
     assert!(validate_plugin_relative_path("panel/native.json").is_ok());
     assert!(validate_plugin_relative_path("../secret").is_err());
@@ -221,49 +204,6 @@ fn permission_capabilities_reject_empty_wildcard_and_duplicate_values() {
         ])
         .is_err()
     );
-}
-
-#[test]
-fn capability_approval_allows_version_updates_and_narrower_requests() {
-    let mut manifest = minimal_manifest();
-    manifest.permissions.capabilities = vec![
-        "terminal.input.send".to_string(),
-        "terminal.content.read".to_string(),
-    ];
-    let config = NativePluginConfigEntry {
-        approved_capabilities: vec![
-            "terminal.content.read".to_string(),
-            "terminal.input.send".to_string(),
-        ],
-        approved_for_version: Some("1.0.0".to_string()),
-        approved_runtime_kind: Some("wasm".to_string()),
-        ..NativePluginConfigEntry::default()
-    };
-
-    assert!(native_plugin_capability_approval_matches(
-        &manifest, "wasm", &config
-    ));
-    assert!(!native_plugin_capability_approval_matches(
-        &manifest, "process", &config
-    ));
-
-    manifest.version = "1.1.0".to_string();
-    assert!(native_plugin_capability_approval_matches(
-        &manifest, "wasm", &config
-    ));
-
-    manifest.permissions.capabilities = vec!["terminal.content.read".to_string()];
-    assert!(native_plugin_capability_approval_matches(
-        &manifest, "wasm", &config
-    ));
-
-    manifest
-        .permissions
-        .capabilities
-        .push("file.content.read".to_string());
-    assert!(!native_plugin_capability_approval_matches(
-        &manifest, "wasm", &config
-    ));
 }
 
 #[test]
@@ -699,6 +639,7 @@ fn process_activation_plans_and_runtime_state_transitions_are_host_owned() {
     write_manifest(&plugin_dir, &manifest);
 
     let mut registry = NativePluginRegistry::discover(&settings_path);
+    assert_eq!(registry.plugins()[0].state, NativePluginState::Disabled);
     assert!(registry.process_activation_plans().is_empty());
     registry
         .set_plugin_enabled("com.example.process", true)
@@ -707,6 +648,12 @@ fn process_activation_plans_and_runtime_state_transitions_are_host_owned() {
     assert_eq!(plans.len(), 1);
     assert_eq!(plans[0].plugin_id, "com.example.process");
     assert_eq!(plans[0].entry, "bin/plugin");
+    assert_eq!(registry.plugins()[0].state, NativePluginState::ReadyProcess);
+    let config = load_native_plugin_config(registry.config_path());
+    assert_eq!(
+        config.plugins["com.example.process"].approved_capabilities,
+        vec![NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY.to_string()]
+    );
 
     registry
         .mark_runtime_loading("com.example.process")
@@ -754,44 +701,7 @@ fn wasm_activation_plans_are_host_owned() {
 }
 
 #[test]
-fn set_plugin_enabled_persists_config_and_refreshes_state() {
-    let temp_dir = unique_temp_dir("plugin-toggle-enabled");
-    let settings_path = temp_dir.join("settings.json");
-    let plugins_dir = native_plugins_dir(&settings_path);
-    let plugin_dir = plugins_dir.join("demo");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    write_manifest(&plugin_dir, &minimal_manifest());
-
-    let mut registry = NativePluginRegistry::discover(&settings_path);
-    assert_eq!(
-        registry.plugins()[0].state,
-        NativePluginState::ReadyManifestOnly
-    );
-
-    registry
-        .set_plugin_enabled("com.example.demo", false)
-        .unwrap();
-    assert_eq!(registry.plugins()[0].state, NativePluginState::Disabled);
-
-    let config = load_native_plugin_config(registry.config_path());
-    assert!(!config.plugins["com.example.demo"].enabled);
-    assert_eq!(
-        config.plugins["com.example.demo"].runtime_kind.as_deref(),
-        Some("manifest-only")
-    );
-
-    registry
-        .set_plugin_enabled("com.example.demo", true)
-        .unwrap();
-    assert_eq!(
-        registry.plugins()[0].state,
-        NativePluginState::ReadyManifestOnly
-    );
-    let _ = fs::remove_dir_all(temp_dir);
-}
-
-#[test]
-fn manifest_only_contributions_are_indexed_without_runtime_execution() {
+fn manifest_only_contributions_follow_persisted_enable_state() {
     let temp_dir = unique_temp_dir("plugin-contributions");
     let settings_path = temp_dir.join("settings.json");
     let plugins_dir = native_plugins_dir(&settings_path);
@@ -801,7 +711,11 @@ fn manifest_only_contributions_are_indexed_without_runtime_execution() {
     manifest.contributes = Some(sample_contributes());
     write_manifest(&plugin_dir, &manifest);
 
-    let registry = NativePluginRegistry::discover(&settings_path);
+    let mut registry = NativePluginRegistry::discover(&settings_path);
+    assert_eq!(
+        registry.plugins()[0].state,
+        NativePluginState::ReadyManifestOnly
+    );
     let contributions = registry.contributions();
     assert_eq!(contributions.tabs.len(), 1);
     assert_eq!(contributions.sidebar_panels.len(), 1);
@@ -825,26 +739,25 @@ fn manifest_only_contributions_are_indexed_without_runtime_execution() {
             .host_monitor("com.example.other", "workers")
             .is_none()
     );
-    let _ = fs::remove_dir_all(temp_dir);
-}
-
-#[test]
-fn disabling_plugin_removes_manifest_only_contributions() {
-    let temp_dir = unique_temp_dir("plugin-contributions-disabled");
-    let settings_path = temp_dir.join("settings.json");
-    let plugins_dir = native_plugins_dir(&settings_path);
-    let plugin_dir = plugins_dir.join("demo");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    let mut manifest = minimal_manifest();
-    manifest.contributes = Some(sample_contributes());
-    write_manifest(&plugin_dir, &manifest);
-
-    let mut registry = NativePluginRegistry::discover(&settings_path);
-    assert_eq!(registry.contributions().total_count(), 9);
     registry
         .set_plugin_enabled("com.example.demo", false)
         .unwrap();
     assert_eq!(registry.contributions().total_count(), 0);
+    assert_eq!(registry.plugins()[0].state, NativePluginState::Disabled);
+    let config = load_native_plugin_config(registry.config_path());
+    assert!(!config.plugins["com.example.demo"].enabled);
+    assert_eq!(
+        config.plugins["com.example.demo"].runtime_kind.as_deref(),
+        Some("manifest-only")
+    );
+    registry
+        .set_plugin_enabled("com.example.demo", true)
+        .unwrap();
+    assert_eq!(
+        registry.plugins()[0].state,
+        NativePluginState::ReadyManifestOnly
+    );
+    assert_eq!(registry.contributions().tabs[0].definition.id, "demo-tab");
     let _ = fs::remove_dir_all(temp_dir);
 }
 
@@ -1749,37 +1662,6 @@ fn sensitive_wasm_waits_for_enable_approval_before_activation() {
 }
 
 #[test]
-fn process_runtime_requires_implicit_trust_approval() {
-    let temp_dir = unique_temp_dir("plugin-process-permission-review");
-    let settings_path = temp_dir.join("settings.json");
-    let plugin_dir = native_plugins_dir(&settings_path).join("process");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    fs::write(plugin_dir.join("plugin-process"), b"executable placeholder").unwrap();
-    let mut manifest = minimal_manifest();
-    manifest.runtime = Some(NativePluginRuntime {
-        kind: NativePluginRuntimeKind::Process,
-        entry: "plugin-process".to_string(),
-    });
-    write_manifest(&plugin_dir, &manifest);
-
-    let mut registry = NativePluginRegistry::discover(&settings_path);
-    assert_eq!(registry.plugins()[0].state, NativePluginState::Disabled);
-    assert!(registry.process_activation_plans().is_empty());
-
-    registry
-        .set_plugin_enabled("com.example.demo", true)
-        .unwrap();
-    assert_eq!(registry.plugins()[0].state, NativePluginState::ReadyProcess);
-    assert_eq!(registry.process_activation_plans().len(), 1);
-    let config = load_native_plugin_config(registry.config_path());
-    assert_eq!(
-        config.plugins["com.example.demo"].approved_capabilities,
-        vec![NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY.to_string()]
-    );
-    let _ = fs::remove_dir_all(temp_dir);
-}
-
-#[test]
 fn updates_only_require_review_for_expanded_permissions_or_runtime_changes() {
     let temp_dir = unique_temp_dir("plugin-permission-update");
     let settings_path = temp_dir.join("settings.json");
@@ -1802,8 +1684,14 @@ fn updates_only_require_review_for_expanded_permissions_or_runtime_changes() {
         .set_plugin_enabled("com.example.demo", true)
         .unwrap();
 
-    // A version update and narrower request preserve the existing approval.
+    // A version-only update preserves the existing approval.
     manifest.version = "1.1.0".to_string();
+    write_manifest(&plugin_dir, &manifest);
+    let registry = NativePluginRegistry::discover(&settings_path);
+    assert_eq!(registry.plugins()[0].state, NativePluginState::ReadyWasm);
+    assert_eq!(registry.wasm_activation_plans().len(), 1);
+
+    // Removing a capability does not require renewed approval either.
     manifest.permissions.capabilities = vec!["terminal.content.read".to_string()];
     write_manifest(&plugin_dir, &manifest);
     let registry = NativePluginRegistry::discover(&settings_path);

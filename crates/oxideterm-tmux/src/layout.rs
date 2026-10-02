@@ -274,13 +274,18 @@ mod tests {
 
     #[test]
     fn verifies_checksum_and_rejects_invalid_structure() {
-        let body = b"159x48,0,0{79x48,0,0,0,79x48,80,0,1}";
-        let encoded = format!(
-            "{:04x},{}",
-            layout_checksum(body),
-            String::from_utf8_lossy(body)
+        assert_eq!(
+            Layout::parse(b"b25e,80x24,0,0,1").unwrap(),
+            Layout {
+                cell: LayoutCell {
+                    width: 80,
+                    height: 24,
+                    x: 0,
+                    y: 0,
+                },
+                kind: LayoutKind::Pane(PaneId(1)),
+            }
         );
-        assert!(Layout::parse(encoded.as_bytes()).is_ok());
         assert_eq!(
             Layout::parse(b"0000,80x24,0,0,1"),
             Err(LayoutError::InvalidChecksum)

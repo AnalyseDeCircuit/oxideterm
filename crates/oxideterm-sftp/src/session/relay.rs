@@ -1154,15 +1154,11 @@ mod relay_tests {
     }
 
     #[test]
-    fn relay_staging_paths_are_siblings_of_the_requested_target() {
-        assert_eq!(
-            relay_sibling_path("/srv/data", "part", "fixed"),
-            "/srv/data.oxideterm-relay-fixed.part"
-        );
-    }
-
-    #[test]
     fn relay_resume_accepts_only_its_owned_staging_sibling() {
+        assert_eq!(
+            relay_sibling_path("/srv/data", "part", "0123456789abcdef0123456789abcdef"),
+            "/srv/data.oxideterm-relay-0123456789abcdef0123456789abcdef.part"
+        );
         assert!(is_owned_relay_staging_path(
             "/srv/data",
             Path::new("/srv/data.oxideterm-relay-0123456789abcdef0123456789abcdef.part")

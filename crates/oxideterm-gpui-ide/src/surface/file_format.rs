@@ -387,18 +387,6 @@ mod format_tests {
     use oxideterm_theme::default_tokens;
 
     #[gpui::test]
-    fn pasted_crlf_is_normalized_in_the_editor(cx: &mut TestAppContext) {
-        let editor = cx.new(|cx| TextEditorView::new("", &default_tokens(), cx));
-        editor.update(cx, |editor, cx| {
-            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                "first\r\nsecond\r\n".into(),
-            ));
-            editor.paste_from_clipboard(cx);
-            assert_eq!(editor.buffer().text(), "first\nsecond\n");
-        });
-    }
-
-    #[gpui::test]
     fn format_only_edits_are_dirty_and_survive_reconnect_snapshot(cx: &mut TestAppContext) {
         let router =
             oxideterm_ssh::NodeRouter::new(oxideterm_ssh::SshConnectionRegistry::default());

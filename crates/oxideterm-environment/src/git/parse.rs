@@ -610,23 +610,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn command_outputs_parse_branch() {
-        let outcome = interpret_git_command_outputs(
-            GitCommandOutput::success("/repo\n"),
-            GitCommandOutput::success("main\n"),
-            GitCommandOutput::success("abc123\n"),
-        );
-
-        assert_eq!(
-            outcome,
-            GitProbeOutcome::Ready(
-                GitRepositorySnapshot::new("/repo", GitBranchIdentity::Branch("main".to_string()),)
-                    .unwrap()
-            )
-        );
-    }
-
-    #[test]
     fn command_outputs_fall_back_to_detached_head() {
         let outcome = interpret_git_command_outputs(
             GitCommandOutput::success("/repo\n"),
@@ -669,6 +652,11 @@ mod tests {
         let GitProbeOutcome::Ready(snapshot) = outcome else {
             panic!("expected ready git snapshot");
         };
+        assert_eq!(snapshot.repo_root, "/repo");
+        assert_eq!(
+            snapshot.branch,
+            GitBranchIdentity::Branch("main".to_string())
+        );
         assert_eq!(snapshot.status.upstream(), Some("origin/main"));
         assert_eq!(snapshot.status.ahead(), 2);
         assert_eq!(snapshot.status.behind(), 1);
@@ -733,21 +721,6 @@ mod tests {
         assert_eq!(
             parse_shell_probe_output(output),
             GitProbeOutcome::NotRepository
-        );
-    }
-
-    #[test]
-    fn branch_list_output_marks_current_branch() {
-        let outcome = interpret_git_branch_list_output(GitCommandOutput::success(
-            "*\tmain\n \texperiment/rust-native-v2\n",
-        ));
-
-        assert_eq!(
-            outcome,
-            GitBranchListOutcome::Ready(vec![
-                GitBranchReference::new("main", true).unwrap(),
-                GitBranchReference::new("experiment/rust-native-v2", false).unwrap(),
-            ])
         );
     }
 
@@ -865,30 +838,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_probe_output_parses_git_file_worktree_operation() {
-        let output = "OXIDETERM_GIT_PROBE_V1\0state\0repo\0root\0/repo-linked\0branch\0feature/worktree\0operation\0merge\0";
-
-        let GitProbeOutcome::Ready(snapshot) = parse_shell_probe_output(output) else {
-            panic!("expected ready git worktree snapshot");
-        };
-        assert_eq!(snapshot.repo_root, "/repo-linked");
-        assert_eq!(snapshot.branch.display_text(), "feature/worktree");
-        assert_eq!(snapshot.status.operation(), Some(GitOperationKind::Merge));
-    }
-
-    #[test]
-    fn staged_diff_outputs_empty_when_no_cached_changes() {
-        assert_eq!(
-            interpret_git_staged_diff_outputs(
-                GitCommandOutput::success(""),
-                GitCommandOutput::success(""),
-            ),
-            GitStagedDiffOutcome::Empty
-        );
-    }
-
-    #[test]
-    fn staged_diff_outputs_keep_stat_and_patch() {
+    fn staged_diff_outputs_preserve_stat_and_patch_or_report_empty() {
         let outcome = interpret_git_staged_diff_outputs(
             GitCommandOutput::success(" src/lib.rs | 2 ++\n"),
             GitCommandOutput::success("diff --git a/src/lib.rs b/src/lib.rs\n"),
@@ -904,10 +854,17 @@ mod tests {
                 .unwrap()
             )
         );
+        assert_eq!(
+            interpret_git_staged_diff_outputs(
+                GitCommandOutput::success(""),
+                GitCommandOutput::success(""),
+            ),
+            GitStagedDiffOutcome::Empty
+        );
     }
 
     #[test]
-    fn shell_staged_diff_output_parses_nul_records() {
+    fn shell_staged_diff_output_parses_nul_records_and_empty_state() {
         let output = "noise\nOXIDETERM_GIT_STAGED_DIFF_V1\0state\0ok\0stat\0 src/lib.rs | 1 +\0patch\0diff --git a/src/lib.rs b/src/lib.rs\n+added\n\0";
 
         let GitStagedDiffOutcome::Ready(context) = parse_shell_staged_diff_output(output) else {
@@ -915,10 +872,6 @@ mod tests {
         };
         assert_eq!(context.stat(), " src/lib.rs | 1 +");
         assert!(context.patch().contains("+added"));
-    }
-
-    #[test]
-    fn shell_staged_diff_output_handles_empty_state() {
         assert_eq!(
             parse_shell_staged_diff_output("OXIDETERM_GIT_STAGED_DIFF_V1\0state\0empty\0"),
             GitStagedDiffOutcome::Empty

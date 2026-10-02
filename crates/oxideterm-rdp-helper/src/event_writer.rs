@@ -224,6 +224,20 @@ mod tests {
                 .send(dirty_update_at((index as u32) * 2))
                 .expect("dirty update should enqueue");
         }
+        writer
+            .send(dirty_update_at(99))
+            .expect("dirty update should enqueue despite sparse backlog");
+
+        let (queue, _) = &*writer.queue;
+        {
+            let queue = queue.lock().unwrap();
+            assert_eq!(queue.frames.len(), 33);
+            let Some(RemoteDesktopHelperEvent::FrameUpdate { update }) = queue.frames.back() else {
+                panic!("expected the newest sparse update");
+            };
+            assert_eq!(update.rect, RemoteDesktopRect::new(99, 0, 1, 1));
+            assert_eq!(update.bytes, [99, 0, 0, 0xff]);
+        }
 
         writer
             .send(RemoteDesktopHelperEvent::Frame {
@@ -238,30 +252,19 @@ mod tests {
             })
             .expect("base frame should enqueue");
 
-        let (queue, _) = &*writer.queue;
         let queue = queue.lock().unwrap();
         assert_eq!(queue.frames.len(), 1);
-        assert!(matches!(
-            queue.frames.front(),
-            Some(RemoteDesktopHelperEvent::Frame { .. })
-        ));
-    }
-
-    #[test]
-    fn dirty_updates_continue_when_writer_has_sparse_backlog() {
-        let writer = SharedEventWriter::inert_for_tests();
-        let backlog_count = 32;
-        for index in 0..backlog_count {
-            writer
-                .send(dirty_update_at((index as u32) * 2))
-                .expect("dirty update should enqueue");
-        }
-        writer
-            .send(dirty_update_at(99))
-            .expect("dirty update should enqueue");
-
-        let (queue, _) = &*writer.queue;
-        let queue = queue.lock().unwrap();
-        assert_eq!(queue.frames.len(), backlog_count + 1);
+        let Some(RemoteDesktopHelperEvent::Frame { frame }) = queue.frames.front() else {
+            panic!("expected the replacement base frame");
+        };
+        assert_eq!(
+            frame.size,
+            RemoteDesktopSize {
+                width: 1,
+                height: 1
+            }
+        );
+        assert_eq!(frame.format, RemoteDesktopFrameFormat::Rgba8);
+        assert_eq!(frame.bytes, [0, 0, 0, 0xff]);
     }
 }

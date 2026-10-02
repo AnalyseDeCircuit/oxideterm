@@ -105,6 +105,25 @@ fn saved_connection_terminal_options_map_to_runtime_sequences() {
 }
 
 #[test]
+fn password_auth_prompts_only_when_no_explicit_empty_value_is_saved() {
+    let (store, path) = temp_connection_store("empty-password-auth");
+    for (empty_password, expected_prompt) in [(false, true), (true, false)] {
+        let saved = SavedAuth::Password {
+            empty_password,
+            keychain_id: None,
+            plaintext_password: None,
+        };
+        let auth = crate::auth_method_from_saved_auth(&store, &saved).unwrap();
+        let AuthMethod::Password { password, prompt } = auth else {
+            panic!("expected password authentication");
+        };
+        assert_eq!(prompt, expected_prompt);
+        assert_eq!(password.as_str(), "");
+    }
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn proxy_command_requires_authorization_before_runtime_hydration() {
     let words = || {
         Some(vec![
@@ -317,9 +336,17 @@ fn saved_managed_key_becomes_reference_only_ssh_config() {
 }
 
 #[test]
-fn custom_upstream_proxy_hydrates_plaintext_secret_without_keychain() {
+fn saved_upstream_proxy_policy_overrides_global_proxy_and_hydrates_custom_secret() {
     let (store, path) = temp_connection_store("custom-proxy");
-    let settings = PersistedSettings::default();
+    let mut settings = PersistedSettings::default();
+    settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
+        protocol: SettingsUpstreamProxyProtocol::Socks5,
+        host: "global-proxy.local".to_string(),
+        port: 1080,
+        auth: SettingsUpstreamProxyAuth::None,
+        remote_dns: true,
+        no_proxy: String::new(),
+    });
     let policy = SavedUpstreamProxyPolicy::Custom {
         proxy: SavedUpstreamProxyConfig {
             protocol: SavedUpstreamProxyProtocol::Socks5,
@@ -348,27 +375,14 @@ fn custom_upstream_proxy_hydrates_plaintext_secret_without_keychain() {
         }
         UpstreamProxyAuth::None => panic!("expected password auth"),
     }
-    let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn direct_upstream_proxy_policy_ignores_global_proxy() {
-    let (store, path) = temp_connection_store("direct-proxy");
-    let mut settings = PersistedSettings::default();
-    settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
-        protocol: SettingsUpstreamProxyProtocol::Socks5,
-        host: "global-proxy.local".to_string(),
-        port: 1080,
-        auth: SettingsUpstreamProxyAuth::None,
-        remote_dns: true,
-        no_proxy: String::new(),
-    });
-    let policy = SavedUpstreamProxyPolicy::Direct;
-
     assert!(
-        upstream_proxy_config_from_saved_policy(&store, &settings, &policy)
-            .unwrap()
-            .is_none()
+        upstream_proxy_config_from_saved_policy(
+            &store,
+            &settings,
+            &SavedUpstreamProxyPolicy::Direct
+        )
+        .unwrap()
+        .is_none()
     );
     let _ = std::fs::remove_file(path);
 }

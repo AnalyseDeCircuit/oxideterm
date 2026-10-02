@@ -263,13 +263,9 @@ impl ForwardingWorkspaceEntity {
 mod tests {
     use super::*;
 
-    fn test_entity() -> ForwardingWorkspaceEntity {
-        ForwardingWorkspaceEntity::test_fixture()
-    }
-
     #[test]
     fn operation_and_input_transitions_are_entity_owned() {
-        let mut entity = test_entity();
+        let mut entity = ForwardingWorkspaceEntity::test_fixture();
         entity.set_error("old error".to_string());
 
         entity.begin_operation();
@@ -292,7 +288,7 @@ mod tests {
 
     #[test]
     fn active_detection_projection_and_dismissal_share_one_owner() {
-        let mut entity = test_entity();
+        let mut entity = ForwardingWorkspaceEntity::test_fixture();
         let node_id = NodeId::new("forward-view");
         let detected_port = DetectedPort {
             port: 8080,

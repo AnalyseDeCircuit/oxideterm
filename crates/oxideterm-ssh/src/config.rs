@@ -730,6 +730,7 @@ mod tests {
     #[test]
     fn connection_key_includes_proxy_chain_order() {
         let mut config = SshConfig::password("target", 22, "app", "pw");
+        let direct_key = config.connection_key();
         config.proxy_chain = Some(vec![
             ProxyHopConfig {
                 totp: None,
@@ -763,9 +764,10 @@ mod tests {
             },
         ]);
 
-        assert!(config.connection_key().starts_with(
-            "app@target:22|ops@jump-a:2222>root@jump-b:22:legacy:agent-forwarding:forwarding-agent="
-        ));
+        let ordered_key = config.connection_key();
+        assert_ne!(ordered_key, direct_key);
+        config.proxy_chain.as_mut().unwrap().reverse();
+        assert_ne!(config.connection_key(), ordered_key);
     }
 
     #[test]

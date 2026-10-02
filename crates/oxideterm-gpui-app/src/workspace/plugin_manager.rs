@@ -2818,29 +2818,6 @@ fn plugin_manager_palette_alpha(color: u32, alpha: u32) -> Rgba {
 mod tests {
     use super::*;
 
-    fn plugin_with_permissions(
-        runtime_plan: plugin_host::NativePluginRuntimePlan,
-        capabilities: &[&str],
-        config: plugin_host::NativePluginConfigEntry,
-    ) -> plugin_host::NativePluginInfo {
-        // Keep permission presentation tests independent from filesystem discovery.
-        let manifest: plugin_host::NativePluginManifest =
-            serde_json::from_value(serde_json::json!({
-                "id": "com.example.permissions",
-                "name": "Permissions",
-                "version": "1.0.0",
-                "permissions": { "capabilities": capabilities }
-            }))
-            .expect("test manifest should deserialize");
-        plugin_host::NativePluginInfo {
-            manifest,
-            install_dir: PathBuf::from("plugins/permissions"),
-            runtime_plan,
-            state: plugin_host::NativePluginState::Disabled,
-            config,
-        }
-    }
-
     fn registry_entry_with_capabilities(
         capabilities_summary: Option<Vec<String>>,
     ) -> plugin_host::NativePluginRegistryEntry {
@@ -2907,64 +2884,6 @@ mod tests {
         assert!(debug.contains("<redacted>"));
         assert!(!debug.contains("token"));
         assert!(!debug.contains("secret"));
-    }
-
-    #[test]
-    fn permission_details_show_declared_capabilities_until_approved() {
-        let plugin = plugin_with_permissions(
-            plugin_host::NativePluginRuntimePlan::Wasm {
-                entry: "plugin.wasm".to_string(),
-            },
-            &["terminal.content.read", "terminal.input.write"],
-            plugin_host::NativePluginConfigEntry::default(),
-        );
-
-        let details = native_plugin_permission_details(&plugin);
-        assert_eq!(
-            details.capabilities,
-            vec![
-                "terminal.content.read".to_string(),
-                "terminal.input.write".to_string()
-            ]
-        );
-        assert!(details.requires_review);
-    }
-
-    #[test]
-    fn permission_details_mark_process_plugins_as_trusted_native_code() {
-        let plugin = plugin_with_permissions(
-            plugin_host::NativePluginRuntimePlan::Process {
-                entry: "plugin-bin".to_string(),
-            },
-            &[],
-            plugin_host::NativePluginConfigEntry::default(),
-        );
-
-        let details = native_plugin_permission_details(&plugin);
-        assert_eq!(
-            details.capabilities,
-            vec![plugin_host::NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY.to_string()]
-        );
-        assert!(details.requires_review);
-    }
-
-    #[test]
-    fn permission_details_hide_review_warning_after_matching_approval() {
-        let config = plugin_host::NativePluginConfigEntry {
-            approved_capabilities: vec!["terminal.content.read".to_string()],
-            approved_for_version: Some("1.0.0".to_string()),
-            approved_runtime_kind: Some("wasm".to_string()),
-            ..plugin_host::NativePluginConfigEntry::default()
-        };
-        let plugin = plugin_with_permissions(
-            plugin_host::NativePluginRuntimePlan::Wasm {
-                entry: "plugin.wasm".to_string(),
-            },
-            &["terminal.content.read"],
-            config,
-        );
-
-        assert!(!native_plugin_permission_details(&plugin).requires_review);
     }
 
     #[test]

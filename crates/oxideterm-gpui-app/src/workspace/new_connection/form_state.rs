@@ -2856,7 +2856,7 @@ mod tests {
     }
 
     #[test]
-    fn text_input_uses_platform_text_not_binding_key() {
+    fn text_input_uses_platform_text_and_ignores_shortcut_keystrokes() {
         let shifted = keystroke(
             "1",
             Some("!"),
@@ -2876,10 +2876,6 @@ mod tests {
 
         assert_eq!(text_from_keystroke(&shifted), Some("!"));
         assert_eq!(text_from_keystroke(&option_char), Some("ß"));
-    }
-
-    #[test]
-    fn text_input_ignores_shortcut_keystrokes() {
         let shortcut = keystroke(
             "v",
             None,

@@ -436,6 +436,17 @@ mod tests {
             });
             cx.run_until_parked();
         }
+        view.update(cx, |view, _| {
+            view.handle.scroll_sync.request(SourceAnchor {
+                version: 0,
+                position: 0.0,
+                ..Default::default()
+            });
+            assert_eq!(
+                view.handle.scroll_sync.anchor().unwrap().position,
+                view.document.blocks[95].source_span().unwrap().start as f64
+            );
+        });
         let notifications = Rc::new(RefCell::new(Vec::new()));
         let captured = notifications.clone();
         view.update(cx, |view, cx| {
@@ -507,43 +518,5 @@ mod tests {
             assert_eq!(y_at_position(&geometry, source), Some(y));
             assert_eq!(position_at_y(&geometry, y), Some(source));
         }
-    }
-
-    #[test]
-    fn far_source_request_selects_an_unmeasured_block_and_rejects_old_versions() {
-        let source = (0..100)
-            .map(|n| format!("paragraph {n}\n\n"))
-            .collect::<String>();
-        let doc = crate::parser::parse_with_source_ranges(&source);
-        let opts = crate::MarkdownOptions::default();
-        let layout = MarkdownBlockLayout::from_document(&doc, &opts);
-        let sync = MarkdownScrollSync::default();
-        sync.set_version(7);
-        let source = doc.blocks[80].source_span().unwrap().start;
-        sync.request(SourceAnchor {
-            version: 7,
-            position: source as f64,
-            ..Default::default()
-        });
-        let scroll = ScrollHandle::new();
-        let target = sync.begin(&layout, opts.block_gap, &scroll);
-        assert_eq!(target, 80.0 * (22.0 + 16.0));
-        assert_eq!(scroll.offset().y, px(-3040.0));
-        let near_source = doc.blocks[5].source_span().unwrap().start;
-        sync.request(SourceAnchor {
-            version: 7,
-            position: near_source as f64,
-            ..Default::default()
-        });
-        assert_eq!(sync.begin(&layout, opts.block_gap, &scroll), 190.0);
-        assert_eq!(scroll.offset().y, px(-190.0));
-        sync.request(SourceAnchor {
-            version: 6,
-            position: 0.0,
-            ..Default::default()
-        });
-        assert_eq!(sync.anchor().unwrap().position, near_source as f64);
-        sync.user_input();
-        assert!(!sync.0.borrow().pending);
     }
 }

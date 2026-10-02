@@ -392,33 +392,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ide_session_acquisition_registers_and_releases_ide_consumer() {
-        let registry = oxideterm_ssh::SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry.clone());
-        let node_id = NodeId::new("node-ide");
-        let config = oxideterm_ssh::SshConfig::password("host", 22, "me", "pw");
-        router.upsert_node(node_id.clone(), config.clone());
-
-        let handle = registry.acquire(
-            config.clone(),
-            oxideterm_ssh::ConnectionConsumer::NodeRouter("node-ide".to_string()),
-        );
-        handle.set_physical(Arc::new(()));
-        registry.mark_state(handle.connection_id(), oxideterm_ssh::ConnectionState::Active);
-        router
-            .bind_connection(&node_id, handle.connection_id().to_string())
-            .unwrap();
-
-        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
-        fs.ensure_ide_session_for_node(&node_id).await.unwrap();
-
-        assert!(has_ide_consumer(&handle, "node-ide"));
-
-        fs.release_ide_consumer("node-ide");
-        assert!(!has_ide_consumer(&handle, "node-ide"));
-    }
-
-    #[tokio::test]
     async fn released_session_rejects_late_connection_acquisition() {
         let registry = oxideterm_ssh::SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
@@ -740,51 +713,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn ide_session_on_proxy_child_consumes_child_connection() {
-        let registry = oxideterm_ssh::SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry.clone());
-        let parent_id = NodeId::new("jump");
-        let child_id = NodeId::new("target");
-        let parent_config = oxideterm_ssh::SshConfig::password("jump", 22, "me", "pw");
-        let child_config = oxideterm_ssh::SshConfig::password("target", 22, "me", "pw");
-        router.upsert_node(parent_id.clone(), parent_config.clone());
-        router
-            .runtime_store()
-            .upsert_child_node(parent_id.clone(), child_id.clone(), child_config.clone())
-            .unwrap();
-
-        let parent = registry.acquire(
-            parent_config,
-            oxideterm_ssh::ConnectionConsumer::NodeRouter("jump".to_string()),
-        );
-        parent.set_physical(Arc::new(()));
-        registry.mark_state(parent.connection_id(), oxideterm_ssh::ConnectionState::Active);
-        router
-            .bind_connection(&parent_id, parent.connection_id().to_string())
-            .unwrap();
-
-        let child = registry.acquire(
-            child_config,
-            oxideterm_ssh::ConnectionConsumer::NodeRouter("target".to_string()),
-        );
-        child.set_physical(Arc::new(()));
-        registry.mark_state(child.connection_id(), oxideterm_ssh::ConnectionState::Active);
-        registry.set_parent_connection_id(
-            child.connection_id(),
-            Some(parent.connection_id().to_string()),
-        );
-        router
-            .bind_connection(&child_id, child.connection_id().to_string())
-            .unwrap();
-
-        let fs = NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled);
-        fs.ensure_ide_session_for_node(&child_id).await.unwrap();
-
-        assert!(!has_ide_consumer(&parent, "target"));
-        assert!(has_ide_consumer(&child, "target"));
-    }
-
-    #[tokio::test]
     async fn terminal_consumer_release_does_not_kill_ide_remote_fs() {
         let registry = oxideterm_ssh::SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
@@ -817,7 +745,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn parent_link_down_interrupts_child_ide_and_release_cleans_consumer() {
+    async fn proxy_child_ide_owns_child_connection_until_parent_link_down_and_release() {
         let registry = oxideterm_ssh::SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
         let parent_id = NodeId::new("jump");
@@ -856,6 +784,7 @@ mod tests {
 
         let fs = NodeAgentIdeFileSystem::new(router.clone(), NodeAgentMode::Disabled);
         fs.ensure_ide_session_for_node(&child_id).await.unwrap();
+        assert!(!has_ide_consumer(&parent, "target"));
         assert!(has_ide_consumer(&child, "target"));
 
         registry.mark_link_down_cascade(parent.connection_id());

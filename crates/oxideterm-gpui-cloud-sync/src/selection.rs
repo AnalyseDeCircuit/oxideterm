@@ -1500,7 +1500,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_preview_selection_exports_selected_connection_names() {
+    fn legacy_preview_selection_tracks_partial_full_and_empty_selection() {
         let summary = summary_with_connections(&["Prod", "Staging"]);
         let mut selection = CloudSyncPreviewSelection {
             import_connections: true,
@@ -1520,17 +1520,8 @@ mod tests {
             .selected_connection_names
             .insert("Staging".to_string());
         assert!(legacy_apply_covers_full_remote(&summary, &selection));
-    }
 
-    #[test]
-    fn legacy_preview_selection_disables_connection_import_when_none_checked() {
-        let summary = summary_with_connections(&["Prod"]);
-        let selection = CloudSyncPreviewSelection {
-            import_connections: true,
-            conflict_strategy: ConflictStrategy::Rename,
-            ..CloudSyncPreviewSelection::default()
-        };
-
+        selection.selected_connection_names.clear();
         assert_eq!(
             selection.selected_connection_names_for_import(&summary),
             Some(Vec::new())

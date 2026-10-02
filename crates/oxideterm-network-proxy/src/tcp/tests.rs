@@ -118,104 +118,71 @@ async fn direct_tcp_enables_nodelay_for_ssh_handshake() {
 }
 
 #[tokio::test]
-async fn http_connect_success_connects_to_target() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::Success).await;
-    let proxy = http_proxy(proxy_addr, UpstreamProxyAuth::None);
-
-    let mut stream = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap();
-
-    assert!(stream.nodelay().unwrap());
-    stream.write_all(b"ping").await.unwrap();
+async fn http_connect_preserves_target_authentication_and_tunnel_data() {
+    for mode in [
+        MockHttpConnectMode::Success,
+        MockHttpConnectMode::BasicAuthSuccess,
+    ] {
+        let (proxy_addr, server) = spawn_http_connect_server(mode).await;
+        let auth = match mode {
+            MockHttpConnectMode::BasicAuthSuccess => UpstreamProxyAuth::Password {
+                username: "user".to_string(),
+                password: Zeroizing::new("hunter2".to_string()),
+            },
+            _ => UpstreamProxyAuth::None,
+        };
+        let proxy = http_proxy(proxy_addr, auth);
+        let mut stream = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
+            .await
+            .unwrap();
+        assert!(stream.nodelay().unwrap());
+        stream.write_all(b"ping").await.unwrap();
+        let mut reply = [0; 4];
+        tokio::time::timeout(Duration::from_secs(5), stream.read_exact(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&reply, b"pong");
+        if matches!(mode, MockHttpConnectMode::BasicAuthSuccess) {
+            assert!(!format!("{proxy:?}").contains("hunter2"));
+        }
+        server.await.unwrap();
+    }
 }
 
 #[tokio::test]
-async fn http_connect_basic_auth_is_sent_and_redacted() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::BasicAuthSuccess {
-        username: "user",
-        password: "hunter2",
-    })
-    .await;
-    let proxy = http_proxy(
-        proxy_addr,
-        UpstreamProxyAuth::Password {
-            username: "user".to_string(),
-            password: Zeroizing::new("hunter2".to_string()),
-        },
-    );
-
-    let mut stream = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap();
-
-    assert!(stream.nodelay().unwrap());
-    stream.write_all(b"ping").await.unwrap();
-    assert!(!format!("{proxy:?}").contains("hunter2"));
-}
-
-#[tokio::test]
-async fn http_connect_rejected_status_is_reported_without_credentials() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::Status(407)).await;
-    let proxy = http_proxy(
-        proxy_addr,
-        UpstreamProxyAuth::Password {
-            username: "user".to_string(),
-            password: Zeroizing::new("secret".to_string()),
-        },
-    );
-
-    let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("status 407"));
-    assert!(!error.contains("secret"));
-}
-
-#[tokio::test]
-async fn http_connect_non_200_status_is_reported() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::Status(502)).await;
-    let proxy = http_proxy(proxy_addr, UpstreamProxyAuth::None);
-
-    let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("status 502"));
-}
-
-#[tokio::test]
-async fn http_connect_malformed_response_is_rejected() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::Malformed).await;
-    let proxy = http_proxy(proxy_addr, UpstreamProxyAuth::None);
-
-    let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("invalid response"));
-}
-
-#[tokio::test]
-async fn http_connect_oversized_header_is_rejected() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::OversizedHeader).await;
-    let proxy = http_proxy(proxy_addr, UpstreamProxyAuth::None);
-
-    let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap_err()
-        .to_string();
-
-    assert!(error.contains("size limit"));
+async fn http_connect_rejects_status_and_invalid_headers_without_credentials() {
+    for (mode, expected, authenticated) in [
+        (MockHttpConnectMode::Status(407), "status 407", true),
+        (MockHttpConnectMode::Status(502), "status 502", false),
+        (MockHttpConnectMode::Malformed, "invalid response", false),
+        (MockHttpConnectMode::OversizedHeader, "size limit", false),
+    ] {
+        let (proxy_addr, server) = spawn_http_connect_server(mode).await;
+        let auth = if authenticated {
+            UpstreamProxyAuth::Password {
+                username: "user".to_string(),
+                password: Zeroizing::new("secret".to_string()),
+            }
+        } else {
+            UpstreamProxyAuth::None
+        };
+        let proxy = http_proxy(proxy_addr, auth);
+        let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(expected), "expected {expected}");
+        if authenticated {
+            assert!(!error.contains("secret"));
+        }
+        server.await.unwrap();
+    }
 }
 
 #[tokio::test]
 async fn http_connect_header_timeout_uses_transport_timeout_error() {
-    let proxy_addr = spawn_http_connect_server(MockHttpConnectMode::SlowHeader).await;
+    let (proxy_addr, server) = spawn_http_connect_server(MockHttpConnectMode::SlowHeader).await;
     let proxy = http_proxy(proxy_addr, UpstreamProxyAuth::None);
 
     let error = dial_initial_tcp("target.example.com", 22, 1, Some(&proxy))
@@ -223,6 +190,8 @@ async fn http_connect_header_timeout_uses_transport_timeout_error() {
         .unwrap_err();
 
     assert!(matches!(error, TcpProxyError::Timeout));
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
 }
 
 #[tokio::test]
@@ -351,10 +320,7 @@ enum MockSocks5Mode {
 #[derive(Clone, Copy)]
 enum MockHttpConnectMode {
     Success,
-    BasicAuthSuccess {
-        username: &'static str,
-        password: &'static str,
-    },
+    BasicAuthSuccess,
     Status(u16),
     Malformed,
     OversizedHeader,
@@ -372,24 +338,26 @@ fn http_proxy(proxy_addr: SocketAddr, auth: UpstreamProxyAuth) -> UpstreamProxyC
     }
 }
 
-async fn spawn_http_connect_server(mode: MockHttpConnectMode) -> SocketAddr {
+async fn spawn_http_connect_server(
+    mode: MockHttpConnectMode,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
+    let server = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let request = read_http_request_header(&mut stream).await;
         assert!(request.contains("CONNECT target.example.com:22 HTTP/1.1"));
         match mode {
             MockHttpConnectMode::Success => {
+                assert!(!request.contains("Proxy-Authorization:"));
                 stream
                     .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                     .await
                     .unwrap();
             }
-            MockHttpConnectMode::BasicAuthSuccess { username, password } => {
-                let expected = BASE64_STANDARD.encode(format!("{username}:{password}"));
-                assert!(request.contains(&format!("Proxy-Authorization: Basic {expected}")));
-                assert!(!request.contains(password));
+            MockHttpConnectMode::BasicAuthSuccess => {
+                assert!(request.contains("Proxy-Authorization: Basic dXNlcjpodW50ZXIy\r\n"));
+                assert!(!request.contains("hunter2"));
                 stream
                     .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
                     .await
@@ -415,8 +383,17 @@ async fn spawn_http_connect_server(mode: MockHttpConnectMode) -> SocketAddr {
                 tokio::time::sleep(Duration::from_secs(3)).await;
             }
         }
+        if matches!(
+            mode,
+            MockHttpConnectMode::Success | MockHttpConnectMode::BasicAuthSuccess
+        ) {
+            let mut payload = [0; 4];
+            stream.read_exact(&mut payload).await.unwrap();
+            assert_eq!(&payload, b"ping");
+            stream.write_all(b"pong").await.unwrap();
+        }
     });
-    addr
+    (addr, server)
 }
 
 async fn read_http_request_header(stream: &mut TcpStream) -> String {

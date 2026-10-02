@@ -253,30 +253,12 @@ fn terminal_element_hides_cursor_when_blink_cycle_is_invisible() {
     assert!(hidden.cursor.is_none());
     assert_eq!(hidden.text_runs.first().unwrap().text, "x");
     assert_eq!(hidden.text_runs.first().unwrap().col, 1);
-}
 
-#[test]
-fn ime_cursor_bounds_track_terminal_cursor_even_when_cursor_blink_is_hidden() {
-    let layout = TerminalElement::new(
-        cursor_snapshot(),
-        None,
-        test_metrics(),
-        false,
-        None,
-        None,
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    let bounds = layout.ime_cursor_bounds.unwrap();
+    let bounds = hidden.ime_cursor_bounds.unwrap();
     assert_eq!(bounds.origin.x, px(0.0));
     assert_eq!(bounds.origin.y, px(0.0));
     assert_eq!(bounds.size.width, px(8.0));
     assert_eq!(bounds.size.height, px(10.0));
-    assert!(layout.cursor.is_none());
 }
 
 #[test]
@@ -328,25 +310,11 @@ fn open_command_mark_overlay_uses_transient_prompt_boundary() {
         row_from_text("   ~ ··············· lips@host 15:16:05", snapshot.cols),
         row_from_text("❯", snapshot.cols),
     ];
-    let mark = TerminalCommandMark {
-        command_id: "cmd-1".to_string(),
-        command: Some("ls".to_string()),
-        start_line: 0,
-        command_line: 0,
-        command_line_clipped: false,
-        end_line: None,
-        is_closed: false,
-        closed_by: None,
-        exit_code: None,
-        duration_ms: None,
-        detection_source: TerminalCommandMarkDetectionSource::CommandBar,
-        submitted_by: None,
-        confidence: TerminalCommandMarkConfidence::High,
-        output_confidence: TerminalCommandMarkConfidence::Unknown,
-        stale: false,
-        started_at: 1,
-        finished_at: None,
-    };
+    let mut mark = test_command_mark("cmd-1", 0, None, None);
+    mark.command = Some("ls".to_string());
+    mark.duration_ms = None;
+    mark.detection_source = TerminalCommandMarkDetectionSource::CommandBar;
+    mark.output_confidence = TerminalCommandMarkConfidence::Unknown;
 
     let layout = TerminalElement::new(
         snapshot,

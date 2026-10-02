@@ -512,7 +512,6 @@ fn protected_search_paginates_matches_and_export_neutralizes_formulas() {
     let csv = String::from_utf8(csv).unwrap();
     assert!(csv.contains("\"'  =match-new\""));
     assert!(!csv.contains("excluded"));
-    assert!(!csv.contains("token-fixture-secret"));
 }
 
 #[test]

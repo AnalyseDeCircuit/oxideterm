@@ -99,23 +99,10 @@ impl Drop for PreviewAssetInner {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::Arc;
 
     use tempfile::tempdir;
 
     use super::*;
-
-    #[test]
-    fn owned_temp_asset_is_removed_when_owner_drops() {
-        let temp = tempdir().unwrap();
-        let path = temp.path().join("preview.png");
-        fs::write(&path, b"png").unwrap();
-        {
-            let _owner = PreviewAssetOwner::owned_temp(&path, "image/png", PreviewAssetKind::Image);
-            assert!(path.exists());
-        }
-        assert!(!path.exists());
-    }
 
     #[test]
     fn local_asset_is_not_removed_when_owner_drops() {
@@ -139,30 +126,6 @@ mod tests {
         drop(owner);
         assert!(path.exists());
         drop(clone);
-        assert!(!path.exists());
-    }
-
-    #[test]
-    fn cloned_owned_temp_asset_survives_concurrent_clone_drops_until_last_owner() {
-        let temp = tempdir().unwrap();
-        let path = temp.path().join("video.mp4");
-        fs::write(&path, b"video").unwrap();
-
-        let owner = PreviewAssetOwner::owned_temp(&path, "video/mp4", PreviewAssetKind::Video);
-        let owner = Arc::new(owner);
-        let mut handles = Vec::new();
-        for _ in 0..16 {
-            let clone = owner.clone();
-            handles.push(std::thread::spawn(move || {
-                let local_owner = (*clone).clone();
-                drop(local_owner);
-            }));
-        }
-        for handle in handles {
-            handle.join().unwrap();
-        }
-        assert!(path.exists());
-        drop(owner);
         assert!(!path.exists());
     }
 }

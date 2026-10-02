@@ -603,7 +603,13 @@ mod tests {
     }
 
     #[test]
-    fn magic_scan_detects_every_cross_chunk_split() {
+    fn magic_scan_detects_complete_markers_and_every_cross_chunk_split() {
+        let mut scan = MagicScanWindow::default();
+        assert_eq!(
+            scan.scan(b"time:12:34 status:ok ::TRZSZ:TRANSFER:R:1"),
+            [TerminalMagicKind::TrzszTransfer]
+        );
+
         let marker = TerminalMagicKind::TrzszTransfer.marker();
         for split in 1..marker.len() {
             let mut scan = MagicScanWindow::default();
@@ -615,16 +621,6 @@ mod tests {
             );
             assert!(scan.scan(b"ordinary output").is_empty());
         }
-    }
-
-    #[test]
-    fn magic_scan_skips_false_marker_prefixes_in_current_chunk() {
-        let mut scan = MagicScanWindow::default();
-        assert_eq!(
-            scan.scan(b"time:12:34 status:ok ::TRZSZ:TRANSFER:R:1")
-                .len(),
-            1
-        );
     }
 
     #[test]

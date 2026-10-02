@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn loading_keeps_previous_snapshot() {
+    fn refresh_preserves_snapshot_rejects_stale_completion_and_obeys_ttl() {
         let key = key();
         let mut store = GitStatusStore::default();
         let first = store.mark_loading(key.clone(), 0);
@@ -157,30 +157,15 @@ mod tests {
         assert_eq!(entry.generation(), second);
         assert!(matches!(entry.state(), GitProbeState::Loading));
         assert_eq!(entry.snapshot().unwrap().branch.display_text(), "main");
-    }
-
-    #[test]
-    fn stale_probe_result_is_ignored() {
-        let key = key();
-        let mut store = GitStatusStore::default();
-        let first = store.mark_loading(key.clone(), 0);
-        let _second = store.mark_loading(key.clone(), 1);
-
-        let applied = store.finish_probe(&key, first, GitProbeOutcome::NotRepository, 2);
+        let applied = store.finish_probe(&key, first, GitProbeOutcome::NotRepository, 11);
 
         assert!(!applied);
         assert!(matches!(
             store.get(&key).unwrap().state(),
             GitProbeState::Loading
         ));
-    }
-
-    #[test]
-    fn ttl_suppresses_fresh_probe() {
-        let key = key();
-        let mut store = GitStatusStore::default();
-        let generation = store.mark_loading(key.clone(), 100);
-        store.finish_probe(&key, generation, GitProbeOutcome::NotRepository, 100);
+        assert_eq!(store.snapshot(&key).unwrap().branch.display_text(), "main");
+        store.finish_probe(&key, second, GitProbeOutcome::NotRepository, 100);
 
         assert!(!store.should_probe(&key, 150, 1000));
         assert!(store.should_probe(&key, 1200, 1000));

@@ -636,81 +636,6 @@ mod tests {
     }
 
     #[test]
-    fn handle_from_another_tool_session_is_rejected_without_oracle() {
-        let mut registry = RuntimeCapabilityRegistry::new();
-        let owner_key = RuntimeOwnerKey::new();
-        registry
-            .register_owner(terminal_registration(owner_key.clone(), 1))
-            .expect("owner registers");
-        let first_session = registry.begin_tool_session();
-        let second_session = registry.begin_tool_session();
-        let handle = registry
-            .issue_handle(&first_session, &owner_key)
-            .expect("handle issues");
-
-        let error = registry
-            .validate_handle(
-                &second_session,
-                Some(&handle.handle_id),
-                RuntimeCapability::TerminalObserve,
-            )
-            .expect_err("cross-session handle is rejected");
-
-        assert_eq!(error.failure(), RuntimeValidationFailure::WrongToolSession);
-        assert_eq!(error.public_code(), "runtime_handle_expired");
-    }
-
-    #[test]
-    fn finishing_tool_session_discards_its_handles() {
-        let mut registry = RuntimeCapabilityRegistry::new();
-        let owner_key = RuntimeOwnerKey::new();
-        registry
-            .register_owner(terminal_registration(owner_key.clone(), 1))
-            .expect("owner registers");
-        let session = registry.begin_tool_session();
-        let handle = registry
-            .issue_handle(&session, &owner_key)
-            .expect("handle issues");
-
-        registry.finish_tool_session(&session, RuntimeRevocationReason::ToolSessionFinished);
-        let error = registry
-            .validate_handle(
-                &session,
-                Some(&handle.handle_id),
-                RuntimeCapability::TerminalObserve,
-            )
-            .expect_err("finished session cannot execute");
-
-        assert_eq!(error.public_code(), "runtime_handle_expired");
-    }
-
-    #[test]
-    fn replaced_owner_generation_revokes_old_handle() {
-        let mut registry = RuntimeCapabilityRegistry::new();
-        let owner_key = RuntimeOwnerKey::new();
-        registry
-            .register_owner(terminal_registration(owner_key.clone(), 1))
-            .expect("owner registers");
-        let session = registry.begin_tool_session();
-        let handle = registry
-            .issue_handle(&session, &owner_key)
-            .expect("handle issues");
-
-        registry
-            .register_owner(terminal_registration(owner_key, 2))
-            .expect("replacement owner registers");
-        let error = registry
-            .validate_handle(
-                &session,
-                Some(&handle.handle_id),
-                RuntimeCapability::TerminalObserve,
-            )
-            .expect_err("old generation is revoked");
-
-        assert_eq!(error.failure(), RuntimeValidationFailure::OwnerReplaced);
-    }
-
-    #[test]
     fn capability_change_requires_a_new_owner_generation() {
         let mut registry = RuntimeCapabilityRegistry::new();
         let owner_key = RuntimeOwnerKey::new();
@@ -743,7 +668,7 @@ mod tests {
     }
 
     #[test]
-    fn metadata_update_does_not_replace_owner_generation() {
+    fn handle_lifecycle_preserves_identity_until_owner_replacement_or_session_finish() {
         let mut registry = RuntimeCapabilityRegistry::new();
         let owner_key = RuntimeOwnerKey::new();
         registry
@@ -753,7 +678,21 @@ mod tests {
         let handle = registry
             .issue_handle(&session, &owner_key)
             .expect("handle issues");
-        let mut renamed = terminal_registration(owner_key, 1);
+        let reused = registry
+            .issue_handle(&session, &owner_key)
+            .expect("handle reuses");
+        assert_eq!(handle.handle_id.as_str(), reused.handle_id.as_str());
+        let other_session = registry.begin_tool_session();
+        let error = registry
+            .validate_handle(
+                &other_session,
+                Some(&handle.handle_id),
+                RuntimeCapability::TerminalObserve,
+            )
+            .expect_err("cross-session handle is rejected");
+        assert_eq!(error.failure(), RuntimeValidationFailure::WrongToolSession);
+        assert_eq!(error.public_code(), "runtime_handle_expired");
+        let mut renamed = terminal_registration(owner_key.clone(), 1);
         renamed.label = "Renamed terminal".to_string();
 
         registry
@@ -776,6 +715,29 @@ mod tests {
                 .label,
             "Renamed terminal"
         );
+        registry
+            .register_owner(terminal_registration(owner_key.clone(), 2))
+            .expect("replacement owner registers");
+        let error = registry
+            .validate_handle(
+                &session,
+                Some(&handle.handle_id),
+                RuntimeCapability::TerminalObserve,
+            )
+            .expect_err("old generation is revoked");
+        assert_eq!(error.failure(), RuntimeValidationFailure::OwnerReplaced);
+        let replacement = registry
+            .issue_handle(&session, &owner_key)
+            .expect("replacement handle issues");
+        registry.finish_tool_session(&session, RuntimeRevocationReason::ToolSessionFinished);
+        let error = registry
+            .validate_handle(
+                &session,
+                Some(&replacement.handle_id),
+                RuntimeCapability::TerminalObserve,
+            )
+            .expect_err("finished session cannot execute");
+        assert_eq!(error.public_code(), "runtime_handle_expired");
     }
 
     #[test]
@@ -828,25 +790,6 @@ mod tests {
             registration,
             Err(RuntimeContextError::InvalidOwnerRegistration)
         ));
-    }
-
-    #[test]
-    fn same_owner_reuses_one_handle_per_tool_session() {
-        let mut registry = RuntimeCapabilityRegistry::new();
-        let owner_key = RuntimeOwnerKey::new();
-        registry
-            .register_owner(terminal_registration(owner_key.clone(), 1))
-            .expect("owner registers");
-        let session = registry.begin_tool_session();
-
-        let first = registry
-            .issue_handle(&session, &owner_key)
-            .expect("first handle issues");
-        let second = registry
-            .issue_handle(&session, &owner_key)
-            .expect("second handle reuses first");
-
-        assert_eq!(first.handle_id.as_str(), second.handle_id.as_str());
     }
 
     #[test]

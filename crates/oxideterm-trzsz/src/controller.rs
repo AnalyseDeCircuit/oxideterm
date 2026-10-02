@@ -214,7 +214,7 @@ mod tests {
     use crate::types::TrzszTransferPolicy;
 
     #[test]
-    fn controller_forwards_io_while_active() {
+    fn controller_blocks_io_after_stop_but_allows_cleanup_protocol() {
         let mut controller = TrzszController::new(
             "session",
             "conn",
@@ -229,17 +229,6 @@ mod tests {
         assert_eq!(
             controller.process_terminal_input("ls\r"),
             Some(TrzszFilterOutput::SendServer(b"ls\r".to_vec()))
-        );
-    }
-
-    #[test]
-    fn controller_blocks_io_after_stop_but_allows_cleanup_protocol() {
-        let mut controller = TrzszController::new(
-            "session",
-            "conn",
-            "runtime",
-            "owner",
-            TrzszTransferPolicy::default(),
         );
         let _ = controller.stop();
         assert_eq!(controller.state(), TrzszControllerState::Draining);

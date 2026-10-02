@@ -2693,18 +2693,13 @@ mod tests {
     }
 
     #[test]
-    fn closing_unrelated_tab_keeps_knowledge_workspace_registered() {
-        let mut workspace = KnowledgeWorkspaceEntity::default();
-        workspace.register_tab(TabId(7));
-        workspace.close_tab(TabId(8));
-        assert_eq!(workspace.tab_id(), Some(TabId(7)));
-    }
-
-    #[test]
-    fn closing_knowledge_tab_invalidates_pending_document_load() {
+    fn only_closing_knowledge_tab_invalidates_pending_document_load() {
         let mut workspace = KnowledgeWorkspaceEntity::default();
         workspace.register_tab(TabId(7));
         let generation = workspace.begin_document_load("doc".to_string());
+        workspace.close_tab(TabId(8));
+        assert_eq!(workspace.tab_id(), Some(TabId(7)));
+        assert_eq!(workspace.load_generation, generation);
         workspace.close_tab(TabId(7));
         assert_ne!(workspace.load_generation, generation);
         assert_eq!(workspace.tab_id(), None);
@@ -2725,7 +2720,7 @@ mod tests {
     }
 
     #[test]
-    fn created_document_is_immediately_inserted_into_selected_collection_snapshot() {
+    fn created_document_is_deduplicated_and_survives_stale_navigator_refresh() {
         let mut existing = navigator_document("Existing", "markdown", None);
         existing.id = "existing".to_string();
         let mut created = navigator_document("Created", "markdown", None);
@@ -2733,28 +2728,19 @@ mod tests {
         let mut workspace = KnowledgeWorkspaceEntity::default();
         workspace.navigator_snapshot.selected_collection_id = Some("collection".to_string());
         workspace.navigator_snapshot.documents = Arc::new(vec![existing]);
+        let stale_generation = workspace.begin_navigator_refresh(true).unwrap();
 
         workspace.insert_created_document(created.clone());
         workspace.insert_created_document(created);
-
-        let document_ids = workspace
-            .navigator_snapshot
-            .documents
-            .iter()
-            .map(|document| document.id.as_str())
-            .collect::<Vec<_>>();
-        assert_eq!(document_ids, vec!["existing", "created"]);
-    }
-
-    #[test]
-    fn stale_navigator_refresh_cannot_overwrite_a_created_document() {
-        let mut created = navigator_document("Created", "markdown", None);
-        created.id = "created".to_string();
-        let mut workspace = KnowledgeWorkspaceEntity::default();
-        workspace.navigator_snapshot.selected_collection_id = Some("collection".to_string());
-        let stale_generation = workspace.begin_navigator_refresh(true).unwrap();
-
-        workspace.insert_created_document(created);
+        assert_eq!(
+            workspace
+                .navigator_snapshot
+                .documents
+                .iter()
+                .map(|document| document.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["existing", "created"]
+        );
         let current_generation = workspace.begin_navigator_refresh(true).unwrap();
 
         assert!(
@@ -2764,8 +2750,13 @@ mod tests {
             )
         );
         assert_eq!(
-            workspace.navigator_snapshot.documents[0].id.as_str(),
-            "created"
+            workspace
+                .navigator_snapshot
+                .documents
+                .iter()
+                .map(|document| document.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["existing", "created"]
         );
         assert_ne!(stale_generation, current_generation);
     }

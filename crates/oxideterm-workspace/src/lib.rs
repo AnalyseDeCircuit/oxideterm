@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn split_active_leaf_creates_group_and_focusable_leaf() {
+    fn split_and_close_restores_the_remaining_terminal_leaf() {
         let (pane_a, pane_b, group, session_a, session_b) = ids();
         let mut node = PaneNode::leaf(pane_a, session_a);
 
@@ -539,10 +539,15 @@ mod tests {
         assert_eq!(node.pane_count(), 2);
         assert!(node.contains_pane(pane_a));
         assert!(node.contains_pane(pane_b));
+        assert_eq!(node.close_pane(pane_b), Some(pane_a));
+        assert_eq!(
+            node.single_child_replacement(),
+            Some(PaneNode::leaf(pane_a, session_a))
+        );
     }
 
     #[test]
-    fn split_active_accepts_an_existing_pane_subtree() {
+    fn split_active_preserves_subtree_sessions_and_allows_replacement() {
         let (pane_a, pane_b, group, session_a, session_b) = ids();
         let pane_c = PaneId(4);
         let session_c = TerminalSessionId(3);
@@ -562,6 +567,25 @@ mod tests {
         assert_eq!(node.pane_count(), 3);
         assert_eq!(node.pane_id_for_session(session_b), Some(pane_b));
         assert_eq!(node.pane_id_for_session(session_c), Some(pane_c));
+        assert_eq!(node.pane_id_for_session(TerminalSessionId(99)), None);
+        assert_eq!(node.session_id_for_pane(pane_a), Some(session_a));
+        assert_eq!(node.session_id_for_pane(pane_c), Some(session_c));
+        assert_eq!(node.session_id_for_pane(PaneId(99)), None);
+        let mut sessions = Vec::new();
+        node.collect_session_ids(&mut sessions);
+        assert_eq!(sessions, [session_a, session_b, session_c]);
+
+        let new_pane = PaneId(42);
+        let new_session = TerminalSessionId(77);
+        assert_eq!(
+            node.replace_session(session_b, new_pane, new_session),
+            Some(pane_b)
+        );
+        assert_eq!(node.pane_id_for_session(new_session), Some(new_pane));
+        assert_eq!(node.pane_id_for_session(session_b), None);
+        sessions.clear();
+        node.collect_session_ids(&mut sessions);
+        assert_eq!(sessions, [session_a, new_session, session_c]);
     }
 
     #[test]
@@ -639,82 +663,6 @@ mod tests {
         }
         assert_eq!(root.close_pane(PaneId(1)), Some(PaneId(2)));
         assert_eq!(root.single_child_replacement(), Some(page));
-    }
-
-    #[test]
-    fn close_pane_collapses_group_to_remaining_leaf() {
-        let (pane_a, pane_b, group, session_a, session_b) = ids();
-        let mut node = PaneNode::Group {
-            id: group,
-            direction: SplitDirection::Horizontal,
-            children: split_children(pane_a, pane_b, session_a, session_b, [50.0, 50.0]),
-        };
-
-        assert_eq!(node.close_pane(pane_b), Some(pane_a));
-        if let Some(replacement) = node.single_child_replacement() {
-            node = replacement;
-        }
-        assert_eq!(node, PaneNode::leaf(pane_a, session_a));
-    }
-
-    #[test]
-    fn locates_pane_by_terminal_session() {
-        let (pane_a, pane_b, group, session_a, session_b) = ids();
-        let node = PaneNode::Group {
-            id: group,
-            direction: SplitDirection::Horizontal,
-            children: split_children(pane_a, pane_b, session_a, session_b, [50.0, 50.0]),
-        };
-
-        assert_eq!(node.pane_id_for_session(session_b), Some(pane_b));
-        assert_eq!(node.pane_id_for_session(TerminalSessionId(99)), None);
-    }
-
-    #[test]
-    fn locates_terminal_session_by_pane() {
-        let (pane_a, pane_b, group, session_a, session_b) = ids();
-        let node = PaneNode::Group {
-            id: group,
-            direction: SplitDirection::Horizontal,
-            children: split_children(pane_a, pane_b, session_a, session_b, [50.0, 50.0]),
-        };
-
-        assert_eq!(node.session_id_for_pane(pane_a), Some(session_a));
-        assert_eq!(node.session_id_for_pane(PaneId(99)), None);
-    }
-
-    #[test]
-    fn collects_terminal_sessions_from_tree() {
-        let (pane_a, pane_b, group, session_a, session_b) = ids();
-        let node = PaneNode::Group {
-            id: group,
-            direction: SplitDirection::Horizontal,
-            children: split_children(pane_a, pane_b, session_a, session_b, [50.0, 50.0]),
-        };
-        let mut sessions = Vec::new();
-
-        node.collect_session_ids(&mut sessions);
-
-        assert_eq!(sessions, vec![session_a, session_b]);
-    }
-
-    #[test]
-    fn replaces_terminal_session_in_place() {
-        let (pane_a, pane_b, group, session_a, session_b) = ids();
-        let new_pane = PaneId(42);
-        let new_session = TerminalSessionId(77);
-        let mut node = PaneNode::Group {
-            id: group,
-            direction: SplitDirection::Horizontal,
-            children: split_children(pane_a, pane_b, session_a, session_b, [50.0, 50.0]),
-        };
-
-        assert_eq!(
-            node.replace_session(session_b, new_pane, new_session),
-            Some(pane_b)
-        );
-        assert_eq!(node.pane_id_for_session(new_session), Some(new_pane));
-        assert_eq!(node.pane_id_for_session(session_b), None);
     }
 
     #[test]

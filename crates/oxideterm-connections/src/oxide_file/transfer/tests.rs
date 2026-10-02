@@ -983,7 +983,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_key_export_import_restores_managed_key_store_entry() {
+    fn managed_key_archive_supports_store_restore_and_file_extraction() {
         let mut source = temp_store("managed-source");
         let private_key = generated_private_key_text();
         let managed_key = source
@@ -1044,35 +1044,6 @@ mod tests {
             .resolve_managed_ssh_key_private_key(&keys[0].id)
             .unwrap();
         assert_eq!(restored_key.expose_secret(), private_key);
-    }
-
-    #[test]
-    fn managed_key_import_can_extract_embedded_key_when_restore_disabled() {
-        let mut source = temp_store("managed-fallback-source");
-        let private_key = generated_private_key_text();
-        let managed_key = source
-            .create_managed_ssh_key_from_text(
-                SecretString::from(private_key),
-                Some("Deploy key".to_string()),
-                None,
-            )
-            .unwrap();
-        let mut connection = saved_connection("conn-1", "Prod");
-        connection.auth = SavedAuth::ManagedKey {
-            key_id: managed_key.id,
-            passphrase_keychain_id: None,
-            plaintext_passphrase: None,
-        };
-        connection.proxy_chain.clear();
-        source.upsert_imported_connection(connection).unwrap();
-
-        let bytes = export_connections_to_oxide(
-            &source,
-            &["conn-1".to_string()],
-            "secret!",
-            OxideExportOptions::default(),
-        )
-        .unwrap();
         let mut target = temp_store("managed-fallback-target");
         let result = apply_oxide_import_with_options(
             &mut target,
@@ -1088,9 +1059,12 @@ mod tests {
         assert_eq!(result.imported, 1);
         assert!(target.managed_ssh_keys().is_empty());
         let imported = target.connections().first().unwrap();
-        assert!(
-            matches!(&imported.auth, SavedAuth::Key { key_path, .. } if key_path.contains(".ssh/imported"))
-        );
+        let SavedAuth::Key { key_path, .. } = &imported.auth else {
+            panic!("disabled managed key restore should extract a key file");
+        };
+        assert!(key_path.contains(".ssh/imported"));
+        assert_eq!(fs::read_to_string(key_path).unwrap(), private_key);
+        fs::remove_file(key_path).unwrap();
     }
 
     #[test]
@@ -1217,41 +1191,7 @@ mod tests {
     }
 
     #[test]
-    fn rename_strategy_matches_copy_suffix_contract() {
-        let mut store = temp_store("rename");
-        store
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-
-        let payload = vec![EncryptedConnection {
-            source_connection_id: None,
-            name: "Prod".to_string(),
-            group: None,
-            notes: None,
-            host: "example.org".to_string(),
-            port: 22,
-            username: "me".to_string(),
-            auth: EncryptedAuth::Agent,
-            color: None,
-            icon_background_color: None,
-            icon: None,
-            tags: Vec::new(),
-            options: ConnectionOptions::default(),
-            upstream_proxy: EncryptedUpstreamProxyPolicy::UseGlobal,
-            proxy_chain: Vec::new(),
-            forwards: Vec::new(),
-            privilege_credentials: Vec::new(),
-        }];
-
-        let plans = plan_import(&store, &payload, ImportConflictStrategy::Rename);
-        assert!(matches!(
-            plans.first(),
-            Some(PlannedImportAction::Rename(name)) if name == "Prod (Copy)"
-        ));
-    }
-
-    #[test]
-    fn replace_strategy_only_replaces_first_same_name_record() {
+    fn import_planning_renames_collisions_and_replaces_only_first_duplicate() {
         let mut store = temp_store("replace-duplicate");
         store
             .upsert_imported_connection(saved_connection("conn-1", "Prod"))
@@ -1262,10 +1202,15 @@ mod tests {
             encrypted_agent_connection("Prod", "two.example.com"),
         ];
 
+        let renamed = plan_import(&store, &payload[..1], ImportConflictStrategy::Rename);
+        assert!(matches!(
+            renamed.first(),
+            Some(PlannedImportAction::Rename(name)) if name == "Prod (Copy)"
+        ));
         let plans = plan_import(&store, &payload, ImportConflictStrategy::Replace);
         assert!(matches!(
             plans.first(),
-            Some(PlannedImportAction::Replace(_))
+            Some(PlannedImportAction::Replace(id)) if id == "conn-1"
         ));
         assert!(matches!(
             plans.get(1),
@@ -1389,7 +1334,7 @@ mod tests {
     }
 
     #[test]
-    fn preflight_blocks_managed_key_connections_when_excluded() {
+    fn preflight_requires_managed_key_export_for_managed_key_connections() {
         let mut source = temp_store("preflight-managed-key-excluded");
         let managed_key = source
             .create_managed_ssh_key_from_text(
@@ -1412,27 +1357,6 @@ mod tests {
         assert!(!result.can_export);
         assert_eq!(result.managed_key_count, 1);
         assert_eq!(result.blocked_managed_key_connections, vec!["Prod"]);
-    }
-
-    #[test]
-    fn preflight_allows_managed_key_connections_when_included() {
-        let mut source = temp_store("preflight-managed-key-included");
-        let managed_key = source
-            .create_managed_ssh_key_from_text(
-                SecretString::from(generated_private_key_text()),
-                Some("Deploy key".to_string()),
-                None,
-            )
-            .unwrap();
-        let mut connection = saved_connection("conn-1", "Prod");
-        connection.auth = SavedAuth::ManagedKey {
-            key_id: managed_key.id,
-            passphrase_keychain_id: None,
-            plaintext_passphrase: None,
-        };
-        connection.proxy_chain.clear();
-        source.upsert_imported_connection(connection).unwrap();
-
         let result = preflight_export(&source, &["conn-1".to_string()], false, true, 0);
 
         assert!(result.can_export);

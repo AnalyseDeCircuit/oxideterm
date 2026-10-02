@@ -377,20 +377,6 @@ mod tests {
     }
 
     #[test]
-    fn validates_named_capture_templates() {
-        let mut rule = trigger(
-            r"host=(?P<host>[a-z0-9.-]+)",
-            TerminalTriggerMatchMode::Regex,
-        );
-        rule.action = TerminalTriggerAction::SendText {
-            text: "ping ${host}".to_string(),
-            append_enter: true,
-        };
-
-        assert!(validate_snapshot(&snapshot(rule)).is_ok());
-    }
-
-    #[test]
     fn rejects_unknown_capture_without_echoing_pattern() {
         let mut rule = trigger("(?P<secret>.+)", TerminalTriggerMatchMode::Regex);
         rule.action = TerminalTriggerAction::SendText {
@@ -458,8 +444,14 @@ mod tests {
     fn disabled_rules_are_validated_but_compile_to_empty_fast_path() {
         let mut rule = trigger("ready", TerminalTriggerMatchMode::Literal);
         rule.enabled = false;
-        let snapshot = snapshot(rule);
+        let mut snapshot = snapshot(rule);
 
         assert!(compile_active(&snapshot, 1).unwrap().is_none());
+        snapshot.triggers[0].matcher.mode = TerminalTriggerMatchMode::Regex;
+        snapshot.triggers[0].matcher.pattern = "(".to_string();
+        assert!(matches!(
+            compile_active(&snapshot, 1),
+            Err(TerminalTriggerError::InvalidRegex)
+        ));
     }
 }

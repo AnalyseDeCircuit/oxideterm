@@ -422,46 +422,6 @@ fn active_session_failure_exit_preserves_structured_category() {
 }
 
 #[test]
-fn clipboard_formats_prefer_unicode_text() {
-    let formats = text_clipboard_formats();
-
-    assert_eq!(
-        preferred_text_clipboard_format(&formats),
-        Some(ClipboardFormatId::CF_UNICODETEXT)
-    );
-}
-
-#[test]
-fn clipboard_ready_advertises_cached_local_text() {
-    let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
-    let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-    let mut backend = ClientClipboardBackend::new(
-        input_tx,
-        output_tx,
-        RemoteDesktopSessionOptions::default().clipboard,
-    );
-    backend.set_local_text("hello".to_string());
-
-    backend.on_ready();
-
-    match input_rx.try_recv().unwrap() {
-        RdpInputEvent::Clipboard(ClipboardMessage::SendInitiateCopy(formats)) => {
-            assert!(
-                formats
-                    .iter()
-                    .any(|format| format.id == ClipboardFormatId::CF_UNICODETEXT)
-            );
-            assert!(
-                formats
-                    .iter()
-                    .any(|format| format.id == ClipboardFormatId::CF_TEXT)
-            );
-        }
-        message => panic!("unexpected clipboard message: {message:?}"),
-    }
-}
-
-#[test]
 fn clipboard_ready_advertises_cached_local_image_data() {
     let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
     let (output_tx, _output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
@@ -710,62 +670,52 @@ fn client_config_withholds_credentials_until_certificate_acceptance() {
 }
 
 #[test]
-fn rdp_desktop_size_normalization_matches_displaycontrol_bounds() {
-    assert_eq!(
-        normalized_rdp_desktop_size(RemoteDesktopSize {
-            width: 201,
-            height: 121,
-        }),
-        RemoteDesktopSize {
-            width: 200,
-            height: 200,
-        }
-    );
-    assert_eq!(
-        normalized_rdp_desktop_size(RemoteDesktopSize {
-            width: 9001,
-            height: 9001,
-        }),
-        RemoteDesktopSize {
-            width: 8192,
-            height: 8192,
-        }
-    );
-}
-
-#[test]
 fn resize_request_enters_client_loop_with_normalized_rdp_size() {
-    let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
-    let mut input_database = RdpInputDatabase::new();
-    let mut keyboard_mapper = RdpKeyboardInputMapper::default();
-
-    forward_client_rdp_request(
-        &input_tx,
-        &mut input_database,
-        &mut keyboard_mapper,
-        RemoteDesktopHelperRequest::Resize {
-            size: RemoteDesktopSize {
+    for (requested, expected) in [
+        (
+            RemoteDesktopSize {
                 width: 201,
                 height: 121,
             },
-            scale_factor: Some(125),
-        },
-        false,
-    )
-    .unwrap();
+            200,
+        ),
+        (
+            RemoteDesktopSize {
+                width: 9001,
+                height: 9001,
+            },
+            8192,
+        ),
+    ] {
+        let (input_tx, mut input_rx) = tokio_mpsc::unbounded_channel();
+        let mut input_database = RdpInputDatabase::new();
+        let mut keyboard_mapper = RdpKeyboardInputMapper::default();
 
-    match input_rx.try_recv().unwrap() {
-        RdpInputEvent::Resize {
-            width,
-            height,
-            scale_factor,
-            ..
-        } => {
-            assert_eq!(width, 200);
-            assert_eq!(height, 200);
-            assert_eq!(scale_factor, 125);
+        forward_client_rdp_request(
+            &input_tx,
+            &mut input_database,
+            &mut keyboard_mapper,
+            RemoteDesktopHelperRequest::Resize {
+                size: requested,
+                scale_factor: Some(125),
+            },
+            false,
+        )
+        .unwrap();
+
+        match input_rx.try_recv().unwrap() {
+            RdpInputEvent::Resize {
+                width,
+                height,
+                scale_factor,
+                ..
+            } => {
+                assert_eq!(width, expected);
+                assert_eq!(height, expected);
+                assert_eq!(scale_factor, 125);
+            }
+            event => panic!("expected resize event, got {event:?}"),
         }
-        event => panic!("expected resize event, got {event:?}"),
     }
 }
 
@@ -789,31 +739,6 @@ fn established_transport_closure_is_classified_as_network_failure() {
 }
 
 #[test]
-fn native_rdp_desktop_ready_events_report_first_frame_ready() {
-    let events = native_rdp_desktop_ready_events(RemoteDesktopSize {
-        width: 1280,
-        height: 720,
-    });
-
-    assert!(matches!(
-        events[0],
-        RemoteDesktopHelperEvent::Connected {
-            size: RemoteDesktopSize {
-                width: 1280,
-                height: 720
-            }
-        }
-    ));
-    assert!(matches!(
-        &events[1],
-        RemoteDesktopHelperEvent::Status {
-            status: RemoteDesktopSessionStatus::Connected,
-            message: Some(message),
-        } if message.contains("desktop frame")
-    ));
-}
-
-#[test]
 fn unsupported_resize_reports_existing_framebuffer_size() {
     let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
 
@@ -830,41 +755,57 @@ fn unsupported_resize_reports_existing_framebuffer_size() {
 
 #[test]
 fn first_desktop_base_frame_publishes_connected_once() {
-    let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-    let image = DecodedImage::new(PixelFormat::RgbA32, 4, 3);
-    let mut frame_state = ClientRdpFrameState::default();
+    for (pixel_format, frame_format) in [
+        (PixelFormat::RgbA32, RemoteDesktopFrameFormat::Rgba8),
+        (
+            RDP_DECODED_FRAME_PIXEL_FORMAT,
+            RemoteDesktopFrameFormat::Bgra8,
+        ),
+    ] {
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        let image = DecodedImage::new(pixel_format, 4, 3);
+        let mut frame_state = ClientRdpFrameState::default();
 
-    send_client_rdp_base_frame(&output_tx, &image, &mut frame_state, true)
-        .expect("first desktop frame should queue");
-    send_client_rdp_base_frame(&output_tx, &image, &mut frame_state, true)
-        .expect("later desktop frame should queue");
+        send_client_rdp_base_frame(&output_tx, &image, &mut frame_state, true)
+            .expect("first desktop frame should queue");
+        send_client_rdp_base_frame(&output_tx, &image, &mut frame_state, true)
+            .expect("later desktop frame should queue");
 
-    assert!(frame_state.published_first_desktop_frame);
-    assert!(matches!(
-        output_rx.graphics_rx.try_recv(),
-        Ok(ClientRdpOutput::Event(
-            RemoteDesktopHelperEvent::Frame { .. }
-        ))
-    ));
-    assert!(matches!(
-        output_rx.control_rx.try_recv(),
-        Ok(ClientRdpOutput::Event(
-            RemoteDesktopHelperEvent::Connected {
-                size: RemoteDesktopSize {
-                    width: 4,
-                    height: 3
-                }
+        assert!(frame_state.published_first_desktop_frame);
+        let ClientRdpOutput::Event(RemoteDesktopHelperEvent::Frame { frame }) =
+            output_rx.graphics_rx.try_recv().unwrap()
+        else {
+            panic!("expected base frame");
+        };
+        assert_eq!(
+            frame.size,
+            RemoteDesktopSize {
+                width: 4,
+                height: 3
             }
-        ))
-    ));
-    assert!(matches!(
-        output_rx.control_rx.try_recv(),
-        Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Status {
-            status: RemoteDesktopSessionStatus::Connected,
-            ..
-        }))
-    ));
-    assert!(output_rx.control_rx.try_recv().is_err());
+        );
+        assert_eq!(frame.format, frame_format);
+        assert_eq!(frame.bytes, [0, 0, 0, 0xff].repeat(12));
+        assert!(matches!(
+            output_rx.control_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(
+                RemoteDesktopHelperEvent::Connected {
+                    size: RemoteDesktopSize {
+                        width: 4,
+                        height: 3
+                    }
+                }
+            ))
+        ));
+        assert!(matches!(
+            output_rx.control_rx.try_recv(),
+            Ok(ClientRdpOutput::Event(RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Connected,
+                message: Some(message),
+            })) if message.contains("desktop frame")
+        ));
+        assert!(output_rx.control_rx.try_recv().is_err());
+    }
 }
 
 #[test]
@@ -1097,39 +1038,6 @@ fn reactivation_resets_graphics_base_without_publishing_empty_image() {
 }
 
 #[test]
-fn base_frame_event_uses_current_image_as_complete_backing_frame() {
-    let image = DecodedImage::new(PixelFormat::RgbA32, 2, 1);
-
-    match base_frame_event(&image) {
-        RemoteDesktopHelperEvent::Frame { frame } => {
-            assert_eq!(
-                frame.size,
-                RemoteDesktopSize {
-                    width: 2,
-                    height: 1
-                }
-            );
-            assert_eq!(frame.format, RemoteDesktopFrameFormat::Rgba8);
-            assert_eq!(frame.bytes, vec![0, 0, 0, 0xff, 0, 0, 0, 0xff]);
-        }
-        other => panic!("expected base frame, got {other:?}"),
-    }
-}
-
-#[test]
-fn base_frame_event_uses_bgra_for_rdp_decoded_image() {
-    let image = DecodedImage::new(RDP_DECODED_FRAME_PIXEL_FORMAT, 2, 1);
-
-    match base_frame_event(&image) {
-        RemoteDesktopHelperEvent::Frame { frame } => {
-            assert_eq!(frame.format, RemoteDesktopFrameFormat::Bgra8);
-            assert_eq!(frame.bytes, vec![0, 0, 0, 0xff, 0, 0, 0, 0xff]);
-        }
-        other => panic!("expected base frame, got {other:?}"),
-    }
-}
-
-#[test]
 fn full_frame_copy_sets_alpha_opaque() {
     let bytes = opaque_frame_bytes(&[1, 2, 3, 0, 4, 5, 6, 7], RemoteDesktopFrameFormat::Rgba8);
 
@@ -1188,17 +1096,6 @@ fn custom_standard_security_source_reports_legacy_security() {
     assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
     assert!(!message.contains("/Users/"));
     assert!(!message.contains(".cargo"));
-}
-
-#[test]
-fn access_denied_connector_error_is_authentication_category() {
-    let error = connector::ConnectorError::new("Authentication", ConnectorErrorKind::AccessDenied);
-
-    // Access denied is a stable authentication failure constructor for tests.
-    assert_eq!(
-        connector_error_category(&error),
-        RemoteDesktopErrorCategory::Authentication
-    );
 }
 
 fn test_frame() -> RemoteDesktopFrame {
@@ -1330,6 +1227,23 @@ fn clipboard_text_preserves_code_whitespace_and_unicode_in_windows_format() {
         RemoteDesktopSessionOptions::default().clipboard,
     );
     backend.set_local_text("one\n\t中文🦀\r\ntwo\rthree\n".repeat(512));
+    backend.on_ready();
+    let RdpInputEvent::Clipboard(ClipboardMessage::SendInitiateCopy(formats)) =
+        input_rx.try_recv().unwrap()
+    else {
+        panic!("expected cached clipboard format advertisement");
+    };
+    assert_eq!(
+        formats.iter().map(|format| format.id).collect::<Vec<_>>(),
+        [
+            ClipboardFormatId::CF_UNICODETEXT,
+            ClipboardFormatId::CF_TEXT
+        ]
+    );
+    assert_eq!(
+        preferred_text_clipboard_format(&formats),
+        Some(ClipboardFormatId::CF_UNICODETEXT)
+    );
     backend.on_format_data_request(FormatDataRequest {
         format: ClipboardFormatId::CF_UNICODETEXT,
     });
