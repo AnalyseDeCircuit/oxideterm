@@ -36,6 +36,9 @@ pub(super) fn native_apply_syncable_settings_payload(
             if let Some(theme) = plan.theme {
                 settings.terminal.theme = theme;
             }
+            if let Some(theme) = plan.application_theme {
+                settings.appearance.theme = theme;
+            }
             if let Some(auto_reconnect) = plan.auto_reconnect {
                 settings.reconnect.enabled = auto_reconnect;
             }

@@ -718,6 +718,15 @@ impl TerminalSessionBackend for SshPtySession {
         });
     }
 
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        // The worker publishes damage and wakes the UI after applying the palette;
+        // the UI must remain free to draw its previous snapshot while parsing is busy.
+        self.enqueue_control(0, move |core| {
+            core.set_palette(palette);
+            Ok(())
+        });
+    }
+
     fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
         self.enqueue_control(0, move |core| {
             core.set_output_processor(processor);

@@ -626,17 +626,24 @@ impl ThemeTokens {
     /// arbitrary image luminance.
     pub fn refresh_palette_metrics(&mut self) {
         let background_luminance = color_relative_luminance(self.ui.bg);
-        let (window, panel, sidebar, terminal) = if background_luminance < 0.18 {
-            (0.80, 0.84, 0.72, 0.94)
+        let (window, panel, sidebar) = if background_luminance < 0.18 {
+            (0.80, 0.84, 0.72)
         } else if background_luminance < 0.55 {
-            (0.76, 0.81, 0.68, 0.93)
+            (0.76, 0.81, 0.68)
         } else {
-            (0.72, 0.78, 0.64, 0.92)
+            (0.72, 0.78, 0.64)
         };
         self.metrics.window_vibrancy_tint_alpha = window;
         self.metrics.panel_vibrancy_alpha = panel;
         self.metrics.sidebar_vibrancy_alpha = sidebar;
-        self.metrics.terminal_vibrancy_alpha = terminal;
+        let terminal_luminance = color_relative_luminance(self.terminal.background);
+        self.metrics.terminal_vibrancy_alpha = if terminal_luminance < 0.18 {
+            0.94
+        } else if terminal_luminance < 0.55 {
+            0.93
+        } else {
+            0.92
+        };
     }
 
     pub fn apply_density(&mut self, density: UiDensityProfile) {

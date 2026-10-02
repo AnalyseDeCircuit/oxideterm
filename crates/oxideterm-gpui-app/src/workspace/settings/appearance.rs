@@ -21,6 +21,35 @@ const BACKGROUND_SCOPE_OPTIONS: [(BackgroundScope, &str); 2] = [
     ),
 ];
 
+// Persisted opacity keeps 0.1% steps so the slider's expanded near-opaque
+// range is not collapsed back into whole-percent jumps.
+const WINDOW_OPACITY_STEPS_PER_UNIT: f64 = 1000.0;
+
+/// Maps window opacity to slider travel in `0.0..=1.0`.
+///
+/// Compositors blend window alpha linearly, but on a dark theme over bright
+/// content the first few percent of transparency are already very visible.
+/// Travel is quadratic in transparency so most of the slider covers the
+/// near-opaque range.
+fn window_opacity_slider_position(opacity: f64) -> f32 {
+    let transparency = ((MAX_WINDOW_OPACITY - opacity) / (MAX_WINDOW_OPACITY - MIN_WINDOW_OPACITY))
+        .clamp(0.0, 1.0);
+    (1.0 - transparency.sqrt()) as f32
+}
+
+pub(super) fn window_opacity_from_slider_position(position: f32) -> f64 {
+    let travel_from_opaque = 1.0 - f64::from(position.clamp(0.0, 1.0));
+    let opacity =
+        MAX_WINDOW_OPACITY - (MAX_WINDOW_OPACITY - MIN_WINDOW_OPACITY) * travel_from_opaque.powi(2);
+    (opacity * WINDOW_OPACITY_STEPS_PER_UNIT).round() / WINDOW_OPACITY_STEPS_PER_UNIT
+}
+
+fn window_opacity_label(opacity: f64) -> String {
+    let percent = format!("{:.1}", opacity * SETTINGS_PERCENT_SCALE);
+    let percent = percent.strip_suffix(".0").unwrap_or(&percent);
+    format!("{percent}%")
+}
+
 fn background_scope_index(scope: BackgroundScope) -> usize {
     BACKGROUND_SCOPE_OPTIONS
         .iter()
@@ -85,55 +114,92 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.appearance_card(
             self.i18n.t("settings_view.appearance.theme"),
-            Some(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.appearance_action_button(
-                        LucideIcon::Upload,
-                        self.i18n.t("settings_view.appearance.theme_import"),
-                        cx.listener(|this, _event, _window, cx| {
-                            this.import_theme_from_file(cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .when(is_custom_theme_id(&settings.terminal.theme), |actions| {
-                        actions.child(self.appearance_action_button(
-                            LucideIcon::Pencil,
-                            self.i18n.t("settings_view.custom_theme.edit"),
-                            cx.listener(|this, _event, _window, cx| {
-                                let theme_id =
-                                    this.settings_store.settings().terminal.theme.clone();
-                                this.open_theme_editor(Some(theme_id), cx);
+            None,
+            vec![
+                self.appearance_theme_target_row(settings, ThemeTarget::Application, cx),
+                self.appearance_theme_target_row(settings, ThemeTarget::Terminal, cx),
+                self.appearance_theme_preview(settings),
+            ],
+        )
+    }
+
+    fn appearance_theme_target_row(
+        &self,
+        settings: &PersistedSettings,
+        target: ThemeTarget,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let (title_key, hint_key, select) = match target {
+            ThemeTarget::Application => (
+                "settings_view.appearance.application_theme",
+                "settings_view.appearance.application_theme_hint",
+                SettingsSelect::AppearanceTheme,
+            ),
+            ThemeTarget::Terminal => (
+                "settings_view.appearance.terminal_theme",
+                "settings_view.appearance.color_theme_hint",
+                SettingsSelect::AppearanceTerminalTheme,
+            ),
+        };
+        self.appearance_row(
+            title_key,
+            hint_key,
+            div()
+                .w(px(self.tokens.metrics.settings_select_width))
+                .flex_none()
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap(px(self.tokens.spacing.two))
+                .child(self.appearance_select_control(
+                    select,
+                    custom_theme_display_name(settings, target.selected_id(settings)),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_row()
+                        .flex_wrap()
+                        .justify_end()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(self.appearance_action_button(
+                            LucideIcon::Upload,
+                            self.i18n.t("settings_view.appearance.theme_import"),
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.import_theme_from_file(target, cx);
                                 cx.stop_propagation();
                             }),
                         ))
-                    })
-                    .child(self.appearance_action_button(
-                        LucideIcon::Plus,
-                        self.i18n.t("settings_view.custom_theme.create"),
-                        cx.listener(|this, _event, _window, cx| {
-                            this.open_theme_editor(None, cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .into_any_element(),
-            ),
-            vec![
-                self.appearance_row(
-                    "settings_view.appearance.color_theme",
-                    "settings_view.appearance.color_theme_hint",
-                    self.appearance_select_control(
-                        SettingsSelect::AppearanceTheme,
-                        custom_theme_display_name(settings, &settings.terminal.theme),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
-                ),
-                self.appearance_theme_preview(settings),
-            ],
+                        .when(
+                            is_custom_theme_id(target.selected_id(settings)),
+                            |actions| {
+                                actions.child(self.appearance_action_button(
+                                    LucideIcon::Pencil,
+                                    self.i18n.t("settings_view.custom_theme.edit"),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        let theme_id = target
+                                            .selected_id(this.settings_store.settings())
+                                            .to_string();
+                                        this.open_theme_editor(target, Some(theme_id), cx);
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                            },
+                        )
+                        .child(self.appearance_action_button(
+                            LucideIcon::Plus,
+                            self.i18n.t("settings_view.custom_theme.create"),
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.open_theme_editor(target, None, cx);
+                                cx.stop_propagation();
+                            }),
+                        )),
+                )
+                .into_any_element(),
         )
     }
 
@@ -206,14 +272,13 @@ impl WorkspaceApp {
                 self.appearance_row(
                     "settings_view.appearance.window_opacity",
                     "settings_view.appearance.window_opacity_hint",
-                    self.appearance_slider_value_control(
+                    self.appearance_slider_labeled_control(
                         SettingsSlider::AppearanceWindowOpacity,
                         SelectAnchorId::SettingsAppearanceWindowOpacitySlider,
-                        (MIN_WINDOW_OPACITY * SETTINGS_PERCENT_SCALE) as f32,
-                        (MAX_WINDOW_OPACITY * SETTINGS_PERCENT_SCALE) as f32,
-                        (settings.appearance.window_opacity * SETTINGS_PERCENT_SCALE).round()
-                            as f32,
-                        "%",
+                        0.0,
+                        1.0,
+                        window_opacity_slider_position(settings.appearance.window_opacity),
+                        window_opacity_label(settings.appearance.window_opacity),
                         cx,
                     ),
                 ),
@@ -902,6 +967,28 @@ impl WorkspaceApp {
         unit: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.appearance_slider_labeled_control(
+            slider,
+            anchor_id,
+            min,
+            max,
+            value,
+            format!("{}{}", value.round() as i64, unit),
+            cx,
+        )
+    }
+
+    /// Slider whose track position and displayed value use different scales.
+    pub(in crate::workspace) fn appearance_slider_labeled_control(
+        &self,
+        slider: SettingsSlider,
+        anchor_id: SelectAnchorId,
+        min: f32,
+        max: f32,
+        value: f32,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .flex_row()
@@ -914,7 +1001,7 @@ impl WorkspaceApp {
                     .text_align(gpui::TextAlign::Right)
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("{}{}", value.round() as i64, unit)),
+                    .child(label),
             )
             .into_any_element()
     }
@@ -982,23 +1069,40 @@ impl WorkspaceApp {
         &self,
         settings: &PersistedSettings,
     ) -> AnyElement {
-        let previewing = self.open_settings_select == Some(SettingsSelect::AppearanceTheme);
-        let id = if previewing {
-            self.settings_theme_preview
-                .as_deref()
-                .unwrap_or(&settings.terminal.theme)
-        } else {
-            &settings.terminal.theme
+        let preview_target = self
+            .open_settings_select
+            .and_then(SettingsSelect::theme_target);
+        let preview_id = |target: ThemeTarget| {
+            if preview_target == Some(target) {
+                self.settings_theme_preview
+                    .as_deref()
+                    .unwrap_or(target.selected_id(settings))
+            } else {
+                target.selected_id(settings)
+            }
+        };
+        let application_id = preview_id(ThemeTarget::Application);
+        let terminal_id = preview_id(ThemeTarget::Terminal);
+        // Resolve both halves locally so hovering never applies draft colors to the workspace.
+        let preview_tokens = ThemeTokens {
+            ui: oxideterm_settings_model::theme_ui_colors(settings, application_id),
+            terminal: appearance_theme_palette(settings, terminal_id),
+            ..self.tokens
         };
         div()
             .flex()
             .flex_col()
             .gap(px(self.tokens.spacing.two))
             .child(settings_appearance_theme_preview(
-                &self.tokens,
+                &preview_tokens,
                 settings,
-                appearance_theme_palette(settings, id),
-                custom_theme_display_name(settings, id),
+                custom_theme_display_name(settings, application_id),
+                custom_theme_display_name(settings, terminal_id),
+                oxideterm_gpui_settings_view::application_theme_description(
+                    application_id,
+                    preview_tokens.ui,
+                    &self.i18n,
+                ),
                 &self.i18n,
             ))
             .child(
@@ -1656,11 +1760,13 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn open_theme_editor(
         &mut self,
+        target: ThemeTarget,
         edit_theme_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let editor = theme_editor_from_settings(
             self.settings_store.settings(),
+            target,
             edit_theme_id,
             self.i18n.t("settings_view.custom_theme.new_theme_name"),
         );
@@ -1707,7 +1813,11 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn import_theme_from_file(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn import_theme_from_file(
+        &mut self,
+        target: ThemeTarget,
+        cx: &mut Context<Self>,
+    ) {
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: true,
             directories: false,
@@ -1724,7 +1834,7 @@ impl WorkspaceApp {
         };
         let runtime = self.forwarding_runtime.handle().clone();
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.start_theme_import(selection, runtime, cx);
+            settings.start_theme_import(target, selection, runtime, cx);
         });
     }
 
@@ -2069,5 +2179,34 @@ mod theme_preview_tests {
                 0x00ffff
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_opacity_slider_spends_most_travel_near_opaque() {
+        // Linear travel would put 98% at 0.96 and 87.5% at 0.75; the curve
+        // must leave the top fifth of the track for the 100%..98% range.
+        for (position, opacity, label) in [
+            (1.0, 1.0, "100%"),
+            (0.9, 0.995, "99.5%"),
+            (0.8, 0.98, "98%"),
+            (0.5, 0.875, "87.5%"),
+            (0.0, 0.5, "50%"),
+        ] {
+            assert_eq!(
+                window_opacity_from_slider_position(position),
+                opacity,
+                "position={position}"
+            );
+            assert!(
+                (window_opacity_slider_position(opacity) - position).abs() < 1e-6,
+                "opacity={opacity}"
+            );
+            assert_eq!(window_opacity_label(opacity), label);
+        }
     }
 }

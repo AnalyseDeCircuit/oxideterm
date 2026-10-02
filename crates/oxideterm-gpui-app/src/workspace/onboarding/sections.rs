@@ -254,10 +254,11 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected_theme = self.settings_store.settings().terminal.theme.clone();
+        let settings = self.settings_store.settings();
         let mut grid = div().grid().grid_cols(4).gap(px(8.0));
         for theme_id in ONBOARDING_THEME_IDS {
-            let selected = selected_theme == theme_id;
+            let selected =
+                settings.appearance.theme == theme_id && settings.terminal.theme == theme_id;
             let terminal_theme = theme_by_id(theme_id).terminal;
             let card_radius = self.tokens.radii.md;
             grid = grid.child(
@@ -342,7 +343,10 @@ impl WorkspaceApp {
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
                             this.edit_settings(
-                                |settings| settings.terminal.theme = theme_id.to_string(),
+                                |settings| {
+                                    settings.appearance.theme = theme_id.to_string();
+                                    settings.terminal.theme = theme_id.to_string();
+                                },
                                 cx,
                             );
                             cx.stop_propagation();

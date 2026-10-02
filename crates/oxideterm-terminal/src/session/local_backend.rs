@@ -83,6 +83,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::set_output_events_enabled(self, enabled);
     }
 
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        LocalPtySession::set_palette(self, palette);
+    }
+
     fn set_trigger_rules(
         &mut self,
         rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,

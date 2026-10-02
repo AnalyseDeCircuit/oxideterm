@@ -21,6 +21,7 @@ pub struct LocalPtySession {
     encoding: TerminalEncoding,
     input_encoder: TerminalInputEncoder,
     tmux_display: Arc<crate::tmux::TmuxDisplay>,
+    palette: TerminalPalette,
 }
 
 pub type LocalTerminal = LocalPtySession;
@@ -239,6 +240,7 @@ impl LocalPtySession {
             encoding,
             input_encoder: TerminalInputEncoder::new(encoding),
             tmux_display,
+            palette: TerminalPalette::default(),
         })
     }
 
@@ -427,6 +429,20 @@ impl LocalPtySession {
             .notifier
             .0
             .send(LocalGraphicsMsg::SetOutputEventsEnabled(enabled));
+    }
+
+    pub fn set_palette(&mut self, palette: TerminalPalette) {
+        if self.palette == palette {
+            return;
+        }
+        self.palette = palette;
+        // Unchanged rows still hold colors resolved from the old palette.
+        self.term.lock().mark_fully_damaged();
+        self.term.lock().notify_palette_changed();
+        self.tmux_display.set_palette(palette);
+        for command in self.tmux_display.palette_report_commands() {
+            let _ = self.write_control_bytes(command, None);
+        }
     }
 
     pub fn set_trigger_rules(
@@ -650,11 +666,16 @@ impl LocalPtySession {
                     .push(TerminalEvent::ClipboardLoad(formatter));
                 false
             }
+            AlacEvent::ColorSchemeRequest => {
+                let _ = self.write_protocol_bytes(self.palette.color_scheme_report().as_bytes());
+                false
+            }
             AlacEvent::ColorRequest(index, formatter) => {
-                let override_color = (index <= 268)
-                    .then(|| self.display_term().lock().colors()[index])
-                    .flatten();
-                let color = color_for_alacritty_request_with_override(index, override_color);
+                let color = color_for_alacritty_request(
+                    index,
+                    &self.palette,
+                    self.display_term().lock().colors(),
+                );
                 let _ = self.write_protocol_bytes(formatter(color).as_bytes());
                 false
             }
@@ -823,7 +844,14 @@ impl LocalPtySession {
         }
         let term = self.display_term();
         let mut term = term.lock();
-        scroll_snapshot_from_term(&mut term, self.size, &self.graphics, delta, previous)
+        scroll_snapshot_from_term(
+            &mut term,
+            self.size,
+            &self.graphics,
+            &self.palette,
+            delta,
+            previous,
+        )
     }
 
     pub fn page_up(&mut self) {
@@ -885,7 +913,7 @@ impl LocalPtySession {
         }
         let term = self.display_term();
         let term = term.lock();
-        snapshot_from_term(&term, self.size, &self.graphics)
+        snapshot_from_term(&term, self.size, &self.graphics, &self.palette)
     }
 
     pub fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
@@ -894,7 +922,13 @@ impl LocalPtySession {
         }
         let term = self.display_term();
         let mut term = term.lock();
-        incremental_snapshot_from_term(&mut term, self.size, &self.graphics, previous)
+        incremental_snapshot_from_term(
+            &mut term,
+            self.size,
+            &self.graphics,
+            &self.palette,
+            previous,
+        )
     }
 
     pub fn try_render_snapshot(
@@ -919,8 +953,13 @@ impl LocalPtySession {
         } else {
             self.term.lock()
         };
-        let snapshot =
-            incremental_snapshot_from_term(&mut term, self.size, &self.graphics, previous);
+        let snapshot = incremental_snapshot_from_term(
+            &mut term,
+            self.size,
+            &self.graphics,
+            &self.palette,
+            previous,
+        );
         // Selection coordinates must describe this grid revision, without a second blocking lock.
         let selection = crate::selection::term_selection(&term);
         Some((snapshot, selection, *term.mode()))
@@ -941,6 +980,7 @@ impl LocalPtySession {
             &term,
             self.size,
             &self.graphics,
+            &self.palette,
             display_offset,
             rows,
         )
@@ -958,11 +998,13 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
+    palette: &TerminalPalette,
 ) -> TerminalSnapshot {
     snapshot_from_term_with_display_offset(
         term,
         size,
         graphics,
+        palette,
         term.grid().display_offset(),
         size.rows,
     )
@@ -972,6 +1014,7 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
     term: &mut Term<T>,
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
+    palette: &TerminalPalette,
     previous: &TerminalSnapshot,
 ) -> TerminalSnapshot {
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
@@ -1013,6 +1056,7 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
             term,
             size,
             graphics,
+            palette,
             scrollback_lines,
             scroll_up,
             dirty_rows,
@@ -1026,6 +1070,7 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
             term,
             size,
             graphics,
+            palette,
             display_offset,
             size.rows,
         );
@@ -1034,7 +1079,7 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
     let mut snapshot = previous.clone();
     for row in dirty_rows.expect("partial terminal damage must contain row indexes") {
         let line_id = snapshot.lines[row].line_id;
-        let mut next_row = snapshot_row_from_term(term, size, display_offset, row);
+        let mut next_row = snapshot_row_from_term(term, size, palette, display_offset, row);
         next_row.line_id = line_id;
         snapshot.lines[row] = next_row;
     }
@@ -1046,6 +1091,7 @@ fn snapshot_from_term_after_scroll_up<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
+    palette: &TerminalPalette,
     scrollback_lines: usize,
     scroll_up: usize,
     dirty_rows: &[usize],
@@ -1072,7 +1118,7 @@ fn snapshot_from_term_after_scroll_up<T: EventListener>(
             continue;
         }
 
-        let mut next_row = snapshot_row_from_term(term, size, 0, row);
+        let mut next_row = snapshot_row_from_term(term, size, palette, 0, row);
         if previous_row < previous.lines.len() {
             next_row.line_id = previous.lines[previous_row].line_id;
         }
@@ -1086,6 +1132,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
     term: &mut Term<T>,
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
+    palette: &TerminalPalette,
     delta: i32,
     previous: &TerminalSnapshot,
 ) -> TerminalSnapshot {
@@ -1101,8 +1148,14 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
         && previous.lines.len() == size.rows;
     let offset_distance = previous.display_offset.abs_diff(display_offset);
     if !compatible || offset_distance >= size.rows {
-        let snapshot =
-            snapshot_from_term_with_display_offset(term, size, graphics, display_offset, size.rows);
+        let snapshot = snapshot_from_term_with_display_offset(
+            term,
+            size,
+            graphics,
+            palette,
+            display_offset,
+            size.rows,
+        );
         term.reset_damage();
         return snapshot;
     }
@@ -1120,7 +1173,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
             previous_row_index(row)
                 .and_then(|previous_row| previous.lines.get(previous_row))
                 .cloned()
-                .unwrap_or_else(|| snapshot_row_from_term(term, size, display_offset, row))
+                .unwrap_or_else(|| snapshot_row_from_term(term, size, palette, display_offset, row))
         })
         .collect::<Vec<_>>();
 
@@ -1153,6 +1206,7 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
+    palette: &TerminalPalette,
     display_offset: usize,
     rows: usize,
 ) -> TerminalSnapshot {
@@ -1161,7 +1215,7 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     let display_offset = display_offset.min(scrollback_lines);
     let requested_rows = rows.max(1);
     let mut rows = (0..requested_rows)
-        .map(|row| snapshot_row_from_term(term, size, display_offset, row))
+        .map(|row| snapshot_row_from_term(term, size, palette, display_offset, row))
         .collect::<Vec<_>>();
 
     let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
@@ -1194,13 +1248,19 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
 fn snapshot_row_from_term<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
+    palette: &TerminalPalette,
     display_offset: usize,
     row: usize,
 ) -> TerminalRow {
     let Some(source) = snapshot_row_source(term, size, display_offset, row) else {
-        return blank_snapshot_row(size, display_offset, row);
+        return blank_snapshot_row(
+            size,
+            display_offset,
+            row,
+            default_terminal_cell(palette, term.colors()),
+        );
     };
-    snapshot_row_from_source(term, size, display_offset, row, source)
+    snapshot_row_from_source(term, size, palette, display_offset, row, source)
 }
 
 #[derive(Clone, Copy)]
@@ -1245,6 +1305,7 @@ fn snapshot_row_source<T: EventListener>(
 fn snapshot_row_from_source<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
+    palette: &TerminalPalette,
     display_offset: usize,
     row: usize,
     source: SnapshotRowSource,
@@ -1252,25 +1313,27 @@ fn snapshot_row_from_source<T: EventListener>(
     let grid_line = row as i32 - display_offset as i32;
     let terminal_row = &term.grid()[Line(grid_line)];
     let terminal_cells = &terminal_row[..];
+    let overrides = term.colors();
     let mut cells = Vec::with_capacity(size.cols);
     let mut recent_styles = [None, None];
     let mut next_style_slot = 0;
     let mut previous_extra = None;
     // Default trailing cells have fixed paint data, so skip color and metadata conversion.
     for cell in &terminal_cells[..source.populated_cols] {
-        if cell
+        let spacer = cell
             .flags
-            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
-        {
-            cells.push(blank_terminal_cell());
-            continue;
-        }
-        let ch = if cell.c == '\0' { ' ' } else { cell.c };
+            .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
+        // Spacers keep their own colors so a wide glyph's background covers both cells.
+        let ch = if spacer || cell.c == '\0' {
+            ' '
+        } else {
+            cell.c
+        };
         let attrs = attrs_from_flags(cell.flags);
         let effective_fg = if attrs.inverse() { cell.bg } else { cell.fg };
         let ((fg, bg), style_origin) = if crate::color::is_app_chosen_exact_color(&effective_fg) {
             (
-                style_colors_for_cell(cell.fg, cell.bg, ch, attrs),
+                style_colors_for_cell(cell.fg, cell.bg, ch, attrs, palette, overrides),
                 style_origin_for_cell(cell.fg, cell.bg, attrs),
             )
         } else {
@@ -1288,7 +1351,7 @@ fn snapshot_row_from_source<T: EventListener>(
             {
                 (*colors, *origin)
             } else {
-                let colors = style_colors_for_cell(cell.fg, cell.bg, ch, attrs);
+                let colors = style_colors_for_cell(cell.fg, cell.bg, ch, attrs, palette, overrides);
                 let origin = style_origin_for_cell(cell.fg, cell.bg, attrs);
                 recent_styles[next_style_slot] = Some((style_key, colors, origin));
                 next_style_slot = (next_style_slot + 1) % recent_styles.len();
@@ -1297,7 +1360,7 @@ fn snapshot_row_from_source<T: EventListener>(
         };
         let mut snapshot_cell = TerminalCell {
             ch,
-            wide: cell.flags.contains(Flags::WIDE_CHAR),
+            wide: !spacer && cell.flags.contains(Flags::WIDE_CHAR),
             fg,
             bg,
             style_origin,
@@ -1305,6 +1368,10 @@ fn snapshot_row_from_source<T: EventListener>(
             extra: None,
             cursor: false,
         };
+        if spacer {
+            cells.push(snapshot_cell);
+            continue;
+        }
         let zerowidth = cell.zerowidth().unwrap_or_default();
         let hyperlink = cell.hyperlink();
         if !zerowidth.is_empty() || hyperlink.is_some() {
@@ -1327,7 +1394,7 @@ fn snapshot_row_from_source<T: EventListener>(
         }
         cells.push(snapshot_cell);
     }
-    cells.resize(size.cols, blank_terminal_cell());
+    cells.resize(size.cols, default_terminal_cell(palette, overrides));
     let mut snapshot_row = TerminalRow {
         line_id: 0,
         source_id: source.source_id,
@@ -1341,7 +1408,12 @@ fn snapshot_row_from_source<T: EventListener>(
     snapshot_row
 }
 
-fn blank_snapshot_row(size: TerminalSize, display_offset: usize, row: usize) -> TerminalRow {
+pub(crate) fn blank_snapshot_row(
+    size: TerminalSize,
+    display_offset: usize,
+    row: usize,
+    blank: TerminalCell,
+) -> TerminalRow {
     let mut snapshot_row = TerminalRow {
         line_id: 0,
         source_id: 0,
@@ -1349,18 +1421,20 @@ fn blank_snapshot_row(size: TerminalSize, display_offset: usize, row: usize) -> 
         wrapped: false,
         active_input: false,
         signature: 0,
-        cells: Arc::new(vec![blank_terminal_cell(); size.cols]),
+        cells: Arc::new(vec![blank; size.cols]),
     };
     snapshot_row.refresh_signature();
     snapshot_row
 }
 
-fn blank_terminal_cell() -> TerminalCell {
+/// Builds an empty cell painted with the emulator's current default colors.
+pub(crate) fn default_terminal_cell(palette: &TerminalPalette, overrides: &Colors) -> TerminalCell {
+    let (fg, bg) = crate::color::default_colors(palette, overrides);
     TerminalCell {
         ch: ' ',
         wide: false,
-        fg: OXIDETERM_DARK_THEME.foreground,
-        bg: OXIDETERM_DARK_THEME.ansi_background,
+        fg,
+        bg,
         style_origin: TerminalStyleOrigin::default(),
         attrs: TerminalAttrs::default(),
         extra: None,
@@ -1462,7 +1536,7 @@ mod incremental_snapshot_tests {
         let graphics = TerminalGraphicsState::default();
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, "\x1b[37;107mab─cd\x1b[2mef\x1b[7mgh\x1b[0mij\x1b[38;2;1;2;3mkl\x1b[38;5;196mmn\x1b[0m\r\n\x1b]8;;https://one.example\x1b\\ABe\u{301}C\x1b]8;;\x1b\\D\x1b]8;;https://two.example\x1b\\EF\x1b]8;;\x1b\\".as_bytes());
-        let snapshot = snapshot_from_term(&term, size, &graphics);
+        let snapshot = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         for (source, actual) in term.grid()[Line(0)][..]
             .iter()
             .take(16)
@@ -1471,7 +1545,14 @@ mod incremental_snapshot_tests {
             let attrs = attrs_from_flags(source.flags);
             assert_eq!(
                 (actual.fg, actual.bg),
-                style_colors_for_cell(source.fg, source.bg, source.c, attrs)
+                style_colors_for_cell(
+                    source.fg,
+                    source.bg,
+                    source.c,
+                    attrs,
+                    &TerminalPalette::default(),
+                    term.colors(),
+                )
             );
             assert_eq!(actual.attrs, attrs);
             assert_eq!(
@@ -1484,7 +1565,7 @@ mod incremental_snapshot_tests {
             colors[0].fg, colors[2].fg,
             "decoration glyphs bypass contrast adjustment"
         );
-        assert_eq!(colors[2].fg, OXIDETERM_DARK_THEME.ansi[7]);
+        assert_eq!(colors[2].fg, crate::color::OXIDETERM_DARK_THEME.ansi[7]);
         assert_eq!(colors[12].fg, TerminalColor::rgb(1, 2, 3));
         let linked = &snapshot.lines[1].cells;
         assert_eq!(snapshot.lines[1].text().trim_end(), "ABe\u{301}CDEF");
@@ -1518,7 +1599,13 @@ mod incremental_snapshot_tests {
             &mut term,
             b"\x1b[2;1H\x1b]8;;https://changed.example\x1b\\Z\x1b]8;;\x1b\\",
         );
-        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &snapshot);
+        let next = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &snapshot,
+        );
         assert_eq!(
             next.lines[1].cells[0].hyperlink(),
             Some("https://changed.example")
@@ -1540,13 +1627,19 @@ mod incremental_snapshot_tests {
         let (listener, _events) = local_event_channel();
         let mut term = Term::new(Config::default(), &size, listener);
         let graphics = TerminalGraphicsState::default();
-        let previous = snapshot_from_term(&term, size, &graphics);
+        let previous = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         term.reset_damage();
 
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"changed");
-        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
-        let full = snapshot_from_term(&term, size, &graphics);
+        let next = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &previous,
+        );
+        let full = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         assert!(!Arc::ptr_eq(&previous.lines[0].cells, &next.lines[0].cells));
         assert!(Arc::ptr_eq(&previous.lines[2].cells, &next.lines[2].cells));
@@ -1566,10 +1659,10 @@ mod incremental_snapshot_tests {
         let graphics = TerminalGraphicsState::default();
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"one\r\ntwo\r\nthree\r\nfour");
-        let previous = snapshot_from_term(&term, size, &graphics);
+        let previous = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         parser.advance(&mut term, b"\r\nfive");
-        let next = snapshot_from_term(&term, size, &graphics);
+        let next = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         assert_eq!(next.lines[0].source_id, previous.lines[1].source_id);
         assert_eq!(next.lines[1].source_id, previous.lines[2].source_id);
@@ -1588,13 +1681,19 @@ mod incremental_snapshot_tests {
         let graphics = TerminalGraphicsState::default();
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"one\r\ntwo\r\nprompt");
-        let previous = snapshot_from_term(&term, size, &graphics);
+        let previous = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         term.reset_damage();
 
         // Output commonly completes the active row before the following linefeed scrolls it.
         parser.advance(&mut term, b"-completed\r\nnext");
-        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
-        let full = snapshot_from_term(&term, size, &graphics);
+        let next = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &previous,
+        );
+        let full = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         assert!(next.lines[1].text().starts_with("prompt-completed"));
         assert_snapshot_content_eq(&next, &full);
@@ -1613,13 +1712,25 @@ mod incremental_snapshot_tests {
         let graphics = TerminalGraphicsState::default();
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"one\r\ntwo\r\nprompt");
-        let initial = snapshot_from_term(&term, size, &graphics);
+        let initial = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         // Consume startup full damage so this assertion covers the steady output path.
-        let previous = incremental_snapshot_from_term(&mut term, size, &graphics, &initial);
+        let previous = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &initial,
+        );
 
         parser.advance(&mut term, b"-completed\r\nnext");
-        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
-        let full = snapshot_from_term(&term, size, &graphics);
+        let next = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &previous,
+        );
+        let full = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         assert!(Arc::ptr_eq(&previous.lines[1].cells, &next.lines[0].cells));
         assert!(!Arc::ptr_eq(&previous.lines[2].cells, &next.lines[1].cells));
@@ -1639,12 +1750,24 @@ mod incremental_snapshot_tests {
         let graphics = TerminalGraphicsState::default();
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"zero\r\none\r\ntwo\r\nthree\r\nprompt");
-        let initial = snapshot_from_term(&term, size, &graphics);
-        let previous = incremental_snapshot_from_term(&mut term, size, &graphics, &initial);
+        let initial = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
+        let previous = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &initial,
+        );
 
         parser.advance(&mut term, b"-completed\r\nnext-a\r\nnext-b");
-        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
-        let full = snapshot_from_term(&term, size, &graphics);
+        let next = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &previous,
+        );
+        let full = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         assert!(Arc::ptr_eq(&previous.lines[2].cells, &next.lines[0].cells));
         assert!(Arc::ptr_eq(&previous.lines[3].cells, &next.lines[1].cells));
@@ -1665,10 +1788,17 @@ mod incremental_snapshot_tests {
         let graphics = TerminalGraphicsState::default();
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"one\r\ntwo\r\nthree\r\nfour");
-        let previous = snapshot_from_term(&term, size, &graphics);
+        let previous = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
-        let next = scroll_snapshot_from_term(&mut term, size, &graphics, 1, &previous);
-        let full = snapshot_from_term(&term, size, &graphics);
+        let next = scroll_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            1,
+            &previous,
+        );
+        let full = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
 
         assert!(Arc::ptr_eq(&previous.lines[0].cells, &next.lines[1].cells));
         assert_snapshot_content_eq(&next, &full);
@@ -1685,16 +1815,25 @@ mod incremental_snapshot_tests {
         let (listener, _events) = local_event_channel();
         let mut term = Term::new(Config::default(), &size, listener);
         let graphics = TerminalGraphicsState::default();
-        let previous = snapshot_from_term(&term, size, &graphics);
+        let previous = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         term.reset_damage();
 
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"\r\n");
-        let next = incremental_snapshot_from_term(&mut term, size, &graphics, &previous);
+        let next = incremental_snapshot_from_term(
+            &mut term,
+            size,
+            &graphics,
+            &TerminalPalette::default(),
+            &previous,
+        );
 
         assert!(!next.lines[0].cells[0].cursor);
         assert!(next.lines[1].cells[0].cursor);
-        assert_snapshot_content_eq(&next, &snapshot_from_term(&term, size, &graphics));
+        assert_snapshot_content_eq(
+            &next,
+            &snapshot_from_term(&term, size, &graphics, &TerminalPalette::default()),
+        );
     }
 
     #[test]

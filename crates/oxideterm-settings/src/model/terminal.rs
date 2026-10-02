@@ -540,7 +540,7 @@ impl TerminalSettings {
 impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
-            theme: "default".to_string(),
+            theme: DEFAULT_COLOR_THEME.to_string(),
             font_family: FontFamily::Jetbrains,
             custom_font_family: String::new(),
             cjk_font_family: String::new(),

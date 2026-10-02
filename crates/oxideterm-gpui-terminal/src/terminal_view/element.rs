@@ -1114,12 +1114,12 @@ impl TerminalElement {
             {
                 highlight_fg
             } else {
-                to_hsla(resolve_terminal_foreground(cell.fg, &self.theme))
+                to_hsla(cell.fg)
             };
             let bg = if block_cursor {
                 to_hsla(terminal_color_from_hex(self.theme.header_foreground))
             } else {
-                to_hsla(resolve_terminal_background(cell.bg, &self.theme))
+                to_hsla(cell.bg)
             };
             let cell_width = if cell.wide { 2 } else { 1 };
 
@@ -1732,22 +1732,6 @@ fn hash_selection_for_row(
         crate::terminal_view::selection::TerminalSelectionMode::Lines => 3,
     }
     .hash(hasher);
-}
-
-fn resolve_terminal_foreground(color: TerminalColor, theme: &TerminalUiTheme) -> TerminalColor {
-    if color == terminal_color_from_hex(OXIDETERM_TERMINAL_FOREGROUND) {
-        terminal_color_from_hex(theme.foreground)
-    } else {
-        color
-    }
-}
-
-fn resolve_terminal_background(color: TerminalColor, theme: &TerminalUiTheme) -> TerminalColor {
-    if color == terminal_color_from_hex(OXIDETERM_TERMINAL_BACKGROUND) {
-        terminal_color_from_hex(theme.background)
-    } else {
-        color
-    }
 }
 
 fn hash_highlight_rules(rules: &[TerminalHighlightRule], hasher: &mut impl Hasher) {
@@ -2428,14 +2412,18 @@ mod cache_tests {
     }
 
     fn row_with_text_and_cursor(absolute_line: i64, text: &str, cursor_col: usize) -> TerminalRow {
+        // Default-colored cells carry the theme defaults that the backend palette resolves.
+        let theme = TerminalUiTheme::default();
+        let fg = terminal_color_from_hex(theme.foreground);
+        let bg = terminal_color_from_hex(theme.background);
         let mut cells = text
             .chars()
             .enumerate()
             .map(|(col, ch)| TerminalCell {
                 ch,
                 wide: false,
-                fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-                bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+                fg,
+                bg,
                 style_origin: Default::default(),
                 attrs: Default::default(),
                 extra: None,
@@ -2445,8 +2433,8 @@ mod cache_tests {
         cells.resize_with(cursor_col.saturating_add(1), || TerminalCell {
             ch: ' ',
             wide: false,
-            fg: TerminalColor::rgb(0xe6, 0xe8, 0xeb),
-            bg: TerminalColor::rgb(0x0d, 0x0f, 0x12),
+            fg,
+            bg,
             style_origin: Default::default(),
             attrs: Default::default(),
             extra: None,

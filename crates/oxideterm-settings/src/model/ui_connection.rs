@@ -41,6 +41,7 @@ pub enum AppIconVariant {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
+    pub theme: String,
     #[serde(default)]
     pub app_icon: AppIconVariant,
     pub sidebar_collapsed_default: bool,
@@ -63,6 +64,7 @@ pub struct AppearanceSettings {
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
+            theme: DEFAULT_COLOR_THEME.to_string(),
             app_icon: AppIconVariant::default(),
             sidebar_collapsed_default: false,
             ui_density: UiDensity::Comfortable,

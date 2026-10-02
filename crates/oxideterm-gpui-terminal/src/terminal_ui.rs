@@ -9,7 +9,8 @@ use oxideterm_settings::{
     TerminalBackspaceSequence, TerminalDeleteSequence, TerminalSemanticScheme,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalRow, TrzszTransferPolicy,
+    TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalPalette, TerminalRow,
+    TrzszTransferPolicy,
 };
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticClass, SemanticScheme, SemanticSchemeDocument,
@@ -39,8 +40,6 @@ pub(crate) const TERMINAL_COMMAND_MARK_GUTTER_WIDTH: f32 = 0.0;
 const NESTED_SEMANTIC_COLOR_COUNT: u8 = 6;
 const TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY: f32 = 0.11;
 const TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY: f32 = 0.08;
-pub(crate) const OXIDETERM_TERMINAL_BACKGROUND: u32 = 0x0d0f12;
-pub(crate) const OXIDETERM_TERMINAL_FOREGROUND: u32 = 0xe6e8eb;
 pub(crate) const SCROLLBAR_WIDTH: f32 = 10.0;
 pub(crate) const SCROLLBAR_GAP: f32 = 0.0;
 pub(crate) const SCROLLBAR_RESERVED_WIDTH: f32 = SCROLLBAR_WIDTH;
@@ -1006,6 +1005,36 @@ impl TerminalUiTheme {
             header_foreground: tokens.terminal.cursor,
             tokens,
         }
+    }
+
+    /// Colors the terminal backend resolves for default, ANSI, and color-query slots, so
+    /// emulator output and pane chrome share one theme.
+    pub fn palette(&self) -> TerminalPalette {
+        let terminal = self.tokens.terminal;
+        TerminalPalette::new(
+            terminal_color_from_hex(self.foreground),
+            terminal_color_from_hex(self.background),
+            terminal_color_from_hex(self.header_foreground),
+            [
+                terminal.black,
+                terminal.red,
+                terminal.green,
+                terminal.yellow,
+                terminal.blue,
+                terminal.magenta,
+                terminal.cyan,
+                terminal.white,
+                terminal.bright_black,
+                terminal.bright_red,
+                terminal.bright_green,
+                terminal.bright_yellow,
+                terminal.bright_blue,
+                terminal.bright_magenta,
+                terminal.bright_cyan,
+                terminal.bright_white,
+            ]
+            .map(terminal_color_from_hex),
+        )
     }
 }
 

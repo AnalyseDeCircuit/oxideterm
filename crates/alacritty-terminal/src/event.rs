@@ -36,6 +36,9 @@ pub enum Event {
     /// expected escape sequence format.
     ColorRequest(usize, Arc<dyn Fn(Rgb) -> String + Sync + Send + 'static>),
 
+    /// Request the host's color preference, independent of application palette overrides.
+    ColorSchemeRequest,
+
     /// Write some text to the PTY.
     PtyWrite(String),
 
@@ -65,6 +68,7 @@ impl Debug for Event {
             Event::ClipboardLoad(ty, _) => write!(f, "ClipboardLoad({ty:?})"),
             Event::TextAreaSizeRequest(_) => write!(f, "TextAreaSizeRequest"),
             Event::ColorRequest(index, _) => write!(f, "ColorRequest({index})"),
+            Event::ColorSchemeRequest => write!(f, "ColorSchemeRequest"),
             Event::PtyWrite(text) => write!(f, "PtyWrite({text})"),
             Event::Title(title) => write!(f, "Title({title})"),
             Event::CursorBlinkingChange => write!(f, "CursorBlinkingChange"),

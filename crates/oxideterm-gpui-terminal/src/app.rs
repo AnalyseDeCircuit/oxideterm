@@ -1028,7 +1028,9 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> Result<Self> {
         let (mut snapshot, session_kind, cwd_integration_launch_state, render_mode) = {
-            let terminal = terminal.lock();
+            let mut terminal = terminal.lock();
+            // The pane owns the visible theme; apply it before the first snapshot is taken.
+            terminal.set_palette(preferences.theme.palette());
             (
                 terminal.snapshot().with_generation(1),
                 terminal.kind(),
@@ -1881,6 +1883,12 @@ impl TerminalPane {
             self.terminal
                 .lock()
                 .set_trzsz_policy(preferences.trzsz_policy.clone());
+        }
+        let palette = preferences.theme.palette();
+        if self.preferences.theme.palette() != palette {
+            self.terminal.lock().set_palette(palette);
+            // Rows resolved with the previous palette must be rebuilt even without new output.
+            self.snapshot_dirty = true;
         }
         let metrics_changed = self.preferences.font_family != preferences.font_family
             || self.preferences.cjk_font_family != preferences.cjk_font_family
@@ -5083,6 +5091,56 @@ mod tests {
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
             4
         );
+    }
+
+    #[gpui::test]
+    fn theme_change_repaints_existing_rows_with_the_new_palette(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        let light = TerminalUiTheme::from_tokens(oxideterm_theme::ThemeTokens::from_builtin(
+            oxideterm_theme::theme_by_id("solarized-light"),
+        ));
+        pane.update(cx, |pane, cx| {
+            let settled = {
+                let mut terminal = pane.terminal.lock();
+                // The cursor row is always damaged, so leave it below the colored row.
+                terminal.feed_recording_output(b"\x1b[41mAB\x1b[0m\r\n");
+                let first = terminal.snapshot_incremental(&terminal.snapshot());
+                terminal.snapshot_incremental(&first)
+            };
+            pane.snapshot = settled;
+            pane.snapshot_dirty = false;
+
+            let mut preferences = pane.preferences.clone();
+            preferences.theme = light.clone();
+            pane.set_preferences(preferences, cx);
+
+            assert!(pane.snapshot_dirty);
+            let (next, _, _) = pane
+                .terminal
+                .lock()
+                .try_render_snapshot(&pane.snapshot, false)
+                .unwrap();
+            let row = &next.lines[0].cells;
+            assert_eq!(
+                (row[0].bg, row[2].bg),
+                (
+                    terminal_color_from_hex(light.tokens.terminal.red),
+                    terminal_color_from_hex(light.background),
+                )
+            );
+        });
     }
 
     #[gpui::test]

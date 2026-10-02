@@ -14,6 +14,7 @@ pub struct NativeSyncableSettingsApplyPlan {
     pub ui_density: Option<UiDensity>,
     pub font_size: Option<i64>,
     pub theme: Option<String>,
+    pub application_theme: Option<String>,
     pub auto_reconnect: Option<bool>,
 }
 
@@ -23,6 +24,7 @@ impl NativeSyncableSettingsApplyPlan {
             && self.ui_density.is_none()
             && self.font_size.is_none()
             && self.theme.is_none()
+            && self.application_theme.is_none()
             && self.auto_reconnect.is_none()
     }
 }
@@ -46,6 +48,12 @@ pub fn native_syncable_settings_payload(settings: &Value) -> Value {
         .and_then(Value::as_str)
     {
         appearance.insert("uiDensity".to_string(), json!(ui_density));
+    }
+    if let Some(theme) = settings
+        .pointer("/appearance/theme")
+        .and_then(Value::as_str)
+    {
+        appearance.insert("theme".to_string(), json!(theme));
     }
     if let Some(font_size) = settings
         .get("terminal")
@@ -134,6 +142,20 @@ pub fn native_normalize_syncable_settings_payload(
                     ),
                     None,
                 ));
+            }
+        }
+        if let Some(theme) = source.get("theme") {
+            let theme = theme.as_str().map(str::trim).unwrap_or_default();
+            if theme.is_empty() {
+                warnings.push(native_syncable_settings_warning(
+                    "appearance.theme",
+                    "missing-theme",
+                    false,
+                    "Theme id must not be empty".to_string(),
+                    None,
+                ));
+            } else {
+                appearance.insert("theme".to_string(), json!(theme));
             }
         }
         if !appearance.is_empty() {
@@ -232,6 +254,10 @@ pub fn native_syncable_settings_apply_plan(
             .and_then(Value::as_i64),
         theme: payload
             .pointer("/terminal/theme")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        application_theme: payload
+            .pointer("/appearance/theme")
             .and_then(Value::as_str)
             .map(str::to_string),
         auto_reconnect: payload
@@ -336,5 +362,51 @@ fn native_syncable_settings_json_string(value: &Value) -> String {
         Value::Number(value) => value.to_string(),
         Value::Bool(value) => value.to_string(),
         Value::Null => "null".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_payload_preserves_independent_themes() {
+        let payload = native_syncable_settings_payload(&json!({
+            "appearance": { "theme": "github-dark" },
+            "terminal": { "theme": "monokai" }
+        }));
+        assert_eq!(
+            payload,
+            json!({
+                "appearance": { "theme": "github-dark" },
+                "terminal": { "theme": "monokai" }
+            })
+        );
+    }
+
+    #[test]
+    fn sync_plan_only_applies_the_requested_theme_targets() {
+        for (payload, application, terminal) in [
+            (
+                json!({"appearance": {"theme": " github-dark "}}),
+                Some("github-dark"),
+                None,
+            ),
+            (
+                json!({"terminal": {"theme": "monokai"}}),
+                None,
+                Some("monokai"),
+            ),
+            (
+                json!({"appearance": {"theme": "github-dark"}, "terminal": {"theme": "monokai"}}),
+                Some("github-dark"),
+                Some("monokai"),
+            ),
+        ] {
+            let normalized = native_normalize_syncable_settings_payload(&payload);
+            let plan = native_syncable_settings_apply_plan(&normalized.payload).unwrap();
+            assert_eq!(plan.application_theme.as_deref(), application, "{payload}");
+            assert_eq!(plan.theme.as_deref(), terminal, "{payload}");
+        }
     }
 }

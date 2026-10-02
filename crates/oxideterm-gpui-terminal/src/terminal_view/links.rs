@@ -5,7 +5,7 @@ use std::{
 };
 
 use gpui::SharedString;
-use oxideterm_terminal::{TerminalCell, TerminalColor, TerminalSnapshot};
+use oxideterm_terminal::{TerminalCell, TerminalSnapshot};
 
 #[derive(Clone, Debug)]
 struct LinkText {
@@ -43,11 +43,12 @@ pub(crate) fn link_should_be_styled(
 
 pub(crate) fn is_link_stylable_cell(cell: &TerminalCell) -> bool {
     // Auto-detected links must not replace colors chosen by the terminal application.
-    cell.bg == TerminalColor::rgb(0x0d, 0x0f, 0x12) && !cell.style_origin.foreground_explicit()
+    is_link_interactive_cell(cell) && !cell.style_origin.foreground_explicit()
 }
 
 pub(crate) fn is_link_interactive_cell(cell: &TerminalCell) -> bool {
-    cell.bg == TerminalColor::rgb(0x0d, 0x0f, 0x12)
+    // Application-painted backgrounds usually mark UI chrome rather than plain output.
+    !cell.style_origin.background_explicit()
 }
 
 #[cfg(test)]

@@ -8,14 +8,14 @@ mod tests {
     use alacritty_terminal::{
         event::VoidListener,
         term::Config,
+        term::color::Colors,
         vte::ansi::{Color, NamedColor, Processor, Rgb, StdSyncHandler},
     };
     use oxideterm_terminal_graphics::{GraphicsIngress, TerminalGraphicsSegment};
 
     use crate::{
         color::{
-            DEFAULT_MINIMUM_CONTRAST_SCORE, OXIDETERM_DARK_THEME,
-            color_for_alacritty_request_with_override, indexed_color_to_rgb,
+            DEFAULT_MINIMUM_CONTRAST_SCORE, OXIDETERM_DARK_THEME, color_for_alacritty_request,
             perceptual_contrast_score, style_colors_for_cell,
         },
         process::{parse_lsof_cwd, parse_process_table_for_group},
@@ -981,8 +981,8 @@ mod tests {
             placeholder: false,
         }));
 
-        let first = snapshot_from_term(&term, size, &graphics);
-        let second = snapshot_from_term(&term, size, &graphics);
+        let first = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
+        let second = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         let first_data = first.images[0].data.as_ref().expect("image data");
         let second_data = second.images[0].data.as_ref().expect("image data");
 
@@ -1019,7 +1019,8 @@ mod tests {
             graphics.handle_event(event);
         }
 
-        let snapshot = snapshot_from_term(&term.borrow(), size, &graphics);
+        let snapshot =
+            snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
         assert_eq!(snapshot.images.len(), 1);
         let image = &snapshot.images[0];
         assert_eq!(image.row, 5);
@@ -1045,7 +1046,8 @@ mod tests {
             let mut shell = crate::shell_integration::TerminalShellIntegration::default();
             let graphics = TerminalGraphicsState::default();
             parser.advance(&mut *term.borrow_mut(), b"\x1b[4;3H");
-            let mut snapshot = snapshot_from_term(&term.borrow(), size, &graphics);
+            let mut snapshot =
+                snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
             let frame = b"\x1b[?2026h\x1b[2;1H*\x1b[4;5H\x1b[?2026l";
             for (index, byte) in frame.iter().enumerate() {
                 ingress.advance_ordered(
@@ -1073,6 +1075,7 @@ mod tests {
                     &mut term.borrow_mut(),
                     size,
                     &graphics,
+                    &TerminalPalette::default(),
                     &snapshot,
                 );
                 let complete = index + 1 == frame.len();
@@ -1116,14 +1119,45 @@ mod tests {
 
         // TUI applications commonly move the cursor into scratch space before hiding it.
         parser.advance(&mut term, b"\x1b[6;41H\x1b[?25l");
-        let hidden = snapshot_from_term(&term, size, &graphics);
+        let hidden = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         assert_eq!(hidden.cursor_col, 40);
         assert_eq!(hidden.cursor_row, 5);
         assert_eq!(hidden.cursor_shape, TerminalCursorShape::Hidden);
 
         parser.advance(&mut term, b"\x1b[?25h");
-        let visible = snapshot_from_term(&term, size, &graphics);
+        let visible = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         assert_eq!(visible.cursor_shape, TerminalCursorShape::Block);
+    }
+
+    #[test]
+    fn wide_glyph_spacers_keep_the_glyph_background() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 2,
+            cell_width: 10,
+            cell_height: 20,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, "\x1b[48;2;1;2;3m中\x1b[m".as_bytes());
+
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
+        let cells = &snapshot.lines[0].cells;
+
+        assert_eq!(
+            (cells[0].ch, cells[0].wide, cells[0].bg),
+            ('中', true, TerminalColor::rgb(1, 2, 3))
+        );
+        assert_eq!(
+            (cells[1].ch, cells[1].wide, cells[1].bg),
+            (' ', false, TerminalColor::rgb(1, 2, 3))
+        );
+        assert_eq!(cells[2].bg, OXIDETERM_DARK_THEME.background);
     }
 
     #[test]
@@ -1149,7 +1183,7 @@ mod tests {
             b"\x1b[?1049h\x1b[>4;2m\x1b[?1h\x1b=\x1b[?2004h\x1b[?1004h\x1b[1;24r\x1b[m\x1b[H\x1b[2J\x1b[?25l\x1b[24;1H\"oxideterm-vim-test.txt\" [New]\x1b[1;1H\x1b[?25h",
         );
 
-        let snapshot = snapshot_from_term(&term, size, &graphics);
+        let snapshot = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         assert!(
             snapshot.lines[0].cells.iter().all(|cell| cell.ch == ' '),
             "Vim's alternate-screen clear retained shell glyphs in the first row"
@@ -1158,7 +1192,7 @@ mod tests {
             snapshot.lines[0]
                 .cells
                 .iter()
-                .all(|cell| cell.bg == OXIDETERM_DARK_THEME.ansi_background),
+                .all(|cell| cell.bg == OXIDETERM_DARK_THEME.background),
             "Vim's alternate-screen clear retained shell backgrounds in the first row"
         );
         assert_eq!(snapshot.cursor_row, 0);
@@ -1192,12 +1226,12 @@ mod tests {
         parser.advance(&mut term, b"\x1b[?1049h\x1b[m\x1b[H\x1b[2J");
         term.resize(resized);
 
-        let snapshot = snapshot_from_term(&term, resized, &graphics);
+        let snapshot = snapshot_from_term(&term, resized, &graphics, &TerminalPalette::default());
         assert!(
             snapshot.lines[0]
                 .cells
                 .iter()
-                .all(|cell| cell.ch == ' ' && cell.bg == OXIDETERM_DARK_THEME.ansi_background),
+                .all(|cell| cell.ch == ' ' && cell.bg == OXIDETERM_DARK_THEME.background),
             "alternate-screen resize restored primary-screen prompt cells"
         );
     }
@@ -1221,7 +1255,7 @@ mod tests {
             b"\x1b[?25l\x1b[m\x1b[24;1H\x1b[1m-- INSERT --\x1b[m\x1b[24;13H\x1b[K\x1b[24;1H\x1b[K\x1b[1;1H846\x08\x1b[?25h",
         );
 
-        let snapshot = snapshot_from_term(&term, size, &graphics);
+        let snapshot = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         let first_row = &snapshot.lines[0];
         let text = first_row
             .cells
@@ -1273,7 +1307,7 @@ mod tests {
         );
 
         let term = term.borrow();
-        let snapshot = snapshot_from_term(&term, size, &graphics);
+        let snapshot = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
         assert!(!term.mode().contains(TermMode::ALT_SCREEN));
         assert!(snapshot.images.is_empty());
     }
@@ -1290,7 +1324,12 @@ mod tests {
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"012345678901234567890123456789X");
 
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let row_text = |row: usize| -> String {
             snapshot.lines[row]
                 .cells
@@ -1332,6 +1371,7 @@ mod tests {
             &term,
             size,
             &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
             1,
             4,
         );
@@ -1385,7 +1425,12 @@ mod tests {
             event,
             TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(_))
         )));
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let visible_text = snapshot
             .lines
             .iter()
@@ -1619,7 +1664,7 @@ mod tests {
             }).collect::<Vec<_>>();
             assert_eq!(cwd_events, [(expected_cwd, expected_host)], "{scenario}");
             assert!(integration.command_marks().is_empty(), "{scenario}");
-            let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+            let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default(), &TerminalPalette::default());
             let visible_text = snapshot.lines.iter().map(|row| row.text()).collect::<Vec<_>>().join("\n");
             assert_eq!(visible_text.trim(), "$", "{scenario}");
         }
@@ -1659,7 +1704,12 @@ mod tests {
                     && clipboard.operation == TerminalEditorClipboardOperation::Copy
                     && clipboard.text.as_str() == "你好"
         )));
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let visible_text = snapshot
             .lines
             .iter()
@@ -1695,7 +1745,12 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, TerminalEvent::EditorIntegration(_)))
         );
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let visible_text = snapshot
             .lines
             .iter()
@@ -1766,7 +1821,12 @@ mod tests {
         assert_eq!(marks.len(), 1);
         assert_eq!(marks[0].command.as_deref(), Some("pwd"));
         assert!(!marks[0].is_closed);
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let visible_text = snapshot
             .lines
             .iter()
@@ -1806,7 +1866,12 @@ mod tests {
                 host: Some(host),
             } if cwd == "/home/dev" && host == "build-host"
         )));
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let visible_text = snapshot
             .lines
             .iter()
@@ -1877,7 +1942,12 @@ mod tests {
                 recorded.extend(bytes);
             }
             assert_eq!(recorded, input, "split {split}");
-            let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+            let snapshot = snapshot_from_term(
+                &term,
+                size,
+                &TerminalGraphicsState::default(),
+                &TerminalPalette::default(),
+            );
             assert_eq!(snapshot.lines[0].text().trim_end(), "ABC", "split {split}");
             assert_eq!(
                 snapshot.lines[0].cells[..3]
@@ -1944,7 +2014,12 @@ mod tests {
         );
 
         assert_eq!(recorded, "❯ typed input".as_bytes());
-        let snapshot = snapshot_from_term(&term, size, &TerminalGraphicsState::default());
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &TerminalGraphicsState::default(),
+            &TerminalPalette::default(),
+        );
         let visible_text = snapshot
             .lines
             .iter()
@@ -1996,61 +2071,143 @@ mod tests {
         )));
     }
 
-    #[test]
-    fn color_request_uses_oxideterm_terminal_palette_indices() {
-        let dim_background = color_for_alacritty_request_with_override(268, None);
-        assert_eq!(dim_background.r, OXIDETERM_DARK_THEME.ansi[0].r);
-        assert_eq!(dim_background.g, OXIDETERM_DARK_THEME.ansi[0].g);
-        assert_eq!(dim_background.b, OXIDETERM_DARK_THEME.ansi[0].b);
-
-        let out_of_range = color_for_alacritty_request_with_override(999, None);
-        assert_eq!((out_of_range.r, out_of_range.g, out_of_range.b), (0, 0, 0));
+    fn solarized_light_palette() -> TerminalPalette {
+        let hex =
+            |value: u32| TerminalColor::rgb((value >> 16) as u8, (value >> 8) as u8, value as u8);
+        TerminalPalette::new(
+            hex(0x657b83),
+            hex(0xfdf6e3),
+            hex(0x586e75),
+            [
+                0x073642, 0xdc322f, 0x859900, 0xb58900, 0x268bd2, 0xd33682, 0x2aa198, 0xeee8d5,
+                0x002b36, 0xcb4b16, 0x586e75, 0x657b83, 0x839496, 0x6c71c4, 0x93a1a1, 0xfdf6e3,
+            ]
+            .map(hex),
+        )
     }
 
     #[test]
-    fn color_request_prefers_alacritty_runtime_overrides() {
-        let override_color = Rgb {
+    fn color_requests_follow_palette_and_runtime_overrides() {
+        let light = solarized_light_palette();
+        let rgb = |color: Rgb| TerminalColor::rgb(color.r, color.g, color.b);
+        for palette in [OXIDETERM_DARK_THEME, light] {
+            let overrides = Colors::default();
+            for (index, expected) in [
+                (1, palette.ansi[1]),
+                (256, palette.foreground),
+                (257, palette.background),
+                (258, palette.cursor),
+                (268, palette.dim_foreground),
+                (999, TerminalColor::rgb(0, 0, 0)),
+            ] {
+                assert_eq!(
+                    rgb(color_for_alacritty_request(index, &palette, &overrides)),
+                    expected,
+                    "slot {index} of {palette:?}"
+                );
+            }
+        }
+
+        let mut overrides = Colors::default();
+        overrides[257] = Some(Rgb {
             r: 12,
             g: 34,
             b: 56,
-        };
-
-        let color = color_for_alacritty_request_with_override(4, Some(override_color));
-        assert_eq!((color.r, color.g, color.b), (12, 34, 56));
+        });
+        assert_eq!(
+            rgb(color_for_alacritty_request(257, &light, &overrides)),
+            TerminalColor::rgb(12, 34, 56)
+        );
+        let (_, bg) = style_colors_for_cell(
+            Color::Named(NamedColor::Foreground),
+            Color::Named(NamedColor::Background),
+            'x',
+            TerminalAttrs::default(),
+            &light,
+            &overrides,
+        );
+        assert_eq!(bg, TerminalColor::rgb(12, 34, 56));
     }
 
     #[test]
-    fn minimum_contrast_adjusts_theme_defined_ansi_colors() {
-        let (fg, bg) = style_colors_for_cell(
-            Color::Named(NamedColor::White),
-            Color::Indexed(15),
-            'x',
-            TerminalAttrs::default(),
-        );
+    fn cell_colors_follow_palette_only_for_palette_sourced_colors() {
+        let light = solarized_light_palette();
+        let overrides = Colors::default();
+        // Decoration glyphs bypass contrast adjustment so the resolved palette slot is visible.
+        for (fg, expected) in [
+            (
+                Color::Named(NamedColor::Red),
+                TerminalColor::rgb(0xdc, 0x32, 0x2f),
+            ),
+            (Color::Indexed(1), TerminalColor::rgb(0xdc, 0x32, 0x2f)),
+            (Color::Indexed(196), TerminalColor::rgb(255, 0, 0)),
+            (
+                Color::Spec(Rgb { r: 1, g: 2, b: 3 }),
+                TerminalColor::rgb(1, 2, 3),
+            ),
+        ] {
+            let colors = style_colors_for_cell(
+                fg,
+                Color::Named(NamedColor::Background),
+                '\u{2500}',
+                TerminalAttrs::default(),
+                &light,
+                &overrides,
+            );
+            assert_eq!(
+                colors,
+                (expected, TerminalColor::rgb(0xfd, 0xf6, 0xe3)),
+                "{fg:?}"
+            );
+        }
+    }
 
-        assert_ne!(fg, OXIDETERM_DARK_THEME.ansi[7]);
-        assert_eq!(bg, OXIDETERM_DARK_THEME.ansi[15]);
-        assert!(perceptual_contrast_score(fg, bg).abs() >= DEFAULT_MINIMUM_CONTRAST_SCORE);
+    #[test]
+    fn minimum_contrast_uses_resolved_palette_background() {
+        let overrides = Colors::default();
+        for palette in [OXIDETERM_DARK_THEME, solarized_light_palette()] {
+            // ANSI white is nearly invisible on a light background until contrast adjusts it.
+            let (fg, bg) = style_colors_for_cell(
+                Color::Named(NamedColor::White),
+                Color::Named(NamedColor::Background),
+                'x',
+                TerminalAttrs::default(),
+                &palette,
+                &overrides,
+            );
+
+            assert_eq!(bg, palette.background);
+            assert!(
+                perceptual_contrast_score(fg, bg).abs() >= DEFAULT_MINIMUM_CONTRAST_SCORE,
+                "{fg:?} on {bg:?}"
+            );
+        }
     }
 
     #[test]
     fn app_chosen_truecolor_and_256_colors_bypass_contrast_adjustment() {
-        let red_rgb = Rgb { r: 255, g: 0, b: 0 };
-        let (truecolor_fg, _) = style_colors_for_cell(
-            Color::Spec(red_rgb),
-            Color::Named(NamedColor::Background),
-            'x',
-            TerminalAttrs::default(),
-        );
-        assert_eq!(truecolor_fg, TerminalColor::rgb(255, 0, 0));
-
-        let (indexed_fg, _) = style_colors_for_cell(
-            Color::Indexed(196),
-            Color::Named(NamedColor::Background),
-            'x',
-            TerminalAttrs::default(),
-        );
-        assert_eq!(indexed_fg, indexed_color_to_rgb(196));
+        // Both colors are too dark for the default background and would otherwise be lifted.
+        for (fg, expected) in [
+            (
+                Color::Spec(Rgb {
+                    r: 20,
+                    g: 20,
+                    b: 20,
+                }),
+                TerminalColor::rgb(20, 20, 20),
+            ),
+            (Color::Indexed(233), TerminalColor::rgb(18, 18, 18)),
+        ] {
+            let (resolved, _) = style_colors_for_cell(
+                fg,
+                Color::Named(NamedColor::Background),
+                'x',
+                TerminalAttrs::default(),
+                &TerminalPalette::default(),
+                &Colors::default(),
+            );
+            assert_eq!(resolved, expected, "{fg:?}");
+        }
     }
 
     #[test]
@@ -2060,11 +2217,14 @@ mod tests {
             Color::Indexed(15),
             '\u{e0b0}',
             TerminalAttrs::default(),
+            &TerminalPalette::default(),
+            &Colors::default(),
         );
 
         assert_eq!(fg, OXIDETERM_DARK_THEME.ansi[7]);
         assert_eq!(bg, OXIDETERM_DARK_THEME.ansi[15]);
     }
+
     #[cfg(unix)]
     #[test]
     #[ignore = "requires the tmux executable; uses a private test server socket"]

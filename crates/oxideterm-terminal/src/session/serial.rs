@@ -172,6 +172,7 @@ pub struct SerialSession {
     title: Option<String>,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
+    palette: TerminalPalette,
     graphics_alt_screen_active: bool,
     output_queue: VecDeque<crate::backpressure::ByteBoundedItem<SerialWorkerEvent>>,
     magic_scan: MagicScanWindow,
@@ -420,6 +421,7 @@ impl SerialSession {
             title: None,
             graphics_ingress: GraphicsIngress::new(serial_graphics_options),
             graphics: TerminalGraphicsState::default(),
+            palette: TerminalPalette::default(),
             graphics_alt_screen_active: false,
             output_queue: VecDeque::new(),
             magic_scan: MagicScanWindow::default(),
@@ -823,7 +825,20 @@ impl SerialSession {
                     .push(TerminalEvent::ClipboardLoad(formatter));
                 false
             }
-            AlacEvent::ColorRequest(_, _) | AlacEvent::TextAreaSizeRequest(_) => false,
+            AlacEvent::ColorSchemeRequest => {
+                let _ = self.write_protocol_bytes(self.palette.color_scheme_report().as_bytes());
+                false
+            }
+            AlacEvent::ColorRequest(index, formatter) => {
+                let color = crate::color_for_alacritty_request(
+                    index,
+                    &self.palette,
+                    self.term.lock().colors(),
+                );
+                let _ = self.write_protocol_bytes(formatter(color).as_bytes());
+                false
+            }
+            AlacEvent::TextAreaSizeRequest(_) => false,
             AlacEvent::ChildExit(_) | AlacEvent::Exit => false,
         }
     }
@@ -937,6 +952,16 @@ impl TerminalSessionBackend for SerialSession {
             .input_encoder
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
         self.write_input(&bytes)
+    }
+
+    fn set_palette(&mut self, palette: TerminalPalette) {
+        if self.palette == palette {
+            return;
+        }
+        self.palette = palette;
+        // Unchanged rows still hold colors resolved from the old palette.
+        self.term.lock().mark_fully_damaged();
+        self.term.lock().notify_palette_changed();
     }
 
     fn set_encoding(&mut self, encoding: TerminalEncoding) {
@@ -1092,6 +1117,7 @@ impl TerminalSessionBackend for SerialSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             delta,
             previous,
         )
@@ -1171,6 +1197,7 @@ impl TerminalSessionBackend for SerialSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
         )
     }
 
@@ -1185,6 +1212,7 @@ impl TerminalSessionBackend for SerialSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             previous,
         )
     }
@@ -1204,6 +1232,7 @@ impl TerminalSessionBackend for SerialSession {
                 cell_height: self.resize.cell_height,
             },
             &self.graphics,
+            &self.palette,
             display_offset,
             rows,
         )
@@ -1909,6 +1938,7 @@ mod serial_tests {
             title: None,
             graphics_ingress: GraphicsIngress::new(GraphicsOptions::default()),
             graphics: TerminalGraphicsState::default(),
+            palette: TerminalPalette::default(),
             graphics_alt_screen_active: false,
             output_queue: VecDeque::new(),
             magic_scan: MagicScanWindow::default(),
