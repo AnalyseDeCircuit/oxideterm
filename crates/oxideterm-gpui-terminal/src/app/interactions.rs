@@ -3332,13 +3332,13 @@ mod tests {
     use gpui::{AppContext, IntoElement, Render, ScrollDelta, TestAppContext, Window, div, point};
     #[cfg(unix)]
     use oxideterm_terminal::{
-        GraphicsOptions, LocalPtyConfig, ShellInfo, TerminalEncoding, TerminalEvent,
-        TerminalSession, VIM_FREE_TYPE_INTEGRATION_SOURCE,
+        GraphicsOptions, LocalPtyConfig, ShellInfo, TerminalEditorClipboardOperation,
+        TerminalEncoding, TerminalEvent, TerminalSession, VIM_FREE_TYPE_INTEGRATION_SOURCE,
     };
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
     use oxideterm_terminal::{
-        TerminalEditorApplication, TerminalEditorCapabilities, TerminalEditorClipboardOperation,
-        TerminalEditorIntegrationEvent, TerminalEditorMode, TerminalEditorSelection,
+        TerminalEditorApplication, TerminalEditorCapabilities, TerminalEditorIntegrationEvent,
+        TerminalEditorMode, TerminalEditorSelection,
     };
 
     struct TerminalScrollTestRoot;

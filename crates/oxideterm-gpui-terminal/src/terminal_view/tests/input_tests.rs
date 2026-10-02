@@ -118,19 +118,30 @@ fn bundled_conpty_delivers_distinct_ctrl_j_and_enter_events() {
     let directory = tempfile::tempdir().unwrap();
     let script = directory.path().join("input.ps1");
     let ready = directory.path().join("ready");
+    let started = directory.path().join("ready.started");
+    let error = directory.path().join("ready.error");
     let result = directory.path().join("result.json");
     fs::write(
         &script,
         r#"
 param($Ready, $Result)
 $ErrorActionPreference = 'Stop'
-[Console]::TreatControlCAsInput = $true
-[IO.File]::WriteAllText($Ready, 'ready')
-$events = @(for ($i = 0; $i -lt 7; $i++) {
-    $key = [Console]::ReadKey($true)
-    @{ key = [int]$key.Key; character = [int]$key.KeyChar; modifiers = $key.Modifiers.ToString() }
-})
-[IO.File]::WriteAllText($Result, (ConvertTo-Json -InputObject $events -Compress))
+try {
+    [IO.File]::WriteAllText("$Ready.started", 'started')
+    [Console]::TreatControlCAsInput = $true
+    [IO.File]::WriteAllText($Ready, 'ready')
+    $events = @(for ($i = 0; $i -lt 7; $i++) {
+        $key = [Console]::ReadKey($true)
+        @{ key = [int]$key.Key; character = [int]$key.KeyChar; modifiers = $key.Modifiers.ToString() }
+    })
+    # Publish only a complete result; the parent may stop the PTY once it sees this file.
+    [IO.File]::WriteAllText("$Result.tmp", (ConvertTo-Json -InputObject $events -Compress))
+    [IO.File]::Move("$Result.tmp", $Result)
+} catch {
+    [IO.File]::WriteAllText("$Ready.error.tmp", ($_ | Out-String))
+    [IO.File]::Move("$Ready.error.tmp", "$Ready.error")
+    exit 1
+}
 "#,
     )
     .unwrap();
@@ -153,20 +164,50 @@ $events = @(for ($i = 0; $i -lt 7; $i++) {
     };
     let terminal =
         TerminalPane::local_shared_session(config, &TerminalUiPreferences::default()).unwrap();
+    let fail = |stage: &str| -> ! {
+        let mut session = terminal.lock();
+        session.read_pending();
+        let lifecycle = session.lifecycle();
+        let mode = session.mode();
+        // This isolated fixture runs fixed input with profiles disabled, so its
+        // terminal output can explain startup failures without logging user sessions.
+        let output = session
+            .snapshot()
+            .lines
+            .iter()
+            .map(|row| row.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let script_error = fs::read_to_string(&error).unwrap_or_default();
+        session.shutdown();
+        panic!(
+            "{stage}; script_started={}; ready={}; lifecycle={lifecycle:?}; mode={mode:?}\nPowerShell error: {script_error}\nTerminal output:\n{output}",
+            started.exists(),
+            ready.exists()
+        );
+    };
     let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        terminal.lock().read_pending();
+        let running = {
+            let mut session = terminal.lock();
+            session.read_pending();
+            session.lifecycle().is_running()
+        };
+        if error.exists() || !running {
+            fail("console reader exited before becoming ready");
+        }
         if ready.exists() && terminal.lock().mode().contains(TermMode::WIN32_INPUT) {
             break;
         }
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(ready.exists(), "console reader did not start");
+    if !ready.exists() {
+        fail("console reader did not become ready within 15 seconds");
+    }
     let mode = terminal.lock().mode();
-    assert!(
-        mode.contains(TermMode::WIN32_INPUT),
-        "bundled ConPTY did not negotiate mode 9001"
-    );
+    if !mode.contains(TermMode::WIN32_INPUT) {
+        fail("bundled ConPTY did not negotiate mode 9001");
+    }
     for key in ["ctrl-j", "ctrl-enter", "shift-enter", "enter", "ctrl-i"] {
         for event in [KittyKeyEventType::Press, KittyKeyEventType::Release] {
             let sequence =
@@ -183,8 +224,18 @@ $events = @(for ($i = 0; $i -lt 7; $i++) {
         .write_protocol_bytes("中文".as_bytes())
         .unwrap();
     while Instant::now() < deadline && !result.exists() {
-        terminal.lock().read_pending();
+        let running = {
+            let mut session = terminal.lock();
+            session.read_pending();
+            session.lifecycle().is_running()
+        };
+        if error.exists() || (!running && !result.exists()) {
+            fail("console reader exited before publishing key events");
+        }
         std::thread::sleep(Duration::from_millis(10));
+    }
+    if !result.exists() {
+        fail("console reader did not publish key events before the deadline");
     }
     terminal.lock().shutdown();
     let events: serde_json::Value =
