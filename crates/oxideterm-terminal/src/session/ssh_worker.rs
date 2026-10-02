@@ -719,9 +719,12 @@ impl TerminalSessionBackend for SshPtySession {
     }
 
     fn set_palette(&mut self, palette: TerminalPalette) {
-        // Snapshots read the core under this lock, so the next render must already use the
-        // new palette instead of waiting for the parser queue to reach a control command.
-        self.shared.core.lock().set_palette(palette);
+        // The worker publishes damage and wakes the UI after applying the palette;
+        // the UI must remain free to draw its previous snapshot while parsing is busy.
+        self.enqueue_control(0, move |core| {
+            core.set_palette(palette);
+            Ok(())
+        });
     }
 
     fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {

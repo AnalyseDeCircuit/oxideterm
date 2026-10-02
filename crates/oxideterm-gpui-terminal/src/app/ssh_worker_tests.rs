@@ -57,16 +57,23 @@ fn busy_ssh_parser_does_not_block_drawing_the_previous_frame(cx: &mut TestAppCon
         .block_on(sender.data(channel, b"FINAL-AFTER-DEFER".to_vec()))
         .unwrap();
     entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    pane.update(cx, |pane, _| {
-        pane.snapshot_dirty = true;
+    let palette_started = Instant::now();
+    pane.update(cx, |pane, cx| {
+        let mut preferences = pane.preferences.clone();
+        preferences.theme = TerminalUiTheme::new(0xfdf6e3, 0x657b83, 0x586e75);
+        pane.set_preferences(preferences, cx);
         pane.snapshot_deferred_since = None;
     });
     draw(cx);
+    eprintln!(
+        "SSH_BUSY_PALETTE update_and_draw_ms={:.3}",
+        palette_started.elapsed().as_secs_f64() * 1000.0
+    );
     let blocked = timed_out.load(std::sync::atomic::Ordering::Acquire);
     let _ = release_tx.send(());
     assert!(
         !blocked,
-        "render waited for the parser despite deferring its snapshot"
+        "theme update or render waited for the busy parser"
     );
     pane.read_with(cx, |pane, _| {
         assert!(pane.snapshot_dirty);
@@ -83,20 +90,31 @@ fn busy_ssh_parser_does_not_block_drawing_the_previous_frame(cx: &mut TestAppCon
                 .collect::<Vec<_>>(),
         );
     });
+    let activity = pane.read_with(cx, |pane, _| pane.terminal.lock().activity_receiver());
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
+        // Bridge the worker's real notification into GPUI's deterministic executor.
+        let notified = peer.runtime.block_on(async {
+            tokio::time::timeout(Duration::from_millis(2), activity.notified())
+                .await
+                .unwrap_or(false)
+        });
+        if notified {
+            pane.update(cx, |pane, cx| pane.tick(cx));
+        }
         draw(cx);
         if pane.read_with(cx, |pane, _| {
-            pane.snapshot
-                .lines
-                .iter()
-                .any(|line| line.text().contains("FINAL-AFTER-DEFER"))
+            pane.snapshot.lines.iter().any(|line| {
+                line.text().contains("FINAL-AFTER-DEFER")
+                    && line.cells[0].fg == oxideterm_terminal::TerminalColor::rgb(0x65, 0x7b, 0x83)
+                    && line.cells[0].bg == oxideterm_terminal::TerminalColor::rgb(0xfd, 0xf6, 0xe3)
+            })
         }) {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "deferred final output was never painted"
+            "deferred final output was never painted with the new palette"
         );
         std::thread::sleep(Duration::from_millis(2));
     }

@@ -152,7 +152,21 @@ fn ssh_palette_changes_rebuild_rows_and_answer_color_queries() {
         TerminalColor::rgb(0x58, 0x6e, 0x75),
         ansi,
     );
+    fixture.barrier();
+    fixture.terminal.read_pending();
+    let activity = fixture.terminal.activity_receiver();
+    while fixture.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_millis(2), activity.notified())
+            .await
+            .unwrap_or(false)
+    }) {}
     fixture.terminal.set_palette(light);
+    assert!(fixture.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), activity.notified())
+            .await
+            .expect("palette application did not wake the UI")
+    }));
+    assert!(fixture.terminal.read_pending());
     let themed = fixture.terminal.snapshot_incremental(&settled);
     let row = &themed.lines[0].cells;
     assert_eq!(
