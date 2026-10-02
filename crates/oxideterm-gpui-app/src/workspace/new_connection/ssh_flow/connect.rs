@@ -439,10 +439,12 @@ impl WorkspaceApp {
                 }
                 SshConnectionWorkerResult::AuthenticationCompleted {
                     node_id,
+                    connection_id,
                     configured_credentials_confirmed,
                 } => {
                     self.save_confirmed_connection_auth(
                         node_id,
+                        connection_id,
                         configured_credentials_confirmed,
                         cx,
                     );

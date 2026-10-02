@@ -891,7 +891,9 @@ impl WorkspaceRuntimeEntity {
         let worker_node_id = node_id.clone();
         let worker_connection_id = connection_id.clone();
         let prompt_handler = Arc::new(
-            NativeSshPromptHandler::new(self.ssh_worker_tx.clone()).for_node(node_id.clone()),
+            NativeSshPromptHandler::new(self.ssh_worker_tx.clone())
+                .for_node(node_id.clone())
+                .for_connection(connection_id.clone()),
         );
         let progress_tx = reconnect_tx.clone();
         let progress_node_id = worker_node_id.clone();

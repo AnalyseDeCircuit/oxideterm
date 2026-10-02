@@ -263,6 +263,7 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
     },
     AuthenticationCompleted {
         node_id: NodeId,
+        connection_id: String,
         configured_credentials_confirmed: bool,
     },
 }
@@ -271,6 +272,7 @@ pub(in crate::workspace) enum SshConnectionWorkerResult {
 pub(in crate::workspace) struct NativeSshPromptHandler {
     tx: ActiveDeliverySender<SshConnectionWorkerResult>,
     node_id: Option<NodeId>,
+    connection_id: Option<String>,
 }
 
 fn sync_saved_connection_node_title_for_nodes(
@@ -296,22 +298,32 @@ fn sync_saved_connection_node_title_for_nodes(
 
 impl NativeSshPromptHandler {
     pub(in crate::workspace) fn new(tx: ActiveDeliverySender<SshConnectionWorkerResult>) -> Self {
-        Self { tx, node_id: None }
+        Self {
+            tx,
+            node_id: None,
+            connection_id: None,
+        }
     }
 
     pub(in crate::workspace) fn for_node(mut self, node_id: NodeId) -> Self {
         self.node_id = Some(node_id);
         self
     }
+
+    pub(in crate::workspace) fn for_connection(mut self, connection_id: String) -> Self {
+        self.connection_id = Some(connection_id);
+        self
+    }
 }
 
 impl SshPromptHandler for NativeSshPromptHandler {
     fn authentication_completed(&self, configured_credentials_confirmed: bool) {
-        if let Some(node_id) = &self.node_id {
+        if let (Some(node_id), Some(connection_id)) = (&self.node_id, &self.connection_id) {
             let _ = self
                 .tx
                 .send(SshConnectionWorkerResult::AuthenticationCompleted {
                     node_id: node_id.clone(),
+                    connection_id: connection_id.clone(),
                     configured_credentials_confirmed,
                 });
         }

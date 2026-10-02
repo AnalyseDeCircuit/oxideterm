@@ -1,7 +1,8 @@
 use gpui::{Context, Window};
 use oxideterm_connections::{ConnectionCredentialSlot, SavedAuth, SavedConnection, SecretString};
 use oxideterm_ssh::{
-    AuthMethod, NodeId, NodeOrigin, SshPasswordPrompt, SshPasswordResponse, SshPromptError,
+    AuthMethod, NodeId, NodeOrigin, SshConfig, SshPasswordPrompt, SshPasswordResponse,
+    SshPromptError,
 };
 use tokio::sync::oneshot;
 use zeroize::Zeroizing;
@@ -35,6 +36,50 @@ impl SavedAuthSaveTarget {
             && self.port == connection.port
             && self.username == connection.username
             && self.updated_at == connection.updated_at
+    }
+
+    fn take_confirmed_auth(
+        pending: &mut Option<Self>,
+        connection: &SavedConnection,
+        config: SshConfig,
+        current_connection_id: Option<&str>,
+        authenticated_connection_id: &str,
+        configured_credentials_confirmed: bool,
+    ) -> Option<AuthMethod> {
+        // Replacement attempts retire the old physical connection. Check its receipt
+        // before consuming consent, including after the current transport finishes.
+        if current_connection_id != Some(authenticated_connection_id) {
+            return None;
+        }
+        let target = pending.take()?;
+        if !configured_credentials_confirmed
+            || !target.is_current(connection)
+            || config.host != target.host
+            || config.port != target.port
+            || config.username != target.username
+        {
+            return None;
+        }
+        Some(config.auth)
+    }
+
+    fn refresh_after_password_save(
+        &mut self,
+        saved: &SavedPasswordTarget,
+        connection: &SavedConnection,
+    ) {
+        // A verified write to a jump slot changes the record revision, not the
+        // primary authentication the user consented to save. Never revive stale consent.
+        if matches!(saved.slot, ConnectionCredentialSlot::ProxyHop { .. })
+            && self.connection_id == saved.connection_id
+            && self.connection_id == connection.id
+            && self.updated_at == saved.updated_at
+            && self.host == connection.host
+            && self.port == connection.port
+            && self.username == connection.username
+        {
+            self.updated_at = connection.updated_at;
+        }
     }
 }
 
@@ -172,36 +217,36 @@ impl WorkspaceApp {
     pub(super) fn save_confirmed_connection_auth(
         &mut self,
         node_id: NodeId,
+        authenticated_connection_id: String,
         configured_credentials_confirmed: bool,
         cx: &mut Context<Self>,
     ) {
-        let Some(target) = self
-            .ssh_nodes
-            .get_mut(&node_id)
-            .and_then(|node| node.pending_auth_save_target.take())
-        else {
+        let Some(node) = self.ssh_nodes.get_mut(&node_id) else {
             return;
         };
-        if !configured_credentials_confirmed
-            || !self
-                .connection_store
-                .get(&target.connection_id)
-                .is_some_and(|connection| target.is_current(connection))
-        {
+        let Some(target) = node.pending_auth_save_target.as_ref() else {
             return;
-        }
+        };
+        let connection_id = target.connection_id.clone();
+        let Some(connection) = self.connection_store.get(&connection_id) else {
+            return;
+        };
         let Some(snapshot) = self.node_router.node_runtime_snapshot(&node_id) else {
             return;
         };
-        if snapshot.config.host != target.host
-            || snapshot.config.port != target.port
-            || snapshot.config.username != target.username
-        {
+        let Some(auth) = SavedAuthSaveTarget::take_confirmed_auth(
+            &mut node.pending_auth_save_target,
+            connection,
+            snapshot.config,
+            snapshot.connection_id.as_deref(),
+            &authenticated_connection_id,
+            configured_credentials_confirmed,
+        ) else {
             return;
-        }
+        };
         let mut form = super::ssh_flow::form_from_runtime_config(
             oxideterm_ssh::SshConfig {
-                auth: snapshot.config.auth,
+                auth,
                 ..Default::default()
             },
             None,
@@ -214,7 +259,7 @@ impl WorkspaceApp {
         );
         if matches!(
             self.connection_store
-                .set_connection_auth(&target.connection_id, auth),
+                .set_connection_auth(&connection_id, auth),
             Ok(true)
         ) {
             self.queue_cloud_sync_dirty_refresh(cx);
@@ -317,6 +362,13 @@ impl WorkspaceApp {
             );
             return;
         }
+        if let Some(connection) = self.connection_store.get(&target.connection_id) {
+            for node in self.ssh_nodes.values_mut() {
+                if let Some(pending) = node.pending_auth_save_target.as_mut() {
+                    pending.refresh_after_password_save(&target, connection);
+                }
+            }
+        }
         if let Some(mut node) = self.node_router.node_runtime_snapshot(&target.node_id)
             && node.config.host == target.prompt.host
             && node.config.port == target.prompt.port
@@ -348,13 +400,110 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
 
-    #[test]
-    fn password_prompt_target_keeps_saved_identity_and_jump_slot_and_rejects_stale_records() {
-        let mut connection: SavedConnection = serde_json::from_value(serde_json::json!({
+    fn saved_password_connection() -> SavedConnection {
+        serde_json::from_value(serde_json::json!({
             "id": "saved-a", "name": "Saved", "host": "target.test", "username": "user",
             "auth": {"type": "password"}, "created_at": "2026-09-30T00:00:00Z",
             "proxy_chain": [{"host": "jump.test", "username": "jump-user", "auth": {"type": "password"}}]
-        })).unwrap();
+        })).unwrap()
+    }
+
+    #[test]
+    fn stale_authentication_receipt_cannot_consume_replacement_consent() {
+        use oxideterm_ssh::{
+            ConnectionConsumer, ConnectionPoolConfig, NodeRouter, SshConfig, SshConnectionRegistry,
+        };
+        let connection = saved_password_connection();
+        let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+        let router = NodeRouter::new(registry.clone());
+        let node_id = NodeId::new("reused-node");
+        let config = SshConfig::password("target.test", 22, "user", "new-fixture-password");
+        let handle = registry.acquire(
+            config.clone(),
+            ConnectionConsumer::NodeRouter(node_id.0.clone()),
+        );
+        router.upsert_node(node_id.clone(), config);
+        router
+            .bind_connection(&node_id, handle.connection_id())
+            .unwrap();
+        let mut pending = Some(SavedAuthSaveTarget::new(&connection));
+
+        for confirmed in [true, false] {
+            let snapshot = router.node_runtime_snapshot(&node_id).unwrap();
+            assert_eq!(
+                SavedAuthSaveTarget::take_confirmed_auth(
+                    &mut pending,
+                    &connection,
+                    snapshot.config,
+                    snapshot.connection_id.as_deref(),
+                    "retired-connection",
+                    confirmed,
+                ),
+                None
+            );
+            assert!(pending.as_ref().unwrap().is_current(&connection));
+        }
+        let snapshot = router.node_runtime_snapshot(&node_id).unwrap();
+        assert_eq!(
+            SavedAuthSaveTarget::take_confirmed_auth(
+                &mut pending,
+                &connection,
+                snapshot.config,
+                snapshot.connection_id.as_deref(),
+                handle.connection_id(),
+                true,
+            ),
+            Some(AuthMethod::password("new-fixture-password"))
+        );
+        assert!(pending.is_none());
+    }
+
+    #[test]
+    fn saving_a_jump_password_preserves_only_unchanged_primary_consent() {
+        let mut connection = saved_password_connection();
+        let mut pending = SavedAuthSaveTarget::new(&connection);
+        let mut stale = pending.clone();
+        stale.updated_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-09-29T00:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+        let target = saved_password_target(
+            &connection,
+            NodeId::new("jump"),
+            &NodeOrigin::ManualPreset {
+                saved_connection_id: connection.id.clone(),
+                hop_index: 0,
+            },
+            SshPasswordPrompt {
+                host: "jump.test".into(),
+                port: 22,
+                username: "jump-user".into(),
+            },
+        )
+        .unwrap();
+        // A successful protected-slot write changes the record revision without changing primary auth.
+        connection.proxy_chain[0].auth = SavedAuth::Password {
+            empty_password: false,
+            keychain_id: Some("fixture-protected-reference".into()),
+            plaintext_password: None,
+        };
+        connection.updated_at = Some(chrono::Utc::now());
+        pending.refresh_after_password_save(&target, &connection);
+        stale.refresh_after_password_save(&target, &connection);
+        assert!(pending.is_current(&connection));
+        assert!(!stale.is_current(&connection));
+
+        connection.updated_at = Some(chrono::Utc::now() + chrono::Duration::seconds(1));
+        assert!(
+            !pending.is_current(&connection),
+            "later user edits must still invalidate consent"
+        );
+    }
+
+    #[test]
+    fn password_prompt_target_keeps_saved_identity_and_jump_slot_and_rejects_stale_records() {
+        let mut connection = saved_password_connection();
         connection.auth = SavedAuth::KerberosPreferred {
             server_identity: None,
             delegate_credentials: false,
