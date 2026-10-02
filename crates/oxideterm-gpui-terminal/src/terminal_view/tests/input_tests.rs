@@ -92,17 +92,15 @@ fn win32_input_leaves_printable_and_ime_text_on_the_platform_commit_path() {
             key_char: Some(key_char.into()),
             modifiers,
         };
-        for event in [KittyKeyEventType::Press, KittyKeyEventType::Release] {
-            assert_eq!(
-                oxideterm_key_escape_sequence(
-                    &keystroke,
-                    &(TermMode::default() | TermMode::WIN32_INPUT),
-                    false,
-                    event
-                ),
-                None
-            );
-        }
+        assert_eq!(
+            oxideterm_key_escape_sequence(
+                &keystroke,
+                &(TermMode::default() | TermMode::WIN32_INPUT),
+                false,
+                KittyKeyEventType::Press
+            ),
+            None
+        );
     }
 }
 

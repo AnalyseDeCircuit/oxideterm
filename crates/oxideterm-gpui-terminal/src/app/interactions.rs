@@ -228,6 +228,9 @@ impl TerminalPane {
         }
 
         let mode = self.terminal.lock().mode();
+        if !mode.contains(TermMode::WIN32_INPUT) {
+            self.win32_pressed_keys.clear();
+        }
         if self.handle_editor_free_type_clipboard_shortcut(event, mode, cx) {
             return true;
         }
@@ -337,7 +340,7 @@ impl TerminalPane {
                 let secret_entry = self.input_answers_privilege_prompt(semantic_bytes);
                 if self.send_user_encoded_key_without_broadcast(
                     semantic_bytes,
-                    Some(sequence.as_bytes()),
+                    Some((&event.keystroke.key, sequence.as_bytes())),
                     cx,
                 ) && !secret_entry
                 {
@@ -476,6 +479,15 @@ impl TerminalPane {
 
     pub(crate) fn handle_key_up(&mut self, event: &KeyUpEvent, cx: &mut Context<Self>) {
         let mode = self.terminal.lock().mode();
+        if mode.contains(TermMode::WIN32_INPUT) {
+            // Modifiers may have changed since key-down. The delivered key identity,
+            // not the current chord, determines whether ConPTY needs a release.
+            if !self.win32_pressed_keys.remove(&event.keystroke.key) {
+                return;
+            }
+        } else {
+            self.win32_pressed_keys.clear();
+        }
         if let Some(sequence) = configurable_key_escape_sequence(
             &event.keystroke,
             &mode,

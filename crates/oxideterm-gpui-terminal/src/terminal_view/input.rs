@@ -338,7 +338,11 @@ pub(crate) fn configurable_key_escape_sequence(
     // ConPTY translates these events into the inner application's input mode.
     // Printable/IME text still arrives through the platform commit callback.
     if mode.contains(TermMode::WIN32_INPUT) {
-        if modifiers.control && modifiers.alt && keystroke.key_char.is_some() {
+        if event_type != KittyKeyEventType::Release
+            && modifiers.control
+            && modifiers.alt
+            && keystroke.key_char.is_some()
+        {
             return None;
         }
         if let Some(sequence) = win32_key_sequence(keystroke, event_type) {
@@ -411,7 +415,9 @@ fn win32_key_sequence(
         "tab" => (0x09, 0x09),
         "escape" => (0x1b, 0x1b),
         "backspace" | "back" => (0x08, if modifiers.control { 0x7f } else { 0x08 }),
-        "space" | " " if modifiers.control => (0x20, 0),
+        "space" | " " if modifiers.control || event_type == KittyKeyEventType::Release => {
+            (0x20, if modifiers.control { 0 } else { 0x20 })
+        }
         "pageup" => (0x21, 0),
         "pagedown" => (0x22, 0),
         "end" => (0x23, 0),
@@ -429,7 +435,9 @@ fn win32_key_sequence(
                 .filter(|n| (1..=24).contains(n))?;
             (0x70 + number - 1, 0)
         }
-        key if (modifiers.control || modifiers.alt) && key.len() == 1 => {
+        key if (modifiers.control || modifiers.alt || event_type == KittyKeyEventType::Release)
+            && key.len() == 1 =>
+        {
             let character = key.as_bytes()[0];
             // GPUI exposes logical keys. Only letters have layout-independent
             // virtual-key identities; OEM punctuation keeps its existing VT path.
