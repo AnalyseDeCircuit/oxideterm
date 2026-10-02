@@ -272,45 +272,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rewrites_little_endian_setup_cookie_in_place() {
-        let fake = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let real = X11AuthCookie::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
-        let auth = X11AuthMaterial::with_fake_cookie(fake, real);
-        let mut packet = setup_packet(X11ByteOrder::LittleEndian, auth.fake_cookie.as_bytes());
+    fn setup_authentication_preserves_framing_and_rewrites_cookies() {
+        for (byte_order, local_bytes, encoded_length) in [
+            (X11ByteOrder::LittleEndian, vec![0xbb; 16], [16, 0]),
+            (X11ByteOrder::BigEndian, vec![0xbb; 4], [0, 4]),
+        ] {
+            let fake = X11AuthCookie::from_bytes(vec![0xaa; 16]).unwrap();
+            let local = X11AuthCookie::from_bytes(local_bytes.clone()).unwrap();
+            let auth = X11AuthMaterial::with_fake_cookie(fake.clone(), local);
+            let mut packet = setup_packet(byte_order, fake.as_bytes());
 
-        let request = rewrite_setup_authentication(&mut packet, &auth).unwrap();
+            assert_eq!(required_setup_packet_len(&packet[..5]).unwrap(), None);
+            assert_eq!(required_setup_packet_len(&packet).unwrap(), Some(48));
+            let inspected = inspect_setup_authentication(&packet).unwrap();
+            assert_eq!(inspected.protocol, X11AuthProtocol::MitMagicCookie1);
+            assert_eq!(inspected.fake_cookie, fake);
+            assert_eq!(inspected.request.protocol_major, 11);
 
-        assert_eq!(request.byte_order, X11ByteOrder::LittleEndian);
-        assert_eq!(request.protocol_major, 11);
-        assert_eq!(request.auth_protocol, "MIT-MAGIC-COOKIE-1");
-        assert!(
-            packet
-                .windows(16)
-                .any(|window| window == auth.local_cookie.as_bytes())
-        );
-        assert!(
-            !packet
-                .windows(16)
-                .any(|window| window == auth.fake_cookie.as_bytes())
-        );
-    }
-
-    #[test]
-    fn rewrites_big_endian_cookie_when_replacement_length_changes() {
-        let fake = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let real = X11AuthCookie::from_hex("bbbbbbbb").unwrap();
-        let auth = X11AuthMaterial::with_fake_cookie(fake, real);
-        let mut packet = setup_packet(X11ByteOrder::BigEndian, auth.fake_cookie.as_bytes());
-
-        let request = rewrite_setup_authentication(&mut packet, &auth).unwrap();
-
-        assert_eq!(request.byte_order, X11ByteOrder::BigEndian);
-        assert_eq!(read_u16(&packet[8..10], X11ByteOrder::BigEndian), 4);
-        assert!(
-            packet
-                .windows(4)
-                .any(|window| window == auth.local_cookie.as_bytes())
-        );
+            let request = rewrite_setup_authentication(&mut packet, &auth).unwrap();
+            assert_eq!(request.byte_order, byte_order);
+            assert_eq!(request.protocol_major, 11);
+            assert_eq!(request.auth_protocol, "MIT-MAGIC-COOKIE-1");
+            assert_eq!(&packet[8..10], &encoded_length);
+            assert_eq!(&packet[32..], local_bytes.as_slice());
+            assert!(!packet.windows(16).any(|bytes| bytes == [0xaa; 16]));
+        }
     }
 
     #[test]
@@ -326,30 +312,6 @@ mod tests {
 
         assert_eq!(error, X11ForwardingError::AuthCookieMismatch);
         assert!(!error.to_string().contains("aaaa"));
-    }
-
-    #[test]
-    fn reports_required_setup_packet_length_from_header() {
-        let cookie = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let packet = setup_packet(X11ByteOrder::LittleEndian, cookie.as_bytes());
-
-        assert_eq!(required_setup_packet_len(&packet[..5]).unwrap(), None);
-        assert_eq!(
-            required_setup_packet_len(&packet).unwrap(),
-            Some(packet.len())
-        );
-    }
-
-    #[test]
-    fn inspects_setup_authentication_for_registry_lookup() {
-        let cookie = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let packet = setup_packet(X11ByteOrder::BigEndian, cookie.as_bytes());
-
-        let auth = inspect_setup_authentication(&packet).unwrap();
-
-        assert_eq!(auth.protocol, X11AuthProtocol::MitMagicCookie1);
-        assert_eq!(auth.fake_cookie, cookie);
-        assert_eq!(auth.request.protocol_major, 11);
     }
 
     fn setup_packet(byte_order: X11ByteOrder, cookie: &[u8]) -> Vec<u8> {

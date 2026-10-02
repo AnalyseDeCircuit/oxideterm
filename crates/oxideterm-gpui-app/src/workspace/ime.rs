@@ -4108,7 +4108,7 @@ mod tests {
     }
 
     #[test]
-    fn caret_state_pauses_settings_blink_until_scroll_deadline() {
+    fn caret_state_pauses_scrolled_settings_and_resets_when_visible_owner_changes() {
         let now = std::time::Instant::now();
         let visibility = WorkspaceCaretVisibility::default();
         let mut caret = WorkspaceCaretState::new(visibility.clone());
@@ -4123,15 +4123,7 @@ mod tests {
         assert!(visibility.visible());
         assert!(caret.advance_tick(now + std::time::Duration::from_millis(700)));
         assert!(!visibility.visible());
-    }
 
-    #[test]
-    fn caret_state_resets_phase_and_pause_when_visible_owner_changes() {
-        let now = std::time::Instant::now();
-        let visibility = WorkspaceCaretVisibility::default();
-        let mut caret = WorkspaceCaretState::new(visibility.clone());
-        let settings_target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
-        caret.sync_active_target(Some(settings_target));
         caret.pause_settings_caret(now + std::time::Duration::from_secs(1));
         caret.advance_tick(now + std::time::Duration::from_secs(1));
         assert!(!visibility.visible());
@@ -4412,36 +4404,27 @@ mod tests {
     }
 
     #[test]
-    fn managed_private_key_clipboard_normalization_preserves_pem_lines() {
-        let normalized = normalize_clipboard_text_for_ime_target(
-            WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePrivateKey),
-            "-----BEGIN TEST KEY-----\r\nfake-material\r-----END TEST KEY-----",
-        );
-
-        assert_eq!(
-            normalized.as_str(),
-            "-----BEGIN TEST KEY-----\nfake-material\n-----END TEST KEY-----"
-        );
-    }
-
-    #[test]
-    fn quick_command_clipboard_normalization_preserves_command_lines() {
-        let normalized = normalize_clipboard_text_for_ime_target(
-            WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText),
-            "first\r\nsecond\rthird",
-        );
-
-        assert_eq!(normalized.as_str(), "first\nsecond\nthird");
-    }
-
-    #[test]
-    fn single_line_secret_clipboard_normalization_flattens_line_breaks() {
-        let normalized = normalize_clipboard_text_for_ime_target(
-            WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePassphrase),
-            "fake\r\npassphrase",
-        );
-
-        assert_eq!(normalized.as_str(), "fake passphrase");
+    fn clipboard_normalization_preserves_multiline_inputs_and_flattens_secret_fields() {
+        for (target, text, expected) in [
+            (
+                WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePrivateKey),
+                "-----BEGIN TEST KEY-----\r\nfake-material\r-----END TEST KEY-----",
+                "-----BEGIN TEST KEY-----\nfake-material\n-----END TEST KEY-----",
+            ),
+            (
+                WorkspaceImeTarget::QuickCommand(QuickCommandInput::CommandText),
+                "first\r\nsecond\rthird",
+                "first\nsecond\nthird",
+            ),
+            (
+                WorkspaceImeTarget::Settings(SettingsInput::ManagedKeyPastePassphrase),
+                "fake\r\npassphrase",
+                "fake passphrase",
+            ),
+        ] {
+            let normalized = normalize_clipboard_text_for_ime_target(target, text);
+            assert_eq!(normalized.as_str(), expected, "{target:?}");
+        }
     }
 
     #[test]

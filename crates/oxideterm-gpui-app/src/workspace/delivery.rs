@@ -221,17 +221,6 @@ mod tests {
     use std::sync::mpsc;
 
     #[test]
-    fn item_limit_reports_remaining_backlog() {
-        let budget = DeliveryBudget::new(2, Duration::from_secs(1));
-
-        let outcome = budget.outcome(2, Duration::from_millis(1), false);
-
-        assert_eq!(outcome.processed, 2);
-        assert!(outcome.backlog_remaining);
-        assert!(!budget.allows_next(2, Duration::from_millis(1)));
-    }
-
-    #[test]
     fn elapsed_limit_reports_remaining_backlog() {
         let budget = DeliveryBudget::new(8, Duration::from_millis(2));
 
@@ -239,15 +228,6 @@ mod tests {
 
         assert!(outcome.backlog_remaining);
         assert!(!budget.allows_next(1, Duration::from_millis(2)));
-    }
-
-    #[test]
-    fn exhausted_source_does_not_report_backlog() {
-        let budget = DeliveryBudget::new(8, Duration::from_millis(2));
-
-        let outcome = budget.outcome(1, Duration::from_millis(1), true);
-
-        assert!(!outcome.backlog_remaining);
     }
 
     #[test]

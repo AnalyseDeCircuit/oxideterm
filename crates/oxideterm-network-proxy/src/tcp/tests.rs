@@ -88,18 +88,22 @@ fn debug_redacts_socks5_password() {
 }
 
 #[test]
-fn no_proxy_matches_exact_wildcard_literal_ip_and_cidr() {
-    assert!(should_bypass_proxy("example.com", "example.com"));
-    assert!(should_bypass_proxy("api.internal", "*.internal"));
-    assert!(should_bypass_proxy("127.0.0.1", "127.0.0.1"));
-    assert!(should_bypass_proxy("10.2.3.4", "10.0.0.0/8"));
-    assert!(should_bypass_proxy("2001:db8::1", "2001:db8::/32"));
-    assert!(!should_bypass_proxy("api.external", "*.internal"));
-}
-
-#[test]
-fn no_proxy_cidr_does_not_resolve_hostname_for_remote_dns() {
-    assert!(!should_bypass_proxy("localhost", "127.0.0.0/8"));
+fn no_proxy_matches_literals_and_patterns_without_resolving_hostnames() {
+    for (target, rule, expected) in [
+        ("example.com", "example.com", true),
+        ("api.internal", "*.internal", true),
+        ("127.0.0.1", "127.0.0.1", true),
+        ("10.2.3.4", "10.0.0.0/8", true),
+        ("2001:db8::1", "2001:db8::/32", true),
+        ("api.external", "*.internal", false),
+        ("localhost", "127.0.0.0/8", false),
+    ] {
+        assert_eq!(
+            should_bypass_proxy(target, rule),
+            expected,
+            "{target} / {rule}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -181,20 +185,6 @@ async fn http_connect_rejects_status_and_invalid_headers_without_credentials() {
 }
 
 #[tokio::test]
-async fn http_connect_header_timeout_uses_transport_timeout_error() {
-    let (proxy_addr, server) = spawn_http_connect_server(MockHttpConnectMode::SlowHeader).await;
-    let proxy = http_proxy(proxy_addr, UpstreamProxyAuth::None);
-
-    let error = dial_initial_tcp("target.example.com", 22, 1, Some(&proxy))
-        .await
-        .unwrap_err();
-
-    assert!(matches!(error, TcpProxyError::Timeout));
-    server.abort();
-    assert!(server.await.unwrap_err().is_cancelled());
-}
-
-#[tokio::test]
 async fn socks5_connect_preserves_target_authentication_and_tunnel_data() {
     let password_mode = MockSocks5Mode::PasswordSuccess {
         username: "user",
@@ -235,75 +225,80 @@ async fn socks5_connect_preserves_target_authentication_and_tunnel_data() {
 }
 
 #[tokio::test]
-async fn socks5_rejected_method_is_redacted_error() {
-    let (proxy_addr, server) =
-        spawn_socks5_server(MockSocks5Mode::RejectMethods, "target.example.com").await;
-    let proxy = UpstreamProxyConfig {
-        protocol: UpstreamProxyProtocol::Socks5,
-        host: proxy_addr.ip().to_string(),
-        port: proxy_addr.port(),
-        auth: UpstreamProxyAuth::None,
-        remote_dns: true,
-        no_proxy: String::new(),
-    };
+async fn socks5_rejections_preserve_the_failure_stage_without_credentials() {
+    for (mode, auth, expected) in [
+        (
+            MockSocks5Mode::RejectMethods,
+            UpstreamProxyAuth::None,
+            "rejected all auth methods",
+        ),
+        (
+            MockSocks5Mode::BadReplyCode,
+            UpstreamProxyAuth::Password {
+                username: "user".to_string(),
+                password: Zeroizing::new("secret".to_string()),
+            },
+            "reply code 0x05",
+        ),
+    ] {
+        let (proxy_addr, server) = spawn_socks5_server(mode, "target.example.com").await;
+        let authenticated = matches!(&auth, UpstreamProxyAuth::Password { .. });
+        let proxy = UpstreamProxyConfig {
+            protocol: UpstreamProxyProtocol::Socks5,
+            host: proxy_addr.ip().to_string(),
+            port: proxy_addr.port(),
+            auth,
+            remote_dns: true,
+            no_proxy: String::new(),
+        };
 
-    let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap_err()
-        .to_string();
+        let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
+            .await
+            .unwrap_err()
+            .to_string();
 
-    assert!(error.contains("rejected all auth methods"));
-    server.await.unwrap();
+        assert!(error.contains(expected), "expected {expected}");
+        if authenticated {
+            assert!(!error.contains("secret"));
+        }
+        server.await.unwrap();
+    }
 }
 
 #[tokio::test]
-async fn socks5_bad_reply_code_is_reported_without_credentials() {
-    let (proxy_addr, server) =
-        spawn_socks5_server(MockSocks5Mode::BadReplyCode, "target.example.com").await;
-    let proxy = UpstreamProxyConfig {
-        protocol: UpstreamProxyProtocol::Socks5,
-        host: proxy_addr.ip().to_string(),
-        port: proxy_addr.port(),
-        auth: UpstreamProxyAuth::Password {
-            username: "user".to_string(),
-            password: Zeroizing::new("secret".to_string()),
-        },
-        remote_dns: true,
-        no_proxy: String::new(),
-    };
+async fn proxy_handshake_timeouts_use_transport_timeout_error() {
+    for protocol in [
+        UpstreamProxyProtocol::HttpConnect,
+        UpstreamProxyProtocol::Socks5,
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        let server_protocol = protocol;
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            if server_protocol == UpstreamProxyProtocol::HttpConnect {
+                let request = read_http_request_header(&mut stream).await;
+                assert!(request.contains("CONNECT target.example.com:22 HTTP/1.1"));
+            }
+            std::future::pending::<()>().await;
+        });
+        let proxy = UpstreamProxyConfig {
+            protocol,
+            host: proxy_addr.ip().to_string(),
+            port: proxy_addr.port(),
+            auth: UpstreamProxyAuth::None,
+            remote_dns: true,
+            no_proxy: String::new(),
+        };
 
-    let error = dial_initial_tcp("target.example.com", 22, 5, Some(&proxy))
-        .await
-        .unwrap_err()
-        .to_string();
+        let error = dial_initial_tcp("target.example.com", 22, 1, Some(&proxy))
+            .await
+            .unwrap_err();
 
-    assert!(error.contains("reply code 0x05"));
-    server.await.unwrap();
-    assert!(!error.contains("secret"));
-}
-
-#[tokio::test]
-async fn socks5_handshake_timeout_uses_transport_timeout_error() {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let proxy_addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        let (_stream, _) = listener.accept().await.unwrap();
-        tokio::time::sleep(Duration::from_secs(3)).await;
-    });
-    let proxy = UpstreamProxyConfig {
-        protocol: UpstreamProxyProtocol::Socks5,
-        host: proxy_addr.ip().to_string(),
-        port: proxy_addr.port(),
-        auth: UpstreamProxyAuth::None,
-        remote_dns: true,
-        no_proxy: String::new(),
-    };
-
-    let error = dial_initial_tcp("target.example.com", 22, 1, Some(&proxy))
-        .await
-        .unwrap_err();
-
-    assert!(matches!(error, TcpProxyError::Timeout));
+        assert!(matches!(error, TcpProxyError::Timeout));
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -324,7 +319,6 @@ enum MockHttpConnectMode {
     Status(u16),
     Malformed,
     OversizedHeader,
-    SlowHeader,
 }
 
 fn http_proxy(proxy_addr: SocketAddr, auth: UpstreamProxyAuth) -> UpstreamProxyConfig {
@@ -377,10 +371,6 @@ async fn spawn_http_connect_server(
                     .write_all(&vec![b'a'; HTTP_CONNECT_MAX_HEADER_BYTES + 1])
                     .await
                     .unwrap();
-            }
-            MockHttpConnectMode::SlowHeader => {
-                // Keep the socket open long enough for the outer proxy dial timeout to fire.
-                tokio::time::sleep(Duration::from_secs(3)).await;
             }
         }
         if matches!(

@@ -416,38 +416,6 @@ impl RuntimeCapabilityRegistry {
         ))
     }
 
-    pub fn handles_for_session(
-        &mut self,
-        tool_session_id: &ToolSessionId,
-    ) -> Result<Vec<RuntimeHandleProjection>, RuntimeContextError> {
-        let mut owner_keys = self
-            .owners
-            .iter()
-            .filter(|(key, _)| self.owner_in_scope(tool_session_id, key))
-            .map(|(key, owner)| {
-                (
-                    owner.label.clone(),
-                    format!("{:?}", owner.kind),
-                    key.clone(),
-                )
-            })
-            .collect::<Vec<_>>();
-        owner_keys.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
-        if owner_keys.len() > MAX_HANDLES_PER_TOOL_SESSION {
-            return Err(RuntimeContextError::HandleAllocationLimitReached);
-        }
-        let mut handles = owner_keys
-            .iter()
-            .map(|(_, _, owner_key)| self.issue_handle(tool_session_id, owner_key))
-            .collect::<Result<Vec<_>, _>>()?;
-        handles.sort_by(|left, right| {
-            left.label
-                .cmp(&right.label)
-                .then_with(|| format!("{:?}", left.kind).cmp(&format!("{:?}", right.kind)))
-        });
-        Ok(handles)
-    }
-
     pub fn restrict_tool_session(
         &mut self,
         session: &ToolSessionId,
@@ -618,56 +586,6 @@ mod tests {
     }
 
     #[test]
-    fn fabricated_handle_is_rejected() {
-        let mut registry = RuntimeCapabilityRegistry::new();
-        let session = registry.begin_tool_session();
-        let fabricated = RuntimeHandleId::new();
-
-        let error = registry
-            .validate_handle(
-                &session,
-                Some(&fabricated),
-                RuntimeCapability::TerminalObserve,
-            )
-            .expect_err("fabricated handle is rejected");
-
-        assert_eq!(error.failure(), RuntimeValidationFailure::UnknownHandle);
-        assert_eq!(error.public_code(), "runtime_handle_expired");
-    }
-
-    #[test]
-    fn capability_change_requires_a_new_owner_generation() {
-        let mut registry = RuntimeCapabilityRegistry::new();
-        let owner_key = RuntimeOwnerKey::new();
-        registry
-            .register_owner(terminal_registration(owner_key.clone(), 1))
-            .expect("owner registers");
-        let update = registry.register_owner(
-            RuntimeOwnerRegistration::new(
-                owner_key,
-                RuntimeOwnerKind::Terminal,
-                RuntimeOwnerGeneration::new(1),
-                "SSH terminal renamed".to_string(),
-                [RuntimeCapability::TerminalObserve],
-                Some(
-                    StableResourceRef::new(
-                        StableResourceKind::SavedConnection,
-                        "4e22e673-067e-46e2-8b9f-902d7b21af4c".to_string(),
-                        Some("Production renamed".to_string()),
-                    )
-                    .expect("valid stable reference"),
-                ),
-            )
-            .expect("valid metadata update"),
-        );
-
-        assert_eq!(
-            update,
-            Err(RuntimeContextError::OwnerIdentityChangedWithoutGeneration)
-        );
-    }
-
-    #[test]
     fn handle_lifecycle_preserves_identity_until_owner_replacement_or_session_finish() {
         let mut registry = RuntimeCapabilityRegistry::new();
         let owner_key = RuntimeOwnerKey::new();
@@ -675,6 +593,17 @@ mod tests {
             .register_owner(terminal_registration(owner_key.clone(), 1))
             .expect("owner registers");
         let session = registry.begin_tool_session();
+        let fabricated = RuntimeHandleId::new();
+        let error = registry
+            .validate_handle(
+                &session,
+                Some(&fabricated),
+                RuntimeCapability::TerminalObserve,
+            )
+            .expect_err("fabricated handle is rejected");
+        assert_eq!(error.failure(), RuntimeValidationFailure::UnknownHandle);
+        assert_eq!(error.public_code(), "runtime_handle_expired");
+
         let handle = registry
             .issue_handle(&session, &owner_key)
             .expect("handle issues");
@@ -699,6 +628,13 @@ mod tests {
             .register_owner(renamed)
             .expect("presentation metadata may update in place");
 
+        let mut capability_change = terminal_registration(owner_key.clone(), 1);
+        capability_change.capabilities = BTreeSet::from([RuntimeCapability::TerminalObserve]);
+        assert_eq!(
+            registry.register_owner(capability_change),
+            Err(RuntimeContextError::OwnerIdentityChangedWithoutGeneration)
+        );
+
         assert!(
             registry
                 .validate_handle(
@@ -709,10 +645,7 @@ mod tests {
                 .is_ok()
         );
         assert_eq!(
-            registry
-                .handles_for_session(&session)
-                .expect("session handles")[0]
-                .label,
+            registry.issued_handles_for_session(&session)[0].label,
             "Renamed terminal"
         );
         registry
@@ -793,13 +726,15 @@ mod tests {
     }
 
     #[test]
-    fn discovery_is_bounded_per_tool_session() {
+    fn handle_issuance_is_bounded_per_tool_session() {
         let mut registry = RuntimeCapabilityRegistry::new();
+        let session = registry.begin_tool_session();
         for index in 0..=MAX_HANDLES_PER_TOOL_SESSION {
+            let owner_key = RuntimeOwnerKey::new();
             registry
                 .register_owner(
                     RuntimeOwnerRegistration::new(
-                        RuntimeOwnerKey::new(),
+                        owner_key.clone(),
                         RuntimeOwnerKind::Terminal,
                         RuntimeOwnerGeneration::new(1),
                         format!("Terminal {index:03}"),
@@ -809,13 +744,22 @@ mod tests {
                     .expect("valid terminal owner"),
                 )
                 .expect("owner registers");
+            let issued = registry.issue_handle(&session, &owner_key);
+            if index < MAX_HANDLES_PER_TOOL_SESSION {
+                assert_eq!(
+                    issued.expect("handle below limit").label,
+                    format!("Terminal {index:03}")
+                );
+            } else {
+                assert!(matches!(
+                    issued,
+                    Err(RuntimeContextError::HandleAllocationLimitReached)
+                ));
+            }
         }
-        let session = registry.begin_tool_session();
-
-        assert!(matches!(
-            registry.handles_for_session(&session),
-            Err(RuntimeContextError::HandleAllocationLimitReached)
-        ));
-        assert!(registry.issued_handles_for_session(&session).is_empty());
+        assert_eq!(
+            registry.issued_handles_for_session(&session).len(),
+            MAX_HANDLES_PER_TOOL_SESSION
+        );
     }
 }

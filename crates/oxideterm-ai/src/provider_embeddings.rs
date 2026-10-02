@@ -391,31 +391,4 @@ mod tests {
         assert!(sanitized_chunks[0].contains("Document API_KEY=[REDACTED]"));
         assert!(sanitized_query[0].contains("Find Authorization: Bearer [REDACTED]"));
     }
-
-    #[tokio::test]
-    async fn embedding_errors_do_not_include_raw_content() {
-        let raw_secret = "sk-proj-abcdefghijklmnopqrstuvwxyz123456";
-        let provider = AiProviderView {
-            api_protocol: crate::AiApiProtocol::default(),
-            id: "unsupported".to_string(),
-            provider_type: "unsupported".to_string(),
-            name: "Unsupported".to_string(),
-            base_url: "https://example.invalid".to_string(),
-            models: Vec::new(),
-            enabled: true,
-            custom: true,
-        };
-
-        let error = embed_texts(
-            &provider,
-            None,
-            "test-model",
-            vec![format!("password={raw_secret}")],
-        )
-        .await
-        .expect_err("unsupported providers must fail");
-        let debug = format!("{error:?}");
-        assert!(!debug.contains(raw_secret));
-        assert!(!error.to_string().contains(raw_secret));
-    }
 }

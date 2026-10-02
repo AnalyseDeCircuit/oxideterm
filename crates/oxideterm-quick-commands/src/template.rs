@@ -490,69 +490,55 @@ mod tests {
     }
 
     #[test]
-    fn non_oxideterm_double_braces_remain_literal_command_text() {
-        let command = QuickCommand {
-            id: "docker-log".to_string(),
-            name: "Docker log".to_string(),
-            command: "docker inspect --format='{{.LogPath}}' container".to_string(),
-            category: "custom".to_string(),
-            description: None,
-            parameters: Vec::new(),
-            availability: QuickCommandAvailability::default(),
-            confirmation: QuickCommandConfirmationPolicy::Inherit,
-            sort_order: 0,
-            created_at: 1,
-            updated_at: 1,
-        };
-        let target = QuickCommandTargetContext {
-            target_id: "local".to_string(),
-            label: "Local".to_string(),
-            protocol: QuickCommandTargetProtocol::Local,
-            values: QuickCommandContextValues::default(),
-        };
+    fn local_templates_preserve_foreign_braces_and_quote_shell_parameters() {
+        for (template, value, expected) in [
+            (
+                "docker inspect --format='{{.LogPath}}' container",
+                None,
+                "docker inspect --format='{{.LogPath}}' container",
+            ),
+            (
+                "printf '%s\\n' {{param.value|sh}}",
+                Some("a b'$(touch nope)"),
+                "printf '%s\\n' 'a b'\"'\"'$(touch nope)'",
+            ),
+        ] {
+            let command = QuickCommand {
+                id: "show".to_string(),
+                name: "Show".to_string(),
+                command: template.to_string(),
+                category: "custom".to_string(),
+                description: None,
+                parameters: value
+                    .map(|_| QuickCommandParameter {
+                        name: "value".to_string(),
+                        label: "Value".to_string(),
+                        required: true,
+                        ..QuickCommandParameter::default()
+                    })
+                    .into_iter()
+                    .collect(),
+                availability: QuickCommandAvailability::default(),
+                confirmation: QuickCommandConfirmationPolicy::Inherit,
+                sort_order: 0,
+                created_at: 1,
+                updated_at: 1,
+            };
+            let values = value
+                .map(|value| ("value".to_string(), Zeroizing::new(value.to_string())))
+                .into_iter()
+                .collect();
+            let target = QuickCommandTargetContext {
+                target_id: "local".to_string(),
+                label: "Local".to_string(),
+                protocol: QuickCommandTargetProtocol::Local,
+                values: QuickCommandContextValues::default(),
+            };
 
-        let prepared = prepare_quick_command(&command, &[target], &BTreeMap::new()).unwrap();
+            let prepared = prepare_quick_command(&command, &[target], &values).unwrap();
 
-        assert_eq!(prepared.targets[0].command.as_str(), command.command);
-    }
-
-    #[test]
-    fn sh_modifier_quotes_one_posix_shell_word() {
-        let command = QuickCommand {
-            id: "show".to_string(),
-            name: "Show".to_string(),
-            command: "printf '%s\\n' {{param.value|sh}}".to_string(),
-            category: "custom".to_string(),
-            description: None,
-            parameters: vec![QuickCommandParameter {
-                name: "value".to_string(),
-                label: "Value".to_string(),
-                required: true,
-                ..QuickCommandParameter::default()
-            }],
-            availability: QuickCommandAvailability::default(),
-            confirmation: QuickCommandConfirmationPolicy::Inherit,
-            sort_order: 0,
-            created_at: 1,
-            updated_at: 1,
-        };
-        let values = BTreeMap::from([(
-            "value".to_string(),
-            Zeroizing::new("a b'$(touch nope)".to_string()),
-        )]);
-        let target = QuickCommandTargetContext {
-            target_id: "local".to_string(),
-            label: "Local".to_string(),
-            protocol: QuickCommandTargetProtocol::Local,
-            values: QuickCommandContextValues::default(),
-        };
-
-        let prepared = prepare_quick_command(&command, &[target], &values).unwrap();
-
-        assert_eq!(
-            prepared.targets[0].command.as_str(),
-            "printf '%s\\n' 'a b'\"'\"'$(touch nope)'"
-        );
+            assert_eq!(prepared.targets[0].command.as_str(), expected, "{template}");
+        }
     }
 
     #[test]

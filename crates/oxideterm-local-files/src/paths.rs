@@ -245,26 +245,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_download_path_prefers_an_existing_system_downloads_directory() {
-        let downloads = PathBuf::from("/home/alice/Downloads");
-        let fallback = PathBuf::from("/tmp");
-
-        let selected = select_default_download_path(Some(downloads.clone()), fallback, |path| {
-            path == downloads
-        });
-
-        assert_eq!(selected, downloads);
-    }
-
-    #[test]
-    fn default_download_path_does_not_fall_back_to_the_home_directory() {
-        let missing_downloads = PathBuf::from("/home/alice/Downloads");
-        let fallback = PathBuf::from("/tmp");
-
-        let selected =
-            select_default_download_path(Some(missing_downloads), fallback.clone(), |_| false);
-
-        assert_eq!(selected, fallback);
+    fn default_download_path_uses_downloads_when_available_and_temp_otherwise() {
+        for (available, expected) in [(true, "/home/alice/Downloads"), (false, "/tmp")] {
+            let downloads = PathBuf::from("/home/alice/Downloads");
+            let selected = select_default_download_path(
+                Some(downloads.clone()),
+                PathBuf::from("/tmp"),
+                |path| available && path == downloads,
+            );
+            assert_eq!(selected, PathBuf::from(expected), "available={available}");
+        }
     }
 
     #[test]

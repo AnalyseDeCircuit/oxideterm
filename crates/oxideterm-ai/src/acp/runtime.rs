@@ -1311,26 +1311,27 @@ mod tests {
     }
 
     #[test]
-    fn launch_fingerprint_changes_when_secret_bearing_configuration_changes() {
-        let policy = AcpHostCapabilityPolicy::default();
-        let first = launch_fingerprint(&launch_config("first"), &policy);
-        let second = launch_fingerprint(&launch_config("second"), &policy);
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn launch_fingerprint_separates_negotiated_host_capabilities() {
-        let config = launch_config("same-secret");
+    fn launch_fingerprint_separates_secrets_and_negotiated_capabilities() {
         let restricted = AcpHostCapabilityPolicy::default();
         let terminal_enabled = AcpHostCapabilityPolicy {
             terminal: true,
             ..AcpHostCapabilityPolicy::default()
         };
-
-        assert_ne!(
-            launch_fingerprint(&config, &restricted),
-            launch_fingerprint(&config, &terminal_enabled)
-        );
+        for (case, first_secret, second_secret, policy) in [
+            ("credentials changed", "first", "second", &restricted),
+            (
+                "terminal enabled",
+                "same-secret",
+                "same-secret",
+                &terminal_enabled,
+            ),
+        ] {
+            assert_ne!(
+                launch_fingerprint(&launch_config(first_secret), &restricted),
+                launch_fingerprint(&launch_config(second_secret), policy),
+                "{case}"
+            );
+        }
     }
 
     #[test]

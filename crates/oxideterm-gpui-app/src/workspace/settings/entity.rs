@@ -2567,7 +2567,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn launch_at_login_replacement_and_late_completion_are_generation_safe(
+    fn launch_at_login_replacement_completion_and_release_preserve_task_ownership(
         cx: &mut TestAppContext,
     ) {
         let first_dropped = Arc::new(AtomicBool::new(false));
@@ -2616,12 +2616,8 @@ mod tests {
                 }
             );
         });
-    }
 
-    #[gpui::test]
-    fn settings_entity_release_cancels_launch_at_login_task(cx: &mut TestAppContext) {
         let dropped = Arc::new(AtomicBool::new(false));
-        let entity = cx.new(SettingsWorkspaceEntity::new);
         entity.update(cx, |entity, cx| {
             let dropped_for_future = Arc::clone(&dropped);
             entity.start_launch_at_login_operation(
@@ -2638,7 +2634,10 @@ mod tests {
         cx.update(|_cx| {});
         cx.run_until_parked();
 
-        assert!(dropped.load(Ordering::Acquire));
+        assert!(
+            dropped.load(Ordering::Acquire),
+            "release cancels the current launch-at-login task"
+        );
     }
 
     #[cfg(target_os = "macos")]
@@ -2666,7 +2665,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn keybinding_file_task_replacement_and_completion_are_generation_safe(
+    fn keybinding_file_replacement_completion_and_release_preserve_task_ownership(
         cx: &mut TestAppContext,
     ) {
         let runtime = tokio::runtime::Runtime::new().expect("create keybinding file runtime");
@@ -2724,13 +2723,8 @@ mod tests {
                 Some(KeybindingFileOperationResult::ImportFailed)
             ));
         });
-    }
 
-    #[gpui::test]
-    fn settings_entity_release_cancels_keybinding_file_task(cx: &mut TestAppContext) {
-        let runtime = tokio::runtime::Runtime::new().expect("create keybinding file runtime");
         let dropped = Arc::new(AtomicBool::new(false));
-        let entity = cx.new(SettingsWorkspaceEntity::new);
         entity.update(cx, |entity, cx| {
             let dropped_for_future = Arc::clone(&dropped);
             entity.start_keybinding_export(
@@ -2749,7 +2743,10 @@ mod tests {
         cx.update(|_cx| {});
         cx.run_until_parked();
 
-        assert!(dropped.load(Ordering::Acquire));
+        assert!(
+            dropped.load(Ordering::Acquire),
+            "release cancels the current keybinding file task"
+        );
     }
 
     #[gpui::test]

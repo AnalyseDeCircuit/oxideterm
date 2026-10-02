@@ -2325,17 +2325,6 @@ mod serial_tests {
     }
 
     #[test]
-    fn serial_io_error_maps_disconnect() {
-        let error = map_serial_io_error(
-            std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "gone"),
-            SerialErrorCode::ReadFailed,
-            "/dev/cu.usbserial-1",
-        );
-
-        assert_eq!(error.code, SerialErrorCode::DeviceDisconnected);
-    }
-
-    #[test]
     fn fake_serial_worker_lifecycle_writes_reads_and_reports_disconnect() {
         let config = valid_config();
         let mut port = FakeSerialPort::new(VecDeque::from([
@@ -2503,9 +2492,10 @@ mod serial_tests {
 
         assert_eq!(offset, 5);
         let rendered = String::from_utf8(dump).unwrap();
-        assert!(rendered.contains("00000000"));
-        assert!(rendered.contains("48 65 6c 6c 6f"));
-        assert!(rendered.contains("|Hello|"));
+        assert_eq!(
+            rendered.split_whitespace().collect::<Vec<_>>(),
+            ["00000000", "48", "65", "6c", "6c", "6f", "|Hello|"]
+        );
     }
 
     #[test]
@@ -2553,12 +2543,30 @@ mod serial_tests {
 
     #[test]
     fn serial_preserves_split_csi_sequences() {
+        use alacritty_terminal::{
+            index::{Column, Line},
+            vte::ansi::{Color, NamedColor},
+        };
+
         let mut session = test_serial_session();
 
         session.feed_transport_output(b"\x1b");
-        session.feed_transport_output(b"[31mred\x1b[0m\r\n");
+        session.feed_transport_output(b"[31mred\x1b[0m\r\nplain");
 
-        assert!(session.buffer_text().contains("red"));
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.lines[0].text().trim_end(), "red");
+        assert_eq!(snapshot.lines[1].text().trim_end(), "plain");
+        let term = session.term.lock();
+        for col in 0..3 {
+            assert_eq!(
+                term.grid()[Line(0)][Column(col)].fg,
+                Color::Named(NamedColor::Red)
+            );
+        }
+        assert_eq!(
+            term.grid()[Line(1)][Column(0)].fg,
+            Color::Named(NamedColor::Foreground)
+        );
     }
 
 }

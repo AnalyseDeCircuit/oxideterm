@@ -323,26 +323,7 @@ fn append_display_rows_for_line(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        DisplayRow, DisplayRows, append_display_rows_for_line, display_row_for_visual_column,
-    };
-
-    #[test]
-    fn wrapped_boundary_belongs_to_the_later_display_row() {
-        let mut rows = Vec::new();
-        append_display_rows_for_line(
-            &mut rows,
-            0,
-            std::iter::repeat_n((1, 1.0), 16),
-            Some(8.0),
-            false,
-        );
-
-        let rows = DisplayRows::Explicit(rows);
-        assert_eq!(display_row_for_visual_column(&rows, 0, 7).unwrap().0, 0);
-        assert_eq!(display_row_for_visual_column(&rows, 0, 8).unwrap().0, 1);
-        assert_eq!(display_row_for_visual_column(&rows, 0, 16).unwrap().0, 1);
-    }
+    use super::{DisplayRow, append_display_rows_for_line};
 
     #[test]
     fn wrapping_never_splits_a_wide_grapheme() {
@@ -496,8 +477,12 @@ mod edit_layout_tests {
             editor.settings.soft_wrap = true;
             editor.settings.soft_wrap_column = Some(8);
             let wrapped = editor.display_rows();
+            let (index, row, column) = display_row_for_visual_column(&wrapped, 0, 7).unwrap();
+            assert_eq!((index, row.start_col, row.end_col, column), (0, 0, 8, 7));
             let (index, row, column) = display_row_for_visual_column(&wrapped, 0, 8).unwrap();
             assert_eq!((index, row.start_col, row.end_col, column), (1, 8, 13, 0));
+            let (index, row, column) = display_row_for_visual_column(&wrapped, 0, 13).unwrap();
+            assert_eq!((index, row.start_col, row.end_col, column), (1, 8, 13, 5));
         });
     }
 

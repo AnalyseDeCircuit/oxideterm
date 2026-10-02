@@ -91,24 +91,6 @@ pub fn export_custom_semantic_scheme(
     export_scheme_document(document)
 }
 
-pub fn update_custom_semantic_scheme(
-    settings: &mut PersistedSettings,
-    document: SemanticSchemeDocument,
-) -> Result<(), String> {
-    validate_scheme_document(&document)?;
-    if !document.id.starts_with(CUSTOM_SEMANTIC_SCHEME_PREFIX) {
-        return Err("Only custom semantic schemes can be updated".to_string());
-    }
-    let target = settings
-        .terminal
-        .custom_semantic_schemes
-        .iter_mut()
-        .find(|scheme| scheme.id == document.id)
-        .ok_or_else(|| "Custom semantic scheme not found".to_string())?;
-    *target = document;
-    Ok(())
-}
-
 pub fn delete_custom_semantic_scheme(settings: &mut PersistedSettings, scheme_id: &str) -> bool {
     let original_len = settings.terminal.custom_semantic_schemes.len();
     settings
@@ -286,13 +268,5 @@ mod tests {
                 .semantic_scheme_for_shell("bash")
                 .is_none()
         );
-    }
-
-    #[test]
-    fn built_in_scheme_ids_cannot_be_updated_as_custom_documents() {
-        let mut settings = PersistedSettings::default();
-        let document = built_in_scheme_document(SemanticScheme::Balanced);
-
-        assert!(update_custom_semantic_scheme(&mut settings, document).is_err());
     }
 }

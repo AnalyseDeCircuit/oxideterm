@@ -26,45 +26,61 @@ fn apply_frame_updates(target: &mut [u8], target_width: u32, updates: &[RemoteDe
 }
 
 #[test]
-fn framebuffer_draws_bgra_rect() {
-    let mut framebuffer = VncFramebuffer::new(2, 2);
-    let rect = RfbRect {
-        x: 1,
-        y: 0,
-        width: 1,
-        height: 2,
-    };
-
-    let update = only_frame_update(framebuffer.apply(VncServerEvent::RawImage(
-        rect,
-        vec![1, 2, 3, 255, 4, 5, 6, 255],
-    )));
-
-    assert_eq!(update.rect, RemoteDesktopRect::new(1, 0, 1, 2));
-    assert_eq!(update.bytes, vec![1, 2, 3, 255, 4, 5, 6, 255]);
-    assert_eq!(
-        framebuffer.frame().bytes,
-        vec![0, 0, 0, 255, 1, 2, 3, 255, 0, 0, 0, 255, 4, 5, 6, 255]
-    );
-}
-
-#[test]
-fn framebuffer_treats_raw_padding_as_opaque_alpha() {
-    let mut framebuffer = VncFramebuffer::new(1, 1);
-    let rect = RfbRect {
-        x: 0,
-        y: 0,
-        width: 1,
-        height: 1,
-    };
-
-    let _ = framebuffer.apply(VncServerEvent::RawImage(rect, vec![1, 2, 3, 0]));
-
-    assert_eq!(framebuffer.frame().bytes, vec![1, 2, 3, 255]);
-    assert_eq!(
-        framebuffer.frame_update(rect).unwrap().bytes,
-        vec![1, 2, 3, 255]
-    );
+fn framebuffer_updates_preserve_pixels_and_publish_only_the_changed_rectangle() {
+    for (width, rect, pixels, expected_update, expected_frame) in [
+        (
+            2,
+            RfbRect {
+                x: 1,
+                y: 0,
+                width: 1,
+                height: 2,
+            },
+            vec![1, 2, 3, 0, 4, 5, 6, 0],
+            vec![1, 2, 3, 255, 4, 5, 6, 255],
+            vec![0, 0, 0, 255, 1, 2, 3, 255, 0, 0, 0, 255, 4, 5, 6, 255],
+        ),
+        (
+            3,
+            RfbRect {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 1,
+            },
+            vec![7, 8, 9, 255, 10, 11, 12, 255],
+            vec![7, 8, 9, 255, 10, 11, 12, 255],
+            vec![
+                0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 7, 8, 9, 255, 10, 11, 12,
+                255,
+            ],
+        ),
+    ] {
+        let mut framebuffer = VncFramebuffer::new(width, 2);
+        let update = only_frame_update(framebuffer.apply(VncServerEvent::RawImage(rect, pixels)));
+        assert_eq!(
+            update.size,
+            RemoteDesktopSize {
+                width: u32::from(width),
+                height: 2
+            }
+        );
+        assert_eq!(
+            update.rect,
+            RemoteDesktopRect::new(
+                u32::from(rect.x),
+                u32::from(rect.y),
+                u32::from(rect.width),
+                u32::from(rect.height)
+            )
+        );
+        assert_eq!(update.bytes, expected_update);
+        assert_eq!(
+            framebuffer.frame_update(rect).unwrap().bytes,
+            expected_update
+        );
+        assert_eq!(framebuffer.frame().bytes, expected_frame);
+    }
 }
 
 #[test]
@@ -98,31 +114,6 @@ fn framebuffer_copies_rect_without_overlapping_corruption() {
         framebuffer.frame().bytes,
         vec![1, 0, 0, 255, 1, 0, 0, 255, 2, 0, 0, 255]
     );
-}
-
-#[test]
-fn framebuffer_update_contains_only_changed_rect() {
-    let mut framebuffer = VncFramebuffer::new(3, 2);
-    let rect = RfbRect {
-        x: 1,
-        y: 1,
-        width: 2,
-        height: 1,
-    };
-
-    let update = only_frame_update(framebuffer.apply(VncServerEvent::RawImage(
-        rect,
-        vec![7, 8, 9, 255, 10, 11, 12, 255],
-    )));
-    assert_eq!(
-        update.size,
-        RemoteDesktopSize {
-            width: 3,
-            height: 2,
-        }
-    );
-    assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 2, 1));
-    assert_eq!(update.bytes, vec![7, 8, 9, 255, 10, 11, 12, 255]);
 }
 
 #[test]
@@ -245,86 +236,43 @@ fn last_rect_stops_an_unknown_length_framebuffer_update() {
 }
 
 #[test]
-fn hextile_background_and_colored_subrect_decode_to_raw_rect() {
-    let mut payload = vec![
-        VNC_HEXTILE_BACKGROUND_SPECIFIED | VNC_HEXTILE_ANY_SUBRECTS | VNC_HEXTILE_SUBRECTS_COLORED,
-        1,
-        2,
-        3,
-        0,
-        1,
-        9,
-        8,
-        7,
-        0,
-        0x10,
-        0x00,
-    ];
-    let mut reader = Cursor::new(payload.split_off(0));
-
-    let bytes = read_hextile_rect(
-        &mut reader,
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 2,
-            height: 2,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(bytes, vec![1, 2, 3, 0, 9, 8, 7, 0, 1, 2, 3, 0, 1, 2, 3, 0]);
-}
-
-#[test]
-fn hextile_raw_tile_decodes_without_background_state() {
-    let mut payload = vec![VNC_HEXTILE_RAW, 1, 2, 3, 0, 4, 5, 6, 0];
-    let mut reader = Cursor::new(payload.split_off(0));
-
-    let bytes = read_hextile_rect(
-        &mut reader,
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 2,
-            height: 1,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(bytes, vec![1, 2, 3, 0, 4, 5, 6, 0]);
-}
-
-#[test]
-fn hextile_rejects_out_of_bounds_subrect() {
-    let mut payload = vec![
-        VNC_HEXTILE_BACKGROUND_SPECIFIED | VNC_HEXTILE_ANY_SUBRECTS | VNC_HEXTILE_SUBRECTS_COLORED,
-        1,
-        2,
-        3,
-        0,
-        1,
-        9,
-        8,
-        7,
-        0,
-        0x10,
-        0x10,
-    ];
-    let mut reader = Cursor::new(payload.split_off(0));
-
-    let error = read_hextile_rect(
-        &mut reader,
-        RfbRect {
-            x: 0,
-            y: 0,
-            width: 2,
-            height: 1,
-        },
-    )
-    .unwrap_err();
-
-    assert!(error.contains("subrect exceeds"));
+fn hextile_tiles_decode_pixels_and_reject_out_of_bounds_subrectangles() {
+    let colored =
+        VNC_HEXTILE_BACKGROUND_SPECIFIED | VNC_HEXTILE_ANY_SUBRECTS | VNC_HEXTILE_SUBRECTS_COLORED;
+    for (case, payload, height, expected) in [
+        (
+            "colored subrectangle",
+            vec![colored, 1, 2, 3, 0, 1, 9, 8, 7, 0, 0x10, 0x00],
+            2,
+            Ok(vec![1, 2, 3, 0, 9, 8, 7, 0, 1, 2, 3, 0, 1, 2, 3, 0]),
+        ),
+        (
+            "raw tile",
+            vec![VNC_HEXTILE_RAW, 1, 2, 3, 0, 4, 5, 6, 0],
+            1,
+            Ok(vec![1, 2, 3, 0, 4, 5, 6, 0]),
+        ),
+        (
+            "out of bounds",
+            vec![colored, 1, 2, 3, 0, 1, 9, 8, 7, 0, 0x10, 0x10],
+            1,
+            Err("subrect exceeds"),
+        ),
+    ] {
+        let result = read_hextile_rect(
+            &mut Cursor::new(payload),
+            RfbRect {
+                x: 0,
+                y: 0,
+                width: 2,
+                height,
+            },
+        );
+        match expected {
+            Ok(pixels) => assert_eq!(result.unwrap(), pixels, "{case}"),
+            Err(message) => assert!(result.unwrap_err().contains(message), "{case}"),
+        }
+    }
 }
 
 #[test]
@@ -396,28 +344,18 @@ fn zrle_rectangle_decodes_length_prefixed_zlib_payload() {
 }
 
 #[test]
-fn zrle_inflater_grows_beyond_initial_output_capacity() {
-    // Large ZRLE rectangles can legitimately expand beyond the inflater's
-    // small initial allocation even when the compressed payload is tiny.
+fn zrle_inflater_grows_to_the_limit_and_rejects_one_byte_over() {
     let expanded = vec![0x5a; 96 * 1024];
     let compressed = zlib_payload(&expanded);
 
-    let output =
-        inflate_zrle_payload(&mut Decompress::new(true), &compressed, expanded.len()).unwrap();
-
-    assert_eq!(output.len(), expanded.len());
-    assert!(output.iter().all(|byte| *byte == 0x5a));
-}
-
-#[test]
-fn zrle_inflater_rejects_output_beyond_limit() {
-    let expanded = vec![0x3c; 96 * 1024];
-    let compressed = zlib_payload(&expanded);
-
-    let error = inflate_zrle_payload(&mut Decompress::new(true), &compressed, expanded.len() - 1)
-        .unwrap_err();
-
-    assert!(error.contains("expanded beyond"));
+    for limit in [expanded.len(), expanded.len() - 1] {
+        let result = inflate_zrle_payload(&mut Decompress::new(true), &compressed, limit);
+        if limit == expanded.len() {
+            assert_eq!(result.unwrap(), expanded);
+        } else {
+            assert!(result.unwrap_err().contains("expanded beyond"));
+        }
+    }
 }
 
 #[test]
@@ -757,61 +695,60 @@ fn desktop_resize_remains_unknown_without_extension_evidence() {
 }
 
 #[test]
-fn forced_vnc_recovery_promotes_dirty_rect_to_base_frame() {
-    let mut framebuffer = VncFramebuffer::new(2, 2);
-    let rect = RfbRect {
-        x: 1,
-        y: 1,
-        width: 1,
-        height: 1,
+fn vnc_dirty_rect_publication_uses_a_base_frame_only_for_recovery() {
+    let size = RemoteDesktopSize {
+        width: 2,
+        height: 2,
     };
-    let change = framebuffer
-        .apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]))
-        .unwrap();
-    let mut sent_initial_frame = true;
+    for (force_base_frame, expected) in [
+        (
+            true,
+            RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    size,
+                    RemoteDesktopFrameFormat::Bgra8,
+                    vec![0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255, 9, 8, 7, 255],
+                ),
+            },
+        ),
+        (
+            false,
+            RemoteDesktopHelperEvent::FrameUpdate {
+                update: RemoteDesktopFrameUpdate::new(
+                    size,
+                    RemoteDesktopRect::new(1, 1, 1, 1),
+                    RemoteDesktopFrameFormat::Bgra8,
+                    vec![9, 8, 7, 255],
+                ),
+            },
+        ),
+    ] {
+        let mut framebuffer = VncFramebuffer::new(2, 2);
+        let change = framebuffer
+            .apply(VncServerEvent::RawImage(
+                RfbRect {
+                    x: 1,
+                    y: 1,
+                    width: 1,
+                    height: 1,
+                },
+                vec![9, 8, 7, 255],
+            ))
+            .unwrap();
+        let mut sent_initial_frame = true;
 
-    let event = vnc_frame_event_for_change(&framebuffer, change, &mut sent_initial_frame, true);
-
-    match event {
-        RemoteDesktopHelperEvent::Frame { frame } => {
-            assert_eq!(
-                frame.size,
-                RemoteDesktopSize {
-                    width: 2,
-                    height: 2,
-                }
-            );
-            assert_eq!(frame.bytes.len(), 16);
-        }
-        other => panic!("expected forced base frame, got {other:?}"),
+        assert_eq!(
+            vnc_frame_event_for_change(
+                &framebuffer,
+                change,
+                &mut sent_initial_frame,
+                force_base_frame,
+            ),
+            expected,
+            "force_base_frame: {force_base_frame}"
+        );
+        assert!(sent_initial_frame);
     }
-    assert!(sent_initial_frame);
-}
-
-#[test]
-fn ordinary_vnc_dirty_rect_stays_incremental_after_base_frame() {
-    let mut framebuffer = VncFramebuffer::new(2, 2);
-    let rect = RfbRect {
-        x: 1,
-        y: 1,
-        width: 1,
-        height: 1,
-    };
-    let change = framebuffer
-        .apply(VncServerEvent::RawImage(rect, vec![9, 8, 7, 255]))
-        .unwrap();
-    let mut sent_initial_frame = true;
-
-    let event = vnc_frame_event_for_change(&framebuffer, change, &mut sent_initial_frame, false);
-
-    match event {
-        RemoteDesktopHelperEvent::FrameUpdate { update } => {
-            assert_eq!(update.rect, RemoteDesktopRect::new(1, 1, 1, 1));
-            assert_eq!(update.bytes, vec![9, 8, 7, 255]);
-        }
-        other => panic!("expected dirty update, got {other:?}"),
-    }
-    assert!(sent_initial_frame);
 }
 
 #[test]

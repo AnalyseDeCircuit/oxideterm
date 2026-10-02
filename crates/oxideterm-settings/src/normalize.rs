@@ -1037,37 +1037,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalid_custom_semantic_schemes_are_removed_before_deserialization() {
+    fn invalid_terminal_rule_references_are_removed_while_valid_bindings_survive() {
         let sanitized = sanitize_settings_value(json!({
             "terminal": {
                 "semanticCustomScheme": "custom:invalid",
                 "customSemanticSchemes": [{
-                    "version": 1,
-                    "id": "custom:invalid",
-                    "name": "Invalid",
+                    "version": 1, "id": "custom:invalid", "name": "Invalid",
                     "rules": [{
-                        "id": "bad-regex",
-                        "enabled": true,
-                        "pattern": "(",
-                        "capture": 0,
-                        "class": "error",
-                        "priority": 80,
-                        "context": "any"
+                        "id": "bad-regex", "enabled": true, "pattern": "(", "capture": 0,
+                        "class": "error", "priority": 80, "context": "any"
                     }]
-                }]
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert!(
+                }],
+                "defaultHighlightRuleSet": "missing",
+                "highlightRuleSets": [{ "id": "operations", "name": "Operations", "rules": [] }]
+            },
+            "localTerminal": { "semanticSchemeByShell": { "bash": "conservative", "zsh": "custom:missing" } }
+        })).unwrap();
+        let terminal = &sanitized.settings.terminal;
+        assert!(terminal.custom_semantic_schemes.is_empty());
+        assert_eq!(terminal.semantic_custom_scheme, None);
+        assert_eq!(terminal.default_highlight_rule_set, None);
+        assert_eq!(
+            terminal
+                .highlight_rule_sets
+                .iter()
+                .map(|rules| (rules.id.as_str(), rules.name.as_str()))
+                .collect::<Vec<_>>(),
+            [("operations", "Operations")]
+        );
+        assert_eq!(
             sanitized
                 .settings
-                .terminal
-                .custom_semantic_schemes
-                .is_empty()
+                .local_terminal
+                .semantic_scheme_for_shell("bash"),
+            Some("conservative")
         );
-        assert!(sanitized.settings.terminal.semantic_custom_scheme.is_none());
-        assert!(!sanitized.validation_warnings.is_empty());
+        assert_eq!(
+            sanitized
+                .settings
+                .local_terminal
+                .semantic_scheme_for_shell("zsh"),
+            None
+        );
+        assert!(
+            sanitized
+                .validation_warnings
+                .iter()
+                .any(|warning| warning.contains("custom:invalid"))
+        );
     }
 
     #[test]
@@ -1094,74 +1111,79 @@ mod tests {
     }
 
     #[test]
-    fn missing_default_highlight_rule_set_falls_back_to_global_base() {
-        let sanitized = sanitize_settings_value(json!({
-            "terminal": {
-                "defaultHighlightRuleSet": "missing",
-                "highlightRuleSets": [{
-                    "id": "operations",
-                    "name": "Operations",
-                    "rules": []
-                }]
+    fn saved_display_values_use_supported_defaults_and_bounds() {
+        for (input, path, expected, warning) in [
+            (
+                json!({"general": {"updateChannel": "gpui-preview"}}),
+                "/general/updateChannel",
+                serde_json::to_value(UpdateChannel::default()).unwrap(),
+                Some("general.updateChannel"),
+            ),
+            (
+                json!({"terminal": {"backgroundOpacity": 1.0}}),
+                "/terminal/backgroundOpacity",
+                json!(MAX_TERMINAL_BACKGROUND_OPACITY),
+                None,
+            ),
+            (
+                json!({"terminal": {"backgroundOpacity": 1.5}}),
+                "/terminal/backgroundOpacity",
+                json!(MAX_TERMINAL_BACKGROUND_OPACITY),
+                Some("terminal.backgroundOpacity"),
+            ),
+            (
+                json!({"appearance": {}}),
+                "/appearance/windowOpacity",
+                json!(DEFAULT_WINDOW_OPACITY),
+                None,
+            ),
+            (
+                json!({"appearance": {"windowOpacity": 0.1}}),
+                "/appearance/windowOpacity",
+                json!(MIN_WINDOW_OPACITY),
+                Some("appearance.windowOpacity"),
+            ),
+            (
+                json!({"appearance": {}}),
+                "/appearance/uiFontSize",
+                json!(DEFAULT_UI_FONT_SIZE),
+                None,
+            ),
+            (
+                json!({"appearance": {"uiFontSize": 100}}),
+                "/appearance/uiFontSize",
+                json!(20),
+                Some("appearance.uiFontSize"),
+            ),
+            (
+                json!({"appearance": {"frostedGlass": "css"}}),
+                "/appearance/frostedGlass",
+                json!("off"),
+                Some("appearance.frostedGlass"),
+            ),
+        ] {
+            let sanitized = sanitize_settings_value(input).unwrap();
+            assert_eq!(
+                sanitized.settings.to_value().pointer(path),
+                Some(&expected),
+                "{path}"
+            );
+            match warning {
+                Some(field) => assert!(
+                    sanitized
+                        .validation_warnings
+                        .iter()
+                        .any(|warning| warning.contains(field)),
+                    "{path}: {:?}",
+                    sanitized.validation_warnings
+                ),
+                None => assert!(
+                    sanitized.validation_warnings.is_empty(),
+                    "{path}: {:?}",
+                    sanitized.validation_warnings
+                ),
             }
-        }))
-        .expect("sanitize settings");
-
-        assert!(
-            sanitized
-                .settings
-                .terminal
-                .default_highlight_rule_set
-                .is_none()
-        );
-        assert_eq!(sanitized.settings.terminal.highlight_rule_sets.len(), 1);
-    }
-
-    #[test]
-    fn local_shell_scheme_bindings_keep_builtins_and_remove_missing_custom_schemes() {
-        let sanitized = sanitize_settings_value(json!({
-            "localTerminal": {
-                "semanticSchemeByShell": {
-                    "bash": "conservative",
-                    "zsh": "custom:missing"
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert_eq!(
-            sanitized
-                .settings
-                .local_terminal
-                .semantic_scheme_for_shell("bash"),
-            Some("conservative")
-        );
-        assert!(
-            sanitized
-                .settings
-                .local_terminal
-                .semantic_scheme_for_shell("zsh")
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn retired_gpui_preview_channel_migrates_to_the_build_default() {
-        let sanitized = sanitize_settings_value(json!({
-            "general": { "updateChannel": "gpui-preview" }
-        }))
-        .expect("sanitize retired update channel");
-
-        assert_eq!(
-            sanitized.settings.general.update_channel,
-            UpdateChannel::default()
-        );
-        assert!(
-            sanitized
-                .validation_warnings
-                .iter()
-                .any(|warning| warning.contains("general.updateChannel"))
-        );
+        }
     }
 
     #[test]
@@ -1234,99 +1256,6 @@ mod tests {
                 assert_eq!(sanitized.settings.terminal.background_blur, 20);
             }
         }
-    }
-
-    #[test]
-    fn background_opacity_accepts_full_visibility_and_clamps_oversized_values() {
-        let full_visibility = sanitize_settings_value(json!({
-            "terminal": { "backgroundOpacity": 1.0 }
-        }))
-        .expect("sanitize full background opacity");
-        assert_eq!(
-            full_visibility.settings.terminal.background_opacity,
-            MAX_TERMINAL_BACKGROUND_OPACITY
-        );
-        assert!(full_visibility.validation_warnings.is_empty());
-
-        let oversized = sanitize_settings_value(json!({
-            "terminal": { "backgroundOpacity": 1.5 }
-        }))
-        .expect("sanitize oversized background opacity");
-        assert_eq!(
-            oversized.settings.terminal.background_opacity,
-            MAX_TERMINAL_BACKGROUND_OPACITY
-        );
-        assert!(
-            oversized
-                .validation_warnings
-                .iter()
-                .any(|warning| warning.contains("terminal.backgroundOpacity"))
-        );
-    }
-
-    #[test]
-    fn window_opacity_defaults_to_opaque_and_clamps_unreadable_values() {
-        let legacy = sanitize_settings_value(json!({
-            "appearance": {}
-        }))
-        .expect("sanitize settings without window opacity");
-        assert_eq!(
-            legacy.settings.appearance.window_opacity,
-            DEFAULT_WINDOW_OPACITY
-        );
-
-        let too_transparent = sanitize_settings_value(json!({
-            "appearance": { "windowOpacity": 0.1 }
-        }))
-        .expect("sanitize overly transparent window opacity");
-        assert_eq!(
-            too_transparent.settings.appearance.window_opacity,
-            MIN_WINDOW_OPACITY
-        );
-        assert!(
-            too_transparent
-                .validation_warnings
-                .iter()
-                .any(|warning| warning.contains("appearance.windowOpacity"))
-        );
-    }
-
-    #[test]
-    fn ui_font_size_defaults_and_clamps_during_sanitization() {
-        let legacy = sanitize_settings_value(json!({
-            "appearance": {}
-        }))
-        .expect("sanitize settings without a UI font size");
-        assert_eq!(
-            legacy.settings.appearance.ui_font_size,
-            DEFAULT_UI_FONT_SIZE
-        );
-
-        let oversized = sanitize_settings_value(json!({
-            "appearance": { "uiFontSize": 100 }
-        }))
-        .expect("sanitize oversized UI font size");
-        assert_eq!(oversized.settings.appearance.ui_font_size, 20);
-        assert!(
-            oversized
-                .validation_warnings
-                .iter()
-                .any(|warning| warning.contains("appearance.uiFontSize"))
-        );
-    }
-
-    #[test]
-    fn legacy_css_frosted_glass_falls_back_to_off() {
-        let sanitized = sanitize_settings_value(json!({
-            "appearance": { "frostedGlass": "css" }
-        }))
-        .expect("sanitize legacy frosted glass setting");
-
-        assert_eq!(
-            sanitized.settings.appearance.frosted_glass,
-            crate::FrostedGlassMode::Off
-        );
-        assert!(!sanitized.validation_warnings.is_empty());
     }
 
     #[test]
@@ -1542,125 +1471,96 @@ mod tests {
     }
 
     #[test]
-    fn legacy_native_profile_reasoning_aliases_migrate_to_top_level() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "providers": [{
-                    "id": "provider-1",
-                    "type": "openai",
-                    "name": "OpenAI",
-                    "baseUrl": "https://api.openai.com/v1",
-                    "models": ["gpt-4o-mini"],
-                    "enabled": true,
-                    "createdAt": 1
-                }],
-                "activeProviderId": "provider-1",
-                "activeModel": "gpt-4o-mini",
-                "executionProfiles": {
-                    "defaultProfileId": "default",
-                    "profiles": [{
-                        "id": "default",
-                        "name": "Default",
-                        "providerId": "provider-1",
-                        "model": "gpt-4o-mini",
-                        "reasoningEffort": "xhigh"
-                    }]
-                }
+    fn legacy_execution_profiles_migrate_selection_and_drop_removed_profile_data() {
+        for (input, expected) in [
+            (
+                json!({
+                    "ai": {
+                        "providers": [{
+                            "id": "provider-1",
+                            "type": "openai",
+                            "name": "OpenAI",
+                            "baseUrl": "https://api.openai.com/v1",
+                            "models": ["gpt-4o-mini"],
+                            "enabled": true,
+                            "createdAt": 1
+                        }],
+                        "activeProviderId": "provider-1",
+                        "activeModel": "gpt-4o-mini",
+                        "executionProfiles": {
+                            "defaultProfileId": "default",
+                            "profiles": [{
+                                "id": "default",
+                                "name": "Default",
+                                "providerId": "provider-1",
+                                "model": "gpt-4o-mini",
+                                "reasoningEffort": "xhigh"
+                            }]
+                        }
+                    }
+                }),
+                vec![
+                    ("/ai/reasoningEffort", json!("xhigh")),
+                    ("/ai/activeProviderId", json!("provider-1")),
+                    ("/ai/activeModel", json!("gpt-4o-mini")),
+                ],
+            ),
+            (
+                json!({
+                    "ai": {
+                        "executionProfiles": {
+                            "defaultProfileId": "missing",
+                            "profiles": [{
+                                "id": "first",
+                                "name": "First",
+                                "providerId": "provider-1",
+                                "model": "model-1",
+                                "reasoningEffort": "auto",
+                                "createdAt": 1,
+                                "updatedAt": 1
+                            }]
+                        }
+                    }
+                }),
+                vec![
+                    ("/ai/activeProviderId", json!("provider-1")),
+                    ("/ai/activeModel", json!("model-1")),
+                ],
+            ),
+            (
+                json!({
+                    "ai": {
+                        "executionProfiles": {
+                            "defaultProfileId": "codex-profile",
+                            "profiles": [{
+                                "id": "codex-profile",
+                                "backend": "acp",
+                                "acpAgentId": "codex",
+                                "reasoningEffort": "off"
+                            }]
+                        }
+                    }
+                }),
+                vec![
+                    ("/ai/activeBackend", json!("acp")),
+                    ("/ai/activeAcpAgentId", json!("codex")),
+                    ("/ai/reasoningEffort", json!("none")),
+                ],
+            ),
+        ] {
+            let sanitized = sanitize_settings_value(input).unwrap();
+            assert!(
+                !sanitized
+                    .settings
+                    .ai
+                    .extra
+                    .contains_key("executionProfiles")
+            );
+            let saved = sanitized.settings.to_value();
+            for (path, expected) in expected {
+                assert_eq!(saved.pointer(path), Some(&expected), "{path}");
             }
-        }))
-        .expect("sanitize settings");
-
-        assert_eq!(
-            sanitized.settings.ai.reasoning_effort,
-            AiReasoningEffort::Xhigh
-        );
-        assert_eq!(
-            sanitized.settings.ai.active_provider_id.as_deref(),
-            Some("provider-1")
-        );
-        assert_eq!(
-            sanitized.settings.ai.active_model.as_deref(),
-            Some("gpt-4o-mini")
-        );
-        assert!(
-            !sanitized
-                .settings
-                .ai
-                .extra
-                .contains_key("executionProfiles")
-        );
-    }
-
-    #[test]
-    fn legacy_execution_profiles_with_missing_default_migrate_first_profile() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "executionProfiles": {
-                    "defaultProfileId": "missing",
-                    "profiles": [{
-                        "id": "first",
-                        "name": "First",
-                        "providerId": "provider-1",
-                        "model": "model-1",
-                        "reasoningEffort": "auto",
-                        "createdAt": 1,
-                        "updatedAt": 1
-                    }]
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert_eq!(
-            sanitized.settings.ai.active_provider_id.as_deref(),
-            Some("provider-1")
-        );
-        assert_eq!(
-            sanitized.settings.ai.active_model.as_deref(),
-            Some("model-1")
-        );
-        assert!(
-            !sanitized
-                .settings
-                .ai
-                .extra
-                .contains_key("executionProfiles")
-        );
-    }
-
-    #[test]
-    fn legacy_acp_execution_profile_migrates_to_active_agent() {
-        let sanitized = sanitize_settings_value(json!({
-            "ai": {
-                "executionProfiles": {
-                    "defaultProfileId": "codex-profile",
-                    "profiles": [{
-                        "id": "codex-profile",
-                        "backend": "acp",
-                        "acpAgentId": "codex",
-                        "reasoningEffort": "off"
-                    }]
-                }
-            }
-        }))
-        .expect("sanitize settings");
-
-        assert_eq!(sanitized.settings.ai.active_backend, AiActiveBackend::Acp);
-        assert_eq!(
-            sanitized.settings.ai.active_acp_agent_id.as_deref(),
-            Some("codex")
-        );
-        assert_eq!(
-            sanitized.settings.ai.reasoning_effort,
-            AiReasoningEffort::None
-        );
-        assert!(
-            !sanitized
-                .settings
-                .ai
-                .extra
-                .contains_key("executionProfiles")
-        );
+        }
     }
 
     #[test]

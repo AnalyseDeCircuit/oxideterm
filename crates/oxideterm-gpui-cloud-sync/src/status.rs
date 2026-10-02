@@ -404,89 +404,66 @@ mod tests {
     }
 
     #[test]
-    fn health_items_accept_secret_hints_without_secret_value_clones() {
-        let mut settings = CloudSyncSettings::default();
-        settings.backend_type = BackendType::S3;
-        settings.endpoint = "https://s3.example.test".to_string();
-        settings.s3_bucket = "oxide".to_string();
-        settings.s3_region = "us-east-1".to_string();
-        let form = CloudSyncFormDraft::from_settings(&settings);
-        let mut state = CloudSyncPersistedState::default();
-        state
-            .secret_hints
-            .insert(secret_keys::ACCESS_KEY_ID.to_string(), true);
-        state
-            .secret_hints
-            .insert(secret_keys::SECRET_ACCESS_KEY.to_string(), true);
-        state
-            .secret_hints
-            .insert(secret_keys::SYNC_PASSWORD.to_string(), true);
-        state.last_check_at = Some("2026-06-12T00:00:00Z".to_string());
-
-        let items = cloud_sync_health_items(&form, &state);
-
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.backend_config"
-                && item.status == CloudSyncHealthStatus::Pass
-        }));
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.sync_password"
-                && item.status == CloudSyncHealthStatus::Pass
-        }));
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.remote_check"
-                && item.status == CloudSyncHealthStatus::Pass
-        }));
-    }
-
-    #[test]
-    fn health_items_require_google_drive_client_id_and_refresh_token_hint() {
-        let settings = CloudSyncSettings {
-            backend_type: BackendType::GoogleDrive,
-            google_oauth_client_id: "google-client-id".to_string(),
-            ..CloudSyncSettings::default()
-        };
-        let form = CloudSyncFormDraft::from_settings(&settings);
-        let mut state = CloudSyncPersistedState::default();
-        state
-            .secret_hints
-            .insert(secret_keys::GOOGLE_REFRESH_TOKEN.to_string(), true);
-        state
-            .secret_hints
-            .insert(secret_keys::SYNC_PASSWORD.to_string(), true);
-
-        let items = cloud_sync_health_items(&form, &state);
-
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.backend_config"
-                && item.status == CloudSyncHealthStatus::Pass
-        }));
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.sync_password"
-                && item.status == CloudSyncHealthStatus::Pass
-        }));
-    }
-
-    #[test]
-    fn health_items_allow_empty_gist_id_for_first_upload_creation() {
-        let mut settings = CloudSyncSettings::default();
-        settings.backend_type = BackendType::GithubGist;
-        settings.git_repository.clear();
-        let form = CloudSyncFormDraft::from_settings(&settings);
-        let mut state = CloudSyncPersistedState::default();
-        state
-            .secret_hints
-            .insert(secret_keys::GIT_TOKEN.to_string(), true);
-        state
-            .secret_hints
-            .insert(secret_keys::SYNC_PASSWORD.to_string(), true);
-
-        let items = cloud_sync_health_items(&form, &state);
-
-        assert!(items.iter().any(|item| {
-            item.label_key == "plugin.cloud_sync.health.backend_config"
-                && item.status == CloudSyncHealthStatus::Pass
-        }));
+    fn health_items_accept_backend_secret_hints_without_plaintext_drafts() {
+        for (settings, keys, checked_remote) in [
+            (
+                CloudSyncSettings {
+                    backend_type: BackendType::S3,
+                    endpoint: "https://s3.example.test".into(),
+                    s3_bucket: "oxide".into(),
+                    s3_region: "us-east-1".into(),
+                    ..CloudSyncSettings::default()
+                },
+                vec![secret_keys::ACCESS_KEY_ID, secret_keys::SECRET_ACCESS_KEY],
+                true,
+            ),
+            (
+                CloudSyncSettings {
+                    backend_type: BackendType::GoogleDrive,
+                    google_oauth_client_id: "google-client-id".into(),
+                    ..CloudSyncSettings::default()
+                },
+                vec![secret_keys::GOOGLE_REFRESH_TOKEN],
+                false,
+            ),
+            (
+                CloudSyncSettings {
+                    backend_type: BackendType::GithubGist,
+                    git_repository: String::new(),
+                    ..CloudSyncSettings::default()
+                },
+                vec![secret_keys::GIT_TOKEN],
+                false,
+            ),
+        ] {
+            let form = CloudSyncFormDraft::from_settings(&settings);
+            let mut state = CloudSyncPersistedState::default();
+            for key in keys.into_iter().chain([secret_keys::SYNC_PASSWORD]) {
+                state.secret_hints.insert(key.to_string(), true);
+            }
+            if checked_remote {
+                state.last_check_at = Some("2026-06-12T00:00:00Z".into());
+            }
+            let items = cloud_sync_health_items(&form, &state);
+            let mut expected_keys = vec![
+                "plugin.cloud_sync.health.backend_config",
+                "plugin.cloud_sync.health.sync_password",
+            ];
+            if checked_remote {
+                expected_keys.push("plugin.cloud_sync.health.remote_check");
+            }
+            for key in expected_keys {
+                assert_eq!(
+                    items
+                        .iter()
+                        .find(|item| item.label_key == key)
+                        .map(|item| &item.status),
+                    Some(&CloudSyncHealthStatus::Pass),
+                    "{:?}: {key}",
+                    settings.backend_type
+                );
+            }
+        }
     }
 
     #[test]

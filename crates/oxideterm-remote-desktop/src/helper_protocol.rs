@@ -685,27 +685,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn connect_debug_redacts_secret_values() {
-        let request = RemoteDesktopHelperRequest::Connect {
-            protocol: RemoteDesktopProtocol::Rdp,
-            endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-            username: Some("admin".to_string()),
-            password: Some(RemoteDesktopSecret::from("super-secret")),
-            domain: Some("corp".to_string()),
-            size: RemoteDesktopSize {
-                width: 1280,
-                height: 720,
-            },
-            scale_factor: Some(125),
-            read_only: false,
-        };
-
-        let debug = format!("{request:?}");
-
-        assert!(debug.contains("redacted"));
-        assert!(!debug.contains("super-secret"));
-        assert!(!debug.contains("admin"));
-        assert!(!debug.contains("corp"));
+    fn request_debug_redacts_credentials_and_clipboard_paths() {
+        for (request, marker, secrets) in [
+            (
+                RemoteDesktopHelperRequest::Connect {
+                    protocol: RemoteDesktopProtocol::Rdp,
+                    endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
+                    username: Some("admin".into()),
+                    password: Some(RemoteDesktopSecret::from("super-secret")),
+                    domain: Some("corp".into()),
+                    size: RemoteDesktopSize {
+                        width: 1280,
+                        height: 720,
+                    },
+                    scale_factor: Some(125),
+                    read_only: false,
+                },
+                "redacted",
+                &["super-secret", "admin", "corp"][..],
+            ),
+            (
+                RemoteDesktopHelperRequest::Authenticate {
+                    challenge_id: "challenge".into(),
+                    sha256_fingerprint: "AA:BB".into(),
+                    username: Some("admin".into()),
+                    password: Some(RemoteDesktopSecret::from("super-secret")),
+                    domain: Some("corp".into()),
+                },
+                "redacted",
+                &["super-secret", "admin", "corp"][..],
+            ),
+            (
+                RemoteDesktopHelperRequest::ClipboardFiles {
+                    transfer_id: "transfer".into(),
+                    paths: vec![PathBuf::from("/private/example.txt")],
+                },
+                "path_count",
+                &["/private/example.txt"][..],
+            ),
+        ] {
+            let debug = format!("{request:?}");
+            assert!(debug.contains(marker));
+            for &secret in secrets {
+                assert!(!debug.contains(secret), "sensitive debug field leaked");
+            }
+        }
     }
 
     #[test]
@@ -742,106 +766,64 @@ mod tests {
     }
 
     #[test]
-    fn authentication_debug_redacts_credentials() {
-        let request = RemoteDesktopHelperRequest::Authenticate {
-            challenge_id: "challenge".to_string(),
-            sha256_fingerprint: "AA:BB".to_string(),
-            username: Some("admin".to_string()),
-            password: Some(RemoteDesktopSecret::from("super-secret")),
-            domain: Some("corp".to_string()),
-        };
-
-        let debug = format!("{request:?}");
-
-        assert!(debug.contains("redacted"));
-        assert!(!debug.contains("super-secret"));
-        assert!(!debug.contains("admin"));
-        assert!(!debug.contains("corp"));
-    }
-
-    #[test]
-    fn clipboard_file_debug_does_not_expose_local_paths() {
-        let request = RemoteDesktopHelperRequest::ClipboardFiles {
-            transfer_id: "transfer".to_string(),
-            paths: vec![PathBuf::from("/private/example.txt")],
-        };
-
-        let debug = format!("{request:?}");
-
-        assert!(debug.contains("path_count"));
-        assert!(!debug.contains("/private/example.txt"));
-    }
-
-    #[test]
-    fn connect_request_accepts_missing_scale_factor() {
-        let decoded: RemoteDesktopHelperRequest = serde_json::from_str(
-            r#"{"type":"connect","protocol":"rdp","endpoint":{"host":"example.test","port":3389},"username":null,"password":null,"domain":null,"size":{"width":1280,"height":720},"readOnly":false}"#,
-        )
-        .unwrap();
-
-        assert_eq!(
-            decoded,
-            RemoteDesktopHelperRequest::Connect {
-                protocol: RemoteDesktopProtocol::Rdp,
-                endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
-                username: None,
-                password: None,
-                domain: None,
-                size: RemoteDesktopSize {
-                    width: 1280,
-                    height: 720,
+    fn helper_request_wire_fixtures_preserve_variants_and_optional_scale() {
+        for (wire, expected) in [
+            (
+                serde_json::json!({"type":"connect","protocol":"rdp","endpoint":{"host":"example.test","port":3389},"username":null,"password":null,"domain":null,"size":{"width":1280,"height":720},"readOnly":false}),
+                RemoteDesktopHelperRequest::Connect {
+                    protocol: RemoteDesktopProtocol::Rdp,
+                    endpoint: RemoteDesktopEndpoint::new("example.test", 3389),
+                    username: None,
+                    password: None,
+                    domain: None,
+                    size: RemoteDesktopSize {
+                        width: 1280,
+                        height: 720,
+                    },
+                    scale_factor: None,
+                    read_only: false,
                 },
-                scale_factor: None,
-                read_only: false,
-            }
-        );
-    }
-
-    #[test]
-    fn helper_requests_round_trip_json() {
-        // Generic request variants share the same serialization round-trip contract.
-        let requests = [
-            RemoteDesktopHelperRequest::Resize {
-                size: RemoteDesktopSize {
-                    width: 1024,
-                    height: 768,
+            ),
+            (
+                serde_json::json!({"type":"resize","size":{"width":1024,"height":768}}),
+                RemoteDesktopHelperRequest::Resize {
+                    size: RemoteDesktopSize {
+                        width: 1024,
+                        height: 768,
+                    },
+                    scale_factor: None,
                 },
-                scale_factor: Some(125),
-            },
-            RemoteDesktopHelperRequest::ReleaseAllInputs,
-            RemoteDesktopHelperRequest::SynchronizeLockKeys {
-                keys: RemoteDesktopLockKeys {
-                    scroll_lock: true,
-                    num_lock: false,
-                    caps_lock: true,
-                    kana_lock: false,
+            ),
+            (
+                serde_json::json!({"type":"resize","size":{"width":1024,"height":768},"scaleFactor":125}),
+                RemoteDesktopHelperRequest::Resize {
+                    size: RemoteDesktopSize {
+                        width: 1024,
+                        height: 768,
+                    },
+                    scale_factor: Some(125),
                 },
-            },
-        ];
-
-        for request in requests {
-            let encoded = serde_json::to_string(&request).unwrap();
-            let decoded: RemoteDesktopHelperRequest = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(decoded, request);
+            ),
+            (
+                serde_json::json!({"type":"releaseAllInputs"}),
+                RemoteDesktopHelperRequest::ReleaseAllInputs,
+            ),
+            (
+                serde_json::json!({"type":"synchronizeLockKeys","keys":{"scrollLock":true,"numLock":false,"capsLock":true,"kanaLock":false}}),
+                RemoteDesktopHelperRequest::SynchronizeLockKeys {
+                    keys: RemoteDesktopLockKeys {
+                        scroll_lock: true,
+                        num_lock: false,
+                        caps_lock: true,
+                        kana_lock: false,
+                    },
+                },
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&expected).unwrap(), wire);
+            let decoded: RemoteDesktopHelperRequest = serde_json::from_value(wire).unwrap();
+            assert_eq!(decoded, expected);
         }
-    }
-
-    #[test]
-    fn resize_request_accepts_missing_scale_factor() {
-        let decoded: RemoteDesktopHelperRequest =
-            serde_json::from_str(r#"{"type":"resize","size":{"width":1024,"height":768}}"#)
-                .unwrap();
-
-        assert_eq!(
-            decoded,
-            RemoteDesktopHelperRequest::Resize {
-                size: RemoteDesktopSize {
-                    width: 1024,
-                    height: 768,
-                },
-                scale_factor: None,
-            }
-        );
     }
 
     #[test]

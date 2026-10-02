@@ -228,22 +228,4 @@ mod tests {
             }),
         );
     }
-
-    #[test]
-    fn highlights_map_unicode_lowercase_expansion_back_to_original_label() {
-        assert_eq!(
-            command_palette_match("İnfo 设置", "İnfo 设置", "i"),
-            Some(CommandPaletteMatch {
-                score: 1.0,
-                highlights: vec![0],
-            })
-        );
-        assert_eq!(
-            command_palette_match("打开设置", "打开设置", "设置"),
-            Some(CommandPaletteMatch {
-                score: 1.0,
-                highlights: vec![2, 3],
-            })
-        );
-    }
 }

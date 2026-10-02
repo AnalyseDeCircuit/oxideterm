@@ -776,36 +776,76 @@ mod tests {
     }
 
     #[test]
-    fn parses_html5_fragments_with_nested_native_semantics() {
-        let blocks = parse_block_fragment(
-            "<div><h2>Title</h2><p>Hello <mark><b>world</b></mark>.</p></div>",
-            &mut heading_id,
-        );
-
-        assert!(matches!(
-            &blocks[0],
-            Block::Heading { level: 2, id, .. } if id == "title"
-        ));
-        assert!(matches!(
-            &blocks[1],
-            Block::Paragraph { inlines }
-                if inlines.iter().any(|inline| matches!(inline, Inline::Highlight(_)))
-        ));
-    }
-
-    #[test]
-    fn ignores_active_content_and_event_attributes() {
-        let blocks = parse_block_fragment(
-            "<div onclick='alert(1)'>safe<script>alert(2)</script><iframe>hidden</iframe></div>",
-            &mut heading_id,
-        );
-
-        assert_eq!(
-            blocks,
-            vec![Block::Paragraph {
-                inlines: vec![Inline::Text("safe".to_string())],
-            }]
-        );
+    fn html_fragments_preserve_safe_structure_and_repair_formatting() {
+        let text = |value: &str| Inline::Text(value.into());
+        let paragraph = |inlines| Block::Paragraph { inlines };
+        for (source, expected) in [
+            (
+                "<div><h2>Title</h2><p>Hello <mark><b>world</b></mark>.</p></div>",
+                vec![
+                    Block::Heading {
+                        level: 2,
+                        id: "title".into(),
+                        inlines: vec![text("Title")],
+                    },
+                    paragraph(vec![
+                        text("Hello "),
+                        Inline::Highlight(vec![Inline::Bold(vec![text("world")])]),
+                        text("."),
+                    ]),
+                ],
+            ),
+            (
+                "<div onclick='alert(1)'>safe<script>alert(2)</script><iframe>hidden</iframe></div>",
+                vec![paragraph(vec![text("safe")])],
+            ),
+            (
+                "<p><b>bold <i>both</b> italic</i></p>",
+                vec![paragraph(vec![
+                    Inline::Bold(vec![text("bold "), Inline::Italic(vec![text("both")])]),
+                    Inline::Italic(vec![text(" italic")]),
+                ])],
+            ),
+            (
+                "<p>before <span> middle </span> after</p>",
+                vec![paragraph(vec![
+                    text("before "),
+                    text(" middle "),
+                    text(" after"),
+                ])],
+            ),
+            (
+                "<details><summary>More</summary><p>Body</p></details>",
+                vec![Block::Details {
+                    id: "html-details".into(),
+                    summary: vec![text("More")],
+                    blocks: vec![paragraph(vec![text("Body")])],
+                    open: false,
+                }],
+            ),
+            (
+                "<details open><summary>More</summary><p>Body</p></details>",
+                vec![Block::Details {
+                    id: "html-details".into(),
+                    summary: vec![text("More")],
+                    blocks: vec![paragraph(vec![text("Body")])],
+                    open: true,
+                }],
+            ),
+            (
+                "<div align='center' style='position:fixed'><p>Centered</p></div>",
+                vec![Block::HtmlContainer {
+                    alignment: BlockAlignment::Center,
+                    blocks: vec![paragraph(vec![text("Centered")])],
+                }],
+            ),
+        ] {
+            assert_eq!(
+                parse_block_fragment(source, &mut heading_id),
+                expected,
+                "{source}"
+            );
+        }
     }
 
     #[test]
@@ -847,51 +887,6 @@ mod tests {
     }
 
     #[test]
-    fn html5_parser_recovers_misnested_formatting() {
-        let blocks = parse_block_fragment("<p><b>bold <i>both</b> italic</i></p>", &mut heading_id);
-
-        assert!(matches!(&blocks[0], Block::Paragraph { inlines } if !inlines.is_empty()));
-    }
-
-    #[test]
-    fn preserves_collapsed_spacing_across_inline_elements() {
-        let blocks =
-            parse_block_fragment("<p>before <span> middle </span> after</p>", &mut heading_id);
-
-        assert_eq!(
-            blocks,
-            vec![Block::Paragraph {
-                inlines: vec![
-                    Inline::Text("before ".to_string()),
-                    Inline::Text(" middle ".to_string()),
-                    Inline::Text(" after".to_string()),
-                ],
-            }]
-        );
-    }
-
-    #[test]
-    fn preserves_details_summary_body_and_initial_state() {
-        for (attribute, open) in [("", false), (" open", true)] {
-            let blocks = parse_block_fragment(
-                &format!("<details{attribute}><summary>More</summary><p>Body</p></details>"),
-                &mut heading_id,
-            );
-            assert_eq!(
-                blocks,
-                vec![Block::Details {
-                    id: "html-details".into(),
-                    summary: vec![Inline::Text("More".into())],
-                    blocks: vec![Block::Paragraph {
-                        inlines: vec![Inline::Text("Body".into())]
-                    }],
-                    open,
-                }]
-            );
-        }
-    }
-
-    #[test]
     fn deeply_nested_html_falls_back_to_inert_source() {
         let source = format!(
             "{}content{}",
@@ -901,20 +896,6 @@ mod tests {
         let blocks = parse_block_fragment(&source, &mut heading_id);
 
         assert_eq!(blocks, vec![Block::Html(source)]);
-    }
-
-    #[test]
-    fn parses_safe_block_alignment_without_css() {
-        let blocks = parse_block_fragment(
-            "<div align='center' style='position:fixed'><p>Centered</p></div>",
-            &mut heading_id,
-        );
-
-        assert!(matches!(
-            &blocks[0],
-            Block::HtmlContainer { alignment: BlockAlignment::Center, blocks }
-                if matches!(&blocks[0], Block::Paragraph { .. })
-        ));
     }
 
     #[test]

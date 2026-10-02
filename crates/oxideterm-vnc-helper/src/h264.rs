@@ -302,38 +302,24 @@ mod tests {
 
     #[test]
     fn h264_reset_flags_drop_the_requested_contexts_before_decode() {
-        let create_count = Arc::new(AtomicUsize::new(0));
-        let mut state = state(create_count.clone(), false);
-        state.decode_payload(rect(0, 0), 0, &[1]).unwrap();
-        state.decode_payload(rect(1, 0), 0, &[2]).unwrap();
-
-        state
-            .decode_payload(rect(0, 0), OPEN_H264_RESET_CONTEXT, &[3])
-            .unwrap();
-        assert_eq!(create_count.load(Ordering::Relaxed), 3);
-        assert_eq!(state.context_count(), 2);
-
-        state
-            .decode_payload(rect(0, 0), OPEN_H264_RESET_ALL_CONTEXTS, &[4])
-            .unwrap();
-        assert_eq!(create_count.load(Ordering::Relaxed), 4);
-        assert_eq!(state.context_count(), 1);
-    }
-
-    #[test]
-    fn h264_empty_reset_payload_does_not_create_a_context() {
-        let create_count = Arc::new(AtomicUsize::new(0));
-        let mut state = state(create_count.clone(), false);
-        state.decode_payload(rect(0, 0), 0, &[1]).unwrap();
-
-        assert_eq!(
-            state
-                .decode_payload(rect(0, 0), OPEN_H264_RESET_CONTEXT, &[])
-                .unwrap(),
-            None
-        );
-        assert_eq!(create_count.load(Ordering::Relaxed), 1);
-        assert_eq!(state.context_count(), 0);
+        for (flags, payload, expected_creations, expected_contexts) in [
+            (OPEN_H264_RESET_CONTEXT, &[3][..], 3, 2),
+            (OPEN_H264_RESET_ALL_CONTEXTS, &[4][..], 3, 1),
+            (OPEN_H264_RESET_CONTEXT, &[][..], 2, 1),
+        ] {
+            let create_count = Arc::new(AtomicUsize::new(0));
+            let mut state = state(create_count.clone(), false);
+            state.decode_payload(rect(0, 0), 0, &[1]).unwrap();
+            state.decode_payload(rect(1, 0), 0, &[2]).unwrap();
+            let result = state.decode_payload(rect(0, 0), flags, payload).unwrap();
+            assert_eq!(result.is_none(), payload.is_empty());
+            assert_eq!(
+                create_count.load(Ordering::Relaxed),
+                expected_creations,
+                "flags {flags}, payload {payload:?}"
+            );
+            assert_eq!(state.context_count(), expected_contexts);
+        }
     }
 
     #[test]

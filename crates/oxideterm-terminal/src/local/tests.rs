@@ -669,21 +669,6 @@ mod tests {
     }
 
     #[test]
-    fn ssh_terminal_is_not_interactive_until_shell_channel_is_ready() {
-        let session = crate::session::SshPtyCore::new_disconnected_for_test(
-            SshSessionConfig::new("127.0.0.1", 9, "nobody"),
-            80,
-            24,
-            GraphicsOptions::default(),
-            TerminalEncoding::Utf8,
-            1000,
-        );
-
-        assert!(session.lifecycle().is_running());
-        assert!(!session.is_interactive());
-    }
-
-    #[test]
     fn ssh_resize_resets_command_mark_coordinates_only_when_grid_changes() {
         let mut session = crate::session::SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
@@ -820,21 +805,19 @@ mod tests {
     }
 
     #[test]
-    fn graphics_state_removes_existing_placements_when_image_id_is_retransmitted() {
-        let mut graphics = TerminalGraphicsState::default();
-
-        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+    fn graphics_state_retransmission_removes_placements_but_updates_preserve_them() {
+        let image = |rgba: [u8; 4]| TerminalImageData {
             id: TerminalImageId(7),
             protocol: TerminalImageProtocol::Kitty,
             version: 0,
             width: 1,
             height: 1,
-            rgba: vec![0, 0, 0, 255].into(),
+            rgba: Vec::from(rgba).into(),
             frames: Vec::new(),
             animation: TerminalImageAnimationState::default(),
             name: None,
-        }));
-        graphics.handle_event(TerminalGraphicsEvent::Place(TerminalImagePlacement {
+        };
+        let placement = TerminalImagePlacement {
             id: TerminalImageId(7),
             protocol: TerminalImageProtocol::Kitty,
             line: 0,
@@ -850,21 +833,22 @@ mod tests {
             source_height: 1,
             z_index: 0,
             placeholder: true,
-        }));
-        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
-            id: TerminalImageId(7),
-            protocol: TerminalImageProtocol::Kitty,
-            version: 0,
-            width: 1,
-            height: 1,
-            rgba: vec![255, 255, 255, 255].into(),
-            frames: Vec::new(),
-            animation: TerminalImageAnimationState::default(),
-            name: None,
-        }));
+        };
+        for (event, expected_placements) in [
+            (TerminalGraphicsEvent::ImageReady(image([255; 4])), vec![]),
+            (
+                TerminalGraphicsEvent::ImageUpdated(image([255; 4])),
+                vec![placement.clone()],
+            ),
+        ] {
+            let mut graphics = TerminalGraphicsState::default();
+            graphics.handle_event(TerminalGraphicsEvent::ImageReady(image([0, 0, 0, 255])));
+            graphics.handle_event(TerminalGraphicsEvent::Place(placement.clone()));
+            graphics.handle_event(event);
 
-        assert!(graphics.images.contains_key(&TerminalImageId(7)));
-        assert!(graphics.placements.is_empty());
+            assert_eq!(graphics.images[&TerminalImageId(7)].rgba.as_ref(), &[255; 4]);
+            assert_eq!(graphics.placements, expected_placements);
+        }
     }
 
     #[test]
@@ -892,54 +876,6 @@ mod tests {
 
         assert!(second_version > first_version);
         assert_eq!(graphics.images.len(), 1);
-    }
-
-    #[test]
-    fn graphics_state_preserves_placements_when_image_is_updated() {
-        let mut graphics = TerminalGraphicsState::default();
-
-        graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
-            id: TerminalImageId(8),
-            protocol: TerminalImageProtocol::Kitty,
-            version: 0,
-            width: 1,
-            height: 1,
-            rgba: vec![0, 0, 0, 255].into(),
-            frames: Vec::new(),
-            animation: TerminalImageAnimationState::default(),
-            name: None,
-        }));
-        graphics.handle_event(TerminalGraphicsEvent::Place(TerminalImagePlacement {
-            id: TerminalImageId(8),
-            protocol: TerminalImageProtocol::Kitty,
-            line: 0,
-            row: 0,
-            col: 0,
-            cols: 1,
-            rows: 1,
-            pixel_width: 1,
-            pixel_height: 1,
-            source_x: 0,
-            source_y: 0,
-            source_width: 1,
-            source_height: 1,
-            z_index: 0,
-            placeholder: true,
-        }));
-        graphics.handle_event(TerminalGraphicsEvent::ImageUpdated(TerminalImageData {
-            id: TerminalImageId(8),
-            protocol: TerminalImageProtocol::Kitty,
-            version: 0,
-            width: 1,
-            height: 1,
-            rgba: vec![255, 255, 255, 255].into(),
-            frames: Vec::new(),
-            animation: TerminalImageAnimationState::default(),
-            name: None,
-        }));
-
-        assert!(graphics.images.contains_key(&TerminalImageId(8)));
-        assert_eq!(graphics.placements.len(), 1);
     }
 
     #[test]

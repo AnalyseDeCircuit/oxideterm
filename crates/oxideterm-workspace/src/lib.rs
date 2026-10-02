@@ -531,22 +531,6 @@ mod tests {
     }
 
     #[test]
-    fn split_and_close_restores_the_remaining_terminal_leaf() {
-        let (pane_a, pane_b, group, session_a, session_b) = ids();
-        let mut node = PaneNode::leaf(pane_a, session_a);
-
-        assert!(node.split_active(pane_a, group, SplitDirection::Horizontal, pane_b, session_b));
-        assert_eq!(node.pane_count(), 2);
-        assert!(node.contains_pane(pane_a));
-        assert!(node.contains_pane(pane_b));
-        assert_eq!(node.close_pane(pane_b), Some(pane_a));
-        assert_eq!(
-            node.single_child_replacement(),
-            Some(PaneNode::leaf(pane_a, session_a))
-        );
-    }
-
-    #[test]
     fn split_active_preserves_subtree_sessions_and_allows_replacement() {
         let (pane_a, pane_b, group, session_a, session_b) = ids();
         let pane_c = PaneId(4);

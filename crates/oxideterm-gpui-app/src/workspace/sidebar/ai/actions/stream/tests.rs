@@ -19,10 +19,15 @@ mod ai_turn_order_tests {
         });
         entity.update(cx, |entity, _cx| {
             let representative_runtime_epoch = "epoch-test-only";
+            let stable_id = "4e22e673-067e-46e2-8b9f-902d7b21af4c";
             let result = serde_json::json!({
                 "output": "API_KEY=supersecret123456",
                 "data": { "exitCode": 0 },
+                "execution": { "visibleInTerminal": true },
                 "meta": { "runtimeEpoch": representative_runtime_epoch },
+                "targets": [{"authority": {"resource_ref": {
+                    "kind": "saved_connection", "id": stable_id, "label": "Production"
+                }}}],
             });
             let record = entity
                 .record_ai_tool_execution_status(
@@ -53,6 +58,10 @@ mod ai_turn_order_tests {
             assert!(!retained.contains("session_id"));
             assert!(!retained.contains("node_id"));
             assert!(!retained.contains(representative_runtime_epoch));
+            let diagnostic = ai_tool_execution_record_json(&record);
+            assert_eq!(diagnostic["resourceKind"], "saved_connection");
+            assert_eq!(diagnostic["executionSurface"], "visible_terminal");
+            assert!(!diagnostic.to_string().contains(stable_id));
         });
     }
 
@@ -134,25 +143,6 @@ mod ai_turn_order_tests {
 
         assert!(debug.contains("ExpectedFileMissing"));
         assert!(!debug.contains(path));
-    }
-
-    #[test]
-    fn diagnostic_resource_projection_omits_stable_identifiers() {
-        let stable_id = "4e22e673-067e-46e2-8b9f-902d7b21af4c";
-        let resource_kind = ai_tool_argument_resource_kind(Some(&serde_json::json!({
-            "resource_ref": {
-                "kind": "saved_connection",
-                "id": stable_id,
-                "label": "Production",
-            },
-        })));
-        let mut record = test_tool_execution_record("tool-resource");
-        record.resource_kind = resource_kind;
-
-        let diagnostic = ai_tool_execution_record_json(&record).to_string();
-
-        assert!(!diagnostic.contains(stable_id));
-        assert!(diagnostic.contains("saved_connection"));
     }
 
     #[test]
@@ -765,25 +755,6 @@ mod ai_turn_order_tests {
         assert!(!summary.contains("ssh-node:node-1"));
         assert!(!summary.contains("/tmp/report.txt"));
         assert!(!summary.contains("super secret draft"));
-    }
-
-    #[test]
-    fn tool_execution_surface_prefers_visible_terminal_result() {
-        let result = serde_json::json!({
-            "execution": {
-                "visibleInTerminal": true,
-                "target": { "id": "ssh-node:node-1", "kind": "ssh-node" }
-            }
-        });
-        let args = serde_json::json!({
-            "target_id": "ssh-node:node-1",
-            "command": "uptime",
-        });
-
-        assert_eq!(
-            ai_tool_execution_surface("run_command", Some(&args), Some(&result)),
-            "visible_terminal"
-        );
     }
 
     #[test]

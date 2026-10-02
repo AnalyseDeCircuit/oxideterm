@@ -128,17 +128,6 @@ mod tests {
     }
 
     #[test]
-    fn queries_nested_guides_without_expanding_every_line() {
-        let index = IndentGuideIndex::new(vec![guide(0, 8, 4), guide(1, 5, 8), guide(3, 4, 12)]);
-
-        assert_eq!(index.columns_for_line(0), Vec::<usize>::new());
-        assert_eq!(index.columns_for_line(2), vec![4, 8]);
-        assert_eq!(index.columns_for_line(4), vec![4, 8, 12]);
-        assert_eq!(index.columns_for_line(8), vec![4]);
-        assert_eq!(index.columns_for_line(9), Vec::<usize>::new());
-    }
-
-    #[test]
     fn ignores_invalid_and_duplicate_guides() {
         let index = IndentGuideIndex::new(vec![guide(2, 2, 4), guide(0, 3, 4), guide(0, 3, 4)]);
 

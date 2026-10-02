@@ -89,17 +89,15 @@ mod tests {
     }
 
     #[test]
-    fn dry_run_does_not_require_confirmation() {
-        let plan = prepare_write(&write_args(true, false, false), true).unwrap();
+    fn preview_needs_no_confirmation_but_real_write_requires_it() {
+        let mut args = write_args(true, false, false);
+        let plan = prepare_write(&args, true).unwrap();
 
         assert!(plan.dry_run);
         assert!(!plan.applied);
         assert!(plan.backup_path.is_none());
-    }
-
-    #[test]
-    fn real_write_requires_confirmation() {
-        let error = prepare_write(&write_args(false, false, false), true).unwrap_err();
+        args.dry_run = false;
+        let error = prepare_write(&args, true).unwrap_err();
 
         assert_eq!(error.code, "confirmation_required");
     }

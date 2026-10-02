@@ -187,108 +187,112 @@ fn host_api_allowed(permissions: &PluginPermissionSet, namespace: &str, method: 
 mod tests {
     use super::*;
 
-    fn subscription(event: &str) -> PluginOutboundMessage {
-        PluginOutboundMessage::RegisterContribution {
-            registration: PluginRegistration {
-                registration_id: format!("subscription:{event}"),
-                plugin_id: "com.example.permissions".to_string(),
-                kind: PluginRegistrationKind::EventSubscription,
-                metadata: serde_json::json!({ "event": event }),
-            },
-        }
-    }
-
     #[test]
-    fn baseline_event_subscription_needs_no_capability() {
-        validate_outbound_message_permissions(
-            &[subscription("app.themeChanged")],
-            &PluginPermissionSet::default(),
-        )
-        .unwrap();
-    }
+    fn registrations_require_their_declared_capabilities() {
+        use PluginRegistrationKind::*;
 
-    #[test]
-    fn sensitive_event_subscription_requires_matching_capability() {
-        let error = validate_outbound_message_permissions(
-            &[subscription("ide.fileOpen")],
-            &PluginPermissionSet::default(),
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "plugin_capability_not_allowed");
-
-        validate_outbound_message_permissions(
-            &[subscription("ide.fileOpen")],
-            &PluginPermissionSet {
-                capabilities: vec![NATIVE_PLUGIN_CAPABILITY_IDE_READ.to_string()],
-                allowed_host_apis: Vec::new(),
-            },
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn terminal_interceptor_requires_content_and_write_capabilities() {
-        let message = PluginOutboundMessage::RegisterContribution {
-            registration: PluginRegistration {
-                registration_id: "terminal-input".to_string(),
-                plugin_id: "com.example.permissions".to_string(),
-                kind: PluginRegistrationKind::TerminalInputInterceptor,
-                metadata: Value::Null,
-            },
-        };
-        let error = validate_outbound_message_permissions(
-            &[message.clone_public().unwrap()],
-            &PluginPermissionSet {
-                capabilities: vec![NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ.to_string()],
-                allowed_host_apis: Vec::new(),
-            },
-        )
-        .unwrap_err();
-        assert_eq!(error.code, "plugin_capability_not_allowed");
-
-        validate_outbound_message_permissions(
-            &[message],
-            &PluginPermissionSet {
-                capabilities: vec![
-                    NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ.to_string(),
-                    NATIVE_PLUGIN_CAPABILITY_TERMINAL_WRITE.to_string(),
+        for (scenario, kind, metadata, capabilities, expected_error) in [
+            (
+                "baseline event",
+                EventSubscription,
+                serde_json::json!({ "event": "app.themeChanged" }),
+                vec![],
+                None,
+            ),
+            (
+                "IDE event denied",
+                EventSubscription,
+                serde_json::json!({ "event": "ide.fileOpen" }),
+                vec![],
+                Some("plugin_capability_not_allowed"),
+            ),
+            (
+                "IDE event allowed",
+                EventSubscription,
+                serde_json::json!({ "event": "ide.fileOpen" }),
+                vec![NATIVE_PLUGIN_CAPABILITY_IDE_READ],
+                None,
+            ),
+            (
+                "interceptor read only",
+                TerminalInputInterceptor,
+                Value::Null,
+                vec![NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ],
+                Some("plugin_capability_not_allowed"),
+            ),
+            (
+                "interceptor read and write",
+                TerminalInputInterceptor,
+                Value::Null,
+                vec![
+                    NATIVE_PLUGIN_CAPABILITY_TERMINAL_CONTENT_READ,
+                    NATIVE_PLUGIN_CAPABILITY_TERMINAL_WRITE,
                 ],
-                allowed_host_apis: Vec::new(),
-            },
-        )
-        .unwrap();
-    }
-
-    #[test]
-    fn plugin_ui_registrations_require_ui_write_capability() {
-        for kind in [
-            PluginRegistrationKind::Tab,
-            PluginRegistrationKind::SidebarPanel,
-            PluginRegistrationKind::ActivityBarItem,
+                None,
+            ),
+            (
+                "tab denied",
+                Tab,
+                Value::Null,
+                vec![],
+                Some("plugin_capability_not_allowed"),
+            ),
+            (
+                "tab allowed",
+                Tab,
+                Value::Null,
+                vec![NATIVE_PLUGIN_CAPABILITY_UI_WRITE],
+                None,
+            ),
+            (
+                "sidebar denied",
+                SidebarPanel,
+                Value::Null,
+                vec![],
+                Some("plugin_capability_not_allowed"),
+            ),
+            (
+                "sidebar allowed",
+                SidebarPanel,
+                Value::Null,
+                vec![NATIVE_PLUGIN_CAPABILITY_UI_WRITE],
+                None,
+            ),
+            (
+                "activity bar denied",
+                ActivityBarItem,
+                Value::Null,
+                vec![],
+                Some("plugin_capability_not_allowed"),
+            ),
+            (
+                "activity bar allowed",
+                ActivityBarItem,
+                Value::Null,
+                vec![NATIVE_PLUGIN_CAPABILITY_UI_WRITE],
+                None,
+            ),
         ] {
             let message = PluginOutboundMessage::RegisterContribution {
                 registration: PluginRegistration {
-                    registration_id: format!("ui-{kind:?}"),
+                    registration_id: scenario.to_string(),
                     plugin_id: "com.example.permissions".to_string(),
                     kind,
-                    metadata: Value::Null,
+                    metadata,
                 },
             };
-            let error = validate_outbound_message_permissions(
-                &[message.clone_public().unwrap()],
-                &PluginPermissionSet::default(),
-            )
-            .unwrap_err();
-            assert_eq!(error.code, "plugin_capability_not_allowed");
-
-            validate_outbound_message_permissions(
+            let result = validate_outbound_message_permissions(
                 &[message],
                 &PluginPermissionSet {
-                    capabilities: vec![NATIVE_PLUGIN_CAPABILITY_UI_WRITE.to_string()],
+                    capabilities: capabilities.into_iter().map(str::to_string).collect(),
                     allowed_host_apis: Vec::new(),
                 },
-            )
-            .unwrap();
+            );
+            assert_eq!(
+                result.map_err(|error| error.code),
+                expected_error.map_or(Ok(()), |code| Err(code.to_string())),
+                "{scenario}"
+            );
         }
     }
 }

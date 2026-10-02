@@ -823,34 +823,17 @@ mod private_key_auth_error_tests {
     }
 
     #[test]
-    fn private_key_auth_errors_distinguish_missing_and_invalid_passphrases() {
+    fn private_key_auth_errors_distinguish_passphrases_and_unsupported_material() {
         let key = generated_key_text(Some("secret-pass"));
-
-        let missing = decode_private_key_for_auth(&key, None).unwrap_err();
-        let invalid = decode_private_key_for_auth(&key, Some("wrong-pass")).unwrap_err();
-
-        assert!(
-            missing.to_string().contains("requires a passphrase"),
-            "missing passphrase error: {missing}"
-        );
-        assert!(
-            invalid.to_string().contains("Invalid SSH key passphrase"),
-            "invalid passphrase error: {invalid}"
-        );
-    }
-
-    #[test]
-    fn private_key_auth_errors_distinguish_unsupported_formats() {
-        let error = decode_private_key_for_auth("not a private key", None).unwrap_err();
-
-        assert!(error.to_string().contains("Unsupported SSH private key format"));
-    }
-
-    #[test]
-    fn private_key_auth_errors_distinguish_hardware_key_material() {
-        let error = decode_private_key_for_auth("sk-ssh-ed25519", None).unwrap_err();
-
-        assert!(error.to_string().contains("FIDO/security-key"));
+        for (input, passphrase, diagnostic) in [
+            (key.as_str(), None, "requires a passphrase"),
+            (key.as_str(), Some("wrong-pass"), "Invalid SSH key passphrase"),
+            ("not a private key", None, "Unsupported SSH private key format"),
+            ("sk-ssh-ed25519", None, "FIDO/security-key"),
+        ] {
+            let error = decode_private_key_for_auth(input, passphrase).unwrap_err();
+            assert!(error.to_string().contains(diagnostic), "{diagnostic}: {error}");
+        }
     }
 }
 

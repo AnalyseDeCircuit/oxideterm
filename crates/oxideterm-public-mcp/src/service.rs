@@ -2988,41 +2988,38 @@ mod tests {
     }
 
     #[test]
-    fn quick_command_run_parses_and_redacts_parameter_values() {
-        let secret_value = "sensitive-token";
-        let quickcommand_ref = crate::QuickCommandRef::new();
-        let node_ref = NodeRef::new();
-        let arguments = json!({
-            "quickcommand_ref": quickcommand_ref,
-            "node_ref": node_ref,
-            "expected_revision": 7,
-            "arguments": { "token": secret_value }
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
+    fn quick_command_run_preserves_redacted_values_and_rejects_oversized_input() {
+        for (name, values, expected) in [
+            (
+                "secret value",
+                json!({ "token": "sensitive-token" }),
+                Some("sensitive-token"),
+            ),
+            (
+                "oversized value",
+                json!({ "value": "x".repeat(QUICK_COMMAND_ARGUMENT_VALUE_LIMIT_BYTES + 1) }),
+                None,
+            ),
+        ] {
+            let arguments = json!({
+                "quickcommand_ref": crate::QuickCommandRef::new(),
+                "node_ref": NodeRef::new(),
+                "expected_revision": 7,
+                "arguments": values,
+            })
+            .as_object()
+            .cloned()
+            .unwrap();
 
-        let parsed = parse_quick_commands_run(arguments).unwrap();
-
-        assert_eq!(parsed.arguments["token"].as_str(), secret_value);
-        assert!(!format!("{parsed:?}").contains(secret_value));
-    }
-
-    #[test]
-    fn quick_command_run_rejects_oversized_parameter_values_before_approval() {
-        let arguments = json!({
-            "quickcommand_ref": crate::QuickCommandRef::new(),
-            "node_ref": NodeRef::new(),
-            "expected_revision": 7,
-            "arguments": {
-                "value": "x".repeat(QUICK_COMMAND_ARGUMENT_VALUE_LIMIT_BYTES + 1)
+            let parsed = parse_quick_commands_run(arguments);
+            if let Some(secret_value) = expected {
+                let parsed = parsed.unwrap();
+                assert_eq!(parsed.arguments["token"].as_str(), secret_value, "{name}");
+                assert!(!format!("{parsed:?}").contains(secret_value), "{name}");
+            } else {
+                assert!(parsed.is_err(), "{name}");
             }
-        })
-        .as_object()
-        .cloned()
-        .unwrap();
-
-        assert!(parse_quick_commands_run(arguments).is_err());
+        }
     }
 
     #[test]

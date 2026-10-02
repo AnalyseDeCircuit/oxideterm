@@ -1180,34 +1180,30 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_restores_exact_contents_and_recreates_removed_parent_directory() {
-        let settings_path = temp_settings_path("checkpoint-present");
-        let path = quick_commands_path(&settings_path);
-        let original = b"{ not a parsed snapshot, but exact persisted state }";
-        fs::write(&path, original).unwrap();
-        let checkpoint = capture_checkpoint(&settings_path).unwrap();
-        fs::write(&path, b"replacement").unwrap();
-
-        restore_checkpoint(&settings_path, &checkpoint).unwrap();
-
-        assert_eq!(fs::read(&path).unwrap(), original);
-        fs::remove_dir_all(path.parent().unwrap()).unwrap();
-
-        restore_checkpoint(&settings_path, &checkpoint).unwrap();
-
-        assert_eq!(fs::read(&path).unwrap(), original);
-    }
-
-    #[test]
-    fn checkpoint_restores_missing_file_state() {
-        let settings_path = temp_settings_path("checkpoint-missing");
-        let path = quick_commands_path(&settings_path);
-        let checkpoint = capture_checkpoint(&settings_path).unwrap();
-        save_snapshot(&settings_path, &default_snapshot()).unwrap();
-
-        restore_checkpoint(&settings_path, &checkpoint).unwrap();
-
-        assert!(!path.exists());
+    fn checkpoint_restores_exact_present_or_missing_file_state() {
+        for (name, existing) in [("checkpoint-present", true), ("checkpoint-missing", false)] {
+            let settings_path = temp_settings_path(name);
+            let path = quick_commands_path(&settings_path);
+            let original = b"{ not a parsed snapshot, but exact persisted state }";
+            if existing {
+                fs::write(&path, original).unwrap();
+            }
+            let checkpoint = capture_checkpoint(&settings_path).unwrap();
+            if existing {
+                fs::write(&path, b"replacement").unwrap();
+            } else {
+                save_snapshot(&settings_path, &default_snapshot()).unwrap();
+            }
+            restore_checkpoint(&settings_path, &checkpoint).unwrap();
+            if existing {
+                assert_eq!(fs::read(&path).unwrap(), original);
+                fs::remove_dir_all(path.parent().unwrap()).unwrap();
+                restore_checkpoint(&settings_path, &checkpoint).unwrap();
+                assert_eq!(fs::read(&path).unwrap(), original);
+            } else {
+                assert!(!path.exists());
+            }
+        }
     }
 
     #[test]

@@ -177,18 +177,46 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linux_command_queries_all_supported_providers() {
-        let command = build_gpu_sample_command("Linux");
-
-        assert!(command.contains("nvidia-smi --query-gpu="));
-        assert!(command.contains("amd-smi --json"));
-        assert!(command.contains("hy-smi"));
-        assert!(command.contains("rocm-smi"));
-        assert!(command.contains("npu-smi info"));
-        assert!(command.contains("cnmon info"));
-        assert!(command.contains("xpu-smi discovery -j"));
-        assert!(command.contains("mthreads-gmi"));
-        assert!(command.contains(GPU_END_MARKER));
+    fn gpu_command_queries_only_platform_supported_providers() {
+        let providers = [
+            "nvidia-smi",
+            "amd-smi",
+            "hy-smi",
+            "rocm-smi",
+            "npu-smi",
+            "cnmon",
+            "xpu-smi",
+            "mthreads-gmi",
+        ];
+        for (os, expected) in [
+            ("Linux", [true; 8]),
+            (
+                "Windows_MSYS",
+                [true, false, false, false, false, false, false, false],
+            ),
+            ("macOS", [false; 8]),
+        ] {
+            let command = build_gpu_sample_command(os);
+            for (provider, enabled) in providers.into_iter().zip(expected) {
+                assert_eq!(command.contains(provider), enabled, "{os}: {provider}");
+            }
+            assert!(command.contains(GPU_END_MARKER));
+            if os == "Linux" {
+                for invocation in [
+                    "nvidia-smi --query-gpu=",
+                    "amd-smi --json",
+                    "npu-smi info",
+                    "cnmon info",
+                    "xpu-smi discovery -j",
+                ] {
+                    assert!(command.contains(invocation), "{invocation}");
+                }
+            } else if os == "Windows_MSYS" {
+                assert!(command.contains("nvidia-smi --query-gpu="));
+            } else {
+                assert!(command.contains("echo unsupported"));
+            }
+        }
     }
 
     #[cfg(unix)]
@@ -202,35 +230,6 @@ mod tests {
             .expect("POSIX shell should be available on Unix test hosts");
 
         assert!(status.success());
-    }
-
-    #[test]
-    fn windows_command_does_not_invoke_linux_only_amd_smi() {
-        let command = build_gpu_sample_command("Windows_MSYS");
-
-        assert!(command.contains("nvidia-smi --query-gpu="));
-        assert!(!command.contains("amd-smi"));
-        assert!(!command.contains("hy-smi"));
-        assert!(!command.contains("rocm-smi"));
-        assert!(!command.contains("npu-smi"));
-        assert!(!command.contains("cnmon"));
-        assert!(!command.contains("xpu-smi"));
-        assert!(!command.contains("mthreads-gmi"));
-    }
-
-    #[test]
-    fn unsupported_system_does_not_invoke_provider_tools() {
-        let command = build_gpu_sample_command("macOS");
-
-        assert!(command.contains("echo unsupported"));
-        assert!(!command.contains("nvidia-smi"));
-        assert!(!command.contains("amd-smi"));
-        assert!(!command.contains("hy-smi"));
-        assert!(!command.contains("rocm-smi"));
-        assert!(!command.contains("npu-smi"));
-        assert!(!command.contains("cnmon"));
-        assert!(!command.contains("xpu-smi"));
-        assert!(!command.contains("mthreads-gmi"));
     }
 
     #[test]

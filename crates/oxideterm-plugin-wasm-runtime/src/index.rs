@@ -231,72 +231,91 @@ mod tests {
     }
 
     #[test]
-    fn runtime_supports_stable_and_beta_hosts() {
-        let descriptor = sample_descriptor();
+    fn runtime_compatibility_checks_host_channel_version_and_abis() {
+        use WasmRuntimeHostChannel::{Beta, Stable};
 
-        assert!(descriptor.supports_host(
-            WasmRuntimeHostChannel::Stable,
-            "2.0.0",
-            1,
-            1,
-            "preview1"
-        ));
-        assert!(descriptor.supports_host(
-            WasmRuntimeHostChannel::Beta,
-            "2.0.0-beta.4",
-            1,
-            1,
-            "preview1"
-        ));
-    }
-
-    #[test]
-    fn runtime_rejects_wrong_host_channel_or_abi() {
-        let mut descriptor = sample_descriptor();
-        descriptor.supports.oxideterm_channels = vec![WasmRuntimeHostChannel::Stable];
-
-        assert!(!descriptor.supports_host(
-            WasmRuntimeHostChannel::Beta,
-            "2.0.0-beta.8",
-            1,
-            1,
-            "preview1"
-        ));
-        assert!(!descriptor.supports_host(
-            WasmRuntimeHostChannel::Stable,
-            "2.0.0",
-            2,
-            1,
-            "preview1"
-        ));
-        assert!(!descriptor.supports_host(
-            WasmRuntimeHostChannel::Stable,
-            "2.0.0",
-            1,
-            2,
-            "preview1"
-        ));
-        assert!(!descriptor.supports_host(
-            WasmRuntimeHostChannel::Stable,
-            "2.0.0",
-            1,
-            1,
-            "preview2"
-        ));
-    }
-
-    #[test]
-    fn stable_host_range_does_not_accidentally_cover_prerelease_hosts() {
-        let mut descriptor = sample_descriptor();
-        descriptor.supports.oxideterm_channels = vec![WasmRuntimeHostChannel::Stable];
-        descriptor.supports.oxideterm_versions = vec![">=2.0.0 <3.0.0".to_string()];
-
-        assert!(!descriptor.supports_host(
-            WasmRuntimeHostChannel::Stable,
-            "2.0.0-beta.1",
-            1,
-            1,
-            "preview1"
-        ));
+        for (scenario, channels, versions, host, protocol, abi, wasi, expected) in [
+            (
+                "stable",
+                vec![Stable, Beta],
+                None,
+                (Stable, "2.0.0"),
+                1,
+                1,
+                "preview1",
+                true,
+            ),
+            (
+                "beta",
+                vec![Stable, Beta],
+                None,
+                (Beta, "2.0.0-beta.4"),
+                1,
+                1,
+                "preview1",
+                true,
+            ),
+            (
+                "wrong channel",
+                vec![Stable],
+                None,
+                (Beta, "2.0.0-beta.8"),
+                1,
+                1,
+                "preview1",
+                false,
+            ),
+            (
+                "wrong protocol",
+                vec![Stable],
+                None,
+                (Stable, "2.0.0"),
+                2,
+                1,
+                "preview1",
+                false,
+            ),
+            (
+                "wrong guest ABI",
+                vec![Stable],
+                None,
+                (Stable, "2.0.0"),
+                1,
+                2,
+                "preview1",
+                false,
+            ),
+            (
+                "wrong WASI",
+                vec![Stable],
+                None,
+                (Stable, "2.0.0"),
+                1,
+                1,
+                "preview2",
+                false,
+            ),
+            (
+                "prerelease outside stable range",
+                vec![Stable],
+                Some(">=2.0.0 <3.0.0"),
+                (Stable, "2.0.0-beta.1"),
+                1,
+                1,
+                "preview1",
+                false,
+            ),
+        ] {
+            let mut descriptor = sample_descriptor();
+            descriptor.supports.oxideterm_channels = channels;
+            if let Some(requirement) = versions {
+                descriptor.supports.oxideterm_versions = vec![requirement.to_string()];
+            }
+            assert_eq!(
+                descriptor.supports_host(host.0, host.1, protocol, abi, wasi),
+                expected,
+                "{scenario}"
+            );
+        }
     }
 }

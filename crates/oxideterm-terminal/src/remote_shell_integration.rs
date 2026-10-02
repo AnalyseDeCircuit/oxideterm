@@ -652,52 +652,52 @@ mod tests {
     }
 
     #[test]
-    fn managed_startup_block_is_idempotent_and_removable() {
-        let original = "export EDITOR=vim\n";
-        let block = startup_reference(RemoteShellKind::Bash);
-        let installed = install_managed_block(original, &block);
-        let reinstalled = install_managed_block(&installed, &block);
-        assert_eq!(installed, reinstalled);
-        assert_eq!(remove_managed_block(&installed), original);
-    }
-
-    #[test]
-    fn managed_block_parser_ignores_marker_text_and_preserves_incomplete_blocks() {
-        let block = startup_reference(RemoteShellKind::Zsh);
-        let original = format!(
+    fn managed_startup_blocks_preserve_user_content_during_install_upgrade_and_removal() {
+        let incomplete = format!(
             "echo '# {MANAGED_BLOCK_START}'\n# {MANAGED_BLOCK_START}\nlegacy without end\n"
         );
-        let installed = install_managed_block(&original, &block);
-        assert!(installed.starts_with(&original));
-        assert_eq!(complete_managed_blocks(&installed).len(), 1);
-        assert!(remove_managed_block(&installed).starts_with(&original));
-    }
-
-    #[test]
-    fn reinstall_replaces_first_complete_block_and_removes_duplicates() {
-        let desired = startup_reference(RemoteShellKind::Fish);
         let old = format!("# {MANAGED_BLOCK_START}\nold\n# {MANAGED_BLOCK_END}\n");
-        let duplicate = format!("head\n{old}middle\n{old}tail\n");
-        let installed = install_managed_block(&duplicate, &desired);
-        assert_eq!(complete_managed_blocks(&installed).len(), 1);
-        assert!(installed.contains("head\n"));
-        assert!(installed.contains("middle\n"));
-        assert!(installed.contains("tail\n"));
-    }
-
-    #[test]
-    fn version_three_managed_block_upgrades_in_place() {
         let old_block = format!(
             "# {MANAGED_BLOCK_START}\n# oxideterm-shell-integration-version: 3\nlegacy source\n# {MANAGED_BLOCK_END}"
         );
-        let original = format!("before\n{old_block}\nafter\n");
-        let upgraded = install_managed_block(&original, &startup_reference(RemoteShellKind::Bash));
-
-        assert!(upgraded.starts_with("before\n"));
-        assert!(upgraded.ends_with("after\n"));
-        assert!(upgraded.contains("oxideterm-shell-integration-version: 4"));
-        assert!(!upgraded.contains("legacy source"));
-        assert_eq!(complete_managed_blocks(&upgraded).len(), 1);
+        for (shell, original, prefix, suffix, removed) in [
+            (
+                RemoteShellKind::Bash,
+                "export EDITOR=vim\n".to_string(),
+                "export EDITOR=vim\n\n".to_string(),
+                "",
+                "export EDITOR=vim\n".to_string(),
+            ),
+            (
+                RemoteShellKind::Zsh,
+                incomplete.clone(),
+                format!("{incomplete}\n"),
+                "",
+                incomplete,
+            ),
+            (
+                RemoteShellKind::Fish,
+                format!("head\n{old}middle\n{old}tail\n"),
+                "head\n".to_string(),
+                "middle\ntail\n",
+                "head\nmiddle\ntail\n".to_string(),
+            ),
+            (
+                RemoteShellKind::Bash,
+                format!("before\n{old_block}\nafter\n"),
+                "before\n".to_string(),
+                "after\n",
+                "before\nafter\n".to_string(),
+            ),
+        ] {
+            let block = startup_reference(shell);
+            assert!(block.contains("oxideterm-shell-integration-version: 4"));
+            let expected = format!("{prefix}{block}\n{suffix}");
+            let installed = install_managed_block(&original, &block);
+            assert_eq!(installed, expected, "{original:?}");
+            assert_eq!(install_managed_block(&installed, &block), expected);
+            assert_eq!(remove_managed_block(&installed), removed, "{original:?}");
+        }
     }
 
     #[test]

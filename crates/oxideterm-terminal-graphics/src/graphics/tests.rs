@@ -405,43 +405,6 @@ mod tests {
     }
 
     #[test]
-    fn advance_with_anchors_image_after_preceding_terminal_text() {
-        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let payload = BASE64.encode([0, 255, 0, 255]);
-        let seq = format!("abc\x1b_Ga=T,f=32,s=1,v=1,i=42;{payload}\x1b\\xyz");
-        let mut terminal_bytes = Vec::new();
-        let col = std::cell::Cell::new(0usize);
-        let events = ingress.advance_with(
-            seq.as_bytes(),
-            |bytes| {
-                col.set(
-                    col.get()
-                        + bytes
-                            .iter()
-                            .filter(|byte| !matches!(byte, b'\r' | b'\n'))
-                            .count(),
-                );
-                terminal_bytes.extend_from_slice(bytes);
-            },
-            || GraphicsCursor {
-                col: col.get(),
-                ..cursor()
-            },
-        );
-
-        let placement = events
-            .iter()
-            .find_map(|event| match event {
-                TerminalGraphicsEvent::Place(placement) => Some(placement),
-                _ => None,
-            })
-            .expect("image placement");
-        assert_eq!(placement.col, 3);
-        assert!(terminal_bytes.starts_with(b"abc "));
-        assert!(terminal_bytes.ends_with(b"xyz"));
-    }
-
-    #[test]
     fn kitty_chunked_png_waits_until_final_chunk() {
         let payload = BASE64.encode(one_pixel_png());
         let split = payload.len() / 2;

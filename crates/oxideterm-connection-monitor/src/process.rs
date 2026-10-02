@@ -347,41 +347,67 @@ mod tests {
     use super::*;
 
     #[test]
-    fn linux_process_actions_prefer_proc_and_are_full() {
-        let command =
-            build_process_action_command("Linux", "123", ProcessActionKind::Kill).unwrap();
-        assert_eq!(command.capability, ProcessCommandCapability::Full);
-        assert!(command.command.contains("/proc/123"));
-        assert!(command.command.contains("kill -KILL -- 123"));
-    }
-
-    #[test]
-    fn macos_and_bsd_are_partial_and_use_ps_checks() {
-        let mac = build_process_action_command("macOS", "123", ProcessActionKind::Term).unwrap();
-        let bsd =
-            build_process_action_command("FreeBSD", "123", ProcessActionKind::Renice { nice: 5 })
-                .unwrap();
-        assert_eq!(mac.capability, ProcessCommandCapability::Partial);
-        assert_eq!(bsd.capability, ProcessCommandCapability::Partial);
-        assert!(!mac.command.contains("/proc/123"));
-        assert!(bsd.command.contains("renice -n 5 -p 123"));
-    }
-
-    #[test]
-    fn windows_process_actions_use_powershell_only_for_supported_actions() {
-        let term = build_process_action_command("Windows", "123", ProcessActionKind::Term).unwrap();
-        assert_eq!(term.capability, ProcessCommandCapability::Partial);
-        assert!(term.command.contains("powershell"));
-        assert!(term.command.contains("Stop-Process -Id 123"));
-        assert!(build_process_action_command("Windows", "123", ProcessActionKind::Stop).is_err());
-    }
-
-    #[test]
-    fn process_actions_validate_pid_and_renice_range() {
-        assert!(build_process_action_command("Linux", "abc", ProcessActionKind::Term).is_err());
-        assert!(
-            build_process_action_command("Linux", "123", ProcessActionKind::Renice { nice: 20 })
-                .is_err()
-        );
+    fn process_commands_preserve_platform_capabilities_and_validate_actions() {
+        use ProcessActionKind::{Kill, Renice, Stop, Term};
+        use ProcessCommandCapability::{Full, Partial};
+        for (os, pid, action, expected) in [
+            (
+                "Linux",
+                "123",
+                Kill,
+                Some((Full, vec!["/proc/123", "kill -KILL -- 123"], vec![])),
+            ),
+            (
+                "macOS",
+                "123",
+                Term,
+                Some((
+                    Partial,
+                    vec!["ps -p 123", "kill -TERM -- 123"],
+                    vec!["/proc/123"],
+                )),
+            ),
+            (
+                "FreeBSD",
+                "123",
+                Renice { nice: 5 },
+                Some((
+                    Partial,
+                    vec!["ps -p 123", "renice -n 5 -p 123"],
+                    vec!["/proc/123"],
+                )),
+            ),
+            (
+                "Windows",
+                "123",
+                Term,
+                Some((Partial, vec!["powershell", "Stop-Process -Id 123"], vec![])),
+            ),
+            ("Windows", "123", Stop, None),
+            ("Linux", "abc", Term, None),
+            ("Linux", "123", Renice { nice: 20 }, None),
+        ] {
+            let case = format!("{os}: {pid}, {action:?}");
+            let result = build_process_action_command(os, pid, action);
+            match expected {
+                Some((capability, required, forbidden)) => {
+                    let command = result.unwrap();
+                    assert_eq!(command.capability, capability, "{case}");
+                    for fragment in required {
+                        assert!(
+                            command.command.contains(fragment),
+                            "{case}: missing {fragment}"
+                        );
+                    }
+                    for fragment in forbidden {
+                        assert!(
+                            !command.command.contains(fragment),
+                            "{case}: unexpected {fragment}"
+                        );
+                    }
+                }
+                None => assert!(result.is_err(), "{case}"),
+            }
+        }
     }
 }

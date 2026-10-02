@@ -156,32 +156,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn recognizes_supported_cjk_scripts() {
-        for (script, samples) in [
-            ("CJK Unified", &['中', '国'][..]),
-            ("CJK Extension A", &['\u{3400}', '\u{4DBF}'][..]),
-            ("CJK Compat", &['\u{F900}'][..]),
-            ("CJK Symbols", &['〇', '\u{3000}'][..]),
-            ("Hiragana", &['あ', 'ん'][..]),
-            ("Katakana", &['ア', 'ン'][..]),
-            ("Hangul", &['가', '힣'][..]),
+    fn classifies_cjk_and_non_cjk_scripts() {
+        for (script, samples, expected) in [
+            ("CJK Unified", &['中', '国'][..], true),
+            ("CJK Extension A", &['\u{3400}', '\u{4DBF}'][..], true),
+            ("CJK Compat", &['\u{F900}'][..], true),
+            ("CJK Symbols", &['〇', '\u{3000}'][..], true),
+            ("Hiragana", &['あ', 'ん'][..], true),
+            ("Katakana", &['ア', 'ン'][..], true),
+            ("Hangul", &['가', '힣'][..], true),
+            ("ASCII", &['A', 'z', '0', ' '][..], false),
+            ("Latin", &['é', 'ñ'][..], false),
+            ("Cyrillic", &['Д'][..], false),
+            ("Arabic", &['ع'][..], false),
         ] {
             for character in samples {
-                assert!(is_cjk(*character), "{script}: {character:?}");
-            }
-        }
-    }
-
-    #[test]
-    fn rejects_non_cjk_scripts() {
-        for (script, samples) in [
-            ("ASCII", &['A', 'z', '0', ' '][..]),
-            ("Latin", &['é', 'ñ'][..]),
-            ("Cyrillic", &['Д'][..]),
-            ("Arabic", &['ع'][..]),
-        ] {
-            for character in samples {
-                assert!(!is_cjk(*character), "{script}: {character:?}");
+                assert_eq!(is_cjk(*character), expected, "{script}: {character:?}");
             }
         }
     }

@@ -620,33 +620,6 @@ impl RagStore {
         Ok(false)
     }
 
-    /// Check whether a matching content hash exists in the collection, excluding
-    /// the provided document ID. Used when updating a document so the current
-    /// document does not trip the duplicate-content guard.
-    pub fn check_content_hash_exists_excluding_doc(
-        &self,
-        collection_id: &str,
-        content_hash: &str,
-        excluded_doc_id: &str,
-    ) -> Result<bool, RagError> {
-        let doc_ids = self.get_collection_doc_ids(collection_id)?;
-        let txn = self.db.begin_read()?;
-        let meta_t = txn.open_table(DOC_METADATA_TABLE)?;
-
-        for doc_id in &doc_ids {
-            if doc_id == excluded_doc_id {
-                continue;
-            }
-            if let Some(guard) = meta_t.get(doc_id.as_str())? {
-                let meta: DocMetadata = rmp_serde::from_slice(guard.value())?;
-                if meta.content_hash == content_hash {
-                    return Ok(true);
-                }
-            }
-        }
-        Ok(false)
-    }
-
     /// Add a document (metadata + chunks) and update the collection's doc list.
     pub fn add_document(
         &self,
@@ -1613,29 +1586,6 @@ mod tests {
             chunk_count: 0,
             version: 0,
         }
-    }
-
-    #[test]
-    fn check_content_hash_exists_excluding_doc_ignores_same_doc_and_detects_other_docs() {
-        let store = temp_store("content_hash_excluding_doc");
-        store.create_collection(&make_collection("col-1")).unwrap();
-        store
-            .add_document(&make_doc("doc-1", "col-1", "hash-a"), &[], Some("alpha"))
-            .unwrap();
-        store
-            .add_document(&make_doc("doc-2", "col-1", "hash-b"), &[], Some("beta"))
-            .unwrap();
-
-        assert!(
-            !store
-                .check_content_hash_exists_excluding_doc("col-1", "hash-a", "doc-1")
-                .unwrap()
-        );
-        assert!(
-            store
-                .check_content_hash_exists_excluding_doc("col-1", "hash-b", "doc-1")
-                .unwrap()
-        );
     }
 
     #[test]

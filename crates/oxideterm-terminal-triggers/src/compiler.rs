@@ -367,16 +367,6 @@ mod tests {
     }
 
     #[test]
-    fn compiles_literal_metacharacters_as_text() {
-        let snapshot = snapshot(trigger("[ready]", TerminalTriggerMatchMode::Literal));
-        let compiled = CompiledTriggerSet::compile(&snapshot, 7).unwrap();
-
-        assert!(compiled.triggers[0].matcher.is_match("[ready]"));
-        assert!(!compiled.triggers[0].matcher.is_match("r"));
-        assert_eq!(compiled.generation(), 7);
-    }
-
-    #[test]
     fn rejects_unknown_capture_without_echoing_pattern() {
         let mut rule = trigger("(?P<secret>.+)", TerminalTriggerMatchMode::Regex);
         rule.action = TerminalTriggerAction::SendText {

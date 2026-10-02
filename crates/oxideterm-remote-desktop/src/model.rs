@@ -539,56 +539,57 @@ mod quick_connect_tests {
     }
 
     #[test]
-    fn quick_connect_resolves_protocol_ports_and_ipv6_authorities() {
-        for (query, protocol, host, port, target) in [
+    fn quick_connect_resolves_supported_authorities_and_rejects_unsafe_forms() {
+        for (query, expected) in [
             (
                 "vnc://example.com",
-                RemoteDesktopProtocol::Vnc,
-                "example.com",
-                5900,
-                "vnc://example.com:5900",
+                Some((
+                    RemoteDesktopProtocol::Vnc,
+                    "example.com",
+                    5900,
+                    "vnc://example.com:5900",
+                )),
             ),
             (
                 "rdp://example.com",
-                RemoteDesktopProtocol::Rdp,
-                "example.com",
-                3389,
-                "rdp://example.com:3389",
+                Some((
+                    RemoteDesktopProtocol::Rdp,
+                    "example.com",
+                    3389,
+                    "rdp://example.com:3389",
+                )),
             ),
             (
                 "vnc://example.com:5901",
-                RemoteDesktopProtocol::Vnc,
-                "example.com",
-                5901,
-                "vnc://example.com:5901",
+                Some((
+                    RemoteDesktopProtocol::Vnc,
+                    "example.com",
+                    5901,
+                    "vnc://example.com:5901",
+                )),
             ),
             (
                 "vnc://[::1]:5902",
-                RemoteDesktopProtocol::Vnc,
-                "::1",
-                5902,
-                "vnc://[::1]:5902",
+                Some((RemoteDesktopProtocol::Vnc, "::1", 5902, "vnc://[::1]:5902")),
             ),
+            ("vnc://example.com/screen", None),
+            ("vnc://user@example.com", None),
+            ("vnc://example.com:0", None),
+            ("vnc://example.com:not-a-port", None),
+            ("vnc://example .com", None),
+            ("ssh://example.com", None),
         ] {
-            let profile = RemoteDesktopConnectionProfile::parse_quick_connect(query).unwrap();
-            assert_eq!(profile.protocol, protocol);
-            assert_eq!(profile.endpoint, RemoteDesktopEndpoint::new(host, port));
-            assert_eq!(profile.label, target);
-            assert_eq!(profile.quick_connect_target(), target);
-        }
-    }
-
-    #[test]
-    fn quick_connect_rejects_unsafe_or_ambiguous_authorities() {
-        for query in [
-            "vnc://example.com/screen",
-            "vnc://user@example.com",
-            "vnc://example.com:0",
-            "vnc://example.com:not-a-port",
-            "vnc://example .com",
-            "ssh://example.com",
-        ] {
-            assert!(RemoteDesktopConnectionProfile::parse_quick_connect(query).is_none());
+            let profile = RemoteDesktopConnectionProfile::parse_quick_connect(query);
+            match expected {
+                Some((protocol, host, port, target)) => {
+                    let profile = profile.expect(query);
+                    assert_eq!(profile.protocol, protocol);
+                    assert_eq!(profile.endpoint, RemoteDesktopEndpoint::new(host, port));
+                    assert_eq!(profile.label, target);
+                    assert_eq!(profile.quick_connect_target(), target);
+                }
+                None => assert!(profile.is_none(), "{query}"),
+            }
         }
     }
 }
@@ -1293,52 +1294,47 @@ mod tests {
     }
 
     #[test]
-    fn adjacent_frame_updates_merge_into_union_rect() {
+    fn frame_updates_merge_only_when_the_union_has_no_missing_pixels() {
         let size = RemoteDesktopSize {
             width: 4,
             height: 2,
         };
-        let mut update = RemoteDesktopFrameUpdate::new(
-            size,
-            RemoteDesktopRect::new(0, 0, 1, 1),
-            RemoteDesktopFrameFormat::Rgba8,
-            vec![1, 1, 1, 1],
-        );
-        let incoming = RemoteDesktopFrameUpdate::new(
-            size,
-            RemoteDesktopRect::new(1, 0, 1, 1),
-            RemoteDesktopFrameFormat::Rgba8,
-            vec![2, 2, 2, 2],
-        );
-
-        assert!(update.merge(&incoming));
-
-        assert_eq!(update.rect, RemoteDesktopRect::new(0, 0, 2, 1));
-        assert_eq!(update.bytes, vec![1, 1, 1, 1, 2, 2, 2, 2]);
-    }
-
-    #[test]
-    fn sparse_frame_updates_do_not_merge_into_zero_filled_holes() {
-        let size = RemoteDesktopSize {
-            width: 4,
-            height: 2,
-        };
-        let mut update = RemoteDesktopFrameUpdate::new(
-            size,
-            RemoteDesktopRect::new(0, 0, 1, 1),
-            RemoteDesktopFrameFormat::Rgba8,
-            vec![1, 1, 1, 1],
-        );
-        let original = update.clone();
-        let incoming = RemoteDesktopFrameUpdate::new(
-            size,
-            RemoteDesktopRect::new(2, 0, 1, 1),
-            RemoteDesktopFrameFormat::Rgba8,
-            vec![2, 2, 2, 2],
-        );
-
-        assert!(!update.merge(&incoming));
-        assert_eq!(update, original);
+        for (incoming_x, expected) in [
+            (
+                1,
+                Some((
+                    RemoteDesktopRect::new(0, 0, 2, 1),
+                    vec![1, 1, 1, 1, 2, 2, 2, 2],
+                )),
+            ),
+            (2, None),
+        ] {
+            let mut update = RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(0, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![1, 1, 1, 1],
+            );
+            let original = update.clone();
+            let incoming = RemoteDesktopFrameUpdate::new(
+                size,
+                RemoteDesktopRect::new(incoming_x, 0, 1, 1),
+                RemoteDesktopFrameFormat::Rgba8,
+                vec![2, 2, 2, 2],
+            );
+            assert_eq!(
+                update.merge(&incoming),
+                expected.is_some(),
+                "x={incoming_x}"
+            );
+            match expected {
+                Some((rect, bytes)) => {
+                    assert_eq!(update.rect, rect);
+                    assert_eq!(update.bytes, bytes);
+                }
+                None => assert_eq!(update, original),
+            }
+        }
     }
 
     #[test]

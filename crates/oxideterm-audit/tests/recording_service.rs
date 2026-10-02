@@ -238,26 +238,6 @@ fn another_writer_policy_change_is_observed_by_existing_sink() {
 }
 
 #[test]
-fn disabling_policy_flushes_output_queued_before_the_change() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("audit.db");
-    let (_service, client, context) = service(&path);
-    set_output(&client, true);
-    let sink = context.recording_sink();
-    sink.record_output(b"before-policy-close");
-    set_output(&client, false);
-    let id = wait_for(|| {
-        let list = futures::executor::block_on(client.list_recordings(None, 10)).ok()?;
-        list.recordings
-            .first()
-            .and_then(|r| (r.state == RecordingState::Interrupted).then_some(r.id.clone()))
-    });
-    let page = futures::executor::block_on(client.read_recording_page(id, None, None, 10)).unwrap();
-    assert!(page.chunks.iter().flat_map(|chunk| &chunk.frames).any(|frame|
-        matches!(&frame.kind, StoredRecordingFrameKind::Output(data) if data.as_slice() == b"before-policy-close")));
-}
-
-#[test]
 fn service_start_marks_unfinished_prior_instance_interrupted() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("audit.db");

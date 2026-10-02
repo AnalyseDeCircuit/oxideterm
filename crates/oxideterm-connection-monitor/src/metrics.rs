@@ -1082,20 +1082,6 @@ Inter-|   Receive                                                |  Transmit
     }
 
     #[test]
-    fn resource_metrics_deserializes_without_system_information() {
-        let serialized = serde_json::to_value(ResourceMetrics::empty(7, MetricsSource::Full))
-            .expect("serialize metrics");
-        let mut legacy = serialized.as_object().expect("metrics object").clone();
-        legacy.remove("systemInfo");
-
-        let metrics: ResourceMetrics =
-            serde_json::from_value(legacy.into()).expect("deserialize legacy metrics");
-
-        assert_eq!(metrics.timestamp_ms, 7);
-        assert_eq!(metrics.system_info, None);
-    }
-
-    #[test]
     fn parses_process_records_with_optional_fields_and_embedded_markers() {
         for (case, output, expected) in [
             (

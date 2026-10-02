@@ -1006,6 +1006,8 @@ fn ssh_close_during_authentication_releases_the_startup_consumer() {
             .iter()
             .any(|info| !info.consumers.is_empty())
     });
+    assert!(terminal.lifecycle().is_running());
+    assert!(!terminal.is_interactive());
     terminal.shutdown();
     wait_until(|| terminal.shared.finished.load(Ordering::Acquire));
     assert!(

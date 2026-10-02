@@ -8,7 +8,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::filesystem::{AsyncIdeFileSystem, IdeFileError, IdeFileSystem, WriteMode};
+use crate::filesystem::{AsyncIdeFileSystem, IdeFileError, WriteMode};
 use crate::model::{
     BufferSnapshot, CloseRequestId, DirtyCloseDecision, DirtyCloseRequest, EditorBuffer, EditorTab,
     EditorTabId, FileTreeEntry, IdeLocation, OpenFileOutcome, ProjectId, ProjectSnapshot,
@@ -359,32 +359,6 @@ impl IdeWorkspace {
         Ok(!buffer.is_dirty())
     }
 
-    pub fn save_tab_with(
-        &mut self,
-        fs: &dyn IdeFileSystem,
-        tab_id: EditorTabId,
-    ) -> Result<SavedFileVersion, SaveError> {
-        let (location, text, format, revision, expected_version) = {
-            let buffer = self.buffers.get(&tab_id).ok_or(SaveError::UnknownTab)?;
-            (
-                buffer.location.clone(),
-                buffer.text.clone(),
-                buffer.format.clone(),
-                buffer.revision,
-                buffer.version.clone(),
-            )
-        };
-        let mode = if fs.capabilities().atomic_write {
-            WriteMode::AtomicReplace
-        } else {
-            WriteMode::CreateOrReplace
-        };
-        let version = fs.write_file(&location, &text, &format, Some(&expected_version), mode)?;
-        self.complete_save_at_revision(tab_id, text, revision, format, version.clone())
-            .map_err(|_| SaveError::UnknownTab)?;
-        Ok(version)
-    }
-
     pub async fn save_tab_with_async(
         &mut self,
         fs: &dyn AsyncIdeFileSystem,
@@ -430,38 +404,6 @@ impl IdeWorkspace {
         buffer.saved_text = text;
         buffer.version = version;
         buffer.revision += 1;
-        buffer.saved_revision = buffer.revision;
-        buffer.saved_format = buffer.format.clone();
-        Ok(())
-    }
-
-    pub fn reload_tab_with(
-        &mut self,
-        fs: &dyn IdeFileSystem,
-        tab_id: EditorTabId,
-    ) -> Result<(), ReloadError> {
-        let (location, encoding) = self
-            .buffers
-            .get(&tab_id)
-            .map(|buffer| (buffer.location.clone(), buffer.format.encoding.clone()))
-            .ok_or(ReloadError::UnknownTab)?;
-        if self
-            .buffers
-            .get(&tab_id)
-            .is_some_and(EditorBuffer::is_dirty)
-        {
-            return Err(ReloadError::DirtyBuffer);
-        }
-        let data = fs
-            .read_file(&location, Some(&encoding))
-            .map_err(ReloadError::File)?;
-        self.reload_clean_buffer(tab_id, data.text, data.version)?;
-        self.set_file_format(tab_id, data.format)
-            .map_err(|_| ReloadError::UnknownTab)?;
-        let buffer = self
-            .buffers
-            .get_mut(&tab_id)
-            .ok_or(ReloadError::UnknownTab)?;
         buffer.saved_revision = buffer.revision;
         buffer.saved_format = buffer.format.clone();
         Ok(())
@@ -580,27 +522,6 @@ impl IdeWorkspace {
         let tab = self.tabs.remove(from);
         self.tabs.insert(target_index.min(self.tabs.len()), tab);
         Ok(())
-    }
-
-    pub fn request_close_all_tabs(&mut self) -> Result<Option<DirtyCloseRequest>, WorkspaceError> {
-        if let Some(tab) = self
-            .tabs
-            .iter()
-            .find(|tab| {
-                self.buffers
-                    .get(&tab.id)
-                    .is_some_and(EditorBuffer::is_dirty)
-            })
-            .cloned()
-        {
-            return self.request_close_tab(tab.id);
-        }
-        self.tabs.clear();
-        self.buffers.clear();
-        self.tab_by_location.clear();
-        self.active_tab = None;
-        self.pending_close = None;
-        Ok(None)
     }
 
     pub fn resolve_dirty_close(

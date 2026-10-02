@@ -279,24 +279,21 @@ mod tests {
     }
 
     #[test]
-    fn cd_command_quotes_visible_shell_path() {
-        assert_eq!(
-            current_directory_cd_command("/Users/dominical/it's ok").as_deref(),
-            Some("cd '/Users/dominical/it'\\''s ok'")
-        );
-        assert_eq!(
-            current_directory_shell_path_argument("/Users/dominical/it's ok").as_deref(),
-            Some("'/Users/dominical/it'\\''s ok'")
-        );
-    }
-
-    #[test]
-    fn cd_command_preserves_home_expansion() {
-        assert_eq!(current_directory_cd_command("~").as_deref(), Some("cd ~"));
-        assert_eq!(
-            current_directory_cd_command("~/Project Files").as_deref(),
-            Some("cd \"$HOME\"/'Project Files'")
-        );
+    fn cd_commands_quote_paths_and_preserve_home_expansion() {
+        for (path, argument) in [
+            ("/Users/dominical/it's ok", "'/Users/dominical/it'\\''s ok'"),
+            ("~", "~"),
+            ("~/Project Files", "\"$HOME\"/'Project Files'"),
+        ] {
+            assert_eq!(
+                current_directory_shell_path_argument(path).as_deref(),
+                Some(argument)
+            );
+            assert_eq!(
+                current_directory_cd_command(path),
+                Some(format!("cd {argument}"))
+            );
+        }
     }
 
     #[test]

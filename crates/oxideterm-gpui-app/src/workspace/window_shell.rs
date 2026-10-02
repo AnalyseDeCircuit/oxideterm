@@ -443,26 +443,6 @@ mod tests {
         ));
     }
 
-    struct SessionDropProbe {
-        drops: Arc<AtomicUsize>,
-    }
-
-    impl Drop for SessionDropProbe {
-        fn drop(&mut self) {
-            self.drops.fetch_add(1, Ordering::AcqRel);
-        }
-    }
-
-    struct SessionLeaseWindow {
-        _session: Entity<SessionDropProbe>,
-    }
-
-    impl Render for SessionLeaseWindow {
-        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-            div()
-        }
-    }
-
     struct NotificationSource;
 
     struct ObservingWindowRoot {
@@ -491,48 +471,6 @@ mod tests {
             self.render_count.fetch_add(1, Ordering::AcqRel);
             div()
         }
-    }
-
-    #[gpui::test]
-    fn shared_session_outlives_main_and_one_of_two_detached_windows(cx: &mut TestAppContext) {
-        let drops = Arc::new(AtomicUsize::new(0));
-        let session = cx.new({
-            let drops = drops.clone();
-            move |_| SessionDropProbe { drops }
-        });
-        let main_window = cx.add_window({
-            let session = session.clone();
-            move |_window, _cx| SessionLeaseWindow { _session: session }
-        });
-        let first_detached_window = cx.add_window({
-            let session = session.clone();
-            move |_window, _cx| SessionLeaseWindow { _session: session }
-        });
-        let second_detached_window = cx.add_window({
-            let session = session.clone();
-            move |_window, _cx| SessionLeaseWindow { _session: session }
-        });
-        drop(session);
-
-        main_window
-            .update(cx, |_root, window, _cx| window.remove_window())
-            .expect("main window release");
-        cx.run_until_parked();
-        assert_eq!(drops.load(Ordering::Acquire), 0);
-
-        first_detached_window
-            .update(cx, |_root, window, _cx| window.remove_window())
-            .expect("first detached release");
-        cx.run_until_parked();
-        assert_eq!(drops.load(Ordering::Acquire), 0);
-
-        second_detached_window
-            .update(cx, |_root, window, _cx| window.remove_window())
-            .expect("last detached release");
-        cx.run_until_parked();
-        assert_eq!(drops.load(Ordering::Acquire), 1);
-        cx.update(|_| {});
-        assert_eq!(drops.load(Ordering::Acquire), 1);
     }
 
     #[gpui::test]

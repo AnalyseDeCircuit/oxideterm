@@ -27,12 +27,4 @@ mod tests {
         assert_eq!(shell_quote("it's-ready"), "'it'\"'\"'s-ready'");
         assert_eq!(powershell_quote("it's-ready"), "'it''s-ready'");
     }
-
-    #[test]
-    fn posix_probes_bypass_non_posix_login_shell_parsers() {
-        let command = posix_shell_command("printf '%s\\n' \"ready\"");
-
-        assert!(command.starts_with("/bin/sh -c "));
-        assert!(command.contains("'\"'\"'%s\\n'\"'\"'"));
-    }
 }

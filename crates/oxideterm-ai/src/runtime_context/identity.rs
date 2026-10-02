@@ -409,14 +409,20 @@ mod tests {
     };
 
     #[test]
-    fn runtime_handle_debug_redacts_control_token() {
+    fn control_token_debug_is_redacted_and_runtime_handle_serializes() {
         let handle = RuntimeHandleId::new();
-        let raw = handle.as_str().to_string();
-
-        assert!(!format!("{handle:?}").contains(&raw));
+        let owner = RuntimeOwnerKey::new();
+        let tool_session = ToolSessionId::new();
+        for (debug, raw) in [
+            (format!("{handle:?}"), handle.as_str()),
+            (format!("{owner:?}"), owner.as_str()),
+            (format!("{tool_session:?}"), tool_session.0.as_str()),
+        ] {
+            assert!(!debug.contains(raw));
+        }
         assert_eq!(
             serde_json::to_string(&handle).expect("handle serializes"),
-            format!("\"{raw}\"")
+            format!("\"{}\"", handle.as_str())
         );
     }
 
@@ -429,16 +435,6 @@ mod tests {
         ] {
             assert!(RuntimeHandleId::parse(value).is_err());
         }
-    }
-
-    #[test]
-    fn internal_owner_and_tool_session_debug_are_redacted() {
-        let owner = RuntimeOwnerKey::new();
-        let raw_owner = owner.as_str().to_string();
-        let tool_session = ToolSessionId::new();
-
-        assert!(!format!("{owner:?}").contains(&raw_owner));
-        assert!(!format!("{tool_session:?}").contains(&tool_session.0));
     }
 
     #[test]

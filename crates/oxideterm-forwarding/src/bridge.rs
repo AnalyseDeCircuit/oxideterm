@@ -399,9 +399,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_connection_counter_waits_for_zero() {
+    async fn active_connection_counter_times_out_until_connection_finishes() {
         let counter = ActiveConnectionCounter::default();
         counter.increment();
+        assert!(!counter.wait_zero(Duration::from_millis(10)).await);
+        assert_eq!(counter.get(), 1);
         let cloned = counter.clone();
 
         tokio::spawn(async move {
@@ -411,15 +413,6 @@ mod tests {
 
         assert!(counter.wait_zero(Duration::from_secs(1)).await);
         assert_eq!(counter.get(), 0);
-    }
-
-    #[tokio::test]
-    async fn active_connection_counter_times_out() {
-        let counter = ActiveConnectionCounter::default();
-        counter.increment();
-
-        assert!(!counter.wait_zero(Duration::from_millis(10)).await);
-        assert_eq!(counter.get(), 1);
     }
 
     #[tokio::test]

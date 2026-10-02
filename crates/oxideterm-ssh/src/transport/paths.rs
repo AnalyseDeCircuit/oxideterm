@@ -175,15 +175,17 @@ mod path_auth_tests {
         path
     }
 
-    fn write_test_key(path: &PathBuf, passphrase: Option<&str>) {
+    fn write_test_key(path: &PathBuf, passphrase: Option<&str>) -> String {
         let mut rng = UnwrapErr(SysRng);
         let key = PrivateKey::random(&mut rng, Algorithm::Ed25519).unwrap();
+        let public_key = key.public_key().public_key_base64();
         let key = match passphrase {
             Some(passphrase) => key.encrypt(&mut rng, passphrase).unwrap(),
             None => key,
         };
         key.write_openssh_file(path, LineEnding::LF).unwrap();
         set_test_private_key_permissions(path);
+        public_key
     }
 
     #[cfg(unix)]
@@ -259,56 +261,32 @@ mod path_auth_tests {
     }
 
     #[test]
-    fn default_key_loader_falls_back_after_encrypted_candidate_without_passphrase() {
-        let dir = unique_temp_dir("fallback");
+    fn default_key_loader_selects_the_correct_candidate_and_requires_passphrases() {
+        let dir = unique_temp_dir("candidate-selection");
         let encrypted = dir.join("id_ed25519");
         let fallback = dir.join("id_rsa");
-        write_test_key(&encrypted, Some("secret-pass"));
-        write_test_key(&fallback, None);
-
-        let key = load_first_available_key(vec![encrypted, fallback], None).unwrap();
-
-        assert_eq!(key.algorithm(), Algorithm::Ed25519);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn default_key_loader_reports_passphrase_required_when_all_candidates_are_encrypted() {
-        let dir = unique_temp_dir("encrypted");
-        let encrypted = dir.join("id_ed25519");
-        write_test_key(&encrypted, Some("secret-pass"));
-
-        let error = load_first_available_key(vec![encrypted], None).unwrap_err();
-
-        assert!(error.to_string().contains("Passphrase required"));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn default_key_loader_uses_passphrase_for_encrypted_candidate() {
-        let dir = unique_temp_dir("passphrase");
-        let encrypted = dir.join("id_ed25519");
-        let fallback = dir.join("id_rsa");
-        write_test_key(&encrypted, Some("secret-pass"));
-        write_test_key(&fallback, None);
-
-        let key = load_first_available_key(vec![encrypted, fallback], Some("secret-pass")).unwrap();
-
-        assert_eq!(key.algorithm(), Algorithm::Ed25519);
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn default_key_loader_skips_unparseable_extra_candidates() {
-        let dir = unique_temp_dir("skip-invalid");
         let invalid = dir.join("id_work");
-        let fallback = dir.join("id_other");
         std::fs::write(&invalid, "not a private key").unwrap();
-        write_test_key(&fallback, None);
-
-        let key = load_first_available_key(vec![invalid, fallback], None).unwrap();
-
-        assert_eq!(key.algorithm(), Algorithm::Ed25519);
+        let encrypted_public_key = write_test_key(&encrypted, Some("secret-pass"));
+        let fallback_public_key = write_test_key(&fallback, None);
+        for (paths, passphrase, expected_public_key) in [
+            (
+                vec![encrypted.clone(), fallback.clone()],
+                None,
+                &fallback_public_key,
+            ),
+            (
+                vec![encrypted.clone(), fallback.clone()],
+                Some("secret-pass"),
+                &encrypted_public_key,
+            ),
+            (vec![invalid, fallback], None, &fallback_public_key),
+        ] {
+            let key = load_first_available_key(paths, passphrase).unwrap();
+            assert_eq!(&key.public_key().public_key_base64(), expected_public_key);
+        }
+        let error = load_first_available_key(vec![encrypted], None).unwrap_err();
+        assert!(error.to_string().contains("Passphrase required"));
         let _ = std::fs::remove_dir_all(dir);
     }
 }

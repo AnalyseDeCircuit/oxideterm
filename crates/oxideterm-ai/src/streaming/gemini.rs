@@ -391,6 +391,7 @@ fn parse_gemini_error(status: u16, body: &str) -> String {
 mod tests {
     use super::*;
     use crate::{AiExecutionBackend, AiPolicySafetyMode, AiToolUsePolicy};
+    use serde_json::json;
 
     fn config(model: &str, effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
@@ -435,25 +436,21 @@ mod tests {
     }
 
     #[test]
-    fn gemini_three_uses_official_thinking_level_field() {
-        let body = gemini_chat_body(&config("gemini-3.6-flash", "medium"), &[]);
-        assert_eq!(
-            body["generationConfig"]["thinkingConfig"]["thinkingLevel"].as_str(),
-            Some("medium")
-        );
-    }
-
-    #[test]
-    fn gemini_two_five_maps_levels_to_official_budgets() {
-        let body = gemini_chat_body(&config("gemini-2.5-flash", "none"), &[]);
-        assert_eq!(
-            body["generationConfig"]["thinkingConfig"]["thinkingBudget"].as_i64(),
-            Some(0)
-        );
-        let body = gemini_chat_body(&config("gemini-2.5-pro", "high"), &[]);
-        assert_eq!(
-            body["generationConfig"]["thinkingConfig"]["thinkingBudget"].as_i64(),
-            Some(24576)
-        );
+    fn thinking_config_matches_model_generation() {
+        for (model, effort, expected) in [
+            (
+                "gemini-3.6-flash",
+                "medium",
+                json!({"thinkingLevel": "medium"}),
+            ),
+            ("gemini-2.5-flash", "none", json!({"thinkingBudget": 0})),
+            ("gemini-2.5-pro", "high", json!({"thinkingBudget": 24576})),
+        ] {
+            let body = gemini_chat_body(&config(model, effort), &[]);
+            assert_eq!(
+                body["generationConfig"]["thinkingConfig"], expected,
+                "{model}/{effort}"
+            );
+        }
     }
 }

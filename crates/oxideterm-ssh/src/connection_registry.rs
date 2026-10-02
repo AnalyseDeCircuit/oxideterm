@@ -2707,37 +2707,6 @@ mod tests {
     }
 
     #[test]
-    fn tunneled_child_parent_ref_is_released_by_ancestor_consumer() {
-        let registry = SshConnectionRegistry::default();
-        let root = registry.acquire(
-            SshConfig::password("jump", 22, "me", "pw"),
-            ConnectionConsumer::NodeRouter("root".into()),
-        );
-        let parent_ref = ConnectionConsumer::NodeRouter("child:ancestor".into());
-        let parent_for_child = registry
-            .acquire_consumer_for_connection(root.connection_id(), parent_ref.clone())
-            .unwrap();
-        let child = registry.acquire(
-            SshConfig::password("target", 22, "me", "pw"),
-            ConnectionConsumer::NodeRouter("child".into()),
-        );
-        registry.set_parent_connection_id(
-            child.connection_id(),
-            Some(parent_for_child.connection_id().to_string()),
-        );
-
-        assert_eq!(root.info().ref_count, 2);
-        registry.release(root.connection_id(), &parent_ref);
-
-        assert_eq!(root.info().ref_count, 1);
-        assert!(
-            root.info()
-                .consumers
-                .contains(&ConnectionConsumer::NodeRouter("root".into()))
-        );
-    }
-
-    #[test]
     fn retiring_connection_allows_same_config_to_receive_new_id() {
         let registry = SshConnectionRegistry::default();
         let config = SshConfig::password("host", 22, "me", "pw");

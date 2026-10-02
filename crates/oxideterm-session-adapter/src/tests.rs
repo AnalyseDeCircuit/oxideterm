@@ -255,45 +255,6 @@ fn manual_proxy_command_uses_runtime_secret_and_overrides_other_routes() {
 }
 
 #[test]
-fn saved_proxy_chain_becomes_ssh_config_chain() {
-    let (store, path) = temp_connection_store("proxy-chain");
-    let mut conn = saved_connection(SavedAuth::Agent);
-    conn.proxy_chain = vec![SavedProxyHop {
-        totp_credential_id: None,
-        host: "jump.example.com".to_string(),
-        port: 2222,
-        username: "ops".to_string(),
-        auth: SavedAuth::Agent,
-        agent_forwarding: true,
-        identity_agent: Some("/tmp/jump-agent.sock".to_string()),
-        agent_forwarding_socket: Some("/tmp/jump-forward.sock".to_string()),
-        legacy_ssh_compatibility: true,
-        ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
-    }];
-
-    let settings = PersistedSettings::default();
-    let config = ssh_config_from_saved_connection(&store, &settings, &conn).unwrap();
-
-    assert!(config.strict_host_key_checking);
-    let chain = config.proxy_chain.unwrap();
-    assert_eq!(chain.len(), 1);
-    assert_eq!(chain[0].host, "jump.example.com");
-    assert_eq!(chain[0].port, 2222);
-    assert_eq!(chain[0].username, "ops");
-    assert!(chain[0].agent_forwarding);
-    assert_eq!(
-        chain[0].identity_agent.as_deref(),
-        Some("/tmp/jump-agent.sock")
-    );
-    assert_eq!(
-        chain[0].agent_forwarding_socket.as_deref(),
-        Some("/tmp/jump-forward.sock")
-    );
-    assert!(chain[0].legacy_ssh_compatibility);
-    let _ = std::fs::remove_file(path);
-}
-
-#[test]
 fn legacy_jump_host_becomes_runtime_proxy_chain() {
     let (mut store, path) = temp_connection_store("legacy-jump-host");
     let mut jump = saved_connection(SavedAuth::Agent);
@@ -317,7 +278,7 @@ fn legacy_jump_host_becomes_runtime_proxy_chain() {
 }
 
 #[test]
-fn saved_connection_hops_become_independent_runtime_configs() {
+fn saved_proxy_chain_maps_to_shared_and_independent_runtime_configs() {
     let (store, path) = temp_connection_store("materialized-hops");
     let mut connection = saved_connection(SavedAuth::Agent);
     connection.options.connect_timeout_seconds = Some(180);
@@ -335,6 +296,25 @@ fn saved_connection_hops_become_independent_runtime_configs() {
         ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
     }];
     let settings = PersistedSettings::default();
+
+    let config = ssh_config_from_saved_connection(&store, &settings, &connection).unwrap();
+
+    assert!(config.strict_host_key_checking);
+    let chain = config.proxy_chain.unwrap();
+    assert_eq!(chain.len(), 1);
+    assert_eq!(chain[0].host, "jump.example.com");
+    assert_eq!(chain[0].port, 2222);
+    assert_eq!(chain[0].username, "ops");
+    assert!(chain[0].agent_forwarding);
+    assert_eq!(
+        chain[0].identity_agent.as_deref(),
+        Some("/tmp/jump-agent.sock")
+    );
+    assert_eq!(
+        chain[0].agent_forwarding_socket.as_deref(),
+        Some("/tmp/jump-forward.sock")
+    );
+    assert!(chain[0].legacy_ssh_compatibility);
 
     let jump = ssh_config_for_saved_connection_hop(&store, &settings, &connection, 0)
         .expect("saved jump should become a runtime config");
@@ -445,7 +425,7 @@ fn saved_upstream_proxy_policy_overrides_global_proxy_and_hydrates_custom_secret
 }
 
 #[test]
-fn use_global_upstream_proxy_prefers_global_settings_over_env_fallback() {
+fn global_upstream_proxy_overrides_environment_and_requires_saved_credentials() {
     let _socks_env = EnvVarGuard::set("OXIDETERM_SOCKS5_PROXY", "env-proxy.local:1080");
     let _http_env = EnvVarGuard::set("OXIDETERM_HTTP_PROXY", "http://env-http.local:8080");
     let (store, path) = temp_connection_store("global-proxy-priority");
@@ -466,24 +446,13 @@ fn use_global_upstream_proxy_prefers_global_settings_over_env_fallback() {
 
     assert_eq!(proxy.host, "global-proxy.local");
     assert!(matches!(proxy.auth, UpstreamProxyAuth::None));
-    let _ = std::fs::remove_file(path);
-}
-
-#[test]
-fn use_global_upstream_proxy_fails_when_saved_password_is_missing() {
-    let (store, path) = temp_connection_store("missing-global-proxy-password");
-    let mut settings = PersistedSettings::default();
-    settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
-        protocol: SettingsUpstreamProxyProtocol::HttpConnect,
-        host: "global-proxy.local".to_string(),
-        port: 8080,
-        auth: SettingsUpstreamProxyAuth::Password {
-            username: "proxy-user".to_string(),
-            keychain_id: None,
-        },
-        remote_dns: true,
-        no_proxy: String::new(),
-    });
+    let global_proxy = settings.network.upstream_proxy.as_mut().unwrap();
+    global_proxy.protocol = SettingsUpstreamProxyProtocol::HttpConnect;
+    global_proxy.port = 8080;
+    global_proxy.auth = SettingsUpstreamProxyAuth::Password {
+        username: "proxy-user".to_string(),
+        keychain_id: None,
+    };
 
     let error = upstream_proxy_config_from_saved_policy(
         &store,

@@ -458,22 +458,20 @@ mod tests {
     }
 
     #[test]
-    fn mismatch_detector_suggests_legacy_encoding_for_invalid_utf8() {
+    fn mismatch_detector_suggests_legacy_encoding_only_in_utf8_mode() {
         let encoded = TerminalInputEncoder::new(TerminalEncoding::Gbk)
             .encode_text("你好世界你好世界你好世界")
             .into_owned();
-        let mut detector = EncodingMismatchDetector::new(TerminalEncoding::Utf8);
-        let hint = detector.observe(&encoded.repeat(8)).unwrap();
-        assert!(hint.suggestions.contains(&TerminalEncoding::Gbk));
-        assert!(hint.invalid_bytes >= 4);
-    }
-
-    #[test]
-    fn mismatch_detector_disabled_for_non_utf8_mode() {
-        let encoded = TerminalInputEncoder::new(TerminalEncoding::Gbk)
-            .encode_text("你好世界")
-            .into_owned();
-        let mut detector = EncodingMismatchDetector::new(TerminalEncoding::Gbk);
-        assert!(detector.observe(&encoded.repeat(16)).is_none());
+        for mode in [TerminalEncoding::Utf8, TerminalEncoding::Gbk] {
+            let mut detector = EncodingMismatchDetector::new(mode);
+            let hint = detector.observe(&encoded.repeat(8));
+            if mode == TerminalEncoding::Utf8 {
+                let hint = hint.expect("invalid UTF-8 should produce an encoding hint");
+                assert!(hint.suggestions.contains(&TerminalEncoding::Gbk));
+                assert!(hint.invalid_bytes >= 4);
+            } else {
+                assert!(hint.is_none());
+            }
+        }
     }
 }

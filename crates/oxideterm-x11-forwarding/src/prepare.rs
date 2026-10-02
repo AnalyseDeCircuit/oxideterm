@@ -269,41 +269,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn untrusted_generation_uses_temporary_authority_and_grace_timeout() {
+    fn untrusted_generation_preserves_authority_and_bounded_expiry() {
         let display = crate::X11Display::parse(":0").unwrap();
-        let args = untrusted_generate_args(Path::new("/private/tmp/auth"), &display, Some(1_260));
-
-        assert_eq!(
-            args,
-            [
-                "-f",
-                "/private/tmp/auth",
-                "generate",
-                ":0",
-                "MIT-MAGIC-COOKIE-1",
-                "untrusted",
-                "timeout",
-                "1260",
-            ]
-        );
-    }
-
-    #[test]
-    fn untrusted_generation_can_follow_connection_lifetime() {
-        let display = crate::X11Display::parse(":0").unwrap();
-        let args = untrusted_generate_args(Path::new("/private/tmp/auth"), &display, None);
-
-        assert!(!args.iter().any(|argument| argument == "timeout"));
-    }
-
-    #[test]
-    fn untrusted_expiry_adds_grace_without_overflowing_x_security_timeout() {
-        assert_eq!(xauth_expiry_seconds(Some(1_200_000)), Some(1_260));
-        assert_eq!(
-            xauth_expiry_seconds(Some(u64::MAX)),
-            Some(MAX_XAUTH_TIMEOUT_SECONDS)
-        );
-        assert_eq!(xauth_expiry_seconds(None), None);
+        for (millis, expected_seconds) in [
+            (Some(1_200_000), Some(1_260)),
+            (Some(u64::MAX), Some(4_294_967_295)),
+            (None, None),
+        ] {
+            let seconds = xauth_expiry_seconds(millis);
+            assert_eq!(seconds, expected_seconds);
+            let mut expected = vec![
+                "-f".to_string(),
+                "/private/tmp/auth".to_string(),
+                "generate".to_string(),
+                ":0".to_string(),
+                "MIT-MAGIC-COOKIE-1".to_string(),
+                "untrusted".to_string(),
+            ];
+            if let Some(seconds) = expected_seconds {
+                expected.extend(["timeout".to_string(), seconds.to_string()]);
+            }
+            assert_eq!(
+                untrusted_generate_args(Path::new("/private/tmp/auth"), &display, seconds),
+                expected,
+                "timeout: {millis:?}"
+            );
+        }
     }
 
     #[test]

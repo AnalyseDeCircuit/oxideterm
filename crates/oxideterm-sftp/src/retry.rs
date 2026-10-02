@@ -141,14 +141,36 @@ mod classification_tests {
 
     #[test]
     fn retry_classification_separates_transport_from_path_and_auth_errors() {
-        assert!(error_is_connection_unavailable("SSH connection is closed"));
+        for error in [
+            "SSH connection is closed",
+            "Connection abc is stale: transport is closed",
+            "SFTP init failed: Channel error: SSH connection is closed and cannot open an SFTP channel",
+            "Capability unavailable: Session not found: node-1",
+            "SFTP subsystem not available: failed to open SFTP channel: channel closed",
+        ] {
+            assert!(error_is_connection_unavailable(error), "{error}");
+        }
+        assert!(!error_is_connection_unavailable(
+            "Permission denied: /home/me/secret"
+        ));
         assert!(error_should_retry_initialization("connection timeout"));
         assert!(!error_should_retry_initialization(
             "Permission denied: /root"
         ));
         assert!(!error_should_retry_initialization("authentication failed"));
-        assert!(error_is_not_found("No such file: /tmp/missing"));
-        assert!(!error_is_not_found("Node not found: node-1"));
+        for error in [
+            "No such file: /tmp/missing",
+            "Directory not found: /home/me/missing",
+            "No such file or directory: /home/me/missing",
+        ] {
+            assert!(error_is_not_found(error), "{error}");
+        }
+        for error in [
+            "Node not found: node-1",
+            "Capability unavailable: Session not found: node-1",
+        ] {
+            assert!(!error_is_not_found(error), "{error}");
+        }
         assert!(error_is_auth_failure("permission denied (publickey)"));
         assert!(!error_is_permission_denied("permission denied (publickey)"));
         assert!(error_is_permission_denied("Permission denied: /root"));

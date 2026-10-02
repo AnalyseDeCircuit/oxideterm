@@ -1161,7 +1161,7 @@ mod tests {
     }
 
     #[test]
-    fn atomic_save_failure_preserves_file_and_memory() {
+    fn failed_updates_and_checkpoint_restore_preserve_current_file_and_memory() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("forwards.json");
         let store = SavedForwardStore::load(&path).unwrap();
@@ -1183,6 +1183,18 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), original_file);
         assert_eq!(*store.lock_data(), checkpoint.data);
         assert!(!store.load_persisted_forwards("session-1")[0].auto_start);
+
+        store.update_auto_start("forward-1", true).unwrap();
+        let current_data = store.lock_data().clone();
+        let current_file = fs::read(&path).unwrap();
+
+        inject_atomic_replace_failure();
+        let error = store.restore_checkpoint(&checkpoint).unwrap_err();
+
+        assert!(matches!(error, SavedForwardError::Io(_)));
+        assert_eq!(*store.lock_data(), current_data);
+        assert_eq!(fs::read(&path).unwrap(), current_file);
+        assert!(store.load_persisted_forwards("session-1")[0].auto_start);
     }
 
     #[test]
@@ -1274,36 +1286,10 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_restore_failure_preserves_current_file_and_memory() {
+    fn forward_auto_start_skips_unchanged_writes_and_survives_rule_updates() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("forwards.json");
         let store = SavedForwardStore::load(&path).unwrap();
-        store
-            .persist_forward(persisted_forward(
-                "forward-1",
-                "session-1",
-                Some("connection-1"),
-                8080,
-            ))
-            .unwrap();
-        let prior_checkpoint = store.checkpoint().unwrap();
-        store.update_auto_start("forward-1", true).unwrap();
-        let current_data = store.lock_data().clone();
-        let current_file = fs::read(&path).unwrap();
-
-        inject_atomic_replace_failure();
-        let error = store.restore_checkpoint(&prior_checkpoint).unwrap_err();
-
-        assert!(matches!(error, SavedForwardError::Io(_)));
-        assert_eq!(*store.lock_data(), current_data);
-        assert_eq!(fs::read(&path).unwrap(), current_file);
-        assert!(store.load_persisted_forwards("session-1")[0].auto_start);
-    }
-
-    #[test]
-    fn sync_owner_bound_forward_preserves_auto_start_on_update() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();
         store
             .sync_persisted_forward_rule(
                 "forward-1",
@@ -1312,6 +1298,14 @@ mod tests {
                 sample_rule("forward-1", 8080),
             )
             .unwrap();
+        let before = fs::read(&path).unwrap();
+        let updated_at = store.load_persisted_forwards("session-1")[0].updated_at;
+        store.update_auto_start("forward-1", false).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            store.load_persisted_forwards("session-1")[0].updated_at,
+            updated_at
+        );
         store.update_auto_start("forward-1", true).unwrap();
         store
             .sync_persisted_forward_rule(
@@ -1327,31 +1321,6 @@ mod tests {
         assert!(saved[0].auto_start);
         assert_eq!(saved[0].session_id, "session-2");
         assert_eq!(saved[0].rule.bind_port, 9090);
-    }
-
-    #[test]
-    fn unchanged_auto_start_does_not_rewrite_saved_rule() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("forwards.json");
-        let store = SavedForwardStore::load(&path).unwrap();
-        store
-            .persist_forward(persisted_forward(
-                "forward-1",
-                "session-1",
-                Some("connection-1"),
-                8080,
-            ))
-            .unwrap();
-        let before = fs::read(&path).unwrap();
-        let updated_at = store.load_persisted_forwards("session-1")[0].updated_at;
-
-        store.update_auto_start("forward-1", false).unwrap();
-
-        assert_eq!(fs::read(&path).unwrap(), before);
-        assert_eq!(
-            store.load_persisted_forwards("session-1")[0].updated_at,
-            updated_at
-        );
     }
 
     #[test]
@@ -1386,6 +1355,27 @@ mod tests {
                 .iter()
                 .any(|tombstone| tombstone.id == "forward-1")
         );
+        let snapshot = store.export_snapshot().unwrap();
+        assert_eq!(snapshot.records.len(), 2);
+        let deleted_record = snapshot
+            .records
+            .iter()
+            .find(|record| record.id == "forward-1")
+            .unwrap();
+        assert!(deleted_record.deleted);
+        assert!(deleted_record.payload.is_none());
+        let live_record = snapshot
+            .records
+            .iter()
+            .find(|record| record.id == "forward-2")
+            .unwrap();
+        assert!(!live_record.deleted);
+        let live_payload = live_record.payload.as_ref().unwrap();
+        assert_eq!(
+            live_payload.owner_connection_id.as_deref(),
+            Some("connection-2")
+        );
+        assert_eq!(live_payload.bind_port, 9090);
     }
 
     #[test]
@@ -1464,27 +1454,6 @@ mod tests {
                 .iter()
                 .any(|forward| forward.rule.bind_port == 9090 && forward.rule.description == "new")
         );
-    }
-
-    #[test]
-    fn export_snapshot_includes_owner_bound_forward_and_tombstone() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = SavedForwardStore::load(dir.path().join("forwards.json")).unwrap();
-        store
-            .sync_persisted_forward_rule(
-                "forward-1",
-                "session-1",
-                Some("connection-1".to_string()),
-                sample_rule("forward-1", 8080),
-            )
-            .unwrap();
-        store.delete_persisted_forward("forward-1").unwrap();
-
-        let snapshot = store.export_snapshot().unwrap();
-
-        assert_eq!(snapshot.records.len(), 1);
-        assert!(snapshot.records[0].deleted);
-        assert!(snapshot.records[0].payload.is_none());
     }
 
     #[test]

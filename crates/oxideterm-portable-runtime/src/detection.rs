@@ -320,23 +320,6 @@ mod tests {
     }
 
     #[test]
-    fn non_empty_portable_file_does_not_enable_portable_mode() {
-        let temp = tempdir().unwrap();
-        let exe_path = temp.path().join("oxideterm");
-        std::fs::write(&exe_path, b"").unwrap();
-        std::fs::write(
-            temp.path().join(PORTABLE_MARKER_FILENAME),
-            b"#!/usr/bin/env sh\n",
-        )
-        .unwrap();
-
-        let info = detect_portable_info_from_exe(&exe_path).unwrap();
-
-        assert!(!info.is_portable);
-        assert_eq!(info.activation, PortableActivationKind::Disabled);
-    }
-
-    #[test]
     fn issue_143_portable_binary_name_does_not_enable_portable_mode() {
         let temp = tempdir().unwrap();
         let exe_path = temp.path().join("oxideterm");

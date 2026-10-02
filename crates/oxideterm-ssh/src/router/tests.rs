@@ -176,38 +176,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_url_tracks_bound_endpoint() {
-        let registry = SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry);
-        let node = NodeId::new("node-a");
-        router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
-
-        let endpoint = TerminalEndpoint {
-            ws_port: 0,
-            ws_token: Zeroizing::new("native-terminal-term-a".to_string()),
-            session_id: "term-a".to_string(),
-        };
-        let event = router
-            .bind_terminal_endpoint(&node, endpoint.clone())
-            .unwrap();
-        assert!(matches!(
-            event,
-            NodeStateEvent::TerminalEndpointChanged {
-                available: true,
-                ..
-            }
-        ));
-
-        assert_eq!(router.terminal_url(&node).unwrap(), endpoint);
-
-        router.unbind_terminal_session(&node, "term-a").unwrap();
-        assert!(matches!(
-            router.terminal_url(&node),
-            Err(RouteError::NotConnected(_))
-        ));
-    }
-
-    #[test]
     fn metadata_snapshot_omits_authentication_and_endpoint_tokens() {
         let store = NodeRuntimeStore::default();
         let node = NodeId::new("node-a");
@@ -363,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn removing_primary_terminal_elects_another_endpoint() {
+    fn terminal_endpoints_elect_a_replacement_and_clear_after_last_close() {
         let router = NodeRouter::new(SshConnectionRegistry::default());
         let node = NodeId::new("node-a");
         router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
@@ -378,7 +346,14 @@ mod tests {
             session_id: "term-b".to_string(),
         };
 
-        router.bind_terminal_endpoint(&node, first.clone()).unwrap();
+        let event = router.bind_terminal_endpoint(&node, first.clone()).unwrap();
+        assert!(matches!(
+            event,
+            NodeStateEvent::TerminalEndpointChanged {
+                available: true,
+                ..
+            }
+        ));
         router.bind_terminal_endpoint(&node, second.clone()).unwrap();
         assert_eq!(router.terminal_url(&node).unwrap(), first);
 
@@ -389,6 +364,11 @@ mod tests {
         assert_eq!(snapshot.terminal_session_id.as_deref(), Some("term-b"));
         let tree_snapshot = router.export_tree_snapshot();
         assert_eq!(tree_snapshot.nodes[0].terminal_endpoints.len(), 1);
+        router.unbind_terminal_session(&node, "term-b").unwrap();
+        assert!(matches!(
+            router.terminal_url(&node),
+            Err(RouteError::NotConnected(_))
+        ));
     }
 
     #[test]
@@ -821,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn disconnect_node_runtime_clears_connection_and_session_metadata() {
+    fn disconnect_node_runtime_clears_sessions_and_emits_sftp_revocation_first() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
         let node = NodeId::new("node-a");
@@ -841,7 +821,11 @@ mod tests {
                 },
             )
             .unwrap();
-        router.runtime_store().set_sftp_ready(&node, true, Some("/home/me".to_string())).unwrap();
+        router
+            .bind_sftp_session(&node, "sftp-a", Some("/home/me".to_string()))
+            .unwrap();
+        let (tx, rx) = mpsc::channel();
+        router.emitter().subscribe(tx);
 
         router
             .disconnect_node_runtime(&node, "explicit disconnect")
@@ -859,25 +843,6 @@ mod tests {
             router.acquire_connection(&node, ConnectionConsumer::Sftp("node-a:sftp".into())),
             Err(RouteError::NotConnected(_))
         ));
-    }
-
-    #[test]
-    fn disconnect_node_runtime_emits_sftp_ready_false_before_disconnected() {
-        let registry = SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry);
-        let node = NodeId::new("node-a");
-        router.upsert_node(node.clone(), SshConfig::password("host", 22, "me", "pw"));
-        router
-            .bind_sftp_session(&node, "sftp-a", Some("/home/me".to_string()))
-            .unwrap();
-
-        let (tx, rx) = mpsc::channel();
-        router.emitter().subscribe(tx);
-
-        router
-            .disconnect_node_runtime(&node, "explicit disconnect")
-            .unwrap();
-
         let events = rx.try_iter().collect::<Vec<_>>();
         assert!(matches!(
             events.first(),
@@ -926,27 +891,6 @@ mod tests {
     }
 
     #[test]
-    fn acquiring_consumer_does_not_revive_link_down_connection() {
-        let registry = SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry.clone());
-        let node = NodeId::new("node-a");
-        let config = SshConfig::password("host", 22, "me", "pw");
-        router.upsert_node(node.clone(), config.clone());
-        let terminal = registry.acquire(config, ConnectionConsumer::Terminal("term-a".into()));
-        router
-            .bind_connection(&node, terminal.connection_id().to_string())
-            .unwrap();
-
-        registry.mark_state(terminal.connection_id(), ConnectionState::LinkDown);
-
-        assert!(matches!(
-            router.acquire_connection(&node, ConnectionConsumer::PortForward("node:a".into())),
-            Err(RouteError::NotConnected(_))
-        ));
-        assert_eq!(terminal.state(), ConnectionState::LinkDown);
-    }
-
-    #[test]
     fn acquire_wait_rejects_active_entry_without_transport() {
         let registry = SshConnectionRegistry::default();
         let router = NodeRouter::new(registry.clone());
@@ -954,10 +898,15 @@ mod tests {
         let config = SshConfig::password("host", 22, "me", "pw");
         router.upsert_node(node.clone(), config.clone());
         let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
+        registry.mark_state(handle.connection_id(), ConnectionState::Active);
         router
             .bind_connection(&node, handle.connection_id().to_string())
             .unwrap();
-        registry.mark_state(handle.connection_id(), ConnectionState::Active);
+
+        assert_ne!(
+            router.node_state(&node).unwrap().state.readiness,
+            NodeReadiness::Ready
+        );
 
         assert!(matches!(
             router.acquire_connection(&node, ConnectionConsumer::Sftp("node-a:sftp".into())),
@@ -976,51 +925,6 @@ mod tests {
 
         assert!(matches!(result, Err(RouteError::NotConnected(_))));
         assert_eq!(handle.state(), ConnectionState::LinkDown);
-    }
-
-    #[test]
-    fn active_registry_state_without_physical_transport_is_not_ready() {
-        let registry = SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry.clone());
-        let node = NodeId::new("node-a");
-        let config = SshConfig::password("host", 22, "me", "pw");
-        router.upsert_node(node.clone(), config.clone());
-        let handle = registry.acquire(config, ConnectionConsumer::NodeRouter("node-a".into()));
-        registry.mark_state(handle.connection_id(), ConnectionState::Active);
-
-        router
-            .bind_connection(&node, handle.connection_id().to_string())
-            .unwrap();
-
-        assert_ne!(
-            router.node_state(&node).unwrap().state.readiness,
-            NodeReadiness::Ready
-        );
-    }
-
-    #[test]
-    fn closing_terminal_consumer_does_not_change_node_readiness() {
-        let registry = SshConnectionRegistry::default();
-        let router = NodeRouter::new(registry.clone());
-        let node = NodeId::new("node-a");
-        let config = SshConfig::password("host", 22, "me", "pw");
-        router.upsert_node(node.clone(), config.clone());
-        let handle = bind_active_node(&registry, &router, &node, config.clone());
-        let terminal_consumer = ConnectionConsumer::Terminal("term-a".into());
-        let terminal_handle = registry.acquire(config, terminal_consumer.clone());
-        assert_eq!(terminal_handle.connection_id(), handle.connection_id());
-        router
-            .bind_terminal_session(&node, "term-a".to_string())
-            .unwrap();
-
-        registry.release(handle.connection_id(), &terminal_consumer);
-        router.unbind_terminal_session(&node, "term-a").unwrap();
-
-        assert_eq!(
-            router.node_state(&node).unwrap().state.readiness,
-            NodeReadiness::Ready
-        );
-        assert!(handle.has_physical());
     }
 
     #[test]
@@ -1116,6 +1020,12 @@ mod tests {
             .unwrap();
         registry.release(child.connection_id(), &terminal_consumer);
 
+        assert_eq!(
+            router.node_state(&child_id).unwrap().state.readiness,
+            NodeReadiness::Ready
+        );
+        assert!(child.has_physical());
+
         let sftp = router
             .acquire_connection(&child_id, ConnectionConsumer::Sftp("target:sftp".to_string()))
             .unwrap();
@@ -1175,6 +1085,7 @@ mod tests {
             .info()
             .consumers
             .contains(&ConnectionConsumer::PortForward("target:forward".to_string())));
+        assert_eq!(child.state(), ConnectionState::LinkDown);
 
         let events = rx.try_iter().collect::<Vec<_>>();
         assert!(events.iter().any(|event| matches!(

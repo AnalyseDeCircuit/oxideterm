@@ -352,44 +352,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn render_cache_converts_protocol_rgba_to_gpui_bgra() {
-        let mut cache = ImageRenderCache::default();
-        let snapshot = TerminalImageSnapshot {
-            id: TerminalImageId(9),
-            protocol: TerminalImageProtocol::Kitty,
-            row: 0,
-            col: 0,
-            cols: 1,
-            rows: 1,
-            pixel_width: 1,
-            pixel_height: 1,
-            source_x: 0,
-            source_y: 0,
-            source_width: 1,
-            source_height: 1,
-            z_index: 0,
-            placeholder: true,
-            version: 1,
-            data: Some(Arc::new(TerminalImageData {
-                id: TerminalImageId(9),
-                protocol: TerminalImageProtocol::Kitty,
-                version: 1,
-                width: 1,
-                height: 1,
-                rgba: vec![255, 0, 0, 255].into(),
-                frames: Vec::new(),
-                animation: TerminalImageAnimationState::default(),
-                name: None,
-            })),
-        };
-
-        let rendered = cache.render_images(&[snapshot], true);
-        let image = rendered[0].render_image.as_ref().unwrap();
-
-        assert_eq!(image.as_bytes(0), Some([0, 0, 255, 255].as_slice()));
-    }
-
-    #[test]
     fn render_cache_crops_protocol_rgba_from_snapshot_source_rect() {
         let mut cache = ImageRenderCache::default();
         let snapshot = TerminalImageSnapshot {
@@ -414,7 +376,7 @@ mod tests {
                 version: 1,
                 width: 2,
                 height: 1,
-                rgba: vec![255, 0, 0, 255, 0, 255, 0, 255].into(),
+                rgba: vec![255, 0, 0, 255, 0, 0, 255, 255].into(),
                 frames: Vec::new(),
                 animation: TerminalImageAnimationState::default(),
                 name: None,
@@ -424,7 +386,7 @@ mod tests {
         let rendered = cache.render_images(&[snapshot], true);
         let image = rendered[0].render_image.as_ref().unwrap();
 
-        assert_eq!(image.as_bytes(0), Some([0, 255, 0, 255].as_slice()));
+        assert_eq!(image.as_bytes(0), Some([255, 0, 0, 255].as_slice()));
     }
 
     #[test]

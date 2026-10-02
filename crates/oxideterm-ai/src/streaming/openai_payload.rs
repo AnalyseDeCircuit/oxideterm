@@ -331,104 +331,71 @@ mod tests {
     }
 
     #[test]
-    fn openai_reasoning_payload_preserves_supported_protocol_levels() {
-        let body = openai_chat_body(&config("openai", "xhigh"), &[]);
-        assert_eq!(body["reasoning_effort"].as_str(), Some("xhigh"));
-
-        let body = openai_chat_body(&config("openai", "off"), &[]);
-        assert_eq!(body["reasoning_effort"].as_str(), Some("none"));
+    fn reasoning_payload_matches_provider_and_model_protocol() {
+        for (provider, model, effort, thinking, reasoning) in [
+            ("openai", "model", "xhigh", None, Some("xhigh")),
+            ("openai", "model", "off", None, Some("none")),
+            ("deepseek", "model", "none", Some("disabled"), None),
+            ("deepseek", "model", "low", Some("enabled"), Some("low")),
+            ("deepseek", "model", "xhigh", Some("enabled"), Some("xhigh")),
+            ("deepseek", "model", "max", Some("enabled"), Some("max")),
+            ("kimi", "kimi-k3", "max", None, Some("max")),
+            ("kimi", "kimi-k2.6", "none", Some("disabled"), None),
+            ("glm", "glm-5.2", "xhigh", Some("enabled"), Some("xhigh")),
+            ("glm", "glm-4.7", "none", Some("disabled"), None),
+        ] {
+            let mut config = config(provider, effort);
+            config.model = model.to_string();
+            let body = openai_chat_body(&config, &[]);
+            assert_eq!(
+                body.get("thinking"),
+                thinking
+                    .map(|kind| serde_json::json!({"type": kind}))
+                    .as_ref(),
+                "{provider}/{model}/{effort}: thinking"
+            );
+            assert_eq!(
+                body.get("reasoning_effort"),
+                reasoning.map(Value::from).as_ref(),
+                "{provider}/{model}/{effort}: reasoning_effort"
+            );
+        }
     }
 
     #[test]
-    fn deepseek_reasoning_payload_preserves_documented_effort_levels() {
-        let body = openai_chat_body(&config("deepseek", "none"), &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("disabled"));
-        assert!(body.get("reasoning_effort").is_none());
-
-        let body = openai_chat_body(&config("deepseek", "low"), &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
-        assert_eq!(body["reasoning_effort"].as_str(), Some("low"));
-
-        let body = openai_chat_body(&config("deepseek", "xhigh"), &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
-        assert_eq!(body["reasoning_effort"].as_str(), Some("xhigh"));
-
-        let body = openai_chat_body(&config("deepseek", "max"), &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
-        assert_eq!(body["reasoning_effort"].as_str(), Some("max"));
-    }
-
-    #[test]
-    fn kimi_reasoning_payload_matches_documented_model_parameters() {
-        let mut k3 = config("kimi", "max");
-        k3.model = "kimi-k3".to_string();
-        let body = openai_chat_body(&k3, &[]);
-        assert_eq!(body["reasoning_effort"].as_str(), Some("max"));
-        assert!(body.get("thinking").is_none());
-
-        let mut k2_6 = config("kimi", "none");
-        k2_6.model = "kimi-k2.6".to_string();
-        let body = openai_chat_body(&k2_6, &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("disabled"));
-        assert!(body.get("reasoning_effort").is_none());
-    }
-
-    #[test]
-    fn glm_reasoning_payload_matches_documented_model_parameters() {
-        let mut glm_5_2 = config("glm", "xhigh");
-        glm_5_2.model = "glm-5.2".to_string();
-        let body = openai_chat_body(&glm_5_2, &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("enabled"));
-        assert_eq!(body["reasoning_effort"].as_str(), Some("xhigh"));
-
-        let mut glm_4_7 = config("glm", "none");
-        glm_4_7.model = "glm-4.7".to_string();
-        let body = openai_chat_body(&glm_4_7, &[]);
-        assert_eq!(body["thinking"]["type"].as_str(), Some("disabled"));
-        assert!(body.get("reasoning_effort").is_none());
-    }
-
-    #[test]
-    fn kimi_k2_omits_unsupported_required_tool_choice() {
-        let mut config = config("kimi", "auto");
-        config.model = "kimi-k2.7-code-highspeed".to_string();
-        config.tools = vec![AiToolDefinition {
+    fn vendor_tool_choice_preserves_tools_and_omits_unsupported_modes() {
+        let tools = vec![AiToolDefinition {
             name: "run_command".to_string(),
             description: "Run command".to_string(),
             parameters: serde_json::json!({ "type": "object" }),
         }];
-        config.tool_choice = AiToolChoice::Required;
+        let named = AiToolChoice::Named("run_command".into());
+        for (provider, model, choice, expected) in [
+            (
+                "kimi",
+                "kimi-k2.7-code-highspeed",
+                AiToolChoice::Required,
+                None,
+            ),
+            ("kimi", "kimi-k3", AiToolChoice::Required, Some("required")),
+            ("kimi", "kimi-k3", named.clone(), None),
+            ("glm", "glm-5.2", AiToolChoice::Required, None),
+            ("glm", "glm-5.2", named, None),
+        ] {
+            let mut config = config(provider, "auto");
+            config.model = model.to_string();
+            config.tools = tools.clone();
+            config.tool_choice = choice;
 
-        let body = openai_chat_body(&config, &[]);
-        assert!(body.get("tool_choice").is_none());
-
-        config.model = "kimi-k3".to_string();
-        let body = openai_chat_body(&config, &[]);
-        assert_eq!(body["tool_choice"].as_str(), Some("required"));
-
-        config.tool_choice = AiToolChoice::Named("run_command".to_string());
-        let body = openai_chat_body(&config, &[]);
-        assert!(body.get("tool_choice").is_none());
-    }
-
-    #[test]
-    fn glm_omits_unsupported_tool_choice_modes() {
-        let mut config = config("glm", "auto");
-        config.model = "glm-5.2".to_string();
-        config.tools = vec![AiToolDefinition {
-            name: "run_command".to_string(),
-            description: "Run command".to_string(),
-            parameters: serde_json::json!({ "type": "object" }),
-        }];
-
-        config.tool_choice = AiToolChoice::Required;
-        let body = openai_chat_body(&config, &[]);
-        assert!(body.get("tool_choice").is_none());
-        assert_eq!(body["tools"][0]["function"]["name"], "run_command");
-
-        config.tool_choice = AiToolChoice::Named("run_command".to_string());
-        let body = openai_chat_body(&config, &[]);
-        assert!(body.get("tool_choice").is_none());
+            let body = openai_chat_body(&config, &[]);
+            assert_eq!(
+                body.get("tool_choice"),
+                expected.map(serde_json::Value::from).as_ref(),
+                "{provider}/{model}: {:?}",
+                config.tool_choice
+            );
+            assert_eq!(body["tools"][0]["function"]["name"], "run_command");
+        }
     }
 
     #[test]

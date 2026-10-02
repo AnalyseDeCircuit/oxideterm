@@ -159,10 +159,6 @@ impl X11AuthMaterial {
         }
     }
 
-    pub fn ssh_auth_protocol(&self) -> &'static str {
-        self.protocol.ssh_name()
-    }
-
     pub fn ssh_auth_cookie(&self) -> String {
         self.fake_cookie.to_hex()
     }
@@ -210,20 +206,6 @@ mod tests {
             X11AuthCookie::from_hex("00zz"),
             Err(X11ForwardingError::InvalidAuthCookie(_))
         ));
-    }
-
-    #[test]
-    fn auth_material_exposes_fake_cookie_for_ssh_only() {
-        let fake = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let real = X11AuthCookie::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
-        let material = X11AuthMaterial::with_fake_cookie(fake.clone(), real);
-
-        assert_eq!(material.ssh_auth_protocol(), "MIT-MAGIC-COOKIE-1");
-        assert_eq!(
-            material.ssh_auth_cookie(),
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-        );
-        assert_eq!(material.fake_cookie, fake);
     }
 
     #[test]

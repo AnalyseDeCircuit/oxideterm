@@ -259,27 +259,6 @@ fn client_output_drain_prioritizes_control_events_over_saturated_graphics() {
 }
 
 #[test]
-fn egfx_protocol_failure_preserves_protocol_category() {
-    let writer = SharedEventWriter::inert_for_tests();
-    let (output_tx, output_rx) = client_rdp_output_channel(1);
-    output_tx
-        .send_control(ClientRdpOutput::ProtocolFailure(
-            "RDP Progressive decode failed.".to_string(),
-        ))
-        .unwrap();
-
-    let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
-
-    match drain.exit {
-        Some(ClientRdpSessionExit::ConnectionFailed { message, category }) => {
-            assert_eq!(message, "RDP Progressive decode failed.");
-            assert_eq!(category, RemoteDesktopErrorCategory::Protocol);
-        }
-        other => panic!("expected an EGFX protocol failure, got {other:?}"),
-    }
-}
-
-#[test]
 fn cursor_position_can_drop_under_backpressure_but_shape_is_preserved() {
     let (output_tx, output_rx) = client_rdp_output_channel(1);
     output_tx
@@ -377,48 +356,54 @@ fn client_loop_prioritizes_queued_close_over_pending_output_error() {
 }
 
 #[test]
-fn connector_failure_exit_preserves_structured_category() {
-    let writer = SharedEventWriter::inert_for_tests();
-    let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-    output_tx
-        .send_control(ClientRdpOutput::ConnectionFailure(
-            connector::ConnectorError::new("Authentication", ConnectorErrorKind::AccessDenied),
-        ))
-        .unwrap();
+fn client_failures_preserve_structured_categories_and_diagnostic_messages() {
+    for (failure, category, expected_message, exact_message) in [
+        (
+            ClientRdpOutput::ConnectionFailure(connector::ConnectorError::new(
+                "Authentication",
+                ConnectorErrorKind::AccessDenied,
+            )),
+            RemoteDesktopErrorCategory::Authentication,
+            "access denied",
+            false,
+        ),
+        (
+            ClientRdpOutput::SessionFailure {
+                message: "RDP session ended after transport loss.".to_string(),
+                category: RemoteDesktopErrorCategory::Network,
+            },
+            RemoteDesktopErrorCategory::Network,
+            "RDP session ended after transport loss.",
+            true,
+        ),
+        (
+            ClientRdpOutput::ProtocolFailure("RDP Progressive decode failed.".to_string()),
+            RemoteDesktopErrorCategory::Protocol,
+            "RDP Progressive decode failed.",
+            true,
+        ),
+    ] {
+        let writer = SharedEventWriter::inert_for_tests();
+        let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
+        output_tx.send_control(failure).unwrap();
 
-    let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
+        let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
 
-    // The helper event should classify from the connector error kind, not
-    // from a localized display string.
-    match drain.exit {
-        Some(ClientRdpSessionExit::ConnectionFailed { message, category }) => {
-            assert_eq!(category, RemoteDesktopErrorCategory::Authentication);
-            assert!(message.contains("access denied"));
+        match drain.exit {
+            Some(ClientRdpSessionExit::ConnectionFailed {
+                message,
+                category: actual,
+            }) => {
+                assert_eq!(actual, category);
+                if exact_message {
+                    assert_eq!(message, expected_message);
+                } else {
+                    assert!(message.contains(expected_message), "{message}");
+                }
+            }
+            other => panic!("unexpected drain exit: {other:?}"),
         }
-        other => panic!("unexpected drain exit: {other:?}"),
     }
-}
-
-#[test]
-fn active_session_failure_exit_preserves_structured_category() {
-    let writer = SharedEventWriter::inert_for_tests();
-    let (output_tx, output_rx) = client_rdp_output_channel(RDP_CLIENT_OUTPUT_QUEUE_CAPACITY);
-    output_tx
-        .send_control(ClientRdpOutput::SessionFailure {
-            message: "RDP session ended after transport loss.".to_string(),
-            category: RemoteDesktopErrorCategory::Network,
-        })
-        .unwrap();
-
-    let drain = drain_client_rdp_outputs(&writer, &output_rx).unwrap();
-
-    assert!(matches!(
-        drain.exit,
-        Some(ClientRdpSessionExit::ConnectionFailed {
-            category: RemoteDesktopErrorCategory::Network,
-            ..
-        })
-    ));
 }
 
 #[test]
@@ -1045,57 +1030,39 @@ fn full_frame_copy_sets_alpha_opaque() {
 }
 
 #[test]
-fn standard_security_error_is_actionable_and_path_free() {
-    let error = connector::ConnectorError::new(
-        "Initiation",
-        ConnectorErrorKind::Reason(
-            "client advertised SSL | HYBRID | HYBRID_EX, but server selected STANDARD_RDP_SECURITY"
-                .to_string(),
+fn connector_errors_preserve_safe_diagnostics_and_detect_legacy_security_in_sources() {
+    for (error, expected, category, legacy) in [
+        (
+            connector::ConnectorError::new("Initiation", ConnectorErrorKind::Reason(
+                "client advertised SSL | HYBRID | HYBRID_EX, but server selected STANDARD_RDP_SECURITY".into()
+            )),
+            LEGACY_RDP_SECURITY_MESSAGE,
+            RemoteDesktopErrorCategory::LegacySecurity,
+            true,
         ),
-    );
-
-    let message = format_connector_error("RDP negotiation failed", &error);
-
-    assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
-    assert_eq!(
-        connector_error_category(&error),
-        RemoteDesktopErrorCategory::LegacySecurity
-    );
-    assert!(connector_error_requires_legacy_security(&error));
-    assert!(!message.contains("/Users/"));
-    assert!(!message.contains(".cargo"));
-}
-
-#[test]
-fn custom_connector_error_includes_source_without_local_path() {
-    let error = connector::ConnectorError::new("Initiation", ConnectorErrorKind::Custom)
-            .with_source(StaticConnectorSource(
-                "[license verification @ /Users/example/.cargo/git/checkouts/ironrdp/src/lib.rs:42] invalid server license",
-            ));
-
-    let message = format_connector_error("RDP negotiation failed", &error);
-
-    assert_eq!(
-        message,
-        "RDP negotiation failed: [license verification] invalid server license"
-    );
-    assert!(!message.contains("/Users/"));
-    assert!(!message.contains(".cargo"));
-}
-
-#[test]
-fn custom_standard_security_source_reports_legacy_security() {
-    let error = connector::ConnectorError::new("Initiation", ConnectorErrorKind::Custom)
-            .with_source(StaticConnectorSource(
-                "[Initiation @ /Users/example/.cargo/git/checkouts/ironrdp/src/lib.rs:409] client advertised SSL | HYBRID | HYBRID_EX, but server selected STANDARD_RDP_SECURITY",
-            ));
-
-    let message = format_connector_error("RDP negotiation failed", &error);
-
-    assert!(connector_error_requires_legacy_security(&error));
-    assert_eq!(message, LEGACY_RDP_SECURITY_MESSAGE);
-    assert!(!message.contains("/Users/"));
-    assert!(!message.contains(".cargo"));
+        (
+            connector::ConnectorError::new("Initiation", ConnectorErrorKind::Custom)
+                .with_source(StaticConnectorSource(
+                    "[license verification @ /Users/example/.cargo/git/checkouts/ironrdp/src/lib.rs:42] invalid server license"
+                )),
+            "RDP negotiation failed: [license verification] invalid server license",
+            RemoteDesktopErrorCategory::Unknown,
+            false,
+        ),
+        (
+            connector::ConnectorError::new("Initiation", ConnectorErrorKind::Custom)
+                .with_source(StaticConnectorSource(
+                    "[Initiation @ /Users/example/.cargo/git/checkouts/ironrdp/src/lib.rs:409] client advertised SSL | HYBRID | HYBRID_EX, but server selected STANDARD_RDP_SECURITY"
+                )),
+            LEGACY_RDP_SECURITY_MESSAGE,
+            RemoteDesktopErrorCategory::LegacySecurity,
+            true,
+        ),
+    ] {
+        assert_eq!(format_connector_error("RDP negotiation failed", &error), expected);
+        assert_eq!(connector_error_category(&error), category);
+        assert_eq!(connector_error_requires_legacy_security(&error), legacy);
+    }
 }
 
 fn test_frame() -> RemoteDesktopFrame {

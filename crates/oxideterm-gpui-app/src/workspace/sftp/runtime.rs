@@ -2140,40 +2140,4 @@ mod tests {
         assert_eq!(sidebar_sftp_target(Some(&a), true, None), Some(a));
         assert_eq!(sidebar_sftp_target(None, false, Some(b)), None);
     }
-
-    #[test]
-    fn stale_node_sftp_errors_are_connection_unavailable() {
-        assert!(oxideterm_sftp::error_is_connection_unavailable(
-            "Connection abc is stale: transport is closed"
-        ));
-        assert!(oxideterm_sftp::error_is_connection_unavailable(
-            "SFTP init failed: Channel error: SSH connection is closed and cannot open an SFTP channel"
-        ));
-        assert!(oxideterm_sftp::error_is_connection_unavailable(
-            "Capability unavailable: Session not found: node-1"
-        ));
-        assert!(oxideterm_sftp::error_is_connection_unavailable(
-            "SFTP subsystem not available: failed to open SFTP channel: channel closed"
-        ));
-        assert!(!oxideterm_sftp::error_is_connection_unavailable(
-            "Permission denied: /home/me/secret"
-        ));
-    }
-
-    #[test]
-    fn sftp_path_not_found_classifier_does_not_catch_dead_sessions() {
-        assert!(oxideterm_sftp::error_is_not_found(
-            "Directory not found: /home/me/missing"
-        ));
-        assert!(oxideterm_sftp::error_is_not_found(
-            "No such file or directory: /home/me/missing"
-        ));
-
-        assert!(!oxideterm_sftp::error_is_not_found(
-            "Capability unavailable: Session not found: node-1"
-        ));
-        assert!(!oxideterm_sftp::error_is_not_found(
-            "Node not found: node-1"
-        ));
-    }
 }

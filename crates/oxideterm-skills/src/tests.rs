@@ -113,31 +113,6 @@ fn workspace_standard_skill_wins_compatible_duplicate() {
 }
 
 #[test]
-fn disabled_skill_is_hidden_and_cannot_be_loaded() {
-    let directory = TestDirectory::new("disabled");
-    let path = write_skill(
-        &directory.path().join(".agents/skills"),
-        "manual-only",
-        "Manual workflow",
-        "instructions",
-    );
-    let canonical_path = fs::canonicalize(path).unwrap();
-    let registry = SkillRegistry::discover(&SkillDiscoveryOptions {
-        workspace_root: Some(directory.path().to_path_buf()),
-        disabled_paths: HashSet::from([canonical_path]),
-        ..SkillDiscoveryOptions::default()
-    });
-
-    assert!(
-        registry
-            .catalog()
-            .iter()
-            .all(|skill| skill.id != "manual-only")
-    );
-    assert!(registry.load("manual-only").is_err());
-}
-
-#[test]
 fn resource_reader_rejects_paths_outside_skill_root() {
     let directory = TestDirectory::new("resource-boundary");
     let skill_path = write_skill(
@@ -169,7 +144,7 @@ fn resource_reader_rejects_paths_outside_skill_root() {
 }
 
 #[test]
-fn invalid_names_and_empty_bodies_are_reported_without_poisoning_other_skills() {
+fn discovery_excludes_disabled_and_invalid_skills_without_poisoning_valid_skills() {
     let directory = TestDirectory::new("invalid");
     let invalid_name = write_skill(
         &directory.path().join(".agents/skills"),
@@ -189,12 +164,26 @@ fn invalid_names_and_empty_bodies_are_reported_without_poisoning_other_skills() 
         "Valid workflow",
         "loaded",
     );
+    let disabled_path = write_skill(
+        &directory.path().join(".agents/skills"),
+        "manual-only",
+        "Manual workflow",
+        "instructions",
+    );
     let registry = SkillRegistry::discover(&SkillDiscoveryOptions {
         workspace_root: Some(directory.path().to_path_buf()),
+        disabled_paths: HashSet::from([fs::canonicalize(disabled_path).unwrap()]),
         ..SkillDiscoveryOptions::default()
     });
 
     assert_eq!(registry.load("valid-name").unwrap(), "loaded");
+    assert!(
+        registry
+            .catalog()
+            .iter()
+            .all(|skill| skill.id != "manual-only")
+    );
+    assert!(registry.load("manual-only").is_err());
     for (id, path) in [("Bad_Name", invalid_name), ("empty-skill", empty_body)] {
         assert!(registry.catalog().iter().all(|skill| skill.id != id));
         let path = fs::canonicalize(path).unwrap();

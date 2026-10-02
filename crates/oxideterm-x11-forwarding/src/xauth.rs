@@ -122,15 +122,6 @@ impl X11AuthEntry {
         }))
     }
 
-    pub fn matches_display(&self, display: &X11Display) -> bool {
-        parse_xauth_display_suffix(&self.display_name).is_some_and(
-            |(entry_display, entry_screen)| {
-                entry_display == display.display
-                    && entry_screen.unwrap_or(display.screen) == display.screen
-            },
-        )
-    }
-
     fn match_score(&self, display: &X11Display) -> Option<u8> {
         let (entry_display, entry_screen) = parse_xauth_display_suffix(&self.display_name)?;
         if entry_display != display.display {
@@ -219,41 +210,44 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_xauth_list_and_skips_unsupported_protocols() {
-        let output = r#"
-            host/unix:0  MIT-MAGIC-COOKIE-1  00112233445566778899aabbccddeeff
-            host/unix:0  XDM-AUTHORIZATION-1  deadbeef
-            localhost:10.1 MIT-MAGIC-COOKIE-1 aabbccdd
-        "#;
-
-        let entries = parse_xauth_list(output).unwrap();
-
-        assert_eq!(entries.len(), 2);
-        assert_eq!(entries[0].display_name, "host/unix:0");
-        assert_eq!(
-            entries[0].cookie.to_hex(),
-            "00112233445566778899aabbccddeeff"
-        );
-        assert_eq!(entries[1].display_name, "localhost:10.1");
-    }
-
-    #[test]
-    fn xauth_entry_matching_uses_display_and_screen() {
-        let display = X11Display::parse(":10.1").unwrap();
-        let entry = X11AuthEntry::parse_list_line("localhost:10.1 MIT-MAGIC-COOKIE-1 aabbccdd")
-            .unwrap()
-            .unwrap();
-        let display_only =
-            X11AuthEntry::parse_list_line("localhost:10 MIT-MAGIC-COOKIE-1 aabbccdd")
-                .unwrap()
-                .unwrap();
-        let wrong = X11AuthEntry::parse_list_line("localhost:11 MIT-MAGIC-COOKIE-1 aabbccdd")
-            .unwrap()
-            .unwrap();
-
-        assert!(entry.matches_display(&display));
-        assert!(display_only.matches_display(&display));
-        assert!(!wrong.matches_display(&display));
+    fn xauth_text_formats_preserve_display_and_cookie_records() {
+        let cases = [
+            (
+                parse_xauth_list as fn(&str) -> X11Result<Vec<X11AuthEntry>>,
+                r#"
+                    host/unix:0  MIT-MAGIC-COOKIE-1  00112233445566778899aabbccddeeff
+                    host/unix:0  XDM-AUTHORIZATION-1  deadbeef
+                    localhost:10.1 MIT-MAGIC-COOKIE-1 aabbccdd
+                "#,
+                &[
+                    ("host/unix:0", "00112233445566778899aabbccddeeff"),
+                    ("localhost:10.1", "aabbccdd"),
+                ][..],
+            ),
+            (
+                parse_xauth_nlist,
+                concat!(
+                    "0100 ",
+                    "0009 6c6f63616c686f7374 ",
+                    "0004 31302e31 ",
+                    "0012 4d49542d4d414749432d434f4f4b49452d31 ",
+                    "0004 aabbccdd"
+                ),
+                &[("localhost:10.1", "aabbccdd")][..],
+            ),
+        ];
+        for (parse, input, expected) in cases {
+            let entries = parse(input).unwrap();
+            let actual = entries
+                .iter()
+                .map(|entry| (entry.display_name.as_str(), entry.cookie.to_hex()))
+                .collect::<Vec<_>>();
+            let expected = expected
+                .iter()
+                .map(|(display, cookie)| (*display, cookie.to_string()))
+                .collect::<Vec<_>>();
+            assert_eq!(actual, expected);
+        }
     }
 
     #[test]
@@ -270,23 +264,6 @@ mod tests {
         let selected = select_xauth_entry(&entries, &display).unwrap();
 
         assert_eq!(selected.cookie.to_hex(), "00112233");
-    }
-
-    #[test]
-    fn parses_xauth_nlist_records() {
-        let line = concat!(
-            "0100 ",
-            "0009 6c6f63616c686f7374 ",
-            "0004 31302e31 ",
-            "0012 4d49542d4d414749432d434f4f4b49452d31 ",
-            "0004 aabbccdd"
-        );
-
-        let entries = parse_xauth_nlist(line).unwrap();
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].display_name, "localhost:10.1");
-        assert_eq!(entries[0].cookie.to_hex(), "aabbccdd");
     }
 
     #[test]

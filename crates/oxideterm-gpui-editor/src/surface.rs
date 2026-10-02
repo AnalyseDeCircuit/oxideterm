@@ -1502,7 +1502,6 @@ mod tests {
 
     use super::{
         HighlightChunkCache, HighlightChunkCacheKey, LineChunkSpec, prefixed_line_replacement,
-        wrapped_selection_text,
     };
     use oxideterm_editor_core::{BufferOffset, Selection};
 
@@ -1786,31 +1785,31 @@ mod tests {
     }
 
     #[test]
-    fn formatting_wraps_unicode_selection_without_normalizing_text() {
-        assert_eq!(wrapped_selection_text("正文", "**", "**"), "**正文**");
-    }
-
-    #[test]
-    fn line_prefix_expands_partial_selection_to_complete_lines() {
-        let selection = Selection::new(BufferOffset(1), BufferOffset(9));
-        let (start, end, replacement, adjusted_selection) =
-            prefixed_line_replacement("alpha\nbeta\ngamma", selection, "- ");
-        assert_eq!((start, end), (0, 10));
-        assert_eq!(replacement, "- alpha\n- beta");
-        assert_eq!(
-            adjusted_selection,
-            Selection::new(BufferOffset(3), BufferOffset(13))
-        );
-    }
-
-    #[test]
-    fn line_prefix_places_empty_heading_caret_after_marker() {
-        let selection = Selection::caret(BufferOffset::ZERO);
-        let (_, _, replacement, adjusted_selection) =
-            prefixed_line_replacement("title", selection, "## ");
-
-        assert_eq!(replacement, "## title");
-        assert_eq!(adjusted_selection, Selection::caret(BufferOffset(3)));
+    fn line_prefix_preserves_content_selection_after_inserted_markers() {
+        for (source, selection, prefix, expected_range, expected_text, expected_selection) in [
+            (
+                "alpha\nbeta\ngamma",
+                Selection::new(BufferOffset(1), BufferOffset(9)),
+                "- ",
+                (0, 10),
+                "- alpha\n- beta",
+                Selection::new(BufferOffset(3), BufferOffset(13)),
+            ),
+            (
+                "title",
+                Selection::caret(BufferOffset::ZERO),
+                "## ",
+                (0, 5),
+                "## title",
+                Selection::caret(BufferOffset(3)),
+            ),
+        ] {
+            let (start, end, replacement, adjusted_selection) =
+                prefixed_line_replacement(source, selection, prefix);
+            assert_eq!((start, end), expected_range, "{source}");
+            assert_eq!(replacement, expected_text, "{source}");
+            assert_eq!(adjusted_selection, expected_selection, "{source}");
+        }
     }
 
     #[test]

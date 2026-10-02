@@ -68,8 +68,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn allocator_scans_default_openssh_style_range() {
-        let allocator = X11RemoteDisplayAllocator::localhost();
+    fn allocator_limits_probe_results_to_the_configured_range() {
+        let mut allocator = X11RemoteDisplayAllocator::localhost();
 
         assert_eq!(
             allocator.candidates().take(3).collect::<Vec<_>>(),
@@ -77,15 +77,7 @@ mod tests {
         );
         assert_eq!(allocator.display_value(10), "localhost:10.0");
         assert_eq!(allocator.parse_probe_output("12\n").unwrap(), 12);
-    }
-
-    #[test]
-    fn allocator_rejects_out_of_range_probe_result() {
-        let allocator = X11RemoteDisplayAllocator {
-            start_display: 10,
-            max_displays: 2,
-            ..X11RemoteDisplayAllocator::localhost()
-        };
+        allocator.max_displays = 2;
 
         assert_eq!(
             allocator.parse_probe_output("20").unwrap_err(),

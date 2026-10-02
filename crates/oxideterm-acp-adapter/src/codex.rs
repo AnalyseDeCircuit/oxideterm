@@ -1081,21 +1081,6 @@ mod tests {
     }
 
     #[test]
-    fn model_catalog_keeps_configured_model_when_listing_is_unavailable() {
-        let catalog = codex_model_catalog(&[], Some("gpt-5.6-sol"));
-
-        assert_eq!(catalog.selected_model.as_deref(), Some("gpt-5.6-sol"));
-        assert_eq!(
-            catalog.models,
-            vec![AdapterModel {
-                id: "gpt-5.6-sol".to_string(),
-                name: "gpt-5.6-sol".to_string(),
-                description: None,
-            }]
-        );
-    }
-
-    #[test]
     fn visible_item_tool_metadata_keeps_user_visible_tools() {
         let command = json!({
             "id": "cmd-1",

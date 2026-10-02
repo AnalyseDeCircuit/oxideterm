@@ -847,52 +847,92 @@ mod tests {
     }
 
     #[test]
-    fn password_is_saved_to_keychain_reference() {
-        let mut store = load_empty_store("password-save");
-
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Password {
-                    empty_password: false,
-
-                    keychain_id: None,
-                    plaintext_password: Some(SecretString::from("secret")),
-                },
-            ))
-            .unwrap();
-
-        let conn = store.get("conn-1").unwrap();
-        match &conn.auth {
-            SavedAuth::Password {
-                keychain_id: Some(_),
-                plaintext_password: None,
-                ..
-            } => {}
-            other => panic!("unexpected auth: {other:?}"),
-        }
-        assert_eq!(store.get_connection_password("conn-1").unwrap(), "secret");
-
-        store
-            .store_connection_credential(
-                "conn-1",
-                ConnectionCredentialSlot::Primary,
-                &SecretString::from("replacement"),
-            )
-            .unwrap();
-        assert_eq!(
-            store.get_connection_password("conn-1").unwrap(),
-            "replacement"
-        );
-        assert!(store.get("conn-1").unwrap().last_used_at.is_none());
-        let retained_auth = store.get("conn-1").unwrap().auth.clone();
-        assert!(
+    fn password_credentials_distinguish_missing_empty_and_unloaded_values() {
+        for (scenario, password) in [
+            ("missing", None),
+            ("empty", Some("")),
+            ("nonempty", Some("secret")),
+        ] {
+            let mut store = load_empty_store(scenario);
             store
-                .forget_connection_credential("conn-1", ConnectionCredentialSlot::Primary)
-                .unwrap()
-        );
-        assert!(store.get_connection_password("conn-1").is_err());
-        assert_eq!(store.get_saved_auth_password_optional(&retained_auth).unwrap(), None);
+                .upsert(request(
+                    "conn-1",
+                    SavedAuth::Password {
+                        empty_password: false,
+                        keychain_id: None,
+                        plaintext_password: password.map(SecretString::from),
+                    },
+                ))
+                .unwrap();
+            let saved_auth = store.get("conn-1").unwrap().auth.clone();
+            let SavedAuth::Password {
+                keychain_id,
+                plaintext_password,
+                ..
+            } = &saved_auth
+            else {
+                panic!("unexpected auth: {saved_auth:?}");
+            };
+            assert!(plaintext_password.is_none(), "{scenario}");
+            let Some(expected_password) = password else {
+                assert!(keychain_id.is_none());
+                assert!(store.get_connection_password("conn-1").is_err());
+                continue;
+            };
+            let keychain_id = keychain_id.as_ref().expect("protected password reference").clone();
+            assert_eq!(
+                store.get_connection_password("conn-1").unwrap(),
+                expected_password,
+                "{scenario}"
+            );
+
+            store.upsert(request("conn-1", saved_auth)).unwrap();
+            assert_eq!(
+                store.get_connection_password("conn-1").unwrap(),
+                expected_password,
+                "unloaded {scenario} password must survive metadata edits"
+            );
+            store
+                .upsert(request(
+                    "conn-1",
+                    SavedAuth::Password {
+                        empty_password: false,
+                        keychain_id: Some(keychain_id.clone()),
+                        plaintext_password: Some(SecretString::default()),
+                    },
+                ))
+                .unwrap();
+            assert!(matches!(
+                &store.get("conn-1").unwrap().auth,
+                SavedAuth::Password {
+                    keychain_id: Some(current),
+                    plaintext_password: None,
+                    ..
+                } if current == &keychain_id
+            ));
+            assert_eq!(store.get_connection_password("conn-1").unwrap(), "");
+
+            store
+                .store_connection_credential(
+                    "conn-1",
+                    ConnectionCredentialSlot::Primary,
+                    &SecretString::from("replacement"),
+                )
+                .unwrap();
+            assert_eq!(
+                store.get_connection_password("conn-1").unwrap(),
+                "replacement"
+            );
+            assert!(store.get("conn-1").unwrap().last_used_at.is_none());
+            let retained_auth = store.get("conn-1").unwrap().auth.clone();
+            assert!(
+                store
+                    .forget_connection_credential("conn-1", ConnectionCredentialSlot::Primary)
+                    .unwrap()
+            );
+            assert!(store.get_connection_password("conn-1").is_err());
+            assert_eq!(store.get_saved_auth_password_optional(&retained_auth).unwrap(), None);
+        }
     }
 
     #[test]
@@ -1062,130 +1102,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_password_is_saved_to_keychain_reference() {
-        let mut store = load_empty_store("password-save-empty");
-
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Password {
-                    empty_password: false,
-
-                    keychain_id: None,
-                    plaintext_password: Some(SecretString::default()),
-                },
-            ))
-            .unwrap();
-
-        match &store.get("conn-1").unwrap().auth {
-            SavedAuth::Password {
-                keychain_id: Some(_),
-                plaintext_password: None,
-                ..
-            } => {}
-            other => panic!("unexpected auth: {other:?}"),
-        }
-        assert_eq!(store.get_connection_password("conn-1").unwrap(), "");
-    }
-
-    #[test]
-    fn password_auth_without_secret_keeps_no_keychain_reference() {
-        let mut store = load_empty_store("password-no-save");
-
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Password {
-                    empty_password: false,
-
-                    keychain_id: None,
-                    plaintext_password: None,
-                },
-            ))
-            .unwrap();
-
-        match &store.get("conn-1").unwrap().auth {
-            SavedAuth::Password {
-                keychain_id: None,
-                plaintext_password: None,
-                ..
-            } => {}
-            other => panic!("unexpected auth: {other:?}"),
-        }
-        assert!(store.get_connection_password("conn-1").is_err());
-    }
-
-    #[test]
-    fn loaded_empty_password_updates_existing_keychain_entry() {
-        let mut store = load_empty_store("password-clear");
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Password {
-                    empty_password: false,
-
-                    keychain_id: None,
-                    plaintext_password: Some(SecretString::from("secret")),
-                },
-            ))
-            .unwrap();
-        let previous_keychain_id = match &store.get("conn-1").unwrap().auth {
-            SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-                ..
-            } => keychain_id.clone(),
-            other => panic!("unexpected auth: {other:?}"),
-        };
-
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Password {
-                    empty_password: false,
-
-                    keychain_id: Some(previous_keychain_id.clone()),
-                    plaintext_password: Some(SecretString::default()),
-                },
-            ))
-            .unwrap();
-
-        match &store.get("conn-1").unwrap().auth {
-            SavedAuth::Password {
-                keychain_id: Some(keychain_id),
-                plaintext_password: None,
-                ..
-            } => assert_eq!(keychain_id, &previous_keychain_id),
-            other => panic!("unexpected auth: {other:?}"),
-        }
-        assert_eq!(store.get_connection_password("conn-1").unwrap(), "");
-    }
-
-    #[test]
-    fn unloaded_password_preserves_saved_keychain_entry() {
-        let mut store = load_empty_store("password-preserve");
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Password {
-                    empty_password: false,
-
-                    keychain_id: None,
-                    plaintext_password: Some(SecretString::from("secret")),
-                },
-            ))
-            .unwrap();
-        let previous_auth = store.get("conn-1").unwrap().auth.clone();
-
-        store.upsert(request("conn-1", previous_auth)).unwrap();
-
-        assert_eq!(store.get_connection_password("conn-1").unwrap(), "secret");
-    }
-
-
-
-
-
-    #[test]
     fn legacy_plaintext_password_and_passphrase_are_migrated() {
         let path = temp_store_path("legacy-migration");
         fs::write(
@@ -1231,7 +1147,7 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_key_path_preserves_passphrase_keychain_entry() {
+    fn key_passphrase_survives_metadata_edits_and_is_removed_when_path_changes() {
         let mut store = load_empty_store("key-preserve");
         store
             .upsert(request(
@@ -1280,29 +1196,6 @@ mod tests {
             store.get_connection_passphrase("conn-1").unwrap(),
             Some(SecretString::from("key-secret"))
         );
-    }
-
-    #[test]
-    fn changed_key_path_without_passphrase_clears_passphrase_reference() {
-        let mut store = load_empty_store("key-clear");
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::Key {
-                    key_path: "/tmp/id".to_string(),
-                    has_passphrase: true,
-                    passphrase_keychain_id: None,
-                    plaintext_passphrase: Some(SecretString::from("key-secret")),
-                },
-            ))
-            .unwrap();
-        let previous_keychain_id = match &store.get("conn-1").unwrap().auth {
-            SavedAuth::Key {
-                passphrase_keychain_id: Some(keychain_id),
-                ..
-            } => keychain_id.clone(),
-            other => panic!("unexpected auth: {other:?}"),
-        };
 
         store
             .upsert(request(
@@ -1331,6 +1224,7 @@ mod tests {
         assert_eq!(store.get_connection_passphrase("conn-1").unwrap(), None);
         assert!(store.keychain.get(&previous_keychain_id).is_err());
     }
+
 
     #[test]
     fn unchanged_certificate_paths_preserve_passphrase_keychain_entry() {
@@ -1756,70 +1650,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn explicit_proxy_hop_key_update_without_passphrase_clears_old_keychain_entry() {
-        let mut store = load_empty_store("proxy-hop-passphrase-clear");
-        let mut req = request("conn-1", SavedAuth::Agent);
-        req.proxy_chain = vec![SavedProxyHop {
-            totp_credential_id: None,
-            host: "jump.example.com".to_string(),
-            port: 22,
-            username: "ops".to_string(),
-            auth: SavedAuth::Key {
-                key_path: "/tmp/jump-key".to_string(),
-                has_passphrase: true,
-                passphrase_keychain_id: None,
-                plaintext_passphrase: Some(SecretString::from("jump-key-secret")),
-            },
-            agent_forwarding: false,
-            identity_agent: None,
-            agent_forwarding_socket: None,
-            legacy_ssh_compatibility: false,
-            ssh_algorithms: SshAlgorithmPreferences::default(),
-        }];
-        store.upsert(req).unwrap();
-        let previous_keychain_id = match &store.get("conn-1").unwrap().proxy_chain[0].auth {
-            SavedAuth::Key {
-                passphrase_keychain_id: Some(keychain_id),
-                ..
-            } => keychain_id.clone(),
-            other => panic!("unexpected proxy auth: {other:?}"),
-        };
-
-        let mut update = request("conn-1", SavedAuth::Agent);
-        update.proxy_chain = vec![SavedProxyHop {
-            totp_credential_id: None,
-            host: "jump.example.com".to_string(),
-            port: 22,
-            username: "ops".to_string(),
-            auth: SavedAuth::Key {
-                key_path: "/tmp/jump-key".to_string(),
-                has_passphrase: false,
-                passphrase_keychain_id: None,
-                plaintext_passphrase: None,
-            },
-            agent_forwarding: false,
-            identity_agent: None,
-            agent_forwarding_socket: None,
-            legacy_ssh_compatibility: false,
-            ssh_algorithms: SshAlgorithmPreferences::default(),
-        }];
-        store.upsert(update).unwrap();
-
-        match &store.get("conn-1").unwrap().proxy_chain[0].auth {
-            SavedAuth::Key {
-                has_passphrase,
-                passphrase_keychain_id: None,
-                plaintext_passphrase: None,
-                ..
-            } => assert!(!*has_passphrase),
-            other => panic!("unexpected proxy auth: {other:?}"),
-        }
-        assert!(store.keychain.get(&previous_keychain_id).is_err());
-    }
 
     #[test]
-    fn copied_existing_proxy_hop_preserves_passphrase_keychain_entry() {
+    fn proxy_hop_key_passphrase_survives_copy_and_is_removed_by_explicit_clear() {
         let mut store = load_empty_store("proxy-hop-passphrase-preserve");
         let mut req = request("conn-1", SavedAuth::Agent);
         req.proxy_chain = vec![SavedProxyHop {
@@ -1869,6 +1702,37 @@ mod tests {
             store.keychain.get(&previous_keychain_id).unwrap(),
             SecretString::from("jump-key-secret")
         );
+
+        let mut update = request("conn-1", SavedAuth::Agent);
+        update.proxy_chain = vec![SavedProxyHop {
+            totp_credential_id: None,
+            host: "jump.example.com".to_string(),
+            port: 22,
+            username: "ops".to_string(),
+            auth: SavedAuth::Key {
+                key_path: "/tmp/jump-key".to_string(),
+                has_passphrase: false,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+            },
+            agent_forwarding: false,
+            identity_agent: None,
+            agent_forwarding_socket: None,
+            legacy_ssh_compatibility: false,
+            ssh_algorithms: SshAlgorithmPreferences::default(),
+        }];
+        store.upsert(update).unwrap();
+
+        match &store.get("conn-1").unwrap().proxy_chain[0].auth {
+            SavedAuth::Key {
+                has_passphrase,
+                passphrase_keychain_id: None,
+                plaintext_passphrase: None,
+                ..
+            } => assert!(!*has_passphrase),
+            other => panic!("unexpected proxy auth: {other:?}"),
+        }
+        assert!(store.keychain.get(&previous_keychain_id).is_err());
     }
 
     #[test]
@@ -1960,22 +1824,6 @@ mod tests {
     }
 
     #[test]
-    fn saved_connection_sync_snapshot_exports_delete_tombstones() {
-        let mut store = load_empty_store("sync-tombstone-export");
-        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
-        store.delete("conn-1").unwrap();
-
-        let snapshot = store.export_saved_connections_snapshot().unwrap();
-
-        assert_eq!(snapshot.records.len(), 1);
-        let record = &snapshot.records[0];
-        assert_eq!(record.id, "conn-1");
-        assert!(record.deleted);
-        assert!(record.payload.is_none());
-        assert!(!record.revision.is_empty());
-    }
-
-    #[test]
     fn saved_connection_sync_snapshot_revision_tracks_record_updated_at() {
         let mut store = load_empty_store("sync-updated-at-revision");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
@@ -1990,7 +1838,7 @@ mod tests {
     }
 
     #[test]
-    fn saved_connection_sync_apply_delete_removes_connection() {
+    fn saved_connection_sync_exports_tombstone_and_applies_remote_delete() {
         let mut target = load_empty_store("sync-delete-target");
         target.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
 
@@ -1998,6 +1846,12 @@ mod tests {
         source.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
         source.delete("conn-1").unwrap();
         let snapshot = source.export_saved_connections_snapshot().unwrap();
+        assert_eq!(snapshot.records.len(), 1);
+        let record = &snapshot.records[0];
+        assert_eq!(record.id, "conn-1");
+        assert!(record.deleted);
+        assert!(record.payload.is_none());
+        assert!(!record.revision.is_empty());
 
         let outcome = target
             .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Merge)
@@ -2548,20 +2402,7 @@ mod tests {
     }
 
     #[test]
-    fn connection_store_data_deserializes_missing_managed_keys_as_empty() {
-        let data: ConnectionStoreData = serde_json::from_value(serde_json::json!({
-            "version": CONFIG_VERSION,
-            "connections": [],
-            "groups": [],
-            "recent": []
-        }))
-        .unwrap();
-
-        assert!(data.managed_ssh_keys.is_empty());
-    }
-
-    #[test]
-    fn connection_store_data_ignores_removed_raw_profiles() {
+    fn connection_store_data_defaults_missing_keys_and_ignores_removed_profiles() {
         let data: ConnectionStoreData = serde_json::from_value(serde_json::json!({
             "version": CONFIG_VERSION,
             "connections": [],
@@ -2572,6 +2413,7 @@ mod tests {
         }))
         .unwrap();
 
+        assert!(data.managed_ssh_keys.is_empty());
         assert!(data.serial_profiles.is_empty());
         assert!(data.telnet_profiles.is_empty());
         assert!(data.connections.is_empty());
@@ -3096,7 +2938,7 @@ mod tests {
     }
 
     #[test]
-    fn managed_key_resolve_repairs_legacy_hex_encoded_secret() {
+    fn managed_key_resolve_repairs_only_fingerprint_verified_legacy_hex() {
         let mut store = load_empty_store("managed-key-legacy-hex");
         let private_key = generated_private_key_text(None);
         let info = store
@@ -3107,26 +2949,36 @@ mod tests {
             )
             .unwrap();
         let secret_id = store.data.managed_ssh_keys[0].secret_id.clone();
-        let legacy_hex = private_key
-            .as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        store
-            .managed_keychain
-            .store(&secret_id, &SecretString::from(legacy_hex))
-            .unwrap();
-
-        let restored = store
-            .resolve_managed_ssh_key_private_key(&info.id)
-            .expect("legacy hexadecimal managed key should be repaired");
-
-        assert_eq!(restored, private_key.as_str());
-        assert_eq!(
-            store.managed_keychain.get(&secret_id).unwrap(),
-            private_key.as_str(),
-            "the repaired private key should replace the legacy hexadecimal value"
-        );
+        let different_key = generated_private_key_text(None);
+        for (candidate, matches_fingerprint) in [
+            (different_key.as_str(), false),
+            (private_key.as_str(), true),
+        ] {
+            let legacy_hex = candidate
+                .as_bytes()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            store
+                .managed_keychain
+                .store(&secret_id, &SecretString::from(legacy_hex.clone()))
+                .unwrap();
+            let restored = store.resolve_managed_ssh_key_private_key(&info.id);
+            let expected_stored = if matches_fingerprint {
+                assert_eq!(restored.unwrap(), private_key.as_str());
+                private_key.as_str()
+            } else {
+                assert_eq!(
+                    restored.unwrap_err().to_string(),
+                    "Managed SSH key integrity check failed"
+                );
+                legacy_hex.as_str()
+            };
+            assert_eq!(
+                store.managed_keychain.get(&secret_id).unwrap(),
+                expected_stored
+            );
+        }
     }
 
     #[test]
@@ -3166,39 +3018,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn managed_key_resolve_rejects_legacy_hex_with_wrong_fingerprint() {
-        let mut store = load_empty_store("managed-key-legacy-hex-mismatch");
-        let expected_key = generated_private_key_text(None);
-        let different_key = generated_private_key_text(None);
-        let info = store
-            .create_managed_ssh_key_from_text(
-                SecretString::from(expected_key),
-                Some("Expected Key".to_string()),
-                None,
-            )
-            .unwrap();
-        let secret_id = store.data.managed_ssh_keys[0].secret_id.clone();
-        let legacy_hex = different_key
-            .as_bytes()
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
-        store
-            .managed_keychain
-            .store(&secret_id, &SecretString::from(legacy_hex.clone()))
-            .unwrap();
-
-        let error = store
-            .resolve_managed_ssh_key_private_key(&info.id)
-            .expect_err("a different legacy key must fail its metadata integrity check");
-
-        assert_eq!(error.to_string(), "Managed SSH key integrity check failed");
-        assert_eq!(
-            store.managed_keychain.get(&secret_id).unwrap(),
-            legacy_hex.as_str()
-        );
-    }
 
     #[test]
     fn managed_key_create_falls_back_to_secret_file_for_large_rsa_keychain_failure() {
@@ -3273,11 +3092,11 @@ mod tests {
     }
 
     #[test]
-    fn managed_key_delete_blocks_referenced_key_without_force() {
+    fn managed_key_deletion_respects_connection_references_and_secret_ownership() {
         let mut store = load_empty_store("managed-key-delete-blocked");
         let private_key = generated_private_key_text(None);
         let info = store
-            .create_managed_ssh_key_from_text(SecretString::from(private_key), None, None)
+            .create_managed_ssh_key_from_text(SecretString::from(private_key.clone()), None, None)
             .unwrap();
         store
             .upsert(request(
@@ -3290,32 +3109,13 @@ mod tests {
             ))
             .unwrap();
 
+        let secret_id = store.data.managed_ssh_keys[0].secret_id.clone();
         let usage = store.managed_ssh_key_usage(&info.id).unwrap();
         let error = store.delete_managed_ssh_key(&info.id, false).unwrap_err();
 
         assert_eq!(usage.count, 1);
         assert!(error.to_string().contains("used by 1 saved connection"));
         assert_eq!(store.managed_ssh_keys().len(), 1);
-    }
-
-    #[test]
-    fn managed_key_connection_delete_does_not_delete_managed_key_secret() {
-        let mut store = load_empty_store("managed-key-connection-delete");
-        let private_key = generated_private_key_text(None);
-        let info = store
-            .create_managed_ssh_key_from_text(SecretString::from(private_key.clone()), None, None)
-            .unwrap();
-        let secret_id = store.data.managed_ssh_keys[0].secret_id.clone();
-        store
-            .upsert(request(
-                "conn-1",
-                SavedAuth::ManagedKey {
-                    key_id: info.id,
-                    passphrase_keychain_id: None,
-                    plaintext_passphrase: None,
-                },
-            ))
-            .unwrap();
 
         assert!(store.delete("conn-1").unwrap());
         assert_eq!(
@@ -3324,6 +3124,7 @@ mod tests {
         );
         assert_eq!(store.managed_ssh_keys().len(), 1);
     }
+
 
     #[test]
     fn managed_key_connection_info_exposes_reference_only() {

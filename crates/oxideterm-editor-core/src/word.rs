@@ -36,12 +36,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn word_at_respects_unicode_boundaries() {
-        assert_eq!(word_at("let 名字 = value", BufferOffset(5)), "名字");
-    }
-
-    #[test]
-    fn word_at_matches_codemirror_dollar_identifiers() {
-        assert_eq!(word_at("const $value = 1", BufferOffset(8)), "$value");
+    fn word_at_preserves_unicode_boundaries_and_dollar_identifiers() {
+        for (source, offset, expected) in [
+            ("let 名字 = value", 5, "名字"),
+            ("const $value = 1", 8, "$value"),
+        ] {
+            assert_eq!(word_at(source, BufferOffset(offset)), expected, "{source}");
+        }
     }
 }

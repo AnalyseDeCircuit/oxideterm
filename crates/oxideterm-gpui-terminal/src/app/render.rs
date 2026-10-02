@@ -2762,11 +2762,7 @@ mod tests {
 
     use oxideterm_terminal::TerminalCursorShape;
 
-    use super::{
-        TERMINAL_VISUAL_BELL_OVERLAY_ALPHA, external_paths_for_local_terminal,
-        terminal_cursor_shape_for_render, terminal_pane_base_is_transparent,
-        terminal_visual_bell_overlay_color,
-    };
+    use super::{external_paths_for_local_terminal, terminal_cursor_shape_for_render};
 
     struct AutosuggestTestView {
         pane: gpui::Entity<super::TerminalPane>,
@@ -2957,16 +2953,6 @@ mod tests {
         assert_eq!(
             constrained.size,
             gpui::size(gpui::px(234.0), gpui::px(48.0))
-        );
-    }
-
-    #[test]
-    fn terminal_pane_base_keeps_window_background_visible_during_visual_bell() {
-        assert!(terminal_pane_base_is_transparent(true));
-        assert!(!terminal_pane_base_is_transparent(false));
-        assert_eq!(
-            terminal_visual_bell_overlay_color(0x17131a) & 0xff,
-            u32::from(TERMINAL_VISUAL_BELL_OVERLAY_ALPHA)
         );
     }
 

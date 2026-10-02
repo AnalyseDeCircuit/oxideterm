@@ -512,35 +512,49 @@ mod tests {
 
     #[test]
     fn keyboard_mapper_keeps_physical_modifier_pressed_until_modifier_releases() {
-        let mut mapper = RdpKeyboardInputMapper::default();
-
-        let control_down = mapper.operations(
-            &key("ControlLeft", None, true),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(control_down.len(), 1);
-        assert_eq!(scancode(&control_down[0]), 0x1d);
-
-        let letter_down = mapper.operations(
-            &key("KeyV", Some("v"), true),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(letter_down.len(), 1);
-        assert_eq!(scancode(&letter_down[0]), 0x2f);
-
-        let letter_up = mapper.operations(
-            &key("KeyV", Some("v"), true),
-            RemoteDesktopKeyState::Released,
-        );
-        assert_eq!(letter_up.len(), 1);
-        assert_eq!(scancode(&letter_up[0]), 0x2f);
-
-        let control_up = mapper.operations(
-            &key("ControlLeft", None, false),
-            RemoteDesktopKeyState::Released,
-        );
-        assert_eq!(control_up.len(), 1);
-        assert_eq!(scancode(&control_up[0]), 0x1d);
+        for (control_code, expected_control) in [("ControlLeft", 0x1d), ("ControlRight", 0xe01d)] {
+            let mut mapper = RdpKeyboardInputMapper::default();
+            for (input, state, expected) in [
+                (
+                    key(control_code, None, true),
+                    RemoteDesktopKeyState::Pressed,
+                    expected_control,
+                ),
+                (
+                    key("KeyV", Some("v"), true),
+                    RemoteDesktopKeyState::Pressed,
+                    0x2f,
+                ),
+                (
+                    key("KeyV", Some("v"), true),
+                    RemoteDesktopKeyState::Released,
+                    0x2f,
+                ),
+                (
+                    key(control_code, None, false),
+                    RemoteDesktopKeyState::Released,
+                    expected_control,
+                ),
+            ] {
+                let operations = mapper.operations(&input, state);
+                assert_eq!(operations.len(), 1, "{control_code}: {state:?}");
+                assert_eq!(
+                    scancode(&operations[0]),
+                    expected,
+                    "{control_code}: {state:?}"
+                );
+                assert!(matches!(
+                    (&operations[0], state),
+                    (
+                        RdpInputOperation::KeyPressed(_),
+                        RemoteDesktopKeyState::Pressed
+                    ) | (
+                        RdpInputOperation::KeyReleased(_),
+                        RemoteDesktopKeyState::Released
+                    )
+                ));
+            }
+        }
     }
 
     #[test]
@@ -565,69 +579,35 @@ mod tests {
     }
 
     #[test]
-    fn keyboard_mapper_treats_left_and_right_modifiers_as_equivalent() {
-        let mut mapper = RdpKeyboardInputMapper::default();
-
-        let right_control_down = mapper.operations(
-            &key("ControlRight", None, true),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(right_control_down.len(), 1);
-        assert_eq!(scancode(&right_control_down[0]), 0xe01d);
-
-        let letter_down = mapper.operations(
-            &key("KeyV", Some("v"), true),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(letter_down.len(), 1);
-        assert_eq!(scancode(&letter_down[0]), 0x2f);
-    }
-
-    #[test]
-    fn keyboard_mapper_uses_physical_scancodes_for_keypad_and_special_keys() {
-        let mut mapper = RdpKeyboardInputMapper::default();
+    fn keyboard_mapper_uses_physical_scancodes_for_printable_keypad_and_special_keys() {
         for (code, text, expected) in [
-            ("Numpad1", "1", 0x4f),
-            ("Enter", "\n", 0x1c),
-            ("Backspace", "\u{8}", 0x0e),
+            ("KeyA", Some("a"), 0x1e),
+            ("Numpad1", Some("1"), 0x4f),
+            ("Enter", Some("\n"), 0x1c),
+            ("Backspace", Some("\u{8}"), 0x0e),
+            ("Return", None, 0x1c),
+            ("EnterKey", None, 0x1c),
+            ("\n", None, 0x1c),
+            ("\r", None, 0x1c),
+            ("NumpadDivide", None, 0xe035),
+            ("NumpadEnter", None, 0xe01c),
+            ("KP_Enter", None, 0xe01c),
+            ("ContextMenu", None, 0xe05d),
+            ("PrintScreen", None, 0xe037),
+            ("NumLock", None, 0x45),
         ] {
-            let operations = mapper.operations(
-                &key(code, Some(text), false),
-                RemoteDesktopKeyState::Pressed,
-            );
+            let mut mapper = RdpKeyboardInputMapper::default();
+            let operations =
+                mapper.operations(&key(code, text, false), RemoteDesktopKeyState::Pressed);
             assert_eq!(operations.len(), 1, "code {code}");
             assert_eq!(scancode(&operations[0]), expected, "code {code}");
+            assert!(matches!(operations[0], RdpInputOperation::KeyPressed(_)));
+            let released =
+                mapper.operations(&key(code, None, false), RemoteDesktopKeyState::Released);
+            assert_eq!(released.len(), 1, "code {code}");
+            assert_eq!(scancode(&released[0]), expected, "code {code}");
+            assert!(matches!(released[0], RdpInputOperation::KeyReleased(_)));
         }
-    }
-
-    #[test]
-    fn keyboard_mapper_prefers_physical_scancode_for_printable_key_events() {
-        let mut mapper = RdpKeyboardInputMapper::default();
-
-        let key_down = mapper.operations(
-            &key("KeyA", Some("a"), false),
-            RemoteDesktopKeyState::Pressed,
-        );
-        assert_eq!(key_down.len(), 1);
-        assert_eq!(scancode(&key_down[0]), 0x1e);
-
-        let key_up = mapper.operations(&key("KeyA", None, false), RemoteDesktopKeyState::Released);
-        assert_eq!(key_up.len(), 1);
-        assert_eq!(scancode(&key_up[0]), 0x1e);
-    }
-
-    #[test]
-    fn keyboard_mapper_maps_extended_desktop_keys() {
-        assert_eq!(rdp_scancode("Return").unwrap().as_u16(), 0x1c);
-        assert_eq!(rdp_scancode("EnterKey").unwrap().as_u16(), 0x1c);
-        assert_eq!(rdp_scancode("\n").unwrap().as_u16(), 0x1c);
-        assert_eq!(rdp_scancode("\r").unwrap().as_u16(), 0x1c);
-        assert_eq!(rdp_scancode("NumpadDivide").unwrap().as_u16(), 0xe035);
-        assert_eq!(rdp_scancode("NumpadEnter").unwrap().as_u16(), 0xe01c);
-        assert_eq!(rdp_scancode("KP_Enter").unwrap().as_u16(), 0xe01c);
-        assert_eq!(rdp_scancode("ContextMenu").unwrap().as_u16(), 0xe05d);
-        assert_eq!(rdp_scancode("PrintScreen").unwrap().as_u16(), 0xe037);
-        assert_eq!(rdp_scancode("NumLock").unwrap().as_u16(), 0x45);
     }
 
     #[test]

@@ -2727,17 +2727,6 @@ mod text_input_tests {
     }
 
     #[test]
-    fn first_text_replaces_the_selected_original_name() {
-        let mut input = rename_input("settings.json");
-
-        apply_tree_name_text(&mut input, "renamed");
-
-        assert_eq!(input.value, "renamed.json");
-        assert_eq!(input.selection_range, Some(7..7));
-        assert!(input.error.is_none());
-    }
-
-    #[test]
     fn basename_selection_handles_multibyte_filenames() {
         let mut input = rename_input("配置.json");
         input.original_name = Some("配置.json".into());

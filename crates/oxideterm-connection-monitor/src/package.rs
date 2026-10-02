@@ -636,58 +636,110 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_and_merges_apt_rows_with_service_owner() {
-        let output = concat!(
-            "===PACKAGES===\n",
-            "__OXIDE_PACKAGE_CAPABILITY__\tpartial\tlinux_packages\n",
-            "MANAGER\tapt\ttrue\tapt\n",
-            "ROW\topenssh-server\tapt\t1:9.6p1-3\t1:9.6p1-4\tamd64\tjammy-updates\tupgradable\t\t\t\tapt\n",
-            "ROW\topenssh-server\tapt\t1:9.6p1-3\t\tamd64\t\tinstalled\tOpenSSH server\t\t\tdpkg\n",
-            "OWNER\tapt\topenssh-server\tssh.service\t/usr/lib/systemd/system/ssh.service\tdpkg\n",
-            "===PACKAGES_END===\n"
-        );
-
-        let snapshot = parse_package_snapshot(output);
-        let rows = visible_package_rows(&snapshot.entries, "ssh.service", PackageFilter::Services);
-
-        assert_eq!(
-            snapshot.status,
-            ResourcePackageStatus::Available {
-                capability: PackageCommandCapability::Partial,
-                platform: "linux_packages".to_string(),
+    fn package_snapshots_merge_versions_and_attach_service_owners() {
+        for (platform, manager, output, expected, searches) in [
+            (
+                "linux_packages",
+                "apt",
+                concat!(
+                    "===PACKAGES===\n",
+                    "__OXIDE_PACKAGE_CAPABILITY__\tpartial\tlinux_packages\n",
+                    "MANAGER\tapt\ttrue\tapt\n",
+                    "ROW\topenssh-server\tapt\t1:9.6p1-3\t1:9.6p1-4\tamd64\tjammy-updates\tupgradable\t\t\t\tapt\n",
+                    "ROW\topenssh-server\tapt\t1:9.6p1-3\t\tamd64\t\tinstalled\tOpenSSH server\t\t\tdpkg\n",
+                    "OWNER\tapt\topenssh-server\tssh.service\t/usr/lib/systemd/system/ssh.service\tdpkg\n",
+                    "===PACKAGES_END===\n"
+                ),
+                vec![(
+                    "openssh-server",
+                    "upgradable",
+                    "1:9.6p1-4",
+                    "OpenSSH server",
+                    vec!["ssh.service"],
+                )],
+                vec![(
+                    "ssh.service",
+                    PackageFilter::Services,
+                    vec!["openssh-server"],
+                )],
+            ),
+            (
+                "macos_brew",
+                "brew",
+                concat!(
+                    "===PACKAGES===\n",
+                    "__OXIDE_PACKAGE_CAPABILITY__\tpartial\tmacos_brew\n",
+                    "MANAGER\tbrew\ttrue\tbrew\n",
+                    "ROW\topenssl@3\tbrew\t3.3.1\t3.3.2\t\t\toutdated\t\t\t\tbrew\n",
+                    "ROW\topenssl@3\tbrew\t3.3.1\t\t\t\tinstalled\t\t\t\tbrew\n",
+                    "OWNER\tbrew\tpostgresql@16\tpostgresql@16\t/Users/me/Library/LaunchAgents/homebrew.mxcl.postgresql@16.plist\tbrew\n",
+                    "ROW\tpostgresql@16\tbrew\t16.3\t\t\t\tinstalled\tPostgreSQL\t\t\tbrew\n",
+                    "===PACKAGES_END===\n"
+                ),
+                vec![
+                    ("openssl@3", "upgradable", "3.3.2", "", vec![]),
+                    (
+                        "postgresql@16",
+                        "installed",
+                        "",
+                        "PostgreSQL",
+                        vec!["postgresql@16"],
+                    ),
+                ],
+                vec![
+                    ("openssl", PackageFilter::Brew, vec!["openssl@3"]),
+                    (
+                        "LaunchAgents",
+                        PackageFilter::Services,
+                        vec!["postgresql@16"],
+                    ),
+                ],
+            ),
+        ] {
+            let snapshot = parse_package_snapshot(output);
+            assert_eq!(
+                snapshot.status,
+                ResourcePackageStatus::Available {
+                    capability: PackageCommandCapability::Partial,
+                    platform: platform.into(),
+                }
+            );
+            assert_eq!(
+                snapshot
+                    .managers
+                    .iter()
+                    .map(|entry| (entry.name.as_str(), entry.available))
+                    .collect::<Vec<_>>(),
+                [(manager, true)]
+            );
+            assert_eq!(
+                snapshot
+                    .entries
+                    .iter()
+                    .map(|entry| (
+                        entry.name.as_str(),
+                        entry.status.as_str(),
+                        entry.candidate_version.as_str(),
+                        entry.summary.as_str(),
+                        entry
+                            .service_units
+                            .iter()
+                            .map(String::as_str)
+                            .collect::<Vec<_>>(),
+                    ))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{platform}"
+            );
+            for (query, filter, names) in searches {
+                let rows = visible_package_rows(&snapshot.entries, query, filter);
+                assert_eq!(
+                    rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+                    names,
+                    "{platform}: {query}"
+                );
             }
-        );
-        assert_eq!(snapshot.managers.len(), 1);
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].status, "upgradable");
-        assert_eq!(rows[0].candidate_version, "1:9.6p1-4");
-        assert_eq!(rows[0].summary, "OpenSSH server");
-        assert_eq!(rows[0].service_units, vec!["ssh.service"]);
-    }
-
-    #[test]
-    fn parses_brew_rows_without_auto_update_dependency() {
-        let output = concat!(
-            "===PACKAGES===\n",
-            "__OXIDE_PACKAGE_CAPABILITY__\tpartial\tmacos_brew\n",
-            "MANAGER\tbrew\ttrue\tbrew\n",
-            "ROW\topenssl@3\tbrew\t3.3.1\t3.3.2\t\t\toutdated\t\t\t\tbrew\n",
-            "ROW\topenssl@3\tbrew\t3.3.1\t\t\t\tinstalled\t\t\t\tbrew\n",
-            "OWNER\tbrew\tpostgresql@16\tpostgresql@16\t/Users/me/Library/LaunchAgents/homebrew.mxcl.postgresql@16.plist\tbrew\n",
-            "ROW\tpostgresql@16\tbrew\t16.3\t\t\t\tinstalled\tPostgreSQL\t\t\tbrew\n",
-            "===PACKAGES_END===\n"
-        );
-
-        let snapshot = parse_package_snapshot(output);
-        let outdated = visible_package_rows(&snapshot.entries, "openssl", PackageFilter::Brew);
-        let services =
-            visible_package_rows(&snapshot.entries, "LaunchAgents", PackageFilter::Services);
-
-        assert_eq!(outdated.len(), 1);
-        assert_eq!(outdated[0].status, "upgradable");
-        assert_eq!(outdated[0].candidate_version, "3.3.2");
-        assert_eq!(services.len(), 1);
-        assert_eq!(services[0].name, "postgresql@16");
+        }
     }
 
     #[test]

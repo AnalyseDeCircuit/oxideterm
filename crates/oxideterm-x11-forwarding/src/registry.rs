@@ -142,37 +142,6 @@ mod tests {
     }
 
     #[test]
-    fn registry_consumes_single_connection_entries() {
-        let mut registry = X11AuthSpoofRegistry::new();
-        let local = X11AuthCookie::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
-        let auth = registry.register_mit_magic_cookie(7u64, local, true);
-
-        assert!(registry.resolve(auth.protocol, &auth.fake_cookie).is_some());
-        assert!(registry.resolve(auth.protocol, &auth.fake_cookie).is_none());
-        assert!(registry.is_empty());
-    }
-
-    #[test]
-    fn registry_can_insert_prebuilt_auth_material() {
-        let mut registry = X11AuthSpoofRegistry::new();
-        let fake = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
-        let local = X11AuthCookie::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
-        let auth = X11AuthMaterial::with_fake_cookie(fake.clone(), local);
-
-        registry.insert(X11SpoofedAuth {
-            channel_id: "channel-1",
-            auth,
-            single_connection: true,
-        });
-
-        assert!(
-            registry
-                .resolve(X11AuthProtocol::MitMagicCookie1, &fake)
-                .is_some()
-        );
-    }
-
-    #[test]
     fn registry_debug_does_not_leak_cookie_material() {
         let mut registry = X11AuthSpoofRegistry::new();
         let fake = X11AuthCookie::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();

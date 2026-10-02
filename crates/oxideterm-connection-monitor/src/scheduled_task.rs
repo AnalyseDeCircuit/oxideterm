@@ -991,96 +991,166 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_systemd_timers_and_links_service_unit() {
-        let output = concat!(
-            "===SCHEDULED_TASKS===\n",
-            "__OXIDE_SCHEDULE_CAPABILITY__\tfull\tlinux_systemd\n",
-            "SYSTEMD\tapt-daily.timer\tapt-daily.service\tTue 2026-06-16 12:00:00 UTC\t1h left\tMon 2026-06-15 12:00:00 UTC\t1 day ago\n",
-            "SHOW\tId=apt-daily.timer\tDescription=Daily apt download activities\tUnit=apt-daily.service\tActiveState=active\tUnitFileState=enabled\tResult=success\n",
-            "===SCHEDULED_TASKS_END===\n",
-        );
-
-        let snapshot = parse_scheduled_task_snapshot(output);
-        let rows =
-            visible_scheduled_task_rows(&snapshot.entries, "apt", ScheduledTaskFilter::Systemd);
-
-        assert_eq!(
-            snapshot.status,
-            ResourceScheduledTaskStatus::Available {
-                capability: ScheduledTaskCapability::Full,
-                platform: "linux_systemd".to_string(),
+    fn scheduled_task_snapshots_preserve_platform_fields_and_filter_matches() {
+        for (platform, capability, output, expected, searches) in [
+            (
+                "linux_systemd",
+                ScheduledTaskCapability::Full,
+                concat!(
+                    "===SCHEDULED_TASKS===\n",
+                    "__OXIDE_SCHEDULE_CAPABILITY__\tfull\tlinux_systemd\n",
+                    "SYSTEMD\tapt-daily.timer\tapt-daily.service\tTue 2026-06-16 12:00:00 UTC\t1h left\tMon 2026-06-15 12:00:00 UTC\t1 day ago\n",
+                    "SHOW\tId=apt-daily.timer\tDescription=Daily apt download activities\tUnit=apt-daily.service\tActiveState=active\tUnitFileState=enabled\tResult=success\n",
+                    "===SCHEDULED_TASKS_END===\n",
+                ),
+                vec![(
+                    "apt-daily",
+                    "systemctl start apt-daily.service",
+                    "root",
+                    "1h left",
+                    "enabled",
+                    "1 day ago",
+                    "Daily apt download activities",
+                    "apt-daily.service",
+                )],
+                vec![("apt", ScheduledTaskFilter::Systemd, vec!["apt-daily"])],
+            ),
+            (
+                "linux_cron",
+                ScheduledTaskCapability::Partial,
+                concat!(
+                    "===SCHEDULED_TASKS===\n",
+                    "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tlinux_cron\n",
+                    "CRON\tuser\t*/5 * * * * /usr/local/bin/backup job --flag value\n",
+                    "CRON\t/etc/crontab\t0 2 * * * root /usr/sbin/logrotate /etc/logrotate.conf\n",
+                    "===SCHEDULED_TASKS_END===\n",
+                ),
+                vec![
+                    (
+                        "backup",
+                        "/usr/local/bin/backup job --flag value",
+                        "",
+                        "*/5 * * * *",
+                        "enabled",
+                        "",
+                        "user",
+                        "",
+                    ),
+                    (
+                        "logrotate",
+                        "/usr/sbin/logrotate /etc/logrotate.conf",
+                        "root",
+                        "0 2 * * *",
+                        "enabled",
+                        "",
+                        "/etc/crontab",
+                        "",
+                    ),
+                ],
+                vec![("logrotate", ScheduledTaskFilter::Cron, vec!["logrotate"])],
+            ),
+            (
+                "mixed",
+                ScheduledTaskCapability::Partial,
+                concat!(
+                    "===SCHEDULED_TASKS===\n",
+                    "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tmixed\n",
+                    "LAUNCHD\tcom.example.sync\tactive\t0\tStartInterval=300\t/Library/LaunchDaemons/com.example.sync.plist\t/usr/local/bin/sync\tExample sync\n",
+                    "WIN\t\\Microsoft\\Windows\\Defrag\\ScheduledDefrag\tScheduledDefrag\tReady\tWeekly\tdefrag.exe C:\tSYSTEM\t2026-06-15 10:00:00\t2026-06-22 10:00:00\t0\tDisk defrag\n",
+                    "===SCHEDULED_TASKS_END===\n",
+                ),
+                vec![
+                    (
+                        "com.example.sync",
+                        "/usr/local/bin/sync",
+                        "",
+                        "StartInterval=300",
+                        "unknown",
+                        "0",
+                        "Example sync",
+                        "/Library/LaunchDaemons/com.example.sync.plist",
+                    ),
+                    (
+                        "ScheduledDefrag",
+                        "defrag.exe C:",
+                        "SYSTEM",
+                        "Weekly",
+                        "enabled",
+                        "0",
+                        "Disk defrag",
+                        "",
+                    ),
+                ],
+                vec![
+                    (
+                        "sync",
+                        ScheduledTaskFilter::Launchd,
+                        vec!["com.example.sync"],
+                    ),
+                    (
+                        "defrag",
+                        ScheduledTaskFilter::Windows,
+                        vec!["ScheduledDefrag"],
+                    ),
+                ],
+            ),
+            (
+                "fixture",
+                ScheduledTaskCapability::Partial,
+                concat!(
+                    "===SCHEDULED_TASKS===\n",
+                    "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tfixture\n",
+                    "ROW\tid-1\t备份 任务\tcron\t0 1 * * *\t/opt/bin/backup --中文\talice\tenabled\tfailed\tyesterday\ttomorrow\t1\tNightly backup\t\n",
+                    "===SCHEDULED_TASKS_END===\n",
+                ),
+                vec![(
+                    "备份 任务",
+                    "/opt/bin/backup --中文",
+                    "alice",
+                    "0 1 * * *",
+                    "enabled",
+                    "1",
+                    "Nightly backup",
+                    "",
+                )],
+                vec![("中文", ScheduledTaskFilter::Failed, vec!["备份 任务"])],
+            ),
+        ] {
+            let snapshot = parse_scheduled_task_snapshot(output);
+            assert_eq!(
+                snapshot.status,
+                ResourceScheduledTaskStatus::Available {
+                    capability,
+                    platform: platform.into()
+                }
+            );
+            assert_eq!(
+                snapshot
+                    .entries
+                    .iter()
+                    .map(|entry| (
+                        entry.name.as_str(),
+                        entry.command.as_str(),
+                        entry.user.as_str(),
+                        entry.schedule.as_str(),
+                        entry.enabled.as_str(),
+                        entry.last_result.as_str(),
+                        entry.description.as_str(),
+                        entry.unit.as_str(),
+                    ))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{platform}"
+            );
+            for (query, filter, expected) in searches {
+                let rows = visible_scheduled_task_rows(&snapshot.entries, query, filter);
+                assert_eq!(
+                    rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+                    expected,
+                    "{platform}: {query}"
+                );
             }
-        );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].unit, "apt-daily.service");
-        assert_eq!(rows[0].enabled, "enabled");
-        assert_eq!(rows[0].description, "Daily apt download activities");
-        assert_eq!(rows[0].command, "systemctl start apt-daily.service");
-    }
-
-    #[test]
-    fn parses_user_and_system_cron_without_losing_command() {
-        let output = concat!(
-            "===SCHEDULED_TASKS===\n",
-            "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tlinux_cron\n",
-            "CRON\tuser\t*/5 * * * * /usr/local/bin/backup job --flag value\n",
-            "CRON\t/etc/crontab\t0 2 * * * root /usr/sbin/logrotate /etc/logrotate.conf\n",
-            "===SCHEDULED_TASKS_END===\n",
-        );
-
-        let snapshot = parse_scheduled_task_snapshot(output);
-        let rows =
-            visible_scheduled_task_rows(&snapshot.entries, "logrotate", ScheduledTaskFilter::Cron);
-
-        assert_eq!(snapshot.entries.len(), 2);
-        assert_eq!(
-            snapshot.entries[0].command,
-            "/usr/local/bin/backup job --flag value"
-        );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].user, "root");
-        assert_eq!(rows[0].schedule, "0 2 * * *");
-    }
-
-    #[test]
-    fn parses_launchd_and_windows_rows() {
-        let output = concat!(
-            "===SCHEDULED_TASKS===\n",
-            "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tmixed\n",
-            "LAUNCHD\tcom.example.sync\tactive\t0\tStartInterval=300\t/Library/LaunchDaemons/com.example.sync.plist\t/usr/local/bin/sync\tExample sync\n",
-            "WIN\t\\Microsoft\\Windows\\Defrag\\ScheduledDefrag\tScheduledDefrag\tReady\tWeekly\tdefrag.exe C:\tSYSTEM\t2026-06-15 10:00:00\t2026-06-22 10:00:00\t0\tDisk defrag\n",
-            "===SCHEDULED_TASKS_END===\n",
-        );
-
-        let snapshot = parse_scheduled_task_snapshot(output);
-        let launchd =
-            visible_scheduled_task_rows(&snapshot.entries, "sync", ScheduledTaskFilter::Launchd);
-        let windows =
-            visible_scheduled_task_rows(&snapshot.entries, "defrag", ScheduledTaskFilter::Windows);
-
-        assert_eq!(launchd.len(), 1);
-        assert_eq!(launchd[0].command, "/usr/local/bin/sync");
-        assert_eq!(windows.len(), 1);
-        assert_eq!(windows[0].enabled, "enabled");
-        assert_eq!(windows[0].last_result, "0");
-    }
-
-    #[test]
-    fn filters_failed_tasks_and_preserves_unicode_names() {
-        let output = concat!(
-            "===SCHEDULED_TASKS===\n",
-            "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tfixture\n",
-            "ROW\tid-1\t备份 任务\tcron\t0 1 * * *\t/opt/bin/backup --中文\talice\tenabled\tfailed\tyesterday\ttomorrow\t1\tNightly backup\t\n",
-            "===SCHEDULED_TASKS_END===\n",
-        );
-
-        let snapshot = parse_scheduled_task_snapshot(output);
-        let failed =
-            visible_scheduled_task_rows(&snapshot.entries, "中文", ScheduledTaskFilter::Failed);
-
-        assert_eq!(failed.len(), 1);
-        assert_eq!(failed[0].name, "备份 任务");
-        assert_eq!(failed[0].command, "/opt/bin/backup --中文");
+        }
     }
 
     #[test]

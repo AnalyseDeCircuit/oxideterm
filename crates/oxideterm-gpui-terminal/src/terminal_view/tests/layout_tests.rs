@@ -379,30 +379,6 @@ fn terminal_element_prepaint_clips_layout_to_visible_rows() {
 }
 
 #[test]
-fn terminal_element_lays_out_search_highlights() {
-    let snapshot = selection_snapshot("search test search");
-    let layout = TerminalElement::new(
-        snapshot,
-        None,
-        test_metrics(),
-        true,
-        None,
-        Some("search".to_string()),
-        Vec::new(),
-        None,
-        None,
-        None,
-    )
-    .layout();
-
-    assert_eq!(layout.search_matches.len(), 2);
-    assert_eq!(layout.search_matches[0].col, 0);
-    assert_eq!(layout.search_matches[0].cells, 6);
-    assert_eq!(layout.search_matches[1].col, 12);
-    assert_eq!(layout.search_matches[1].cells, 6);
-}
-
-#[test]
 fn transient_command_highlight_stays_inside_latest_command_output() {
     let snapshot = multirow_snapshot(&[
         "$ grep dbx",
@@ -573,7 +549,7 @@ fn terminal_element_maps_scrollback_search_matches_into_visible_rows() {
 
 #[test]
 fn selection_matches_use_literal_case_sensitive_text_without_changing_search() {
-    let snapshot = selection_snapshot("share SHARE shares [x] [x]");
+    let snapshot = selection_snapshot("share SHARE shares [x] [x] SHARE");
     let element = TerminalElement::new(
         snapshot,
         None,
@@ -598,8 +574,14 @@ fn selection_matches_use_literal_case_sensitive_text_without_changing_search() {
             .collect::<Vec<_>>(),
         vec![(0, 0, 5), (0, 12, 5)]
     );
-    assert_eq!(layout.search_matches.len(), 1);
-    assert_eq!(layout.search_matches[0].col, 6);
+    assert_eq!(
+        layout
+            .search_matches
+            .iter()
+            .map(|rect| (rect.row, rect.col, rect.cells))
+            .collect::<Vec<_>>(),
+        vec![(0, 6, 5), (0, 27, 5)]
+    );
     let literal = TerminalElement::new(
         selection_snapshot("[x] x [x]"),
         None,

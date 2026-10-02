@@ -186,19 +186,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remote_shell_probe_contains_quoted_cwd_and_protocol_sentinel() {
-        let command = remote_shell_probe_command("/tmp/it's-ok");
-        assert!(command.contains("cd -- '/tmp/it'\\''s-ok'"));
-        assert!(command.contains(SHELL_PROBE_SENTINEL));
-        assert!(command.contains("GIT_OPTIONAL_LOCKS=0"));
-        assert!(command.contains("git_operation_state()"));
-    }
-
-    #[test]
-    fn remote_shell_probe_expands_home_relative_cwd_without_hardcoded_home() {
-        let command = remote_shell_probe_command("~/project dir");
-        assert!(command.contains("cd -- \"$HOME\"/'project dir'"));
-        assert!(!command.contains("/home/"));
+    fn remote_shell_probe_quotes_cwd_and_preserves_protocol_and_home_expansion() {
+        for (cwd, quoted) in [
+            ("/tmp/it's-ok", "cd -- '/tmp/it'\\''s-ok'"),
+            ("~/project dir", "cd -- \"$HOME\"/'project dir'"),
+        ] {
+            let command = remote_shell_probe_command(cwd);
+            assert!(command.contains(quoted), "{cwd}");
+            assert!(command.contains(SHELL_PROBE_SENTINEL));
+            assert!(command.contains("GIT_OPTIONAL_LOCKS=0"));
+            assert!(command.contains("git_operation_state()"));
+            assert!(!command.contains("/home/"));
+        }
     }
 
     #[test]

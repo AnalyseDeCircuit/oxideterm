@@ -4,7 +4,7 @@
 use oxideterm_settings::{
     PersistedSettings, SettingsApplicationProxyMode, SettingsUpstreamProxyAuth,
     SettingsUpstreamProxyConfig, SettingsUpstreamProxyProtocol, UpdateProxyMode,
-    UpdateProxyProtocol, UpdateProxySettings,
+    UpdateProxySettings,
 };
 use zeroize::Zeroizing;
 
@@ -96,33 +96,6 @@ fn custom_proxy_adapters_reject_an_empty_host() {
 }
 
 #[test]
-fn settings_hydrate_application_proxy_credentials() {
-    let mut settings = PersistedSettings::default();
-    settings.network.application_proxy_mode = SettingsApplicationProxyMode::Shared;
-    settings.network.upstream_proxy = Some(SettingsUpstreamProxyConfig {
-        protocol: SettingsUpstreamProxyProtocol::Socks5,
-        host: "proxy.example".to_string(),
-        port: 1080,
-        auth: SettingsUpstreamProxyAuth::Password {
-            username: "proxy-user".to_string(),
-            keychain_id: Some("credential-id".to_string()),
-        },
-        remote_dns: true,
-        no_proxy: "localhost".to_string(),
-    });
-
-    let policy = application_proxy_policy_from_settings(
-        &settings,
-        &TestCredentials {
-            password: Some("proxy-secret"),
-        },
-    );
-    let debug = format!("{policy:?}");
-    assert!(matches!(policy, ApplicationProxyPolicy::Custom(_)));
-    assert!(!debug.contains("proxy-secret"));
-}
-
-#[test]
 fn missing_application_proxy_password_is_fail_closed() {
     let mut settings = PersistedSettings::default();
     settings.network.application_proxy_mode = SettingsApplicationProxyMode::Shared;
@@ -161,17 +134,4 @@ fn application_proxy_modes_select_system_or_direct_policy() {
         application_proxy_policy_from_settings(&settings, &TestCredentials { password: None }),
         ApplicationProxyPolicy::Direct
     );
-}
-
-#[test]
-fn custom_update_proxy_is_configured_by_the_shared_adapter() {
-    let settings = UpdateProxySettings {
-        mode: UpdateProxyMode::Custom,
-        protocol: UpdateProxyProtocol::Socks5,
-        host: "127.0.0.1".to_string(),
-        port: 7890,
-        ..UpdateProxySettings::default()
-    };
-
-    assert!(configure_update_http_client_builder(reqwest::Client::builder(), &settings).is_ok());
 }

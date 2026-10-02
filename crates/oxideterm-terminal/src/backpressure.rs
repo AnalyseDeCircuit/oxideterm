@@ -578,28 +578,22 @@ mod tests {
     }
 
     #[test]
-    fn utf8_guard_flushes_invalid_bytes_unchanged() {
-        let mut guard = Utf8ResidualGuard::default();
-        assert_eq!(
-            guard.push(&[0xff, b'a']).as_deref(),
-            Some(&[0xff, b'a'][..])
-        );
-    }
-
-    #[test]
-    fn utf8_guard_borrows_complete_chunks() {
-        let mut guard = Utf8ResidualGuard::default();
-        let bytes = "plain 中文 🚀".as_bytes();
-
-        assert!(matches!(guard.push(bytes), Some(Cow::Borrowed(value)) if value == bytes));
-    }
-
-    #[test]
-    fn utf8_guard_flushes_residual_on_stream_end() {
-        let mut guard = Utf8ResidualGuard::default();
-        assert_eq!(guard.push(&[0xe4, 0xbd]), None);
-        assert_eq!(guard.flush(), Some(vec![0xe4, 0xbd]));
-        assert_eq!(guard.flush(), None);
+    fn utf8_guard_preserves_complete_invalid_and_unfinished_chunks() {
+        let complete = "plain 中文 🚀".as_bytes();
+        for (bytes, emitted, residual, must_borrow) in [
+            (complete, Some(complete), None, true),
+            (&[0xff, b'a'][..], Some(&[0xff, b'a'][..]), None, false),
+            (&[0xe4, 0xbd][..], None, Some(&[0xe4, 0xbd][..]), false),
+        ] {
+            let mut guard = Utf8ResidualGuard::default();
+            let output = guard.push(bytes);
+            assert_eq!(output.as_deref(), emitted, "{bytes:?}");
+            if must_borrow {
+                assert!(matches!(output, Some(Cow::Borrowed(_))));
+            }
+            assert_eq!(guard.flush().as_deref(), residual, "{bytes:?}");
+            assert_eq!(guard.flush(), None);
+        }
     }
 
     #[test]

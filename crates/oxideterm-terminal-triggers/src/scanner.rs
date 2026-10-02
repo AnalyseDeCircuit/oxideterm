@@ -568,6 +568,7 @@ mod tests {
     fn literal_matches_survive_every_ascii_and_utf8_chunk_split_exactly_once() {
         for (input, pattern) in [
             ("prefix READY suffix", "READY"),
+            ("prefix [ready] suffix", "[ready]"),
             ("prefix 密码 suffix", "密码"),
         ] {
             for split in 0..=input.len() {

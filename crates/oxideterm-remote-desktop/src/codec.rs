@@ -454,92 +454,105 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frame_event_uses_json_header_with_raw_payload() {
-        let event = RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                RemoteDesktopSize {
-                    width: 1,
-                    height: 1,
-                },
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![1, 2, 3, 4],
-            ),
-        };
-        let mut bytes = Vec::new();
-
-        write_event_line(&mut bytes, &event).unwrap();
-
-        let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
-        let header = std::str::from_utf8(&bytes[..header_end]).unwrap();
-        assert!(header.contains("\"type\":\"frameBinary\""));
-        assert!(header.contains("\"payloadLen\":4"));
-        assert_eq!(&bytes[(header_end + 1)..], &[1, 2, 3, 4]);
-
-        let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
-        assert_eq!(decoded, event);
-    }
-
-    #[test]
-    fn frame_update_batch_uses_one_header_and_contiguous_region_payloads() {
+    fn binary_events_preserve_raw_payloads_and_the_following_json_event() {
         let size = RemoteDesktopSize {
             width: 4,
             height: 1,
         };
-        let event = RemoteDesktopHelperEvent::FrameUpdateBatch {
-            batch: RemoteDesktopFrameUpdateBatch::new(vec![
-                RemoteDesktopFrameUpdate::new(
-                    size,
-                    RemoteDesktopRect::new(0, 0, 1, 1),
-                    RemoteDesktopFrameFormat::Bgra8,
-                    vec![1, 2, 3, 0xff],
-                )
-                .with_graphics_epoch(7)
-                .with_trace_id(42),
-                RemoteDesktopFrameUpdate::new(
-                    size,
-                    RemoteDesktopRect::new(3, 0, 1, 1),
-                    RemoteDesktopFrameFormat::Bgra8,
-                    vec![4, 5, 6, 0xff],
-                )
-                .with_graphics_epoch(7)
-                .with_trace_id(42),
-            ]),
-        };
-        let mut bytes = Vec::new();
-
-        write_event_line(&mut bytes, &event).unwrap();
-
-        let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
-        let header = std::str::from_utf8(&bytes[..header_end]).unwrap();
-        assert!(header.contains("\"type\":\"frameUpdateBatchBinary\""));
-        assert!(header.contains("\"payloadLen\":8"));
-        assert_eq!(&bytes[(header_end + 1)..], &[1, 2, 3, 0xff, 4, 5, 6, 0xff]);
-
-        let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
-        assert_eq!(decoded, event);
-    }
-
-    #[test]
-    fn clipboard_data_event_uses_json_header_with_raw_payload() {
-        let event = RemoteDesktopHelperEvent::ClipboardData {
-            data: RemoteDesktopClipboardData::new(
-                RemoteDesktopClipboardFormat::ImagePng,
+        for (event, header_type, payload) in [
+            (
+                RemoteDesktopHelperEvent::Frame {
+                    frame: RemoteDesktopFrame::new(
+                        RemoteDesktopSize {
+                            width: 1,
+                            height: 1,
+                        },
+                        RemoteDesktopFrameFormat::Rgba8,
+                        vec![1, 2, 3, 4],
+                    ),
+                },
+                "frameBinary",
                 vec![1, 2, 3, 4],
             ),
-        };
-        let mut bytes = Vec::new();
+            (
+                RemoteDesktopHelperEvent::FrameUpdateBatch {
+                    batch: RemoteDesktopFrameUpdateBatch::new(vec![
+                        RemoteDesktopFrameUpdate::new(
+                            size,
+                            RemoteDesktopRect::new(0, 0, 1, 1),
+                            RemoteDesktopFrameFormat::Bgra8,
+                            vec![1, 2, 3, 0xff],
+                        )
+                        .with_graphics_epoch(7)
+                        .with_trace_id(42),
+                        RemoteDesktopFrameUpdate::new(
+                            size,
+                            RemoteDesktopRect::new(3, 0, 1, 1),
+                            RemoteDesktopFrameFormat::Bgra8,
+                            vec![4, 5, 6, 0xff],
+                        )
+                        .with_graphics_epoch(7)
+                        .with_trace_id(42),
+                    ]),
+                },
+                "frameUpdateBatchBinary",
+                vec![1, 2, 3, 0xff, 4, 5, 6, 0xff],
+            ),
+            (
+                RemoteDesktopHelperEvent::ClipboardData {
+                    data: RemoteDesktopClipboardData::new(
+                        RemoteDesktopClipboardFormat::ImagePng,
+                        vec![1, 2, 3, 4],
+                    ),
+                },
+                "clipboardDataBinary",
+                vec![1, 2, 3, 4],
+            ),
+            (
+                RemoteDesktopHelperEvent::FrameUpdate {
+                    update: RemoteDesktopFrameUpdate::new(
+                        RemoteDesktopSize {
+                            width: 4,
+                            height: 4,
+                        },
+                        RemoteDesktopRect::new(1, 1, 1, 1),
+                        RemoteDesktopFrameFormat::Bgra8,
+                        vec![9, 8, 7, 6],
+                    ),
+                },
+                "frameUpdateBinary",
+                vec![9, 8, 7, 6],
+            ),
+        ] {
+            let mut bytes = Vec::new();
+            write_event_line(&mut bytes, &event).unwrap();
+            let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
+            let header: serde_json::Value = serde_json::from_slice(&bytes[..header_end]).unwrap();
+            assert_eq!(header["type"], header_type);
+            assert_eq!(header["payloadLen"], payload.len());
+            if header_type == "clipboardDataBinary" {
+                assert_eq!(header["format"], "image-png");
+            }
+            assert_eq!(&bytes[header_end + 1..], payload, "{header_type}");
 
-        write_event_line(&mut bytes, &event).unwrap();
-
-        let header_end = bytes.iter().position(|byte| *byte == b'\n').unwrap();
-        let header = std::str::from_utf8(&bytes[..header_end]).unwrap();
-        assert!(header.contains("\"type\":\"clipboardDataBinary\""));
-        assert!(header.contains("\"format\":\"image-png\""));
-        assert!(header.contains("\"payloadLen\":4"));
-        assert_eq!(&bytes[(header_end + 1)..], &[1, 2, 3, 4]);
-
-        let decoded = read_event_line(&mut Cursor::new(bytes)).unwrap().unwrap();
-        assert_eq!(decoded, event);
+            let status = RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Connected,
+                message: None,
+            };
+            write_event_line(&mut bytes, &status).unwrap();
+            let mut reader = Cursor::new(bytes);
+            assert_eq!(
+                read_event_line(&mut reader).unwrap(),
+                Some(event),
+                "{header_type}"
+            );
+            assert_eq!(
+                read_event_line(&mut reader).unwrap(),
+                Some(status),
+                "{header_type}"
+            );
+            assert_eq!(read_event_line(&mut reader).unwrap(), None);
+        }
     }
 
     #[test]
@@ -563,32 +576,6 @@ mod tests {
 
         let decoded = read_request_line(&mut Cursor::new(bytes)).unwrap().unwrap();
         assert_eq!(decoded, request);
-    }
-
-    #[test]
-    fn binary_frame_can_be_followed_by_json_event_without_delimiter() {
-        let frame = RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                RemoteDesktopSize {
-                    width: 4,
-                    height: 4,
-                },
-                RemoteDesktopRect::new(1, 1, 1, 1),
-                RemoteDesktopFrameFormat::Bgra8,
-                vec![9, 8, 7, 6],
-            ),
-        };
-        let status = RemoteDesktopHelperEvent::Status {
-            status: RemoteDesktopSessionStatus::Connected,
-            message: None,
-        };
-        let mut bytes = Vec::new();
-        write_event_line(&mut bytes, &frame).unwrap();
-        write_event_line(&mut bytes, &status).unwrap();
-        let mut reader = Cursor::new(bytes);
-
-        assert_eq!(read_event_line(&mut reader).unwrap(), Some(frame));
-        assert_eq!(read_event_line(&mut reader).unwrap(), Some(status));
     }
 
     #[test]

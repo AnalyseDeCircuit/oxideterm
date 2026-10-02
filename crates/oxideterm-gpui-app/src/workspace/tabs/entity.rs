@@ -2338,7 +2338,7 @@ mod tests {
     }
 
     #[test]
-    fn navigation_replay_does_not_create_a_new_history_branch() {
+    fn navigation_replays_prunes_closed_tabs_and_branches_only_on_new_selection() {
         let mut tab_host = WorkspaceTabHostEntity::new();
         let first = TabId(1);
         let second = TabId(2);
@@ -2355,19 +2355,8 @@ mod tests {
         assert_eq!(tab_host.navigate_history(true, &existing), Some(second));
         tab_host.observe_active_tab(Some(second));
         assert_eq!(tab_host.navigate_history(true, &existing), Some(third));
-    }
-
-    #[test]
-    fn navigation_prunes_closed_tabs_and_new_selection_replaces_forward_history() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-        let first = TabId(1);
-        let second = TabId(2);
-        let third = TabId(3);
-        let replacement = TabId(4);
-
-        tab_host.observe_active_tab(Some(first));
-        tab_host.observe_active_tab(Some(second));
         tab_host.observe_active_tab(Some(third));
+        let replacement = TabId(4);
         assert_eq!(
             tab_host.navigate_history(false, &HashSet::from([first, third])),
             Some(first)
@@ -2424,8 +2413,22 @@ mod tests {
     }
 
     #[gpui::test]
-    fn newer_close_process_check_cancels_and_replaces_the_previous_task(cx: &mut TestAppContext) {
+    fn close_process_check_replacement_completion_and_release_preserve_delivery(
+        cx: &mut TestAppContext,
+    ) {
         let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let event_recorder = cx.new(|_| TabHostEventRecorder {
+            events: Vec::new(),
+            _subscription: None,
+        });
+        event_recorder.update(cx, |event_recorder, cx| {
+            event_recorder._subscription = Some(cx.subscribe(
+                &tab_host,
+                |event_recorder, _tab_host, event, _cx| {
+                    event_recorder.events.push(*event);
+                },
+            ));
+        });
         let (first_sender, first_receiver) = tokio::sync::oneshot::channel();
         let (replacement_sender, replacement_receiver) = tokio::sync::oneshot::channel();
         tab_host.update(cx, |tab_host, cx| {
@@ -2459,23 +2462,57 @@ mod tests {
             .send(())
             .expect("current task remains retained");
         cx.run_until_parked();
-
-        let completion = tab_host
-            .update(cx, |tab_host, _| tab_host.take_close_process_completion())
-            .expect("latest close process completion");
+        tab_host.update(cx, |tab_host, _| {
+            let completion = tab_host
+                .take_close_process_completion()
+                .expect("latest close process completion");
+            assert_eq!(
+                completion.request,
+                LocalTerminalCloseCheck::Batch {
+                    tab_ids: vec![TabId(2), TabId(3)]
+                }
+            );
+            assert!(completion.results.is_empty());
+            assert!(!completion.has_foreground_child);
+            assert!(tab_host.take_close_process_completion().is_none());
+        });
         assert_eq!(
-            completion.request,
-            LocalTerminalCloseCheck::Batch {
-                tab_ids: vec![TabId(2), TabId(3)]
-            }
+            event_recorder.read_with(cx, |recorder, _| recorder.events.clone()),
+            vec![WorkspaceTabHostEvent::CloseProcessCheckReady]
         );
-        assert!(completion.results.is_empty());
-        assert!(!completion.has_foreground_child);
-    }
 
-    #[gpui::test]
-    fn entity_release_cancels_close_process_check_without_completion(cx: &mut TestAppContext) {
-        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
+        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
+        tab_host.update(cx, |tab_host, cx| {
+            tab_host.start_close_process_check_with_future(
+                LocalTerminalCloseCheck::Single { tab_id: TabId(7) },
+                async move {
+                    result_receiver.await.expect("single result released");
+                    Vec::new()
+                },
+                cx,
+            );
+        });
+        result_sender.send(()).expect("current task retained");
+        cx.run_until_parked();
+        tab_host.update(cx, |tab_host, _| {
+            let completion = tab_host
+                .take_close_process_completion()
+                .expect("single completion");
+            assert_eq!(
+                completion.request,
+                LocalTerminalCloseCheck::Single { tab_id: TabId(7) }
+            );
+            assert!(tab_host.take_close_process_completion().is_none());
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            event_recorder.read_with(cx, |recorder, _| recorder.events.clone()),
+            vec![
+                WorkspaceTabHostEvent::CloseProcessCheckReady,
+                WorkspaceTabHostEvent::CloseProcessCheckReady,
+            ]
+        );
+
         let completion_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let completion_count_for_task = completion_count.clone();
         let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
@@ -2490,11 +2527,9 @@ mod tests {
                 cx,
             );
         });
-
         drop(tab_host);
         cx.update(|_cx| {});
         cx.run_until_parked();
-
         assert!(
             result_sender.send(()).is_err(),
             "releasing the Entity must cancel its retained check"
@@ -2503,56 +2538,9 @@ mod tests {
             completion_count.load(std::sync::atomic::Ordering::SeqCst),
             0
         );
-    }
-
-    #[gpui::test]
-    fn current_close_process_check_completes_and_notifies_exactly_once(cx: &mut TestAppContext) {
-        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
-        let event_recorder = cx.new(|_| TabHostEventRecorder {
-            events: Vec::new(),
-            _subscription: None,
-        });
-        event_recorder.update(cx, |event_recorder, cx| {
-            event_recorder._subscription = Some(cx.subscribe(
-                &tab_host,
-                |event_recorder, _tab_host, event, _cx| {
-                    event_recorder.events.push(*event);
-                },
-            ));
-        });
-        let (result_sender, result_receiver) = tokio::sync::oneshot::channel();
-        tab_host.update(cx, |tab_host, cx| {
-            tab_host.start_close_process_check_with_future(
-                LocalTerminalCloseCheck::Single { tab_id: TabId(7) },
-                async move {
-                    result_receiver.await.expect("test result released");
-                    Vec::new()
-                },
-                cx,
-            );
-        });
-
-        result_sender.send(()).expect("current task retained");
-        cx.run_until_parked();
-
         assert_eq!(
-            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.clone()),
-            vec![WorkspaceTabHostEvent::CloseProcessCheckReady]
-        );
-        tab_host.update(cx, |tab_host, _cx| {
-            let completion = tab_host
-                .take_close_process_completion()
-                .expect("current completion");
-            assert_eq!(
-                completion.request,
-                LocalTerminalCloseCheck::Single { tab_id: TabId(7) }
-            );
-            assert!(tab_host.take_close_process_completion().is_none());
-        });
-        cx.run_until_parked();
-        assert_eq!(
-            event_recorder.read_with(cx, |event_recorder, _cx| event_recorder.events.len()),
-            1
+            event_recorder.read_with(cx, |recorder, _| recorder.events.len()),
+            2
         );
     }
 
@@ -2790,87 +2778,5 @@ mod tests {
                 detached_window
             );
         });
-    }
-
-    #[gpui::test]
-    fn detached_sftp_and_forward_mount_release_preserves_runtime_owners(cx: &mut TestAppContext) {
-        let sftp_window: AnyWindowHandle = cx.add_window(|_window, _cx| TabHostTestRoot).into();
-        let forwards_window: AnyWindowHandle = cx.add_window(|_window, _cx| TabHostTestRoot).into();
-        let tab_host = cx.new(|_| WorkspaceTabHostEntity::new());
-        let (sftp_tab_id, forwards_tab_id) = tab_host.update(cx, |tab_host, _cx| {
-            let sftp_tab_id = tab_host.alloc_tab_id();
-            let forwards_tab_id = tab_host.alloc_tab_id();
-            tab_host.insert_tab(test_tab(sftp_tab_id, None));
-            tab_host.insert_tab(test_tab(forwards_tab_id, None));
-            (sftp_tab_id, forwards_tab_id)
-        });
-
-        let ssh_registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
-        let node_router = NodeRouter::new(ssh_registry.clone());
-        let node_id = NodeId::new("shared-runtime-node");
-        let config = SshConfig::default();
-        node_router.upsert_node(node_id.clone(), config.clone());
-        let node_consumer = ConnectionConsumer::NodeRouter(node_id.0.clone());
-        let node_handle = ssh_registry.acquire(config.clone(), node_consumer.clone());
-        node_router
-            .bind_connection(&node_id, node_handle.connection_id().to_string())
-            .expect("node binding");
-
-        let sftp_consumer = ConnectionConsumer::Sftp(node_id.0.clone());
-        let sftp_handle = ssh_registry.acquire(config.clone(), sftp_consumer.clone());
-        let forwarding_session = forwards::ForwardingRuntimeService::session_id_for_node(&node_id);
-        let forwarding_consumer = ConnectionConsumer::PortForward(forwarding_session.clone());
-        let forwarding_handle = ssh_registry.acquire(config, forwarding_consumer.clone());
-        let forwarding_registry = ForwardingRegistry::new();
-        forwarding_registry.register(forwarding_session.clone(), forwarding_handle.clone());
-
-        tab_host.update(cx, |tab_host, _cx| {
-            let sftp_mount = tab_host
-                .begin_detach(sftp_tab_id)
-                .expect("SFTP detach reservation");
-            assert!(tab_host.commit_detach(sftp_tab_id, sftp_mount, sftp_window));
-            let forwards_mount = tab_host
-                .begin_detach(forwards_tab_id)
-                .expect("forwards detach reservation");
-            assert!(tab_host.commit_detach(forwards_tab_id, forwards_mount, forwards_window));
-
-            assert!(
-                tab_host
-                    .remove_tab_for_detached_window_release(
-                        sftp_tab_id,
-                        sftp_mount,
-                        sftp_window.window_id(),
-                    )
-                    .is_some()
-            );
-            let forwards_cleanup = tab_host.close_tab_mount(forwards_tab_id);
-            assert_eq!(forwards_cleanup.detached_window, Some(forwards_window));
-        });
-
-        // Native mount cleanup does not own node, transfer, or tunnel teardown.
-        assert_eq!(
-            node_router.connection_id_for_node(&node_id).as_deref(),
-            Some(node_handle.connection_id())
-        );
-        let connection_info = ssh_registry
-            .get(node_handle.connection_id())
-            .expect("shared SSH connection remains registered")
-            .info();
-        assert!(connection_info.consumers.contains(&node_consumer));
-        assert!(connection_info.consumers.contains(&sftp_consumer));
-        assert!(connection_info.consumers.contains(&forwarding_consumer));
-        assert_eq!(sftp_handle.connection_id(), node_handle.connection_id());
-        assert_eq!(
-            forwarding_handle.connection_id(),
-            node_handle.connection_id()
-        );
-        assert_eq!(
-            forwarding_registry
-                .get(&forwarding_session)
-                .expect("forwarding manager survives UI mount release")
-                .ssh_connection_handle()
-                .connection_id(),
-            node_handle.connection_id()
-        );
     }
 }

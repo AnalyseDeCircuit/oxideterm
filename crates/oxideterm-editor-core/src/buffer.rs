@@ -678,23 +678,42 @@ mod tests {
     }
 
     #[test]
-    fn maps_unicode_offsets_to_line_columns() {
-        let buffer = TextBuffer::new("aé\n你b\nlast");
-
-        assert_eq!(
-            buffer.offset_to_line_col(BufferOffset(3)).unwrap(),
-            LineCol::new(0, 3)
-        );
-        assert_eq!(
-            buffer.offset_to_line_col(BufferOffset(4)).unwrap(),
-            LineCol::new(1, 0)
-        );
-        assert_eq!(
-            buffer.line_col_to_offset(LineCol::new(1, 3)).unwrap(),
-            BufferOffset(7)
-        );
-        assert_eq!(buffer.line_count(), 3);
-        assert_eq!(buffer.line_text(1), Some("你b".to_string()));
+    fn unicode_line_index_preserves_byte_columns_and_empty_final_lines() {
+        for (source, lines, char_counts, positions) in [
+            (
+                "aé\n你b\nlast",
+                vec!["aé", "你b", "last"],
+                vec![2, 2, 4],
+                vec![(3, 0, 3), (4, 1, 0), (7, 1, 3)],
+            ),
+            (
+                "aé\n你b\n",
+                vec!["aé", "你b", ""],
+                vec![2, 2, 0],
+                vec![(9, 2, 0)],
+            ),
+        ] {
+            let buffer = TextBuffer::new(source);
+            assert_eq!(buffer.line_char_counts(), char_counts, "{source:?}");
+            assert_eq!(
+                (0..buffer.line_count())
+                    .map(|line| buffer.line_text(line).unwrap())
+                    .collect::<Vec<_>>(),
+                lines
+            );
+            for (offset, line, column) in positions {
+                assert_eq!(
+                    buffer.offset_to_line_col(BufferOffset(offset)).unwrap(),
+                    LineCol::new(line, column)
+                );
+                assert_eq!(
+                    buffer
+                        .line_col_to_offset(LineCol::new(line, column))
+                        .unwrap(),
+                    BufferOffset(offset)
+                );
+            }
+        }
     }
 
     #[test]
@@ -732,21 +751,6 @@ mod tests {
     }
 
     #[test]
-    fn unicode_line_counts_include_empty_final_line_after_trailing_newline() {
-        let buffer = TextBuffer::new("aé\n你b\n");
-
-        assert_eq!(buffer.line_char_counts(), vec![2, 2, 0]);
-        assert_eq!(buffer.line_count(), 3);
-        assert_eq!(buffer.line_text(0), Some("aé".to_string()));
-        assert_eq!(buffer.line_text(1), Some("你b".to_string()));
-        assert_eq!(buffer.line_text(2), Some(String::new()));
-        assert_eq!(
-            buffer.line_col_to_offset(LineCol::new(2, 0)).unwrap(),
-            BufferOffset(9)
-        );
-    }
-
-    #[test]
     fn moves_by_grapheme_boundaries() {
         let buffer = TextBuffer::new("a🇨🇳é");
         let after_a = buffer.next_grapheme_offset(BufferOffset(0));
@@ -761,45 +765,59 @@ mod tests {
     }
 
     #[test]
-    fn applies_multiline_range_edits_and_updates_line_index() {
-        let mut buffer = TextBuffer::new("one\ntwo\nthree");
-
-        buffer
-            .apply_transaction(EditTransaction::single(TextEdit::new(
-                TextRange::new(BufferOffset(4), BufferOffset(7)),
-                "2\nII",
-            )))
-            .unwrap();
-
-        assert_eq!(buffer.text(), "one\n2\nII\nthree");
-        assert_eq!(buffer.line_count(), 4);
-        assert_eq!(buffer.line_text(2), Some("II".to_string()));
-        assert!(buffer.is_dirty());
-    }
-
-    #[test]
-    fn updates_line_index_across_deleted_and_inserted_newlines() {
-        let mut buffer = TextBuffer::new("alpha\nbravo\ncharlie\ndelta");
-
-        buffer
-            .apply_transaction(EditTransaction::single(TextEdit::new(
-                TextRange::new(BufferOffset(8), BufferOffset(20)),
-                "R\nS\nT\n",
-            )))
-            .unwrap();
-
-        assert_eq!(buffer.text(), "alpha\nbrR\nS\nT\ndelta");
-        assert_eq!(buffer.line_count(), 5);
-        assert_eq!(buffer.line_text(1), Some("brR".to_string()));
-        assert_eq!(buffer.line_text(2), Some("S".to_string()));
-        assert_eq!(buffer.line_text(3), Some("T".to_string()));
-        assert_eq!(buffer.line_text(4), Some("delta".to_string()));
-        assert_eq!(
-            buffer
-                .offset_to_line_col(BufferOffset(buffer.len()))
-                .unwrap(),
-            LineCol::new(4, 5)
-        );
+    fn multiline_transactions_keep_line_indexes_and_saved_state_through_undo_redo() {
+        for (initial, edits, expected, lines) in [
+            (
+                "one\ntwo\nthree",
+                vec![(4, 7, "2\nII")],
+                "one\n2\nII\nthree",
+                vec!["one", "2", "II", "three"],
+            ),
+            (
+                "alpha\nbravo\ncharlie\ndelta",
+                vec![(8, 20, "R\nS\nT\n")],
+                "alpha\nbrR\nS\nT\ndelta",
+                vec!["alpha", "brR", "S", "T", "delta"],
+            ),
+            (
+                "alpha\nbeta\ngamma",
+                vec![(0, 5, "A"), (11, 11, "B2\n")],
+                "A\nbeta\nB2\ngamma",
+                vec!["A", "beta", "B2", "gamma"],
+            ),
+        ] {
+            let mut buffer = TextBuffer::new(initial);
+            buffer.mark_saved();
+            let transaction = EditTransaction::new(
+                edits
+                    .into_iter()
+                    .map(|(start, end, text)| {
+                        TextEdit::new(TextRange::new(BufferOffset(start), BufferOffset(end)), text)
+                    })
+                    .collect(),
+            );
+            buffer.apply_transaction(transaction).unwrap();
+            assert_eq!(buffer.text(), expected, "{initial}");
+            assert!(buffer.is_dirty());
+            assert_eq!(
+                (0..buffer.line_count())
+                    .map(|line| buffer.line_text(line).unwrap())
+                    .collect::<Vec<_>>(),
+                lines
+            );
+            assert_eq!(
+                buffer
+                    .offset_to_line_col(BufferOffset(buffer.len()))
+                    .unwrap(),
+                LineCol::new(lines.len() - 1, lines.last().unwrap().len())
+            );
+            assert!(buffer.undo().unwrap());
+            assert_eq!(buffer.text(), initial);
+            assert!(!buffer.is_dirty());
+            assert!(buffer.redo().unwrap());
+            assert_eq!(buffer.text(), expected);
+            assert!(buffer.is_dirty());
+        }
     }
 
     #[test]
@@ -835,29 +853,6 @@ mod tests {
 
         assert_eq!(buffer.text(), "hello OxideTerm");
         assert_eq!(next_selection, Selection::caret(BufferOffset(15)));
-    }
-
-    #[test]
-    fn undo_redo_restores_multiline_transaction() {
-        let mut buffer = TextBuffer::new("alpha\nbeta\ngamma");
-        buffer.mark_saved();
-
-        buffer
-            .apply_transaction(EditTransaction::new(vec![
-                TextEdit::new(TextRange::new(BufferOffset(0), BufferOffset(5)), "A"),
-                TextEdit::insert(BufferOffset(11), "B2\n"),
-            ]))
-            .unwrap();
-        assert_eq!(buffer.text(), "A\nbeta\nB2\ngamma");
-        assert!(buffer.is_dirty());
-
-        assert!(buffer.undo().unwrap());
-        assert_eq!(buffer.text(), "alpha\nbeta\ngamma");
-        assert!(!buffer.is_dirty());
-
-        assert!(buffer.redo().unwrap());
-        assert_eq!(buffer.text(), "A\nbeta\nB2\ngamma");
-        assert!(buffer.is_dirty());
     }
 
     #[test]

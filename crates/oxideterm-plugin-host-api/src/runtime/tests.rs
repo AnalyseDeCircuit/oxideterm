@@ -63,26 +63,28 @@ fn process_decoder_classifies_sync_password_frames_before_typed_queues() {
 }
 
 #[test]
-fn process_decoder_rejects_malformed_sensitive_frames() {
-    let error = decode_process_output_frame(
-        r#"{"protocolVersion":1,"payload":{"type":"callHostApi","namespace":"sync","method":"previewImport","args":{"password":"sensitive-value"}}}"#,
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, "process_outbound_decode_failed");
-    assert!(!error.message.contains("sensitive-value"));
-}
-
-#[test]
-fn process_decoder_rejects_sensitive_frames_with_unknown_version() {
-    let error = decode_process_output_frame(
-        r#"{"protocolVersion":2,"payload":{"type":"callHostApi","requestId":"sync-1","namespace":"sync","method":"exportOxide","args":{"password":"sensitive-value"}}}"#,
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, "unsupported_protocol_version");
-    assert!(!error.recoverable);
-    assert!(!error.message.contains("sensitive-value"));
+fn process_decoder_rejects_invalid_sensitive_frames_without_disclosure() {
+    for (scenario, frame, code, recoverable) in [
+        (
+            "missing request ID",
+            r#"{"protocolVersion":1,"payload":{"type":"callHostApi","namespace":"sync","method":"previewImport","args":{"password":"sensitive-value"}}}"#,
+            "process_outbound_decode_failed",
+            None,
+        ),
+        (
+            "unknown protocol version",
+            r#"{"protocolVersion":2,"payload":{"type":"callHostApi","requestId":"sync-1","namespace":"sync","method":"exportOxide","args":{"password":"sensitive-value"}}}"#,
+            "unsupported_protocol_version",
+            Some(false),
+        ),
+    ] {
+        let error = decode_process_output_frame(frame).unwrap_err();
+        assert_eq!(error.code, code, "{scenario}");
+        if let Some(expected) = recoverable {
+            assert_eq!(error.recoverable, expected, "{scenario}");
+        }
+        assert!(!error.message.contains("sensitive-value"), "{scenario}");
+    }
 }
 
 #[test]
@@ -119,7 +121,7 @@ fn runtime_activate_request_uses_versioned_wire_fields() {
 }
 
 #[test]
-fn process_runtime_entry_resolves_inside_plugin_dir() {
+fn process_runtime_entry_is_confined_to_plugin_directory() {
     let temp_dir = unique_temp_dir("plugin-process-entry");
     let plugin_dir = temp_dir.join("plugin");
     let bin_dir = plugin_dir.join("bin");
@@ -128,31 +130,19 @@ fn process_runtime_entry_resolves_inside_plugin_dir() {
 
     let resolved = resolve_process_runtime_entry(&plugin_dir, "bin/plugin").unwrap();
     assert!(resolved.starts_with(fs::canonicalize(&plugin_dir).unwrap()));
-}
-
-#[test]
-fn process_runtime_entry_rejects_path_traversal() {
-    let temp_dir = unique_temp_dir("plugin-process-traversal");
-    let plugin_dir = temp_dir.join("plugin");
-    fs::create_dir_all(&plugin_dir).unwrap();
-
     let error = resolve_process_runtime_entry(&plugin_dir, "../outside").unwrap_err();
     assert_eq!(error.code, "invalid_process_entry");
-}
 
-#[cfg(unix)]
-#[test]
-fn process_runtime_entry_rejects_symlink_escape() {
-    let temp_dir = unique_temp_dir("plugin-process-symlink");
-    let plugin_dir = temp_dir.join("plugin");
-    let outside_dir = temp_dir.join("outside");
-    fs::create_dir_all(&plugin_dir).unwrap();
-    fs::create_dir_all(&outside_dir).unwrap();
-    fs::write(outside_dir.join("runner"), b"#!/bin/sh\n").unwrap();
-    std::os::unix::fs::symlink(outside_dir.join("runner"), plugin_dir.join("runner")).unwrap();
+    #[cfg(unix)]
+    {
+        let outside_dir = temp_dir.join("outside");
+        fs::create_dir_all(&outside_dir).unwrap();
+        fs::write(outside_dir.join("runner"), b"#!/bin/sh\n").unwrap();
+        std::os::unix::fs::symlink(outside_dir.join("runner"), plugin_dir.join("runner")).unwrap();
 
-    let error = resolve_process_runtime_entry(&plugin_dir, "runner").unwrap_err();
-    assert_eq!(error.code, "process_entry_escapes_plugin_dir");
+        let error = resolve_process_runtime_entry(&plugin_dir, "runner").unwrap_err();
+        assert_eq!(error.code, "process_entry_escapes_plugin_dir");
+    }
 }
 
 #[cfg(feature = "wasm-runtime")]

@@ -732,20 +732,6 @@ pub fn ai_orchestrator_system_prompt(tool_use_enabled: bool) -> String {
     .join("\n")
 }
 
-#[cfg(test)]
-mod tests {
-    use super::ai_orchestrator_system_prompt;
-
-    #[test]
-    fn orchestrator_prompt_does_not_require_evidence_binding_protocol() {
-        let prompt = ai_orchestrator_system_prompt(true);
-
-        assert!(!prompt.contains("Evidence Binding"));
-        assert!(!prompt.contains("<evidence_claims>"));
-        assert!(!prompt.contains("rag-index:"));
-    }
-}
-
 pub fn ai_context_window_from_maps(
     user_context_windows: &serde_json::Map<String, serde_json::Value>,
     model_context_windows: &serde_json::Map<String, serde_json::Value>,

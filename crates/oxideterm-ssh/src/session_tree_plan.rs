@@ -228,25 +228,6 @@ mod tests {
     }
 
     #[test]
-    fn session_tree_connect_step_separates_verified_preflight_from_accepted_fingerprint() {
-        let step = NativeSessionTreeConnectStep {
-            node_id: node_id("hop-1"),
-            host: "jump-a".to_string(),
-            port: 22,
-            trust_host_key: Some(false),
-            expected_host_key_fingerprint: None,
-            preflight_verified: false,
-        };
-        assert!(!step.has_accepted_host_key());
-        assert!(!step.can_connect_without_preflight());
-
-        assert!(
-            step.with_accepted_host_key(false, "SHA256:test")
-                .has_accepted_host_key()
-        );
-    }
-
-    #[test]
     fn session_tree_connect_plan_preflights_each_hop_in_order_and_completes() {
         let mut plan = NativeSessionTreeConnectPlan::from_expansion(
             &expansion(),
@@ -257,6 +238,7 @@ mod tests {
 
         assert_eq!(plan.target_node_id, node_id("target"));
         assert_eq!(plan.cleanup_root_node_id(), Some(node_id("target")));
+        plan.steps[0].trust_host_key = Some(false);
         for (id, host, port) in [
             ("hop-1", "jump-a", 22),
             ("hop-2", "jump-b", 2200),

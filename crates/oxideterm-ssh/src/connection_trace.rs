@@ -101,22 +101,6 @@ pub struct ConnectionTraceState {
 }
 
 impl ConnectionTraceState {
-    pub fn plan_for_path(
-        &mut self,
-        mode: ConnectionTraceMode,
-        path: &[(NodeId, bool)],
-    ) -> Option<ConnectionTracePlan> {
-        let start_index = path.iter().position(|(_, ready)| !ready)?;
-        Some(ConnectionTracePlan {
-            attempt_id: self.next_attempt_id(),
-            mode,
-            node_ids: path[start_index..]
-                .iter()
-                .map(|(node_id, _)| node_id.clone())
-                .collect(),
-        })
-    }
-
     pub fn begin(
         &mut self,
         node_id: NodeId,
@@ -306,21 +290,6 @@ pub fn server_offers_legacy_cipher(algorithms: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn plan_starts_at_first_unready_node() {
-        let mut state = ConnectionTraceState::default();
-        let path = [
-            (NodeId("parent".into()), true),
-            (NodeId("target".into()), false),
-        ];
-
-        let plan = state
-            .plan_for_path(ConnectionTraceMode::Connect, &path)
-            .expect("unready target should produce a trace plan");
-
-        assert_eq!(plan.node_ids, [NodeId("target".into())]);
-    }
 
     #[test]
     fn parses_algorithm_negotiation_lists_from_transport_error() {

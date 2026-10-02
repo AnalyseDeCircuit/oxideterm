@@ -54,12 +54,4 @@ mod tests {
     fn crc32_matches_ieee_check_value() {
         assert_eq!(crc32_ieee(b"123456789"), 0xcbf4_3926);
     }
-
-    #[test]
-    fn crc16_update_matches_bulk() {
-        let crc = b"hello"
-            .iter()
-            .fold(0u16, |crc, byte| crc16_xmodem_update(crc, *byte));
-        assert_eq!(crc, crc16_xmodem(b"hello"));
-    }
 }

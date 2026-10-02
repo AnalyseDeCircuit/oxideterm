@@ -1366,62 +1366,57 @@ mod tests {
     }
 
     #[test]
-    fn x11_options_import_trust_and_compound_timeout() {
-        let blocks = vec![block(
-            &["workstation"],
-            SshHostOptions {
-                forward_x11: Some("yes".to_string()),
-                forward_x11_trusted: Some("yes".to_string()),
-                forward_x11_timeout: Some("1h30m".to_string()),
+    fn x11_host_options_preserve_safe_defaults_and_openssh_timeout_semantics() {
+        for (enabled, trusted, timeout, expected) in [
+            (
+                Some("yes"),
+                Some("yes"),
+                Some("1h30m"),
+                Some(ConnectionX11ForwardingOptions {
+                    enabled: true,
+                    mode: ConnectionX11ForwardingMode::Trusted,
+                    untrusted_timeout_seconds: 5400,
+                }),
+            ),
+            (
+                None,
+                None,
+                None,
+                Some(ConnectionX11ForwardingOptions {
+                    enabled: false,
+                    mode: ConnectionX11ForwardingMode::Untrusted,
+                    untrusted_timeout_seconds: crate::DEFAULT_X11_UNTRUSTED_TIMEOUT_SECONDS,
+                }),
+            ),
+            (
+                Some("yes"),
+                None,
+                Some("0"),
+                Some(ConnectionX11ForwardingOptions {
+                    enabled: true,
+                    mode: ConnectionX11ForwardingMode::Untrusted,
+                    untrusted_timeout_seconds: 0,
+                }),
+            ),
+            (Some("yes"), None, Some("18446744073709551615w"), None),
+        ] {
+            let options = SshHostOptions {
+                forward_x11: enabled.map(str::to_string),
+                forward_x11_trusted: trusted.map(str::to_string),
+                forward_x11_timeout: timeout.map(str::to_string),
                 ..SshHostOptions::default()
-            },
-        )];
-
-        let host = resolve_ssh_config_host("workstation", &blocks).unwrap();
-
-        assert!(host.x11_forwarding.enabled);
-        assert_eq!(
-            host.x11_forwarding.mode,
-            ConnectionX11ForwardingMode::Trusted
-        );
-        assert_eq!(host.x11_forwarding.untrusted_timeout_seconds, 5_400);
-    }
-
-    #[test]
-    fn x11_options_default_to_disabled_untrusted_policy() {
-        let host = resolve_ssh_config_host(
-            "workstation",
-            &[block(&["workstation"], SshHostOptions::default())],
-        )
-        .unwrap();
-
-        assert_eq!(
-            host.x11_forwarding,
-            ConnectionX11ForwardingOptions::default()
-        );
-    }
-
-    #[test]
-    fn x11_options_preserve_openssh_connection_lifetime_timeout() {
-        let blocks = vec![block(
-            &["workstation"],
-            SshHostOptions {
-                forward_x11: Some("yes".to_string()),
-                forward_x11_timeout: Some("0".to_string()),
-                ..SshHostOptions::default()
-            },
-        )];
-
-        let host = resolve_ssh_config_host("workstation", &blocks).unwrap();
-
-        assert!(host.x11_forwarding.enabled);
-        assert_eq!(host.x11_forwarding.untrusted_timeout_seconds, 0);
-    }
-
-    #[test]
-    fn x11_timeout_accepts_openssh_zero_and_rejects_overflow() {
-        assert_eq!(parse_ssh_time_seconds("0").unwrap(), 0);
-        assert!(parse_ssh_time_seconds("18446744073709551615w").is_err());
+            };
+            let result =
+                resolve_ssh_config_host("workstation", &[block(&["workstation"], options)]);
+            match expected {
+                Some(expected) => assert_eq!(
+                    result.unwrap().x11_forwarding,
+                    expected,
+                    "timeout {timeout:?}"
+                ),
+                None => assert!(result.is_err(), "overflowing timeout must reject the host"),
+            }
+        }
     }
 
     #[test]

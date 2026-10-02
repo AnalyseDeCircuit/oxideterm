@@ -3679,45 +3679,14 @@ mod tests {
     }
 
     #[gpui::test]
-    fn selection_follows_output_into_scrollback(cx: &mut TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
-        let pane = cx.update(|window, cx| {
-            cx.new(|cx| {
-                TerminalPane::new_recording_playback(
-                    20,
-                    3,
-                    TerminalUiPreferences::default(),
-                    window,
-                    cx,
-                )
-                .unwrap()
-            })
-        });
-        pane.update(cx, |pane, _cx| {
-            pane.terminal
-                .lock()
-                .feed_recording_output(b"selected\r\nsecond\r\nthird");
-            let snapshot = pane.terminal.lock().snapshot();
-            pane.snapshot = pane.stamp_snapshot(snapshot);
-            pane.set_selection(Some(TerminalSelection {
-                anchor: TerminalGridPoint { line: 0, col: 0 },
-                head: TerminalGridPoint { line: 0, col: 7 },
-                mode: TerminalSelectionMode::Simple,
-            }));
-            pane.terminal.lock().feed_recording_output(b"\r\nfourth");
-            let snapshot = pane.terminal.lock().snapshot();
-            pane.snapshot = pane.stamp_snapshot(snapshot);
-            assert_eq!(pane.selected_text_snapshot().as_deref(), Some("selected"));
-            assert_eq!(pane.selection.unwrap().anchor.line, -1);
-        });
-    }
+    fn selections_keep_their_direction_and_corners_while_output_scrolls(cx: &mut TestAppContext) {
+        use TerminalSelectionMode::{Block, Simple};
 
-    #[gpui::test]
-    fn reversed_selections_keep_their_corners_while_output_scrolls(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
-        for (mode, expected) in [
-            (TerminalSelectionMode::Simple, "bcde\nfghi"),
-            (TerminalSelectionMode::Block, "bcd\nghi"),
+        for (mode, anchor, head, shifted_anchor, shifted_head, expected) in [
+            (Simple, (0, 0), (0, 4), (-1, 0), (-1, 4), "abcde"),
+            (Simple, (1, 3), (0, 1), (0, 3), (-1, 1), "bcde\nfghi"),
+            (Block, (1, 3), (0, 1), (0, 3), (-1, 1), "bcd\nghi"),
         ] {
             let pane = cx.update(|window, cx| {
                 cx.new(|cx| {
@@ -3738,8 +3707,14 @@ mod tests {
                 let snapshot = pane.terminal.lock().snapshot();
                 pane.snapshot = pane.stamp_snapshot(snapshot);
                 pane.set_selection(Some(TerminalSelection {
-                    anchor: TerminalGridPoint { line: 1, col: 3 },
-                    head: TerminalGridPoint { line: 0, col: 1 },
+                    anchor: TerminalGridPoint {
+                        line: anchor.0,
+                        col: anchor.1,
+                    },
+                    head: TerminalGridPoint {
+                        line: head.0,
+                        col: head.1,
+                    },
                     mode,
                 }));
                 pane.terminal.lock().feed_recording_output(b"\r\npqrst");
@@ -3747,11 +3722,17 @@ mod tests {
                 pane.snapshot = pane.stamp_snapshot(snapshot);
                 assert_eq!(
                     pane.selection.unwrap().anchor,
-                    TerminalGridPoint { line: 0, col: 3 }
+                    TerminalGridPoint {
+                        line: shifted_anchor.0,
+                        col: shifted_anchor.1,
+                    }
                 );
                 assert_eq!(
                     pane.selection.unwrap().head,
-                    TerminalGridPoint { line: -1, col: 1 }
+                    TerminalGridPoint {
+                        line: shifted_head.0,
+                        col: shifted_head.1,
+                    }
                 );
                 assert_eq!(pane.selected_text_snapshot().as_deref(), Some(expected));
             });

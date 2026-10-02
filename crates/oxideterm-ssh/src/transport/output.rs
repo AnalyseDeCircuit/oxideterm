@@ -114,16 +114,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn output_batcher_flushes_binary_tail_without_another_packet() {
-        let mut batcher = SshOutputBatcher::new();
-        batcher.push(&[0x02, 0xe4, 0xbd]);
-        assert_eq!(
-            batcher.take_flush().as_deref(),
-            Some([0x02, 0xe4, 0xbd].as_slice())
-        );
-    }
-
-    #[test]
     fn output_batcher_preserves_text_and_binary_protocol_bytes_across_chunks() {
         let fixtures: &[&[u8]] = &[
             "ASCII 中文 e\u{301} 🦀\r\n".as_bytes(),

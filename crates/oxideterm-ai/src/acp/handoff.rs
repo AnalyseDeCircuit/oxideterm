@@ -315,29 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn message_backend_provenance_round_trips_without_message_content() {
-        let mut conversation = conversation(vec![message(
-            "provider-user",
-            AiChatRole::User,
-            "private conversation text",
-            1,
-        )]);
-        let expected = provenance(AiMessageBackendKind::Provider, "openai");
-
-        assert!(store_ai_message_backend_provenance(
-            &mut conversation,
-            "provider-user",
-            expected.clone(),
-        ));
-        assert_eq!(
-            ai_message_backend_provenance(&conversation, "provider-user"),
-            Some(expected)
-        );
-        let serialized = serde_json::to_string(&conversation.session_metadata).expect("metadata");
-        assert!(!serialized.contains("private conversation text"));
-    }
-
-    #[test]
     fn backend_provenance_and_handoff_cursor_survive_persistence_sanitization() {
         let directory = tempfile::tempdir().expect("temporary persistence directory");
         let store = AiChatPersistenceStore::new(directory.path().join("chat_history.redb"));
@@ -402,62 +379,55 @@ mod tests {
     }
 
     #[test]
-    fn handoff_includes_only_external_messages_after_the_cursor() {
-        let mut conversation = conversation(vec![
-            message("acp-old", AiChatRole::Assistant, "known", 1),
-            message("provider-user", AiChatRole::User, "question", 2),
-            message("provider-answer", AiChatRole::Assistant, "answer", 3),
-            message("current-user", AiChatRole::User, "continue", 4),
-        ]);
-        assert!(store_ai_message_backend_provenance(
-            &mut conversation,
-            "acp-old",
-            provenance(AiMessageBackendKind::Acp, "codex"),
-        ));
-        assert!(store_ai_message_backend_provenance(
-            &mut conversation,
-            "provider-user",
-            provenance(AiMessageBackendKind::Provider, "openai"),
-        ));
-        assert!(store_ai_message_backend_provenance(
-            &mut conversation,
-            "provider-answer",
-            provenance(AiMessageBackendKind::Provider, "openai"),
-        ));
-        let cursor = acp_conversation_handoff_cursor(&conversation, "acp-old").expect("cursor");
-
-        let handoff = build_acp_conversation_handoff(&conversation, "current-user", Some(&cursor))
-            .expect("handoff");
-
-        assert!(handoff.contains("question"));
-        assert!(handoff.contains("answer"));
-        assert!(!handoff.contains("\"content\":\"known\""));
-        assert!(!handoff.contains("continue"));
-    }
-
-    #[test]
-    fn failed_acp_turn_after_the_cursor_is_replayed_on_retry() {
-        let mut conversation = conversation(vec![
-            message("acp-success", AiChatRole::Assistant, "known", 1),
-            message("failed-user", AiChatRole::User, "retry this request", 2),
-            message("failed-assistant", AiChatRole::Assistant, "failed", 3),
-            message("current-user", AiChatRole::User, "continue", 4),
-        ]);
-        for message_id in ["acp-success", "failed-user", "failed-assistant"] {
-            assert!(store_ai_message_backend_provenance(
-                &mut conversation,
-                message_id,
-                provenance(AiMessageBackendKind::Acp, "codex"),
-            ));
+    fn handoff_replays_provider_and_failed_acp_turns_after_the_cursor() {
+        for (kind, backend_id, question, answer, expected_backend) in [
+            (
+                AiMessageBackendKind::Provider,
+                "openai",
+                "question",
+                "answer",
+                "provider:openai",
+            ),
+            (
+                AiMessageBackendKind::Acp,
+                "codex",
+                "retry this request",
+                "failed",
+                "acp:codex",
+            ),
+        ] {
+            let mut conversation = conversation(vec![
+                message("old", AiChatRole::Assistant, "known", 1),
+                message("user", AiChatRole::User, question, 2),
+                message("answer", AiChatRole::Assistant, answer, 3),
+                message("current-user", AiChatRole::User, "continue", 4),
+            ]);
+            let backend = provenance(kind, backend_id);
+            for (id, provenance) in [
+                ("old", provenance(AiMessageBackendKind::Acp, "codex")),
+                ("user", backend.clone()),
+                ("answer", backend),
+            ] {
+                assert!(store_ai_message_backend_provenance(
+                    &mut conversation,
+                    id,
+                    provenance
+                ));
+            }
+            let cursor = acp_conversation_handoff_cursor(&conversation, "old").expect("cursor");
+            let handoff =
+                build_acp_conversation_handoff(&conversation, "current-user", Some(&cursor))
+                    .expect("handoff");
+            for content in [question, answer] {
+                assert!(
+                    handoff.contains(&format!("\"content\":\"{content}\"")),
+                    "{expected_backend}: {content}"
+                );
+            }
+            assert!(handoff.contains(&format!("\"backend\":\"{expected_backend}\"")));
+            assert!(!handoff.contains("\"content\":\"known\""));
+            assert!(!handoff.contains("continue"));
         }
-        let cursor = acp_conversation_handoff_cursor(&conversation, "acp-success").expect("cursor");
-
-        let handoff = build_acp_conversation_handoff(&conversation, "current-user", Some(&cursor))
-            .expect("handoff");
-
-        assert!(handoff.contains("retry this request"));
-        assert!(handoff.contains("\"backend\":\"acp:codex\""));
-        assert!(!handoff.contains("\"content\":\"known\""));
     }
 
     #[test]

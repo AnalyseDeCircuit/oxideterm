@@ -324,56 +324,35 @@ fn parses_and_highlights_all_supported_languages() {
 
 #[test]
 fn markdown_inline_code_highlights_paired_delimiters_symmetrically() {
-    let source = "Run `cargo check` before saving.";
-    let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
-    let spans = session.highlight_spans(source);
-    let opening_delimiter = source.find('`').unwrap();
-    let closing_delimiter = source.rfind('`').unwrap();
-
-    assert!(spans.iter().any(|span| {
-        span.scope == SyntaxScope::String
-            && span.range.start.0 == opening_delimiter
-            && span.range.end.0 == opening_delimiter + 1
-    }));
-    assert!(spans.iter().any(|span| {
-        span.scope == SyntaxScope::String
-            && span.range.start.0 == closing_delimiter
-            && span.range.end.0 == closing_delimiter + 1
-    }));
-    assert!(spans.iter().any(|span| {
-        span.scope == SyntaxScope::String
-            && span.range.start.0 == opening_delimiter + 1
-            && span.range.end.0 == closing_delimiter
-    }));
-    assert!(!spans.iter().any(|span| {
-        span.scope == SyntaxScope::Punctuation
-            && (span.range.start.0 == opening_delimiter || span.range.start.0 == closing_delimiter)
-    }));
-}
-
-#[test]
-fn markdown_inline_code_preserves_multi_backtick_delimiter_widths() {
-    let source = "Run ``cargo `check`` before saving.";
-    let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
-    let spans = session.highlight_spans(source);
-    let opening_delimiter = source.find("``").unwrap();
-    let closing_delimiter = source.rfind("``").unwrap();
-
-    assert!(spans.iter().any(|span| {
-        span.scope == SyntaxScope::String
-            && span.range.start.0 == opening_delimiter
-            && span.range.end.0 == opening_delimiter + 2
-    }));
-    assert!(spans.iter().any(|span| {
-        span.scope == SyntaxScope::String
-            && span.range.start.0 == closing_delimiter
-            && span.range.end.0 == closing_delimiter + 2
-    }));
-    assert!(spans.iter().any(|span| {
-        span.scope == SyntaxScope::String
-            && span.range.start.0 == opening_delimiter + 2
-            && span.range.end.0 == closing_delimiter
-    }));
+    for (source, delimiter) in [
+        ("Run `cargo check` before saving.", "`"),
+        ("Run ``cargo `check`` before saving.", "``"),
+    ] {
+        let session = SyntaxSession::parse(LanguageId::Markdown, source).unwrap();
+        let spans = session.highlight_spans(source);
+        let opening = source.find(delimiter).unwrap();
+        let closing = source.rfind(delimiter).unwrap();
+        for range in [
+            opening..opening + delimiter.len(),
+            opening + delimiter.len()..closing,
+            closing..closing + delimiter.len(),
+        ] {
+            assert!(
+                spans.contains(&HighlightSpan {
+                    range: TextRange::new(BufferOffset(range.start), BufferOffset(range.end)),
+                    scope: SyntaxScope::String,
+                }),
+                "missing literal range {range:?} in {source}"
+            );
+        }
+        assert!(
+            !spans.iter().any(|span| {
+                span.scope == SyntaxScope::Punctuation
+                    && (span.range.start.0 == opening || span.range.start.0 == closing)
+            }),
+            "delimiter classified as punctuation in {source}"
+        );
+    }
 }
 
 #[test]

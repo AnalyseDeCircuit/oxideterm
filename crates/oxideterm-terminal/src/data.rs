@@ -141,7 +141,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_snapshot_reuses_equal_row_cell_buffers() {
+    fn terminal_snapshot_reuses_only_equal_row_cell_buffers() {
         let mut previous_row = TerminalRow {
             line_id: 1,
             source_id: 0,
@@ -152,17 +152,6 @@ mod tests {
             signature: 0,
         };
         previous_row.refresh_signature();
-
-        let mut next_row = TerminalRow {
-            line_id: 1,
-            source_id: 0,
-            absolute_line: 0,
-            cells: Arc::new(vec![test_cell('a')]),
-            wrapped: false,
-            active_input: false,
-            signature: 0,
-        };
-        next_row.refresh_signature();
 
         let previous = TerminalSnapshot {
             generation: 1,
@@ -176,54 +165,23 @@ mod tests {
             lines: vec![previous_row],
             images: Vec::new(),
         };
-        let mut next = previous.clone().with_generation(0);
-        next.lines = vec![next_row];
+        for (ch, expected_reused) in [('a', 1), ('b', 0)] {
+            let mut next = previous.clone().with_generation(0);
+            next.lines[0].cells = Arc::new(vec![test_cell(ch)]);
+            next.lines[0].refresh_signature();
 
-        assert_eq!(next.reuse_unchanged_rows_from(&previous), 1);
-        assert!(Arc::ptr_eq(&next.lines[0].cells, &previous.lines[0].cells));
-    }
-
-    #[test]
-    fn terminal_snapshot_keeps_changed_row_cell_buffers_separate() {
-        let mut previous_row = TerminalRow {
-            line_id: 1,
-            source_id: 0,
-            absolute_line: 0,
-            cells: Arc::new(vec![test_cell('a')]),
-            wrapped: false,
-            active_input: false,
-            signature: 0,
-        };
-        previous_row.refresh_signature();
-
-        let mut next_row = TerminalRow {
-            line_id: 1,
-            source_id: 0,
-            absolute_line: 0,
-            cells: Arc::new(vec![test_cell('b')]),
-            wrapped: false,
-            active_input: false,
-            signature: 0,
-        };
-        next_row.refresh_signature();
-
-        let previous = TerminalSnapshot {
-            generation: 1,
-            cols: 1,
-            rows: 1,
-            cursor_col: 0,
-            cursor_row: 0,
-            cursor_shape: TerminalCursorShape::Block,
-            display_offset: 0,
-            scrollback_lines: 0,
-            lines: vec![previous_row],
-            images: Vec::new(),
-        };
-        let mut next = previous.clone().with_generation(0);
-        next.lines = vec![next_row];
-
-        assert_eq!(next.reuse_unchanged_rows_from(&previous), 0);
-        assert!(!Arc::ptr_eq(&next.lines[0].cells, &previous.lines[0].cells));
+            assert_eq!(
+                next.reuse_unchanged_rows_from(&previous),
+                expected_reused,
+                "{ch}"
+            );
+            assert_eq!(
+                Arc::ptr_eq(&next.lines[0].cells, &previous.lines[0].cells),
+                expected_reused == 1,
+                "{ch}"
+            );
+            assert_eq!(next.lines[0].cells[0].ch, ch);
+        }
     }
 
     #[test]

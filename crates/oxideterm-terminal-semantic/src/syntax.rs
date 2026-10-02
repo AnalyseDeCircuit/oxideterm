@@ -122,26 +122,34 @@ mod tests {
     }
 
     #[test]
-    fn bash_parser_colors_compound_shell_syntax_after_a_prompt() {
-        let text = "user@host:~$ if [ -f \"$HOME/app.log\" ]; then echo ok; fi";
-        let matches = matched(text, SemanticShellDialect::Bash);
-
-        assert!(matches.contains(&("if", SemanticClass::Keyword)));
-        assert!(matches.contains(&("\"$HOME/app.log\"", SemanticClass::String)));
-        assert!(matches.contains(&("echo", SemanticClass::Command)));
-        assert!(matches.contains(&(";", SemanticClass::Operator)));
-    }
-
-    #[test]
-    fn bash_parser_colors_pipeline_and_redirection_operators() {
-        let text = "ps aux | grep node && echo done > result.log";
-        let matches = matched(text, SemanticShellDialect::Bash);
-
-        for operator in ["|", "&&", ">"] {
-            assert!(
-                matches.contains(&(operator, SemanticClass::Operator)),
-                "missing operator {operator:?} in {matches:?}"
-            );
+    fn bash_parser_preserves_prompt_boundaries_and_shell_token_classes() {
+        use SemanticClass::{Command, Keyword, Operator, String};
+        for (text, expected) in [
+            (
+                "user@host:~$ if [ -f \"$HOME/app.log\" ]; then echo ok; fi",
+                &[
+                    ("if", Keyword),
+                    ("\"$HOME/app.log\"", String),
+                    ("echo", Command),
+                    (";", Operator),
+                ][..],
+            ),
+            (
+                "ps aux | grep node && echo done > result.log",
+                &[("|", Operator), ("&&", Operator), (">", Operator)][..],
+            ),
+            (
+                "echo \"price $ 5\"",
+                &[("echo", Command), ("\"price $ 5\"", String)][..],
+            ),
+        ] {
+            let matches = matched(text, SemanticShellDialect::Bash);
+            for token in expected {
+                assert!(
+                    matches.contains(token),
+                    "missing {token:?} in {text:?}: {matches:?}"
+                );
+            }
         }
     }
 
@@ -157,14 +165,5 @@ mod tests {
             value.contains("$env:TEMP") && *class == SemanticClass::Variable
         }));
         assert!(matches.contains(&("'logs'", SemanticClass::String)));
-    }
-
-    #[test]
-    fn prompt_detection_does_not_cut_a_marker_inside_a_command_string() {
-        let text = "echo \"price $ 5\"";
-        let matches = matched(text, SemanticShellDialect::Bash);
-
-        assert!(matches.contains(&("echo", SemanticClass::Command)));
-        assert!(matches.contains(&("\"price $ 5\"", SemanticClass::String)));
     }
 }

@@ -163,93 +163,53 @@ fn upload_diff_items_show_scope_exclusions_that_remove_remote_sections() {
 }
 
 #[test]
-fn apply_field_diff_items_show_changed_quick_command_fields() {
-    let preview = structured_preview(
-        QuickCommandsSnapshot {
-            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
-            categories: Vec::new(),
-            commands: vec![quick_command("cmd-1", "Deploy", "deploy --prod")],
-            updated_at: 2,
-        },
-        None,
-    );
-
+fn apply_field_diff_items_show_remote_command_and_preserve_local_notes() {
+    let snapshot = |command, updated_at| QuickCommandsSnapshot {
+        version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
+        categories: Vec::new(),
+        commands: vec![command],
+        updated_at,
+    };
     let selection = CloudSyncPreviewSelection {
         import_quick_commands: true,
         ..CloudSyncPreviewSelection::default()
     };
-    let local = CloudSyncLocalFieldDiffSnapshot {
-        quick_commands: Some(QuickCommandsSnapshot {
-            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
-            categories: Vec::new(),
-            commands: vec![quick_command("cmd-1", "Deploy", "deploy --staging")],
-            updated_at: 1,
-        }),
-        ..CloudSyncLocalFieldDiffSnapshot::default()
-    };
-
-    let items = cloud_sync_apply_field_diff_items(&preview, &selection, &local);
-
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].status, CloudSyncFieldDiffStatus::Modified);
-    assert!(items[0].fields.iter().any(|field| {
-        field.label_key == "plugin.cloud_sync.diff_fields.command"
-            && field.before.as_deref() == Some("deploy --staging")
-            && field.after.as_deref() == Some("deploy --prod")
-    }));
-}
-
-#[test]
-fn apply_field_diff_items_show_effective_field_merge_result() {
-    let base_command = quick_command("cmd-1", "Deploy", "deploy --old");
-    let mut local_command = base_command.clone();
-    local_command.description = Some("local note".to_string());
-    let mut remote_command = base_command.clone();
-    remote_command.command = "deploy --prod".to_string();
-    let preview = structured_preview(
-        QuickCommandsSnapshot {
-            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
-            categories: Vec::new(),
-            commands: vec![remote_command],
-            updated_at: 2,
-        },
-        Some(QuickCommandsSnapshot {
-            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
-            categories: Vec::new(),
-            commands: vec![base_command],
-            updated_at: 1,
-        }),
-    );
-
-    let selection = CloudSyncPreviewSelection {
-        import_quick_commands: true,
-        ..CloudSyncPreviewSelection::default()
-    };
-    let local = CloudSyncLocalFieldDiffSnapshot {
-        quick_commands: Some(QuickCommandsSnapshot {
-            version: oxideterm_quick_commands::QUICK_COMMANDS_SCHEMA_VERSION,
-            categories: Vec::new(),
-            commands: vec![local_command],
-            updated_at: 3,
-        }),
-        ..CloudSyncLocalFieldDiffSnapshot::default()
-    };
-
-    let items = cloud_sync_apply_field_diff_items(&preview, &selection, &local);
-
-    assert_eq!(items.len(), 1);
-    assert!(items[0].fields.iter().any(|field| {
-        field.label_key == "plugin.cloud_sync.diff_fields.command"
-            && field.before.as_deref() == Some("deploy --old")
-            && field.after.as_deref() == Some("deploy --prod")
-            && field.merge_outcome == Some(CloudSyncFieldMergeOutcome::Remote)
-    }));
-    assert!(items[0].fields.iter().any(|field| {
-        field.label_key == "plugin.cloud_sync.diff_fields.description"
-            && field.before.as_deref() == Some("local note")
-            && field.after.as_deref() == Some("local note")
-            && field.merge_outcome == Some(CloudSyncFieldMergeOutcome::Local)
-    }));
+    for (base_text, local_text, local_note, local_updated_at) in [
+        (None, "deploy --staging", None, 1),
+        (Some("deploy --old"), "deploy --old", Some("local note"), 3),
+    ] {
+        let mut local_command = quick_command("cmd-1", "Deploy", local_text);
+        local_command.description = local_note.map(str::to_string);
+        let preview = structured_preview(
+            snapshot(quick_command("cmd-1", "Deploy", "deploy --prod"), 2),
+            base_text.map(|text| snapshot(quick_command("cmd-1", "Deploy", text), 1)),
+        );
+        let local = CloudSyncLocalFieldDiffSnapshot {
+            quick_commands: Some(snapshot(local_command, local_updated_at)),
+            ..CloudSyncLocalFieldDiffSnapshot::default()
+        };
+        let items = cloud_sync_apply_field_diff_items(&preview, &selection, &local);
+        assert_eq!(items.len(), 1, "base: {base_text:?}");
+        assert_eq!(items[0].status, CloudSyncFieldDiffStatus::Modified);
+        assert!(
+            items[0].fields.iter().any(|field| {
+                field.label_key == "plugin.cloud_sync.diff_fields.command"
+                    && field.before.as_deref() == Some(local_text)
+                    && field.after.as_deref() == Some("deploy --prod")
+                    && (base_text.is_none()
+                        || field.merge_outcome == Some(CloudSyncFieldMergeOutcome::Remote))
+            }),
+            "base: {base_text:?}"
+        );
+        if let Some(note) = local_note {
+            assert!(items[0].fields.iter().any(|field| {
+                field.label_key == "plugin.cloud_sync.diff_fields.description"
+                    && field.before.as_deref() == Some(note)
+                    && field.after.as_deref() == Some(note)
+                    && field.merge_outcome == Some(CloudSyncFieldMergeOutcome::Local)
+            }));
+        }
+    }
 }
 
 #[test]

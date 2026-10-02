@@ -1653,40 +1653,6 @@ mod tests {
     }
 
     #[test]
-    fn pending_texture_regions_clear_only_after_upload_acknowledgement() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        let size = RemoteDesktopSize {
-            width: 2,
-            height: 1,
-        };
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0; RemoteDesktopFrame::expected_len(size).unwrap()],
-            ),
-        });
-        drain_pending_texture_updates(&state);
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(1, 0, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0xaa, 0xbb, 0xcc, 0xdd],
-            ),
-        });
-
-        let surface = state.frame_surface().expect("frame should be cached");
-        let updates = surface.pending_texture_uploads(TEST_RENDERER_RESOURCE_GENERATION);
-        assert_eq!(updates.len(), 1);
-        assert_eq!(pending_texture_update_count(&state), 1);
-
-        surface.acknowledge_texture_upload(&updates[0]);
-        assert_eq!(pending_texture_update_count(&state), 0);
-    }
-
-    #[test]
     fn texture_upload_retry_reuses_prepared_pixel_snapshot() {
         let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
         let size = RemoteDesktopSize {
@@ -1721,45 +1687,64 @@ mod tests {
 
     #[test]
     fn upload_acknowledgement_does_not_drop_new_dirty_regions() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        let size = RemoteDesktopSize {
-            width: 4,
-            height: 1,
-        };
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
+        for (format, renderer_generation, expected_uploaded_rect) in [
+            (
                 RemoteDesktopFrameFormat::Rgba8,
-                vec![0; RemoteDesktopFrame::expected_len(size).unwrap()],
-            ),
-        });
-        drain_pending_texture_updates(&state);
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
+                30,
                 RemoteDesktopRect::new(0, 0, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0x30, 0x20, 0x10, 0xff],
             ),
-        });
-        let surface = state.frame_surface().expect("frame should be cached");
-        let first_upload = surface.pending_texture_uploads(TEST_RENDERER_RESOURCE_GENERATION);
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(2, 0, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0x60, 0x50, 0x40, 0xff],
+            (
+                RemoteDesktopFrameFormat::Bgra8,
+                31,
+                RemoteDesktopRect::new(0, 0, 4, 1),
             ),
-        });
-        surface.acknowledge_texture_upload(&first_upload[0]);
+        ] {
+            let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
+            let size = RemoteDesktopSize {
+                width: 4,
+                height: 1,
+            };
+            state.apply_event(RemoteDesktopHelperEvent::Frame {
+                frame: RemoteDesktopFrame::new(
+                    size,
+                    format,
+                    vec![0; RemoteDesktopFrame::expected_len(size).unwrap()],
+                ),
+            });
+            drain_pending_texture_updates_for_renderer(&state, 30);
 
-        let remaining = surface.pending_texture_uploads(TEST_RENDERER_RESOURCE_GENERATION);
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].rect, RemoteDesktopRect::new(2, 0, 1, 1));
-        assert_eq!(remaining[0].bytes.as_ref(), [0x40, 0x50, 0x60, 0xff]);
+            state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+                update: RemoteDesktopFrameUpdate::new(
+                    size,
+                    RemoteDesktopRect::new(0, 0, 1, 1),
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![0x30, 0x20, 0x10, 0xff],
+                ),
+            });
+            let surface = state.frame_surface().expect("frame should be cached");
+            let first_upload = surface.pending_texture_uploads(renderer_generation);
+            assert_eq!(
+                first_upload.len(),
+                1,
+                "renderer generation {renderer_generation}"
+            );
+            assert_eq!(first_upload[0].rect, expected_uploaded_rect);
+
+            state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
+                update: RemoteDesktopFrameUpdate::new(
+                    size,
+                    RemoteDesktopRect::new(2, 0, 1, 1),
+                    RemoteDesktopFrameFormat::Rgba8,
+                    vec![0x60, 0x50, 0x40, 0xff],
+                ),
+            });
+            surface.acknowledge_texture_upload(&first_upload[0]);
+
+            let remaining = surface.pending_texture_uploads(renderer_generation);
+            assert_eq!(remaining.len(), 1);
+            assert_eq!(remaining[0].rect, RemoteDesktopRect::new(2, 0, 1, 1));
+            assert_eq!(remaining[0].bytes.as_ref(), [0x40, 0x50, 0x60, 0xff]);
+        }
     }
 
     #[test]
@@ -1816,48 +1801,6 @@ mod tests {
 
         surface.acknowledge_texture_upload(&retry[0]);
         assert!(surface.pending_texture_uploads(21).is_empty());
-    }
-
-    #[test]
-    fn renderer_generation_acknowledgement_preserves_new_dirty_region() {
-        let mut state = RemoteDesktopViewState::new("Server", RemoteDesktopProtocol::Rdp);
-        let size = RemoteDesktopSize {
-            width: 4,
-            height: 1,
-        };
-        state.apply_event(RemoteDesktopHelperEvent::Frame {
-            frame: RemoteDesktopFrame::new(
-                size,
-                RemoteDesktopFrameFormat::Bgra8,
-                vec![0; RemoteDesktopFrame::expected_len(size).unwrap()],
-            ),
-        });
-        drain_pending_texture_updates_for_renderer(&state, 30);
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(0, 0, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0x30, 0x20, 0x10, 0xff],
-            ),
-        });
-        let surface = state.frame_surface().expect("frame should be cached");
-        let generation_refresh = surface.pending_texture_uploads(31);
-
-        state.apply_event(RemoteDesktopHelperEvent::FrameUpdate {
-            update: RemoteDesktopFrameUpdate::new(
-                size,
-                RemoteDesktopRect::new(2, 0, 1, 1),
-                RemoteDesktopFrameFormat::Rgba8,
-                vec![0x60, 0x50, 0x40, 0xff],
-            ),
-        });
-        surface.acknowledge_texture_upload(&generation_refresh[0]);
-
-        let remaining = surface.pending_texture_uploads(31);
-        assert_eq!(remaining.len(), 1);
-        assert_eq!(remaining[0].rect, RemoteDesktopRect::new(2, 0, 1, 1));
-        assert_eq!(remaining[0].bytes.as_ref(), [0x40, 0x50, 0x60, 0xff]);
     }
 
     #[test]

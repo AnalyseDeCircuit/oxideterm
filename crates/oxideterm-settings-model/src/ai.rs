@@ -28,8 +28,6 @@ use oxideterm_settings::{
 };
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
-use crate::SettingsInput;
-
 pub fn ai_provider_views(settings: &PersistedSettings) -> Vec<AiProviderView> {
     ai_provider_views_from_values(&settings.ai.providers)
 }
@@ -730,23 +728,6 @@ mod tests {
     }
 
     #[test]
-    fn ai_mcp_record_cleaning_and_arg_split_are_model_owned() {
-        let record = ai_mcp_clean_record(&[
-            ("TOKEN".to_string(), "abc".to_string()),
-            (" ".to_string(), "ignored".to_string()),
-        ])
-        .unwrap();
-        assert_eq!(
-            record.get("TOKEN").and_then(serde_json::Value::as_str),
-            Some("abc")
-        );
-        assert_eq!(
-            ai_mcp_split_args("node server.js --stdio"),
-            vec!["node", "server.js", "--stdio"]
-        );
-    }
-
-    #[test]
     fn ai_mcp_draft_debug_redacts_secret_values() {
         let mut draft = AiMcpServerDraft::default();
         draft.command = "command-secret".to_string();
@@ -783,32 +764,6 @@ mod tests {
         assert!(draft.env.is_empty());
         assert!(draft.auth_token.is_empty());
         assert!(draft.headers.is_empty());
-    }
-
-    #[test]
-    fn ai_mcp_draft_input_adapter_trims_identity_fields_only() {
-        let mut draft = AiMcpServerDraft::default();
-        draft.env = vec![(String::new(), String::new())];
-
-        assert!(apply_ai_mcp_draft_input(
-            Some(&mut draft),
-            SettingsInput::AiMcpName,
-            " demo "
-        ));
-        assert!(apply_ai_mcp_draft_input(
-            Some(&mut draft),
-            SettingsInput::AiMcpEnvValue(0),
-            " value "
-        ));
-
-        assert_eq!(
-            ai_mcp_draft_input_value(Some(&draft), SettingsInput::AiMcpName),
-            Some("demo")
-        );
-        assert_eq!(
-            ai_mcp_draft_input_value(Some(&draft), SettingsInput::AiMcpEnvValue(0)),
-            Some(" value ")
-        );
     }
 
     #[test]
@@ -1092,80 +1047,6 @@ pub fn ai_mcp_draft_valid_for_names(
         && !configured_names.contains(name)
 }
 
-pub fn ai_mcp_draft_input_value(
-    draft: Option<&AiMcpServerDraft>,
-    input: SettingsInput,
-) -> Option<&str> {
-    let draft = draft?;
-    match input {
-        SettingsInput::AiMcpName => Some(&draft.name),
-        SettingsInput::AiMcpCommand => Some(&draft.command),
-        SettingsInput::AiMcpArgs => Some(&draft.args),
-        SettingsInput::AiMcpUrl => Some(&draft.url),
-        SettingsInput::AiMcpAuthHeaderName => Some(&draft.auth_header_name),
-        SettingsInput::AiMcpAuthToken => Some(&draft.auth_token),
-        SettingsInput::AiMcpEnvKey(index) => draft.env.get(index).map(|(key, _)| key.as_str()),
-        SettingsInput::AiMcpEnvValue(index) => {
-            draft.env.get(index).map(|(_, value)| value.as_str())
-        }
-        SettingsInput::AiMcpHeaderKey(index) => {
-            draft.headers.get(index).map(|(key, _)| key.as_str())
-        }
-        SettingsInput::AiMcpHeaderValue(index) => {
-            draft.headers.get(index).map(|(_, value)| value.as_str())
-        }
-        _ => None,
-    }
-}
-
-pub fn apply_ai_mcp_draft_input(
-    draft: Option<&mut AiMcpServerDraft>,
-    input: SettingsInput,
-    value: &str,
-) -> bool {
-    let Some(draft) = draft else {
-        return false;
-    };
-    match input {
-        SettingsInput::AiMcpName => draft.name = value.trim().to_string(),
-        SettingsInput::AiMcpCommand => draft.command = value.trim().to_string(),
-        SettingsInput::AiMcpArgs => draft.args = value.to_string(),
-        SettingsInput::AiMcpUrl => draft.url = value.trim().to_string(),
-        SettingsInput::AiMcpAuthHeaderName => draft.auth_header_name = value.trim().to_string(),
-        SettingsInput::AiMcpAuthToken => {
-            // Auth tokens are draft-only secret input values; callers own
-            // zeroizing their transient input buffer when focus leaves.
-            draft.auth_token = value.to_string();
-        }
-        SettingsInput::AiMcpEnvKey(index) => {
-            let Some((key, _)) = draft.env.get_mut(index) else {
-                return false;
-            };
-            *key = value.trim().to_string();
-        }
-        SettingsInput::AiMcpEnvValue(index) => {
-            let Some((_, env_value)) = draft.env.get_mut(index) else {
-                return false;
-            };
-            *env_value = value.to_string();
-        }
-        SettingsInput::AiMcpHeaderKey(index) => {
-            let Some((key, _)) = draft.headers.get_mut(index) else {
-                return false;
-            };
-            *key = value.trim().to_string();
-        }
-        SettingsInput::AiMcpHeaderValue(index) => {
-            let Some((_, header_value)) = draft.headers.get_mut(index) else {
-                return false;
-            };
-            *header_value = value.to_string();
-        }
-        _ => return false,
-    }
-    true
-}
-
 pub fn ai_mcp_transport_label(transport: McpTransport) -> String {
     match transport {
         McpTransport::Stdio => "stdio",
@@ -1189,21 +1070,6 @@ pub fn ai_mcp_auth_mode_value(mode: McpAuthHeaderMode) -> &'static str {
         McpAuthHeaderMode::Raw => "raw",
         McpAuthHeaderMode::None => "none",
     }
-}
-
-pub fn ai_mcp_clean_record(entries: &[(String, String)]) -> Option<serde_json::Value> {
-    let mut map = serde_json::Map::new();
-    for (key, value) in entries {
-        let key = key.trim();
-        if !key.is_empty() {
-            map.insert(key.to_string(), serde_json::json!(value));
-        }
-    }
-    (!map.is_empty()).then(|| serde_json::Value::Object(map))
-}
-
-pub fn ai_mcp_split_args(args: &str) -> Vec<String> {
-    args.split_whitespace().map(str::to_string).collect()
 }
 
 pub struct AiProviderKeyStatusDelivery {

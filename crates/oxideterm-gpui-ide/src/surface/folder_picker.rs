@@ -579,13 +579,16 @@ mod folder_picker_input_tests {
     }
 
     #[test]
-    fn replacement_uses_utf16_selection_boundaries() {
-        let mut state = path_input("/目录/🚀/file", 4..6);
-
-        replace_folder_picker_selection(&mut state, "项目");
-
-        assert_eq!(state.path_input, "/目录/项目/file");
-        assert_eq!(state.path_selection_range, Some(6..6));
+    fn replacement_preserves_utf16_boundaries_and_single_line_paths() {
+        for (value, selection, replacement, expected, caret) in [
+            ("/目录/🚀/file", 4..6, "项目", "/目录/项目/file", 6),
+            ("/root/", 6..6, "folder\r\nchild", "/root/folderchild", 17),
+        ] {
+            let mut state = path_input(value, selection);
+            replace_folder_picker_selection(&mut state, replacement);
+            assert_eq!(state.path_input, expected, "{value}");
+            assert_eq!(state.path_selection_range, Some(caret..caret), "{value}");
+        }
     }
 
     #[test]
@@ -623,15 +626,6 @@ mod folder_picker_input_tests {
         move_folder_picker_caret(&mut state, false, false);
 
         assert_eq!(state.path_selection_range, Some(1..1));
-    }
-
-    #[test]
-    fn pasted_path_remains_single_line() {
-        let mut state = path_input("/root/", 6..6);
-
-        replace_folder_picker_selection(&mut state, "folder\r\nchild");
-
-        assert_eq!(state.path_input, "/root/folderchild");
     }
 
     #[test]

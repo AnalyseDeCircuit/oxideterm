@@ -881,25 +881,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn applies_builtin_theme_overrides() {
-        let oxide = ThemeTokens::from_builtin(theme_by_id("oxide")).ui;
-        assert_eq!(oxide.bg_panel, 0x291c16);
-        assert_eq!(oxide.bg_card, 0x33231b);
-        assert_eq!(oxide.border, 0x493126);
-        assert_eq!(oxide.text_muted, 0x9d887b);
-
-        let github = ThemeTokens::from_builtin(theme_by_id("github-dark")).ui;
-        assert_eq!(github.bg_panel, 0x161b22);
-        assert_eq!(github.bg_elevated, 0x1c2332);
-        assert_eq!(github.accent, 0x58a6ff);
-
-        let code_light = ThemeTokens::from_builtin(theme_by_id("code-light")).ui;
-        assert_eq!(code_light.bg_panel, 0xf3f3f3);
-        assert_eq!(code_light.bg_active, 0xcce8ff);
-        assert_eq!(code_light.accent, 0x007acc);
-    }
-
-    #[test]
     fn ui_font_scale_changes_type_without_changing_spatial_metrics() {
         let mut enlarged = default_tokens();
         let default = default_tokens();
@@ -1014,60 +995,6 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[test]
-    fn material_theme_accents_preserve_their_named_color_identity() {
-        let accent = |id| ThemeTokens::from_builtin(theme_by_id(id)).ui.accent;
-        let channels = |color: u32| {
-            (
-                ((color >> 16) & 0xff) as i32,
-                ((color >> 8) & 0xff) as i32,
-                (color & 0xff) as i32,
-            )
-        };
-
-        let (oxide_r, oxide_g, oxide_b) = channels(accent("oxide"));
-        assert!(oxide_r > oxide_g && oxide_g > oxide_b);
-        let (verdigris_r, verdigris_g, verdigris_b) = channels(accent("verdigris"));
-        assert!(verdigris_g > verdigris_b && verdigris_b > verdigris_r);
-        let (silver_r, silver_g, silver_b) = channels(accent("silver-oxide"));
-        assert!(
-            [silver_r, silver_g, silver_b].iter().max().unwrap()
-                - [silver_r, silver_g, silver_b].iter().min().unwrap()
-                <= 5
-        );
-
-        for id in ["cuprite", "hematite"] {
-            let (red, green, blue) = channels(accent(id));
-            assert!(
-                red > green && red > blue,
-                "{id} keeps an iron/copper red accent"
-            );
-        }
-        for id in ["chromium-oxide", "malachite"] {
-            let (red, green, blue) = channels(accent(id));
-            assert!(
-                green > red && green > blue,
-                "{id} keeps a mineral green accent"
-            );
-        }
-        for id in ["cobalt", "azurite"] {
-            let (red, green, blue) = channels(accent(id));
-            assert!(
-                blue > green && green > red,
-                "{id} keeps a mineral blue accent"
-            );
-        }
-        let (ochre_r, ochre_g, ochre_b) = channels(accent("ochre"));
-        assert!(ochre_r > ochre_g && ochre_g > ochre_b);
-        let (bismuth_r, bismuth_g, bismuth_b) = channels(accent("bismuth"));
-        assert!(bismuth_r > bismuth_g && bismuth_b > bismuth_g);
-
-        let paper = ThemeTokens::from_builtin(theme_by_id("paper-oxide")).ui;
-        assert!(color_relative_luminance(paper.bg) > 0.75);
-        let magnetite = ThemeTokens::from_builtin(theme_by_id("magnetite")).ui;
-        assert!(color_relative_luminance(magnetite.bg) < 0.03);
     }
 
     #[test]

@@ -609,6 +609,38 @@ mod tests {
 
     #[test]
     fn missing_terminal_fields_preserve_legacy_and_safe_defaults() {
+        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 11] = [
+            ("smoothScroll", true, |settings| settings.smooth_scroll),
+            ("osc52ClipboardRead", false, |settings| {
+                settings.osc52_clipboard_read
+            }),
+            ("confirmBeforeClosingSsh", true, |settings| {
+                settings.confirm_before_closing_ssh
+            }),
+            ("openLinksWithModifier", true, |settings| {
+                settings.open_links_with_modifier
+            }),
+            ("detectFilePathsAsLinks", true, |settings| {
+                settings.detect_file_paths_as_links
+            }),
+            ("highlightTabOnNewOutput", true, |settings| {
+                settings.highlight_tab_on_new_output
+            }),
+            ("freeTypeCursorPositioning", false, |settings| {
+                settings.free_type_mode
+            }),
+            ("fontLigatures", false, |settings| settings.font_ligatures),
+            ("rightClickPaste", false, |settings| {
+                settings.right_click_paste
+            }),
+            ("semanticColoring", false, |settings| {
+                settings.semantic_coloring
+            }),
+            ("selectionHighlighting", false, |settings| {
+                settings.selection_highlighting
+            }),
+        ];
+
         let mut value = serde_json::to_value(TerminalSettings::default()).expect("settings value");
         for field in [
             "sessionLog",
@@ -618,18 +650,38 @@ mod tests {
             "backspaceSequence",
             "deleteSequence",
             "remoteShellIntegrationMode",
+            "semanticScheme",
         ] {
             value.as_object_mut().unwrap().remove(field);
         }
 
-        value["autosuggest"].as_object_mut().unwrap().remove("enabled");
+        for (field, _, _) in defaults {
+            value.as_object_mut().unwrap().remove(field);
+        }
+        for field in [
+            "currentDirectoryAwareness",
+            "projectTasks",
+            "quickBarEnabled",
+        ] {
+            value["commandBar"].as_object_mut().unwrap().remove(field);
+        }
+
+        value["autosuggest"]
+            .as_object_mut()
+            .unwrap()
+            .remove("enabled");
         let settings: TerminalSettings = serde_json::from_value(value).expect("terminal settings");
 
+        for (field, expected, read) in defaults {
+            assert_eq!(read(&settings), expected, "legacy {field} default");
+        }
+        assert_eq!(settings.semantic_scheme, TerminalSemanticScheme::Balanced);
+        assert!(settings.command_bar.current_directory_awareness);
+        assert!(settings.command_bar.project_tasks);
+        assert!(!settings.command_bar.quick_bar_enabled);
         assert!(settings.autosuggest.enabled);
-        let disabled: TerminalAutosuggestSettings = serde_json::from_str(
-            r#"{"enabled":false,"localShellHistory":true}"#,
-        )
-        .unwrap();
+        let disabled: TerminalAutosuggestSettings =
+            serde_json::from_str(r#"{"enabled":false,"localShellHistory":true}"#).unwrap();
         assert!(!disabled.enabled);
         assert_eq!(settings.background_scope, BackgroundScope::Content);
         assert_eq!(
@@ -682,66 +734,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_settings_restore_legacy_boolean_defaults() {
-        let defaults: [(&str, bool, fn(&TerminalSettings) -> bool); 11] = [
-            ("smoothScroll", true, |settings| settings.smooth_scroll),
-            ("osc52ClipboardRead", false, |settings| {
-                settings.osc52_clipboard_read
-            }),
-            ("confirmBeforeClosingSsh", true, |settings| {
-                settings.confirm_before_closing_ssh
-            }),
-            ("openLinksWithModifier", true, |settings| {
-                settings.open_links_with_modifier
-            }),
-            ("detectFilePathsAsLinks", true, |settings| {
-                settings.detect_file_paths_as_links
-            }),
-            ("highlightTabOnNewOutput", true, |settings| {
-                settings.highlight_tab_on_new_output
-            }),
-            ("freeTypeCursorPositioning", false, |settings| {
-                settings.free_type_mode
-            }),
-            ("fontLigatures", false, |settings| settings.font_ligatures),
-            ("rightClickPaste", false, |settings| {
-                settings.right_click_paste
-            }),
-            ("semanticColoring", false, |settings| {
-                settings.semantic_coloring
-            }),
-            ("selectionHighlighting", false, |settings| {
-                settings.selection_highlighting
-            }),
-        ];
-
-        for (field, expected, read) in defaults {
-            let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-            value.as_object_mut().unwrap().remove(field);
-
-            let settings: TerminalSettings = serde_json::from_value(value).unwrap();
-            assert_eq!(read(&settings), expected, "legacy {field} default");
-        }
-    }
-
-    #[test]
-    fn terminal_semantic_scheme_defaults_and_serializes_stably() {
-        let mut value = serde_json::to_value(TerminalSettings::default()).unwrap();
-        value
-            .as_object_mut()
-            .unwrap()
-            .remove("semanticScheme");
-
-        let legacy: TerminalSettings = serde_json::from_value(value).unwrap();
-        assert_eq!(legacy.semantic_scheme, TerminalSemanticScheme::Balanced);
-
-        let mut conservative = TerminalSettings::default();
-        conservative.semantic_scheme = TerminalSemanticScheme::Conservative;
-        let value = serde_json::to_value(conservative).unwrap();
-        assert_eq!(value["semanticScheme"], serde_json::json!("conservative"));
-    }
-
-    #[test]
     fn custom_semantic_schemes_round_trip_and_resolve_by_id() {
         let mut scheme = oxideterm_terminal_semantic::built_in_scheme_document(
             oxideterm_terminal_semantic::SemanticScheme::Balanced,
@@ -784,6 +776,7 @@ mod tests {
     #[test]
     fn terminal_settings_preserve_explicit_values_and_legacy_wire_names() {
         let mut settings = TerminalSettings::default();
+        settings.semantic_scheme = TerminalSemanticScheme::Conservative;
         settings.selection_highlighting = true;
         settings.free_type_mode = true;
         settings.backspace_sequence = TerminalBackspaceSequence::ControlH;
@@ -791,6 +784,7 @@ mod tests {
 
         let value = serde_json::to_value(settings).expect("serialize terminal settings");
 
+        assert_eq!(value["semanticScheme"], serde_json::json!("conservative"));
         assert_eq!(value["backspaceSequence"], serde_json::json!("controlH"));
         assert_eq!(value["deleteSequence"], serde_json::json!("delete"));
         assert_eq!(value["selectionHighlighting"], serde_json::json!(true));
@@ -804,26 +798,5 @@ mod tests {
             TerminalBackspaceSequence::ControlH
         );
         assert_eq!(restored.delete_sequence, TerminalDeleteSequence::Delete);
-    }
-
-    #[test]
-    fn command_bar_settings_restore_legacy_defaults() {
-        let defaults: [(&str, bool, fn(&TerminalCommandBarSettings) -> bool); 3] = [
-            (
-                "currentDirectoryAwareness",
-                true,
-                |settings| settings.current_directory_awareness,
-            ),
-            ("projectTasks", true, |settings| settings.project_tasks),
-            ("quickBarEnabled", false, |settings| settings.quick_bar_enabled),
-        ];
-
-        for (field, expected, read) in defaults {
-            let mut value = serde_json::to_value(TerminalCommandBarSettings::default()).unwrap();
-            value.as_object_mut().unwrap().remove(field);
-
-            let settings: TerminalCommandBarSettings = serde_json::from_value(value).unwrap();
-            assert_eq!(read(&settings), expected, "legacy {field} default");
-        }
     }
 }

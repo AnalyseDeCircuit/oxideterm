@@ -5402,7 +5402,9 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
-    fn chat_confirmation_reopen_cancels_stale_exit(cx: &mut TestAppContext) {
+    fn chat_confirmation_reopen_and_keyboard_actions_preserve_current_payload_once(
+        cx: &mut TestAppContext,
+    ) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
@@ -5431,13 +5433,6 @@ pub(in crate::workspace) mod entity_tests {
                     focused_action: None,
                 })
             );
-        });
-    }
-
-    #[gpui::test]
-    fn chat_confirmation_keys_publish_each_effect_at_most_once(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
         entity.update(cx, |entity, cx| {
             entity.open_chat_confirm(AiChatConfirmKind::ClearAll, cx);
@@ -5481,7 +5476,9 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
-    fn provider_secret_draft_and_operation_are_entity_owned(cx: &mut TestAppContext) {
+    fn provider_secret_handoff_store_failure_and_queued_removal_preserve_the_owner(
+        cx: &mut TestAppContext,
+    ) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
@@ -5538,12 +5535,54 @@ pub(in crate::workspace) mod entity_tests {
                 } if provider_id == "provider-test"
             ));
         });
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_provider_key_operation(
+                "provider-test".to_string(),
+                AiProviderKeyOperation::Remove,
+                std::future::ready(false),
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, _cx| {
+            let intent = entity
+                .take_credential_intents()
+                .pop_front()
+                .expect("provider failure intent");
+            assert!(matches!(
+                intent,
+                AiCredentialIntent::Failed(AiCredentialFailure::RemoveProviderKey)
+            ));
+        });
+
+        entity.update(cx, |entity, cx| {
+            assert!(entity.start_provider_key_operation(
+                "provider-test".to_string(),
+                AiProviderKeyOperation::Store { index: 2 },
+                std::future::pending(),
+                cx,
+            ));
+            assert!(entity.remove_provider_key("provider-test".to_string(), cx));
+            assert!(
+                entity
+                    .pending_provider_key_removals
+                    .contains("provider-test")
+            );
+            assert_eq!(entity.provider_key_operation_tasks.len(), 1);
+        });
     }
 
     #[gpui::test]
-    fn knowledge_document_dialog_keeps_its_collection_and_destination(cx: &mut TestAppContext) {
+    fn knowledge_document_creation_failure_and_window_transfer_preserve_the_dialog_owner(
+        cx: &mut TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
         let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+            let mut entity =
+                AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx);
+            entity.rag_store = LazyAiRagStore::new(directory.path().to_path_buf());
+            entity
         });
         entity.update(cx, |entity, cx| {
             let store = entity.rag_store();
@@ -5591,27 +5630,8 @@ pub(in crate::workspace) mod entity_tests {
                     .total,
                 0
             );
-        });
-    }
 
-    #[gpui::test]
-    fn failed_document_creation_keeps_dialog_title_and_local_error(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        entity.update(cx, |entity, cx| {
-            let store = entity.rag_store();
-            let collection = oxideterm_ai::rag_create_collection(
-                &store,
-                oxideterm_ai::RagCreateCollectionRequest {
-                    name: "temporary".to_string(),
-                    scope: oxideterm_ai::RagDocScopeRequest::Global,
-                },
-            )
-            .unwrap();
-            oxideterm_ai::rag_delete_collection(&store, &collection.id).unwrap();
-            entity.open_knowledge_document_dialog(collection.id, 42_u64.into(), true);
-            assert!(entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+            oxideterm_ai::rag_delete_collection(&store, &first.id).unwrap();
             assert!(entity.replace_settings_input(
                 SettingsInput::KnowledgeDocumentTitle,
                 None,
@@ -5628,43 +5648,22 @@ pub(in crate::workspace) mod entity_tests {
             assert_eq!(entity.knowledge_new_document_title(), "Runbook");
             assert_eq!(entity.knowledge_new_document_error(), Some("failed"));
             assert_eq!(entity.knowledge_error(), None);
-        });
-    }
 
-    #[gpui::test]
-    fn knowledge_document_dialog_stays_with_its_owner_until_transfer_or_release(
-        cx: &mut TestAppContext,
-    ) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        entity.update(cx, |entity, cx| {
-            let first_window_id: gpui::WindowId = 43_u64.into();
             let second_window_id: gpui::WindowId = 44_u64.into();
-            entity.open_knowledge_document_dialog(
-                "collection-first".to_string(),
-                first_window_id,
-                true,
-            );
-            assert!(entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
             assert!(entity.replace_settings_input(
                 SettingsInput::KnowledgeDocumentTitle,
-                None,
+                Some(0..7),
                 "Draft title",
                 cx,
             ));
 
-            entity.open_knowledge_document_dialog(
-                "collection-second".to_string(),
-                second_window_id,
-                false,
-            );
-            assert!(entity.knowledge_document_dialog_owned_by(first_window_id));
+            entity.open_knowledge_document_dialog(second.id, second_window_id, false);
+            assert!(entity.knowledge_document_dialog_owned_by(owner_window_id));
             assert!(!entity.knowledge_document_dialog_owned_by(second_window_id));
             assert_eq!(entity.knowledge_new_document_title(), "Draft title");
 
             assert!(entity.transfer_knowledge_document_dialog_owner(
-                first_window_id,
+                owner_window_id,
                 second_window_id,
                 cx,
             ));
@@ -5673,55 +5672,6 @@ pub(in crate::workspace) mod entity_tests {
             assert!(!entity.knowledge_document_dialog_open());
             assert_eq!(entity.knowledge_new_document_title(), "");
             assert_eq!(entity.focused_settings_input(), None);
-        });
-    }
-
-    #[gpui::test]
-    fn provider_operation_failure_exposes_only_typed_category(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        entity.update(cx, |entity, cx| {
-            assert!(entity.start_provider_key_operation(
-                "provider-test".to_string(),
-                AiProviderKeyOperation::Remove,
-                std::future::ready(false),
-                cx,
-            ));
-        });
-        cx.run_until_parked();
-
-        entity.update(cx, |entity, _cx| {
-            let intent = entity
-                .take_credential_intents()
-                .pop_front()
-                .expect("provider failure intent");
-            assert!(matches!(
-                intent,
-                AiCredentialIntent::Failed(AiCredentialFailure::RemoveProviderKey)
-            ));
-        });
-    }
-
-    #[gpui::test]
-    fn provider_removal_is_queued_behind_an_inflight_store(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        entity.update(cx, |entity, cx| {
-            assert!(entity.start_provider_key_operation(
-                "provider-test".to_string(),
-                AiProviderKeyOperation::Store { index: 2 },
-                std::future::pending(),
-                cx,
-            ));
-            assert!(entity.remove_provider_key("provider-test".to_string(), cx));
-            assert!(
-                entity
-                    .pending_provider_key_removals
-                    .contains("provider-test")
-            );
-            assert_eq!(entity.provider_key_operation_tasks.len(), 1);
         });
     }
 
@@ -6023,7 +5973,9 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
-    fn knowledge_reindex_progress_cancel_and_completion_are_entity_owned(cx: &mut TestAppContext) {
+    fn knowledge_reindex_progress_completion_and_release_preserve_task_ownership(
+        cx: &mut TestAppContext,
+    ) {
         let entity = cx.new(|cx| {
             AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
         });
@@ -6060,6 +6012,28 @@ pub(in crate::workspace) mod entity_tests {
         assert_eq!(
             entity.read_with(cx, |entity, _cx| entity.knowledge_reindex_progress()),
             None
+        );
+
+        let release_cancel = Arc::new(AtomicBool::new(false));
+        let (paths_sender, paths_receiver) = tokio::sync::oneshot::channel();
+        entity.update(cx, |entity, cx| {
+            entity.knowledge_reindex_cancel = Some(release_cancel.clone());
+            assert!(entity.start_knowledge_import(
+                async move { paths_receiver.await.ok().flatten() },
+                "collection".to_string(),
+                "safe import failure".to_string(),
+                cx,
+            ));
+        });
+
+        drop(entity);
+        cx.update(|_cx| {});
+        cx.run_until_parked();
+
+        assert!(release_cancel.load(Ordering::Acquire));
+        assert!(
+            paths_sender.send(Some(Vec::new())).is_err(),
+            "dropping the entity must cancel its retained import future"
         );
     }
 
@@ -6125,35 +6099,7 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
-    fn entity_release_cancels_knowledge_tasks_and_reindex(cx: &mut TestAppContext) {
-        let entity = cx.new(|cx| {
-            AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        let cancel = Arc::new(AtomicBool::new(false));
-        let (paths_sender, paths_receiver) = tokio::sync::oneshot::channel();
-        entity.update(cx, |entity, cx| {
-            entity.knowledge_reindex_cancel = Some(cancel.clone());
-            assert!(entity.start_knowledge_import(
-                async move { paths_receiver.await.ok().flatten() },
-                "collection".to_string(),
-                "safe import failure".to_string(),
-                cx,
-            ));
-        });
-
-        drop(entity);
-        cx.update(|_cx| {});
-        cx.run_until_parked();
-
-        assert!(cancel.load(Ordering::Acquire));
-        assert!(
-            paths_sender.send(Some(Vec::new())).is_err(),
-            "dropping the entity must cancel its retained import future"
-        );
-    }
-
-    #[gpui::test]
-    fn stream_task_replacement_and_cancel_abort_each_task_exactly_once(cx: &mut TestAppContext) {
+    fn stream_replacement_cancel_and_release_abort_each_owned_task_once(cx: &mut TestAppContext) {
         let runtime = test_worker_runtime();
         let entity = cx.new({
             let runtime = Arc::clone(&runtime);
@@ -6205,17 +6151,7 @@ pub(in crate::workspace) mod entity_tests {
         });
         wait_for_lifecycle_count(&chat_drop_count, 2);
         wait_for_lifecycle_count(&terminal_drop_count, 2);
-    }
 
-    #[gpui::test]
-    fn entity_release_aborts_chat_and_terminal_stream_tasks_exactly_once(cx: &mut TestAppContext) {
-        let runtime = test_worker_runtime();
-        let entity = cx.new({
-            let runtime = Arc::clone(&runtime);
-            move |cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx)
-        });
-        let chat_drop_count = Arc::new(AtomicUsize::new(0));
-        let terminal_drop_count = Arc::new(AtomicUsize::new(0));
         let chat_generation = entity.update(cx, |entity, _cx| {
             entity
                 .begin_chat_stream("conversation-a".into(), "assistant-a".into())
@@ -6236,11 +6172,11 @@ pub(in crate::workspace) mod entity_tests {
         cx.update(|_cx| {});
         cx.run_until_parked();
 
-        wait_for_lifecycle_count(&chat_drop_count, 1);
-        wait_for_lifecycle_count(&terminal_drop_count, 1);
+        wait_for_lifecycle_count(&chat_drop_count, 3);
+        wait_for_lifecycle_count(&terminal_drop_count, 3);
         std::thread::sleep(Duration::from_millis(10));
-        assert_eq!(chat_drop_count.load(Ordering::Acquire), 1);
-        assert_eq!(terminal_drop_count.load(Ordering::Acquire), 1);
+        assert_eq!(chat_drop_count.load(Ordering::Acquire), 3);
+        assert_eq!(terminal_drop_count.load(Ordering::Acquire), 3);
     }
 
     #[gpui::test]

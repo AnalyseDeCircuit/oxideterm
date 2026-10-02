@@ -99,7 +99,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn durable_write_creates_missing_parents_and_replaces_existing_contents() {
+    fn durable_file_lifecycle_preserves_contents_on_failure_and_cleans_up() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("nested").join("state.json");
 
@@ -107,24 +107,18 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), b"old");
 
         durable_write(&path, b"new").unwrap();
-
-        assert_eq!(fs::read(path).unwrap(), b"new");
-    }
-
-    #[test]
-    fn callback_failure_preserves_destination_and_cleans_temporary_file() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("state.json");
-        fs::write(&path, b"old").unwrap();
-
-        let error = durable_write_with_before_replace(&path, b"new", || {
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        let error = durable_write_with_before_replace(&path, b"uncommitted", || {
             Err(io::Error::other("injected failure"))
         })
         .unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::Other);
-        assert_eq!(fs::read(&path).unwrap(), b"old");
-        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        durable_remove(&path).unwrap();
+        durable_remove(&path).unwrap();
+        assert!(!path.exists());
     }
 
     #[test]
@@ -154,17 +148,5 @@ mod tests {
 
         assert!(!source.exists());
         assert_eq!(fs::read(destination).unwrap(), b"new");
-    }
-
-    #[test]
-    fn durable_remove_is_idempotent() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("state.json");
-        fs::write(&path, b"state").unwrap();
-
-        durable_remove(&path).unwrap();
-        durable_remove(&path).unwrap();
-
-        assert!(!path.exists());
     }
 }

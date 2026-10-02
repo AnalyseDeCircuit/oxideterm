@@ -9,7 +9,6 @@
 
 pub mod buffer;
 pub mod consumer;
-pub mod controller;
 pub mod download;
 pub mod error;
 pub mod escape;

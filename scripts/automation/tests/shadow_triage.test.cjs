@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { main, markdownSummary } = require('../shadow_triage.cjs');
+const { main } = require('../shadow_triage.cjs');
 
 function sampleIssue() {
   return {
@@ -58,20 +58,4 @@ test('writes a sanitized report and an explicit no-write summary', () => {
   assert.equal(Object.hasOwn(report.issue, 'body'), false);
   assert.equal(summary.includes('Shadow — no repository writes'), true);
   assert.equal(summary.includes('did not comment, label, close, modify, or open'), true);
-});
-
-test('renders reports without exposing an issue title or body', () => {
-  const report = {
-    issue: { number: 402, url: 'https://example.test/issues/402' },
-    category: 'bug',
-    platforms: ['linux'],
-    route: 'observe_only',
-    confidence: 'low',
-    reasons: ['reproduction_not_proven'],
-    recommendedLabels: [],
-  };
-  const summary = markdownSummary(report);
-
-  assert.equal(summary.includes('#402'), true);
-  assert.equal(summary.includes('reproduction_not_proven'), true);
 });

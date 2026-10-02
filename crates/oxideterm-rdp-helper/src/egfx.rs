@@ -1061,46 +1061,41 @@ mod tests {
     }
 
     #[test]
-    fn handler_advertises_only_non_avc_v8() {
-        let (output_tx, _output_rx) = client_rdp_output_channel(4);
-        let renderer = Arc::new(Mutex::new(EgfxRenderer::new(output_tx.clone())));
-        let handler = OxideTermGraphicsPipelineHandler {
-            renderer,
-            output_tx,
-            reported_lock_failure: false,
-            h264_available: false,
-        };
-
-        assert_eq!(
-            handler.capabilities(),
-            vec![CapabilitySet::V8 {
-                flags: CapabilitiesV8Flags::SMALL_CACHE,
-            }]
-        );
-    }
-
-    #[test]
     fn handler_advertises_avc420_only_when_decoder_is_available() {
-        let (output_tx, _output_rx) = client_rdp_output_channel(4);
-        let renderer = Arc::new(Mutex::new(EgfxRenderer::new(output_tx.clone())));
-        let handler = OxideTermGraphicsPipelineHandler {
-            renderer,
-            output_tx,
-            reported_lock_failure: false,
-            h264_available: true,
-        };
-
-        assert_eq!(
-            handler.capabilities(),
-            vec![
-                CapabilitySet::V8_1 {
-                    flags: CapabilitiesV81Flags::AVC420_ENABLED | CapabilitiesV81Flags::SMALL_CACHE,
-                },
-                CapabilitySet::V8 {
+        for (h264_available, expected) in [
+            (
+                false,
+                vec![CapabilitySet::V8 {
                     flags: CapabilitiesV8Flags::SMALL_CACHE,
-                },
-            ]
-        );
+                }],
+            ),
+            (
+                true,
+                vec![
+                    CapabilitySet::V8_1 {
+                        flags: CapabilitiesV81Flags::AVC420_ENABLED
+                            | CapabilitiesV81Flags::SMALL_CACHE,
+                    },
+                    CapabilitySet::V8 {
+                        flags: CapabilitiesV8Flags::SMALL_CACHE,
+                    },
+                ],
+            ),
+        ] {
+            let (output_tx, _output_rx) = client_rdp_output_channel(4);
+            let renderer = Arc::new(Mutex::new(EgfxRenderer::new(output_tx.clone())));
+            let handler = OxideTermGraphicsPipelineHandler {
+                renderer,
+                output_tx,
+                reported_lock_failure: false,
+                h264_available,
+            };
+            assert_eq!(
+                handler.capabilities(),
+                expected,
+                "h264_available: {h264_available}"
+            );
+        }
     }
 
     #[test]

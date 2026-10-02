@@ -317,38 +317,35 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_restores_present_file_byte_for_byte() {
-        let directory = TestDirectory::new();
-        let settings_path = directory.path().join("settings.json");
-        let plugin_path = plugin_settings_path(&settings_path);
-        let original = b"{\n  \"futureField\": \"opaque-ciphertext\"\n}\n";
-        fs::write(&plugin_path, original).expect("original file should be written");
-        let checkpoint = checkpoint_plugin_settings(&settings_path)
-            .expect("present plugin settings should be checkpointed");
-        fs::write(&plugin_path, b"replacement").expect("replacement should be written");
+    fn checkpoint_restores_original_file_contents_or_absence() {
+        for (original, replacement) in [
+            (
+                Some(b"{\n  \"futureField\": \"opaque-ciphertext\"\n}\n".as_slice()),
+                b"replacement".as_slice(),
+            ),
+            (None, b"new file".as_slice()),
+        ] {
+            let directory = TestDirectory::new();
+            let settings_path = directory.path().join("settings.json");
+            let plugin_path = plugin_settings_path(&settings_path);
+            if let Some(contents) = original {
+                fs::write(&plugin_path, contents).expect("original file should be written");
+            }
+            let checkpoint = checkpoint_plugin_settings(&settings_path)
+                .expect("plugin settings should be checkpointed");
+            fs::write(&plugin_path, replacement).expect("replacement should be written");
 
-        restore_plugin_settings(&settings_path, &checkpoint)
-            .expect("present checkpoint should be restored");
+            restore_plugin_settings(&settings_path, &checkpoint)
+                .expect("checkpoint should be restored");
 
-        assert_eq!(
-            fs::read(&plugin_path).expect("restored file should be readable"),
-            original
-        );
-    }
-
-    #[test]
-    fn checkpoint_restores_missing_file_state() {
-        let directory = TestDirectory::new();
-        let settings_path = directory.path().join("settings.json");
-        let plugin_path = plugin_settings_path(&settings_path);
-        let checkpoint = checkpoint_plugin_settings(&settings_path)
-            .expect("missing plugin settings should be checkpointed");
-        fs::write(&plugin_path, b"new file").expect("new file should be written");
-
-        restore_plugin_settings(&settings_path, &checkpoint)
-            .expect("missing checkpoint should remove the new file");
-
-        assert!(!plugin_path.exists());
+            match original {
+                Some(contents) => assert_eq!(
+                    fs::read(&plugin_path).expect("restored file should be readable"),
+                    contents
+                ),
+                None => assert!(!plugin_path.exists()),
+            }
+        }
     }
 
     #[test]

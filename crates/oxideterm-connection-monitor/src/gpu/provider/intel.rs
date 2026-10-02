@@ -430,6 +430,7 @@ available
 ===INTEL_QUERY_EXIT===
 0
 ===INTEL_DETAILS===
+warning: partial telemetry
 {"device_id":0,"device_name":"Intel Data Center GPU Max 1550","pci_bdf_address":"0000:4d:00.0","uuid":"intel-0","driver_version":"1.3.30872","memory_physical_size_byte":68719476736}
 {"device_id":1,"device_name":"Intel Data Center GPU Flex 170","pci_bdf_address":"0000:5e:00.0","uuid":"intel-1","driver_version":"1.3.30872","memory_physical_size_byte":"16384 MiB"}
 ===INTEL_STATS===
@@ -448,6 +449,10 @@ available
         assert_eq!(snapshot.devices[0].provider, GpuProvider::Intel);
         assert_eq!(snapshot.devices[0].memory_total, Some(68_719_476_736));
         assert_eq!(snapshot.devices[0].memory_used, Some(8192 * 1024 * 1024));
+        assert_eq!(
+            snapshot.devices[1].memory_total,
+            Some(16 * 1024 * 1024 * 1024)
+        );
         assert_eq!(snapshot.devices[1].utilization_percent, Some(30.0));
         assert_eq!(snapshot.devices[1].temperature_celsius, Some(55.0));
         assert_eq!(snapshot.devices[1].power_draw_watts, Some(85.0));
@@ -479,13 +484,5 @@ available
             failed.status,
             ProviderStatus::Error("Intel: permission denied".into())
         );
-    }
-
-    #[test]
-    fn extracts_json_after_tool_warnings() {
-        let values =
-            parse_json_stream("warning: partial telemetry\n{\"device_id\":0}\n{\"device_id\":1}\n");
-
-        assert_eq!(values.len(), 2);
     }
 }

@@ -1106,26 +1106,112 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_inline_and_display_math() {
-        let doc = parse("Inline $a^2+b^2=c^2$.\n\n$$\\frac{1}{2}$$");
-        assert_eq!(doc.blocks.len(), 2);
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Math { latex, display: false } if latex == "a^2+b^2=c^2"
-                )));
-            }
-            other => panic!("expected inline math Paragraph, got {:?}", other),
-        }
-        match &doc.blocks[1] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Math { latex, display: true } if latex == "\\frac{1}{2}"
-                )));
-            }
-            other => panic!("expected display math Paragraph, got {:?}", other),
+    fn parses_markdown_and_html_into_explicit_native_blocks() {
+        let text = |value: &str| Inline::Text(value.into());
+        let paragraph = |inlines| Block::Paragraph { inlines };
+        for (source, expected) in [
+            (
+                "Inline $a^2+b^2=c^2$.\n\n$$\\frac{1}{2}$$",
+                vec![
+                    paragraph(vec![
+                        text("Inline "),
+                        Inline::Math {
+                            latex: "a^2+b^2=c^2".into(),
+                            display: false,
+                        },
+                        text("."),
+                    ]),
+                    paragraph(vec![Inline::Math {
+                        latex: "\\frac{1}{2}".into(),
+                        display: true,
+                    }]),
+                ],
+            ),
+            (
+                "See https://example.com/docs.",
+                vec![paragraph(vec![
+                    text("See "),
+                    Inline::Link {
+                        text: vec![text("https://example.com/docs")],
+                        url: "https://example.com/docs".into(),
+                    },
+                    text("."),
+                ])],
+            ),
+            (
+                "---\ntitle: Demo\n---\n\n# Body",
+                vec![Block::Heading {
+                    level: 1,
+                    id: "body".into(),
+                    inlines: vec![text("Body")],
+                }],
+            ),
+            (
+                "> [!WARNING]\n> Careful",
+                vec![Block::Blockquote {
+                    kind: Some(CalloutKind::Warning),
+                    blocks: vec![paragraph(vec![text("Careful")])],
+                }],
+            ),
+            (
+                "Text <custom-tag data-value=\"x\">inline</custom-tag> html",
+                vec![paragraph(vec![
+                    text("Text "),
+                    Inline::Html("<custom-tag data-value=\"x\">".into()),
+                    text("inline"),
+                    Inline::Html("</custom-tag>".into()),
+                    text(" html"),
+                ])],
+            ),
+            (
+                "Press <kbd>Esc</kbd><br>H<sub>2</sub>O x<sup>2</sup>",
+                vec![paragraph(vec![
+                    text("Press "),
+                    Inline::Kbd(vec![text("Esc")]),
+                    Inline::LineBreak,
+                    text("H"),
+                    Inline::Subscript(vec![text("2")]),
+                    text("O x"),
+                    Inline::Superscript(vec![text("2")]),
+                ])],
+            ),
+            (
+                "<div>raw</div>\n\nAfter",
+                vec![paragraph(vec![text("raw")]), paragraph(vec![text("After")])],
+            ),
+            (
+                "<span class='ignored'><u>under</u> <mark>marked</mark> <a href='https://example.com'>link</a> <img src='https://example.com/a.png' alt='A'></span>",
+                vec![paragraph(vec![
+                    Inline::Underline(vec![text("under")]),
+                    text(" "),
+                    Inline::Highlight(vec![text("marked")]),
+                    text(" "),
+                    Inline::Link {
+                        text: vec![text("link")],
+                        url: "https://example.com".into(),
+                    },
+                    text(" "),
+                    Inline::Image {
+                        alt: "A".into(),
+                        url: "https://example.com/a.png".into(),
+                        dimensions: Default::default(),
+                    },
+                ])],
+            ),
+            (
+                "before <mark>after",
+                vec![paragraph(vec![
+                    text("before "),
+                    Inline::Html("<mark>".into()),
+                    text("after"),
+                ])],
+            ),
+            (
+                "<div>before<script>alert(1)</script><style>body{}</style>after</div>",
+                vec![paragraph(vec![text("before"), text("after")])],
+            ),
+        ] {
+            assert_eq!(parse(source).blocks, expected, "{source}");
         }
     }
 
@@ -1141,159 +1227,77 @@ mod tests {
     }
 
     #[test]
-    fn parses_bare_http_urls_as_links() {
-        let doc = parse("See https://example.com/docs.");
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Link { text, url }
-                        if url == "https://example.com/docs"
-                            && text == &vec![Inline::Text("https://example.com/docs".into())]
-                )));
-                assert!(
-                    inlines
-                        .iter()
-                        .any(|inline| matches!(inline, Inline::Text(text) if text == "."))
-                );
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
+    fn heading_ids_respect_explicit_ids_and_remain_unique_across_formats() {
+        for (source, expected) in [
+            (
+                "# Intro {#custom}\n\n# Intro\n\n# Intro",
+                ["custom", "intro", "intro-2"],
+            ),
+            (
+                "# Intro\n\n<h1>Intro</h1>\n\n<h1 id='intro'>Explicit</h1>",
+                ["intro", "intro-2", "intro-3"],
+            ),
+        ] {
+            let doc = parse(source);
+            let ids = doc
+                .blocks
+                .iter()
+                .map(|block| match block {
+                    Block::Heading { id, .. } => id.as_str(),
+                    other => panic!("expected heading, got {other:?}"),
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(ids, expected, "{source}");
         }
     }
 
     #[test]
-    fn hides_yaml_frontmatter() {
-        let doc = parse("---\ntitle: Demo\n---\n\n# Body");
-        assert_eq!(doc.blocks.len(), 1);
-        assert!(matches!(
-            &doc.blocks[0],
-            Block::Heading { id, .. } if id == "body"
-        ));
-    }
-
-    #[test]
-    fn parses_gfm_callout_kind() {
-        let doc = parse("> [!WARNING]\n> Careful");
-        match &doc.blocks[0] {
-            Block::Blockquote { kind, blocks } => {
-                assert_eq!(*kind, Some(CalloutKind::Warning));
-                assert_eq!(blocks.len(), 1);
-            }
-            other => panic!("expected warning callout, got {:?}", other),
+    fn footnotes_keep_reference_order_and_formatted_definitions() {
+        let text = |value: &str| Inline::Text(value.into());
+        for (source, references, definitions) in [
+            (
+                "Hello[^note].\n\n[^note]: Footnote **body**.",
+                vec![("note", 1)],
+                vec![(
+                    "note",
+                    vec![
+                        text("Footnote "),
+                        Inline::Bold(vec![text("body")]),
+                        text("."),
+                    ],
+                )],
+            ),
+            (
+                "Second[^b] then first[^a].\n\n[^a]: A\n\n[^b]: B",
+                vec![("b", 1), ("a", 2)],
+                vec![("b", vec![text("B")]), ("a", vec![text("A")])],
+            ),
+        ] {
+            let doc = parse(source);
+            let [Block::Paragraph { inlines }] = doc.blocks.as_slice() else {
+                panic!("expected one paragraph: {:?}", doc.blocks);
+            };
+            assert_eq!(
+                inlines
+                    .iter()
+                    .filter_map(|inline| match inline {
+                        Inline::FootnoteReference { label, index, .. } =>
+                            Some((label.as_str(), *index)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>(),
+                references,
+                "{source}"
+            );
+            let expected = definitions
+                .into_iter()
+                .map(|(label, inlines)| FootnoteDefinition {
+                    label: label.into(),
+                    blocks: vec![Block::Paragraph { inlines }],
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(doc.footnotes, expected, "{source}");
         }
-    }
-
-    #[test]
-    fn preserves_explicit_heading_id_and_uniques_generated_slugs() {
-        let doc = parse("# Intro {#custom}\n\n# Intro\n\n# Intro");
-        assert!(matches!(
-            &doc.blocks[0],
-            Block::Heading { id, .. } if id == "custom"
-        ));
-        assert!(matches!(
-            &doc.blocks[1],
-            Block::Heading { id, .. } if id == "intro"
-        ));
-        assert!(matches!(
-            &doc.blocks[2],
-            Block::Heading { id, .. } if id == "intro-2"
-        ));
-    }
-
-    #[test]
-    fn parses_footnote_reference_and_definition() {
-        let doc = parse("Hello[^note].\n\n[^note]: Footnote **body**.");
-
-        assert_eq!(doc.blocks.len(), 1);
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::FootnoteReference { label, index, .. }
-                        if label == "note" && *index == 1
-                )));
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-
-        assert_eq!(doc.footnotes.len(), 1);
-        assert_eq!(doc.footnotes[0].label, "note");
-        assert_eq!(doc.footnotes[0].blocks.len(), 1);
-        match &doc.footnotes[0].blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Bold(children)
-                        if children.iter().any(|child| matches!(child, Inline::Text(text) if text == "body"))
-                )));
-            }
-            other => panic!("expected footnote Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn orders_footnotes_by_first_reference() {
-        let doc = parse("Second[^b] then first[^a].\n\n[^a]: A\n\n[^b]: B");
-
-        assert_eq!(doc.footnotes.len(), 2);
-        assert_eq!(doc.footnotes[0].label, "b");
-        assert_eq!(doc.footnotes[1].label, "a");
-    }
-
-    #[test]
-    fn preserves_unsupported_inline_html_as_inert_text() {
-        let doc = parse("Text <custom-tag data-value=\"x\">inline</custom-tag> html");
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Html(html) if html.contains("<custom-tag")
-                )));
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_safe_inline_html_subset() {
-        let doc = parse("Press <kbd>Esc</kbd><br>H<sub>2</sub>O x<sup>2</sup>");
-        match &doc.blocks[0] {
-            Block::Paragraph { inlines } => {
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Kbd(children)
-                        if children == &vec![Inline::Text("Esc".to_string())]
-                )));
-                assert!(
-                    inlines
-                        .iter()
-                        .any(|inline| matches!(inline, Inline::LineBreak))
-                );
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Subscript(children)
-                        if children == &vec![Inline::Text("2".to_string())]
-                )));
-                assert!(inlines.iter().any(|inline| matches!(
-                    inline,
-                    Inline::Superscript(children)
-                        if children == &vec![Inline::Text("2".to_string())]
-                )));
-            }
-            other => panic!("expected Paragraph, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn parses_common_block_html_into_native_blocks() {
-        let doc = parse("<div>raw</div>\n\nAfter");
-
-        assert!(matches!(
-            &doc.blocks[0],
-            Block::Paragraph { inlines }
-                if inlines == &vec![Inline::Text("raw".to_string())]
-        ));
-        assert!(matches!(&doc.blocks[1], Block::Paragraph { .. }));
     }
 
     #[test]
@@ -1443,75 +1447,6 @@ mod tests {
     }
 
     #[test]
-    fn keeps_heading_ids_unique_across_markdown_and_html() {
-        let doc = parse("# Intro\n\n<h1>Intro</h1>\n\n<h1 id='intro'>Explicit</h1>");
-
-        assert!(matches!(
-            &doc.blocks[0],
-            Block::Heading { id, .. } if id == "intro"
-        ));
-        assert!(matches!(
-            &doc.blocks[1],
-            Block::Heading { id, .. } if id == "intro-2"
-        ));
-        assert!(matches!(
-            &doc.blocks[2],
-            Block::Heading { id, .. } if id == "intro-3"
-        ));
-    }
-
-    #[test]
-    fn parses_extended_inline_html_with_attributes() {
-        let doc = parse(
-            "<span class='ignored'><u>under</u> <mark>marked</mark> <a href='https://example.com'>link</a> <img src='https://example.com/a.png' alt='A'></span>",
-        );
-
-        let Block::Paragraph { inlines } = &doc.blocks[0] else {
-            panic!("expected Paragraph, got {:?}", doc.blocks[0]);
-        };
-        assert!(inlines.iter().any(|inline| matches!(
-            inline,
-            Inline::Underline(children)
-                if children == &vec![Inline::Text("under".to_string())]
-        )));
-        assert!(inlines.iter().any(|inline| matches!(
-            inline,
-            Inline::Highlight(children)
-                if children == &vec![Inline::Text("marked".to_string())]
-        )));
-        assert!(inlines.iter().any(|inline| matches!(
-            inline,
-            Inline::Link { text, url }
-                if text == &vec![Inline::Text("link".to_string())]
-                    && url == "https://example.com"
-        )));
-        assert!(inlines.iter().any(|inline| matches!(
-            inline,
-            Inline::Image { alt, url, .. }
-                if alt == "A" && url == "https://example.com/a.png"
-        )));
-    }
-
-    #[test]
-    fn keeps_content_when_safe_inline_html_is_unclosed() {
-        let doc = parse("before <mark>after");
-
-        let Block::Paragraph { inlines } = &doc.blocks[0] else {
-            panic!("expected Paragraph, got {:?}", doc.blocks[0]);
-        };
-        assert!(
-            inlines
-                .iter()
-                .any(|inline| matches!(inline, Inline::Html(source) if source == "<mark>"))
-        );
-        assert!(
-            inlines
-                .iter()
-                .any(|inline| matches!(inline, Inline::Text(text) if text == "after"))
-        );
-    }
-
-    #[test]
     fn parses_html_lists_tables_and_code_blocks() {
         let source = "<ol start='3'><li>three</li><li>four<ul><li>nested</li></ul></li></ol>\n\n<table><thead><tr><th align='right'>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>\n\n<pre><code class='language-rust'>fn main() {}</code></pre>";
         let doc = parse(source);
@@ -1532,20 +1467,5 @@ mod tests {
             Block::CodeBlock { language, code }
                 if language.as_deref() == Some("rust") && code == "fn main() {}"
         ));
-    }
-
-    #[test]
-    fn drops_active_html_content_without_losing_safe_siblings() {
-        let doc = parse("<div>before<script>alert(1)</script><style>body{}</style>after</div>");
-
-        assert_eq!(
-            doc.blocks,
-            vec![Block::Paragraph {
-                inlines: vec![
-                    Inline::Text("before".to_string()),
-                    Inline::Text("after".to_string()),
-                ],
-            }]
-        );
     }
 }

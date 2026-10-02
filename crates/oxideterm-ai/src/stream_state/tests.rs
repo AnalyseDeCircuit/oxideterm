@@ -155,7 +155,9 @@ fn cancellation_retains_partial_text_and_completes_rejected_tool_results() {
             "Generation was stopped."
         );
         let turn = message.turn.as_ref().unwrap();
+        assert_eq!(turn["id"], "assistant");
         assert_eq!(turn["status"], "complete");
+        assert_eq!(turn["plainTextSummary"], content);
         assert!(
             turn["parts"]
                 .as_array()
@@ -354,18 +356,6 @@ fn compaction_and_provider_history_scrub_runtime_handles() {
     let mut provider_history = vec![source];
     normalize_ai_stream_history_for_provider(&mut provider_history);
     assert!(!provider_history[0].content.contains(handle));
-}
-
-#[test]
-fn turn_status_initializes_structured_turn_state() {
-    let mut assistant = message("assistant", AiChatRole::Assistant, "answer");
-
-    set_ai_turn_status(&mut assistant, "complete");
-
-    let turn = assistant.turn.expect("turn state");
-    assert_eq!(turn["id"], "assistant");
-    assert_eq!(turn["status"], "complete");
-    assert_eq!(turn["plainTextSummary"], "answer");
 }
 
 #[test]

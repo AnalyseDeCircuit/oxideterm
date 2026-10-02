@@ -429,11 +429,12 @@ mod cli_companion_tests {
 
     use gpui::{AppContext, TestAppContext};
 
+    #[cfg(unix)]
+    use super::remove_managed_cli;
     use super::{
         CLI_COMPANION_COMMAND_NAME, CliCompanionOperation, LEGACY_CLI_COMPANION_COMMAND_NAME,
         SettingsWorkspaceEntity, cli_companion_migrate_at_paths, cli_install_path,
         cli_path_present, installed_cli_matches_bundle, legacy_cli_install_path,
-        remove_managed_cli,
     };
 
     pub(in crate::workspace) fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -507,21 +508,6 @@ mod cli_companion_tests {
         assert_ne!(cli_install_path(), legacy_cli_install_path());
     }
 
-    #[test]
-    pub(in crate::workspace) fn removing_managed_legacy_file_does_not_touch_sibling_command() {
-        let temp_dir = temp_test_dir("legacy-remove");
-        let legacy_path = temp_dir.join("oxt");
-        let new_path = temp_dir.join("oxideterm");
-        std::fs::write(&legacy_path, b"legacy-cli").unwrap();
-        std::fs::write(&new_path, b"new-cli").unwrap();
-
-        remove_managed_cli(&legacy_path).unwrap();
-
-        assert!(!legacy_path.exists());
-        assert!(new_path.exists());
-        let _ = std::fs::remove_dir_all(temp_dir);
-    }
-
     #[cfg(unix)]
     #[test]
     pub(in crate::workspace) fn removing_managed_broken_legacy_symlink_is_idempotent() {
@@ -549,6 +535,7 @@ mod cli_companion_tests {
         cli_companion_migrate_at_paths(&bundle_path, &install_path, &legacy_path).unwrap();
 
         assert!(installed_cli_matches_bundle(&install_path, &bundle_path).unwrap());
+        assert_eq!(std::fs::read(&install_path).unwrap(), b"new-cli");
         assert!(legacy_path.symlink_metadata().is_err());
         let _ = std::fs::remove_dir_all(temp_dir);
     }

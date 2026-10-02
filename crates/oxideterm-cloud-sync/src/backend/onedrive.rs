@@ -688,84 +688,84 @@ mod tests {
     }
 
     #[test]
-    fn onedrive_folder_create_uses_parent_item_id() {
-        assert_eq!(
-            onedrive_folder_children_url("folder!123"),
-            "https://graph.microsoft.com/v1.0/me/drive/items/folder%21123/children"
-        );
-    }
-
-    #[test]
-    fn onedrive_error_mapping_distinguishes_scope_rate_and_conflict() {
-        let scope_error = onedrive_value_error(
-            StatusCode::FORBIDDEN,
-            &json!({ "error": { "message": "Missing Files.ReadWrite.AppFolder" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-        let rate_error = onedrive_value_error(
-            StatusCode::TOO_MANY_REQUESTS,
-            &json!({ "error": { "message": "Too many requests" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-        let conflict_error = onedrive_value_error(
-            StatusCode::PRECONDITION_FAILED,
-            &json!({ "error": { "message": "ETag changed" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-
-        assert!(scope_error.starts_with("onedrive_missing_scope:"));
-        assert!(rate_error.starts_with("onedrive_rate_limited:"));
-        assert!(conflict_error.starts_with("etag_conflict_detected:"));
-    }
-
-    #[test]
-    fn onedrive_error_mapping_distinguishes_graph_configuration_failures() {
-        let access_error = onedrive_value_error(
-            StatusCode::FORBIDDEN,
-            &json!({ "error": { "code": "accessDenied", "message": "Tenant policy blocked this app" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-        let bad_request_error = onedrive_value_error(
-            StatusCode::BAD_REQUEST,
-            &json!({ "error": { "message": "Invalid app folder request" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-        let locked_error = onedrive_value_error(
-            StatusCode::from_u16(423).unwrap(),
-            &json!({ "error": { "message": "Resource is locked" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-        let service_error = onedrive_value_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            &json!({ "error": { "message": "Service unavailable" } }),
-            "onedrive",
-            "fallback",
-            None,
-        )
-        .to_string();
-
-        assert!(access_error.starts_with("onedrive_access_denied:"));
-        assert!(bad_request_error.starts_with("onedrive_bad_request:"));
-        assert!(locked_error.starts_with("onedrive_locked:"));
-        assert!(service_error.starts_with("onedrive_service_unavailable:"));
+    fn onedrive_error_mapping_distinguishes_status_and_permission_failures() {
+        for (status, graph_code, message, operation, expected_code) in [
+            (
+                StatusCode::FORBIDDEN,
+                None,
+                "Missing Files.ReadWrite.AppFolder",
+                "onedrive",
+                "onedrive_missing_scope",
+            ),
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                None,
+                "Too many requests",
+                "onedrive",
+                "onedrive_rate_limited",
+            ),
+            (
+                StatusCode::PRECONDITION_FAILED,
+                None,
+                "ETag changed",
+                "onedrive",
+                "etag_conflict_detected",
+            ),
+            (
+                StatusCode::FORBIDDEN,
+                Some("accessDenied"),
+                "Tenant policy blocked this app",
+                "onedrive",
+                "onedrive_access_denied",
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                None,
+                "Invalid app folder request",
+                "onedrive",
+                "onedrive_bad_request",
+            ),
+            (
+                StatusCode::from_u16(423).unwrap(),
+                None,
+                "Resource is locked",
+                "onedrive",
+                "onedrive_locked",
+            ),
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                None,
+                "Service unavailable",
+                "onedrive",
+                "onedrive_service_unavailable",
+            ),
+            (
+                StatusCode::FORBIDDEN,
+                Some("accessDenied"),
+                "The permission state could not be evaluated",
+                "onedrive_object_upload",
+                "onedrive_access_denied",
+            ),
+            (
+                StatusCode::FORBIDDEN,
+                Some("Authorization_RequestDenied"),
+                "Request denied",
+                "onedrive_object_upload",
+                "onedrive_missing_scope",
+            ),
+        ] {
+            let mut value = json!({ "error": { "message": message } });
+            if let Some(graph_code) = graph_code {
+                value["error"]["code"] = json!(graph_code);
+            }
+            let error =
+                onedrive_value_error(status, &value, operation, "fallback", None).to_string();
+            assert_eq!(
+                error.split_once(':').unwrap().0,
+                expected_code,
+                "{status}: {value}"
+            );
+        }
     }
 
     #[test]
@@ -795,39 +795,6 @@ mod tests {
         assert!(error.contains("graph_code=badRequest"));
         assert!(error.contains("request_id=request-123"));
         assert!(!error.contains("representative-secret"));
-    }
-
-    #[test]
-    fn onedrive_scope_mapping_ignores_ambiguous_permission_words() {
-        let ambiguous = onedrive_value_error(
-            StatusCode::FORBIDDEN,
-            &json!({
-                "error": {
-                    "code": "accessDenied",
-                    "message": "The permission state could not be evaluated"
-                }
-            }),
-            "onedrive_object_upload",
-            "fallback",
-            None,
-        )
-        .to_string();
-        let explicit = onedrive_value_error(
-            StatusCode::FORBIDDEN,
-            &json!({
-                "error": {
-                    "code": "Authorization_RequestDenied",
-                    "message": "Request denied"
-                }
-            }),
-            "onedrive_object_upload",
-            "fallback",
-            None,
-        )
-        .to_string();
-
-        assert!(ambiguous.starts_with("onedrive_access_denied:"));
-        assert!(explicit.starts_with("onedrive_missing_scope:"));
     }
 
     #[test]

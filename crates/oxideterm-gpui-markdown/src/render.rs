@@ -3539,18 +3539,41 @@ mod tests {
     }
 
     #[test]
-    fn relative_links_resolve_against_the_source_directory() {
-        let opts = super::MarkdownOptions::default().with_source_path("/tmp/notes/readme.md");
-        assert_eq!(
-            super::resolved_link_url("../guide%20one.md#intro", &opts).as_deref(),
-            Some("file:///tmp/guide%20one.md#intro")
-        );
-        assert_eq!(super::resolved_link_url("javascript:alert(1)", &opts), None);
-        assert_eq!(super::resolved_link_url("//other-host/file", &opts), None);
-        assert_eq!(
-            super::resolved_link_url("relative.md", &super::MarkdownOptions::default()),
-            None
-        );
+    fn link_resolution_enforces_schemes_and_requires_a_base_for_relative_paths() {
+        let opts = MarkdownOptions::default();
+        let source_opts = MarkdownOptions::default().with_source_path("/tmp/notes/readme.md");
+        for (url, options, directly_openable, resolved) in [
+            (
+                "https://example.com",
+                &opts,
+                true,
+                Some("https://example.com"),
+            ),
+            (
+                "mailto:hello@example.com",
+                &opts,
+                true,
+                Some("mailto:hello@example.com"),
+            ),
+            ("#intro", &opts, false, None),
+            ("javascript:alert(1)", &opts, false, None),
+            ("javascript:alert(1)", &source_opts, false, None),
+            ("//other-host/file", &source_opts, false, None),
+            ("relative.md", &opts, false, None),
+            (
+                "../guide%20one.md#intro",
+                &source_opts,
+                false,
+                Some("file:///tmp/guide%20one.md#intro"),
+            ),
+        ] {
+            assert_eq!(should_open_link(url, options), directly_openable, "{url}");
+            assert_eq!(
+                resolved_link_url(url, options).as_deref(),
+                resolved,
+                "{url}"
+            );
+        }
     }
 
     #[test]
@@ -3578,40 +3601,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn image_path_resolution_uses_local_paths_and_defers_remote_uris() {
+    fn image_resolution_preserves_local_paths_and_enforces_scheme_policy() {
         let opts = MarkdownOptions::default();
-        for (url, expected) in [
-            ("images/logo.png", Some("images/logo.png")),
-            ("file:///tmp/logo.png", Some("/tmp/logo.png")),
-            ("https://example.com/logo.png", None),
-            ("http://example.com/logo.png", None),
-            ("data:image/png;base64,AAAA", None),
+        let source_opts = MarkdownOptions::default().with_source_path("/tmp/docs/README.md");
+        for (url, options, allowed, path) in [
+            ("images/logo.png", &opts, true, Some("images/logo.png")),
+            ("file:///tmp/logo.png", &opts, true, Some("/tmp/logo.png")),
+            ("https://example.com/logo.png", &opts, true, None),
+            ("http://example.com/logo.png", &opts, true, None),
+            ("data:image/png;base64,AAAA", &opts, true, None),
+            ("javascript:alert(1)", &opts, false, None),
+            ("ftp://example.com/logo.png", &opts, false, None),
+            ("./assets/logo.png", &opts, true, Some("./assets/logo.png")),
+            (
+                "./assets/logo.png",
+                &source_opts,
+                true,
+                Some("/tmp/docs/./assets/logo.png"),
+            ),
         ] {
+            assert_eq!(should_load_image(url, options), allowed, "{url}");
             assert_eq!(
-                image_path_from_url(url, &opts),
-                expected.map(PathBuf::from),
+                image_path_from_url(url, options),
+                path.map(PathBuf::from),
                 "{url}"
             );
         }
-
-        let source_opts = MarkdownOptions::default().with_source_path("/tmp/docs/README.md");
-        assert_eq!(
-            image_path_from_url("./assets/logo.png", &source_opts),
-            Some(PathBuf::from("/tmp/docs/./assets/logo.png")),
-        );
-    }
-
-    #[test]
-    fn blocks_images_with_unconfigured_schemes() {
-        let opts = MarkdownOptions::default();
-        assert!(!should_load_image("javascript:alert(1)", &opts));
-        assert!(!should_load_image("ftp://example.com/logo.png", &opts));
-        assert!(should_load_image("https://example.com/logo.png", &opts));
-        assert!(should_load_image("./assets/logo.png", &opts));
-        assert_eq!(
-            image_path_from_url("ftp://example.com/logo.png", &opts),
-            None
-        );
     }
 
     #[test]
@@ -3638,77 +3653,58 @@ mod tests {
     }
 
     #[test]
-    fn flat_runs_preserve_html_as_plain_text() {
-        let mut runs = Vec::new();
-        collect_runs(
-            &[Inline::Html("<kbd>Esc</kbd>".into())],
-            FlatRunStyle::default(),
-            &mut runs,
-        );
-
-        assert_eq!(runs.len(), 1);
-        assert_eq!(runs[0].text, "<kbd>Esc</kbd>");
-        assert!(runs[0].link_url.is_none());
-        assert!(runs[0].image_url.is_none());
-        assert!(runs[0].math_latex.is_none());
-    }
-
-    #[test]
-    fn flat_runs_preserve_html_underline_and_highlight_styles() {
-        let mut runs = Vec::new();
-        collect_runs(
-            &[Inline::Underline(vec![Inline::Highlight(vec![
-                Inline::Text("styled".into()),
-            ])])],
-            FlatRunStyle::default(),
-            &mut runs,
-        );
-
-        assert_eq!(runs.len(), 1);
-        assert!(runs[0].underline);
-        assert!(runs[0].highlight);
+    fn inline_html_runs_preserve_text_and_native_style_features() {
         let tokens = oxideterm_theme::default_tokens();
         let opts = MarkdownOptions::from_theme(&tokens);
-        let text_run = text_run_for_flat(&runs[0], runs[0].text.len(), &tokens, &opts);
-        assert!(text_run.underline.is_some());
-        assert_eq!(
-            text_run.background_color,
-            Some(style::highlight_bg_color(&tokens))
-        );
-    }
-
-    #[test]
-    fn flat_runs_apply_native_subscript_and_superscript_features() {
-        let mut runs = Vec::new();
-        collect_runs(
-            &[
-                Inline::Subscript(vec![Inline::Text("2".into())]),
-                Inline::Superscript(vec![Inline::Text("3".into())]),
-            ],
-            FlatRunStyle::default(),
-            &mut runs,
-        );
-
-        let tokens = oxideterm_theme::default_tokens();
-        let opts = MarkdownOptions::from_theme(&tokens);
-        let subscript = text_run_for_flat(&runs[0], 1, &tokens, &opts);
-        let superscript = text_run_for_flat(&runs[1], 1, &tokens, &opts);
-        assert_eq!(
-            subscript.font.features.tag_value_list(),
-            &[("subs".to_string(), 1)]
-        );
-        assert_eq!(
-            superscript.font.features.tag_value_list(),
-            &[("sups".to_string(), 1)]
-        );
-    }
-
-    #[test]
-    fn allows_only_configured_link_schemes() {
-        let opts = MarkdownOptions::default();
-        assert!(should_open_link("https://example.com", &opts));
-        assert!(should_open_link("mailto:hello@example.com", &opts));
-        assert!(!should_open_link("#intro", &opts));
-        assert!(!should_open_link("javascript:alert(1)", &opts));
+        for (inlines, expected) in [
+            (
+                vec![Inline::Html("<kbd>Esc</kbd>".into())],
+                vec![("<kbd>Esc</kbd>", false, false, None)],
+            ),
+            (
+                vec![Inline::Underline(vec![Inline::Highlight(vec![
+                    Inline::Text("styled".into()),
+                ])])],
+                vec![("styled", true, true, None)],
+            ),
+            (
+                vec![
+                    Inline::Subscript(vec![Inline::Text("2".into())]),
+                    Inline::Superscript(vec![Inline::Text("3".into())]),
+                ],
+                vec![
+                    ("2", false, false, Some("subs")),
+                    ("3", false, false, Some("sups")),
+                ],
+            ),
+        ] {
+            let mut runs = Vec::new();
+            collect_runs(&inlines, FlatRunStyle::default(), &mut runs);
+            assert_eq!(runs.len(), expected.len(), "{inlines:?}");
+            for (run, (text, underline, highlight, feature)) in runs.iter().zip(expected) {
+                assert_eq!(
+                    (run.text.as_str(), run.underline, run.highlight),
+                    (text, underline, highlight)
+                );
+                assert_eq!(
+                    (&run.link_url, &run.image_url, &run.math_latex),
+                    (&None, &None, &None)
+                );
+                let styled = text_run_for_flat(run, run.text.len(), &tokens, &opts);
+                assert_eq!(styled.underline.is_some(), underline, "{text}");
+                assert_eq!(
+                    styled.background_color,
+                    highlight.then(|| style::highlight_bg_color(&tokens)),
+                    "{text}"
+                );
+                if let Some(feature) = feature {
+                    assert_eq!(
+                        styled.font.features.tag_value_list(),
+                        &[(feature.to_string(), 1)],
+                        "{text}"
+                    );
+                }
+            }
+        }
     }
 }

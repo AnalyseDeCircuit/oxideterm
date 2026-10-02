@@ -158,108 +158,110 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_local_unix_displays() {
-        assert_eq!(
-            X11Display::parse(":0").unwrap(),
-            X11Display {
-                transport: X11DisplayTransport::Unix,
-                display: 0,
-                screen: 0,
-            }
-        );
-        assert_eq!(X11Display::parse("unix:2.1").unwrap().screen, 1);
-        assert_eq!(
-            X11Display::parse("localhost/unix:3").unwrap().transport,
-            X11DisplayTransport::Unix
-        );
-        assert_eq!(
-            X11Display::parse("/private/tmp/com.apple.launchd.abcd/org.xquartz:0")
-                .unwrap()
-                .transport,
-            X11DisplayTransport::UnixSocket {
-                path: "/private/tmp/com.apple.launchd.abcd/org.xquartz".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn parses_tcp_displays() {
-        assert_eq!(
-            X11Display::parse("localhost:10.0").unwrap(),
-            X11Display {
-                transport: X11DisplayTransport::Tcp {
-                    host: "localhost".to_string()
+    fn display_addresses_resolve_transport_screen_and_local_endpoint() {
+        for (input, transport, display, screen, endpoint) in [
+            (
+                ":0",
+                X11DisplayTransport::Unix,
+                0,
+                0,
+                X11LocalEndpoint::UnixSocket {
+                    path: "/tmp/.X11-unix/X0".into(),
                 },
-                display: 10,
-                screen: 0,
-            }
-        );
-        assert_eq!(
-            X11Display::parse("[::1]:4").unwrap().transport,
-            X11DisplayTransport::Tcp {
-                host: "::1".to_string()
-            }
-        );
-        assert_eq!(
-            X11Display::parse("tcp/[::1]:4").unwrap().transport,
-            X11DisplayTransport::Tcp {
-                host: "::1".to_string()
-            }
-        );
+            ),
+            (
+                "unix:2.1",
+                X11DisplayTransport::Unix,
+                2,
+                1,
+                X11LocalEndpoint::UnixSocket {
+                    path: "/tmp/.X11-unix/X2".into(),
+                },
+            ),
+            (
+                "localhost/unix:3",
+                X11DisplayTransport::Unix,
+                3,
+                0,
+                X11LocalEndpoint::UnixSocket {
+                    path: "/tmp/.X11-unix/X3".into(),
+                },
+            ),
+            (
+                "/private/tmp/com.apple.launchd.abcd/org.xquartz:0",
+                X11DisplayTransport::UnixSocket {
+                    path: "/private/tmp/com.apple.launchd.abcd/org.xquartz".into(),
+                },
+                0,
+                0,
+                X11LocalEndpoint::UnixSocket {
+                    path: "/private/tmp/com.apple.launchd.abcd/org.xquartz:0".into(),
+                },
+            ),
+            (
+                "localhost:10.0",
+                X11DisplayTransport::Tcp {
+                    host: "localhost".into(),
+                },
+                10,
+                0,
+                X11LocalEndpoint::Tcp {
+                    host: "localhost".into(),
+                    port: 6010,
+                },
+            ),
+            (
+                "[::1]:4",
+                X11DisplayTransport::Tcp { host: "::1".into() },
+                4,
+                0,
+                X11LocalEndpoint::Tcp {
+                    host: "::1".into(),
+                    port: 6004,
+                },
+            ),
+            (
+                "tcp/[::1]:4",
+                X11DisplayTransport::Tcp { host: "::1".into() },
+                4,
+                0,
+                X11LocalEndpoint::Tcp {
+                    host: "::1".into(),
+                    port: 6004,
+                },
+            ),
+        ] {
+            let parsed = X11Display::parse(input).unwrap();
+            assert_eq!(
+                parsed,
+                X11Display {
+                    transport,
+                    display,
+                    screen
+                },
+                "{input}"
+            );
+            assert_eq!(parsed.local_endpoint().unwrap(), endpoint, "{input}");
+        }
     }
 
     #[test]
-    fn rejects_invalid_displays() {
-        assert!(matches!(
-            X11Display::parse(""),
-            Err(X11ForwardingError::EmptyDisplay)
-        ));
-        assert!(matches!(
-            X11Display::parse("localhost"),
-            Err(X11ForwardingError::InvalidDisplay(_))
-        ));
-        assert!(matches!(
-            X11Display::parse(":abc"),
-            Err(X11ForwardingError::InvalidDisplay(_))
-        ));
-    }
-
-    #[test]
-    fn builds_local_endpoints_from_display_transport() {
-        assert_eq!(
-            X11Display::parse(":0").unwrap().local_endpoint().unwrap(),
-            X11LocalEndpoint::UnixSocket {
-                path: "/tmp/.X11-unix/X0".to_string()
+    fn invalid_display_addresses_cannot_resolve_a_local_endpoint() {
+        for input in ["", "localhost", ":abc", "localhost:60000"] {
+            let error = X11Display::parse(input)
+                .and_then(|display| display.local_endpoint())
+                .unwrap_err();
+            match input {
+                "" => assert!(matches!(error, X11ForwardingError::EmptyDisplay)),
+                "localhost:60000" => assert!(matches!(
+                    error,
+                    X11ForwardingError::DisplayPortOutOfRange(60000)
+                )),
+                _ => assert!(
+                    matches!(error, X11ForwardingError::InvalidDisplay(_)),
+                    "{input}"
+                ),
             }
-        );
-        assert_eq!(
-            X11Display::parse("localhost:10")
-                .unwrap()
-                .local_endpoint()
-                .unwrap(),
-            X11LocalEndpoint::Tcp {
-                host: "localhost".to_string(),
-                port: 6010
-            }
-        );
-        assert_eq!(
-            X11Display::parse("/private/tmp/com.apple.launchd.abcd/org.xquartz:0")
-                .unwrap()
-                .local_endpoint()
-                .unwrap(),
-            X11LocalEndpoint::UnixSocket {
-                path: "/private/tmp/com.apple.launchd.abcd/org.xquartz:0".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn tcp_port_rejects_unrepresentable_display_numbers() {
-        assert!(matches!(
-            X11Display::parse("localhost:60000")
-                .unwrap()
-                .local_endpoint(),
-            Err(X11ForwardingError::DisplayPortOutOfRange(60000))
-        ));
+        }
     }
 }

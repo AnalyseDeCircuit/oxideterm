@@ -307,48 +307,54 @@ mod tests {
     }
 
     #[test]
-    fn parser_rejects_unknown_subtype_and_operation() {
-        assert!(read_qemu_audio_server_message(&mut Cursor::new([2, 0, 0])).is_err());
-        assert!(read_qemu_audio_server_message(&mut Cursor::new([1, 0, 3])).is_err());
-    }
-
-    #[test]
-    fn parser_rejects_oversized_and_unaligned_payloads() {
+    fn parser_rejects_invalid_headers_and_payloads_with_the_corresponding_error() {
         let oversized = (MAX_QEMU_AUDIO_PAYLOAD_BYTES as u32 + 4).to_be_bytes();
         let mut oversized_message = vec![1, 0, 2];
         oversized_message.extend_from_slice(&oversized);
-        assert!(read_qemu_audio_server_message(&mut Cursor::new(oversized_message)).is_err());
-        assert!(
-            read_qemu_audio_server_message(&mut Cursor::new([1, 0, 2, 0, 0, 0, 2, 1, 2])).is_err()
-        );
+        for (case, payload, expected_error) in [
+            (
+                "unknown subtype",
+                vec![2, 0, 0],
+                "Unsupported VNC QEMU message subtype 2.",
+            ),
+            (
+                "unknown operation",
+                vec![1, 0, 3],
+                "Unsupported VNC QEMU Audio operation 3.",
+            ),
+            ("oversized payload", oversized_message, "payload exceeds"),
+            (
+                "unaligned payload",
+                vec![1, 0, 2, 0, 0, 0, 2, 1, 2],
+                "splits a stereo PCM frame",
+            ),
+            (
+                "truncated payload",
+                vec![1, 0, 2, 0, 0, 0, 4, 1, 2],
+                "payload read failed",
+            ),
+        ] {
+            let error = read_qemu_audio_server_message(&mut Cursor::new(payload)).unwrap_err();
+            assert!(error.contains(expected_error), "{case}: {error}");
+        }
     }
 
     #[test]
-    fn parser_reports_truncated_data_without_allocating_more_input() {
-        let error = read_qemu_audio_server_message(&mut Cursor::new([1, 0, 2, 0, 0, 0, 4, 1, 2]))
-            .unwrap_err();
+    fn playback_requires_user_opt_in_and_server_confirmation() {
+        for (requested, server_supported, client_enabled) in
+            [(true, false, false), (false, true, true)]
+        {
+            let mut session = QemuAudioSession::new(requested);
+            session.server_supported = server_supported;
+            session.client_enabled = client_enabled;
 
-        assert!(error.contains("payload read failed"));
-    }
+            session.handle_server_message(&QemuAudioServerMessage::Start);
+            session.handle_server_message(&QemuAudioServerMessage::Data(vec![0; 4]));
 
-    #[test]
-    fn server_messages_cannot_start_playback_before_confirmation() {
-        let mut session = QemuAudioSession::new(true);
-
-        session.handle_server_message(&QemuAudioServerMessage::Start);
-        session.handle_server_message(&QemuAudioServerMessage::Data(vec![0; 4]));
-
-        assert!(!session.server_streaming);
-    }
-
-    #[test]
-    fn user_opt_out_prevents_playback_even_after_server_support() {
-        let mut session = QemuAudioSession::new(false);
-        session.server_supported = true;
-        session.client_enabled = true;
-
-        session.handle_server_message(&QemuAudioServerMessage::Start);
-
-        assert!(!session.server_streaming);
+            assert!(
+                !session.server_streaming,
+                "requested: {requested}, server_supported: {server_supported}"
+            );
+        }
     }
 }

@@ -2158,55 +2158,219 @@ mod tests {
     }
 
     #[test]
-    fn previews_securecrt_session_without_importing_password() {
-        let path = fixture_path("securecrt/basic.ini");
-        let preview = preview_connection_import(
-            ConnectionImportSource::SecureCrt,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.host, "gpu.example.com");
-        assert_eq!(draft.port, 2222);
-        assert_eq!(draft.username, "alice");
-        assert_eq!(draft.auth_type, ImportedConnectionAuthType::Key);
-        assert!(
-            draft
-                .warnings
-                .iter()
-                .any(|warning| warning == "Password was not imported")
+    fn import_previews_preserve_source_metadata_and_exclude_embedded_secrets() {
+        use ImportedConnectionAuthType::{Key, Password};
+        let legacy = temp_import_file(
+            "json",
+            r#"[{"id":"legacy","title":"Legacy","host":"legacy.example.com","username":"root","port":"2225","type":"ssh"}]"#,
         );
-    }
-
-    #[test]
-    fn previews_securecrt_xml_sessions_without_retaining_secrets() {
-        let path = fixture_path("securecrt/export.xml");
-        let preview = preview_connection_import(
-            ConnectionImportSource::SecureCrt,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert_eq!(preview.total, 1);
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.name, "Gateway");
-        assert_eq!(draft.host, "gateway.example.com");
-        assert_eq!(draft.port, 2202);
-        assert_eq!(draft.username, "deploy");
-        assert_eq!(draft.group.as_deref(), Some("Imported/Production"));
-        assert_eq!(draft.auth_type, ImportedConnectionAuthType::Key);
-        assert!(
-            draft
-                .unsupported_fields
-                .contains(&"Password V2".to_string())
-        );
-        let serialized = serde_json::to_string(&preview).unwrap();
-        let debug = format!("{preview:?}");
-        assert!(!serialized.contains("securecrt-secret-sentinel"));
-        assert!(!debug.contains("securecrt-secret-sentinel"));
+        let finalshell_rows = vec![(
+            "FinalShell Gateway",
+            "finalshell.example.com",
+            2224,
+            "admin",
+            Some("Imported/Production"),
+            Password,
+        )];
+        for (source, path, expected, warning_count, unsupported, secrets) in [
+            (
+                ConnectionImportSource::SecureCrt,
+                fixture_path("securecrt/basic.ini"),
+                vec![(
+                    "basic",
+                    "gpu.example.com",
+                    2222,
+                    "alice",
+                    Some("Imported"),
+                    Key,
+                )],
+                1,
+                vec!["Password V2"],
+                vec!["redacted-encrypted-value"],
+            ),
+            (
+                ConnectionImportSource::SecureCrt,
+                fixture_path("securecrt/export.xml"),
+                vec![(
+                    "Gateway",
+                    "gateway.example.com",
+                    2202,
+                    "deploy",
+                    Some("Imported/Production"),
+                    Key,
+                )],
+                1,
+                vec!["Password V2"],
+                vec!["securecrt-secret-sentinel"],
+            ),
+            (
+                ConnectionImportSource::Termius,
+                fixture_path("termius/export.json"),
+                vec![
+                    (
+                        "Inference A",
+                        "gpu-a.example.com",
+                        22,
+                        "root",
+                        Some("Imported"),
+                        Key,
+                    ),
+                    (
+                        "Inference B",
+                        "gpu-b.example.com",
+                        2200,
+                        "ubuntu",
+                        Some("Imported"),
+                        Password,
+                    ),
+                ],
+                1,
+                vec!["encryptedPassword"],
+                vec!["redacted-encrypted-value"],
+            ),
+            (
+                ConnectionImportSource::MobaXterm,
+                fixture_path("mobaxterm/bookmarks.mxtsessions"),
+                vec![(
+                    "Prod GPU",
+                    "prod-gpu.example.com",
+                    2200,
+                    "deploy",
+                    Some("Imported/Production/GPU"),
+                    Password,
+                )],
+                1,
+                vec!["ImgNum"],
+                vec![],
+            ),
+            (
+                ConnectionImportSource::WindTerm,
+                fixture_path("windterm/user.sessions"),
+                vec![(
+                    "Wind Prod",
+                    "wind.example.com",
+                    2222,
+                    "admin",
+                    Some("Imported/Production/Edge"),
+                    Password,
+                )],
+                0,
+                vec![],
+                vec![],
+            ),
+            (
+                ConnectionImportSource::Electerm,
+                fixture_path("electerm/bookmarks.json"),
+                vec![(
+                    "Electerm Gateway",
+                    "electerm.example.com",
+                    2223,
+                    "ops",
+                    Some("Imported/Production/Edge"),
+                    Password,
+                )],
+                4,
+                vec![
+                    "passphrase",
+                    "privateKey",
+                    "connectionHoppings",
+                    "sshTunnels",
+                ],
+                vec![
+                    "electerm-private-key-sentinel",
+                    "electerm-passphrase-sentinel",
+                    "nested-secret-sentinel",
+                ],
+            ),
+            (
+                ConnectionImportSource::Electerm,
+                legacy.clone(),
+                vec![(
+                    "Legacy",
+                    "legacy.example.com",
+                    2225,
+                    "root",
+                    Some("Imported"),
+                    Password,
+                )],
+                0,
+                vec![],
+                vec![],
+            ),
+            (
+                ConnectionImportSource::FinalShell,
+                fixture_path("finalshell"),
+                finalshell_rows.clone(),
+                4,
+                vec![
+                    "password",
+                    "secret_key_id",
+                    "proxy_id",
+                    "port_forwarding_list",
+                ],
+                vec!["finalshell-password-sentinel"],
+            ),
+            (
+                ConnectionImportSource::FinalShell,
+                fixture_path("finalshell/conn"),
+                finalshell_rows,
+                4,
+                vec![
+                    "password",
+                    "secret_key_id",
+                    "proxy_id",
+                    "port_forwarding_list",
+                ],
+                vec!["finalshell-password-sentinel"],
+            ),
+        ] {
+            let preview =
+                preview_connection_import(source, &[path.display().to_string()], &HashSet::new())
+                    .unwrap();
+            assert_eq!(preview.total, expected.len(), "{path:?}");
+            assert!(preview.errors.is_empty(), "{path:?}: {:?}", preview.errors);
+            assert_eq!(
+                preview
+                    .drafts
+                    .iter()
+                    .map(|draft| (
+                        draft.name.as_str(),
+                        draft.host.as_str(),
+                        draft.port,
+                        draft.username.as_str(),
+                        draft.group.as_deref(),
+                        draft.auth_type,
+                    ))
+                    .collect::<Vec<_>>(),
+                expected,
+                "{path:?}"
+            );
+            assert_eq!(preview.warnings, warning_count, "{path:?}");
+            assert_eq!(
+                preview
+                    .drafts
+                    .iter()
+                    .flat_map(|draft| draft.unsupported_fields.iter().map(String::as_str))
+                    .collect::<Vec<_>>(),
+                unsupported,
+                "{path:?}"
+            );
+            if source == ConnectionImportSource::SecureCrt {
+                assert!(
+                    preview.drafts[0]
+                        .warnings
+                        .iter()
+                        .any(|warning| warning == "Password was not imported")
+                );
+            }
+            let serialized = serde_json::to_string(&preview).unwrap();
+            let debug = format!("{preview:?}");
+            for secret in secrets {
+                assert!(!serialized.contains(secret), "{path:?}: serialized secret");
+                assert!(!debug.contains(secret), "{path:?}: debug secret");
+            }
+        }
+        fs::remove_file(legacy).unwrap();
     }
 
     #[test]
@@ -2242,160 +2406,6 @@ mod tests {
         assert_eq!(draft.group.as_deref(), Some("Imported/Production/GPU"));
         assert!(draft.source_path.contains("Production/GPU/model.xsh"));
         let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn previews_termius_export_hosts() {
-        let path = fixture_path("termius/export.json");
-        let preview = preview_connection_import(
-            ConnectionImportSource::Termius,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert_eq!(preview.total, 2);
-        assert!(
-            preview
-                .drafts
-                .iter()
-                .any(|draft| draft.name == "Inference A")
-        );
-        assert!(
-            preview
-                .drafts
-                .iter()
-                .any(|draft| draft.host == "gpu-b.example.com")
-        );
-        assert_eq!(preview.warnings, 1);
-    }
-
-    #[test]
-    fn previews_mobaxterm_ssh_bookmarks_with_groups() {
-        let path = fixture_path("mobaxterm/bookmarks.mxtsessions");
-        let preview = preview_connection_import(
-            ConnectionImportSource::MobaXterm,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        let draft = &preview.drafts[0];
-        assert_eq!(preview.total, 1);
-        assert_eq!(draft.name, "Prod GPU");
-        assert_eq!(draft.host, "prod-gpu.example.com");
-        assert_eq!(draft.port, 2200);
-        assert_eq!(draft.username, "deploy");
-        assert_eq!(draft.group.as_deref(), Some("Imported/Production/GPU"));
-        assert_eq!(draft.unsupported_fields, vec!["ImgNum".to_string()]);
-    }
-
-    #[test]
-    fn previews_windterm_ssh_sessions_with_groups() {
-        let path = fixture_path("windterm/user.sessions");
-        let preview = preview_connection_import(
-            ConnectionImportSource::WindTerm,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        let draft = &preview.drafts[0];
-        assert_eq!(preview.total, 1);
-        assert_eq!(draft.name, "Wind Prod");
-        assert_eq!(draft.host, "wind.example.com");
-        assert_eq!(draft.port, 2222);
-        assert_eq!(draft.username, "admin");
-        assert_eq!(draft.group.as_deref(), Some("Imported/Production/Edge"));
-    }
-
-    #[test]
-    fn previews_electerm_bookmarks_with_nested_groups_and_redaction() {
-        let path = fixture_path("electerm/bookmarks.json");
-        let preview = preview_connection_import(
-            ConnectionImportSource::Electerm,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert_eq!(preview.total, 1);
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.name, "Electerm Gateway");
-        assert_eq!(draft.host, "electerm.example.com");
-        assert_eq!(draft.port, 2223);
-        assert_eq!(draft.username, "ops");
-        assert_eq!(draft.group.as_deref(), Some("Imported/Production/Edge"));
-        assert!(draft.unsupported_fields.contains(&"privateKey".to_string()));
-        assert!(
-            draft
-                .unsupported_fields
-                .contains(&"connectionHoppings".to_string())
-        );
-        let serialized = serde_json::to_string(&preview).unwrap();
-        let debug = format!("{preview:?}");
-        assert!(!serialized.contains("electerm-private-key-sentinel"));
-        assert!(!serialized.contains("electerm-passphrase-sentinel"));
-        assert!(!serialized.contains("nested-secret-sentinel"));
-        assert!(!debug.contains("electerm-private-key-sentinel"));
-        assert!(!debug.contains("electerm-passphrase-sentinel"));
-        assert!(!debug.contains("nested-secret-sentinel"));
-    }
-
-    #[test]
-    fn previews_legacy_electerm_bookmark_array() {
-        let path = temp_import_file(
-            "json",
-            r#"[{"id":"legacy","title":"Legacy","host":"legacy.example.com","username":"root","port":"2225","type":"ssh"}]"#,
-        );
-        let preview = preview_connection_import(
-            ConnectionImportSource::Electerm,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert_eq!(preview.total, 1);
-        assert_eq!(preview.drafts[0].port, 2225);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn previews_finalshell_conn_directory_without_retaining_secrets() {
-        let path = fixture_path("finalshell");
-        let preview = preview_connection_import(
-            ConnectionImportSource::FinalShell,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert_eq!(preview.total, 1);
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.name, "FinalShell Gateway");
-        assert_eq!(draft.host, "finalshell.example.com");
-        assert_eq!(draft.port, 2224);
-        assert_eq!(draft.username, "admin");
-        assert_eq!(draft.group.as_deref(), Some("Imported/Production"));
-        assert!(draft.unsupported_fields.contains(&"password".to_string()));
-        assert!(
-            draft
-                .unsupported_fields
-                .contains(&"secret_key_id".to_string())
-        );
-        let serialized = serde_json::to_string(&preview).unwrap();
-        let debug = format!("{preview:?}");
-        assert!(!serialized.contains("finalshell-password-sentinel"));
-        assert!(!debug.contains("finalshell-password-sentinel"));
-
-        let conn_path = path.join("conn");
-        let direct_preview = preview_connection_import(
-            ConnectionImportSource::FinalShell,
-            &[conn_path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-        assert_eq!(direct_preview.total, 1);
     }
 
     #[test]
@@ -2467,79 +2477,67 @@ mod tests {
     }
 
     #[test]
-    fn records_missing_host_as_preview_error() {
-        let path = temp_import_file("xsh", "UserName=alice\n");
-        let preview = preview_connection_import(
-            ConnectionImportSource::Xshell,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert!(preview.drafts.is_empty());
-        assert_eq!(preview.errors.len(), 1);
-        assert!(preview.errors[0].message.contains("Missing host"));
-        let _ = std::fs::remove_file(path);
+    fn invalid_import_files_report_errors_without_producing_drafts() {
+        for (source, extension, content, message) in [
+            (
+                ConnectionImportSource::Xshell,
+                "xsh",
+                "UserName=alice\n",
+                "Missing host",
+            ),
+            (
+                ConnectionImportSource::Termius,
+                "json",
+                "{",
+                "EOF while parsing an object",
+            ),
+        ] {
+            let path = temp_import_file(extension, content);
+            let preview =
+                preview_connection_import(source, &[path.display().to_string()], &HashSet::new())
+                    .unwrap();
+            fs::remove_file(&path).unwrap();
+            assert!(preview.drafts.is_empty());
+            let [error] = preview.errors.as_slice() else {
+                panic!("expected one import error");
+            };
+            assert_eq!(error.source_path, path.display().to_string());
+            assert!(error.message.contains(message), "{}", error.message);
+        }
     }
 
     #[test]
-    fn invalid_port_warns_and_defaults_to_ssh_port() {
-        let path = temp_import_file("xsh", "Host=gpu.invalid\nUserName=alice\nPort=abc\n");
-        let preview = preview_connection_import(
-            ConnectionImportSource::Xshell,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        let draft = &preview.drafts[0];
-        assert_eq!(draft.port, 22);
-        assert!(
-            draft
-                .warnings
-                .iter()
-                .any(|warning| warning == "Invalid port; defaulted to 22")
-        );
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn unsupported_proxy_fields_warn_instead_of_silent_import() {
-        let path = temp_import_file(
-            "xsh",
-            "Host=gpu.invalid\nUserName=alice\nProxyServer=jump.example.com\n",
-        );
-        let preview = preview_connection_import(
-            ConnectionImportSource::Xshell,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        let draft = &preview.drafts[0];
-        assert!(draft.proxy_chain.is_empty());
-        assert!(
-            draft
-                .warnings
-                .iter()
-                .any(|warning| warning == "Proxy/jump setting was not imported")
-        );
-        assert_eq!(draft.unsupported_fields, vec!["ProxyServer".to_string()]);
-        let _ = std::fs::remove_file(path);
-    }
-
-    #[test]
-    fn records_malformed_termius_json_as_preview_error() {
-        let path = temp_import_file("json", "{");
-        let preview = preview_connection_import(
-            ConnectionImportSource::Termius,
-            &[path.display().to_string()],
-            &HashSet::new(),
-        )
-        .unwrap();
-
-        assert!(preview.drafts.is_empty());
-        assert_eq!(preview.errors.len(), 1);
-        let _ = std::fs::remove_file(path);
+    fn xshell_preview_reports_unsupported_fields_and_invalid_ports() {
+        for (content, warning, unsupported) in [
+            (
+                "Host=gpu.invalid\nUserName=alice\nPort=abc\n",
+                "Invalid port; defaulted to 22",
+                vec![],
+            ),
+            (
+                "Host=gpu.invalid\nUserName=alice\nProxyServer=jump.example.com\n",
+                "Proxy/jump setting was not imported",
+                vec!["ProxyServer"],
+            ),
+        ] {
+            let path = temp_import_file("xsh", content);
+            let preview = preview_connection_import(
+                ConnectionImportSource::Xshell,
+                &[path.display().to_string()],
+                &HashSet::new(),
+            )
+            .unwrap();
+            fs::remove_file(path).unwrap();
+            let [draft] = preview.drafts.as_slice() else {
+                panic!("expected one draft");
+            };
+            assert_eq!(
+                (draft.host.as_str(), draft.username.as_str(), draft.port),
+                ("gpu.invalid", "alice", 22)
+            );
+            assert!(draft.proxy_chain.is_empty());
+            assert_eq!(draft.warnings, [warning]);
+            assert_eq!(draft.unsupported_fields, unsupported);
+        }
     }
 }

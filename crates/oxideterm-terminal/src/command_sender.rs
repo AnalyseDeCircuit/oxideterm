@@ -271,61 +271,56 @@ mod tests {
     }
 
     #[test]
-    fn text_character_plan_keeps_grapheme_clusters_together() {
-        let plan = plan(
-            "a\u{301}👨‍👩‍👧‍👦\n",
-            TerminalSenderInputMode::Text,
-            TerminalSenderPacing::Character,
-            1,
-        )
-        .unwrap();
-        let chunks = plan
-            .frames()
-            .iter()
-            .map(|frame| frame.text().unwrap())
-            .collect::<Vec<_>>();
+    fn text_character_plan_keeps_graphemes_and_normalizes_line_endings() {
+        for (input, expected) in [
+            ("a\u{301}👨‍👩‍👧‍👦\n", vec!["a\u{301}", "👨‍👩‍👧‍👦", "\r"]),
+            ("a\n\nb\n", vec!["a", "\r", "\r", "b", "\r"]),
+        ] {
+            let plan = plan(
+                input,
+                TerminalSenderInputMode::Text,
+                TerminalSenderPacing::Character,
+                1,
+            )
+            .unwrap();
+            let chunks = plan
+                .frames()
+                .iter()
+                .map(|frame| frame.text().unwrap())
+                .collect::<Vec<_>>();
 
-        assert_eq!(chunks, vec!["a\u{301}", "👨‍👩‍👧‍👦", "\r"]);
+            assert_eq!(chunks, expected, "{input:?}");
+        }
     }
 
     #[test]
-    fn hex_line_plan_accepts_prefixes_separators_and_contiguous_digits() {
-        let plan = plan(
-            "0x0d, 0A\ndead-beef",
-            TerminalSenderInputMode::Hex,
-            TerminalSenderPacing::Line,
-            1,
-        )
-        .unwrap();
-        let frames = plan
-            .frames()
-            .iter()
-            .map(|frame| frame.raw_bytes().unwrap())
-            .collect::<Vec<_>>();
+    fn hex_plan_preserves_raw_bytes_and_pacing_units() {
+        for (input, pacing, repeats, expected, units) in [
+            (
+                "0x0d, 0A\ndead-beef",
+                TerminalSenderPacing::Line,
+                1,
+                vec![&[0x0d, 0x0a][..], &[0xde, 0xad, 0xbe, 0xef][..]],
+                2,
+            ),
+            (
+                "00 ff 7f",
+                TerminalSenderPacing::Character,
+                3,
+                vec![&[0x00][..], &[0xff][..], &[0x7f][..]],
+                9,
+            ),
+        ] {
+            let plan = plan(input, TerminalSenderInputMode::Hex, pacing, repeats).unwrap();
+            let frames = plan
+                .frames()
+                .iter()
+                .map(|frame| frame.raw_bytes().unwrap())
+                .collect::<Vec<_>>();
 
-        assert_eq!(
-            frames,
-            vec![&[0x0d, 0x0a][..], &[0xde, 0xad, 0xbe, 0xef][..]]
-        );
-    }
-
-    #[test]
-    fn hex_character_plan_emits_one_raw_byte_per_unit() {
-        let plan = plan(
-            "00 ff 7f",
-            TerminalSenderInputMode::Hex,
-            TerminalSenderPacing::Character,
-            3,
-        )
-        .unwrap();
-        let frames = plan
-            .frames()
-            .iter()
-            .map(|frame| frame.raw_bytes().unwrap())
-            .collect::<Vec<_>>();
-
-        assert_eq!(frames, vec![&[0x00][..], &[0xff][..], &[0x7f][..]]);
-        assert_eq!(plan.total_units(), 9);
+            assert_eq!(frames, expected, "{pacing:?}");
+            assert_eq!(plan.total_units(), units, "{pacing:?}");
+        }
     }
 
     #[test]
@@ -375,41 +370,6 @@ mod tests {
             .unwrap_err(),
             TerminalSenderPlanError::EmptyHexInput
         );
-    }
-
-    #[test]
-    fn line_and_character_pacing_preserve_the_same_logical_line_endings() {
-        let input = "a\n\nb\n";
-        let line_plan = plan(
-            input,
-            TerminalSenderInputMode::Text,
-            TerminalSenderPacing::Line,
-            1,
-        )
-        .unwrap();
-        let line_bytes = line_plan
-            .frames()
-            .iter()
-            .flat_map(|frame| {
-                let mut bytes = frame.text().unwrap().as_bytes().to_vec();
-                bytes.push(b'\r');
-                bytes
-            })
-            .collect::<Vec<_>>();
-        let character_bytes = plan(
-            input,
-            TerminalSenderInputMode::Text,
-            TerminalSenderPacing::Character,
-            1,
-        )
-        .unwrap()
-        .frames()
-        .iter()
-        .flat_map(|frame| frame.text().unwrap().as_bytes().to_vec())
-        .collect::<Vec<_>>();
-
-        assert_eq!(line_bytes, b"a\r\rb\r");
-        assert_eq!(line_bytes, character_bytes);
     }
 
     #[test]
