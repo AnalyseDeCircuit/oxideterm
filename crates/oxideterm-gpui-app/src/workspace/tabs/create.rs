@@ -193,6 +193,40 @@ fn reusable_indexed_saved_node_for_config(
     .then(|| node_id.clone())
 }
 
+fn updated_saved_node_config_for_connect(
+    node_router: &NodeRouter,
+    node_id: &NodeId,
+    accepted_config: &SshConfig,
+) -> Option<SshConfig> {
+    let runtime_snapshot = node_router.node_runtime_snapshot(node_id)?;
+    let mut config = runtime_snapshot.config;
+    let connection_in_use = node_router.node_state(node_id).is_ok_and(|snapshot| {
+        matches!(
+            snapshot.state.readiness,
+            NodeReadiness::Ready | NodeReadiness::Connecting
+        )
+    });
+    if !connection_in_use {
+        // Restored nodes own placeholder auth until the user supplies credentials.
+        // Refresh that owner before the transport clones its zeroizing config.
+        config.auth = accepted_config.auth.clone();
+    }
+    let accepted_host_key = accepted_config
+        .trust_host_key
+        .zip(accepted_config.expected_host_key_fingerprint.as_ref());
+    if let Some((trust_host_key, fingerprint)) = accepted_host_key {
+        config.strict_host_key_checking = true;
+        config.trust_host_key = Some(trust_host_key);
+        config.expected_host_key_fingerprint = Some(fingerprint.clone());
+    }
+    if connection_in_use && accepted_host_key.is_none() {
+        return Some(config);
+    }
+    let action_config = config.clone();
+    node_router.upsert_node_with_origin(node_id.clone(), config, runtime_snapshot.origin);
+    Some(action_config)
+}
+
 fn indexed_saved_node_matches_saved_connection(
     node_router: &NodeRouter,
     store: &oxideterm_connections::ConnectionStore,
@@ -751,6 +785,7 @@ impl WorkspaceApp {
         saved_connection_id: String,
         config: SshConfig,
         title: String,
+        mut auth_save_target: Option<new_connection::SavedAuthSaveTarget>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
@@ -778,6 +813,7 @@ impl WorkspaceApp {
             &config,
         ) {
             self.associate_existing_node_with_saved_connection(&node_id, &saved_connection_id);
+            self.arm_saved_auth_save(&node_id, auth_save_target.take());
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                 node.terminal_options = saved_terminal_options.clone();
                 node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
@@ -796,12 +832,7 @@ impl WorkspaceApp {
             }
             if self.ssh_nodes.contains_key(&node_id) {
                 let node_config = self
-                    .config_with_host_key_acceptance_for_node(&node_id, &config)
-                    .or_else(|| {
-                        self.node_router
-                            .node_runtime_snapshot(&node_id)
-                            .map(|snapshot| snapshot.config)
-                    })
+                    .config_for_reused_saved_node(&node_id, &config)
                     .ok_or_else(|| {
                         anyhow::anyhow!("SSH node {} has no runtime config", node_id.0)
                     })?;
@@ -844,6 +875,7 @@ impl WorkspaceApp {
                 .map(|snapshot| snapshot.config)
                 .ok_or_else(|| anyhow::anyhow!("target node was not materialized"))?;
             let target_node_id = expansion.target_node_id;
+            self.arm_saved_auth_save(&target_node_id, auth_save_target.take());
             if let Some(node) = self.ssh_nodes.get_mut(&target_node_id) {
                 node.terminal_options = saved_terminal_options;
                 node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
@@ -869,6 +901,7 @@ impl WorkspaceApp {
                 &saved_connection_id,
             ) {
                 self.ensure_workspace_ssh_node_from_runtime(&existing_node_id);
+                self.arm_saved_auth_save(&existing_node_id, auth_save_target.take());
                 self.associate_existing_node_with_saved_connection(
                     &existing_node_id,
                     &saved_connection_id,
@@ -900,12 +933,7 @@ impl WorkspaceApp {
                     // above gives every terminal on that reused node one owner
                     // without letting sudo helper code infer one from host text.
                     let node_config = self
-                        .config_with_host_key_acceptance_for_node(&existing_node_id, &config)
-                        .or_else(|| {
-                            self.node_router
-                                .node_runtime_snapshot(&existing_node_id)
-                                .map(|snapshot| snapshot.config)
-                        })
+                        .config_for_reused_saved_node(&existing_node_id, &config)
                         .ok_or_else(|| {
                             anyhow::anyhow!("SSH node {} has no runtime config", existing_node_id.0)
                         })?;
@@ -931,6 +959,7 @@ impl WorkspaceApp {
                 title.clone(),
                 Some(saved_connection_id.clone()),
             );
+            self.arm_saved_auth_save(&node_id, auth_save_target.take());
             if let Some(node) = self.ssh_nodes.get_mut(&node_id) {
                 node.terminal_options = saved_terminal_options;
                 node.dedicated_new_terminal_connection = saved_dedicated_new_terminal_connection;
@@ -1007,26 +1036,12 @@ impl WorkspaceApp {
         }
     }
 
-    fn config_with_host_key_acceptance_for_node(
+    fn config_for_reused_saved_node(
         &mut self,
         node_id: &NodeId,
         accepted_config: &SshConfig,
     ) -> Option<SshConfig> {
-        let trust_host_key = accepted_config.trust_host_key?;
-        let expected_host_key_fingerprint =
-            accepted_config.expected_host_key_fingerprint.clone()?;
-        let runtime_snapshot = self.node_router.node_runtime_snapshot(node_id)?;
-        let mut config = runtime_snapshot.config;
-        // Tauri passes accepted host-key data as connectNode step options. A
-        // reused native node connects from its runtime-owned config, so update
-        // that owner before starting the worker.
-        config.strict_host_key_checking = true;
-        config.trust_host_key = Some(trust_host_key);
-        config.expected_host_key_fingerprint = Some(expected_host_key_fingerprint);
-        let action_config = config.clone();
-        self.node_router
-            .upsert_node_with_origin(node_id.clone(), config, runtime_snapshot.origin);
-        Some(action_config)
+        updated_saved_node_config_for_connect(&self.node_router, node_id, accepted_config)
     }
 
     pub(in crate::workspace) fn try_reuse_active_saved_connection_terminal(
@@ -1110,6 +1125,9 @@ impl WorkspaceApp {
                 saved_connection_id,
                 &config,
             )
+            && self
+                .config_for_reused_saved_node(&node_id, &config)
+                .is_some()
         {
             self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
             return node_id;
@@ -1355,6 +1373,7 @@ impl WorkspaceApp {
                     ssh_channel_strategy: SshChannelStrategy::default(),
                     terminal_ids: Vec::new(),
                     readiness: NodeReadiness::Disconnected,
+                    pending_auth_save_target: None,
                 },
             );
         }
@@ -1458,6 +1477,8 @@ impl WorkspaceApp {
                 })
                 .transpose()?;
             let prompt_handler = self.workspace_runtime.read(cx).native_ssh_prompt_handler();
+            let prompt_handler =
+                Arc::new(prompt_handler.as_ref().clone().for_node(node_id.clone()));
             SshSessionConfig::for_dedicated_connection(
                 runtime_snapshot.config,
                 parent_connection_id,
@@ -1660,7 +1681,7 @@ impl WorkspaceApp {
                 self.save_connection_after_terminal_open(request, cx);
             }
             if let Some(connection_id) = mark_used_connection_id.as_deref() {
-                let _ = self.connection_store.mark_used(connection_id);
+                self.mark_saved_connection_used_for_node(&node_id, connection_id);
             }
             return Ok(());
         }
@@ -1673,7 +1694,10 @@ impl WorkspaceApp {
             let intent = mark_used_connection_id
                 .clone()
                 .or_else(|| saved_connection_id.clone())
-                .map(SshConnectionIntent::ConnectSaved)
+                .map(|id| SshConnectionIntent::ConnectSaved {
+                    id,
+                    auth_save_target: None,
+                })
                 .unwrap_or_else(|| {
                     let terminal_options = self
                         .ssh_nodes
@@ -1725,7 +1749,11 @@ impl WorkspaceApp {
             cx.notify();
             return Ok(());
         }
-        self.ensure_node_connection_started(&node_id, cx);
+        if !self.ensure_node_connection_started(&node_id, cx)
+            && let Some(node) = self.ssh_nodes.get_mut(&node_id)
+        {
+            node.pending_auth_save_target = None;
+        }
         cx.notify();
         Ok(())
     }
@@ -1753,7 +1781,7 @@ impl WorkspaceApp {
                     self.save_connection_after_terminal_open(save_request, cx);
                 }
                 if let Some(connection_id) = mark_used_connection_id.as_deref() {
-                    let _ = self.connection_store.mark_used(connection_id);
+                    self.mark_saved_connection_used_for_node(&request.node_id, connection_id);
                 }
                 opened = true;
             }
@@ -2014,6 +2042,85 @@ mod create_tests {
             "other-owner"
         ));
         assert_eq!(node.saved_connection_id.as_deref(), Some("home-100"));
+    }
+
+    #[test]
+    fn saved_node_reconnect_uses_credentials_entered_after_restore() {
+        for accept_new_host_key in [false, true] {
+            let router =
+                NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+            let node_id = NodeId::new("restored-node");
+            let restored = SshConfig {
+                auth: AuthMethod::password_prompt(),
+                ..SshConfig::password("target.example.com", 22, "ops", "")
+            };
+            router.upsert_node_with_origin(
+                node_id.clone(),
+                restored,
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-a".to_string(),
+                },
+            );
+            let mut entered =
+                SshConfig::password("target.example.com", 22, "ops", "entered-test-secret");
+            if accept_new_host_key {
+                entered.trust_host_key = Some(true);
+                entered.expected_host_key_fingerprint =
+                    Some("SHA256:accepted-test-key".to_string());
+            }
+            assert!(saved_node_route_matches_config(&router, &node_id, &entered));
+            let launched = updated_saved_node_config_for_connect(&router, &node_id, &entered)
+                .unwrap_or_else(|| router.node_runtime_snapshot(&node_id).unwrap().config);
+            assert_eq!(
+                launched.auth,
+                AuthMethod::password("entered-test-secret"),
+                "the first transport must receive the entered password: accept_new_host_key={accept_new_host_key}",
+            );
+            let owner = router.node_runtime_snapshot(&node_id).unwrap();
+            assert_eq!(
+                owner.config.auth,
+                AuthMethod::password("entered-test-secret")
+            );
+            assert_eq!(owner.origin.saved_connection_id(), Some("saved-a"));
+        }
+    }
+
+    #[test]
+    fn saved_node_in_use_retains_its_current_authentication_owner() {
+        for state in [ConnectionState::Active, ConnectionState::Connecting] {
+            let registry = SshConnectionRegistry::new(ConnectionPoolConfig::default());
+            let router = NodeRouter::new(registry.clone());
+            let node_id = NodeId::new("shared-node");
+            let current =
+                SshConfig::password("target.example.com", 22, "ops", "active-test-secret");
+            let handle = registry.acquire(
+                current.clone(),
+                ConnectionConsumer::NodeRouter(node_id.0.clone()),
+            );
+            let physical = Arc::new(());
+            handle.set_physical(physical.clone());
+            registry.mark_state(handle.connection_id(), state).unwrap();
+            router.upsert_node_with_origin(
+                node_id.clone(),
+                current,
+                NodeOrigin::Restored {
+                    saved_connection_id: "saved-a".to_string(),
+                },
+            );
+            router
+                .bind_connection(&node_id, handle.connection_id().to_string())
+                .unwrap();
+            let entered =
+                SshConfig::password("target.example.com", 22, "ops", "entered-test-secret");
+            let config =
+                updated_saved_node_config_for_connect(&router, &node_id, &entered).unwrap();
+            assert_eq!(config.auth, AuthMethod::password("active-test-secret"));
+            assert_eq!(
+                router.node_runtime_snapshot(&node_id).unwrap().config.auth,
+                AuthMethod::password("active-test-secret")
+            );
+            assert!(Arc::ptr_eq(&handle.physical::<()>().unwrap(), &physical));
+        }
     }
 
     #[test]

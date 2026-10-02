@@ -20,6 +20,9 @@
       "password": "Mot de passe",
       "use_empty_password": "Utiliser un mot de passe vide",
       "save_password": "Enregistrer le mot de passe dans le trousseau",
+      "save_credentials_after_login": "Enregistrer les informations d’authentification après une connexion réussie",
+      "credentials_saved": "Informations d’authentification enregistrées",
+      "save_credentials_failed": "Échec de l’enregistrement des informations d’authentification",
       "group": "Groupe",
       "notes": "Notes",
       "notes_placeholder": "Ajouter des informations facultatives sur cette connexion",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "Enregistrer le mot de passe après une connexion réussie",
+      "password_saved": "Mot de passe SSH enregistré",
+      "save_password_failed": "Impossible d’enregistrer le mot de passe SSH. La connexion reste ouverte.",
       "title": "Authentification clavier interactive",
       "continue": "Continuer",
       "cancelled": "L’authentification clavier interactive a été annulée."

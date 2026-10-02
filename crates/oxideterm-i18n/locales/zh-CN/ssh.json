@@ -33,6 +33,9 @@
       "password": "密码",
       "use_empty_password": "使用空密码",
       "save_password": "保存密码到钥匙串",
+      "save_credentials_after_login": "连接成功后保存认证信息",
+      "credentials_saved": "认证信息已保存",
+      "save_credentials_failed": "保存认证信息失败",
       "group": "分组",
       "notes": "备注",
       "notes_placeholder": "添加此连接的可选说明",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "登录成功后保存密码",
+      "password_saved": "SSH 密码已保存",
+      "save_password_failed": "无法保存 SSH 密码，当前连接仍保持打开。",
       "title": "键盘交互认证",
       "continue": "继续",
       "cancelled": "键盘交互认证已取消。"

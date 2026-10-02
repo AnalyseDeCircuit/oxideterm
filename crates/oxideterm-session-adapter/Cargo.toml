@@ -17,3 +17,6 @@ oxideterm-terminal = { path = "../oxideterm-terminal" }
 
 [dev-dependencies]
 chrono.workspace = true
+
+[target.'cfg(not(target_os = "macos"))'.dev-dependencies]
+keyring.workspace = true

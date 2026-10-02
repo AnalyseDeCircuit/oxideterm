@@ -1319,7 +1319,10 @@ impl WorkspaceApp {
                 },
             }
         } else {
-            SshConnectionIntent::ConnectSaved(connection.id.clone())
+            SshConnectionIntent::ConnectSaved {
+                id: connection.id.clone(),
+                auth_save_target: None,
+            }
         };
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
@@ -2676,11 +2679,12 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let Some(config) = ssh_config_from_saved_connection(
+        let config = ssh_config_from_saved_connection(
             &self.connection_store,
             self.settings_store.settings(),
             &conn,
-        ) else {
+        );
+        if saved_connection_requires_credentials(config.as_ref()) {
             if self.try_reuse_active_saved_connection_terminal(id, &conn, window, cx) {
                 return;
             }
@@ -2695,9 +2699,10 @@ impl WorkspaceApp {
                 cx,
             );
             return;
-        };
+        }
+        let config = config.expect("credential form handles unavailable configurations");
         let title = conn.name.clone();
-        self.start_saved_connection_flow(id.to_string(), config, title, window, cx);
+        self.start_saved_connection_flow(id.to_string(), config, title, None, window, cx);
     }
 
     pub(in crate::workspace) fn open_saved_connection_prompt(
@@ -2713,6 +2718,7 @@ impl WorkspaceApp {
         };
         self.prepare_modal_interaction_boundary(cx);
         let mut form = form_from_saved_connection(&conn, error);
+        form.save_password = false;
         restore_legacy_jump_host_in_form(&mut form, &conn, &self.connection_store);
         self.update_connection_form_state(cx, |state| {
             state.replace_with_new_form(form);
@@ -2815,6 +2821,13 @@ impl WorkspaceApp {
         else {
             return;
         };
+        let auth_save_target = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .filter(|form| form.save_password && action == SavedConnectionPromptAction::Connect)
+            .and_then(|_| self.connection_store.get(&id))
+            .map(super::super::password_prompt::SavedAuthSaveTarget::new);
         let secret_handoff = match action {
             SavedConnectionPromptAction::Test => RuntimeSecretHandoff::CopyForTest,
             SavedConnectionPromptAction::Connect => RuntimeSecretHandoff::Move,
@@ -2856,7 +2869,7 @@ impl WorkspaceApp {
                         form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
                     }
                 });
-                self.start_saved_connection_flow(id, config, title, window, cx);
+                self.start_saved_connection_flow(id, config, title, auth_save_target, window, cx);
             }
             SavedConnectionPromptAction::Test => {
                 self.start_ssh_test_flow(config, title, cx);
@@ -2966,7 +2979,9 @@ impl WorkspaceApp {
                                 // Drop the stale failed runtime node before
                                 // materializing the edited connection again.
                                 self.remove_inactive_session_tree_node(&node_id, window, cx);
-                                self.start_saved_connection_flow(id, config, title, window, cx);
+                                self.start_saved_connection_flow(
+                                    id, config, title, None, window, cx,
+                                );
                             } else {
                                 self.open_saved_connection_prompt(
                                     &id,
@@ -3117,6 +3132,7 @@ impl WorkspaceApp {
         id: String,
         mut config: SshConfig,
         title: String,
+        auth_save_target: Option<super::super::password_prompt::SavedAuthSaveTarget>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3140,7 +3156,10 @@ impl WorkspaceApp {
             self.start_proxy_session_tree_connect(
                 config,
                 title,
-                SshConnectionIntent::ConnectSaved(id),
+                SshConnectionIntent::ConnectSaved {
+                    id,
+                    auth_save_target,
+                },
                 None,
                 window,
                 cx,
@@ -3148,7 +3167,15 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        self.start_ssh_preflight(config, title, SshConnectionIntent::ConnectSaved(id), cx);
+        self.start_ssh_preflight(
+            config,
+            title,
+            SshConnectionIntent::ConnectSaved {
+                id,
+                auth_save_target,
+            },
+            cx,
+        );
         cx.notify();
     }
 
@@ -3476,9 +3503,41 @@ fn saved_connection_for_open(store: &ConnectionStore, id: &str) -> Option<SavedC
     store.get(id).cloned()
 }
 
+fn saved_connection_requires_credentials(config: Option<&SshConfig>) -> bool {
+    config.is_none_or(|config| matches!(config.auth, AuthMethod::Password { prompt: true, .. }))
+}
+
 #[cfg(test)]
 mod saved_connection_open_tests {
     use super::*;
+
+    #[test]
+    fn missing_credentials_open_the_authentication_form_without_blocking_configured_methods() {
+        assert!(saved_connection_requires_credentials(None));
+        for (auth, requires_form) in [
+            (AuthMethod::password_prompt(), true),
+            (AuthMethod::password("fixture-password"), false),
+            (AuthMethod::password(""), false),
+            (AuthMethod::key("fixture-key", None), false),
+            (AuthMethod::Agent, false),
+            (AuthMethod::KeyboardInteractive, false),
+            (
+                AuthMethod::kerberos_preferred(AuthMethod::password_prompt(), None, false),
+                false,
+            ),
+        ] {
+            let config = SshConfig {
+                auth,
+                ..SshConfig::default()
+            };
+            assert_eq!(
+                saved_connection_requires_credentials(Some(&config)),
+                requires_form,
+                "auth={:?}",
+                config.auth
+            );
+        }
+    }
 
     fn password_proxy_hop(auth: SavedAuth) -> SavedProxyHop {
         SavedProxyHop {

@@ -195,7 +195,7 @@ pub(super) fn auth_method_from_proxy_hop(
     }
 }
 
-pub(super) fn form_from_runtime_config(
+pub(in crate::workspace) fn form_from_runtime_config(
     config: SshConfig,
     title: Option<&str>,
     default_group: String,

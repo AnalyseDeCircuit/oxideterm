@@ -20,6 +20,9 @@
       "password": "パスワード",
       "use_empty_password": "空のパスワードを使用",
       "save_password": "パスワードをキーチェーンに保存",
+      "save_credentials_after_login": "ログイン成功後に認証情報を保存する",
+      "credentials_saved": "認証情報を保存しました",
+      "save_credentials_failed": "認証情報の保存に失敗しました",
       "group": "グループ",
       "notes": "メモ",
       "notes_placeholder": "この接続に関する任意の情報を追加",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "ログイン成功後にパスワードを保存",
+      "password_saved": "SSH パスワードを保存しました",
+      "save_password_failed": "SSH パスワードを保存できませんでした。接続は維持されています。",
       "title": "キーボード対話認証",
       "continue": "続行",
       "cancelled": "キーボード対話認証はキャンセルされました。"

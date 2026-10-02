@@ -33,6 +33,9 @@
       "password": "密碼",
       "use_empty_password": "使用空密碼",
       "save_password": "將密碼儲存至鑰匙圈",
+      "save_credentials_after_login": "連線成功後儲存驗證資訊",
+      "credentials_saved": "驗證資訊已儲存",
+      "save_credentials_failed": "儲存驗證資訊失敗",
       "group": "群組",
       "notes": "備註",
       "notes_placeholder": "新增此連線的選填說明",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "登入成功後儲存密碼",
+      "password_saved": "SSH 密碼已儲存",
+      "save_password_failed": "無法儲存 SSH 密碼，目前連線仍保持開啟。",
       "title": "鍵盤互動認證",
       "continue": "繼續",
       "cancelled": "鍵盤互動認證已取消。"

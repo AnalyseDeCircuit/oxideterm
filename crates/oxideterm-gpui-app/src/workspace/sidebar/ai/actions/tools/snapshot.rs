@@ -2248,6 +2248,7 @@ impl WorkspaceApp {
             resource_ref.id().to_string(),
             config,
             title,
+            None,
             window,
             cx,
         );

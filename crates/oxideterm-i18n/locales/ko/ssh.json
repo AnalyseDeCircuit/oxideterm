@@ -20,6 +20,9 @@
       "password": "비밀번호",
       "use_empty_password": "빈 비밀번호 사용",
       "save_password": "비밀번호를 키체인에 저장",
+      "save_credentials_after_login": "로그인 성공 후 인증 정보 저장",
+      "credentials_saved": "인증 정보가 저장되었습니다",
+      "save_credentials_failed": "인증 정보를 저장하지 못했습니다",
       "group": "그룹",
       "notes": "메모",
       "notes_placeholder": "이 연결에 대한 선택적 정보 추가",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "로그인 성공 후 비밀번호 저장",
+      "password_saved": "SSH 비밀번호가 저장되었습니다",
+      "save_password_failed": "SSH 비밀번호를 저장할 수 없습니다. 연결은 유지됩니다.",
       "title": "키보드 대화형 인증",
       "continue": "계속",
       "cancelled": "키보드 대화형 인증이 취소되었습니다."

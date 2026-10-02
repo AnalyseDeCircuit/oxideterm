@@ -20,6 +20,9 @@
       "password": "Mật khẩu",
       "use_empty_password": "Sử dụng mật khẩu trống",
       "save_password": "Lưu mật khẩu vào keychain",
+      "save_credentials_after_login": "Lưu thông tin xác thực sau khi đăng nhập thành công",
+      "credentials_saved": "Đã lưu thông tin xác thực",
+      "save_credentials_failed": "Không thể lưu thông tin xác thực",
       "group": "Nhóm",
       "notes": "Ghi chú",
       "notes_placeholder": "Thêm thông tin tùy chọn cho kết nối này",
@@ -207,6 +210,9 @@
       }
     },
     "kbi": {
+      "save_password_after_login": "Lưu mật khẩu sau khi đăng nhập thành công",
+      "password_saved": "Đã lưu mật khẩu SSH",
+      "save_password_failed": "Không thể lưu mật khẩu SSH. Kết nối vẫn được duy trì.",
       "title": "Xác thực tương tác bàn phím",
       "continue": "Tiếp tục",
       "cancelled": "Xác thực tương tác bàn phím đã bị hủy."

@@ -27,6 +27,14 @@ impl server::Handler for Peer {
         user: &str,
         password: &str,
     ) -> Result<server::Auth, Self::Error> {
+        if self.interactive {
+            return Ok(server::Auth::Reject {
+                proceed_with_methods: Some(
+                    [russh::MethodKind::KeyboardInteractive].as_slice().into(),
+                ),
+                partial_success: false,
+            });
+        }
         Ok(
             if !self.interactive && user == "audit-user" && password == "fixture-auth-secret" {
                 server::Auth::Accept
@@ -88,21 +96,36 @@ impl server::Handler for Peer {
     }
     async fn auth_keyboard_interactive<'a>(
         &'a mut self,
-        _: &str,
+        user: &str,
         _: &str,
         response: Option<server::Response<'a>>,
     ) -> Result<server::Auth, Self::Error> {
         if !self.interactive {
             return Ok(server::Auth::reject());
         }
+        let password_fallback = user == "password-fallback-user";
         Ok(match response {
             None => server::Auth::Partial {
                 name: "sensitive-challenge-name".into(),
                 instructions: "sensitive-challenge-instructions".into(),
-                prompts: vec![("sensitive-challenge-prompt".into(), false)].into(),
+                prompts: vec![(
+                    if password_fallback {
+                        "Password:"
+                    } else {
+                        "sensitive-challenge-prompt"
+                    }
+                    .into(),
+                    false,
+                )]
+                .into(),
             },
             Some(mut responses) => {
-                if responses.next().as_deref() == Some(b"fixture-otp-secret".as_slice()) {
+                let expected = if password_fallback {
+                    b"fixture-auth-secret".as_slice()
+                } else {
+                    b"fixture-otp-secret".as_slice()
+                };
+                if responses.next().as_deref() == Some(expected) {
                     server::Auth::Accept
                 } else {
                     server::Auth::reject()
@@ -351,6 +374,183 @@ async fn protocol_authentication_audit_distinguishes_success_rejection_and_host_
 struct Prompt {
     cancel: bool,
 }
+
+#[derive(Default)]
+struct PasswordPrompt {
+    remember: bool,
+    answer: Option<&'static str>,
+    interactive_answer: Option<&'static str>,
+    saved: Arc<std::sync::Mutex<Vec<(String, u16, String, Zeroizing<String>)>>>,
+    completed: std::sync::Mutex<Vec<bool>>,
+}
+
+impl oxideterm_ssh::SshPromptHandler for PasswordPrompt {
+    fn authentication_completed(&self, configured_credentials_confirmed: bool) {
+        self.completed
+            .lock()
+            .unwrap()
+            .push(configured_credentials_confirmed);
+    }
+    fn keyboard_interactive(
+        &self,
+        _: oxideterm_ssh::KeyboardInteractivePromptRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        oxideterm_ssh::KeyboardInteractiveResponses,
+                        oxideterm_ssh::SshPromptError,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            self.interactive_answer
+                .map(|answer| Zeroizing::new(vec![answer.into()]))
+                .ok_or(oxideterm_ssh::SshPromptError::Cancelled)
+        })
+    }
+
+    fn password(
+        &self,
+        prompt: oxideterm_ssh::SshPasswordPrompt,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<
+                    Output = Result<
+                        oxideterm_ssh::SshPasswordResponse,
+                        oxideterm_ssh::SshPromptError,
+                    >,
+                > + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async move {
+            let answer = self
+                .answer
+                .ok_or(oxideterm_ssh::SshPromptError::Cancelled)?;
+            let saved = self.saved.clone();
+            let on_authenticated: Option<Box<dyn FnOnce(Zeroizing<String>) + Send>> =
+                self.remember.then(|| {
+                    Box::new(move |password| {
+                        saved.lock().unwrap().push((
+                            prompt.host,
+                            prompt.port,
+                            prompt.username,
+                            password,
+                        ));
+                    }) as Box<dyn FnOnce(Zeroizing<String>) + Send>
+                });
+            Ok(oxideterm_ssh::SshPasswordResponse {
+                password: Zeroizing::new(answer.into()),
+                on_authenticated,
+            })
+        })
+    }
+}
+
+#[tokio::test]
+async fn configured_credentials_are_confirmed_only_when_the_server_accepts_them() {
+    for (password, username, authenticated, expected_receipts) in [
+        ("fixture-auth-secret", "audit-user", true, vec![true]),
+        ("incorrect-auth-secret", "audit-user", false, vec![]),
+        (
+            "fixture-auth-secret",
+            "password-fallback-user",
+            true,
+            vec![true],
+        ),
+        (
+            "incorrect-auth-secret",
+            "otp-fallback-user",
+            true,
+            vec![false],
+        ),
+    ] {
+        let (mut config, _, server, _) = start_peer(username != "audit-user").await;
+        config.username = username.into();
+        config.auth = oxideterm_ssh::AuthMethod::password(password);
+        let prompt = Arc::new(PasswordPrompt {
+            interactive_answer: Some("fixture-otp-secret"),
+            ..Default::default()
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            SshTransportClient::new(config)
+                .with_prompt_handler(prompt.clone())
+                .test_connection(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.is_ok(), authenticated, "username={username}");
+        assert_eq!(
+            *prompt.completed.lock().unwrap(),
+            expected_receipts,
+            "username={username}"
+        );
+        server.abort();
+        let _ = server.await;
+    }
+}
+
+#[tokio::test]
+async fn prompted_password_is_saved_only_after_successful_authentication_and_explicit_consent() {
+    for (answer, remember, authenticated, username) in [
+        (Some("fixture-auth-secret"), true, true, "audit-user"),
+        (Some("fixture-auth-secret"), false, true, "audit-user"),
+        (Some("incorrect-auth-secret"), true, false, "audit-user"),
+        (None, true, false, "audit-user"),
+        (
+            Some("fixture-auth-secret"),
+            true,
+            true,
+            "password-fallback-user",
+        ),
+        (
+            Some("incorrect-auth-secret"),
+            true,
+            true,
+            "otp-fallback-user",
+        ),
+    ] {
+        let interactive = username != "audit-user";
+        let (mut config, _, server, _) = start_peer(interactive).await;
+        config.username = username.into();
+        config.auth = oxideterm_ssh::AuthMethod::password_prompt();
+        let expected_endpoint = (config.host.clone(), config.port, config.username.clone());
+        let prompt = Arc::new(PasswordPrompt {
+            answer,
+            remember,
+            interactive_answer: interactive.then_some("fixture-otp-secret"),
+            ..Default::default()
+        });
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            SshTransportClient::new(config)
+                .with_prompt_handler(prompt.clone())
+                .test_connection(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.is_ok(), authenticated);
+        let saved = prompt.saved.lock().unwrap();
+        let expected = if authenticated && remember && answer == Some("fixture-auth-secret") {
+            vec![(
+                expected_endpoint.0,
+                expected_endpoint.1,
+                expected_endpoint.2,
+                Zeroizing::new("fixture-auth-secret".into()),
+            )]
+        } else {
+            vec![]
+        };
+        assert_eq!(*saved, expected);
+        server.abort();
+        let _ = server.await;
+    }
+}
+
 impl oxideterm_ssh::SshPromptHandler for Prompt {
     fn keyboard_interactive(
         &self,

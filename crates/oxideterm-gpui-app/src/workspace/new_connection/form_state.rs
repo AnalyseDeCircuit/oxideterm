@@ -1,3 +1,4 @@
+use super::password_prompt::SavedPasswordLoadError;
 use std::fmt;
 
 use oxideterm_connections::{
@@ -814,7 +815,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     // A revealed value is presentation state until the user edits it.
     pub(in crate::workspace) password_from_store: bool,
     pub(in crate::workspace) password_load_id: Option<u64>,
-    pub(in crate::workspace) password_load_failed: bool,
+    pub(in crate::workspace) password_load_error: Option<SavedPasswordLoadError>,
     pub(in crate::workspace) password_visible: bool,
     pub(in crate::workspace) key_path: String,
     pub(in crate::workspace) managed_key_id: String,
@@ -1120,7 +1121,7 @@ impl Default for NewConnectionForm {
             password_loaded: true,
             password_from_store: false,
             password_load_id: None,
-            password_load_failed: false,
+            password_load_error: None,
             password_visible: false,
             key_path: String::new(),
             managed_key_id: String::new(),
@@ -2025,7 +2026,7 @@ pub(in crate::workspace) fn password_draft_mut(form: &mut NewConnectionForm) -> 
     // Typing supersedes any pending read, even if the replacement is later cleared.
     form.password_loaded = true;
     form.password_load_id = None;
-    form.password_load_failed = false;
+    form.password_load_error = None;
     form.password_from_store = false;
     &mut form.password
 }

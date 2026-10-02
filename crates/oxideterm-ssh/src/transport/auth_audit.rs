@@ -4,6 +4,28 @@ struct AuthenticationAudit {
 }
 
 impl AuthenticationAudit {
+    async fn password_prompt(
+        &self,
+        handler: &dyn SshPromptHandler,
+        prompt: SshPasswordPrompt,
+    ) -> Result<SshPasswordResponse, SshPromptError> {
+        use oxideterm_audit::{AuditEvidence, AuditOutcome};
+        let operation = oxideterm_audit::AuditOperation::in_context(
+            self.context.as_ref(),
+            oxideterm_audit::AuditCategory::Security,
+            "ssh_auth_prompt",
+            Some(r#"{"prompt_count":1,"chained":false}"#),
+        );
+        let result = handler.password(prompt).await;
+        let outcome = match &result {
+            Ok(_) => AuditOutcome::Sent,
+            Err(SshPromptError::Cancelled) => AuditOutcome::Cancelled,
+            Err(_) => AuditOutcome::Failed,
+        };
+        operation.finish(outcome, AuditEvidence::Lifecycle, None, None);
+        result
+    }
+
     fn new(context: Option<&oxideterm_audit::AuditContext>, parent: Option<&str>) -> Self {
         Self {
             context: context.cloned().map(|mut context| {
