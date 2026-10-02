@@ -91,6 +91,7 @@ bitflags! {
         const REPORT_ALTERNATE_KEYS   = 1 << 20;
         const REPORT_ALL_KEYS_AS_ESC  = 1 << 21;
         const REPORT_ASSOCIATED_TEXT  = 1 << 22;
+        const WIN32_INPUT             = 1 << 24;
         const MOUSE_MODE              = Self::MOUSE_REPORT_CLICK.bits() | Self::MOUSE_MOTION.bits() | Self::MOUSE_DRAG.bits();
         const KITTY_KEYBOARD_PROTOCOL = Self::DISAMBIGUATE_ESC_CODES.bits()
                                       | Self::REPORT_EVENT_TYPES.bits()
@@ -2175,6 +2176,7 @@ impl<T: EventListener> Handler for Term<T> {
             },
             NamedPrivateMode::ReportFocusInOut => self.mode.insert(TermMode::FOCUS_IN_OUT),
             NamedPrivateMode::BracketedPaste => self.mode.insert(TermMode::BRACKETED_PASTE),
+            NamedPrivateMode::Win32Input => self.mode.insert(TermMode::WIN32_INPUT),
             // Mouse encodings are mutually exclusive.
             NamedPrivateMode::SgrMouse => {
                 self.mode.remove(TermMode::UTF8_MOUSE);
@@ -2234,6 +2236,7 @@ impl<T: EventListener> Handler for Term<T> {
             },
             NamedPrivateMode::ReportFocusInOut => self.mode.remove(TermMode::FOCUS_IN_OUT),
             NamedPrivateMode::BracketedPaste => self.mode.remove(TermMode::BRACKETED_PASTE),
+            NamedPrivateMode::Win32Input => self.mode.remove(TermMode::WIN32_INPUT),
             NamedPrivateMode::SgrMouse => self.mode.remove(TermMode::SGR_MOUSE),
             NamedPrivateMode::Utf8Mouse => self.mode.remove(TermMode::UTF8_MOUSE),
             NamedPrivateMode::AlternateScroll => self.mode.remove(TermMode::ALTERNATE_SCROLL),
@@ -2290,6 +2293,7 @@ impl<T: EventListener> Handler for Term<T> {
                 },
                 NamedPrivateMode::SyncUpdate => ModeState::Reset,
                 NamedPrivateMode::ColumnMode => ModeState::NotSupported,
+                NamedPrivateMode::Win32Input => self.mode.contains(TermMode::WIN32_INPUT).into(),
             },
             PrivateMode::Unknown(_) => ModeState::NotSupported,
         };
@@ -2724,6 +2728,27 @@ mod tests {
     use crate::term::cell::{Cell, Flags};
     use crate::term::test::TermSize;
     use crate::vte::ansi::{self, CharsetIndex, Handler, StandardCharset};
+
+    #[test]
+    fn win32_input_mode_negotiates_reports_and_resets() {
+        struct Replies(std::cell::RefCell<Vec<String>>);
+        impl EventListener for Replies {
+            fn send_event(&self, event: Event) {
+                if let Event::PtyWrite(reply) = event {
+                    self.0.borrow_mut().push(reply);
+                }
+            }
+        }
+        let mut term = Term::new(Config::default(), &TermSize::new(80, 24), Replies(Default::default()));
+        let mut parser = ansi::Processor::<ansi::StdSyncHandler>::new();
+        parser.advance(&mut term, b"\x1b[?9001$p\x1b[?9001h\x1b[?9001$p");
+        assert!(term.mode().contains(TermMode::WIN32_INPUT));
+        parser.advance(&mut term, b"\x1b[?9001l\x1b[?9001$p");
+        assert!(!term.mode().contains(TermMode::WIN32_INPUT));
+        parser.advance(&mut term, b"\x1b[?9001h\x1bc\x1b[?9001$p");
+        assert!(!term.mode().contains(TermMode::WIN32_INPUT));
+        assert_eq!(*term.event_proxy.0.borrow(), ["\x1b[?9001;2$y", "\x1b[?9001;1$y", "\x1b[?9001;2$y", "\x1b[?9001;2$y"]);
+    }
 
     fn assert_batch_input_matches_scalar(
         size: &TermSize,

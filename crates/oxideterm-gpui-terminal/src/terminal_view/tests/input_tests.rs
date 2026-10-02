@@ -2,6 +2,208 @@ use super::*;
 use oxideterm_settings::{TerminalBackspaceSequence, TerminalDeleteSequence};
 
 #[test]
+fn win32_input_preserves_control_key_identity_and_enter_modifiers() {
+    let mode = TermMode::default() | TermMode::WIN32_INPUT;
+    for (key, control, shift, alt, expected) in [
+        ("j", true, false, false, "\x1b[74;0;10;1;8;1_"),
+        ("i", true, false, false, "\x1b[73;0;9;1;8;1_"),
+        ("m", true, false, false, "\x1b[77;0;13;1;8;1_"),
+        ("h", true, false, false, "\x1b[72;0;8;1;8;1_"),
+        ("c", true, false, false, "\x1b[67;0;3;1;8;1_"),
+        ("enter", false, false, false, "\x1b[13;0;13;1;0;1_"),
+        ("enter", true, false, false, "\x1b[13;0;10;1;8;1_"),
+        ("enter", false, true, false, "\x1b[13;0;13;1;16;1_"),
+        ("enter", false, false, true, "\x1b[13;0;13;1;2;1_"),
+        ("space", true, false, false, "\x1b[32;0;0;1;8;1_"),
+        ("left", true, false, false, "\x1b[37;0;0;1;8;1_"),
+    ] {
+        let keystroke = Keystroke {
+            key: key.into(),
+            modifiers: Modifiers {
+                control,
+                shift,
+                alt,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for event in [KittyKeyEventType::Press, KittyKeyEventType::Repeat] {
+            assert_eq!(
+                oxideterm_key_escape_sequence(&keystroke, &mode, false, event).as_deref(),
+                Some(expected),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            oxideterm_key_escape_sequence(&keystroke, &mode, false, KittyKeyEventType::Release)
+                .as_deref(),
+            Some(expected.replace(";1;", ";0;").as_str()),
+            "{key} release",
+        );
+    }
+    let ctrl_j = Keystroke::parse("ctrl-j").unwrap();
+    assert_eq!(
+        oxideterm_key_escape_sequence(
+            &ctrl_j,
+            &TermMode::default(),
+            false,
+            KittyKeyEventType::Press
+        )
+        .as_deref(),
+        Some("\n")
+    );
+    assert_eq!(
+        oxideterm_key_escape_sequence(
+            &ctrl_j,
+            &(mode | TermMode::DISAMBIGUATE_ESC_CODES),
+            false,
+            KittyKeyEventType::Press
+        )
+        .as_deref(),
+        Some("\x1b[74;0;10;1;8;1_")
+    );
+}
+
+#[test]
+fn win32_input_leaves_printable_and_ime_text_on_the_platform_commit_path() {
+    for (key, key_char, modifiers) in [
+        ("a", "a", Modifiers::default()),
+        (
+            "a",
+            "A",
+            Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        ),
+        ("中", "中", Modifiers::default()),
+        (
+            "q",
+            "@",
+            Modifiers {
+                control: true,
+                alt: true,
+                ..Default::default()
+            },
+        ),
+    ] {
+        let keystroke = Keystroke {
+            key: key.into(),
+            key_char: Some(key_char.into()),
+            modifiers,
+        };
+        assert_eq!(
+            oxideterm_key_escape_sequence(
+                &keystroke,
+                &(TermMode::default() | TermMode::WIN32_INPUT),
+                false,
+                KittyKeyEventType::Press
+            ),
+            None
+        );
+    }
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires ConPTY staged beside the test executable; see local-development.md"]
+fn bundled_conpty_delivers_distinct_ctrl_j_and_enter_events() {
+    use crate::TerminalPane;
+    use oxideterm_terminal::{LocalPtyConfig, ShellInfo};
+    use std::{
+        fs,
+        time::{Duration, Instant},
+    };
+
+    let directory = tempfile::tempdir().unwrap();
+    let script = directory.path().join("input.ps1");
+    let ready = directory.path().join("ready");
+    let result = directory.path().join("result.json");
+    fs::write(
+        &script,
+        r#"
+param($Ready, $Result)
+$ErrorActionPreference = 'Stop'
+[Console]::TreatControlCAsInput = $true
+[IO.File]::WriteAllText($Ready, 'ready')
+$events = @(for ($i = 0; $i -lt 7; $i++) {
+    $key = [Console]::ReadKey($true)
+    @{ key = [int]$key.Key; character = [int]$key.KeyChar; modifiers = $key.Modifiers.ToString() }
+})
+[IO.File]::WriteAllText($Result, (ConvertTo-Json -InputObject $events -Compress))
+"#,
+    )
+    .unwrap();
+    let powershell = std::path::PathBuf::from(std::env::var_os("SystemRoot").unwrap())
+        .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+    let config = LocalPtyConfig {
+        shell: Some(
+            ShellInfo::new("input-probe", "Input probe", powershell).with_args(vec![
+                "-NoLogo".into(),
+                "-NoProfile".into(),
+                "-ExecutionPolicy".into(),
+                "Bypass".into(),
+                "-File".into(),
+                script.to_string_lossy().into_owned(),
+                ready.to_string_lossy().into_owned(),
+                result.to_string_lossy().into_owned(),
+            ]),
+        ),
+        ..Default::default()
+    };
+    let terminal =
+        TerminalPane::local_shared_session(config, &TerminalUiPreferences::default()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while Instant::now() < deadline {
+        terminal.lock().read_pending();
+        if ready.exists() && terminal.lock().mode().contains(TermMode::WIN32_INPUT) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(ready.exists(), "console reader did not start");
+    let mode = terminal.lock().mode();
+    assert!(
+        mode.contains(TermMode::WIN32_INPUT),
+        "bundled ConPTY did not negotiate mode 9001"
+    );
+    for key in ["ctrl-j", "ctrl-enter", "shift-enter", "enter", "ctrl-i"] {
+        for event in [KittyKeyEventType::Press, KittyKeyEventType::Release] {
+            let sequence =
+                oxideterm_key_escape_sequence(&Keystroke::parse(key).unwrap(), &mode, false, event)
+                    .unwrap();
+            terminal
+                .lock()
+                .write_protocol_bytes(sequence.as_bytes())
+                .unwrap();
+        }
+    }
+    terminal
+        .lock()
+        .write_protocol_bytes("中文".as_bytes())
+        .unwrap();
+    while Instant::now() < deadline && !result.exists() {
+        terminal.lock().read_pending();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    terminal.lock().shutdown();
+    let events: serde_json::Value =
+        serde_json::from_slice(&fs::read(result).expect("console reader result")).unwrap();
+    assert_eq!(
+        events,
+        serde_json::json!([
+            {"key": 74, "character": 10, "modifiers": "Control"},
+            {"key": 13, "character": 10, "modifiers": "Control"},
+            {"key": 13, "character": 13, "modifiers": "Shift"},
+        {"key": 13, "character": 13, "modifiers": "0"},
+            {"key": 73, "character": 9, "modifiers": "Control"},
+        {"key": 0, "character": 20013, "modifiers": "0"},
+        {"key": 0, "character": 25991, "modifiers": "0"},
+        ])
+    );
+}
+
+#[test]
 fn legacy_navigation_emits_normal_application_and_modified_sequences() {
     let sequence = oxideterm_key_escape_sequence(
         &Keystroke {

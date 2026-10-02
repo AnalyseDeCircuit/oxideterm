@@ -9,6 +9,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rustfmt.toml'
+      - 'scripts/release/conpty_runtime.py'
       - '.github/workflows/platform-checks.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
@@ -17,6 +18,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'rustfmt.toml'
+      - 'scripts/release/conpty_runtime.py'
       - '.github/workflows/platform-checks.yml'
 
 permissions:
@@ -53,6 +55,18 @@ jobs:
 
       - name: Test Windows text fallback identity
         run: cargo test -p gpui_windows --lib windows_text_
+
+      - name: Test Windows terminal pipe readiness and EOF
+        run: cargo test -p alacritty_terminal --lib tty::windows::blocking::tests
+
+      - name: Stage pinned ConPTY for console input tests
+        run: python scripts/release/conpty_runtime.py --target x86_64-pc-windows-msvc --destination target/debug/deps
+
+      - name: Test negotiated Windows key encoding
+        run: cargo test -p oxideterm-gpui-terminal --lib terminal_view::tests::input_tests
+
+      - name: Test actual ConPTY control and Enter keys
+        run: cargo test -p oxideterm-gpui-terminal --lib bundled_conpty_delivers_distinct_ctrl_j_and_enter_events -- --ignored
 
       - name: Check Windows application
         run: cargo check -p oxideterm-gpui-app

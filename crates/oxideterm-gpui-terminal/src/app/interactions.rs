@@ -228,6 +228,9 @@ impl TerminalPane {
         }
 
         let mode = self.terminal.lock().mode();
+        if !mode.contains(TermMode::WIN32_INPUT) {
+            self.win32_pressed_keys.clear();
+        }
         if self.handle_editor_free_type_clipboard_shortcut(event, mode, cx) {
             return true;
         }
@@ -313,7 +316,44 @@ impl TerminalPane {
             self.settings.delete_sequence,
             key_event_type,
         ) {
-            self.send_user_protocol_bytes(sequence.as_bytes(), cx);
+            if mode.contains(TermMode::WIN32_INPUT)
+                && sequence.starts_with("\x1b[")
+                && sequence.ends_with('_')
+            {
+                let legacy_mode = mode & !TermMode::WIN32_INPUT;
+                let semantic_sequence = configurable_key_escape_sequence(
+                    &event.keystroke,
+                    &legacy_mode,
+                    false,
+                    self.settings.backspace_sequence,
+                    self.settings.delete_sequence,
+                    key_event_type,
+                );
+                let semantic_bytes = semantic_sequence
+                    .as_deref()
+                    .unwrap_or(if event.keystroke.key == "enter" {
+                        "\n"
+                    } else {
+                        ""
+                    })
+                    .as_bytes();
+                let secret_entry = self.input_answers_privilege_prompt(semantic_bytes);
+                if self.send_user_encoded_key_without_broadcast(
+                    semantic_bytes,
+                    Some((&event.keystroke.key, sequence.as_bytes())),
+                    cx,
+                ) && !secret_entry
+                {
+                    // Other panes can use SSH or a different keyboard protocol.
+                    self.broadcast_user_input(
+                        super::TerminalBroadcastInputKind::Protocol,
+                        semantic_bytes,
+                        cx,
+                    );
+                }
+            } else {
+                self.send_user_protocol_bytes(sequence.as_bytes(), cx);
+            }
             return true;
         }
 
@@ -439,6 +479,15 @@ impl TerminalPane {
 
     pub(crate) fn handle_key_up(&mut self, event: &KeyUpEvent, cx: &mut Context<Self>) {
         let mode = self.terminal.lock().mode();
+        if mode.contains(TermMode::WIN32_INPUT) {
+            // Modifiers may have changed since key-down. The delivered key identity,
+            // not the current chord, determines whether ConPTY needs a release.
+            if !self.win32_pressed_keys.remove(&event.keystroke.key) {
+                return;
+            }
+        } else {
+            self.win32_pressed_keys.clear();
+        }
         if let Some(sequence) = configurable_key_escape_sequence(
             &event.keystroke,
             &mode,

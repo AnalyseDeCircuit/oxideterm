@@ -493,6 +493,7 @@ pub struct TerminalPane {
     context_action_requested: Option<TerminalContextAction>,
     pending_trigger_matches: VecDeque<oxideterm_terminal_triggers::TriggerMatched>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
+    win32_pressed_keys: HashSet<String>,
     input_broadcaster: Option<TerminalInputBroadcaster>,
     #[cfg(test)]
     test_accepts_input: bool,
@@ -1211,6 +1212,7 @@ impl TerminalPane {
             context_action_requested: None,
             pending_trigger_matches: VecDeque::new(),
             plugin_input_interceptor: None,
+            win32_pressed_keys: HashSet::new(),
             input_broadcaster: None,
             #[cfg(test)]
             test_accepts_input: false,
@@ -3763,6 +3765,9 @@ impl TerminalPane {
 
     fn handle_focus_change(&mut self, focused: bool, cx: &mut Context<Self>) {
         self.focused = focused;
+        if !focused {
+            self.win32_pressed_keys.clear();
+        }
         if !focused && self.context_menu.take().is_some() {
             // Menu actions refer to this pane's selection and command snapshot. Drop them
             // immediately on focus transfer and invalidate any pending exit animation.
@@ -3805,14 +3810,37 @@ impl TerminalPane {
         bytes: &[u8],
         cx: &mut Context<Self>,
     ) -> bool {
+        self.send_user_encoded_key_without_broadcast(bytes, None, cx)
+    }
+
+    fn send_user_encoded_key_without_broadcast(
+        &mut self,
+        semantic_bytes: &[u8],
+        encoded_key: Option<(&str, &[u8])>,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(semantic_bytes) else {
             return false;
         };
         let bytes = Zeroizing::new(bytes);
-        if self.send_protocol_bytes(&bytes, cx) {
+        // Command/secret tracking and plugins consume the logical input. Only
+        // the PTY sees the negotiated Windows envelope; plugin replacements
+        // remain literal input, matching the existing hook contract.
+        let wire_bytes = if bytes.as_slice() == semantic_bytes {
+            encoded_key.map_or(bytes.as_slice(), |(_, encoded)| encoded)
+        } else {
+            &bytes
+        };
+        if self.send_protocol_bytes(wire_bytes, cx) {
+            if bytes.as_slice() == semantic_bytes
+                && let Some((key, _)) = encoded_key
+            {
+                // Only delivered Win32 presses own a future release, including repeats.
+                self.win32_pressed_keys.insert(key.to_owned());
+            }
             self.observe_user_input("protocol", &bytes, cx);
             self.restore_live_output_after_user_input();
             return true;
@@ -4869,6 +4897,110 @@ mod tests {
     }
 
     #[gpui::test]
+    fn win32_input_releases_only_delivered_keys_after_modifiers_change(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.terminal.lock().feed_recording_output(b"\x1b[?9001h");
+            pane.recorder = Some(TerminalRecorder::start(
+                DEFAULT_COLS,
+                DEFAULT_ROWS,
+                TerminalRecordingOptions {
+                    capture_input: true,
+                    title: None,
+                    theme: None,
+                },
+            ));
+            for (pressed, released) in [("ctrl-j", "j"), ("alt-j", "j"), ("ctrl-space", "space")] {
+                assert!(pane.handle_key(
+                    &gpui::KeyDownEvent {
+                        keystroke: gpui::Keystroke::parse(pressed).unwrap(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    },
+                    cx
+                ));
+                pane.handle_key_up(
+                    &gpui::KeyUpEvent {
+                        keystroke: gpui::Keystroke::parse(released).unwrap(),
+                    },
+                    cx,
+                );
+            }
+            // Platform text commits and plugin replacements own their own input delivery.
+            assert!(!pane.handle_key(
+                &gpui::KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("j").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                cx
+            ));
+            pane.handle_key_up(
+                &gpui::KeyUpEvent {
+                    keystroke: gpui::Keystroke::parse("j").unwrap(),
+                },
+                cx,
+            );
+            for replacement in [None, Some(b"replacement".to_vec())] {
+                pane.set_plugin_input_interceptor(Some(Arc::new(move |_| match &replacement {
+                    Some(bytes) => TerminalInputInterceptorResult::Continue(bytes.clone()),
+                    None => TerminalInputInterceptorResult::Suppress,
+                })));
+                pane.handle_key(
+                    &gpui::KeyDownEvent {
+                        keystroke: gpui::Keystroke::parse("ctrl-j").unwrap(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    },
+                    cx,
+                );
+                pane.handle_key_up(
+                    &gpui::KeyUpEvent {
+                        keystroke: gpui::Keystroke::parse("ctrl-j").unwrap(),
+                    },
+                    cx,
+                );
+            }
+            let recording = pane.recorder.take().unwrap().stop();
+            let input = recording
+                .lines()
+                .skip(1)
+                .map(|line| {
+                    serde_json::from_str::<serde_json::Value>(line).unwrap()[2]
+                        .as_str()
+                        .unwrap()
+                        .to_owned()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                input,
+                [
+                    "\x1b[74;0;10;1;8;1_",
+                    "\x1b[74;0;106;0;0;1_",
+                    "\x1b[74;0;106;1;2;1_",
+                    "\x1b[74;0;106;0;0;1_",
+                    "\x1b[32;0;0;1;8;1_",
+                    "\x1b[32;0;32;0;0;1_",
+                    "replacement",
+                ]
+            );
+        });
+    }
+
+    #[gpui::test]
     fn direct_user_input_broadcasts_once_for_each_input_path(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
         let pane = cx.update(|window, cx| {
@@ -4900,6 +5032,21 @@ mod tests {
             pane.commit_text("x", cx);
             pane.send_user_protocol_bytes(b"\x1b[D", cx);
             pane.paste_text("y", cx);
+            pane.terminal.lock().feed_recording_output(b"\x1b[?9001h");
+            assert!(pane.handle_key(
+                &gpui::KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("ctrl-j").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                cx
+            ));
+            pane.handle_key_up(
+                &gpui::KeyUpEvent {
+                    keystroke: gpui::Keystroke::parse("ctrl-j").unwrap(),
+                },
+                cx,
+            );
         });
         let delivered = recorder.read_with(cx, |recorder, _cx| recorder.delivered.clone());
         assert_eq!(
@@ -4908,6 +5055,7 @@ mod tests {
                 (TerminalBroadcastInputKind::Text, b"x".to_vec()),
                 (TerminalBroadcastInputKind::Protocol, b"\x1b[D".to_vec()),
                 (TerminalBroadcastInputKind::Paste, b"y".to_vec()),
+                (TerminalBroadcastInputKind::Protocol, b"\n".to_vec()),
             ]
         );
 
@@ -4916,7 +5064,7 @@ mod tests {
         });
         assert_eq!(
             recorder.read_with(cx, |recorder, _cx| recorder.delivered.len()),
-            3
+            4
         );
     }
 
