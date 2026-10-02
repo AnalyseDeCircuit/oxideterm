@@ -321,6 +321,13 @@ deterministically. Do not restore direct `Instant::now` or `Instant::elapsed`
 calls in these element paths: doing so disconnects animation state from GPUI's
 timer scheduler and makes retargeting, pause, and resume tests timing-dependent.
 
+### Anonymous hover updates
+
+Anonymous elements with hover styles in `src/elements/div.rs` retain the painted hover state
+in their mouse listener and notify the owning view on transitions. Session Manager rows use
+these elements without IDs. The regression checks their painted backgrounds when entering,
+moving between, and leaving rows, including repeated movement without extra redraws inside a row.
+
 ### Nested scroll ownership
 
 OxideTerm contains nested ordinary overflow regions and virtual lists. Preserve the event

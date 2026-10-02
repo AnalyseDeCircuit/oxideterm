@@ -240,9 +240,23 @@ impl WorkspaceApp {
                     .insert(local_profile_node_id(&profile.id));
                 self.focus_terminal_session(session_id, window, cx);
             }
-            Err(error) => self.session_manager.update(cx, |manager, cx| {
-                manager.set_status(Some(error.to_string()), cx)
-            }),
+            Err(error) => {
+                let message = error.to_string();
+                self.session_manager.update(cx, |manager, cx| {
+                    manager.set_status(Some(message.clone()), cx)
+                });
+                // Palette and sidebar launches may have no Session Manager surface.
+                self.push_workspace_notice(
+                    TerminalNotice {
+                        title: message,
+                        description: None,
+                        status_text: None,
+                        progress: None,
+                        variant: TerminalNoticeVariant::Error,
+                    },
+                    cx,
+                );
+            }
         }
         cx.notify();
     }

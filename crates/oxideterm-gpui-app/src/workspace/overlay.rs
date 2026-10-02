@@ -1793,6 +1793,122 @@ mod tests {
     use super::*;
 
     #[gpui::test]
+    fn saved_local_profile_palette_failure_is_visible_without_session_manager(
+        cx: &mut TestAppContext,
+    ) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_PALETTE_FAILURE_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // The real workspace uses process-wide storage discovery. A separate
+            // portable process isolates it without changing the user's home or stores.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            fs::hard_link(&executable, &child).unwrap();
+            fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "portable palette regression failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let fixture_dir = PathBuf::from(fixture_dir);
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(&fixture_dir));
+        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+        settings.settings_mut().general.language = oxideterm_settings::Language::En;
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.save().unwrap();
+
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let directory = fixture_dir.join("saved-working-directory");
+        fs::create_dir(&directory).unwrap();
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace
+                    .tokens
+                    .apply_motion(oxideterm_theme::UiMotionProfile::Off);
+                assert!(
+                    workspace
+                        .tabs(cx)
+                        .iter()
+                        .all(|tab| tab.kind != TabKind::SessionManager)
+                );
+                workspace
+                    .connection_store
+                    .upsert_local_terminal_profile(
+                        oxideterm_connections::SaveLocalTerminalProfileRequest {
+                            name: "Unavailable palette profile".into(),
+                            cwd: Some(directory.to_string_lossy().into_owned()),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap();
+                fs::remove_dir(&directory).unwrap();
+                workspace.open_command_palette(window, cx);
+                workspace.command_palette.update(cx, |palette, cx| {
+                    palette.push_query_text("Unavailable palette profile", cx);
+                });
+                workspace.handle_command_palette_key(
+                    &KeyDownEvent {
+                        keystroke: gpui::Keystroke::parse("enter").unwrap(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    },
+                    window,
+                    cx,
+                );
+                assert!(!workspace.command_palette.read(cx).is_open());
+                assert!(
+                    workspace
+                        .tabs(cx)
+                        .iter()
+                        .all(|tab| tab.kind != TabKind::SessionManager)
+                );
+            });
+        });
+        cx.run_until_parked();
+        let overlay = workspace.read_with(cx, |workspace, _| workspace.overlay.clone());
+        overlay.read_with(cx, |overlay, _| {
+            assert_eq!(
+                overlay.standard_toasts.iter().map(|toast| (
+                    toast.notice.title.as_str(), toast.notice.variant
+                )).collect::<Vec<_>>(),
+                vec![(
+                    "The startup directory is unavailable. Edit the session to choose an existing directory.",
+                    TerminalNoticeVariant::Error,
+                )]
+            );
+        });
+        let error_background: gpui::Hsla = workspace.read_with(cx, |workspace, _| {
+            rgba((workspace.tokens.ui.error << 8) | 0x1a).into_color()
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(
+                window
+                    .painted_quads()
+                    .iter()
+                    .any(|quad| { quad.background.as_solid() == Some(error_background) }),
+                "the error toast must be painted in the current window"
+            );
+        });
+    }
+
+    #[gpui::test]
     fn tooltip_delay_exit_reentry_and_replacement_cancel_stale_deadlines(cx: &mut TestAppContext) {
         let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::from_millis(300), cx));
         overlay.update(cx, |overlay, _| {

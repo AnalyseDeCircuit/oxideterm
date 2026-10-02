@@ -67,6 +67,7 @@ enum PaletteAction {
     Keybinding(&'static str),
     ActivateTab(TabId),
     OpenSavedConnection(String),
+    OpenSavedLocalTerminal(String),
     QuickConnectHost {
         username: String,
         host: String,
@@ -516,6 +517,9 @@ impl WorkspaceApp {
             PaletteAction::OpenSavedConnection(connection_id) => {
                 self.open_saved_connection_from_palette(connection_id, window, cx);
             }
+            PaletteAction::OpenSavedLocalTerminal(profile_id) => {
+                self.open_saved_local_terminal_profile(&profile_id, window, cx);
+            }
             PaletteAction::QuickConnectHost {
                 username,
                 host,
@@ -941,7 +945,7 @@ impl WorkspaceApp {
 
         let command_items = self.command_palette_command_items();
         let session_items = self.command_palette_session_items(cx);
-        let mut connection_items = self.command_palette_connection_items();
+        let mut connection_items = Self::command_palette_connection_items(&self.connection_store);
         connection_items.extend(self.command_palette_ssh_config_items(&ssh_config_hosts));
         let plugin_items = self.command_palette_plugin_items(cx);
         let help_items = self.command_palette_help_items();
@@ -1114,8 +1118,8 @@ impl WorkspaceApp {
             .collect()
     }
 
-    fn command_palette_connection_items(&self) -> Vec<PaletteItem> {
-        self.connection_store
+    fn command_palette_connection_items(store: &ConnectionStore) -> Vec<PaletteItem> {
+        store
             .connection_infos()
             .into_iter()
             .map(|conn| {
@@ -1139,6 +1143,22 @@ impl WorkspaceApp {
                     disabled: false,
                 }
             })
+            .chain(store.local_terminal_profiles().iter().map(|profile| {
+                let shell = profile.shell_id.as_deref().unwrap_or_default();
+                let cwd = profile.cwd.as_deref().unwrap_or_default();
+                let group = profile.group.as_deref().unwrap_or_default();
+                PaletteItem {
+                    id: format!("local-profile:{}", profile.id),
+                    label: profile.name.clone(),
+                    section: PaletteSection::Connections,
+                    icon: LucideIcon::Terminal,
+                    detail: Some(format!("{shell} {cwd}").trim().to_string()),
+                    shortcut: None,
+                    value: format!("{} {shell} {cwd} {group}", profile.name),
+                    action: PaletteAction::OpenSavedLocalTerminal(profile.id.clone()),
+                    disabled: false,
+                }
+            }))
             .collect()
     }
 
@@ -2787,6 +2807,46 @@ fn shortcut_reference_rows() -> Vec<(
 mod panel_layout_tests {
     use super::*;
     use gpui::{Render, ScrollHandle, TestAppContext, size};
+
+    #[test]
+    fn saved_local_profiles_are_searchable_without_running_tabs() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = ConnectionStore::load(dir.path().join("connections.json")).unwrap();
+        for (id, name, shell_id, cwd) in [
+            ("linux", "wsl", "wsl-ubuntu", "~/work"),
+            ("ps", "PowerShell", "pwsh", "C:/work"),
+            ("cmd", "Command Prompt", "cmd", "C:/work"),
+        ] {
+            store
+                .upsert_local_terminal_profile(
+                    oxideterm_connections::SaveLocalTerminalProfileRequest {
+                        id: Some(id.into()),
+                        name: name.into(),
+                        shell_id: Some(shell_id.into()),
+                        cwd: Some(cwd.into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+        for (query, expected) in [("wsl", vec!["wsl", "PowerShell"]), ("ubuntu", vec!["wsl"])] {
+            let results = rank_palette_section(
+                WorkspaceApp::command_palette_connection_items(&store),
+                query,
+            );
+            assert_eq!(
+                results
+                    .iter()
+                    .map(|r| r.item.label.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(
+                matches!(&results[0].item.action, PaletteAction::OpenSavedLocalTerminal(id) if id == "linux")
+            );
+            assert_eq!(results[0].item.detail.as_deref(), Some("wsl-ubuntu ~/work"));
+        }
+    }
 
     struct PalettePreviewLayout {
         scroll: ScrollHandle,

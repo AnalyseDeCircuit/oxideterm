@@ -2823,18 +2823,20 @@ impl Interactivity {
                     .and_then(|state| state.hover_state.as_ref())
                     .cloned()
             });
+            let painted_hovered = hitbox.is_hovered(window);
             let current_view = window.current_view();
 
             window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
                 let hovered = hitbox.is_hovered(window);
                 let was_hovered = hover_state
                     .as_ref()
-                    .is_some_and(|state| state.borrow().element);
+                    .map_or(painted_hovered, |state| state.borrow().element);
                 if phase == DispatchPhase::Capture && hovered != was_hovered {
                     if let Some(hover_state) = &hover_state {
                         hover_state.borrow_mut().element = hovered;
-                        cx.notify(current_view);
                     }
+                    // Anonymous rows still need to invalidate their view on hover transitions.
+                    cx.notify(current_view);
                 }
             });
         }
@@ -4545,6 +4547,71 @@ mod tests {
                 .unwrap()
                 .running(cx.executor().now(), Duration::from_millis(100))
         );
+    }
+
+    #[gpui::test]
+    fn anonymous_hover_background_follows_pointer_between_rows(cx: &mut TestAppContext) {
+        struct HoverRows {
+            render_count: Rc<Cell<usize>>,
+        }
+        impl Render for HoverRows {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                self.render_count.set(self.render_count.get() + 1);
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .children((0..2).map(|_| {
+                        div()
+                            .w(px(100.))
+                            .h(px(40.))
+                            .bg(crate::rgb(0x000000))
+                            .hover(|style| style.bg(crate::rgb(0xffffff)))
+                    }))
+            }
+        }
+
+        let render_count = Rc::new(Cell::new(0));
+        let window = cx.add_window({
+            let render_count = render_count.clone();
+            move |_, _| HoverRows { render_count }
+        });
+        let window = AnyWindowHandle::from(window);
+        cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))
+            .unwrap();
+        let colors = |cx: &mut TestAppContext| {
+            cx.update_window(window, |_, window, _| {
+                window
+                    .painted_quads()
+                    .into_iter()
+                    .map(|quad| quad.background.as_solid().unwrap())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap()
+        };
+        let idle = crate::hsla(0., 0., 0., 1.);
+        let hovered = crate::hsla(0., 0., 1., 1.);
+        let move_mouse = |cx: &mut TestAppContext, position| {
+            cx.update_window(window, |_, window, cx| {
+                window.simulate_mouse_move(position, cx)
+            })
+            .unwrap();
+        };
+        move_mouse(cx, point(px(120.), px(20.)));
+        assert_eq!(colors(cx), [idle, idle]);
+
+        for _ in 0..3 {
+            move_mouse(cx, point(px(20.), px(20.)));
+            assert_eq!(colors(cx), [hovered, idle]);
+            let entered_render_count = render_count.get();
+            move_mouse(cx, point(px(30.), px(25.)));
+            assert_eq!(render_count.get(), entered_render_count);
+
+            move_mouse(cx, point(px(20.), px(60.)));
+            assert_eq!(colors(cx), [idle, hovered]);
+            move_mouse(cx, point(px(120.), px(60.)));
+            assert_eq!(colors(cx), [idle, idle]);
+        }
     }
 
     struct GroupHoverTestView {
