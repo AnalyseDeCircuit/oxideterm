@@ -3,7 +3,8 @@ use std::ops::Range;
 use gpui::{Bounds, IntoColor, Pixels, point, px, rgba, size};
 use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row_if_bidi;
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalHorizontalScrollbar, TerminalRect, TerminalScrollbar};
@@ -180,16 +181,17 @@ pub(crate) fn terminal_content_bounds_for_rows(
 /// Returns the grid cells covered by composing text before a UTF-16 offset.
 ///
 /// IME ranges are UTF-16 offsets, while the preedit is painted on the terminal
-/// grid where CJK characters occupy two cells.
+/// grid. An offset inside a grapheme advances to its trailing edge, never splitting
+/// surrogate pairs, combining marks, or joined emoji into separate cells.
 pub(crate) fn marked_text_cells_before_utf16(text: &str, utf16_offset: usize) -> usize {
     let mut utf16_position = 0;
     let mut cells = 0;
-    for ch in text.chars() {
+    for grapheme in text.graphemes(true) {
         if utf16_position >= utf16_offset {
             break;
         }
-        utf16_position += ch.len_utf16();
-        cells += ch.width().unwrap_or(0);
+        utf16_position += grapheme.encode_utf16().count();
+        cells += grapheme.width();
     }
     cells
 }

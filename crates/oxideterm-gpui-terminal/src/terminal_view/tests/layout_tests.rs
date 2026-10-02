@@ -28,6 +28,9 @@ fn terminal_ghost_text_respects_cursor_width_and_ime_composition() {
         ("git", 40, 3, None, " status", Some((" status", 0, 3, 7))),
         ("Password:", 12, 9, None, "按Enter", Some(("按E", 0, 9, 3))),
         ("git", 40, 3, Some("あ"), " status", None),
+        ("git", 6, 3, None, "👨‍👩‍👧‍👦a", Some(("👨‍👩‍👧‍👦a", 0, 3, 3))),
+        ("git", 5, 3, None, "👨‍👩‍👧‍👦a", Some(("👨‍👩‍👧‍👦", 0, 3, 2))),
+        ("git", 4, 3, None, "👨‍👩‍👧‍👦a", None),
     ] {
         let mut snapshot = selection_snapshot(text);
         snapshot.cols = cols;
@@ -73,24 +76,36 @@ fn terminal_ghost_text_respects_cursor_width_and_ime_composition() {
 
 #[test]
 fn terminal_element_segments_mixed_width_ghost_text_for_grid_painting() {
-    let segments = ghost_text_grid_segments("按Enter 填充已保存的提权密码");
-
-    assert_eq!(
-        segments
-            .iter()
-            .map(|segment| (
-                segment.text.as_str(),
-                segment.col_offset,
-                segment.cell_stride,
-                segment.cells
-            ))
-            .collect::<Vec<_>>(),
-        [
-            ("按", 0, 2, 2),
-            ("Enter ", 2, 1, 6),
-            ("填充已保存的提权密码", 8, 2, 20)
-        ]
-    );
+    for (text, expected) in [
+        (
+            "按Enter 填充已保存的提权密码",
+            vec![
+                ("按", 0, 2, 2),
+                ("Enter ", 2, 1, 6),
+                ("填充已保存的提权密码", 8, 2, 20),
+            ],
+        ),
+        ("🦀a", vec![("🦀", 0, 2, 2), ("a", 2, 1, 1)]),
+        ("👨‍👩‍👧‍👦a", vec![("👨‍👩‍👧‍👦", 0, 2, 2), ("a", 2, 1, 1)]),
+        ("👩🏽‍💻a", vec![("👩🏽‍💻", 0, 2, 2), ("a", 2, 1, 1)]),
+        ("🇨🇳a", vec![("🇨🇳", 0, 2, 2), ("a", 2, 1, 1)]),
+        ("e\u{301}a", vec![("e\u{301}a", 0, 1, 2)]),
+    ] {
+        let segments = ghost_text_grid_segments(text);
+        assert_eq!(
+            segments
+                .iter()
+                .map(|segment| (
+                    segment.text.as_str(),
+                    segment.col_offset,
+                    segment.cell_stride,
+                    segment.cells
+                ))
+                .collect::<Vec<_>>(),
+            expected,
+            "{text}"
+        );
+    }
 }
 
 #[test]
@@ -125,16 +140,30 @@ fn terminal_element_moves_cursor_to_ime_caret_during_composition() {
     };
     assert!(block_cursor_col(&element(None, None)));
 
-    // Mixed-width preedit: the wide character occupies two grid cells.
-    for (caret_utf16, expected_col) in [(Some(0), 3), (Some(1), 5), (Some(4), 8), (None, 8)] {
-        let layout = element(Some("你hao"), caret_utf16);
+    for (text, caret_utf16, cells, expected_col) in [
+        ("你hao", Some(0), 5, 3),
+        ("你hao", Some(1), 5, 5),
+        ("你hao", Some(4), 5, 8),
+        ("你hao", None, 5, 8),
+        ("🦀a", Some(1), 3, 5),
+        ("🦀a", Some(2), 3, 5),
+        ("👨‍👩‍👧‍👦a", Some(0), 3, 3),
+        ("👨‍👩‍👧‍👦a", Some(2), 3, 5),
+        ("👨‍👩‍👧‍👦a", Some(11), 3, 5),
+        ("👨‍👩‍👧‍👦a", None, 3, 6),
+        ("👩🏽‍💻a", Some(7), 3, 5),
+        ("👩🏽‍💻a", Some(8), 3, 6),
+        ("🇨🇳a", Some(4), 3, 5),
+        ("e\u{301}a", Some(1), 2, 4),
+    ] {
+        let layout = element(Some(text), caret_utf16);
         let marked_text = layout.marked_text.as_ref().expect("marked text");
-        assert_eq!((marked_text.col, marked_text.cells), (3, 5));
+        assert_eq!((marked_text.col, marked_text.cells), (3, cells), "{text}");
         let cursor = layout.cursor.expect("composition caret");
         assert_eq!(
             (cursor.row, cursor.col, cursor.shape),
             (0, expected_col, TerminalCursorShape::Bar),
-            "caret_utf16={caret_utf16:?}"
+            "text={text}, caret_utf16={caret_utf16:?}"
         );
         assert!(
             !block_cursor_col(&layout),

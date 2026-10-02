@@ -21,7 +21,8 @@ use oxideterm_terminal_semantic::{
 };
 use oxideterm_terminal_unicode::{TerminalVisualLine, visual_line_for_row_if_bidi};
 use parking_lot::Mutex;
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 use zeroize::Zeroizing;
 
 use crate::app::{
@@ -1482,21 +1483,16 @@ impl TerminalElement {
 }
 
 fn ghost_text_prefix_for_cells(text: &str, max_cells: usize) -> (String, usize) {
-    // Ghost text is painted on the terminal grid, so clipping must use terminal
-    // cell width rather than Rust char count. Otherwise CJK hints can overlap
-    // the following columns while the layout believes they still fit.
+    // Clipping and painting must agree on complete graphemes so a viewport edge
+    // cannot split a joined emoji or detach a combining mark.
     let mut prefix = String::new();
     let mut cells = 0;
-    for ch in text.chars() {
-        let width = ch.width().unwrap_or(0);
-        if width == 0 {
-            prefix.push(ch);
-            continue;
-        }
+    for grapheme in text.graphemes(true) {
+        let width = grapheme.width();
         if cells + width > max_cells {
             break;
         }
-        prefix.push(ch);
+        prefix.push_str(grapheme);
         cells += width;
     }
     (prefix, cells)

@@ -5,7 +5,8 @@ use gpui::{
     SharedString, TextAlign, TextRun, Window, fill, point, px, rgb, rgba, size,
 };
 use oxideterm_terminal::{TerminalCursorShape, TerminalImageData};
-use unicode_width::UnicodeWidthChar;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::cell_drawing::{cell_drawing_svg, is_cell_drawing};
 use crate::terminal_ui::*;
@@ -691,7 +692,7 @@ pub(crate) struct TerminalGhostTextSegment {
     pub(crate) cell_stride: usize,
 }
 
-/// Paints overlay text such as ghost text or an IME preedit with per-character grid advances.
+/// Paints overlay text such as ghost text or an IME preedit with grapheme grid advances.
 pub(crate) fn paint_grid_text_run(
     run: &BatchedTextRun,
     origin: gpui::Point<Pixels>,
@@ -742,10 +743,10 @@ pub(crate) fn ghost_text_grid_segments(text: &str) -> Vec<TerminalGhostTextSegme
     let mut current_cell_stride = None;
     let mut col_offset = 0;
 
-    for ch in text.chars() {
-        let cell_stride = ch.width().unwrap_or(0);
+    for grapheme in text.graphemes(true) {
+        let cell_stride = grapheme.width();
         if cell_stride == 0 {
-            current_text.push(ch);
+            current_text.push_str(grapheme);
             continue;
         }
 
@@ -766,7 +767,7 @@ pub(crate) fn ghost_text_grid_segments(text: &str) -> Vec<TerminalGhostTextSegme
             current_cells = 0;
         }
 
-        current_text.push(ch);
+        current_text.push_str(grapheme);
         current_cells += cell_stride;
         col_offset += cell_stride;
     }
