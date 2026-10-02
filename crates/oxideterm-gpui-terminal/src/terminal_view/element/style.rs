@@ -56,13 +56,17 @@ pub(crate) fn text_run_for_cell(
     }
 }
 
-pub(crate) fn marked_text_run(text: &str, metrics: &TerminalMetrics) -> TextRun {
-    let color = rgb(0xe6e8eb).into_color();
+pub(crate) fn marked_text_run(
+    text: &str,
+    theme: &TerminalUiTheme,
+    metrics: &TerminalMetrics,
+) -> TextRun {
+    let color = rgb(theme.foreground).into_color();
     TextRun {
         len: text.len(),
         font: metrics.font.clone(),
         color,
-        background_color: Some(rgba(0x528bff33).into_color()),
+        background_color: Some(rgb(theme.background).into_color()),
         underline: Some(UnderlineStyle {
             thickness: px(1.0),
             color: Some(color),

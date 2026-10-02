@@ -60,6 +60,7 @@ pub(crate) struct TerminalElement {
     theme: TerminalUiTheme,
     cursor_visible: bool,
     marked_text: Option<String>,
+    marked_text_caret_utf16: Option<usize>,
     ghost_text: Option<String>,
     search_query: Option<String>,
     search_matches: Arc<[TerminalSearchMatch]>,
@@ -531,6 +532,7 @@ impl TerminalElement {
             theme,
             cursor_visible,
             marked_text,
+            marked_text_caret_utf16: None,
             search_query,
             search_matches: search_matches.into(),
             search_matches_precomputed: false,
@@ -616,6 +618,12 @@ impl TerminalElement {
         self.semantic_scheme
             .as_deref()
             .unwrap_or_else(|| compiled_builtin_scheme(SemanticScheme::Balanced))
+    }
+
+    /// Places the composition caret inside the marked text; `None` keeps it at the end.
+    pub(crate) fn marked_text_caret(mut self, caret_utf16: Option<usize>) -> Self {
+        self.marked_text_caret_utf16 = caret_utf16;
+        self
     }
 
     pub(crate) fn detect_file_paths_as_links(mut self, enabled: bool) -> Self {
@@ -827,6 +835,7 @@ impl TerminalElement {
         let ime_cursor_bounds = cursor_row_visible
             .then(|| ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics))
             .flatten();
+        let marked_text = self.marked_text_run(ime_cursor_bounds.is_some());
         let link_ranges = if let Some(cache) = cache.as_deref_mut() {
             self.cached_link_ranges_for_rows(visible_rows.clone(), cache)
         } else {
@@ -897,6 +906,9 @@ impl TerminalElement {
                 timestamp_runs.push(timestamp_run);
             }
         }
+        if let Some(marked_text) = &marked_text {
+            cursor = self.composition_caret(marked_text);
+        }
 
         TerminalElementLayout {
             backgrounds,
@@ -922,24 +934,7 @@ impl TerminalElement {
             images,
             text_runs,
             timestamp_runs,
-            marked_text: self.marked_text.as_ref().and_then(|text| {
-                ime_cursor_bounds?;
-                let marked_col = self
-                    .snapshot
-                    .lines
-                    .get(self.snapshot.cursor_row)
-                    .and_then(|row| visual_line_for_row_with_bidi(row, self.bidi_enabled))
-                    .map(|line| line.visual_col_for_logical_col(self.snapshot.cursor_col))
-                    .unwrap_or(self.snapshot.cursor_col);
-                Some(BatchedTextRun {
-                    row: self.snapshot.cursor_row,
-                    col: marked_col,
-                    text: SharedString::from(text.clone()),
-                    cells: text.encode_utf16().count().max(1),
-                    style: marked_text_run(text, &self.metrics),
-                    cache: None,
-                })
-            }),
+            marked_text,
             ghost_text: self.ghost_text_run(cursor_row_visible),
             ime_cursor_bounds,
             cursor,
@@ -1098,7 +1093,7 @@ impl TerminalElement {
                 .as_ref()
                 .map(|line| line.visual_col_for_logical_col(col_index))
                 .unwrap_or(col_index);
-            if self.cursor_visible
+            if self.grid_cursor_visible()
                 && cell.cursor
                 && self.snapshot.cursor_shape != TerminalCursorShape::Hidden
             {
@@ -1108,7 +1103,7 @@ impl TerminalElement {
                 });
             }
 
-            let block_cursor = self.cursor_visible
+            let block_cursor = self.grid_cursor_visible()
                 && cell.cursor
                 && self.snapshot.cursor_shape == TerminalCursorShape::Block;
             let fg = if block_cursor {
@@ -1159,7 +1154,7 @@ impl TerminalElement {
 
             if cell.ch != ' '
                 || !cell.zerowidth().is_empty()
-                || (self.cursor_visible && cell.cursor)
+                || (self.grid_cursor_visible() && cell.cursor)
             {
                 let link = !block_cursor
                     && (cell.hyperlink().is_some() || is_link_stylable_cell(cell))
@@ -1220,7 +1215,7 @@ impl TerminalElement {
                 link_ranges,
                 self.hovered_link.as_ref(),
                 &self.metrics,
-                self.cursor_visible,
+                self.grid_cursor_visible(),
                 self.snapshot.cursor_shape,
                 &self.theme,
                 highlight_layout,
@@ -1261,7 +1256,7 @@ impl TerminalElement {
             has_cursor.hash(&mut hasher);
             if has_cursor {
                 self.snapshot.cursor_shape.hash(&mut hasher);
-                self.cursor_visible.hash(&mut hasher);
+                self.grid_cursor_visible().hash(&mut hasher);
             }
         }
         logical_line.signature.hash(&mut hasher);
@@ -1403,6 +1398,51 @@ impl TerminalElement {
         TerminalRowLinkCacheKey {
             signature: hasher.finish(),
         }
+    }
+
+    fn marked_text_run(&self, cursor_cell_visible: bool) -> Option<BatchedTextRun> {
+        if !cursor_cell_visible {
+            return None;
+        }
+        let text = self.marked_text.as_ref()?;
+        let marked_col = self
+            .snapshot
+            .lines
+            .get(self.snapshot.cursor_row)
+            .and_then(|row| visual_line_for_row_with_bidi(row, self.bidi_enabled))
+            .map(|line| line.visual_col_for_logical_col(self.snapshot.cursor_col))
+            .unwrap_or(self.snapshot.cursor_col);
+        Some(BatchedTextRun {
+            row: self.snapshot.cursor_row,
+            col: marked_col,
+            text: SharedString::from(text.clone()),
+            cells: marked_text_cells_before_utf16(text, usize::MAX).max(1),
+            style: marked_text_run(text, &self.theme, &self.metrics),
+            cache: None,
+        })
+    }
+
+    fn composition_caret(&self, marked_text: &BatchedTextRun) -> Option<TerminalCursor> {
+        if !self.cursor_visible {
+            return None;
+        }
+        let caret_cells = self
+            .marked_text_caret_utf16
+            .map(|caret| marked_text_cells_before_utf16(&marked_text.text, caret))
+            .unwrap_or(marked_text.cells);
+        // A bar keeps preedit glyphs readable when the IME caret sits between
+        // composed characters, independent of the program's grid cursor shape.
+        Some(TerminalCursor {
+            row: marked_text.row,
+            col: marked_text.col + caret_cells,
+            shape: TerminalCursorShape::Bar,
+        })
+    }
+
+    fn grid_cursor_visible(&self) -> bool {
+        // The IME preedit is painted over the terminal cursor cell, so the
+        // composition caret replaces the grid cursor until text is committed.
+        self.cursor_visible && self.marked_text.is_none()
     }
 
     fn ghost_text_run(&self, cursor_row_visible: bool) -> Option<BatchedTextRun> {
@@ -2284,10 +2324,10 @@ impl Element for TerminalElement {
                     );
                 }
                 if let Some(ghost_text) = &layout.ghost_text {
-                    paint_ghost_text_run(ghost_text, origin, &self.metrics, window, cx);
+                    paint_grid_text_run(ghost_text, origin, &self.metrics, window, cx);
                 }
                 if let Some(marked_text) = &layout.marked_text {
-                    paint_text_run(marked_text, origin, &self.metrics, window, cx);
+                    paint_grid_text_run(marked_text, origin, &self.metrics, window, cx);
                 }
                 for image in layout
                     .images
@@ -2321,9 +2361,7 @@ impl Element for TerminalElement {
                 cx,
             );
         }
-        if layout.marked_text.is_none()
-            && let Some(cursor) = layout.cursor
-        {
+        if let Some(cursor) = layout.cursor {
             window.with_content_mask(
                 Some(ContentMask {
                     bounds: grid_mask_bounds,

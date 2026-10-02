@@ -94,6 +94,57 @@ fn terminal_element_segments_mixed_width_ghost_text_for_grid_painting() {
 }
 
 #[test]
+fn terminal_element_moves_cursor_to_ime_caret_during_composition() {
+    let mut snapshot = selection_snapshot("git");
+    snapshot.cursor_row = 0;
+    snapshot.cursor_col = 3;
+    snapshot.cursor_shape = TerminalCursorShape::Block;
+    snapshot.lines[0].cells_mut()[3].cursor = true;
+    snapshot.lines[0].refresh_signature();
+    let element = |marked_text: Option<&str>, caret_utf16: Option<usize>| {
+        TerminalElement::new(
+            snapshot.clone(),
+            None,
+            test_metrics(),
+            true,
+            marked_text.map(str::to_string),
+            None,
+            Vec::new(),
+            None,
+            None,
+            None,
+        )
+        .marked_text_caret(caret_utf16)
+        .layout()
+    };
+    let block_cursor_col = |layout: &TerminalElementLayout| {
+        layout
+            .backgrounds
+            .iter()
+            .any(|rect| rect.row == 0 && rect.col == 3)
+    };
+    assert!(block_cursor_col(&element(None, None)));
+
+    // Mixed-width preedit: the wide character occupies two grid cells.
+    for (caret_utf16, expected_col) in [(Some(0), 3), (Some(1), 5), (Some(4), 8), (None, 8)] {
+        let layout = element(Some("你hao"), caret_utf16);
+        let marked_text = layout.marked_text.as_ref().expect("marked text");
+        assert_eq!((marked_text.col, marked_text.cells), (3, 5));
+        let cursor = layout.cursor.expect("composition caret");
+        assert_eq!(
+            (cursor.row, cursor.col, cursor.shape),
+            (0, expected_col, TerminalCursorShape::Bar),
+            "caret_utf16={caret_utf16:?}"
+        );
+        assert!(
+            !block_cursor_col(&layout),
+            "the grid block cursor must not stay at the composition start"
+        );
+    }
+}
+
+
+#[test]
 fn terminal_element_shapes_combining_marks_and_wide_grapheme_clusters() {
     for (base, marks, wide, expected, cells) in [
         ('e', "\u{301}", false, "e\u{301}", 1),

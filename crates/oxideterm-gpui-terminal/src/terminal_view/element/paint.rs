@@ -691,13 +691,18 @@ pub(crate) struct TerminalGhostTextSegment {
     pub(crate) cell_stride: usize,
 }
 
-pub(crate) fn paint_ghost_text_run(
+/// Paints overlay text such as ghost text or an IME preedit with per-character grid advances.
+pub(crate) fn paint_grid_text_run(
     run: &BatchedTextRun,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
     window: &mut Window,
     cx: &mut App,
 ) {
+    if let Some(color) = run.style.background_color {
+        // Preedit owns an opaque grid surface so application colors and glyphs cannot bleed through.
+        paint_terminal_rect_at(run.row, run.col, run.cells, color, origin, metrics, window);
+    }
     for segment in ghost_text_grid_segments(&run.text) {
         let position = origin
             + point(

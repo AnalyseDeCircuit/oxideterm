@@ -498,6 +498,8 @@ pub struct TerminalPane {
     test_accepts_input: bool,
     input_locked: bool,
     marked_text: Option<String>,
+    /// IME caret inside `marked_text`, in UTF-16 units; only read while composing.
+    marked_text_caret_utf16: Option<usize>,
     privilege_prompt_inline_hint: Option<String>,
     privilege_prompt_submit_requested: bool,
     search_query: Option<String>,
@@ -1216,6 +1218,7 @@ impl TerminalPane {
             test_accepts_input: false,
             input_locked: false,
             marked_text: None,
+            marked_text_caret_utf16: None,
             privilege_prompt_inline_hint: None,
             privilege_prompt_submit_requested: false,
             search_query: None,
@@ -4062,9 +4065,23 @@ impl TerminalPane {
         false
     }
 
-    fn set_marked_text(&mut self, text: &str, cx: &mut Context<Self>) {
+    fn set_marked_text(
+        &mut self,
+        text: &str,
+        selected_range_utf16: Option<Range<usize>>,
+        cx: &mut Context<Self>,
+    ) {
         self.marked_text = (!text.is_empty()).then(|| text.to_string());
+        self.marked_text_caret_utf16 = selected_range_utf16.map(|range| range.end);
+        // Composition edits are typing; keep the caret solid like other key input.
+        self.reset_cursor_blink();
         cx.notify();
+    }
+
+    fn marked_text_cells_before_utf16(&self, utf16_offset: usize) -> usize {
+        self.marked_text
+            .as_deref()
+            .map_or(0, |text| marked_text_cells_before_utf16(text, utf16_offset))
     }
 
     fn clear_marked_text(&mut self, cx: &mut Context<Self>) {

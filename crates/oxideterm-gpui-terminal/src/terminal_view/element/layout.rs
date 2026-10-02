@@ -3,6 +3,7 @@ use std::ops::Range;
 use gpui::{Bounds, IntoColor, Pixels, point, px, rgba, size};
 use oxideterm_terminal::{TerminalSearchMatch, TerminalSnapshot};
 use oxideterm_terminal_unicode::visual_line_for_row_if_bidi;
+use unicode_width::UnicodeWidthChar;
 
 use crate::terminal_ui::*;
 use crate::terminal_view::element::{TerminalHorizontalScrollbar, TerminalRect, TerminalScrollbar};
@@ -174,6 +175,23 @@ pub(crate) fn terminal_content_bounds_for_rows(
             px(rows as f32 * metrics.line_height_f32()),
         ),
     )
+}
+
+/// Returns the grid cells covered by composing text before a UTF-16 offset.
+///
+/// IME ranges are UTF-16 offsets, while the preedit is painted on the terminal
+/// grid where CJK characters occupy two cells.
+pub(crate) fn marked_text_cells_before_utf16(text: &str, utf16_offset: usize) -> usize {
+    let mut utf16_position = 0;
+    let mut cells = 0;
+    for ch in text.chars() {
+        if utf16_position >= utf16_offset {
+            break;
+        }
+        utf16_position += ch.len_utf16();
+        cells += ch.width().unwrap_or(0);
+    }
+    cells
 }
 
 pub(crate) fn ime_cursor_bounds_for_snapshot(
