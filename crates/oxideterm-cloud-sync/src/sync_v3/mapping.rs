@@ -10,7 +10,7 @@ use oxideterm_connections::{
 use oxideterm_forwarding::{ForwardingRegistry, PersistedForwardDto};
 use oxideterm_settings::{
     PersistedSettings, SettingsStore, export_oxide_settings_snapshot_json,
-    merge_oxide_settings_snapshot,
+    merge_oxide_settings_snapshot, migrate_legacy_theme_selection,
 };
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
@@ -101,6 +101,20 @@ impl ConfigurationView {
             .as_object_mut()
             .context("Invalid archived settings")?
             .remove("exportedAt");
+        let includes_appearance = envelope
+            .0
+            .get("sectionIds")
+            .and_then(Value::as_array)
+            .is_none_or(|sections| {
+                sections
+                    .iter()
+                    .any(|section| section.as_str() == Some("appearance"))
+            });
+        if includes_appearance && let Some(settings) = envelope.0.get_mut("settings") {
+            // The supplied-field filter must retain the migrated theme, without
+            // changing the application theme for terminal-only archives.
+            migrate_legacy_theme_selection(settings);
+        }
         let merged = merge_oxide_settings_snapshot(&PersistedSettings::default(), json, None)?;
         for section in OXIDE_APP_SETTINGS_SECTION_IDS {
             let section_json = Zeroizing::new(export_oxide_settings_snapshot_json(
@@ -813,6 +827,81 @@ mod tests {
         CLEARED_PROFILE_CREDENTIAL_KIND, CredentialOwner, CredentialSlot, CredentialTarget,
         PROFILE_CREDENTIAL_KIND,
     };
+
+    #[test]
+    fn theme_selections_survive_cloud_upgrade_and_section_selection() {
+        let mut source = PersistedSettings::default();
+        source.appearance.theme = "github-dark".into();
+        source.terminal.theme = "monokai".into();
+        let exported = export_oxide_settings_snapshot_json(&source, None, false).unwrap();
+        for legacy in [false, true] {
+            let mut envelope: Value = serde_json::from_str(&exported).unwrap();
+            if legacy {
+                envelope["settings"]["appearance"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("theme");
+            }
+            let mut view = ConfigurationView::empty();
+            view.insert_app_settings(&envelope.to_string()).unwrap();
+            for (sections, application, terminal) in [
+                (
+                    vec!["appearance"],
+                    if legacy { "monokai" } else { "github-dark" },
+                    "default",
+                ),
+                (vec!["terminalAppearance"], "solarized-light", "monokai"),
+                (
+                    vec!["appearance", "terminalAppearance"],
+                    if legacy { "monokai" } else { "github-dark" },
+                    "monokai",
+                ),
+            ] {
+                let scope = SyncScope {
+                    sync_app_settings: true,
+                    app_settings_sections: sections.into_iter().map(str::to_owned).collect(),
+                    ..Default::default()
+                };
+                let selected = view.selected(
+                    std::iter::empty(),
+                    &scope,
+                    &StructuredUploadItemFilter::default(),
+                );
+                let values = view
+                    .values
+                    .iter()
+                    .filter(|(field, _)| selected.contains(&field.resource))
+                    .map(|(field, value)| (field.clone(), value.clone()))
+                    .collect();
+                let mut current = PersistedSettings::default();
+                current.appearance.theme = "solarized-light".into();
+                let restored = view.resolved_settings(&values, &current).unwrap();
+                assert_eq!(
+                    restored.appearance.theme, application,
+                    "legacy={legacy}, sections={:?}",
+                    scope.app_settings_sections
+                );
+                assert_eq!(
+                    restored.terminal.theme, terminal,
+                    "legacy={legacy}, sections={:?}",
+                    scope.app_settings_sections
+                );
+            }
+        }
+        let terminal_only = export_oxide_settings_snapshot_json(
+            &source,
+            Some(&HashSet::from(["terminalAppearance".into()])),
+            false,
+        )
+        .unwrap();
+        let mut view = ConfigurationView::empty();
+        view.insert_app_settings(&terminal_only).unwrap();
+        let mut current = PersistedSettings::default();
+        current.appearance.theme = "solarized-light".into();
+        let restored = view.resolved_settings(&view.values, &current).unwrap();
+        assert_eq!(restored.appearance.theme, "solarized-light");
+        assert_eq!(restored.terminal.theme, "monokai");
+    }
 
     #[test]
     fn scoped_credentials_share_a_register_for_set_and_clear() {

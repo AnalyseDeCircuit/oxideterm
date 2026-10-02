@@ -961,6 +961,21 @@ mod tests {
     }
 
     #[test]
+    fn application_theme_changes_only_the_appearance_sync_revision() {
+        let path = temp_path("theme-revision", "settings.json");
+        let mut settings = SettingsStore::load_from_path(&path).unwrap();
+        let scope = SyncScope::default();
+        let before = build_app_settings_section_revision_map(&settings, &scope).unwrap();
+        settings.settings_mut().appearance.theme = "github-dark".into();
+        let after = build_app_settings_section_revision_map(&settings, &scope).unwrap();
+        assert_ne!(before["appearance"], after["appearance"]);
+        assert_eq!(before["terminalAppearance"], after["terminalAppearance"]);
+        if path.parent().unwrap().exists() {
+            std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+        }
+    }
+
+    #[test]
     fn failed_credential_stage_rolls_back_profile_metadata() {
         use oxideterm_connections::{
             CLEARED_PROFILE_CREDENTIAL_KIND, CredentialOwner, CredentialSlot,

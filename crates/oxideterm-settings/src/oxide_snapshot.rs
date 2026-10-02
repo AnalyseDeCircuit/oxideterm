@@ -203,6 +203,15 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// Materializes the released shared theme before snapshot fields are filtered by section.
+pub fn migrate_legacy_theme_selection(settings: &mut Value) {
+    if settings.pointer("/appearance/theme").is_none()
+        && let Some(theme) = settings.pointer("/terminal/theme").cloned()
+    {
+        ensure_object_path(settings, &["appearance"]).insert("theme".to_string(), theme);
+    }
+}
+
 pub fn merge_oxide_settings_snapshot(
     current: &PersistedSettings,
     snapshot_json: &str,
@@ -245,12 +254,7 @@ pub fn merge_oxide_settings_snapshot(
 
     // Materialize the released shared theme before current settings fill this key.
     // Copying sections below still limits it to imports that include appearance.
-    if snapshot_settings.pointer("/appearance/theme").is_none()
-        && let Some(theme) = snapshot_settings.pointer("/terminal/theme").cloned()
-    {
-        ensure_object_path(&mut snapshot_settings, &["appearance"])
-            .insert("theme".to_string(), theme);
-    }
+    migrate_legacy_theme_selection(&mut snapshot_settings);
 
     let requested = selected_sections
         .cloned()
