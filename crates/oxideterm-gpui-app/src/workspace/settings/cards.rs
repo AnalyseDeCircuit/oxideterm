@@ -1051,15 +1051,15 @@ impl WorkspaceApp {
                 }
             }
             SettingsSlider::AppearanceWindowOpacity => {
-                let Some(value) = self.settings_slider_value_from_position(
+                let Some(position) = self.settings_slider_value_from_position(
                     SelectAnchorId::SettingsAppearanceWindowOpacitySlider,
                     x,
-                    (MIN_WINDOW_OPACITY * SETTINGS_PERCENT_SCALE) as f32,
-                    (MAX_WINDOW_OPACITY * SETTINGS_PERCENT_SCALE) as f32,
+                    0.0,
+                    1.0,
                 ) else {
                     return;
                 };
-                let value = value.round() as f64 / SETTINGS_PERCENT_SCALE;
+                let value = super::appearance::window_opacity_from_slider_position(position);
                 if self.settings_store.settings().appearance.window_opacity != value {
                     self.edit_settings(|settings| settings.appearance.window_opacity = value, cx);
                     // Detached windows consume the same setting on their next frame.

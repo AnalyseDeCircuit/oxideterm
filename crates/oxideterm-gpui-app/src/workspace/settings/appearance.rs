@@ -21,6 +21,35 @@ const BACKGROUND_SCOPE_OPTIONS: [(BackgroundScope, &str); 2] = [
     ),
 ];
 
+// Persisted opacity keeps 0.1% steps so the slider's expanded near-opaque
+// range is not collapsed back into whole-percent jumps.
+const WINDOW_OPACITY_STEPS_PER_UNIT: f64 = 1000.0;
+
+/// Maps window opacity to slider travel in `0.0..=1.0`.
+///
+/// Compositors blend window alpha linearly, but on a dark theme over bright
+/// content the first few percent of transparency are already very visible.
+/// Travel is quadratic in transparency so most of the slider covers the
+/// near-opaque range.
+fn window_opacity_slider_position(opacity: f64) -> f32 {
+    let transparency = ((MAX_WINDOW_OPACITY - opacity) / (MAX_WINDOW_OPACITY - MIN_WINDOW_OPACITY))
+        .clamp(0.0, 1.0);
+    (1.0 - transparency.sqrt()) as f32
+}
+
+pub(super) fn window_opacity_from_slider_position(position: f32) -> f64 {
+    let travel_from_opaque = 1.0 - f64::from(position.clamp(0.0, 1.0));
+    let opacity =
+        MAX_WINDOW_OPACITY - (MAX_WINDOW_OPACITY - MIN_WINDOW_OPACITY) * travel_from_opaque.powi(2);
+    (opacity * WINDOW_OPACITY_STEPS_PER_UNIT).round() / WINDOW_OPACITY_STEPS_PER_UNIT
+}
+
+fn window_opacity_label(opacity: f64) -> String {
+    let percent = format!("{:.1}", opacity * SETTINGS_PERCENT_SCALE);
+    let percent = percent.strip_suffix(".0").unwrap_or(&percent);
+    format!("{percent}%")
+}
+
 fn background_scope_index(scope: BackgroundScope) -> usize {
     BACKGROUND_SCOPE_OPTIONS
         .iter()
@@ -206,14 +235,13 @@ impl WorkspaceApp {
                 self.appearance_row(
                     "settings_view.appearance.window_opacity",
                     "settings_view.appearance.window_opacity_hint",
-                    self.appearance_slider_value_control(
+                    self.appearance_slider_labeled_control(
                         SettingsSlider::AppearanceWindowOpacity,
                         SelectAnchorId::SettingsAppearanceWindowOpacitySlider,
-                        (MIN_WINDOW_OPACITY * SETTINGS_PERCENT_SCALE) as f32,
-                        (MAX_WINDOW_OPACITY * SETTINGS_PERCENT_SCALE) as f32,
-                        (settings.appearance.window_opacity * SETTINGS_PERCENT_SCALE).round()
-                            as f32,
-                        "%",
+                        0.0,
+                        1.0,
+                        window_opacity_slider_position(settings.appearance.window_opacity),
+                        window_opacity_label(settings.appearance.window_opacity),
                         cx,
                     ),
                 ),
@@ -902,6 +930,28 @@ impl WorkspaceApp {
         unit: &'static str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.appearance_slider_labeled_control(
+            slider,
+            anchor_id,
+            min,
+            max,
+            value,
+            format!("{}{}", value.round() as i64, unit),
+            cx,
+        )
+    }
+
+    /// Slider whose track position and displayed value use different scales.
+    pub(in crate::workspace) fn appearance_slider_labeled_control(
+        &self,
+        slider: SettingsSlider,
+        anchor_id: SelectAnchorId,
+        min: f32,
+        max: f32,
+        value: f32,
+        label: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         div()
             .flex()
             .flex_row()
@@ -914,7 +964,7 @@ impl WorkspaceApp {
                     .text_align(gpui::TextAlign::Right)
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(format!("{}{}", value.round() as i64, unit)),
+                    .child(label),
             )
             .into_any_element()
     }
@@ -2069,5 +2119,34 @@ mod theme_preview_tests {
                 0x00ffff
             ],
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn window_opacity_slider_spends_most_travel_near_opaque() {
+        // Linear travel would put 98% at 0.96 and 87.5% at 0.75; the curve
+        // must leave the top fifth of the track for the 100%..98% range.
+        for (position, opacity, label) in [
+            (1.0, 1.0, "100%"),
+            (0.9, 0.995, "99.5%"),
+            (0.8, 0.98, "98%"),
+            (0.5, 0.875, "87.5%"),
+            (0.0, 0.5, "50%"),
+        ] {
+            assert_eq!(
+                window_opacity_from_slider_position(position),
+                opacity,
+                "position={position}"
+            );
+            assert!(
+                (window_opacity_slider_position(opacity) - position).abs() < 1e-6,
+                "opacity={opacity}"
+            );
+            assert_eq!(window_opacity_label(opacity), label);
+        }
     }
 }
