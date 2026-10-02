@@ -364,6 +364,9 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             "settings_view.appearance.theme",
             &[
                 "settings_view.appearance.color_theme",
+                "settings_view.appearance.application_theme",
+                "settings_view.appearance.application_theme_hint",
+                "settings_view.appearance.terminal_theme",
                 "settings_view.custom_theme.create",
                 "settings_view.appearance.theme_import",
             ],

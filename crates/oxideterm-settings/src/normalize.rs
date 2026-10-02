@@ -657,6 +657,14 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     let mut settings = PersistedSettings::default().to_value();
 
     merge_json(&mut settings, &raw);
+    // Released settings used the terminal theme for the entire application.
+    // Materialize that choice once so subsequent terminal changes stay independent.
+    if raw.pointer("/appearance/theme").is_none() {
+        let theme = settings.pointer("/terminal/theme").cloned();
+        if let (Some(appearance), Some(theme)) = (object_mut(&mut settings, "appearance"), theme) {
+            appearance.insert("theme".to_string(), theme);
+        }
+    }
     if let Some(object) = settings.as_object_mut() {
         object.insert("version".to_string(), json!(SETTINGS_SCHEMA_VERSION));
     }
@@ -1175,6 +1183,28 @@ mod tests {
         assert_eq!(entry.memory_kind, AiMemoryKind::LongTerm);
         assert_eq!(entry.source, AiMemorySource::Migrated);
         assert_eq!(entry.revision, 1);
+    }
+
+    #[test]
+    fn legacy_theme_initializes_application_theme_without_recoupling_saved_settings() {
+        let migrated = sanitize_settings_value(json!({
+            "terminal": { "theme": "monokai" }
+        }))
+        .expect("load shared theme settings");
+        let mut saved = migrated.settings.to_value();
+        assert_eq!(saved.pointer("/appearance/theme"), Some(&json!("monokai")));
+
+        saved["terminal"]["theme"] = json!("github-dark");
+        let reloaded = sanitize_settings_value(saved).expect("load independent themes");
+        let reloaded = reloaded.settings.to_value();
+        assert_eq!(
+            reloaded.pointer("/appearance/theme"),
+            Some(&json!("monokai"))
+        );
+        assert_eq!(
+            reloaded.pointer("/terminal/theme"),
+            Some(&json!("github-dark"))
+        );
     }
 
     #[test]

@@ -1476,12 +1476,12 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
-        if previous_settings.terminal.theme != settings.terminal.theme {
+        if previous_settings.appearance.theme != settings.appearance.theme {
             self.emit_native_plugin_event_to_subscribers(
                 plugin_host::NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT,
                 serde_json::json!({
                     "theme": crate::workspace::plugin_lifecycle::native_plugin_theme_snapshot(
-                        &settings.terminal.theme
+                        &settings.appearance.theme
                     ),
                 }),
                 cx,

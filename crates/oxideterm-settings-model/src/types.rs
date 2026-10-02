@@ -87,6 +87,7 @@ pub enum SettingsSelect {
     UpdateProxyMode,
     UpdateProxyProtocol,
     AppearanceTheme,
+    AppearanceTerminalTheme,
     AppearanceDensity,
     AppearanceAnimation,
     AppearanceRenderProfile,
@@ -140,6 +141,16 @@ pub enum SettingsSelect {
     HighlightMatchScope(usize),
     ConnectionImportSource,
     ConnectionImportDuplicateStrategy,
+}
+
+impl SettingsSelect {
+    pub fn theme_target(self) -> Option<crate::ThemeTarget> {
+        match self {
+            Self::AppearanceTheme => Some(crate::ThemeTarget::Application),
+            Self::AppearanceTerminalTheme => Some(crate::ThemeTarget::Terminal),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

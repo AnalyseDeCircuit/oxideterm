@@ -88,7 +88,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         "commands": &quick_command_store.commands,
     });
     let theme_tokens =
-        native_plugin_theme_tokens_snapshot(&workspace.tokens, &settings.terminal.theme);
+        native_plugin_theme_tokens_snapshot(&workspace.tokens, &settings.appearance.theme);
     let available_themes = native_plugin_available_themes(settings);
     let (cloud_sync_summary, cloud_sync_history) = {
         let cloud_sync = workspace.cloud_sync.read(cx);
@@ -113,7 +113,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         i18n: workspace.i18n.clone(),
         settings: serde_json::to_value(settings).unwrap_or_else(|_| json!({})),
         locale: settings.general.language.as_str().to_string(),
-        theme_name: settings.terminal.theme.clone(),
+        theme_name: settings.appearance.theme.clone(),
         // Tauri's PluginAppAPI exposes the compact ssh_get_pool_stats shape,
         // not the full native monitor payload. Keep this RPC-compatible.
         pool_stats: json!({
@@ -241,7 +241,7 @@ fn native_plugin_available_themes(settings: &oxideterm_settings::PersistedSettin
     let mut custom_ids = settings.custom_themes.keys().cloned().collect::<Vec<_>>();
     custom_ids.sort();
     json!({
-        "active": &settings.terminal.theme,
+        "active": &settings.appearance.theme,
         "builtIn": BUILT_IN_THEMES.iter().map(|theme| theme.id).collect::<Vec<_>>(),
         "custom": custom_ids,
     })

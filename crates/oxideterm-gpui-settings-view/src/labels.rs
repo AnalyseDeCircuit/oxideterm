@@ -5,6 +5,20 @@ use oxideterm_settings::{
     AiThinkingStyle, AnimationSpeed, ConflictAction, FileTransferProtocolPreference, FontFamily,
     FrostedGlassMode, IdeAgentMode, RemoteShellIntegrationMode, UiDensity,
 };
+use oxideterm_theme::{AppUiColors, BUILT_IN_THEMES};
+
+pub fn application_theme_description(id: &str, ui: AppUiColors, i18n: &I18n) -> String {
+    if BUILT_IN_THEMES.iter().any(|theme| theme.id == id) {
+        return i18n.t(&format!(
+            "settings_view.appearance.application_theme_descriptions.{id}"
+        ));
+    }
+
+    // Custom palettes have no fixed color names; describe the colors being previewed.
+    i18n.t("settings_view.appearance.application_theme_custom_description")
+        .replace("{{background}}", &format!("#{:06X}", ui.bg))
+        .replace("{{accent}}", &format!("#{:06X}", ui.accent))
+}
 
 pub fn file_transfer_protocol_label(
     protocol: FileTransferProtocolPreference,

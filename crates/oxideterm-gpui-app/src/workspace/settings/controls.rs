@@ -242,7 +242,12 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Appearance, SettingsSelect::AppearanceTheme) => {
+            (
+                SettingsTab::Appearance,
+                select
+                @ (SettingsSelect::AppearanceTheme | SettingsSelect::AppearanceTerminalTheme),
+            ) => {
+                let target = select.theme_target().expect("theme selector");
                 let mut popup = select_panel_overlay_popup_with_max_height(
                     &self.tokens,
                     width,
@@ -263,7 +268,7 @@ impl WorkspaceApp {
                             let row = oxideterm_gpui_ui::select::select_option_highlighted(
                                 &self.tokens,
                                 "",
-                                theme_id == settings.terminal.theme,
+                                theme_id == target.selected_id(settings),
                                 self.settings_theme_preview.as_deref() == Some(theme_id.as_str()),
                             )
                             .h_auto()
@@ -279,10 +284,26 @@ impl WorkspaceApp {
                                     .gap(px(4.0))
                                     .child(div().truncate().child(label))
                                     .child(
-                                        oxideterm_gpui_settings_view::settings_theme_palette_swatch(
-                                            &self.tokens,
-                                            palette,
-                                        ),
+                                        match target {
+                                            ThemeTarget::Application => {
+                                                let ui = oxideterm_settings_model::theme_ui_colors(settings, &theme_id);
+                                                div()
+                                                    .min_w_0()
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap(px(self.tokens.spacing.one))
+                                                    .child(
+                                                        div()
+                                                            .whitespace_normal()
+                                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                            .text_color(rgb(self.tokens.ui.text_muted))
+                                                            .child(oxideterm_gpui_settings_view::application_theme_description(&theme_id, ui, &self.i18n)),
+                                                    )
+                                                    .child(oxideterm_gpui_settings_view::settings_application_palette_swatch(&self.tokens, ui))
+                                                    .into_any_element()
+                                            }
+                                            ThemeTarget::Terminal => oxideterm_gpui_settings_view::settings_theme_palette_swatch(&self.tokens, palette).into_any_element(),
+                                        },
                                     ),
                             )
                             .on_mouse_move(cx.listener(
@@ -300,7 +321,7 @@ impl WorkspaceApp {
                                 cx.listener(move |this, _, _, cx| {
                                     this.close_settings_select();
                                     this.edit_settings(
-                                        |settings| settings.terminal.theme = theme_id.clone(),
+                                        |settings| target.apply(settings, theme_id.clone()),
                                         cx,
                                     );
                                     cx.stop_propagation();
@@ -2131,9 +2152,9 @@ impl WorkspaceApp {
             return;
         }
         self.settings_theme_preview = None;
-        if select_id == SettingsSelect::AppearanceTheme {
-            let selected = &self.settings_store.settings().terminal.theme;
-            self.settings_theme_preview = Some(selected.clone());
+        if let Some(target) = select_id.theme_target() {
+            let selected = target.selected_id(self.settings_store.settings());
+            self.settings_theme_preview = Some(selected.to_string());
             self.settings_theme_scroll = ScrollHandle::new();
             if let Some(row) = appearance_theme_entries(self.settings_store.settings())
                 .iter()
@@ -2152,6 +2173,12 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
+        let Some(target) = self
+            .open_settings_select
+            .and_then(SettingsSelect::theme_target)
+        else {
+            return false;
+        };
         if event.keystroke.modifiers.platform
             || event.keystroke.modifiers.control
             || event.keystroke.modifiers.alt
@@ -2167,7 +2194,7 @@ impl WorkspaceApp {
             "enter" | "space" | " " => {
                 if let Some(id) = self.settings_theme_preview.clone() {
                     self.close_settings_select();
-                    self.edit_settings(|settings| settings.terminal.theme = id, cx);
+                    self.edit_settings(|settings| target.apply(settings, id), cx);
                 }
                 true
             }

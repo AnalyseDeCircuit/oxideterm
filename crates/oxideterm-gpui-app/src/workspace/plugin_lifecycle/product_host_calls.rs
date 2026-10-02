@@ -237,7 +237,13 @@ impl WorkspaceApp {
             return;
         }
         let theme_id = theme_id.to_string();
-        self.edit_settings(|settings| settings.terminal.theme = theme_id, cx);
+        self.edit_settings(
+            |settings| {
+                settings.appearance.theme = theme_id.clone();
+                settings.terminal.theme = theme_id;
+            },
+            cx,
+        );
     }
 
     fn apply_native_plugin_ide_effect(

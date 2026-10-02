@@ -1,6 +1,7 @@
 pub use oxideterm_render_policy::RenderProfile;
 
 pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
+pub const DEFAULT_COLOR_THEME: &str = "default";
 pub const DEFAULT_TERMINAL_SCROLLBACK: i64 = 1000;
 pub const TERMINAL_SCROLLBACK_MIN: i64 = 500;
 pub const TERMINAL_SCROLLBACK_MAX: i64 = 20_000;

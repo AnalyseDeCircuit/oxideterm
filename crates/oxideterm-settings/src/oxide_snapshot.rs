@@ -83,6 +83,7 @@ const TERMINAL_BEHAVIOR_KEYS: &[&str] = &[
     "unicode",
 ];
 const APPEARANCE_KEYS: &[&str] = &[
+    "theme",
     "sidebarCollapsedDefault",
     "uiDensity",
     "borderRadius",
@@ -434,6 +435,37 @@ mod tests {
     }
     use super::*;
     use crate::{Language, PersistedSettings};
+
+    #[test]
+    fn theme_snapshot_preserves_independent_choices_and_section_boundaries() {
+        let mut settings = PersistedSettings::default();
+        settings.appearance.theme = "github-dark".into();
+        settings.terminal.theme = "monokai".into();
+        let snapshot = export_oxide_settings_snapshot_json(&settings, None, false).unwrap();
+        let value: Value = serde_json::from_str(&snapshot).unwrap();
+        assert_eq!(
+            value.pointer("/settings/appearance/theme"),
+            Some(&json!("github-dark"))
+        );
+        assert_eq!(
+            value.pointer("/settings/terminal/theme"),
+            Some(&json!("monokai"))
+        );
+        for (section, application, terminal) in [
+            ("appearance", "github-dark", "default"),
+            ("terminalAppearance", "default", "monokai"),
+        ] {
+            let selected = HashSet::from([section.to_string()]);
+            let restored = merge_oxide_settings_snapshot(
+                &PersistedSettings::default(),
+                &snapshot,
+                Some(&selected),
+            )
+            .unwrap();
+            assert_eq!(restored.appearance.theme, application, "{section}");
+            assert_eq!(restored.terminal.theme, terminal, "{section}");
+        }
+    }
 
     #[test]
     fn merge_sectioned_snapshot_applies_only_selected_sections() {

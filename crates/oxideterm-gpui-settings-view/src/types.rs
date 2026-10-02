@@ -58,6 +58,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::UpdateProxyMode => SelectAnchorId::SettingsUpdateProxyMode,
             Self::UpdateProxyProtocol => SelectAnchorId::SettingsUpdateProxyProtocol,
             Self::AppearanceTheme => SelectAnchorId::SettingsAppearanceTheme,
+            Self::AppearanceTerminalTheme => SelectAnchorId::SettingsAppearanceTerminalTheme,
             Self::AppearanceDensity => SelectAnchorId::SettingsAppearanceDensity,
             Self::AppearanceAnimation => SelectAnchorId::SettingsAppearanceAnimation,
             Self::AppearanceRenderProfile => SelectAnchorId::SettingsAppearanceRenderProfile,
