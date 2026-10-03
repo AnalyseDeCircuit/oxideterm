@@ -171,13 +171,13 @@ If there is no earlier tag for that channel, state which preceding release tag w
 
 ### 4. Run the repository version script
 
-Always use the repository script; never hand-edit the workspace version, README badges, or lockfile:
+Always use the repository script; never hand-edit the workspace version or lockfile:
 
 ```bash
 python3 scripts/release/bump_version.py <version>
 ```
 
-This validates SemVer, updates `[workspace.package]`, synchronizes every localized README badge, and refreshes `Cargo.lock` offline.
+This validates SemVer, updates `[workspace.package]`, and refreshes `Cargo.lock` offline. README badges display the latest GitHub release automatically and need no version edits.
 
 ### 5. Perform lightweight release validation
 

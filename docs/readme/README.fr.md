@@ -1,285 +1,202 @@
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — Vos serveurs. Un seul espace de travail." width="920">
-</p>
-
-<h1 align="center">⚡ OxideTerm</h1>
-
-<p align="center">
-  <strong>Espace de travail d’exploitation natif avec IA pour serveurs distants — Application native 100% Rust</strong>
-  <br>
-  Terminaux SSH, Mosh, Telnet, série, RDP/VNC, SFTP, redirection de ports et édition légère dans un espace de travail natif.
-  <br>
-  Rendu GPU. Gratuit. Aucun compte requis.
-  <br>
-  <strong>Sans Electron. Sans WebView embarquée. Sans télémétrie. Sans abonnement. BYOK d'abord. SSH pur Rust sans OpenSSL/libssh2.</strong>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/version-2.2.0-blue" alt="Version">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="Plateforme">
-  <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="Licence">
-  <img src="https://img.shields.io/badge/rust-2024%20edition-orange" alt="Rust 2024">
-  <img src="https://img.shields.io/badge/ui-GPUI-green" alt="GPUI">
-</p>
-
-<p align="center">
-  <sub>Open source, local-first et rendu par GPU avec GPUI.</sub>
-</p>
-
-<p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
----
-
-## Ce qu’est OxideTerm
-
-OxideTerm est un espace de travail open source pour SSH et les opérations distantes. Terminaux, fichiers, redirections, outils hôte et bureaux distants restent réunis dans un même espace.
-
-**Ce que vous pouvez faire :**
-
-- Gérer SSH, Mosh, Telnet, série, RDP/VNC, SFTP, redirections de ports, shells locaux et édition légère dans un seul espace de travail
-- Maintenir le travail distant pendant de brèves coupures réseau grâce à la reconnexion Grace Period
-- Demander à OxideSens d’examiner les sessions actives et d’exécuter des actions approuvées avec votre propre fournisseur d’IA
-
-Vos connexions et données opérationnelles restent sous votre contrôle. OxideSens utilise votre propre fournisseur d’IA et aucun compte n’est requis.
-
----
-
-## Pourquoi OxideTerm ?
-
-| Si vous recherchez… | OxideTerm vous apporte… |
-|---|---|
-| Un nœud distant, de nombreux outils | Terminal, SFTP, redirection de ports, RDP/VNC, trzsz, IDE natif, supervision et OxideSens AI restent attachés au même espace de travail |
-| Une application de bureau sans Electron ni WebView embarquée | GPUI dessine l’interface directement sur une surface GPU, sans livrer de runtime de navigateur |
-| Des flux d’exploitation local-first | SSH, Telnet, SFTP, redirection, RDP/VNC, shell local, terminaux série et configuration fonctionnent sans inscription |
-| OxideSens AI avec vos propres clés plutôt que des crédits de plateforme | OxideSens utilise votre point de terminaison OpenAI, Anthropic, Gemini, Ollama ou compatible OpenAI, avec MCP, RAG, contrôles de raisonnement adaptés au fournisseur et actions approuvées |
-| La stabilité de reconnexion | Grace Period sonde l’ancienne connexion pendant 30 s avant son remplacement, afin que les applications TUI survivent aux brèves coupures réseau |
-| SSH Rust pur et sécurité des identifiants | La pile SSH utilise `russh` + `ring` sans OpenSSL/libssh2 ; les identifiants enregistrés utilisent le trousseau système et les paquets `.oxide` utilisent ChaCha20-Poly1305 + Argon2id |
-
----
-
-## Utilisation de la mémoire
-
-**Après la réécriture native, la mémoire utilisée au repos est passée à environ un quart de celle de l’ancienne version sur macOS, et un huitième sur Windows.** Voici les mesures relevées par l’auteur sur ses propres machines lors du passage de Tauri 1.x à la version native GPUI 2.0 :
-
-| Plateforme | Tauri 1.x — au repos | Version native 2.0 — au repos | Réduction |
-|---|---:|---:|---:|
-| macOS | 318,7 Mo | 81,3 Mo | Environ 74 % |
-| Windows | 182,4 Mo | 23,5 Mo | Environ 87 % |
-
-![Comparaison de la mémoire au repos entre Tauri 1.x et la version native 2.0, avec captures des processus système](../screenshots/oxideterm-memory-comparison.png)
-
-Le total de l’ancienne version comprend OxideTerm et les processus WebView associés visibles sur les captures. La version native n’a plus besoin de ces processus de navigateur.
-
----
-
-## Captures d’écran
-
-Les captures ci-dessous présentent les parcours terminal, fichiers, édition et redirection d’OxideTerm.
-
-<table>
-<tr>
-<td align="center"><strong>Terminal SSH + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="Terminal SSH avec OxideSens AI" /></td>
-<td align="center"><strong>Gestionnaire de fichiers SFTP</strong><br/><br/><img src="../../docs/screenshots/sftp/sftp.png" alt="Gestionnaire de fichiers SFTP double volet avec file de transfert" /></td>
-</tr>
-<tr>
-<td align="center"><strong>IDE intégré</strong><br/><br/><img src="../../docs/screenshots/miniIDE/miniide.png" alt="Mode IDE intégré" /></td>
-<td align="center"><strong>Redirection de ports intelligente</strong><br/><br/><img src="../../docs/screenshots/PORTFORWARD/PORTFORWARD.png" alt="Redirection de ports intelligente avec détection automatique" /></td>
-</tr>
-</table>
-
----
-
-## Conçu pour les opérations distantes
-
-OxideTerm réunit connexions, fichiers, redirections, outils hôte, automatisation et contexte IA dans un espace Rust. Les outils partagent la même identité serveur et le même cycle de session.
-
-| Aspect | Approche avec navigateur embarqué | OxideTerm |
-|---|---|---|
-| **Rendu** | Moteur de navigateur et mise en page web | GPUI sur une surface GPU |
-| **Flux de données du terminal** | WebSocket → boucle d’événements JS → xterm.js | Entrée Rust → mutation de `TerminalState` → rendu GPUI |
-| **Cycle de vie des connexions** | Réparti entre frontend et backend | Un pipeline de connexion et reconnexion dans un seul processus |
-| **Contexte IA** | Copié via un pont applicatif | Construit depuis l’espace de travail actif avec accord de l’utilisateur |
-| **Runtime des plugins** | Environnement de scripts navigateur | Chemins manifest-only, WASM à capacités limitées et processus nécessitant une confiance explicite |
-| **CLI** | Nécessite l’application de bureau en cours d’exécution | Binaire autonome avec liaison directe aux crates |
-| **Frontière d’exécution** | Enveloppe de bureau et runtime navigateur | Processus natif sans runtime navigateur embarqué |
-
----
-
-## Fonctions
-
-| Catégorie | Fonctions |
-|---|---|
-| **Terminal et connexions** | Shells locaux, SSH, Mosh, Telnet, série, volets, mode de saisie libre, journaux de session configurables, mode de contrôle natif tmux -CC avec disposition des volets et séparateurs redimensionnables, groupes de diffusion nommés, envoi avancé vers plusieurs cibles, routes multi-hop et reconnexion stable |
-| **Fichiers et édition distante** | SFTP, files de transfert, favoris, écritures sûres, arbres de projet et édition par onglets |
-| **Redirection et réseau** | Redirections locale, distante et SOCKS5 dynamique, règles enregistrées et débogage de sockets |
-| **Opérations hôte et bureau distant** | Supervision, processus, services, journaux, ports, tâches, disques, paquets, conteneurs, tmux, RDP et VNC |
-| **OxideSens et automatisation** | Fournisseurs IA personnels, MCP, RAG local, Agent Skills, actions approuvées, synchronisation chiffrée et CLI |
-| **Extensions et personnalisation** | Plugins manifest-only, WASM et processus, onglets personnalisés, commandes rapides, thèmes, arrière-plans, raccourcis et 11 langues |
-
----
-
 <div align="center">
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens ouvre un terminal dans OxideTerm" width="920">
-</a>
+<img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm : vos serveurs, un seul espace de travail" width="920">
 
-*OxideSens suit une demande utilisateur et ouvre un terminal dans OxideTerm.*
+# ⚡ OxideTerm
+
+**Un client SSH natif gratuit et un espace de travail pour administrer vos serveurs à distance, avec un assistant IA utilisant votre propre clé.**
+
+SSH · Mosh · Telnet · série · RDP/VNC · SFTP · redirection de ports · éditeur intégré, dans une seule application avec rendu GPU.
+Sans compte. Sans abonnement. Sans télémétrie. Sans Electron.
+
+[![Dernière version](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![Plateformes](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
+[![Licence](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
+[![Étoiles](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)
+
+[**Télécharger**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) ·
+[**Documentation**](https://oxideterm.app) ·
+[**Journal des modifications**](../../.github/release-notes/stable-changelog.md) ·
+[**Signaler un problème**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
+
+[English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
 
 </div>
 
 ---
 
-## Installation
+## Premiers pas
 
-[Télécharger la dernière version](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+1. **Installez OxideTerm.** Téléchargez un paquet de la [dernière version](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) ; les indications par plateforme figurent dans la section [Installation](#install) ci-dessous.
+2. **Ajoutez un serveur.** Ouvrez le gestionnaire de sessions et créez une connexion SSH, ou importez des hôtes depuis votre fichier `~/.ssh/config`.
+3. **Connectez-vous.** Ouvrez un terminal. Les clés d’hôte sont vérifiées à partir de `~/.ssh/known_hosts`.
+4. **Utilisez les autres outils de l’espace de travail.** Ouvrez SFTP, la redirection de ports ou l’éditeur intégré sur le même nœud. Par défaut, ils partagent une seule connexion SSH.
+5. **Facultatif : activez l’IA.** Dans les paramètres, ajoutez votre propre point d’accès OpenAI, Anthropic, Gemini, Ollama ou compatible OpenAI pour activer OxideSens.
 
-- macOS : choisissez le fichier `.dmg` correspondant à Apple Silicon ou Intel.
-- Windows : utilisez l’installateur x64 ou ARM64.
-- Linux : choisissez AppImage, `.deb`, `.rpm` ou lancez via Nix (`nix run github:AnalyseDeCircuit/oxideterm` ; les mises à jour sont gérées par Nix).
-- Vérifiez les téléchargements avec le fichier `sha256sums.txt` de la page de publication.
-
-Pour compiler depuis les sources, consultez la section « Exécuter depuis les sources » ci-dessous.
+Pour une visite guidée, consultez la [documentation](https://oxideterm.app).
 
 ---
 
-## Architecture
+## Fonctionnalités
 
-OxideTerm réunit terminal, SSH, Telnet, RDP, VNC, SFTP, redirection, IDE, IA, plugins et CLI dans une architecture Rust. Les détails techniques suivent ci-dessous.
+| | |
+|---|---|
+| **Terminaux et protocoles** | Shells locaux, SSH, Mosh, Telnet, série, volets divisés, routes à plusieurs sauts, agent SSH et transfert d’agent, authentification à deux facteurs (2FA) et identifiants TOTP, transfert X11, intégration du shell, repères de commandes, journaux de session configurables, enregistrement, graphiques Sixel et Kitty, transferts trzsz |
+| **tmux et diffusion** | Mode de contrôle natif `tmux -CC` avec disposition des volets et séparateurs déplaçables, groupes de diffusion nommés et outil avancé d’envoi de commandes à plusieurs cibles pour des saisies planifiées et répétables |
+| **Fiabilité** | La reconnexion Grace Period maintient les applications TUI en fonctionnement pendant de brèves coupures réseau, puis rétablit les redirections, les transferts et les fichiers ouverts dans l’éditeur |
+| **Fichiers et édition** | Gestionnaire SFTP à deux volets, files de transfert avec limites de vitesse et estimation du temps restant, favoris, éditeur distant intégré avec écriture sécurisée, gestion des conflits et restauration de l’espace de travail |
+| **Réseau** | Redirections locales, distantes et dynamiques SOCKS5, règles enregistrées, détection des ports distants, topologie des connexions et débogage ponctuel de sockets |
+| **Bureau à distance** | RDP et VNC intégrés avec prise en charge du presse-papiers et des entrées |
+| **Administration des hôtes** | Surveillance des processus, services, journaux, ports, tâches, disques, paquets, conteneurs et tmux |
+| **IA et automatisation** | OxideSens avec votre propre clé, MCP, RAG local, Agent Skills, actions approuvées dans l’espace de travail et CLI autonome |
+| **Suivi et audit** | Espace de travail facultatif de notifications et d’audit, et enregistrements de sessions chiffrés (tous deux désactivés par défaut) |
+| **Synchronisation et portabilité** | Synchronisation cloud chiffrée, paquets `.oxide` portables |
+| **Personnalisation** | Thèmes, images d’arrière-plan, raccourcis configurables, commandes rapides, 11 langues d’interface |
+
+---
+
+## Pourquoi OxideTerm
+
+- **Gratuit et conçu pour un usage local.** Sans compte, sans abonnement, sans télémétrie. Vous gardez le contrôle de vos connexions et de vos données d’administration.
+- **Un espace de travail par serveur.** Terminal, SFTP, redirections, RDP/VNC, éditeur, surveillance et IA sont rattachés au même nœud, plutôt que de fonctionner comme des outils isolés.
+- **Une véritable application native.** L’interface est dessinée directement sur le GPU avec [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). Sans Electron ni WebView embarquée.
+- **L’IA selon vos choix.** OxideSens utilise votre fournisseur et votre clé, et n’exécute que les actions que vous approuvez.
+- **Des connexions résilientes.** La reconnexion Grace Period teste l’ancienne connexion pendant 30 secondes avant de la remplacer, pour que les applications TUI puissent continuer à fonctionner lors de brèves coupures réseau.
+- **SSH entièrement en Rust.** La pile SSH utilise `russh` avec `ring`, sans OpenSSL ni libssh2.
+
+---
+
+## Utilisation de la mémoire
+
+**La réécriture native a réduit la mémoire utilisée au repos à environ un quart de celle de l’ancienne version sur macOS, et à environ un huitième sur Windows.** Voici les observations consignées par le mainteneur lors du passage de Tauri 1.x à la version native GPUI 2.0 :
+
+| Plateforme | Tauri 1.x (au repos) | Version native 2.0 (au repos) | Réduction |
+|---|---:|---:|---:|
+| macOS | 318.7 MB | 81.3 MB | Environ 74% |
+| Windows | 182.4 MB | 23.5 MB | Environ 87% |
+
+Le total de l’ancienne version comprend OxideTerm et les processus WebView associés. La version native n’a plus besoin de ces processus de navigateur.
+
+![Comparaison de la mémoire au repos avec captures des processus système : Tauri 1.x et version native 2.0](../../docs/screenshots/oxideterm-memory-comparison.png)
+
+---
+
+## Captures d’écran
+
+| Terminal SSH avec OxideSens | Gestionnaire de fichiers SFTP |
+|---|---|
+| ![Terminal SSH avec l’IA OxideSens](../../docs/screenshots/terminal/SSHTERMINAL.png) | ![Gestionnaire de fichiers SFTP à deux volets avec file de transfert](../../docs/screenshots/sftp/sftp.png) |
+
+| IDE intégré | Redirection de ports intelligente |
+|---|---|
+| ![Mode IDE intégré](../../docs/screenshots/miniIDE/miniide.png) | ![Redirection de ports intelligente avec détection automatique](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png) |
 
 <details>
-<summary><strong>Architecture, internes SSH, shell GPUI, reconnexion, IA, plugins et plus</strong></summary>
-<br>
+<summary><b>Voyez OxideSens ouvrir un terminal à partir d’une demande en langage naturel</b></summary>
 
-### Architecture — cœur en processus, sans pont WebView
-
-```text
-GPUI Render Loop
-  WorkspaceApp / Tab surfaces / GPUI views
-        │ dans le processus Arc<> / async
-Domain Crates
-  NodeRouter → SshConnectionRegistry
-  TerminalState ← SSH PTY channel
-  SftpSession / ForwardingRuntime / IdeWorkspace
-  Ai/ACP Entities / CloudSync / Plugin Runtimes
-```
-
-Il n'y a pas de frontière de sérialisation entre l'UI et le backend SSH/terminal. Les octets du terminal modifient directement `TerminalState`, puis GPUI lit l'état et émet les draw calls GPU.
-
-### SSH pur Rust — russh (ring)
-
-- **Sans OpenSSL/libssh2 dans la pile SSH** — `ring` fournit la cryptographie SSH
-- SSH2 complet : échange de clés, canaux, sous-système SFTP, redirection de ports
-- ChaCha20-Poly1305 / AES-GCM, clés Ed25519/RSA/ECDSA
-- SSH Agent sur Unix (`SSH_AUTH_SOCK`) et Windows (`\\.\pipe\openssh-ssh-agent`)
-- ProxyJump multi-hop avec authentification indépendante à chaque saut
-
-### Reconnexion intelligente avec Grace Period
-
-1. Détecter le timeout SSH keepalive sans JavaScript timer throttling
-2. Instantané des panneaux de terminal, transferts SFTP, redirections et fichiers IDE
-3. Sonder l’ancienne connexion pendant 30 secondes de Grace Period pour laisser survivre les TUI lors d’un changement réseau
-4. Si la récupération échoue, reconnecter, restaurer les redirections, reprendre ou retenter les transferts selon la stratégie et rouvrir les fichiers IDE
-
-Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
-
-### Pool de connexions SSH et routage par nœud
-
-- En mode par défaut, une connexion SSH physique peut servir les panneaux de terminal, SFTP, redirections de ports et IDE ; un terminal peut utiliser une connexion dédiée si la politique l’exige
-- Chaque connexion passe par `connecting → active → idle → link_down → reconnecting`
-- L’UI adresse `nodeId`; `NodeRouter` résout atomiquement le `connectionId` actif
-- `NodeRuntimeStore` conserve l’état d’exécution des nœuds et exporte les snapshots de topologie ; les helpers du workspace écrivent ces snapshots dans `session_tree.json` et reconstruisent les handles actifs au démarrage
-- La panne d’un jump host propage `link_down` aux nœuds descendants
-
-### OxideSens AI
-
-OxideSens reste BYOK d’abord, avec construction du contexte dans le processus :
-
-- Fournisseurs : OpenAI, Anthropic, Gemini, Ollama ou tout point d’accès OpenAI-compatible
-- MCP : transports stdio et SSE, découverte et invocation d’outils
-- RAG : BM25 full-text, index vectoriel HNSW, Reciprocal Rank Fusion, tokenizer CJK bigram
-- Les messages envoyés aux fournisseurs passent par un filtre de motifs d’identifiants ; le contexte et les actions du workspace restent sous le contrôle de l’utilisateur
-- Les clés API sont conservées dans le trousseau système et délibérément exclues des journaux structurés et des messages du cœur de l’application
-
-### Shell desktop GPUI
-
-L’UI est dessinée directement avec GPUI, sans pipeline DOM/CSS/JavaScript :
-
-- Types d’onglets de l’espace de travail : terminaux locaux, SSH, Telnet, série, RDP, VNC, SFTP, IDE, Forwards, Settings, plugins, Topology, etc.
-- Arbre binaire de panes avec séparateurs déplaçables, jusqu’à quatre panes par onglet terminal
-- Command palette, raccourcis globaux et sidebars construits avec des primitives GPUI
-- Immediate-mode rendering réagit à l’état Rust sans round-trip de sérialisation
-
-### État du terminal et rendu
-
-Le rendu terminal est d’abord modélisé comme état Rust, puis dessiné par GPUI :
-
-- La sortie PTY arrive dans `TerminalState` ; scrollback, curseur, sélection, marks et état de recherche restent en Rust
-- La rendering policy peut passer entre Boost, Normal et Idle sans attendre un browser event loop
-- Les graphiques Sixel et Kitty sont suivis comme assets propres au terminal, pas comme DOM nodes ou canvas overlays
-- Les panneaux divisés partagent le même modèle de état de l’espace de travail, ce qui permet à restauration d’onglet et reconnect de prendre un instantané ensemble la topologie terminal
-
-### Workspace SFTP et IDE
-
-Les fichiers distants font partie du même node espace de travail, pas d’une fonction séparée :
-
-- Les sessions SFTP sont résolues via `NodeRouter` avec une génération de connexion ; reconnect peut acquérir une session valide, mais une opération de l’ancienne génération n’est jamais remplacée silencieusement par une nouvelle connexion
-- Les transfer queues suivent direction, progression, retry state et speed limits indépendamment des file panes visibles
-- Les onglets IDE gardent ensemble dirty buffers, remote paths, conflict state et restore metadata
-- Lorsque le backend le permet, les écritures distantes utilisent un staged/atomic behavior pour éviter les partial writes dans le flux d’édition normal
-
-### Plugins, CLI et diagnostics
-
-Les extensions et surfaces de support respectent des limites explicites définies en Rust :
-
-- Les plugins prennent en charge les chemins manifest-only, WASM et processus ordinaires. WASM utilise le runtime Wasmtime/WASI intégré ; les plugins processus sont des processus locaux sans sandbox du système d’exploitation.
-- La CLI lie directement les crates de domaine pour doctor, settings, connections, redirections, portable bundles, backups et reports
-- Les diagnostics privilégient compteurs, chemins, indicateurs de fonctionnalité et indices expurgés plutôt que des charges utiles brutes porteurs de secrets
-- Les flows CLI qui modifient l’état utilisent dry-run plans, `--yes` guards et rollback backups lorsque c’est pertinent
-
-### Redirection de ports — Lock-Free I/O
-
-- Local `-L`, Remote `-R`, Dynamic SOCKS5 `-D`
-- Un seul task `ssh_io` possède chaque SSH Channel et évite `Arc<Mutex<Channel>>`
-- Auto-restauration après reconnexion, rapport de fin et expiration d’inactivité
-
-### trzsz — transfert in-band
-
-trzsz continue d’utiliser le flux terminal, sans port supplémentaire ni agent distant :
-
-- Upload/download via le flux terminal existant
-- Fonctionne à travers les chaînes ProxyJump
-- Les sélecteurs de fichiers natifs évitent les limites mémoire du navigateur
-- Transfert bidirectionnel, dossiers, limites configurables
-
-### Export `.oxide` chiffré
-
-- **ChaCha20-Poly1305 AEAD** authenticated encryption
-- **Argon2id KDF** : 256 MB memory cost, 4 iterations, augmente le coût du brute force GPU
-- Couvre connections, redirections, settings, quick commands, réglages de plugin et secrets portables
+<a href="../../docs/media/ai-terminal-demo.mp4">
+  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens ouvre un terminal dans OxideTerm" width="720">
+</a>
 
 </details>
 
 ---
 
-## Lancer depuis le code source
+## IA OxideSens
+
+OxideSens est un assistant facultatif qui peut examiner vos sessions actives et effectuer des actions dans l’espace de travail **uniquement après votre approbation**.
+
+- **Utilisez votre propre clé.** Compatible avec OpenAI, Anthropic (Claude), Google Gemini, Ollama et tout point d’accès compatible OpenAI, avec des réglages de raisonnement adaptés au fournisseur. Il n’y a pas de crédits de plateforme.
+- **MCP et Agent Skills.** Connectez des serveurs MCP (stdio et SSE) et chargez des Agent Skills dans des limites définies.
+- **Base de connaissances locale (RAG).** Recherche plein texte BM25 et index vectoriel.
+- **Vous contrôlez le contexte.** Vous choisissez le contexte de l’espace de travail et les actions à approuver ; les règles de la politique de commandes s’appliquent.
+- **Masquage des identifiants.** Les messages envoyés à un fournisseur passent par un filtre qui masque les motifs correspondant à des identifiants.
+- **Les clés restent dans le trousseau du système d’exploitation** et ne figurent pas dans les journaux structurés.
+
+---
+
+<a id="plugins"></a>
+
+## Plugins
+
+OxideTerm prend en charge trois types de plugins :
+
+| Type | Exécution | Limites |
+|---|---|---|
+| **Manifeste uniquement** | Extensions déclaratives, sans code | Aucun code exécutable |
+| **WASM** | Wasmtime/WASI ou processus auxiliaire | Appels à l’hôte contrôlés, limités aux capacités autorisées |
+| **Processus** | Processus local ordinaire | Code local de confiance, **sans** bac à sable du système d’exploitation |
+
+Les anciens plugins ESM de Tauri (1.x) peuvent apparaître dans la liste, mais l’application native 2.x ne les exécute pas. N’installez des plugins de type processus que depuis des sources de confiance.
+
+---
+
+## Sécurité et confidentialité
+
+| Sujet | Fonctionnement |
+|---|---|
+| **Identifiants enregistrés** | Trousseau du système d’exploitation (macOS Keychain, Windows Credential Manager, libsecret) |
+| **Secrets en mémoire** | Les types contenant des secrets et les tampons temporaires utilisent `zeroize` aux points de gestion de propriété pris en charge |
+| **Clés d’hôte** | Confiance à la première utilisation avec `~/.ssh/known_hosts` ; les modifications inattendues sont refusées |
+| **Exports portables** | Les paquets `.oxide` utilisent ChaCha20-Poly1305 avec Argon2id (256 MB de mémoire, 4 itérations) |
+| **Contexte de l’IA** | Masquage des motifs d’identifiants avant tout envoi à un fournisseur ; vous approuvez le contexte et les actions |
+| **Enregistrements de sessions** | Désactivés par défaut ; stockés chiffrés sur votre appareil et exclus de la synchronisation cloud ; les frappes au clavier ne sont pas enregistrées |
+| **Audit** | Désactivé par défaut ; les données restent sur votre appareil et les détails sensibles sont chiffrés |
+| **Modifications via la CLI** | Plans de simulation, confirmations `--yes` et sauvegardes de restauration pour les commandes qui modifient l’état |
+| **Plugins** | Voir [Plugins](#plugins) |
+| **Télémétrie** | Aucune |
+
+**Utilisation légale.** OxideTerm est distribué sous licence GPL-3.0-only, sans restrictions supplémentaires. Accédez uniquement aux systèmes, réseaux et appareils qui vous appartiennent ou pour lesquels vous disposez d’une autorisation explicite, et respectez la législation applicable. N’utilisez pas OxideTerm pour des accès non autorisés, pour perturber des services ou pour contourner des contrôles d’accès.
+
+---
+
+## Limites actuelles
+
+À savoir avant l’installation :
+
+- Disponible uniquement sur ordinateur (macOS, Windows, Linux). Il n’existe pas d’application mobile.
+- Le projet évolue rapidement, avec des versions fréquentes. Consultez le [journal des modifications](../../.github/release-notes/stable-changelog.md) et les [tickets ouverts](https://github.com/AnalyseDeCircuit/oxideterm/issues).
+- L’audit et l’enregistrement des sessions doivent être activés explicitement et ne reflètent que ce qu’OxideTerm peut lui-même observer.
+- Les plugins de type processus ne sont pas isolés par un bac à sable du système d’exploitation.
+- Si le moteur de rendu ne fonctionne pas sur votre machine, essayez le profil de compatibilité : `OXIDETERM_RENDER_PROFILE=compatibility`.
+
+---
+
+<a id="for-developers"></a>
+
+## Pour les développeurs
+
+<details>
+<summary><b>Exécuter depuis les sources</b></summary>
 
 **Prérequis :** une chaîne d’outils Rust (édition 2024) et un environnement de bureau capable d’exécuter GPUI.
 
-```sh
+```bash
+# Run the app
 cargo run
+
+# If the renderer fails on your machine
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
+
+# Build the headless CLI companion
 ./scripts/build/build-cli.sh
+
+# Build the optional Linux remote agent
 ./scripts/build/build-agent.sh
 ```
 
-## CLI
+Avec Nix : `nix build .#oxideterm`, `nix run .#oxideterm` ou `nix develop`.
 
-La CLI sans interface `oxideterm` fonctionne sans lancer l’application et sert à l’automatisation, à la CI et aux diagnostics.
+Les binaires de la CLI sont placés dans `crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm`.
 
-```sh
+</details>
+
+<details>
+<summary><b>Interface en ligne de commande</b></summary>
+
+La CLI sans interface graphique `oxideterm` fonctionne sans lancer l’application, ce qui est utile pour l’automatisation, l’intégration continue et les diagnostics. Elle couvre les paramètres, connexions, redirections, plugins, commandes rapides, secrets, paquets portables, diagnostics, rapports, plans de traitement par lots, sauvegardes et synchronisation cloud.
+
+```bash
 cargo run -p oxideterm-cli -- doctor --strict
 cargo run -p oxideterm-cli -- settings validate --strict --json
 cargo run -p oxideterm-cli -- connections search prod
@@ -288,79 +205,148 @@ cargo run -p oxideterm-cli -- cloud-sync push --dry-run --json
 cargo run -p oxideterm-cli -- oxide export ./profile.oxide --connection prod --password-stdin
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 cargo run -p oxideterm-cli -- completion install zsh --force
+
+# Path and profile isolation for CI or fixtures
+cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 ```
 
-## Technologies
+</details>
 
-| Couche | Technologie | Notes |
+<details>
+<summary><b>Architecture</b></summary>
+
+L’interface et le backend terminal/SSH partagent un même processus Rust ; les agents distants facultatifs et les auxiliaires de plateforme fonctionnent à l’extérieur de ce processus. Les octets du terminal modifient directement `TerminalState`, à partir duquel GPUI effectue le rendu, sans étape d’analyse JSON, WebSocket, Base64 ou xterm.js.
+
+```
+┌─────────────────────────────────────────────────┐
+│               GPUI Render Loop                  │
+│   WorkspaceApp  ·  Tab surfaces  ·  GPUI views  │
+└──────────────────────┬──────────────────────────┘
+                       │  in-process Arc<> / async
+┌──────────────────────▼──────────────────────────┐
+│             Domain Crates (Rust async)          │
+│  NodeRouter → SshConnectionRegistry             │
+│  TerminalState ← SSH PTY channel (russh)        │
+│  SftpSession · ForwardingRuntime · IdeWorkspace │
+│  Ai/ACP Entities · CloudSync · Plugin Runtimes  │
+└─────────────────────────────────────────────────┘
+```
+
+| Aspect | Approche avec navigateur embarqué | OxideTerm |
 |---|---|---|
-| Interface | GPUI (Zed) | Mode immédiat accéléré par GPU, entièrement en Rust |
-| Exécution | Tokio + DashMap | Exécution asynchrone et tables concurrentes |
-| SSH | russh (`ring`) | Sans OpenSSL/libssh2 dans la pile SSH ; SSH Agent |
-| Terminal | portable-pty + alacritty_terminal | PTY locaux, émulation de terminal et graphismes Sixel/Kitty |
-| Plugins | Wasmtime/WASI et processus | Manifest-only, appels hôte WASM contrôlés et processus locaux nécessitant une confiance explicite |
-| IA et recherche | SSE + BM25 + HNSW | Diffusion des fournisseurs, bigrammes CJK et fusion RRF |
-| Éditeur | tree-sitter (syntaxe), tampon personnalisé | Multilingue, adossé à SFTP |
-| Chiffrement | ChaCha20-Poly1305 + Argon2id | AEAD + KDF gourmande en mémoire (256 Mo) |
-| i18n | oxideterm-i18n | Chargeur intégré, 11 langues distribuées |
+| Rendu | Moteur de navigateur et mise en page web | GPUI sur une surface GPU |
+| Flux des données du terminal | WebSocket → boucle d’événements JS → xterm.js | Entrée Rust → `TerminalState` → rendu GPUI |
+| Cycle de vie des connexions | Réparti entre frontend et backend | Une seule chaîne de connexion et de reconnexion dans le même processus |
+| Contexte de l’IA | Copié via un pont applicatif | Construit à partir de l’espace de travail actif avec l’approbation de l’utilisateur |
+| CLI | Nécessite que l’application de bureau soit lancée | Binaire autonome, liaison directe avec les crates |
 
-## Sécurité
+**Pool de connexions.** `SshConnectionRegistry` repose sur `DashMap` et s’utilise via `NodeRouter`. Les volets de terminal, SFTP, les redirections de ports et l’éditeur peuvent partager une connexion SSH physique par nœud ; une politique de terminal peut aussi opter pour une connexion dédiée. Chaque connexion suit les états `connecting → active → idle → link_down → reconnecting`. Une panne de l’hôte de rebond place les nœuds en aval dans l’état `link_down`. L’IA et les plugins utilisent des références de capacités et des instantanés des hôtes plutôt que de s’enregistrer comme consommateurs de connexion.
 
-| Sujet | Implémentation |
+**Reconnexion Grace Period.**
+
+1. Détecter l’expiration du délai keepalive.
+2. Prendre un instantané des volets de terminal, transferts SFTP, redirections et fichiers de l’éditeur.
+3. Tester l’ancienne connexion pendant 30 s pour que les applications TUI puissent continuer à fonctionner lors de brèves coupures réseau.
+4. Ouvrir une nouvelle connexion, rétablir les redirections, reprendre les transferts et rouvrir les fichiers de l’éditeur.
+
+Les sessions SFTP portent une génération de connexion : après une reconnexion, une session admissible est obtenue à nouveau, mais une opération d’une ancienne génération n’est jamais transférée silencieusement vers la nouvelle connexion.
+
+**Redirection de ports.** Une crate autonome prend en charge `-L`, `-R` et `-D` (SOCKS5). Chaque canal SSH appartient à une seule tâche `ssh_io`, ce qui évite un mutex partagé sur le chemin critique.
+
+**SSH entièrement en Rust.** `russh` avec `ring` : SSH2 complet, ChaCha20-Poly1305 et AES-GCM, clés Ed25519/RSA/ECDSA, agent SSH sur Unix (`SSH_AUTH_SOCK`) et Windows (`\\.\pipe\openssh-ssh-agent`), et chaînes à plusieurs sauts avec authentification indépendante à chaque saut.
+
+**Technologies**
+
+| Couche | Technologie |
 |---|---|
-| Identifiants enregistrés | macOS Keychain / Windows Credential Manager / libsecret |
-| Secrets en mémoire | Les types contenant des secrets et les tampons temporaires utilisent `zeroize` / `Zeroizing` aux frontières de possession compatibles |
-| Diagnostics | Les rapports d’assistance privilégient les métadonnées structurées et les indices expurgés aux charges contenant des secrets |
-| Contexte IA | Les messages envoyés aux fournisseurs passent par un filtre de motifs d’identifiants ; le contexte et les actions du workspace restent sous le contrôle de l’utilisateur |
-| `.oxide` | ChaCha20-Poly1305 + Argon2id |
-| Écritures CLI | dry-run, garde `--yes`, sauvegardes rollback |
-| Clés d’hôte | TOFU avec `~/.ssh/known_hosts`, rejette les changements inattendus |
-| Plugins | manifest-only, API hôte WASM contrôlée et processus locaux nécessitant une confiance explicite |
+| Interface | GPUI (framework d’interface de Zed avec rendu GPU) |
+| Exécution | Tokio, DashMap |
+| SSH | `russh` avec `ring` (sans OpenSSL ni libssh2) |
+| PTY local | `portable-pty` (ConPTY sur Windows) |
+| Émulation de terminal | `alacritty_terminal` (VT100–VT500, graphiques Sixel et Kitty) |
+| Éditeur | Coloration syntaxique tree-sitter, tampon personnalisé |
+| Chiffrement | ChaCha20-Poly1305, Argon2id |
+| Plugins | Wasmtime/WASI, processus auxiliaire WASM et plugins de type processus |
+| Flux de l’IA | SSE (OpenAI, Anthropic, Gemini), dans le même processus |
+| RAG | BM25 + index vectoriel HNSW avec fusion des classements, tokenisation CJK par bigrammes |
+| i18n | `oxideterm-i18n` (11 langues) |
 
-## Avis d’utilisation légale
-
-OxideTerm est distribué sous licence GPL-3.0-only sans restriction de licence supplémentaire. Lors de son utilisation, accédez uniquement aux systèmes, réseaux et appareils qui vous appartiennent ou pour lesquels vous disposez d’une autorisation explicite, et respectez la législation applicable. N’utilisez pas OxideTerm pour un accès non autorisé, une interruption de service ou le contournement de contrôles d’accès.
-
-## Contribution
-
-Les contributions au code, à la documentation, aux traductions, aux plugins, aux tests et aux rapports de bugs sont bienvenues. Discutez les changements importants ou les corrections bien délimitées dans une issue.
-
-```sh
-cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
-```
+</details>
 
 ---
 
-## Contributeurs et contributrices
+<a id="install"></a>
+
+## Installation
+
+[**Télécharger la dernière version**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+| Système | x64 | ARM64 |
+|---|---|---|
+| **macOS** | DMG (Intel) | DMG (Apple Silicon) |
+| **Windows** | Installateur (`.exe`) | Installateur (`.exe`) |
+| **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
+
+Vérifiez votre téléchargement à l’aide du fichier `sha256sums.txt` disponible sur la page de la version. Les archives portables et les signatures y figurent également.
+
+### macOS
+
+Si Gatekeeper bloque l’application, supprimez l’attribut de quarantaine :
+
+```bash
+xattr -cr /Applications/OxideTerm.app
+```
+
+### Windows
+
+Si SmartScreen affiche un avertissement, choisissez **Informations complémentaires → Exécuter quand même**.
+
+### Linux
+
+```bash
+# AppImage
+chmod +x OxideTerm_*_linux_*.AppImage && ./OxideTerm_*_linux_*.AppImage
+
+# Debian / Ubuntu
+sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
+
+# Fedora / RHEL-compatible
+sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Nix; updates are managed by Nix
+nix run github:AnalyseDeCircuit/oxideterm
+```
+
+Vous préférez compiler vous-même ? Consultez **Exécuter depuis les sources** dans la section [Pour les développeurs](#for-developers).
+
+---
+
+## Contribuer
+
+Les contributions sont les bienvenues : code Rust, documentation, traductions, plugins, tests et reproduction de problèmes. Pour les changements importants, ouvrez d’abord un ticket afin d’en discuter.
+
+Les rapports de bugs sont plus utiles lorsqu’ils sont accompagnés d’un dossier de diagnostic dont les données sensibles ont été masquées :
+
+```bash
+cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
+```
+
+Les bugs reproductibles et les régressions sont prioritaires. Les demandes de fonctionnalités sont évaluées selon leur portée, leur sécurité et leur adéquation avec l’objectif d’OxideTerm : un espace de travail pour les serveurs distants. Si OxideTerm vous aide dans votre travail, une étoile sur GitHub, un rapport de bug reproductible, une correction de traduction ou un plugin contribuent à faire avancer le projet.
+
+### Contributeurs
 
 Merci à toutes les personnes qui contribuent à améliorer OxideTerm.
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
-    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="Contributeurs et contributrices d’OxideTerm">
+    <img src="https://contrib.rocks/image?repo=AnalyseDeCircuit/oxideterm" alt="Contributeurs d’OxideTerm">
   </a>
 </p>
-
----
-
-## Support et maintenance
-
-Les bugs et régressions reproductibles avec diagnostics expurgés sont prioritaires. Les demandes de fonctionnalités sont évaluées selon leur périmètre, leur sûreté et leur alignement avec la direction d’OxideTerm pour le espace de travail de serveurs distants.
-
-<p align="center">
-  <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">
-    <img src="https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social" alt="GitHub stars">
-  </a>
-</p>
-
-Si OxideTerm aide votre workflow, une étoile GitHub, une reproduction, une correction de traduction ou un plugin rendent le projet plus facile à maintenir.
 
 ---
 
 ## Licence
 
-**GPL-3.0-only**. Les avis détaillés sur les composants tiers figurent dans [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md), avec des informations complémentaires dans [`NOTICE`](../../NOTICE).
+**GPL-3.0-only.** Les mentions relatives aux dépendances figurent dans [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md), avec des mentions supplémentaires dans [`NOTICE`](../../NOTICE).
 
-## Remerciements
-
-Merci à `russh`, `GPUI`, `alacritty_terminal`, `portable-pty`, `wasmtime` et `tree-sitter`.
+**Développé avec :** [russh](https://github.com/warp-tech/russh) · [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) · [alacritty_terminal](https://github.com/alacritty/alacritty) · [portable-pty](https://github.com/wez/wezterm/tree/main/pty) · [wasmtime](https://wasmtime.dev/) · [tree-sitter](https://tree-sitter.github.io/)

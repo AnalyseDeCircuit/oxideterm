@@ -1,285 +1,202 @@
-<p align="center">
-  <img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm — 在一個工作區中管理你的伺服器" width="920">
-</p>
-
-<h1 align="center">⚡ OxideTerm</h1>
-
-<p align="center">
-  <strong>面向遠端伺服器、具備 AI 能力的原生維運工作區 —— 純 Rust 原生應用</strong>
-  <br>
-  SSH、Mosh、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發 和輕量編輯，集中在一個原生工作區。
-  <br>
-  GPU 直接渲染。免費，無需註冊。
-  <br>
-  <strong>不使用 Electron。 不捆綁 WebView。不蒐集遙測。無需訂閱。BYOK 優先。純 Rust SSH，不依賴 OpenSSL/libssh2。</strong>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/version-2.2.0-blue" alt="版本">
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue" alt="平台">
-  <img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="授權">
-  <img src="https://img.shields.io/badge/rust-2024%20edition-orange" alt="Rust 2024">
-  <img src="https://img.shields.io/badge/ui-GPUI-green" alt="GPUI">
-</p>
-
-<p align="center">
-  <sub>開源、本機優先，使用 GPUI 進行 GPU 繪製。</sub>
-</p>
-
-<p align="center">
-  <a href="../../README.md">English</a> | <a href="README.zh-Hans.md">简体中文</a> | <a href="README.zh-Hant.md">繁體中文</a> | <a href="README.ja.md">日本語</a> | <a href="README.ko.md">한국어</a> | <a href="README.fr.md">Français</a> | <a href="README.de.md">Deutsch</a> | <a href="README.es.md">Español</a> | <a href="README.it.md">Italiano</a> | <a href="README.pt-BR.md">Português</a> | <a href="README.vi.md">Tiếng Việt</a>
-</p>
-
----
-
-## OxideTerm 是什麼
-
-OxideTerm 是面向 SSH 與遠端維運的開源工作區。終端、檔案、連接埠轉發、主機工具和遠端桌面都集中在同一個工作區中。
-
-**你可以做什麼：**
-
-- 在同一個工作區中管理 SSH、Mosh、Telnet、序列埠、RDP/VNC、SFTP、連接埠轉發、本機 Shell 與輕量編輯
-- 透過 Grace Period 重連機制，應對短暫網路中斷並維持遠端工作
-- 使用你自己的 AI 服務商，讓 OxideSens 檢查作用中的工作階段並執行經過核准的工作區操作
-
-連線資訊與維運資料始終由你掌控。OxideSens 使用你自己的 AI 服務商，無需註冊帳號。
-
----
-
-## 為什麼選擇 OxideTerm？
-
-| 如果你在意…… | OxideTerm 提供…… |
-|---|---|
-| 一個遠端節點，多種工具 | 終端、SFTP、連接埠轉發、RDP/VNC、trzsz、原生 IDE、監控和 OxideSens AI 都附屬於同一工作區 |
-| 沒有 Electron 或捆綁 WebView 的桌面應用程式 | GPUI 直接在 GPU 表面繪製介面，無需附帶瀏覽器執行環境 |
-| 本機優先的維運流程 | SSH、Telnet、SFTP、轉發、RDP/VNC、本機 Shell、序列埠終端和設定無需註冊即可使用 |
-| 自帶金鑰的 OxideSens AI，而非平台額度 | OxideSens 使用你的 OpenAI、Anthropic、Gemini、Ollama 或 OpenAI 相容端點，並支援 MCP、本機 RAG、依服務商適配的推理控制和經核准的工作區操作 |
-| 重連穩定性 | Grace Period 會在替換連線前探測舊連線 30 秒，讓 TUI 應用程式能穿越短暫的網路中斷 |
-| 純 Rust SSH 與憑證安全 | SSH 堆疊透過 `russh` + `ring` 提供，不依賴 OpenSSL/libssh2；已儲存憑證使用系統鑰匙圈，`.oxide` 套件使用 ChaCha20-Poly1305 + Argon2id |
-
----
-
-## 記憶體用量
-
-**原生重寫後，閒置記憶體用量降至舊版的約四分之一（macOS）和約八分之一（Windows）。** 以下是作者在自己的電腦上記錄的 Tauri 1.x 與原生 GPUI 2.0 對比：
-
-| 平台 | Tauri 1.x 閒置時 | 原生 2.0 閒置時 | 降幅 |
-|---|---:|---:|---:|
-| macOS | 318.7 MB | 81.3 MB | 約 74% |
-| Windows | 182.4 MB | 23.5 MB | 約 87% |
-
-![Tauri 1.x 與原生 2.0 的閒置記憶體用量對比，附系統處理程序截圖](../screenshots/oxideterm-memory-comparison.png)
-
-舊版合計截圖中 OxideTerm 及其相關 WebView 處理程序的記憶體用量；原生版不再需要這些瀏覽器處理程序。
-
----
-
-## 截圖
-
-以下截圖展示了 OxideTerm 的終端、檔案、編輯與連接埠轉發工作流程。
-
-<table>
-<tr>
-<td align="center"><strong>SSH 終端 + OxideSens AI</strong><br/><br/><img src="../../docs/screenshots/terminal/SSHTERMINAL.png" alt="帶有 OxideSens AI 的 SSH 終端" /></td>
-<td align="center"><strong>SFTP 檔案管理員</strong><br/><br/><img src="../../docs/screenshots/sftp/sftp.png" alt="SFTP 雙窗格檔案管理員與傳輸佇列" /></td>
-</tr>
-<tr>
-<td align="center"><strong>內建 IDE</strong><br/><br/><img src="../../docs/screenshots/miniIDE/miniide.png" alt="內建 IDE 模式" /></td>
-<td align="center"><strong>智慧連接埠轉發</strong><br/><br/><img src="../../docs/screenshots/PORTFORWARD/PORTFORWARD.png" alt="帶自動偵測的智慧連接埠轉發" /></td>
-</tr>
-</table>
-
----
-
-## 為遠端維運而設計
-
-OxideTerm 將連線、檔案、轉發、主機工具、自動化與 AI 上下文放在同一個 Rust 工作區中。各項工具共享同一台伺服器的身分與工作階段生命週期。
-
-| 面向 | 捆綁瀏覽器的方案 | OxideTerm |
-|---|---|---|
-| **繪製** | 瀏覽器引擎與網頁版面 | GPU 表面上的 GPUI |
-| **終端資料流** | WebSocket → JavaScript 事件迴圈 → xterm.js | Rust 輸入 → `TerminalState` 變更 → GPUI 繪製 |
-| **連線生命週期** | 分散在前端與後端層 | 單一行程內連線與重連流程 |
-| **AI 上下文** | 經由應用程式橋接複製 | 在使用者核准下從作用中的工作區建立 |
-| **外掛執行階段** | 瀏覽器腳本環境 | 具能力範圍的 WASM 執行階段 |
-| **CLI** | 需要桌面應用程式正在執行 | 獨立二進位檔，直接連結 crate |
-| **執行階段邊界** | 桌面外殼加瀏覽器執行階段 | 不帶捆綁瀏覽器執行階段的原生行程 |
-
----
-
-## 功能
-
-| 類別 | 功能 |
-|---|---|
-| **終端與連線** | 本機 Shell、SSH、Mosh、Telnet、序列埠、分割窗格、自由輸入模式、可設定的工作階段日誌、具窗格版面與可拖曳分隔線的原生 tmux -CC 控制模式、具名稱的廣播群組、高階多目標命令傳送、多跳路由與穩定重連 |
-| **檔案與遠端編輯** | SFTP、傳輸佇列、收藏夾、安全寫入、專案樹與多分頁編輯 |
-| **轉發與網路** | 本機、遠端與動態 SOCKS5 轉發、已儲存規則與 Socket 除錯 |
-| **主機維運與遠端桌面** | 監控、行程、服務、日誌、連接埠、工作、磁碟、套件、容器、tmux、RDP 與 VNC |
-| **OxideSens 與自動化** | 自有 AI 服務商、MCP、本機 RAG、Agent Skills、已核准操作、加密雲端同步與 CLI |
-| **擴充與個人化** | manifest-only、WASM 與程序外掛、自訂分頁、快速命令、主題、背景圖片、快捷鍵與 11 種介面語言 |
-
----
-
 <div align="center">
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens 在 OxideTerm 中開啟終端" width="920">
-</a>
+<img src="../../docs/media/oxideterm-native-hero.png" alt="OxideTerm：在一個工作區中管理你的伺服器" width="920">
 
-*觀看 OxideSens 依照使用者請求，在 OxideTerm 中開啟一個終端。*
+# ⚡ OxideTerm
+
+**免費的原生 SSH 用戶端與遠端維運工作區，內建使用自備金鑰的 AI 助手。**
+
+SSH · Mosh · Telnet · 序列埠 · RDP/VNC · SFTP · 連接埠轉送 · 內建編輯器，整合在同一個 GPU 繪製的應用程式中。
+無需帳號，無需訂閱，不蒐集遙測，不使用 Electron。
+
+[![最新版本](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![平台](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
+[![授權條款](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
+[![Stars](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)
+
+[**下載**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) ·
+[**文件**](https://oxideterm.app) ·
+[**更新紀錄**](../../.github/release-notes/stable-changelog.md) ·
+[**報告問題**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
+
+[English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
 
 </div>
 
 ---
 
-## 安裝
+## 快速上手
 
-[下載最新版本](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+1. **安裝 OxideTerm。** 從[最新發布頁面](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)下載安裝套件；各平台的說明見下方[安裝](#install)一節。
+2. **新增伺服器。** 開啟工作階段管理器，新增 SSH 連線，或從 `~/.ssh/config` 匯入主機。
+3. **連線伺服器。** 開啟終端。主機金鑰會與 `~/.ssh/known_hosts` 中的記錄核對。
+4. **使用工作區中的其他功能。** 在同一節點上開啟 SFTP、連接埠轉送或內建編輯器。預設情況下，它們共用一個 SSH 連線。
+5. **可選：啟用 AI。** 在設定中新增你自己的 OpenAI、Anthropic、Gemini、Ollama 或相容 OpenAI 的服務端點，即可啟用 OxideSens。
 
-- macOS：選擇適合 Apple Silicon 或 Intel 的 `.dmg`。
-- Windows：選擇 x64 或 ARM64 安裝程式。
-- Linux：選擇 AppImage、`.deb`、`.rpm`，或透過 Nix 執行（`nix run github:AnalyseDeCircuit/oxideterm`；更新由 Nix 管理）。
-- 可使用發布頁中的 `sha256sums.txt` 驗證下載檔案。
-
-需要從原始碼建置？請繼續閱讀下方的「從原始碼執行」章節。
+需要詳細導覽，請參閱[文件](https://oxideterm.app)。
 
 ---
 
-## 內部實作
+## 功能一覽
 
-OxideTerm 將終端、SSH、Telnet、RDP、VNC、SFTP、轉發、IDE、AI、插件和 CLI 整合在同一套 Rust 架構中。下方列出了面向開發者的技術細節。
+| | |
+|---|---|
+| **終端與通訊協定** | 本機 Shell、SSH、Mosh、Telnet、序列埠、分割窗格、多跳連線、SSH Agent 與 Agent 轉送、雙因素認證和 TOTP 認證資料、X11 轉送、Shell 整合、指令標記、可設定的工作階段日誌、錄製、Sixel 和 Kitty 圖形、trzsz 傳輸 |
+| **tmux 與廣播** | 原生 `tmux -CC` 控制模式，支援窗格配置和拖動分隔線；具名廣播群組；可按計畫重複傳送輸入的進階多目標指令傳送工具 |
+| **連線可靠性** | 寬限期重新連線讓 TUI 應用程式在短暫斷網期間繼續執行，隨後恢復連接埠轉送、傳輸和已開啟的編輯器檔案 |
+| **檔案與編輯** | SFTP 雙欄檔案管理器、帶限速和預計完成時間的傳輸佇列、書籤；內建遠端編輯器，支援安全寫入、衝突處理和工作區恢復 |
+| **網路功能** | 本機、遠端和動態 SOCKS5 轉送、已保存的規則、遠端連接埠偵測、連線拓樸、臨時 Socket 除錯 |
+| **遠端桌面** | 內建 RDP 和 VNC，支援剪貼簿與輸入 |
+| **主機維運** | 監控行程、服務、日誌、連接埠、任務、磁碟、套件、容器和 tmux |
+| **AI 與自動化** | 使用自備金鑰的 OxideSens、MCP、本機 RAG、Agent Skills、經批准的工作區操作、獨立命令列工具 |
+| **回顧與稽核** | 可選的通知與稽核工作區，以及加密工作階段錄製（兩者預設均關閉） |
+| **同步與可攜** | 加密雲同步、可攜式 `.oxide` 檔案包 |
+| **個性化** | 主題、背景圖片、可設定的快速鍵、快速指令、11 種介面語言 |
+
+---
+
+## 為什麼選擇 OxideTerm
+
+- **免費，本機優先。** 無需帳號，無需訂閱，不蒐集遙測。連線與維運資料由你掌控。
+- **每台伺服器，一個工作區。** 終端、SFTP、連接埠轉送、RDP/VNC、編輯器、監控和 AI 都連線到同一節點，不再像各自獨立的工具。
+- **原生應用程式，而非瀏覽器套殼。** 介面透過 [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) 直接在 GPU 上繪製，不使用 Electron，也不捆綁 WebView。
+- **AI 由你決定。** OxideSens 使用你自己的服務供應商和金鑰，只執行你批准的操作。
+- **能應對短暫斷網。** 寬限期重新連線會先探測原連線 30 秒，再決定是否替換，讓 TUI 應用程式有機會在短暫斷網後繼續執行。
+- **純 Rust SSH。** SSH 使用 `russh` 與 `ring`，不依賴 OpenSSL 或 libssh2。
+
+---
+
+## 記憶體佔用
+
+**原生重寫後，macOS 上的閒置記憶體約為舊版的四分之一，Windows 上約為八分之一。** 以下是維護者在從 Tauri 1.x 遷移到原生 GPUI 2.0 時記錄的觀察結果：
+
+| 平台 | Tauri 1.x（閒置） | 原生 2.0（閒置） | 降幅 |
+|---|---:|---:|---:|
+| macOS | 318.7 MB | 81.3 MB | 約 74% |
+| Windows | 182.4 MB | 23.5 MB | 約 87% |
+
+舊版的總佔用包含 OxideTerm 及其關聯的 WebView 行程。原生版不再需要這些瀏覽器行程。
+
+![附系統行程螢幕截圖的閒置記憶體對比：Tauri 1.x 與原生 2.0](../../docs/screenshots/oxideterm-memory-comparison.png)
+
+---
+
+## 螢幕截圖
+
+| 帶 OxideSens 的 SSH 終端 | SFTP 檔案管理器 |
+|---|---|
+| ![帶 OxideSens AI 的 SSH 終端](../../docs/screenshots/terminal/SSHTERMINAL.png) | ![帶傳輸佇列的 SFTP 雙欄檔案管理器](../../docs/screenshots/sftp/sftp.png) |
+
+| 內建 IDE | 智慧連接埠轉送 |
+|---|---|
+| ![內建 IDE 模式](../../docs/screenshots/miniIDE/miniide.png) | ![支援自動偵測的智慧連接埠轉送](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png) |
 
 <details>
-<summary><strong>架構、SSH 內部、GPUI 外殼、重連、AI、插件與更多細節</strong></summary>
-<br>
+<summary><b>觀看 OxideSens 根據自然語言請求開啟終端</b></summary>
 
-### 核心行程內直連，無 WebView 橋接
-
-```text
-GPUI 渲染迴圈
-  WorkspaceApp / 分頁介面 / GPUI 檢視
-        │ in-程序 Arc<> / async
-領域 Crate
-  NodeRouter → SshConnectionRegistry
-  TerminalState ← SSH PTY channel
-  SftpSession / ForwardingRuntime / IdeWorkspace
-  Ai/ACP Entities / CloudSync / Plugin Runtimes
-```
-
-介面與 SSH/終端後端之間沒有序列化邊界。終端位元組直接修改 `TerminalState`，GPUI 讀取狀態並發出 GPU 繪製命令。
-
-### 純 Rust SSH — russh (ring)
-
-- **SSH 堆疊不依賴 OpenSSL/libssh2**：SSH 密碼學能力由 `ring` 提供
-- 完整 SSH2：金鑰交換、通道、SFTP 子系統與連接埠轉發
-- ChaCha20-Poly1305 / AES-GCM、Ed25519/RSA/ECDSA 金鑰
-- SSH Agent：Unix `SSH_AUTH_SOCK` 與 Windows `\\.\pipe\openssh-ssh-agent`
-- 多跳 ProxyJump，每一跳獨立認證
-
-### Grace Period 智慧重連
-
-1. 透過 SSH keepalive 偵測連線逾時，沒有 JavaScript timer throttle
-2. 快照終端分割窗格、SFTP 傳輸、連接埠轉發與 IDE 檔案狀態
-3. **Grace Period**：先探測舊連線 30 秒，網路切換時 TUI 應用有機會原地存活
-4. 舊連線無法恢復時，新 SSH 連線會恢復轉發，並依傳輸策略重試或續傳，再重新開啟 IDE 檔案
-
-Pipeline: `queued → snapshot → grace-period → ssh-connect → await-terminal → restore-forwards → retry-or-resume-transfers → restore-ide → verify → done`
-
-### SSH 連線池與節點路由
-
-- 一個實體 SSH 連線可被 terminal、SFTP、port forward 和 IDE 同時使用
-- 每條連線都有 `connecting → active → idle → link_down → reconnecting` 狀態機
-- UI 只按 `nodeId` 操作，`NodeRouter` 原子解析到底層 `connectionId`
-- `NodeRuntimeStore` 保存程序內節點執行狀態並匯出拓撲快照；由工作區 helper 將快照寫入 `session_tree.json`，啟動時重新建立執行中的 handle
-- 跳板機失效會級聯標記下游節點為 `link_down`
-
-### OxideSens AI
-
-OxideSens 採用 BYOK 模式，並在行程內建立上下文：
-
-- 提供商：OpenAI、Anthropic、Gemini、Ollama 或任何 OpenAI 相容端點
-- MCP：stdio 與 SSE 傳輸，支援工具探索與呼叫
-- RAG：BM25 全文檢索、HNSW 向量索引、RRF 融合與 CJK 雙字詞斷詞器
-- 傳送至提供商的訊息會過濾憑證模式；工作區上下文與操作仍由使用者控制
-- API 金鑰存入系統鑰匙圈，並明確排除在結構化日誌和桌面核心訊息內容之外
-
-### GPUI 桌面外殼
-
-整個 UI 使用 GPUI 直接繪製，沒有 DOM/CSS/JavaScript rendering pipeline：
-
-- 工作區分頁類型：本地終端、SSH、Telnet、序列埠、RDP、VNC、SFTP、IDE、Forwards、Settings、Plugin、Topology 等
-- Binary pane tree 與可拖曳 divider，每個 terminal tab 最多 4 個 pane
-- Command palette、global key bindings 與 sidebar 都使用 GPUI primitive
-- 即時模式渲染直接回應 Rust 狀態變化，無需序列化往返
-
-### 終端狀態與渲染
-
-終端渲染先建模為 Rust 狀態，再由 GPUI 繪製：
-
-- PTY 輸出進入 `TerminalState`；scrollback、cursor、selection、marks 與搜尋狀態都留在 Rust 中
-- 渲染策略可在 Boost、Normal、Idle 之間切換，不需要等待瀏覽器事件迴圈配合
-- Sixel 與 Kitty graphics 作為 terminal-owned assets 追蹤，而不是 DOM node 或 canvas overlay
-- 分割窗格共享同一套工作區狀態，分頁恢復與重連可以一起快照終端拓撲
-
-### SFTP 與 IDE 工作區
-
-遠端檔案屬於同一個 node 工作區，而不是割裂的附屬功能：
-
-- SFTP session 透過 `NodeRouter` 與連線代次解析；重連時可以重新取得有效 session，但舊代次操作不會被新連線靜默替換
-- 傳輸佇列獨立追蹤方向、進度、重試狀態與速度限制，不依賴目前可見的檔案窗格
-- IDE 分頁同時保存未儲存緩衝區、遠端路徑、衝突狀態與復原中繼資料
-- Backend 支援時，remote writes 使用 staged/atomic behavior，避免普通 editing flow 出現 partial writes
-
-### 外掛、CLI 與診斷
-
-原生分支把擴充功能與支援介面保持在 Rust 原生邊界內：
-
-- 外掛支援 manifest-only、WASM 與一般程序三種路徑。WASM 使用內建的 Wasmtime/WASI 執行階段；程序外掛是沒有作業系統級沙箱的本機程序，需要另外判斷信任邊界。
-- CLI 直接連結領域 crate，涵蓋 doctor、settings、connections、forwards、便攜包、備份與報告
-- 診斷優先輸出計數、路徑、功能旗標與脫敏提示，避免暴露含密鑰的原始負載
-- 會修改狀態的 CLI flows 使用 dry-run 計畫、`--yes` guards 與回滾備份
-
-### 連接埠轉發 — 無鎖 I/O
-
-- Local `-L`、Remote `-R`、Dynamic SOCKS5 `-D`
-- SSH Channel 由單一 `ssh_io` task 持有，避免 `Arc<Mutex<Channel>>`
-- 支援重連自動恢復、終止回報與閒置逾時
-
-### trzsz 內聯檔案傳輸
-
-trzsz 繼續走 terminal stream，不需要額外 port 或 remote agent：
-
-- Upload/download 復用既有 terminal stream
-- 可穿透 ProxyJump chain
-- Native file picker 不受 browser memory 限制
-- 支援 bidirectional、directory transfer 與 configurable limits
-
-### `.oxide` 加密匯出
-
-- **ChaCha20-Poly1305 AEAD** authenticated encryption
-- **Argon2id KDF**：256 MB memory cost、4 iterations，提高 GPU brute-force 成本
-- 覆蓋 connections、forwards、settings、快捷命令、外掛設定與便攜密鑰
+<a href="../../docs/media/ai-terminal-demo.mp4">
+  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens 在 OxideTerm 中開啟終端" width="720">
+</a>
 
 </details>
 
 ---
 
-## 從原始碼執行
+## OxideSens AI
 
-**需求：**Rust 工具鏈（2024 Edition）以及能夠執行 GPUI 的桌面環境。
+OxideSens 是可選的助手，可查看正在執行的工作階段，並且**僅在你批准後**執行工作區操作。
 
-```sh
+- **自備金鑰。** 支援 OpenAI、Anthropic（Claude）、Google Gemini、Ollama 及相容 OpenAI 的服務端點，並提供適配各服務供應商的推理控制選項。不使用平台點數。
+- **MCP 與 Agent Skills。** 可連線 MCP 伺服器（stdio 和 SSE），並載入有明確使用範圍的 Agent Skills。
+- **本機知識庫（RAG）。** BM25 全文檢索與向量索引相結合。
+- **上下文由你控制。** 由你決定批准哪些工作區上下文和操作，指令策略規則仍然適用。
+- **認證資料遮蔽。** 傳送給服務供應商的訊息會先依認證資料特徵遮蔽敏感內容。
+- **金鑰保存在作業系統鑰匙圈中**，不會寫入結構化日誌。
+
+---
+
+<a id="plugins"></a>
+
+## 外掛
+
+OxideTerm 支援三種外掛方式：
+
+| 類型 | 執行方式 | 邊界 |
+|---|---|---|
+| **僅清單** | 宣告式擴充，不含程式碼 | 不含可執行程式碼 |
+| **WASM** | Wasmtime/WASI 或獨立輔助行程 | 主機呼叫受控，依能力範圍限制權限 |
+| **行程** | 普通本機行程 | 受信任的本機程式碼，**不受**作業系統沙箱隔離 |
+
+舊版 Tauri（1.x）的 ESM 外掛可能仍會顯示在列表中，但原生 2.x 應用程式不會執行它們。請只安裝來自可信來源的行程外掛。
+
+---
+
+## 安全與隱私
+
+| 主題 | 實現方式 |
+|---|---|
+| **儲存的認證資料** | 作業系統鑰匙圈（macOS Keychain、Windows Credential Manager、libsecret） |
+| **記憶體中的秘密資料** | 含秘密資料的類型和臨時緩衝區在支援的所有權邊界使用 `zeroize` 清除 |
+| **主機金鑰** | 首次使用時依據 `~/.ssh/known_hosts` 建立信任；拒絕未預期的金鑰變更 |
+| **可攜匯出** | `.oxide` 檔案包使用 ChaCha20-Poly1305 與 Argon2id（256 MB 記憶體，4 次迭代） |
+| **AI 上下文** | 內容送達服務供應商前，先依認證資料特徵遮蔽敏感內容；上下文和操作由你批准 |
+| **工作階段錄製** | 預設關閉；加密儲存在你的裝置上，不參與雲同步；不錄製鍵盤輸入 |
+| **稽核** | 預設關閉；資料保留在你的裝置上，敏感細節加密儲存 |
+| **命令列修改操作** | 改變狀態的指令提供試執行計畫、`--yes` 確認保護和回復備份 |
+| **外掛** | 見[外掛](#plugins) |
+| **遙測** | 無 |
+
+**合法使用。** OxideTerm 採用 GPL-3.0-only 授權條款，無額外限制。請僅存取你擁有或獲明確授權存取的系統、網路和裝置，並遵守適用法律。不得使用 OxideTerm 進行未授權存取、干擾服務或繞過存取控制。
+
+---
+
+## 目前限制
+
+安裝前，請瞭解以下情況：
+
+- 僅支援桌面平台（macOS、Windows、Linux），沒有行動版應用程式。
+- 專案更新較快，發布頻繁。請參閱[更新紀錄](../../.github/release-notes/stable-changelog.md)和[未解決的問題](https://github.com/AnalyseDeCircuit/oxideterm/issues)。
+- 稽核與工作階段錄製需主動啟用，且只反映 OxideTerm 自身能夠觀察到的活動。
+- 行程外掛不受作業系統沙箱隔離。
+- 如果繪製器在你的機器上無法正常執行，可嘗試相容模式：`OXIDETERM_RENDER_PROFILE=compatibility`。
+
+---
+
+<a id="for-developers"></a>
+
+## 開發者資訊
+
+<details>
+<summary><b>從原始碼執行</b></summary>
+
+**要求：** Rust 工具鏈（edition 2024），以及能夠執行 GPUI 的桌面環境。
+
+```bash
+# Run the app
 cargo run
+
+# If the renderer fails on your machine
 OXIDETERM_RENDER_PROFILE=compatibility cargo run
+
+# Build the headless CLI companion
 ./scripts/build/build-cli.sh
+
+# Build the optional Linux remote agent
 ./scripts/build/build-agent.sh
 ```
 
-## CLI
+使用 Nix：`nix build .#oxideterm`、`nix run .#oxideterm` 或 `nix develop`。
 
-無介面的 `oxideterm` CLI 無需啟動桌面應用程式，適合自動化、CI 與診斷。
+命令列工具的建置產物位於 `crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm`。
 
-```sh
+</details>
+
+<details>
+<summary><b>命令列介面</b></summary>
+
+無介面的 `oxideterm` 命令列工具無需啟動應用程式即可執行，適用於自動化、CI 和診斷。它涵蓋設定、連線、連接埠轉送、外掛、快速指令、秘密資料、可攜檔案包、診斷、報告、批次計畫、備份和雲同步。
+
+```bash
 cargo run -p oxideterm-cli -- doctor --strict
 cargo run -p oxideterm-cli -- settings validate --strict --json
 cargo run -p oxideterm-cli -- connections search prod
@@ -288,52 +205,137 @@ cargo run -p oxideterm-cli -- cloud-sync push --dry-run --json
 cargo run -p oxideterm-cli -- oxide export ./profile.oxide --connection prod --password-stdin
 cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 cargo run -p oxideterm-cli -- completion install zsh --force
+
+# Path and profile isolation for CI or fixtures
+cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
 ```
 
-## 技術棧
+</details>
 
-| 層級 | 技術 | 說明 |
+<details>
+<summary><b>架構</b></summary>
+
+介面與終端及 SSH 後端共用一個 Rust 行程；可選的遠端 Agent 和平台輔助程式位於該行程之外。終端位元組直接更新 `TerminalState`，GPUI 根據該狀態繪製，無需經過 JSON、WebSocket、Base64 或 xterm.js 解析。
+
+```
+┌─────────────────────────────────────────────────┐
+│               GPUI Render Loop                  │
+│   WorkspaceApp  ·  Tab surfaces  ·  GPUI views  │
+└──────────────────────┬──────────────────────────┘
+                       │  in-process Arc<> / async
+┌──────────────────────▼──────────────────────────┐
+│             Domain Crates (Rust async)          │
+│  NodeRouter → SshConnectionRegistry             │
+│  TerminalState ← SSH PTY channel (russh)        │
+│  SftpSession · ForwardingRuntime · IdeWorkspace │
+│  Ai/ACP Entities · CloudSync · Plugin Runtimes  │
+└─────────────────────────────────────────────────┘
+```
+
+| 方面 | 捆綁瀏覽器的方案 | OxideTerm |
 |---|---|---|
-| 介面框架 | GPUI（Zed） | GPU 加速的即時模式介面，純 Rust 實作 |
-| 執行環境 | Tokio + DashMap | 非同步執行環境與並行映射 |
-| SSH | russh（`ring`） | SSH 堆疊不依賴 OpenSSL/libssh2，支援 SSH Agent |
-| 終端 | portable-pty + alacritty_terminal | 本機偽終端、終端模擬與 Sixel/Kitty 圖形 |
-| 外掛 | Wasmtime/WASI 與程序路徑 | manifest-only、受控 WASM 宿主呼叫，以及需要明確授權的本機程序 |
-| AI 與檢索 | SSE + BM25 + HNSW | 提供商串流、CJK 雙字詞與 RRF 融合 |
-| 編輯器 | tree-sitter（語法）、自訂緩衝區 | 多語言，基於 SFTP |
-| 加密 | ChaCha20-Poly1305 + Argon2id | AEAD + 記憶體困難型 KDF（256 MB） |
-| 國際化 | oxideterm-i18n | 內建載入器，內建 11 種介面語言 |
+| 繪製 | 瀏覽器引擎與網頁配置 | GPU 繪圖表面上的 GPUI |
+| 終端資料流 | WebSocket → JS 事件循環 → xterm.js | Rust 輸入 → `TerminalState` → GPUI 繪製 |
+| 連線生命週期 | 分散在前端和後端 | 同一行程內統一處理連線與重新連線 |
+| AI 上下文 | 透過應用程式橋接層複製 | 根據目前工作區建立，並由使用者批准 |
+| 命令列工具 | 需要桌面應用程式保持執行 | 獨立程式，直接連結各 crate |
 
-## 安全
+**連線池。** `SshConnectionRegistry` 以 `DashMap` 為基礎，透過 `NodeRouter` 使用。終端窗格、SFTP、連接埠轉送和編輯器可共用每個節點上的一個物理 SSH 連線，終端策略也允許改用專用連線。每個連線遵循 `connecting → active → idle → link_down → reconnecting` 的狀態變化。跳板機故障會將下游節點標記為 `link_down`。AI 和外掛透過能力控制代碼與主機快照使用相關功能，不註冊為連線消費者。
 
-| 關注點 | 實作 |
+**寬限期重新連線。**
+
+1. 偵測連線保活逾時。
+2. 保存終端窗格、SFTP 傳輸、連接埠轉送和編輯器檔案的快照。
+3. 探測原連線 30 秒，讓 TUI 應用程式有機會在短暫斷網後繼續執行。
+4. 建立新連線，恢復連接埠轉送、繼續傳輸並重新開啟編輯器檔案。
+
+SFTP 工作階段帶有連線世代識別碼：重新連線後，符合條件的工作階段會重新取得，但舊世代的操作絕不會被悄悄轉移到新連線。
+
+**連接埠轉送。** 獨立 crate，支援 `-L`、`-R` 和 `-D`（SOCKS5）。每個 SSH 通道由一個 `ssh_io` 任務獨立管理，關鍵執行路徑上沒有共用互斥鎖。
+
+**純 Rust SSH。** `russh` 與 `ring`：完整 SSH2、ChaCha20-Poly1305 和 AES-GCM、Ed25519/RSA/ECDSA 金鑰、Unix（`SSH_AUTH_SOCK`）與 Windows（`\\.\pipe\openssh-ssh-agent`）上的 SSH Agent，以及每跳獨立認證的多跳鏈路。
+
+**技術堆疊**
+
+| 層級 | 技術 |
 |---|---|
-| 已儲存憑證 | macOS 鑰匙圈 / Windows Credential Manager / libsecret |
-| 記憶體中的秘密 | 持有秘密的型別和暫存緩衝區在支援的所有權邊界使用 `zeroize` / `Zeroizing` |
-| 診斷 | 支援報告優先輸出結構化中繼資料和脫敏提示，避免攜帶秘密的原始內容 |
-| AI 上下文 | 傳送至提供商的訊息會過濾憑證模式；工作區上下文與操作仍由使用者控制 |
-| `.oxide` | ChaCha20-Poly1305 + Argon2id |
-| CLI 寫入 | dry-run 計畫、`--yes` 保護和回滾備份 |
-| 主機金鑰 | 使用 `~/.ssh/known_hosts` 的 TOFU，拒絕未預期變更 |
-| 外掛 | manifest-only、受控 WASM 宿主 API 或需要明確授權的本機程序 |
+| 介面 | GPUI（Zed 的 GPU 介面框架） |
+| 執行環境 | Tokio、DashMap |
+| SSH | `russh` 與 `ring`（不依賴 OpenSSL 或 libssh2） |
+| 本機 PTY | `portable-pty`（Windows 上使用 ConPTY） |
+| 終端模擬 | `alacritty_terminal`（VT100–VT500、Sixel、Kitty 圖形） |
+| 編輯器 | tree-sitter 語法高亮、自訂緩衝區 |
+| 加密 | ChaCha20-Poly1305、Argon2id |
+| 外掛 | Wasmtime/WASI、獨立輔助行程中的 WASM，以及行程方式 |
+| AI 流式響應 | SSE（OpenAI、Anthropic、Gemini），在行程內處理 |
+| RAG | BM25 與 HNSW 向量索引相結合，融合排序，使用 CJK 雙字分詞器 |
+| 國際化 | `oxideterm-i18n`（11 種語言） |
 
-## 合法使用提醒
-
-OxideTerm 依 GPL-3.0-only 授權發布，不附加額外的授權限制。使用時，請僅存取你擁有或已取得明確授權的系統、網路和裝置，並遵守適用法律。請勿使用 OxideTerm 從事未經授權的存取、服務干擾或規避存取控制。
-
-## 貢獻
-
-歡迎貢獻程式碼、文件、翻譯、插件、測試與問題重現。較大的改動或範圍明確的修正請先透過 Issue 討論。
-
-```sh
-cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
-```
+</details>
 
 ---
 
-## 貢獻者
+<a id="install"></a>
 
-感謝每一位讓 OxideTerm 變得更好的貢獻者。
+## 安裝
+
+[**下載最新版本**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+
+| 作業系統 | x64 | ARM64 |
+|---|---|---|
+| **macOS** | DMG（Intel） | DMG（Apple Silicon） |
+| **Windows** | 安裝程式（`.exe`） | 安裝程式（`.exe`） |
+| **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
+
+請使用發布頁面中的 `sha256sums.txt` 檔案驗證下載內容。可攜版壓縮包和簽名也列在該頁面。
+
+### macOS
+
+如果 Gatekeeper 阻止執行應用程式，請移除隔離標記：
+
+```bash
+xattr -cr /Applications/OxideTerm.app
+```
+
+### Windows
+
+如果 SmartScreen 顯示警告，請選擇**其他資訊 → 仍要執行**。
+
+### Linux
+
+```bash
+# AppImage
+chmod +x OxideTerm_*_linux_*.AppImage && ./OxideTerm_*_linux_*.AppImage
+
+# Debian / Ubuntu
+sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
+
+# Fedora / RHEL-compatible
+sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Nix; updates are managed by Nix
+nix run github:AnalyseDeCircuit/oxideterm
+```
+
+想自行建置？請查看[開發者資訊](#for-developers)中的**從原始碼執行**。
+
+---
+
+## 參與貢獻
+
+歡迎貢獻 Rust 程式碼、文件、翻譯、外掛、測試，以及重現問題。較大的改動請先提交 issue 討論。
+
+附上已遮蔽敏感資訊的診斷包，能讓問題報告更有幫助：
+
+```bash
+cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
+```
+
+可重現的缺陷與回歸問題會優先處理。功能請求會根據範圍、安全性，以及是否符合 OxideTerm 遠端伺服器工作區的方向進行評估。如果 OxideTerm 對你的工作有幫助，GitHub Star、可重現的問題報告、翻譯修正或外掛，都能幫助專案繼續發展。
+
+### 貢獻者
+
+感謝每一位幫助 OxideTerm 變得更好的貢獻者。
 
 <p align="center">
   <a href="https://github.com/AnalyseDeCircuit/oxideterm/graphs/contributors">
@@ -343,24 +345,8 @@ cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
 
 ---
 
-## 支援與維護
+## 授權條款
 
-帶有可重現步驟和脫敏診斷資訊的 bug 回報與回歸問題會優先處理。功能請求會根據範圍、安全性以及是否符合 OxideTerm 的遠端伺服器工作區方向來評估。
+**GPL-3.0-only。** 相依套件署名見 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)，其他聲明見 [`NOTICE`](../../NOTICE)。
 
-<p align="center">
-  <a href="https://github.com/AnalyseDeCircuit/oxideterm/stargazers">
-    <img src="https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social" alt="GitHub stars">
-  </a>
-</p>
-
-如果 OxideTerm 幫助了你的工作流，GitHub Star、問題重現、翻譯修正或插件都能讓專案更容易繼續推進。
-
----
-
-## 授權
-
-**GPL-3.0-only**。詳細的第三方聲明請見 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)，其他通知請見 [`NOTICE`](../../NOTICE)。
-
-## 致謝
-
-感謝 `russh`、`GPUI`、`alacritty_terminal`、`portable-pty`、`wasmtime` 和 `tree-sitter`。
+**使用以下專案打造：** [russh](https://github.com/warp-tech/russh) · [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) · [alacritty_terminal](https://github.com/alacritty/alacritty) · [portable-pty](https://github.com/wez/wezterm/tree/main/pty) · [wasmtime](https://wasmtime.dev/) · [tree-sitter](https://tree-sitter.github.io/)
