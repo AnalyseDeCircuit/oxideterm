@@ -137,14 +137,23 @@ impl GraphicsIngress {
         F: FnMut(TerminalGraphicsSegment<'a>),
         C: FnMut() -> GraphicsCursor,
     {
-        if !self.options.enabled
-            || (!bytes.is_empty()
-                && matches!(self.state, ParserState::Ground)
-                && memchr::memchr(0x1b, bytes).is_none())
-        {
-            // Borrow only in Ground: a previous chunk may still own an incomplete protocol.
+        if !self.options.enabled {
             emit(TerminalGraphicsSegment::Terminal(bytes.into()));
             return;
+        }
+
+        if !bytes.is_empty() && matches!(self.state, ParserState::Ground) {
+            // SIMD substring searches let ordinary CSI output stay borrowed. Leave
+            // possible OSC/DCS/APC prefixes and split escapes to the state machine.
+            if memchr::memchr(0x1b, bytes).is_none()
+                || (bytes.last() != Some(&0x1b)
+                    && memchr::memmem::find(bytes, b"\x1b]").is_none()
+                    && memchr::memmem::find(bytes, b"\x1bP").is_none()
+                    && memchr::memmem::find(bytes, b"\x1b_").is_none())
+            {
+                emit(TerminalGraphicsSegment::Terminal(bytes.into()));
+                return;
+            }
         }
 
         let mut terminal_bytes = Vec::with_capacity(bytes.len());

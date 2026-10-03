@@ -2,9 +2,9 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, ExternalPaths,
-    FocusHandle, Focusable, FontWeight, IntoColor, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, anchored,
-    deferred, div, point, prelude::*, px, rgb, rgba,
+    FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, anchored, deferred, div,
+    point, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::button::{
     ButtonRadius, ContextChipOptions, IconButtonOptions, context_chip, icon_button,
@@ -699,7 +699,7 @@ impl TerminalPane {
                     (
                         range,
                         gpui::HighlightStyle {
-                            color: Some(rgb(tokens.ui.accent).into_color()),
+                            color: Some(rgb(tokens.ui.accent).into()),
                             ..Default::default()
                         },
                     )

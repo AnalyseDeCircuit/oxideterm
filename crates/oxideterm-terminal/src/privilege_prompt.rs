@@ -130,6 +130,18 @@ impl TerminalPrivilegePromptStream {
                     remaining = &remaining[printable..];
                     continue;
                 }
+            } else if self.control_state == ControlSequenceState::Csi {
+                let Some(final_byte) = remaining
+                    .as_bytes()
+                    .iter()
+                    .position(|byte| matches!(byte, b'@'..=b'~'))
+                else {
+                    break;
+                };
+                // ASCII final bytes cannot occur inside a multibyte UTF-8 character.
+                remaining = &remaining[final_byte + 1..];
+                self.control_state = ControlSequenceState::Ground;
+                continue;
             }
             let character = remaining.chars().next().unwrap();
             self.observe_character(character, &mut events);
@@ -589,6 +601,12 @@ mod tests {
                 "trailing spaces",
                 vec!["Password:   ".into(), " ".into()],
                 0,
+                password.clone(),
+            ),
+            (
+                "split CSI with Unicode payload",
+                vec!["\x1b[31;中文".into(), "mPassword:".into()],
+                1,
                 password.clone(),
             ),
             (

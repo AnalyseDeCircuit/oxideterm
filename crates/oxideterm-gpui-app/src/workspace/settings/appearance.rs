@@ -2242,7 +2242,7 @@ mod theme_preview_tests {
             assert!(cx.debug_bounds(content).is_some(), "{content}");
             cx.update(|window, _| {
                 let quads = window.painted_quads();
-                let color: gpui::Hsla = rgb(background).into_color();
+                let color: gpui::Hsla = rgb(background).into();
                 let sample = quads
                     .iter()
                     .filter(|quad| quad.background.as_solid() == Some(color))

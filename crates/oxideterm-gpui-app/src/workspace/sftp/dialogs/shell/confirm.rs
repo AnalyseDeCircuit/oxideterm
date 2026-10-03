@@ -33,7 +33,7 @@ impl WorkspaceApp {
                     .border_color(rgba((theme.border << 8) | SFTP_DIALOG_BORDER_SUBTLE_ALPHA))
                     .shadow(vec![gpui::BoxShadow {
                         inset: false,
-                        color: rgba(SFTP_DIALOG_SHADOW_ALPHA).into_color(),
+                        color: rgba(SFTP_DIALOG_SHADOW_ALPHA).into(),
                         offset: gpui::point(px(0.0), px(16.0)),
                         blur_radius: px(32.0),
                         spread_radius: px(0.0),

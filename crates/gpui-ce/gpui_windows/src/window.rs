@@ -33,9 +33,6 @@ use crate::direct_manipulation::DirectManipulationHandler;
 use crate::*;
 use gpui::*;
 
-#[cfg(feature = "wgpu")]
-use gpui_wgpu::{GpuContext, WgpuRecoveryStatus, WgpuRenderer, WgpuSurfaceConfig, wgpu};
-
 pub(crate) struct WindowsWindow(pub Rc<WindowsWindowInner>);
 
 impl std::ops::Deref for WindowsWindow {
@@ -64,17 +61,15 @@ pub struct WindowsWindowState {
     pub last_reported_modifiers: Cell<Option<Modifiers>>,
     pub last_reported_capslock: Cell<Option<Capslock>>,
     pub hovered: Cell<bool>,
+    pub last_visibility: Cell<Option<WindowVisibility>>,
     pub direct_manipulation: DirectManipulationHandler,
 
-    #[cfg(feature = "wgpu")]
-    pub renderer: RefCell<WgpuRenderer>,
-    #[cfg(not(feature = "wgpu"))]
     pub renderer: RefCell<DirectXRenderer>,
     /// Set when the next `draw_window` call must be treated as a forced
     /// render. Used after a GPU device-lost recovery, where the next frame
     /// must both re-enable drawing (via `mark_drawable`) and bypass the GPUI
     /// view cache (which would otherwise replay stale atlas tile references
-    /// from the previous frame and panic in `DirectXAtlasState::texture`),
+    /// from the previous frame and panic in `DirectXAtlasTextures::texture`),
     /// and when a forced render was requested while another draw was in
     /// progress and had to be deferred.
     pub force_render_pending: Cell<bool>,
@@ -96,7 +91,6 @@ pub struct WindowsWindowState {
     pub display: Cell<WindowsDisplay>,
     /// Flag to instruct the `VSyncProvider` thread to invalidate the directx devices
     /// as resizing them has failed, causing us to have lost at least the render target.
-    #[cfg(not(feature = "wgpu"))]
     pub invalidate_devices: Arc<AtomicBool>,
     /// Shared with [`WindowsPlatformState::draw_coordinator`] and every other window.
     pub(crate) draw_coordinator: Rc<DrawCoordinator>,
@@ -108,6 +102,7 @@ pub struct WindowsWindowState {
 
 pub(crate) struct WindowsWindowInner {
     hwnd: HWND,
+    pub(crate) dialog_owner: Rc<crate::dialog::DialogOwner>,
     drop_target_helper: IDropTargetHelper,
     pub(crate) state: WindowsWindowState,
     system_settings: WindowsSystemSettings,
@@ -126,15 +121,15 @@ pub(crate) struct WindowsWindowInner {
 impl WindowsWindowState {
     fn new(
         hwnd: HWND,
-        #[cfg(not(feature = "wgpu"))] directx_devices: &DirectXDevices,
+        directx_devices: &DirectXDevices,
         window_params: &CREATESTRUCTW,
         current_cursor: Option<HCURSOR>,
         cursor_visible: Arc<AtomicBool>,
         display: WindowsDisplay,
         min_size: Option<Size<Pixels>>,
         appearance: WindowAppearance,
-        #[cfg(not(feature = "wgpu"))] disable_direct_composition: bool,
-        #[cfg(not(feature = "wgpu"))] invalidate_devices: Arc<AtomicBool>,
+        disable_direct_composition: bool,
+        invalidate_devices: Arc<AtomicBool>,
         draw_coordinator: Rc<DrawCoordinator>,
     ) -> Result<Self> {
         let scale_factor = {
@@ -153,20 +148,7 @@ impl WindowsWindowState {
         };
         let border_offset = WindowBorderOffset::default();
         let restore_from_minimized = None;
-        #[cfg(feature = "wgpu")]
-        let renderer = WgpuRenderer::new(
-            GpuContext::new(),
-            &RawWindow { hwnd },
-            WgpuSurfaceConfig {
-                size: physical_size,
-                transparent: false,
-                preferred_present_mode: Some(wgpu::PresentMode::Mailbox),
-            },
-            None,
-            None,
-        )
-        .context("Creating Wgpu renderer")?;
-        #[cfg(not(feature = "wgpu"))]
+
         let renderer = DirectXRenderer::new(hwnd, directx_devices, disable_direct_composition)
             .context("Creating DirectX renderer")?;
         let callbacks = Callbacks::default();
@@ -200,6 +182,7 @@ impl WindowsWindowState {
             last_reported_modifiers: Cell::new(last_reported_modifiers),
             last_reported_capslock: Cell::new(last_reported_capslock),
             hovered: Cell::new(hovered),
+            last_visibility: Cell::new(None),
             renderer: RefCell::new(renderer),
             force_render_pending: Cell::new(false),
             frame_request_pending: Cell::new(false),
@@ -214,7 +197,6 @@ impl WindowsWindowState {
             fullscreen: Cell::new(fullscreen),
             initial_placement: Cell::new(initial_placement),
             hwnd,
-            #[cfg(not(feature = "wgpu"))]
             invalidate_devices,
             draw_coordinator,
             direct_manipulation,
@@ -292,10 +274,21 @@ impl WindowsWindowInner {
         }
     }
 
+    /// Whether the window is being presented: shown and not minimized. Windows
+    /// has no notification for a window fully covered by other windows, so
+    /// that case reports `Visible`.
+    pub(crate) fn visibility(&self) -> WindowVisibility {
+        let is_visible =
+            unsafe { IsWindowVisible(self.hwnd).as_bool() && !IsIconic(self.hwnd).as_bool() };
+        if is_visible {
+            WindowVisibility::Visible
+        } else {
+            WindowVisibility::Hidden
+        }
+    }
     fn new(context: &mut WindowCreateContext, hwnd: HWND, cs: &CREATESTRUCTW) -> Result<Rc<Self>> {
         let state = WindowsWindowState::new(
             hwnd,
-            #[cfg(not(feature = "wgpu"))]
             &context.directx_devices,
             cs,
             context.current_cursor,
@@ -303,15 +296,14 @@ impl WindowsWindowInner {
             context.display,
             context.min_size,
             context.appearance,
-            #[cfg(not(feature = "wgpu"))]
             context.disable_direct_composition,
-            #[cfg(not(feature = "wgpu"))]
             context.invalidate_devices.clone(),
             context.draw_coordinator.clone(),
         )?;
 
         Ok(Rc::new(Self {
             hwnd,
+            dialog_owner: crate::dialog::DialogOwner::new(hwnd),
             drop_target_helper: context.drop_target_helper.clone(),
             state,
             handle: context.handle,
@@ -426,6 +418,7 @@ pub(crate) struct Callbacks {
     pub(crate) request_frame: Cell<Option<Box<dyn FnMut(RequestFrameOptions)>>>,
     pub(crate) input: Cell<Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>>,
     pub(crate) active_status_change: Cell<Option<Box<dyn FnMut(bool)>>>,
+    pub(crate) visibility_change: Cell<Option<Box<dyn FnMut(WindowVisibility)>>>,
     pub(crate) hovered_status_change: Cell<Option<Box<dyn FnMut(bool)>>>,
     pub(crate) resize: Cell<Option<Box<dyn FnMut(Size<Pixels>, f32)>>>,
     pub(crate) moved: Cell<Option<Box<dyn FnMut()>>>,
@@ -452,11 +445,8 @@ struct WindowCreateContext {
     main_receiver: PriorityQueueReceiver<RunnableVariant>,
     platform_window_handle: HWND,
     appearance: WindowAppearance,
-    #[cfg(not(feature = "wgpu"))]
     disable_direct_composition: bool,
-    #[cfg(not(feature = "wgpu"))]
     directx_devices: DirectXDevices,
-    #[cfg(not(feature = "wgpu"))]
     invalidate_devices: Arc<AtomicBool>,
     draw_coordinator: Rc<DrawCoordinator>,
     parent_hwnd: Option<HWND>,
@@ -484,15 +474,11 @@ impl WindowsWindow {
             main_receiver,
             platform_window_handle,
             disable_direct_composition,
-            #[cfg(not(feature = "wgpu"))]
             directx_devices,
             invalidate_devices,
             draw_coordinator,
         } = creation_info;
-        #[cfg(feature = "wgpu")]
-        {
-            _ = invalidate_devices;
-        }
+
         register_window_class(icon);
         let owner_hwnd = if matches!(params.kind, WindowKind::Floating | WindowKind::Dialog) {
             let parent_window = unsafe { GetActiveWindow() };
@@ -572,11 +558,8 @@ impl WindowsWindow {
             main_receiver,
             platform_window_handle,
             appearance,
-            #[cfg(not(feature = "wgpu"))]
             disable_direct_composition,
-            #[cfg(not(feature = "wgpu"))]
             directx_devices,
-            #[cfg(not(feature = "wgpu"))]
             invalidate_devices,
             draw_coordinator,
             parent_hwnd: modal_parent_hwnd,
@@ -602,19 +585,17 @@ impl WindowsWindow {
         // so check the inner result first.
         let this = context.inner.take().transpose()?;
         let hwnd = creation_result?;
-        let this = this.unwrap();
+        // Own the native window before fallible post-creation setup so every error
+        // uses the same dialog cancellation and native destruction path as close.
+        let window = Self(this.unwrap());
+        let this = &window.0;
 
-        register_drag_drop(&this)?;
+        register_drag_drop(this)?;
         set_non_rude_hwnd(hwnd, true);
         configure_dwm_dark_mode(hwnd, appearance);
         this.state.border_offset.update(hwnd)?;
-        let placement = retrieve_window_placement(
-            hwnd,
-            display,
-            params.bounds,
-            this.state.scale_factor.get(),
-            &this.state.border_offset,
-        )?;
+        let placement =
+            retrieve_window_placement(hwnd, display, params.bounds, &this.state.border_offset)?;
         if let Some(parent_hwnd) = modal_parent_hwnd {
             // All setup before showing the dialog has succeeded. From this point, failures must
             // explicitly restore the owner so it cannot remain disabled without a live modal.
@@ -642,7 +623,7 @@ impl WindowsWindow {
             }));
         }
 
-        Ok(Self(this))
+        Ok(window)
     }
 
     fn start_native_window_operation(&self, hit_test: u32) {
@@ -669,35 +650,6 @@ impl WindowsWindow {
     }
 }
 
-#[cfg(feature = "wgpu")]
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct RawWindow {
-    pub hwnd: HWND,
-}
-
-#[cfg(feature = "wgpu")]
-unsafe impl Send for RawWindow {}
-#[cfg(feature = "wgpu")]
-unsafe impl Sync for RawWindow {}
-
-#[cfg(feature = "wgpu")]
-impl rwh::HasWindowHandle for RawWindow {
-    fn window_handle(&self) -> std::result::Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        let raw = rwh::Win32WindowHandle::new(unsafe {
-            NonZeroIsize::new_unchecked(self.hwnd.0 as isize)
-        })
-        .into();
-        Ok(unsafe { rwh::WindowHandle::borrow_raw(raw) })
-    }
-}
-
-#[cfg(feature = "wgpu")]
-impl rwh::HasDisplayHandle for RawWindow {
-    fn display_handle(&self) -> std::result::Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
-        Ok(rwh::DisplayHandle::windows())
-    }
-}
-
 impl rwh::HasWindowHandle for WindowsWindow {
     fn window_handle(&self) -> std::result::Result<rwh::WindowHandle<'_>, rwh::HandleError> {
         let raw = rwh::Win32WindowHandle::new(unsafe {
@@ -716,11 +668,17 @@ impl rwh::HasDisplayHandle for WindowsWindow {
 
 impl Drop for WindowsWindow {
     fn drop(&mut self) {
+        self.0.dialog_owner.close();
+        unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).ok().log_err() };
+        // `DestroyWindow` below sends `WM_SHOWWINDOW`; without a callback the
+        // resulting visibility report has nothing to notify.
+        self.0.state.callbacks.visibility_change.take();
         // clone this `Rc` to prevent early release of the pointer
         let this = self.0.clone();
         self.0
             .executor
             .spawn(async move {
+                this.dialog_owner.when_idle().await;
                 let handle = this.hwnd;
                 unsafe {
                     RevokeDragDrop(handle).log_err();
@@ -829,18 +787,19 @@ impl PlatformWindow for WindowsWindow {
         detail: Option<&str>,
         answers: &[PromptButton],
     ) -> Option<Receiver<usize>> {
-        let (done_tx, done_rx) = oneshot::channel();
+        let (mut done_tx, done_rx) = oneshot::channel();
         let msg = msg.to_string();
         let detail_string = detail.map(|detail| detail.to_string());
-        let handle = self.0.hwnd;
         let answers = answers.to_vec();
-        self.0
-            .executor
-            .spawn(async move {
+        let dialog = crate::dialog::show_dialog(
+            Some(self.0.dialog_owner.clone()),
+            &self.0.executor,
+            move |handle| {
                 unsafe {
                     let mut config = TASKDIALOGCONFIG::default();
                     config.cbSize = std::mem::size_of::<TASKDIALOGCONFIG>() as _;
                     config.hwndParent = handle;
+                    config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
                     let title;
                     let main_icon;
                     match level {
@@ -888,17 +847,26 @@ impl PlatformWindow for WindowsWindow {
                     config.cButtons = buttons.len() as _;
                     config.pButtons = buttons.as_ptr();
 
-                    config.pfCallback = None;
+                    config.pfCallback = Some(crate::dialog::task_dialog_callback);
+                    config.lpCallbackData = button_id_map.contains(&IDCANCEL.0) as isize;
                     let mut res = std::mem::zeroed();
-                    let _ = TaskDialogIndirect(&config, Some(&mut res), None, None)
-                        .context("unable to create task dialog")
-                        .log_err();
-
-                    if let Some(clicked) =
-                        button_id_map.iter().position(|&button_id| button_id == res)
-                    {
-                        let _ = done_tx.send(clicked);
-                    }
+                    TaskDialogIndirect(&config, Some(&mut res), None, None)
+                        .context("unable to create task dialog")?;
+                    Ok(button_id_map.iter().position(|&button_id| button_id == res))
+                }
+            },
+        );
+        self.0
+            .executor
+            .spawn(async move {
+                if let futures::future::Either::Left((result, _)) =
+                    futures::future::select(dialog, done_tx.cancellation()).await
+                    && let Some(Some(clicked)) = result
+                        .context("native dialog thread stopped")
+                        .and_then(|result| result)
+                        .log_err()
+                {
+                    done_tx.send(clicked).ok();
                 }
             })
             .detach();
@@ -983,6 +951,10 @@ impl PlatformWindow for WindowsWindow {
 
     fn is_active(&self) -> bool {
         self.0.hwnd == unsafe { GetActiveWindow() }
+    }
+
+    fn visibility(&self) -> WindowVisibility {
+        self.0.visibility()
     }
 
     fn is_hovered(&self) -> bool {
@@ -1121,6 +1093,11 @@ impl PlatformWindow for WindowsWindow {
             .set(Some(callback));
     }
 
+    fn on_visibility_change(&self, callback: Box<dyn FnMut(WindowVisibility)>) {
+        self.0.state.last_visibility.set(Some(self.0.visibility()));
+        self.0.state.callbacks.visibility_change.set(Some(callback));
+    }
+
     fn on_hover_status_change(&self, callback: Box<dyn FnMut(bool)>) {
         self.0
             .state
@@ -1162,7 +1139,6 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn draw(&self, scene: &Scene) {
-        #[cfg(not(feature = "wgpu"))]
         {
             self.state
                 .renderer
@@ -1170,36 +1146,14 @@ impl PlatformWindow for WindowsWindow {
                 .draw(scene, self.state.background_appearance.get())
                 .log_err();
         }
+    }
 
-        #[cfg(feature = "wgpu")]
-        {
-            let mut renderer = self.state.renderer.borrow_mut();
-            if renderer.device_lost() {
-                self.state.force_render_pending.set(
-                    match renderer.recover(&RawWindow {
-                        hwnd: self.platform_window_handle,
-                    }) {
-                        Ok(WgpuRecoveryStatus::Recovered | WgpuRecoveryStatus::Deferred) => true,
-                        Ok(WgpuRecoveryStatus::Failed) => {
-                            log::error!("GPU recovery is exhausted; restart is required");
-                            false
-                        }
-                        Err(err) => {
-                            log::warn!("GPU recovery failed, will retry on next frame: {err}");
-                            true
-                        }
-                    },
-                );
-                return;
-            }
-            if !renderer.draw(scene) {
-                log::error!("failed to render scene");
-            }
-
-            if renderer.needs_redraw() {
-                self.state.force_render_pending.set(true);
-            }
-        }
+    #[cfg(any(test, feature = "test-support"))]
+    fn render_to_image(&self, scene: &Scene) -> anyhow::Result<image::RgbaImage> {
+        self.state
+            .renderer
+            .borrow_mut()
+            .render_to_image(scene, self.state.background_appearance.get())
     }
 
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
@@ -1211,9 +1165,6 @@ impl PlatformWindow for WindowsWindow {
     }
 
     fn gpu_specs(&self) -> Option<GpuSpecs> {
-        #[cfg(feature = "wgpu")]
-        return Some(self.state.renderer.borrow().gpu_specs());
-        #[cfg(not(feature = "wgpu"))]
         self.state.renderer.borrow().gpu_specs().log_err()
     }
 
@@ -1625,6 +1576,9 @@ unsafe extern "system" fn window_procedure(
     }
     let inner = unsafe { &*ptr };
     let result = if let Some(inner) = inner.upgrade() {
+        if msg == WM_NCDESTROY {
+            inner.dialog_owner.close();
+        }
         inner.handle_msg(hwnd, msg, wparam, lparam)
     } else {
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -1729,7 +1683,6 @@ fn retrieve_window_placement(
     hwnd: HWND,
     display: WindowsDisplay,
     initial_bounds: Bounds<Pixels>,
-    scale_factor: f32,
     border_offset: &WindowBorderOffset,
 ) -> Result<WINDOWPLACEMENT> {
     let mut placement = WINDOWPLACEMENT {
@@ -1743,7 +1696,14 @@ fn retrieve_window_placement(
     } else {
         display.default_bounds()
     };
-    let bounds = bounds.to_device_pixels(scale_factor);
+    // `bounds` is expressed in logical pixels for `display`, so it must be converted
+    // to device pixels using that display's own scale factor. The window's current
+    // scale factor can't be used here: `CreateWindowExW` was called with
+    // `CW_USEDEFAULT`, so at this point the window may still be sitting on whichever
+    // monitor Windows picked by default, which can have a different DPI than `display`
+    // and would otherwise throw off the physical position (e.g. leaving the window
+    // partially off-screen when moved to a monitor with a different scale factor).
+    let bounds = bounds.to_device_pixels(display.scale_factor());
     placement.rcNormalPosition = calculate_window_rect(bounds, border_offset);
     Ok(placement)
 }

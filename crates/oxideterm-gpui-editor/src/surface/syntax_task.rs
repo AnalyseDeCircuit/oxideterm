@@ -37,6 +37,7 @@ impl Drop for OwnedSyntax {
         if let Some(state) = self.state.take() {
             if state.syntax.is_some() {
                 self.executor
+                    .scheduler_executor()
                     .spawn_dedicated(move |_| async move {
                         drop(state);
                     })
@@ -101,10 +102,13 @@ impl TextEditorView {
         let language = request.language;
         let token = self.syntax_generation.clone();
         let text = self.buffer.text_snapshot();
-        let background = self.syntax_executor.spawn_dedicated(move |_| async move {
-            let work = SyntaxWork::new(token, generation, SYNTAX_SLICE);
-            compute(runtime, &request, &text, &work)
-        });
+        let background =
+            self.syntax_executor
+                .scheduler_executor()
+                .spawn_dedicated(move |_| async move {
+                    let work = SyntaxWork::new(token, generation, SYNTAX_SLICE);
+                    compute(runtime, &request, &text, &work)
+                });
         self.syntax_task = Some(cx.spawn(async move |weak, cx| {
             let result = background.await;
             let _ = weak.update(cx, |this, cx| {

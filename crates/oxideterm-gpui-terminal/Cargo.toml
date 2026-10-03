@@ -46,9 +46,9 @@ russh.workspace = true
 rand10.workspace = true
 tokio.workspace = true
 crossbeam-channel.workspace = true
-criterion.workspace = true
+criterion = { version = "0.8.2", features = ["html_reports"] }
 gpui = { workspace = true, features = ["bench"] }
-gpui_platform = { workspace = true, features = ["font-kit", "test-support"] }
+gpui_platform = { workspace = true, features = ["font-kit", "bench-support"] }
 
 [[bench]]
 name = "terminal_render"

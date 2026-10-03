@@ -252,7 +252,11 @@ fn benchmark_terminal(
         }
         terminal.feed_recording_output(&terminal_corpus(INITIAL_LINES), cx);
     });
-    cx.run_until_idle();
+    cx.settle();
+    // Painting schedules the real viewport resize on the next frame and its debounce timer.
+    // Let that resize finish before calibration so each sample renders the same settled grid.
+    std::thread::sleep(IDLE_STARTUP_SETTLE);
+    cx.settle();
     terminal
 }
 
@@ -282,10 +286,24 @@ fn terminal_box_drawing_redraw_frame(cx: &mut BenchAppContext<'_, '_>) {
 #[gpui::bench(fps = 120)]
 fn terminal_warm_cache_redraw_frame(cx: &mut BenchAppContext<'_, '_>) {
     let terminal = benchmark_terminal(cx, false);
-    cx.bench_renderer(terminal, |_terminal, _window, cx| {
+    let grid = benchmark_grid_size(cx, &terminal);
+    cx.bench_renderer(terminal.clone(), |_terminal, _window, cx| {
         // Force the same visible terminal through prepaint and paint to measure warm-cache cost.
         cx.notify();
     });
+    assert_eq!(
+        benchmark_grid_size(cx, &terminal),
+        grid,
+        "viewport resize must settle before measurement"
+    );
+}
+
+fn benchmark_grid_size(
+    cx: &BenchAppContext<'_, '_>,
+    terminal: &Entity<TerminalPane>,
+) -> (usize, usize) {
+    let snapshot = cx.read(|app| terminal.read(app).ai_screen_snapshot());
+    (snapshot.cols, snapshot.rows)
 }
 
 #[gpui::bench(fps = 120)]

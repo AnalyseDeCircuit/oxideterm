@@ -50,12 +50,13 @@ licenses/third-party/MATERIAL-ICON-THEME-LICENSE-MIT and is shipped with binarie
 Source hashes and SVG sizing adjustments are recorded in
 crates/oxideterm-gpui-ui/resources/material-icons/SOURCE.md.
 
-GPUI / GPUI-CE
+GPUI / GPUI-pre / GPUI-CE
 Copyright 2022-2025 Zed Industries, Inc.
 Additional GPUI-CE contributions are included under the same license.
 Licensed under the Apache License, Version 2.0.
-Vendored from https://github.com/zed-industries/zed at commit
-0969b0dba3f3411592fce801d00f8d81b8dcf902 with the GPUI-CE portability layer
+Based on Longbridge's gpui-pre 0.3.7 packages, built from
+https://github.com/zed-industries/zed at commit
+1a28cff4b409169bac058bca40dfbfeb7621d19b, retaining selected GPUI-CE capabilities
 from https://github.com/gpui-ce/gpui-ce at commit
 9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b. OxideTerm modifications are
 recorded in crates/gpui-ce/gpui/OXIDETERM_PATCHES.md.

@@ -1,4 +1,4 @@
-use gpui::{BoxShadow, Div, IntoColor, Rgba, Styled, div, point, prelude::*, px, rgb, rgba};
+use gpui::{BoxShadow, Div, Rgba, Styled, div, point, prelude::*, px, rgb, rgba};
 use oxideterm_theme::ThemeTokens;
 
 const TAURI_CARD_DARK_SHADOW_1_ALPHA: u32 = 0x66; // Tauri --theme-card-shadow rgba(0,0,0,0.4).
@@ -398,14 +398,14 @@ fn shadows_with_alpha(
 ) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
-            color: rgba(near_alpha).into_color(),
+            color: rgba(near_alpha).into(),
             offset: point(px(0.0), px(1.0)),
             blur_radius: px(near_blur),
             spread_radius: px(0.0),
             inset: false,
         },
         BoxShadow {
-            color: rgba(far_alpha).into_color(),
+            color: rgba(far_alpha).into(),
             offset: point(px(0.0), px(4.0)),
             blur_radius: px(far_blur),
             spread_radius: px(0.0),

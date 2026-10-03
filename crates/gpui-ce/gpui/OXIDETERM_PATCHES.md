@@ -1,59 +1,60 @@
 # OxideTerm GPUI Vendor Ledger
 
-OxideTerm vendors a reviewed hybrid of Zed's current GPUI implementation and
-GPUI-CE's community-maintained portability layer. This is not an independent
-upstream fork and it is not the previous monolithic `gpui` crate from crates.io.
+OxideTerm uses Longbridge's crates.io `gpui-pre` 0.3.7 publication, the version
+pinned by GPUI Kit v0.7.0. The six locally patched packages retain
+OxideTerm framework changes and selected capabilities inherited from GPUI-CE.
+This is not an unmodified Zed tree.
 
 The authoritative provenance record is [`UPSTREAM_BASELINE.toml`](./UPSTREAM_BASELINE.toml).
-It pins:
+It records the published package names and versions, pristine registry archive
+checksums, and each package's `package.metadata.gpui-pre` Zed crate, version,
+and revision. The recorded Zed revision is
+`1a28cff4b409169bac058bca40dfbfeb7621d19b`.
 
-- primary repository: `https://github.com/zed-industries/zed.git`;
-- primary commit: `0969b0dba3f3411592fce801d00f8d81b8dcf902`;
-- GPUI-CE overlay repository: `https://github.com/gpui-ce/gpui-ce.git`;
-- GPUI-CE overlay commit: `9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b`;
-- OxideTerm import parent: `f462f86a7bcbc5d2803b55b118f6763a3b7c89b6`;
-- the SHA-256 digest of the reviewed workspace `Cargo.lock`;
-- the pristine Zed and/or GPUI-CE tree objects used for every imported crate;
-- the imported and deliberately excluded paths;
-- the license and packaged-license locations.
+The previous hybrid inputs remain historical provenance:
+Zed `0969b0dba3f3411592fce801d00f8d81b8dcf902`, GPUI-CE
+`9949f8b2d27bb1d6dbc1efe90be039634cf1fb6b`, and OxideTerm import parent
+`f462f86a7bcbc5d2803b55b118f6763a3b7c89b6`. Preserve the GPUI-CE root
+license and packaged Apache license because community-derived code remains.
 
-The tree object IDs describe both pristine inputs before the local deltas in
-this document are applied. Do not replace them with hashes of the modified
-OxideTerm trees.
+Registry checksums describe pristine publication archives; they are not hashes
+of OxideTerm's modified directories. Cargo.lock records the complete resolved
+dependency graph; this ledger does not equate a set of downloaded research
+samples with that graph.
 
-## Imported Closure
+## Local Patch Boundary
 
-The approved vendor closure contains these 18 crates:
+Only six published packages are patched to local workspace members:
 
-1. `crates/gpui-ce/gpui`
-2. `crates/gpui-ce/gpui_apple`
-3. `crates/gpui-ce/gpui_ce_util`
-4. `crates/gpui-ce/gpui_collections`
-5. `crates/gpui-ce/gpui_derive_refineable`
-6. `crates/gpui-ce/gpui_linux`
-7. `crates/gpui-ce/gpui_macos`
-8. `crates/gpui-ce/gpui_macros`
-9. `crates/gpui-ce/gpui_media`
-10. `crates/gpui-ce/gpui_path`
-11. `crates/gpui-ce/gpui_platform`
-12. `crates/gpui-ce/gpui_refineable`
-13. `crates/gpui-ce/gpui_scheduler`
-14. `crates/gpui-ce/gpui_shared_string`
-15. `crates/gpui-ce/gpui_sum_tree`
-16. `crates/gpui-ce/gpui_wgpu`
-17. `crates/gpui-ce/gpui_windows`
-18. `crates/gpui-ce/gpui_zed_util`
+| Published package | Local directory |
+| --- | --- |
+| `gpui-pre` | `crates/gpui-ce/gpui` |
+| `gpui-pre-apple` | `crates/gpui-ce/gpui_apple` |
+| `gpui-pre-macos` | `crates/gpui-ce/gpui_macos` |
+| `gpui-pre-windows` | `crates/gpui-ce/gpui_windows` |
+| `gpui-pre-linux` | `crates/gpui-ce/gpui_linux` |
+| `gpui-pre-wgpu` | `crates/gpui-ce/gpui_wgpu` |
 
-WebAssembly is not a shipped or supported OxideTerm target. `crates/gpui_web`,
-`crates/gpui_elements`, `crates/gpui_tokio`, and `tooling/perf` are deliberately
-excluded.
+The root `[patch.crates-io]` mapping makes the product and registry platform
+packages use the same six patched packages. Other gpui-pre dependencies are
+resolved from crates.io, including utility, collection, macro, scheduling,
+platform, and metrics packages. Their registry checksums are enforced by Cargo.
+The old 18-directory CE closure is not the new dependency boundary.
 
-The workspace root declares the closure as local path dependencies and keeps
-the GPUI crates non-publishable. Several vendored manifests therefore have
-small integration-only changes such as `publish = false`, workspace dependency
-inheritance, an explicit Apache-2.0 license for `gpui_shared_string`, and
-OxideTerm-compatible dependency versions. These manifest changes are part of
-the vendor delta and must be reviewed during every refresh.
+### Migration disposition
+
+| Category | Disposition |
+| --- | --- |
+| Six package sources and manifests | Adopt the published 0.3.7 source and package metadata; reconcile local integration changes against that source |
+| CE backdrop/content filters, extended colors, and window capabilities | Retain as community-derived local patches; preserve their original license and attribution |
+| Framework and native fixes described below | Preserve the product contract in the corresponding patched core/backend; use upstream equivalents only when the complete contract is present |
+| Utility/platform dependencies outside the six packages | Use registry implementations instead of carrying the old local CE package layout |
+| Product API differences | Adapt product call sites to 0.3.7; do not introduce unused framework compatibility code |
+| Platform qualification | Native compilation, framework tests, and manual renderer/input checks remain separate verification gates |
+
+The inventory below describes the required semantics, not a claim that a source
+merge has already passed platform validation. Review the final diff for each
+category and record any upstream-equivalent replacement explicitly.
 
 ## Renderer Baseline: No Blade
 
@@ -69,10 +70,18 @@ The renderer layout is now:
 - macOS: `gpui_macos` with the extracted `gpui_apple` Metal renderer;
 - Windows: `gpui_windows`, using Direct3D 11;
 
-Backdrop filtering is already provided by the pinned GPUI-CE baseline. The
-OxideTerm UI uses the upstream `backdrop_blur` style path. There is no local
-`PaintBackdropBlur` scene primitive or renderer-specific backdrop-blur patch to
-preserve.
+Backdrop and content filtering, extended color support, and the associated
+window capabilities originated in the prior GPUI-CE layer. They must remain
+available after moving to gpui-pre through the locally patched core and
+renderers; they are not guaranteed by the pristine gpui-pre publication.
+Retain the style-to-scene and shader/backend behavior together, with the
+community source attribution and license.
+
+Public `Rgba` and `Hsla` use gpui-pre's native types and conversions so the
+published macro crate and GPUI Kit share the same color API. Palette remains
+an implementation detail of the retained CE alpha-compositing equations;
+it is no longer exported as the public color representation. `SceneHsla`
+continues to encode the renderer's four-scalar shader layout.
 
 ### WGPU shader-transfer contract
 
@@ -118,6 +127,11 @@ supports idle benchmarks whose contract is the absence of draw and presentation 
 setup has settled. Named stage samples are merged only after a timed iterator returns, keeping
 histogram aggregation outside the measurement while allowing product benchmarks to split their
 own synchronous pipelines.
+
+The 0.3.7 benchmark dispatcher delivers scheduled frames and activates benchmark windows.
+Terminal fixtures let the next-frame viewport update and resize debounce finish before
+calibration; the warm-cache benchmark checks that its grid remains unchanged across measurement.
+Compare performance only after both versions have settled at the same viewport and grid size.
 
 ### Pointer capture and Windows cursor recovery
 
@@ -201,6 +215,11 @@ not retrieve a pending quit; the forwarding regression test uses an unfiltered r
 of in-draw animation wakeups, and propagation of the quit code to the main loop.
 
 ### Native Windows thread-pool dispatch
+
+The gpui-pre 0.3.7 source already uses the native Win32 thread-pool APIs and
+priority mapping. Its failed-submission path permits a raw runnable leak;
+OxideTerm's explicit failed-submission and failed-timer cleanup remains a
+local ownership patch rather than an upstream-equivalent replacement.
 
 `crates/gpui-ce/gpui_windows/src/dispatcher.rs` schedules background work with the native
 Win32 thread-pool API instead of the WinRT `Windows::System::Threading` projection:
@@ -290,7 +309,9 @@ merely to simplify resize handling.
 ### macOS text-system feature
 
 `crates/oxideterm-gpui-platform/Cargo.toml` must enable the vendored
-`gpui_platform/font-kit` feature. Without it, GPUI-CE constructs
+`gpui_platform/font-kit` feature through the `gpui-pre-platform` package alias.
+The target already forwards this feature to its macOS backend. Without it,
+both the previous CE source and the target construct
 `NoopTextSystem` on macOS: layout surfaces and SVG assets remain visible, but
 all glyph-backed text and icons disappear.
 
@@ -406,7 +427,7 @@ Preserve these teardown boundaries across vendor refreshes (see #599).
 ### Windows DirectWrite callback and glyph readback safety
 
 `crates/gpui-ce/gpui_windows/src/direct_write.rs` carries the Windows text-rendering hardening
-landed in `zed-industries/zed@89e8a4b9ec7e` after the pinned GPUI-CE baseline:
+landed in `zed-industries/zed@89e8a4b9ec7e` after the historical GPUI-CE baseline:
 
 - the renderer context passed to `IDWriteTextLayout::Draw` is a mutable binding and the callback
   pointer is derived from `&raw mut`, because `DrawGlyphRun` appends shaped runs and advances the
@@ -420,7 +441,12 @@ landed in `zed-industries/zed@89e8a4b9ec7e` after the pinned GPUI-CE baseline:
 
 The mutable-pointer provenance fix prevents optimized Windows builds from treating callback writes
 as undefined behavior, which can otherwise surface as missing, stale, or misplaced terminal glyphs.
-Preserve this patch until the next audited GPUI-CE baseline contains the equivalent upstream fix.
+The pristine gpui-pre 0.3.7 source already contains mutable callback-pointer
+provenance, null-aware glyph-array conversion, and staging-texture unmapping.
+Those parts use upstream equivalents. Its font-face cache still stores only
+the resolved font ID under a pointer-address key; retaining the callback COM
+face identity remains an OxideTerm local patch. Check these parts separately
+when refreshing instead of treating the entire category as already upstream.
 
 ### DynamicTexture and renderer resource generations
 
@@ -485,7 +511,7 @@ generation of zero.
 
 ### WGPU backend selection and recovery
 
-The GPUI-CE WGPU path carries OxideTerm-specific VM and recovery behavior:
+The locally patched WGPU path carries OxideTerm-specific VM and recovery behavior:
 
 - `crates/gpui-ce/gpui_wgpu/src/wgpu_context.rs`
   - recognizes the case-insensitive
@@ -525,36 +551,23 @@ The GPUI-CE WGPU path carries OxideTerm-specific VM and recovery behavior:
 Do not restore the old hard-coded `ZED_DEVICE_ID` environment-variable
 contract. The product-facing names are intentionally scoped to OxideTerm.
 
-Other inherited diagnostic controls are also product-scoped:
+Inherited diagnostic controls were not all product-renamed in the previous
+source. Both that source and the migration target retain `ZED_HEADLESS`,
+`ZED_MEASUREMENTS`, and `ZED_ALLOW_ROOT`. Keep the implemented names;
+do not add OxideTerm aliases or remove inherited behavior merely to match the
+previous ledger's inaccurate description. Renderer-specific OxideTerm GPU
+selection and font support overrides remain separate local contracts.
 
-- `crates/gpui-ce/gpui/src/platform.rs` uses `OXIDETERM_GPUI_HEADLESS`;
-- `crates/gpui-ce/gpui_wgpu/src/wgpu_renderer.rs` uses the
-  `OXIDETERM_FONTS_GAMMA`, `OXIDETERM_FONTS_GRAYSCALE_ENHANCED_CONTRAST`, and
-  `OXIDETERM_FONTS_SUBPIXEL_ENHANCED_CONTRAST` support overrides;
-- `crates/gpui-ce/gpui_ce_util/src/lib.rs` uses `OXIDETERM_MEASUREMENTS`;
-- `crates/gpui-ce/gpui_zed_util/src/util.rs` uses `OXIDETERM_ALLOW_ROOT`.
+### Linux display-backend startup selection
 
-Do not reintroduce inherited public `ZED_*` aliases. A refresh must audit the
-complete vendor closure, not only the renderer crates.
-
-### Linux display-backend startup fallback
-
-Linux desktop startup must not panic merely because `WAYLAND_DISPLAY` is set
-while the selected compositor omits a GPUI-required global. Preserve these
-rules across vendor refreshes:
-
-- `crates/gpui-ce/gpui_linux/src/linux/wayland/client.rs` returns a diagnostic
-  error when the Wayland connection, registry, event sources, `wl_seat`,
-  `wl_compositor`, `wl_shm`, or `xdg_wm_base` cannot be initialized;
-- `crates/gpui-ce/gpui_linux/src/linux.rs` logs that Wayland initialization
-  failed and falls back to X11 when that backend is compiled;
-- if both desktop backends fail, the terminal diagnostic includes both errors
-  instead of preserving an opaque Wayland `unwrap()` panic.
-
-WSLg is a known reason for `WAYLAND_DISPLAY` to be present without a
-`wl_seat`. Keep the fallback capability-based rather than hard-coding a WSL
-environment check, so remote, nested, kiosk, and future compositors receive the
-same behavior.
+The previous ledger incorrectly claimed a Wayland-initialization fallback to
+X11. The original code and the target select one backend in
+`gpui_linux/src/linux.rs`; choosing Wayland calls `WaylandClient::new()`
+without an initialization-error fallback to X11. This migration preserves the
+implemented selection behavior. It does not implement the previously described
+fallback or claim that a missing Wayland global is recovered through X11.
+Any future startup fallback is a separate behavioral change requiring native
+evidence and an explicit patch.
 
 ### Wayland window-state restoration
 
@@ -631,7 +644,7 @@ list's ownership of scrolling.
 
 These aliases are migration compatibility layers, not new GPUI abstractions.
 Remove either alias only after all OxideTerm call sites have moved to the
-GPUI-CE API and the full workspace builds without it.
+gpui-pre API and the full workspace builds without it.
 
 ## Product-Owned Remote Desktop Integration
 
@@ -659,89 +672,60 @@ framebuffer uses `DynamicTexture`.
 
 ## Refresh Procedure
 
-Refresh the vendor only on an isolated migration branch or worktree.
+Refresh only in an isolated migration branch or worktree.
 
-1. Check out the candidate GPUI-CE commit in a clean temporary directory and
-   record its full commit ID.
-2. Recompute the dependency closure from the candidate manifests. Any addition
-   to or removal from the 18-crate closure requires an explicit review of why it
-   is needed, its license, and whether it becomes a shipped target.
-3. Record the pristine Git tree ID for every imported crate
-   in `UPSTREAM_BASELINE.toml` before applying local patches.
-4. Refresh only the declared crate directories. Do not import font assets,
-   excluded examples, performance tooling, Blade code, or unrelated Zed
-   application crates.
-5. Reapply the manifest integration and each local patch category in this
-   ledger as a separate, reviewable change. Prefer an upstream equivalent when
-   it satisfies the complete product contract.
-6. Review every upstream renderer split independently: WGPU, Metal, Direct3D,
-   the test atlas, and cursor handling. Do not assume a trait change reached all
-   backends.
-7. Reapply the product-owned remote desktop integration only in the OxideTerm
-   crates. Verify that ordinary dirty updates retain the same dynamic texture
-   identity.
-8. Update `Cargo.lock`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, packaged license
-   files, and native-package verification lists.
-9. Update the pinned commit, tree IDs, import date, and this ledger only after
-   the resulting source and package checks pass.
-10. Inspect the final diff against both the previous OxideTerm vendor snapshot
-    and the pristine candidate commit. Unexplained local differences are a
-    failed refresh.
-
-Never copy the candidate tree over the current vendor tree and assume the local
-patches survived. The manifest and source deltas in this ledger are intentional
-and must be reviewed explicitly.
+1. Select the gpui-pre publication version and obtain the six pristine registry
+   archives. Verify their registry checksums and Zed metadata before importing.
+2. Update only the six recorded local patch directories. Keep other package
+   dependencies registry-resolved; do not import unrelated application crates,
+   examples, font assets, Blade code, or an assumed fixed dependency closure.
+3. Reconcile each local patch above with the candidate source and preserve
+   GPUI-CE attribution for carried community features. Record a verified
+   upstream equivalent instead of silently losing a product contract.
+4. Review WGPU, Metal, Direct3D, headless atlas, and cursor behavior independently.
+   A core trait change does not prove all native backends implement it.
+5. Adapt product API calls in product crates. Keep remote desktop framebuffer
+   ownership outside the framework and verify stable dynamic texture identity.
+6. Resolve Cargo.lock, refresh legal notices and package checks, and run the
+   relevant framework, product, and target-native validations.
+7. Inspect the final diff against both the previous vendor snapshot and the
+   pristine registry source. Record actual validation results separately from
+   the intended patch inventory.
 
 ## Verification
 
-Verify provenance against the clean upstream checkout:
+Verify package metadata, root patch mappings, locked local resolutions, and
+license copies:
 
 ```sh
-python3 scripts/quality/verify_gpui_vendor.py \
-  --zed-checkout /path/to/clean/zed \
-  --gpui-ce-checkout /path/to/clean/gpui-ce
+python3 scripts/quality/verify_gpui_vendor.py
+python3 scripts/quality/verify_gpui_vendor.py --registry-archives /path/to/pristine-archives
 ```
 
-Verify formatting, the vendor crates, and product integration:
+The archive directory contains `<package-name>.crate` files for the six listed
+packages. The optional `--gpui-ce-checkout` argument verifies the retained
+historical root and Apache licenses against the recorded CE commit.
 
 ```sh
 cargo fmt --check
-cargo check --locked -p gpui -p gpui_platform -p gpui_wgpu
-cargo test --locked -p gpui --lib
-cargo test --locked -p gpui_wgpu --lib
+cargo check --locked -p gpui-pre -p gpui-pre-platform -p gpui-pre-wgpu
+cargo test --locked -p gpui-pre --lib
+cargo test --locked -p gpui-pre-wgpu --lib
 cargo check --locked -p oxideterm-gpui-app
 cargo test --locked -p oxideterm-gpui-remote-desktop --lib
 cargo test --locked -p oxideterm-render-policy --lib
 git diff --check
 ```
 
-Run target-native renderer checks on their actual operating systems:
-
-```sh
-# macOS
-cargo check --locked -p gpui_macos
-cargo test --locked -p gpui_macos --lib
-
-# Windows
-cargo check --locked -p gpui_windows
-cargo test --locked -p gpui_windows --lib
-
-# Linux or FreeBSD with the configured display dependencies
-cargo check --locked -p gpui_linux
-```
-
-Verify notices and packaged legal documents:
-
-```sh
-python3 scripts/release/generate_third_party_notices.py --check
-python3 -m unittest \
-  scripts.tests.test_package_native \
-  scripts.tests.test_verify_native_package
-```
+Run platform backends on their matching host: `gpui-pre-macos` on macOS,
+`gpui-pre-windows` on Windows, and `gpui-pre-linux` with its configured
+display dependencies on Linux or FreeBSD. Verify notices with
+`python3 scripts/release/generate_third_party_notices.py --check` and the native
+packaging helper suites.
 
 The remote desktop regression suite must prove full-frame creation, dirty-region
 application, texture identity reuse, renderer-generation full refresh, retry
 after upload failure, and texture retirement. VM qualification remains a
 separate runtime gate: exercise Vulkan and OpenGL fallback on representative
-VMware, VirtualBox, Hyper-V, and QEMU/virtio configurations rather than treating
-successful compilation as proof of driver compatibility.
+VMware, VirtualBox, Hyper-V, and QEMU/virtio configurations. Compilation alone
+does not verify driver compatibility.

@@ -1,6 +1,5 @@
 use std::sync::OnceLock;
 
-#[cfg(not(feature = "wgpu"))]
 use anyhow::Context;
 use gpui_util::ResultExt;
 use windows::{
@@ -11,7 +10,6 @@ use windows::{
     Win32::{Foundation::*, Graphics::Dwm::*, UI::WindowsAndMessaging::*},
     core::BOOL,
 };
-#[cfg(not(feature = "wgpu"))]
 use windows::{Win32::System::LibraryLoader::LoadLibraryA, core::PCSTR};
 
 use crate::*;
@@ -175,7 +173,6 @@ fn is_color_light(color: &Color) -> bool {
     ((5 * color.G as u32) + (2 * color.R as u32) + color.B as u32) > (8 * 128)
 }
 
-#[cfg(not(feature = "wgpu"))]
 pub(crate) fn with_dll_library<R, F>(dll_name: PCSTR, f: F) -> Result<R>
 where
     F: FnOnce(HMODULE) -> Result<R>,

@@ -135,7 +135,7 @@ fn append_semantic_line_band(
     }
 
     let mut color = to_hsla(terminal_color_from_hex(color));
-    color.alpha = opacity;
+    color.a = opacity;
     layout.backgrounds.extend(rows.map(|row| TerminalRect {
         row,
         col: 0,
@@ -310,7 +310,7 @@ mod tests {
         assert_eq!(error_layout.backgrounds.len(), 1);
         assert_eq!(error_layout.backgrounds[0].cells, error_snapshot.cols);
         assert_eq!(
-            error_layout.backgrounds[0].color.alpha,
+            error_layout.backgrounds[0].color.a,
             terminal_semantic_line_band(&theme, SemanticClass::Error)
                 .expect("error band")
                 .1
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(warning_layout.backgrounds.len(), 1);
         assert_eq!(warning_layout.backgrounds[0].cells, warning_snapshot.cols);
         assert_eq!(
-            warning_layout.backgrounds[0].color.alpha,
+            warning_layout.backgrounds[0].color.a,
             terminal_semantic_line_band(&theme, SemanticClass::Warning)
                 .expect("warning band")
                 .1

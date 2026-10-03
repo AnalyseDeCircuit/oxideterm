@@ -16,16 +16,23 @@ mod tests {
     }
 
     #[test]
-    fn plain_output_is_borrowed_but_split_protocol_payload_is_consumed() {
+    fn terminal_output_is_borrowed_but_split_protocol_payload_is_consumed() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
-        let plain = "❯ 2025-2026春季毕设安排.pdf\r\n".as_bytes();
-        let owned = ingress.advance(plain, cursor());
-        assert_eq!(owned.terminal_bytes, plain);
-        assert!(owned.events.is_empty());
-        let segments = ingress.advance_segments(plain, cursor);
-        assert!(
-            matches!(&segments[..], [TerminalGraphicsSegment::Terminal(std::borrow::Cow::Borrowed(bytes))] if *bytes == plain)
-        );
+        for plain in [
+            "❯ 2025-2026春季毕设安排.pdf\r\n".as_bytes(),
+            b"\x1b[31mcolored\x1b[0m\r\n",
+            b"\x1b[1;2;3;4;5;7;8;9;22;23;24;25;27;28;29;38;5;42mX\x1b[0m",
+            b"\x1b(0line\x1b(B",
+        ] {
+            let owned = ingress.advance(plain, cursor());
+            assert_eq!(owned.terminal_bytes, plain);
+            assert!(owned.events.is_empty());
+            let segments = ingress.advance_segments(plain, cursor);
+            assert!(
+                matches!(&segments[..], [TerminalGraphicsSegment::Terminal(std::borrow::Cow::Borrowed(bytes))] if *bytes == plain),
+                "ordinary terminal output should not allocate a copy"
+            );
+        }
 
         assert!(
             ingress

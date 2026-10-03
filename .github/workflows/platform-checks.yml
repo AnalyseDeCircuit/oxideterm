@@ -10,6 +10,8 @@ on:
       - 'Cargo.lock'
       - 'rustfmt.toml'
       - 'scripts/release/conpty_runtime.py'
+      - 'scripts/ci/install-linux-deps.sh'
+      - '.github/actions/install-linux-deps/**'
       - '.github/workflows/platform-checks.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
@@ -19,6 +21,8 @@ on:
       - 'Cargo.lock'
       - 'rustfmt.toml'
       - 'scripts/release/conpty_runtime.py'
+      - 'scripts/ci/install-linux-deps.sh'
+      - '.github/actions/install-linux-deps/**'
       - '.github/workflows/platform-checks.yml'
 
 permissions:
@@ -48,13 +52,13 @@ jobs:
           cache-on-failure: false
 
       - name: Check Windows GPUI backend
-        run: cargo check -p gpui_windows
+        run: cargo check -p gpui-pre-windows
 
       - name: Test Windows frame and quit message handling
-        run: cargo test -p gpui_windows --lib windows_message_
+        run: cargo test -p gpui-pre-windows --lib windows_message_
 
       - name: Test Windows text fallback identity
-        run: cargo test -p gpui_windows --lib windows_text_
+        run: cargo test -p gpui-pre-windows --lib windows_text_
 
       - name: Test Windows terminal pipe readiness and EOF
         run: cargo test -p alacritty_terminal --lib tty::windows::blocking::tests
@@ -90,7 +94,34 @@ jobs:
           cache-on-failure: false
 
       - name: Check macOS GPUI backend
-        run: cargo check -p gpui_macos
+        run: cargo check -p gpui-pre-macos
 
       - name: Check macOS application
+        run: cargo check -p oxideterm-gpui-app
+
+  linux:
+    name: Linux native check
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.94.1
+
+      - name: Install Linux system dependencies
+        uses: ./.github/actions/install-linux-deps
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: native-check-linux-x64
+          cache-on-failure: false
+
+      - name: Check Linux GPUI backend
+        run: cargo check -p gpui-pre-linux
+
+      - name: Check Linux application
         run: cargo check -p oxideterm-gpui-app

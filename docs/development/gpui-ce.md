@@ -1,19 +1,19 @@
-# GPUI CE Maintenance Boundary
+# GPUI Maintenance Boundary
 
-`crates/gpui-ce/` is a reviewed vendor closure, not a general-purpose place for application fixes. The authoritative provenance and local-delta records are [`UPSTREAM_BASELINE.toml`](../../crates/gpui-ce/gpui/UPSTREAM_BASELINE.toml) and [`OXIDETERM_PATCHES.md`](../../crates/gpui-ce/gpui/OXIDETERM_PATCHES.md).
+`crates/gpui-ce/` contains six local patches to Longbridge's `gpui-pre` 0.3.7 packages, the version used by GPUI Kit v0.7.0. Other gpui-pre packages resolve through crates.io. The six patches retain OxideTerm behavior and community-derived GPUI-CE filters, colors, and window capabilities; this is not an unmodified Zed distribution. The authoritative provenance and local-delta records are [`UPSTREAM_BASELINE.toml`](../../crates/gpui-ce/gpui/UPSTREAM_BASELINE.toml) and [`OXIDETERM_PATCHES.md`](../../crates/gpui-ce/gpui/OXIDETERM_PATCHES.md).
 
 ## Decide The Layer First
 
 Change application code when the behavior belongs to OxideTerm navigation, modal ownership, settings, terminal UX, or a product-specific view. Change shared UI code when the primitive is owned by `oxideterm-gpui-ui`.
 
-Consider GPUI CE only when all of the following are true:
+Consider a local GPUI patch only when all of the following are true:
 
 1. The failure is below the application or shared UI boundary.
 2. A minimal reproduction identifies framework or native-platform behavior.
 3. The affected platform path is known: Windows Direct3D/Win32, macOS Metal/AppKit, or Linux WGPU/X11/Wayland.
 4. The local delta can be recorded in the vendor ledger and verified on the affected platform.
 
-Do not copy implementation code from Zed. External projects and upstream sources are behavioral references; OxideTerm changes must be independently designed.
+Do not copy unrelated Zed application code into product fixes. A framework refresh imports the audited gpui-pre publication through the procedure below, then reconciles the recorded local and community-derived patches.
 
 ## Platform Ownership Map
 
@@ -28,11 +28,11 @@ Do not copy implementation code from Zed. External projects and upstream sources
 
 ## Vendor Rules
 
-- Preserve the vendor closure recorded by the baseline file.
+- Preserve the six local package paths and root `[patch.crates-io]` mappings recorded by the baseline file. Do not treat a downloaded research sample as the complete dependency graph.
 - Record every intentional OxideTerm framework delta in `OXIDETERM_PATCHES.md`.
-- Refresh from audited upstream inputs as a coherent closure. Do not replay an old monolithic diff or update one renderer path in isolation.
+- Refresh from checksum-verified registry archives with the recorded `package.metadata.gpui-pre` Zed revision. Keep the remaining dependencies registry-resolved; do not replay the old 18-directory CE layout or a monolithic diff.
 - Keep renderer changes platform-specific: Windows uses Direct3D 11, macOS uses Metal, and Linux uses WGPU with separate Wayland and X11 windowing paths.
-- Prefer an upstream equivalent when one exists, but do not silently drop an OxideTerm delta during an upstream refresh.
+- Prefer an upstream equivalent when it satisfies the complete contract. Preserve GPUI-CE provenance and its root license for carried community code; do not silently drop an OxideTerm delta.
 
 Every intentional local framework change needs an English modification notice near the affected source and a semantic entry in `OXIDETERM_PATCHES.md`. The ledger records behavior rather than fragile line numbers so the change survives audited upstream refreshes.
 
@@ -50,16 +50,16 @@ For a vendor refresh, first validate the current record:
 python3 scripts/quality/verify_gpui_vendor.py
 ```
 
-When clean Zed and GPUI CE checkouts are available, pass them with `--zed-checkout` and `--gpui-ce-checkout` to verify the pinned tree objects as well. Refresh the approved closure from audited inputs, then review each renderer and windowing backend independently.
+Pass `--registry-archives /path/to/pristine-archives` to verify the six `<package-name>.crate` checksums, embedded manifests, Zed metadata, and Apache licenses. The optional `--gpui-ce-checkout` checks the retained historical CE license source. Cargo.lock pins the actual dependency graph; unrelated lockfile updates do not invalidate the six-package source record. Review each renderer and windowing backend independently.
 
 ## Verification
 
 Run the relevant native check locally and use the cross-platform CI matrix before merging:
 
 ```sh
-cargo check -p gpui_windows
-cargo check -p gpui_macos
-cargo check -p oxideterm-gpui-app
+cargo check --locked -p gpui-pre-windows
+cargo check --locked -p gpui-pre-macos
+cargo check --locked -p oxideterm-gpui-app
 ```
 
 The first two commands require their matching host platform. For input, window, cursor, and renderer defects, manual reproduction on the affected operating system remains required.

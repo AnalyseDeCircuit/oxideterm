@@ -21,8 +21,8 @@ Run checks from the repository root. When a command needs an operating-system-sp
 | Terminal behavior or rendering | `cargo test -p oxideterm-gpui-terminal` and the relevant terminal-model check | Selection, scrolling, alternate screen, resize, and the affected shell or TUI workflow |
 | SSH, SFTP, forwarding, reconnect | The focused crate tests, then `cargo check -p oxideterm-gpui-app` | Close one consumer while another remains active; explicit disconnect; reconnect and failure cleanup |
 | Settings, themes, or locale keys | `python scripts/quality/audit_i18n.py` plus the affected crate check | Inspect every changed locale in the relevant view |
-| macOS framework code | `cargo check -p gpui_macos` and `cargo check -p oxideterm-gpui-app` | Native window, input, cursor, and renderer behavior |
-| Windows framework code | `cargo check -p gpui_windows` and `cargo check -p oxideterm-gpui-app` on Windows | IME, pointer capture, cursor recovery, titlebar, and Direct3D behavior |
+| macOS framework code | `cargo check -p gpui-pre-macos` and `cargo check -p oxideterm-gpui-app` | Native window, input, cursor, and renderer behavior |
+| Windows framework code | `cargo check -p gpui-pre-windows` and `cargo check -p oxideterm-gpui-app` on Windows | IME, pointer capture, cursor recovery, titlebar, and Direct3D behavior |
 | Linux framework code | Relevant Linux crate and application checks | Both affected compositor paths: Wayland and/or X11 |
 | Repository scripts or workflows | The matching script test module | Dispatch only the workflow needed by the change |
 | Git dependencies, Nix package, or flake | `nix build .#oxideterm -L --show-trace` and `nix flake check -L` | Confirm `result/bin/oxideterm` builds and runs |

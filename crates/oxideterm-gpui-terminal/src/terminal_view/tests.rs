@@ -1,7 +1,7 @@
 use super::*;
 use std::{path::Path, sync::Arc};
 
-use gpui::{Bounds, IntoColor, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
+use gpui::{Bounds, Keystroke, Modifiers, MouseButton, Pixels, point, px, rgb, size};
 use oxideterm_terminal::{
     TermMode, TerminalCell, TerminalColor, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCursorShape,
@@ -302,10 +302,10 @@ fn marked_text_is_laid_out_at_terminal_cursor() {
         assert_eq!(marked_text.row, 0);
         assert_eq!(marked_text.col, 0);
         assert_eq!(marked_text.text, "拼");
-        assert_eq!(marked_text.style.color, rgb(foreground).into_color());
+        assert_eq!(marked_text.style.color, rgb(foreground).into());
         assert_eq!(
             marked_text.style.background_color,
-            Some(rgb(background).into_color())
+            Some(rgb(background).into())
         );
         assert!(layout.ime_cursor_bounds.is_some());
     }

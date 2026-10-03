@@ -8,9 +8,8 @@ use std::{
 
 use gpui::{
     App, Bounds, ContentMask, CursorStyle, Element, ElementId, Entity, FocusHandle,
-    GlobalElementId, Hsla, InspectorElementId, IntoColor, IntoElement, LayoutId, LineLayout,
-    LinePaintCache, Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb,
-    rgba, size,
+    GlobalElementId, Hsla, InspectorElementId, IntoElement, LayoutId, LineLayout, LinePaintCache,
+    Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
 };
 use oxideterm_terminal::{
     TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
@@ -799,7 +798,7 @@ impl TerminalElement {
                     .map(|query| query.as_str()),
                 visible_rows.clone(),
                 rgba((self.theme.tokens.ui.warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA)
-                    .into_color(),
+                    .into(),
             ),
         );
         let command_mark_overlays = command_mark_overlays_for_rows(
@@ -1012,7 +1011,7 @@ impl TerminalElement {
             (
                 highlight,
                 rgba((self.theme.tokens.ui.warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA)
-                    .into_color(),
+                    .into(),
             )
         });
         let mut layout = terminal_highlights_for_rows(

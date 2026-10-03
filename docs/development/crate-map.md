@@ -14,7 +14,7 @@ The workspace is intentionally split by responsibility. Start from the user-visi
 | Internationalization and theme | `crates/oxideterm-i18n/locales`, `crates/oxideterm-theme` | `oxideterm-gpui-ui` | Every user-visible UI key must exist in every locale catalog |
 | Remote desktop and media | `crates/oxideterm-remote-desktop`, `crates/oxideterm-gpui-remote-desktop` | `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, `oxideterm-pcm-audio` | Viewer lifetime is distinct from terminal and SSH-node consumers |
 | Plugins, CLI, and automation | `crates/oxideterm-plugin-*`, `crates/oxideterm-cli`, `crates/oxideterm-public-mcp` | `scripts/`, `agent/` | Capability APIs must not bypass the application runtime or secret boundary |
-| Framework and native platform code | `crates/gpui-ce/gpui` | `gpui_windows`, `gpui_macos`, `gpui_linux`, `gpui_wgpu`, `gpui_platform` | Maintained vendor closure; see [GPUI CE maintenance](gpui-ce.md) |
+| Framework and native platform code | `crates/gpui-ce/gpui` | `gpui-pre-apple`, `gpui-pre-windows`, `gpui-pre-macos`, `gpui-pre-linux`, `gpui-pre-wgpu`, `gpui-pre-platform` | Six locally patched packages with registry helpers; see [GPUI maintenance](gpui-ce.md) |
 
 ## Main Runtime Path
 
@@ -44,12 +44,12 @@ Use `cargo tree -p <crate>` when a dependency boundary is unclear. A crate name 
 
 | Need | Preferred location | Do not place it in |
 | --- | --- | --- |
-| A page-specific action or rendering decision | The corresponding `workspace/<feature>/` module | A global UI primitive or a GPUI CE crate |
+| A page-specific action or rendering decision | The corresponding `workspace/<feature>/` module | A global UI primitive or a patched GPUI crate |
 | A reusable visual primitive | `oxideterm-gpui-ui` | A feature module copied into multiple views |
 | Persisted product setting | `oxideterm-settings` plus its model and localized settings view | An ad-hoc static or view-local field |
 | A new text label | `oxideterm-i18n/locales/` and the owning view | A hard-coded string in render code |
 | A transport capability | The protocol/domain crate plus its application adapter | A terminal pane or modal callback |
-| A platform event, renderer, or native-window correction | The matching GPUI CE platform crate after reproduction | Product UI code that guesses native state |
+| A platform event, renderer, or native-window correction | The matching patched GPUI platform crate after reproduction | Product UI code that guesses native state |
 
 ## Useful Entry Files
 

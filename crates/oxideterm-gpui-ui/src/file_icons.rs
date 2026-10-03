@@ -1,6 +1,4 @@
-use gpui::{
-    AnyElement, IntoColor, IntoElement, ParentElement, Styled, StyledImage, div, img, px, rgb, svg,
-};
+use gpui::{AnyElement, IntoElement, ParentElement, Styled, StyledImage, div, img, px, rgb, svg};
 use oxideterm_theme::ThemeTokens;
 
 #[rustfmt::skip]
@@ -28,8 +26,8 @@ impl FileIcon {
     }
 
     pub fn render(self, size: f32, tokens: &ThemeTokens) -> AnyElement {
-        let background: gpui::Hsla = rgb(tokens.ui.bg).into_color();
-        let path = if background.lightness > 0.5 {
+        let background: gpui::Hsla = rgb(tokens.ui.bg).into();
+        let path = if background.l > 0.5 {
             self.light
         } else {
             self.path

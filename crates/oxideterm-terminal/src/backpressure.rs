@@ -506,7 +506,7 @@ impl MagicScanWindow {
                 continue;
             }
             if marker_crosses_chunk_boundary(&self.tail, chunk, marker)
-                || chunk_contains_marker(chunk, marker)
+                || memchr::memmem::find(chunk, marker).is_some()
             {
                 matches.push(*kind);
             }
@@ -541,17 +541,6 @@ fn marker_crosses_chunk_boundary(tail: &[u8], chunk: &[u8], marker: &[u8]) -> bo
             && tail[tail.len() - tail_bytes..] == marker[..tail_bytes]
             && chunk[..chunk_bytes] == marker[tail_bytes..]
     })
-}
-
-fn chunk_contains_marker(mut chunk: &[u8], marker: &[u8]) -> bool {
-    while let Some(offset) = chunk.iter().position(|byte| *byte == marker[0]) {
-        chunk = &chunk[offset..];
-        if chunk.starts_with(marker) {
-            return true;
-        }
-        chunk = &chunk[1..];
-    }
-    false
 }
 
 #[cfg(test)]
@@ -599,6 +588,10 @@ mod tests {
     #[test]
     fn magic_scan_detects_complete_markers_and_every_cross_chunk_split() {
         let mut scan = MagicScanWindow::default();
+        assert!(
+            scan.scan(b"time:12:34 status:ok ::TRZSZ:TRANSFEX:")
+                .is_empty()
+        );
         assert_eq!(
             scan.scan(b"time:12:34 status:ok ::TRZSZ:TRANSFER:R:1"),
             [TerminalMagicKind::TrzszTransfer]

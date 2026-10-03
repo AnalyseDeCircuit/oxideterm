@@ -6,7 +6,7 @@
 //! Converts highlighted tokens into GPUI `TextRun` sequences that slot
 //! directly into the existing `StyledText` rendering pipeline.
 
-use gpui::{Font, FontStyle, FontWeight, Hsla, IntoColor, Rgba, SharedString, TextRun};
+use gpui::{Font, FontStyle, FontWeight, Hsla, Rgba, SharedString, TextRun};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle as SyntectFontStyle, Style as SyntectStyle, ThemeSet};
 use syntect::parsing::{SyntaxReference, SyntaxSet};
@@ -111,13 +111,13 @@ pub fn highlighted_runs_to_text_runs(runs: &[HighlightedRun]) -> (SharedString, 
 
 fn syntect_color_to_hsla(syn_style: SyntectStyle) -> Hsla {
     let c = syn_style.foreground;
-    Rgba::new(
-        c.r as f32 / 255.0,
-        c.g as f32 / 255.0,
-        c.b as f32 / 255.0,
-        c.a as f32 / 255.0,
-    )
-    .into_color()
+    Rgba {
+        r: c.r as f32 / 255.0,
+        g: c.g as f32 / 255.0,
+        b: c.b as f32 / 255.0,
+        a: c.a as f32 / 255.0,
+    }
+    .into()
 }
 
 fn syntect_font(syn_style: SyntectStyle, opts: &MarkdownOptions) -> Font {

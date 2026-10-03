@@ -4,7 +4,7 @@
 use std::{cell::Cell, collections::BTreeMap, ops::Range, rc::Rc};
 
 use gpui::{
-    Anchor, AnchoredPositionMode, AnyElement, App, AppContext, ColorExt, Context, CursorStyle, Div,
+    Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Context, CursorStyle, Div,
     EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent, SharedString,
     StatefulInteractiveElement, Styled, Window, anchored, deferred, div, prelude::FluentBuilder,
@@ -844,10 +844,10 @@ impl TextEditorView {
                 if is_current_line && display_row.is_first && self.settings.highlight_current_line {
                     rgba((self.appearance.accent_hex << 8) | CM_ACTIVE_GUTTER_ACCENT_ALPHA)
                 } else if is_selected_line {
-                    self.editor_panel_background(self.appearance.gutter_background_hex)
-                        .blend(&rgba(
-                            (self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA,
-                        ))
+                    gpui::ColorExt::blend(
+                        &self.editor_panel_background(self.appearance.gutter_background_hex),
+                        &rgba((self.appearance.accent_hex << 8) | CM_SELECTED_LINE_ACCENT_ALPHA),
+                    )
                 } else {
                     self.editor_panel_background(self.appearance.gutter_background_hex)
                 },

@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::window::PreparedGlyphBatch;
 use crate::{
-    AtlasTextureId, AtlasTile, Background, Bounds, ColorExt, ContentMask, Corners, Edges, Pixels,
-    Point, Radians, ScaledFilter, ScaledPixels, Size, bounds_tree::BoundsTree, point,
+    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Pixels, Point,
+    Radians, ScaledFilter, ScaledPixels, Size, bounds_tree::BoundsTree, point,
 };
 use smallvec::SmallVec;
 use std::{
@@ -344,7 +344,7 @@ impl Scene {
     }
 }
 
-/// Internal representation of [`palette::Hsla`] which is layout sensitive, as its provided to the renderer.
+/// Packed HSLA transfer representation consumed by renderer uploads.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[repr(C)]
 pub struct SceneHsla {
@@ -357,18 +357,23 @@ pub struct SceneHsla {
     /// Alpha, in a range from 0 to 1
     pub(crate) a: f32,
 }
-impl Into<palette::Hsla> for SceneHsla {
-    fn into(self) -> palette::Hsla {
-        palette::Hsla::new(self.h * 360.0, self.s, self.l, self.a)
+impl From<SceneHsla> for crate::Hsla {
+    fn from(color: SceneHsla) -> Self {
+        Self {
+            h: color.h,
+            s: color.s,
+            l: color.l,
+            a: color.a,
+        }
     }
 }
-impl From<palette::Hsla> for SceneHsla {
-    fn from(hsla: palette::Hsla) -> Self {
+impl From<crate::Hsla> for SceneHsla {
+    fn from(hsla: crate::Hsla) -> Self {
         Self {
-            h: hsla.hue.into_positive_degrees() / 360.0,
-            s: hsla.saturation,
-            l: hsla.lightness,
-            a: hsla.alpha,
+            h: hsla.h.rem_euclid(1.0),
+            s: hsla.s,
+            l: hsla.l,
+            a: hsla.a,
         }
     }
 }
@@ -1340,7 +1345,7 @@ mod tests {
     fn prepared_monochrome_glyph(bounds: Bounds<ScaledPixels>) -> PreparedMonochromeGlyph {
         PreparedMonochromeGlyph {
             bounds,
-            color: palette::Hsla::default(),
+            color: crate::Hsla::default(),
             tile: AtlasTile {
                 texture_id: AtlasTextureId {
                     index: 0,

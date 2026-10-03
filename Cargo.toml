@@ -84,34 +84,23 @@ members = [
   "crates/vte",
   "crates/gpui-ce/gpui",
   "crates/gpui-ce/gpui_apple",
-  "crates/gpui-ce/gpui_ce_util",
-  "crates/gpui-ce/gpui_collections",
-  "crates/gpui-ce/gpui_derive_refineable",
   "crates/gpui-ce/gpui_linux",
   "crates/gpui-ce/gpui_macos",
-  "crates/gpui-ce/gpui_macros",
-  "crates/gpui-ce/gpui_media",
-  "crates/gpui-ce/gpui_path",
-  "crates/gpui-ce/gpui_platform",
-  "crates/gpui-ce/gpui_refineable",
-  "crates/gpui-ce/gpui_scheduler",
-  "crates/gpui-ce/gpui_shared_string",
-  "crates/gpui-ce/gpui_sum_tree",
   "crates/gpui-ce/gpui_wgpu",
   "crates/gpui-ce/gpui_windows",
-  "crates/gpui-ce/gpui_zed_util",
   "crates/russh-sftp",
-]
-exclude = [
-  "crates/gpui-ce/xim-ctext",
-  "crates/gpui-ce/zed-xim",
 ]
 default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 
 [patch.crates-io]
 alacritty_terminal = { path = "crates/alacritty-terminal" }
-gpui = { path = "crates/gpui-ce/gpui" }
+gpui-pre = { path = "crates/gpui-ce/gpui" }
+gpui-pre-apple = { path = "crates/gpui-ce/gpui_apple" }
+gpui-pre-macos = { path = "crates/gpui-ce/gpui_macos" }
+gpui-pre-windows = { path = "crates/gpui-ce/gpui_windows" }
+gpui-pre-linux = { path = "crates/gpui-ce/gpui_linux" }
+gpui-pre-wgpu = { path = "crates/gpui-ce/gpui_wgpu" }
 # Keep the SSH protocol fork independent from application lint and test targets.
 russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "58542ed1045f033abeca4a91164109ab18d9304a" }
 russh-sftp = { path = "crates/russh-sftp" }
@@ -152,7 +141,6 @@ cocoa = "=0.26.0"
 cocoa-foundation = "=0.2.0"
 cbindgen = { version = "0.28.0", default-features = false }
 crossbeam-channel = "0.5"
-collections = { path = "crates/gpui-ce/gpui_collections", version = "0.2.2", package = "gpui_collections" }
 core-foundation = "=0.10.0"
 core-foundation-sys = "0.8.6"
 core-graphics = "0.24"
@@ -173,17 +161,8 @@ futures = "0.3"
 futures-concurrency = "7.7.1"
 fs2 = "0.4"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
-gpui = { path = "crates/gpui-ce/gpui", version = "=0.2.2" }
-gpui_apple = { path = "crates/gpui-ce/gpui_apple", version = "0.1.0" }
-gpui_linux = { path = "crates/gpui-ce/gpui_linux", version = "0.1.0" }
-gpui_macos = { path = "crates/gpui-ce/gpui_macos", version = "0.1.0" }
-gpui_macros = { path = "crates/gpui-ce/gpui_macros", version = "0.1.0" }
-gpui_path = { path = "crates/gpui-ce/gpui_path", version = "0.2.2" }
-gpui_platform = { path = "crates/gpui-ce/gpui_platform", version = "0.1.0" }
-gpui_shared_string = { path = "crates/gpui-ce/gpui_shared_string", version = "0.1.0" }
-gpui_util = { path = "crates/gpui-ce/gpui_ce_util", version = "0.2.2", package = "gpui_ce_util" }
-gpui_wgpu = { path = "crates/gpui-ce/gpui_wgpu", version = "0.1.0" }
-gpui_windows = { path = "crates/gpui-ce/gpui_windows", version = "0.1.0" }
+gpui = { package = "gpui-pre", version = "=0.3.7" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["font-kit", "wayland", "x11"] }
 hdrhistogram = "7"
 heapless = "0.9.2"
 heck = "0.5"
@@ -199,7 +178,6 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 libc = "0.2"
 log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
 mach2 = "0.5"
-media = { path = "crates/gpui-ce/gpui_media", version = "0.2.2", package = "gpui_media" }
 memchr = "2.7"
 memmap2 = "0.9"
 metal = "0.33"
@@ -226,7 +204,6 @@ prost = "0.14.4"
 quote = "1.0.9"
 quick-xml = "0.39"
 raw-window-handle = "0.6"
-refineable = { path = "crates/gpui-ce/gpui_refineable", version = "0.2.2", package = "gpui_refineable" }
 regex = "1.12"
 rand = "0.8"
 rand10 = { package = "rand", version = "0.10" }
@@ -237,7 +214,6 @@ rmcp = { version = "3.1.2", default-features = false, features = ["server", "tra
 rmp-serde = "1"
 russh = "=0.63.0"
 scap = { version = "0.0.8-zed", package = "zed-scap", default-features = false }
-scheduler = { path = "crates/gpui-ce/gpui_scheduler", version = "0.2.2", package = "gpui_scheduler" }
 schemars = { version = "1.0", features = ["indexmap2"] }
 semver = { version = "1.0", features = ["serde"] }
 serde = { version = "1.0", features = ["derive", "rc"] }
@@ -254,7 +230,6 @@ ssh-encoding = "0.3"
 stacksafe = "1.0"
 strum = { version = "0.27.2", features = ["derive"] }
 subtle = "2.5"
-sum_tree = { path = "crates/gpui-ce/gpui_sum_tree", version = "0.2.2", package = "gpui_sum_tree" }
 syn = { version = "2.0.101", features = ["full", "extra-traits", "visit-mut"] }
 sysinfo = { version = "0.33", default-features = false, features = ["disk", "system"] }
 thiserror = "2.0"
@@ -306,7 +281,6 @@ unicode-normalization = "0.1"
 unicode-segmentation = "1.12"
 unicode-width = "0.2.2"
 url = "2.2"
-util = { path = "crates/gpui-ce/gpui_zed_util", version = "0.2.2", package = "gpui_zed_util" }
 vt100 = "0.16.2"
 vte = "0.15.0"
 uuid = { version = "1.23", features = ["v4", "v5", "v7", "serde"] }
@@ -415,7 +389,7 @@ split-debuginfo = "unpacked"
 [profile.dev.package.oxideterm-gpui-app]
 opt-level = 1
 
-[profile.dev.package.gpui]
+[profile.dev.package.gpui-pre]
 opt-level = 1
 
 [profile.dev.package.taffy]

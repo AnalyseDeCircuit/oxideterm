@@ -1894,7 +1894,7 @@ mod tests {
             );
         });
         let error_background: gpui::Hsla = workspace.read_with(cx, |workspace, _| {
-            rgba((workspace.tokens.ui.error << 8) | 0x1a).into_color()
+            rgba((workspace.tokens.ui.error << 8) | 0x1a).into()
         });
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);

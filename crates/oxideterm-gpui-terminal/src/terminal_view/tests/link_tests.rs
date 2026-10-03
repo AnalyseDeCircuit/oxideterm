@@ -212,7 +212,7 @@ fn link_styling_respects_explicit_links_application_colors_and_hover() {
             .unwrap_or_else(|| panic!("{case}: missing {text}"));
         assert_eq!(run.style.underline.is_some(), underline, "{case}");
         if let Some(color) = color {
-            assert_eq!(run.style.color, rgb(color).into_color(), "{case}");
+            assert_eq!(run.style.color, rgb(color).into(), "{case}");
         }
     }
 }

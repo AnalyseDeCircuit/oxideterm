@@ -634,22 +634,25 @@ impl Asset for ImageAssetLoader {
                 Resource::Path(uri) => fs::read(uri.as_ref())?,
                 Resource::Uri(uri) => {
                     use anyhow::Context as _;
+                    use futures::AsyncReadExt as _;
 
-                    let response = client
-                        .get(uri.as_ref(), true)
+                    let mut response = client
+                        .get(uri.as_ref(), ().into(), true)
                         .await
                         .with_context(|| format!("loading image asset from {uri:?}"))?;
-                    if !response.status.is_success() {
-                        let mut error_body = String::from_utf8_lossy(&response.body).into_owned();
+                    let mut body = Vec::new();
+                    response.body_mut().read_to_end(&mut body).await?;
+                    if !response.status().is_success() {
+                        let mut error_body = String::from_utf8_lossy(&body).into_owned();
                         let first_line = error_body.lines().next().unwrap_or("").trim_end();
                         error_body.truncate(first_line.len());
                         return Err(ImageCacheError::BadStatus {
                             uri,
-                            status: response.status,
+                            status: response.status(),
                             body: error_body,
                         });
                     }
-                    response.body
+                    body
                 }
                 Resource::Embedded(path) => {
                     let data = asset_source.load(&path).ok().flatten();

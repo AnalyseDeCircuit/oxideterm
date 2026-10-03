@@ -38,7 +38,7 @@ use gpui::{
     Modifiers, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler,
     PlatformWindow, Point, PromptButton, PromptLevel, RequestFrameOptions, ResizeEdge, Scene, Size,
     Tiling, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowControlArea,
-    WindowControls, WindowDecorations, WindowKind, WindowParams,
+    WindowControls, WindowDecorations, WindowKind, WindowParams, WindowVisibility,
     layer_shell::{Anchor, LayerShellNotSupportedError},
     popup::PopupOptions,
     px, size,
@@ -50,6 +50,7 @@ pub(crate) struct Callbacks {
     request_frame: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     input: Option<Box<dyn FnMut(gpui::PlatformInput) -> gpui::DispatchEventResult>>,
     active_status_change: Option<Box<dyn FnMut(bool)>>,
+    visibility_change: Option<Box<dyn FnMut(WindowVisibility)>>,
     hover_status_change: Option<Box<dyn FnMut(bool)>>,
     resize: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     moved: Option<Box<dyn FnMut()>>,
@@ -92,6 +93,7 @@ struct InProgressConfigure {
     fullscreen: bool,
     maximized: bool,
     resizing: bool,
+    visibility: WindowVisibility,
     tiling: Tiling,
 }
 
@@ -139,6 +141,8 @@ pub struct WaylandWindowState {
     background_appearance: WindowBackgroundAppearance,
     fullscreen: bool,
     maximized: bool,
+    /// `Hidden` while the `xdg_toplevel` `suspended` state (xdg-shell v6) is set.
+    visibility: WindowVisibility,
     tiling: Tiling,
     window_bounds: Bounds<Pixels>,
     client: WaylandClientStatePtr,
@@ -635,6 +639,7 @@ impl WaylandWindowState {
             background_appearance: WindowBackgroundAppearance::Opaque,
             fullscreen: false,
             maximized: false,
+            visibility: WindowVisibility::Visible,
             tiling: Tiling::default(),
             window_bounds: options.bounds,
             in_progress_configure: None,
@@ -1140,7 +1145,7 @@ impl WaylandWindowStatePtr {
             accepts_text_input
         } else {
             drop(state);
-            true
+            false
         };
         if Some(ime_enabled) == client.ime_enabled() {
             return;
@@ -1179,12 +1184,18 @@ impl WaylandWindowStatePtr {
                     state.fullscreen = configure.fullscreen;
                     state.maximized = configure.maximized;
                     state.tiling = configure.tiling;
+                    let visibility_changed = state.visibility != configure.visibility;
+                    state.visibility = configure.visibility;
                     // Limit interactive resizes to once per vblank
-                    if configure.resizing && state.resize_throttle {
+                    let throttled = configure.resizing && state.resize_throttle;
+                    if throttled {
                         state.surface_state.ack_configure(serial);
                         drop(state);
                         if window_state_changed {
                             self.notify_window_state_changed();
+                        }
+                        if visibility_changed {
+                            self.report_visibility(configure.visibility);
                         }
                         return;
                     } else if configure.resizing {
@@ -1208,6 +1219,12 @@ impl WaylandWindowStatePtr {
                         };
                     }
                     drop(state);
+                    if visibility_changed {
+                        self.report_visibility(configure.visibility);
+                    }
+                    if throttled {
+                        return;
+                    }
                     if let Some(size) = configure.size {
                         self.resize(size);
                     }
@@ -1313,6 +1330,7 @@ impl WaylandWindowStatePtr {
                 let mut fullscreen = false;
                 let mut maximized = false;
                 let mut resizing = false;
+                let mut visibility = WindowVisibility::Visible;
 
                 for state in states {
                     match state {
@@ -1323,6 +1341,7 @@ impl WaylandWindowStatePtr {
                             fullscreen = true;
                         }
                         xdg_toplevel::State::Resizing => resizing = true,
+                        xdg_toplevel::State::Suspended => visibility = WindowVisibility::Hidden,
                         xdg_toplevel::State::TiledTop => {
                             tiling.top = true;
                         }
@@ -1351,6 +1370,7 @@ impl WaylandWindowStatePtr {
                     fullscreen,
                     maximized,
                     resizing,
+                    visibility,
                     tiling,
                 });
 
@@ -1425,6 +1445,7 @@ impl WaylandWindowStatePtr {
                     fullscreen: false,
                     maximized: false,
                     resizing: false,
+                    visibility: WindowVisibility::Visible,
                     tiling: Tiling::default(),
                 });
                 drop(state);
@@ -1459,6 +1480,7 @@ impl WaylandWindowStatePtr {
                     fullscreen: false,
                     maximized: false,
                     resizing: false,
+                    visibility: WindowVisibility::Visible,
                     tiling: Tiling::default(),
                 });
 
@@ -1674,6 +1696,14 @@ impl WaylandWindowStatePtr {
         if let Some(mut fun) = callback {
             fun(focus);
             self.callbacks.borrow_mut().hover_status_change = Some(fun);
+        }
+    }
+
+    fn report_visibility(&self, visibility: WindowVisibility) {
+        let callback = self.callbacks.borrow_mut().visibility_change.take();
+        if let Some(mut callback) = callback {
+            callback(visibility);
+            self.callbacks.borrow_mut().visibility_change = Some(callback);
         }
     }
 
@@ -1909,6 +1939,10 @@ impl PlatformWindow for WaylandWindow {
         self.borrow().active
     }
 
+    fn visibility(&self) -> WindowVisibility {
+        self.borrow().visibility
+    }
+
     fn is_hovered(&self) -> bool {
         self.borrow().hovered
     }
@@ -1993,6 +2027,10 @@ impl PlatformWindow for WaylandWindow {
 
     fn on_active_status_change(&self, callback: Box<dyn FnMut(bool)>) {
         self.0.callbacks.borrow_mut().active_status_change = Some(callback);
+    }
+
+    fn on_visibility_change(&self, callback: Box<dyn FnMut(WindowVisibility)>) {
+        self.0.callbacks.borrow_mut().visibility_change = Some(callback);
     }
 
     fn on_hover_status_change(&self, callback: Box<dyn FnMut(bool)>) {
@@ -2230,17 +2268,18 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn gpu_specs(&self) -> Option<GpuSpecs> {
-        self.borrow().renderer.gpu_specs().into()
+        self.borrow().renderer.gpu_specs()
     }
 
     fn gpu_context(&self) -> Option<Box<dyn std::any::Any>> {
-        let (device, queue) = self.borrow().renderer.gpu_context();
-        Some(Box::new((device, queue)))
+        self.borrow()
+            .renderer
+            .gpu_context()
+            .map(|context| Box::new(context) as Box<dyn std::any::Any>)
     }
 
     fn gpu_device_lost(&self) -> Option<bool> {
-        // Only loads an atomic flag — safe even mid-recovery, when
-        // `gpu_context` would panic on the torn-down resources.
+        // The shared error state remains readable while GPU resources are released.
         Some(self.borrow().renderer.device_lost())
     }
 

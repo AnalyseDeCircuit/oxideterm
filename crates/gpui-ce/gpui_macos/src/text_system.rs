@@ -222,9 +222,8 @@ impl PlatformTextSystem for MacTextSystem {
         if !font_smoothing_allowed_by_user() {
             return 0;
         }
-        use palette::IntoColor;
-        let rgba: Rgba = color.into_color();
-        let luminance = 0.2126 * rgba.red + 0.7152 * rgba.green + 0.0722 * rgba.blue;
+        let rgba: Rgba = color.into();
+        let luminance = 0.2126 * rgba.r + 0.7152 * rgba.g + 0.0722 * rgba.b;
         let level = ((4.0 * luminance) + 0.5).floor() as i32;
         level.clamp(0, 4) as u8
     }

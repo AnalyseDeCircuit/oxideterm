@@ -1,7 +1,6 @@
 // Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
 use gpui::{
-    BoxShadow, CursorStyle, Div, IntoColor, ParentElement, Styled, div, point, prelude::*, px, rgb,
-    rgba, svg,
+    BoxShadow, CursorStyle, Div, ParentElement, Styled, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -145,14 +144,14 @@ fn checkbox_focus_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {
     let zero = point(px(0.0), px(0.0));
     vec![
         BoxShadow {
-            color: rgb(tokens.ui.bg).into_color(),
+            color: rgb(tokens.ui.bg).into(),
             offset: zero,
             blur_radius: px(0.0),
             spread_radius: px(CHECKBOX_FOCUS_RING_OFFSET),
             inset: false,
         },
         BoxShadow {
-            color: rgba((tokens.ui.accent << 8) | CHECKBOX_FOCUS_RING_ALPHA).into_color(),
+            color: rgba((tokens.ui.accent << 8) | CHECKBOX_FOCUS_RING_ALPHA).into(),
             offset: zero,
             blur_radius: px(0.0),
             spread_radius: px(CHECKBOX_FOCUS_RING_OFFSET + CHECKBOX_FOCUS_RING_WIDTH),

@@ -6,8 +6,10 @@
 #![allow(unused_mut)] // False positives in platform specific code
 
 extern crate self as gpui;
+
+/// The source directory used by the patched Metal shader binding generator.
 #[doc(hidden)]
-pub static GPUI_MANIFEST_DIR: &'static str = env!("CARGO_MANIFEST_DIR");
+pub const GPUI_MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
 #[macro_use]
 mod action;
 mod app;
@@ -46,7 +48,8 @@ pub mod profiler;
     target_os = "linux",
     target_os = "freebsd",
     target_family = "wasm",
-    feature = "test-support"
+    feature = "test-support",
+    feature = "bench-support"
 ))]
 #[expect(missing_docs)]
 pub mod queue;
@@ -119,14 +122,35 @@ pub use spring::*;
 
 /// Defines a Criterion benchmark group for benchmarks annotated with [`gpui::bench`].
 ///
-/// This mirrors `criterion::criterion_group!` so GPUI benchmark files can keep the
-/// same shape as ordinary Criterion benchmarks.
+/// This mirrors `criterion::criterion_group!`, but the group measures with the
+/// `gpui::BenchMeasurement` configured by `BENCH_MEASUREMENT` (see
+/// `BenchMeasurement::from_env`). By default Criterion analyzes wall time
+/// while retired instructions, cycles, IPC, context switches, and the other
+/// counters this machine supports are printed per iteration in the GPUI bench
+/// report. `BENCH_MEASUREMENT=instructions` makes Criterion analyze
+/// process-wide instructions instead, `foreground-instructions` the benchmark
+/// thread's alone, and `wall-time` disables all counters. A
+/// `config = ...` expression may set any other Criterion option; its
+/// measurement is replaced. To measure with something else, call
+/// `criterion::criterion_group!` directly with
+/// `config = criterion::Criterion::default().with_measurement(gpui::BenchMeasurement::new(...))`.
 ///
 /// [`gpui::bench`]: crate::bench
 #[macro_export]
 macro_rules! bench_group {
-    ($($tokens:tt)*) => {
-        criterion::criterion_group!($($tokens)*);
+    (name = $name:ident; config = $config:expr; targets = $($target:path),+ $(,)?) => {
+        criterion::criterion_group! {
+            name = $name;
+            config = ($config).with_measurement($crate::BenchMeasurement::from_env_or_exit());
+            targets = $($target),+
+        }
+    };
+    ($name:ident, $($target:path),+ $(,)?) => {
+        $crate::bench_group! {
+            name = $name;
+            config = criterion::Criterion::default();
+            targets = $($target),+
+        }
     };
 }
 
@@ -142,8 +166,7 @@ macro_rules! bench_main {
 }
 pub use gpui_shared_string::*;
 pub use gpui_util::arc_cow::ArcCow;
-/// HTTP client abstraction for making requests.
-pub mod http_client;
+pub use http_client;
 pub use input::*;
 pub use inspector::*;
 pub use interactive::*;
@@ -181,6 +204,7 @@ pub use util::{FutureExt, Timeout};
 pub use view::*;
 pub use window::*;
 
+#[cfg(not(target_family = "wasm"))]
 pub use pollster::block_on;
 
 /// The context trait, allows the different contexts in GPUI to be used

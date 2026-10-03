@@ -13,6 +13,7 @@ futures.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+zeroize.workspace = true
 gpui.workspace = true
 # GPUI-CE otherwise installs a no-op text system on macOS.
 gpui_platform = { workspace = true, features = ["font-kit"] }

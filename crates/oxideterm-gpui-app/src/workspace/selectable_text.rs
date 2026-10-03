@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use gpui::{
     AnyElement, App, Bounds, Context, CursorStyle, DispatchPhase, ElementId, Entity,
-    HitboxBehavior, Hsla, InteractiveElement, IntoColor, IntoElement, MouseButton, ParentElement,
-    Pixels, Point, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText,
-    TextAlign, TextLayout, TextRun, Timer, Window, canvas, div, font, point,
-    prelude::FluentBuilder, px, rgb, size,
+    HitboxBehavior, Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
+    Point, ScrollHandle, SharedString, StatefulInteractiveElement, Styled, StyledText, TextAlign,
+    TextLayout, TextRun, Timer, Window, canvas, div, font, point, prelude::FluentBuilder, px, rgb,
+    size,
 };
 use oxideterm_gpui_ui::{
     scroll::{ScrollableElement, vertical_scrollbar_layer},
@@ -641,8 +641,8 @@ impl WorkspaceApp {
         font_family: Option<SharedString>,
         alpha: f32,
     ) -> TextRun {
-        let mut color: Hsla = rgb(color).into_color();
-        color.alpha = alpha.clamp(0.0, 1.0);
+        let mut color: Hsla = rgb(color).into();
+        color.a = alpha.clamp(0.0, 1.0);
         TextRun {
             len: value.len(),
             font: font(font_family.unwrap_or_else(|| {
@@ -1122,7 +1122,7 @@ impl SelectableTextRenderState {
         let run = TextRun {
             len: text.len(),
             font: font(self.ui_font_family.clone()),
-            color: rgb(color).into_color(),
+            color: rgb(color).into(),
             background_color: None,
             underline: None,
             strikethrough: None,
@@ -1327,8 +1327,8 @@ impl SelectableTextRenderState {
 }
 
 fn selection_bg(accent: u32) -> Hsla {
-    let mut color: Hsla = rgb(accent).into_color();
-    color.alpha = 0.25;
+    let mut color: Hsla = rgb(accent).into();
+    color.a = 0.25;
     color
 }
 
