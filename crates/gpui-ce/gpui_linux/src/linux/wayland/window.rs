@@ -726,7 +726,7 @@ impl PresentationState {
 #[cfg(test)]
 mod tests {
     use super::{InProgressConfigure, PresentationState};
-    use gpui::{Tiling, px, size};
+    use gpui::{Tiling, WindowVisibility, px, size};
 
     #[test]
     fn floating_configure_restores_saved_size_only_on_open_or_unmaximize() {
@@ -749,6 +749,7 @@ mod tests {
                 fullscreen: false,
                 maximized: false,
                 resizing: false,
+                visibility: WindowVisibility::Visible,
                 tiling: Tiling::default(),
             };
             configure.resolve_size(initial, unmaximized, restored, px(10.0));
@@ -781,6 +782,7 @@ mod tests {
                 fullscreen,
                 maximized,
                 resizing: false,
+                visibility: WindowVisibility::Visible,
                 tiling,
             };
             configure.resolve_size(true, false, size(px(1100.0), px(720.0)), px(10.0));

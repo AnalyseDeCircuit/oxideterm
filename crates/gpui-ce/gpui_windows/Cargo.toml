@@ -52,6 +52,12 @@ version = "=0.3.7"
 default-features = false
 package = "gpui-pre"
 
+[dev-dependencies.gpui]
+version = "=0.3.7"
+default-features = false
+features = ["test-support"]
+package = "gpui-pre"
+
 [target.'cfg(target_os = "windows")'.dependencies.accesskit]
 version = "0.24.0"
 features = ["enumn"]
