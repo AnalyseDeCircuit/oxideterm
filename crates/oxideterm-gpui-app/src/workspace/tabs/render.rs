@@ -5,7 +5,6 @@ use super::helpers::{
 use super::*;
 
 use gpui::StatefulInteractiveElement;
-use oxideterm_gpui_ui::button::{ButtonRadius, IconButtonOptions};
 
 #[derive(Clone, Copy)]
 enum WelcomeToolAction {
@@ -217,7 +216,6 @@ impl WorkspaceApp {
             let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
             let middle_click_tooltip_id = tab_tooltip_id.clone();
             let close_button_tooltip_id = tab_tooltip_id.clone();
-            let tab_hover_background = self.workspace_chrome_background(theme.bg_hover);
             let tab_text_color = if active {
                 rgb(theme.text)
             } else if has_unread_terminal_output {
@@ -250,10 +248,6 @@ impl WorkspaceApp {
                     theme.bg
                 }))
                 .text_color(tab_text_color)
-                .cursor_pointer()
-                .when(!active && !drag_active, |tab| {
-                    tab.hover(move |tab| tab.bg(tab_hover_background))
-                })
                 .opacity(if is_being_dragged && drag_active {
                     0.5
                 } else {
@@ -344,36 +338,28 @@ impl WorkspaceApp {
                 )
                 .when(!show_reconnect_progress, |tab| {
                     tab.child(
-                        oxideterm_gpui_ui::button::icon_button(
-                            &self.tokens,
-                            Self::render_lucide_icon(
+                        div()
+                            .size(px(self.tokens.metrics.tab_close_button_size))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .text_color(rgb(theme.text_muted))
+                            .child(Self::render_lucide_icon(
                                 LucideIcon::X,
                                 self.tokens.metrics.tab_close_icon_size,
                                 rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.clear_workspace_tooltip(&close_button_tooltip_id, cx);
+                                    this.set_active_tab(tab_id, window, cx);
+                                    this.request_close_active_tab(window, cx);
+                                    cx.stop_propagation();
+                                }),
                             ),
-                            IconButtonOptions {
-                                hover_background: Some(rgb(if active {
-                                    theme.bg_hover
-                                } else {
-                                    theme.bg_panel
-                                })),
-                                ..IconButtonOptions::opaque_toolbar(
-                                    self.tokens.metrics.tab_close_button_size,
-                                    ButtonRadius::Sm,
-                                )
-                            },
-                        )
-                        .id(("workspace-tab-close", tab_id.0))
-                        .flex_none()
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, window, cx| {
-                                this.clear_workspace_tooltip(&close_button_tooltip_id, cx);
-                                this.set_active_tab(tab_id, window, cx);
-                                this.request_close_active_tab(window, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
                     )
                 });
             scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::horizontal_reveal(
