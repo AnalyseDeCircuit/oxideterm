@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub const WORKSPACE_STATUS_BAR_HEIGHT: f32 = 32.0;
+
 pub mod action_row;
 pub mod ai;
 pub mod badge;

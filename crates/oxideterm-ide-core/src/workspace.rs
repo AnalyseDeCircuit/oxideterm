@@ -163,6 +163,18 @@ impl IdeWorkspace {
         Ok(())
     }
 
+    pub fn select_tree_entries(
+        &mut self,
+        location: IdeLocation,
+        visible: &[IdeLocation],
+        additive: bool,
+        range: bool,
+    ) -> Result<(), WorkspaceError> {
+        self.ensure_project()?;
+        self.tree.select_entry(location, visible, additive, range);
+        Ok(())
+    }
+
     pub fn buffer(&self, tab_id: EditorTabId) -> Option<&EditorBuffer> {
         self.buffers.get(&tab_id)
     }

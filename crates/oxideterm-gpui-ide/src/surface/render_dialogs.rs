@@ -1027,7 +1027,13 @@ impl IdeSurface {
                                 self.labels.delete_confirm_title.clone(),
                             )),
                     )
-                    .child(dialog_description(tokens, confirm.name.clone())),
+                    .child(
+                        div()
+                            .id("ide-delete-targets")
+                            .max_h(px(160.0))
+                            .overflow_y_scroll()
+                            .child(dialog_description(tokens, confirm.name.clone())),
+                    ),
             )
             .child(details)
             .child(

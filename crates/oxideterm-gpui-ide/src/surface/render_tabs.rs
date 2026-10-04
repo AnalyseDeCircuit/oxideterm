@@ -340,6 +340,9 @@ impl IdeSurface {
         cx: &mut Context<Self>,
     ) {
         self.tab_context_menu = None;
+        if !self.workspace.file_tree().selection().contains(&location) {
+            let _ = self.workspace.select_tree_entry(Some(location.clone()));
+        }
         self.tree_context_menu = Some(TreeContextMenu {
             location,
             is_directory,
@@ -366,6 +369,7 @@ impl IdeSurface {
             .min(f32::from(viewport.height) - IDE_TREE_CONTEXT_MENU_MAX_HEIGHT - 8.0)
             .max(8.0);
         let remote_disabled = !self.remote_actions_ready();
+        let multiple = self.workspace.file_tree().selection().len() > 1;
         let paste_disabled = remote_disabled || self.tree_clipboard.is_none();
 
         let popup = div()
@@ -428,7 +432,7 @@ impl IdeSurface {
                 self.labels.context_rename.clone(),
                 Some("F2"),
                 false,
-                remote_disabled,
+                remote_disabled || multiple,
                 cx.listener({
                     let location = menu.location.clone();
                     let name = menu.name.clone();
@@ -532,7 +536,15 @@ impl IdeSurface {
                 false,
                 false,
                 cx.listener({
-                    let path = location_path(menu.location);
+                    let path = self
+                        .workspace
+                        .file_tree()
+                        .selection()
+                        .iter()
+                        .cloned()
+                        .map(location_path)
+                        .collect::<Vec<_>>()
+                        .join("\n");
                     move |this, _event, _window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(path.clone()));
                         this.tree_context_menu = None;

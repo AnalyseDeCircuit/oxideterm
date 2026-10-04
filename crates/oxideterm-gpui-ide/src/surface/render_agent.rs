@@ -19,7 +19,8 @@ impl IdeSurface {
             .unwrap_or_default();
 
         div()
-            .h(px(IDE_STATUS_BAR_HEIGHT))
+            .flex_none()
+            .h(px(oxideterm_gpui_ui::WORKSPACE_STATUS_BAR_HEIGHT))
             .px_2()
             .flex()
             .items_center()

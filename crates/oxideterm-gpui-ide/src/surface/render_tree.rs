@@ -281,6 +281,16 @@ impl IdeSurface {
                     .min_h_0()
                     .py_1()
                     .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            window.focus(&this.focus_handle, cx);
+                            let _ = this.workspace.select_tree_entry(None);
+                            this.tree_context_menu = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
                             this.open_tree_context_menu(
@@ -325,7 +335,13 @@ impl IdeSurface {
         }
 
         let row_count = rows.len();
-        let selected = self.workspace.file_tree().selected().cloned();
+        let selected = self
+            .workspace
+            .file_tree()
+            .selection()
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
         let loading_paths = Arc::new(self.loading_paths.clone());
         let tokens = self.tokens;
         let entity = cx.entity();
@@ -339,7 +355,7 @@ impl IdeSurface {
                     .map(|row| {
                         render_tree_row_virtual(
                             row,
-                            selected.as_ref(),
+                            &selected,
                             loading_paths.as_ref(),
                             &tokens,
                             entity.clone(),

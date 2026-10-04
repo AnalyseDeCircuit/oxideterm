@@ -24,6 +24,8 @@ pub struct FileTreeDirectorySnapshot {
 pub struct FileTreeState {
     expanded: HashSet<String>,
     selected: Option<IdeLocation>,
+    selection: Vec<IdeLocation>,
+    selection_anchor: Option<IdeLocation>,
     directories: HashMap<String, DirectoryState>,
     // Structural revision for GPUI virtualization caches. Selection is not
     // included because rows resolve selected state live during rendering.
@@ -58,7 +60,50 @@ impl FileTreeState {
     }
 
     pub fn set_selected(&mut self, location: Option<IdeLocation>) {
+        self.selection = location.iter().cloned().collect();
+        self.selection_anchor = location.clone();
         self.selected = location;
+    }
+
+    pub fn selection(&self) -> &[IdeLocation] {
+        &self.selection
+    }
+
+    pub fn select_entry(
+        &mut self,
+        location: IdeLocation,
+        visible: &[IdeLocation],
+        additive: bool,
+        range: bool,
+    ) {
+        if range
+            && let Some(anchor) = self.selection_anchor.as_ref()
+            && let (Some(start), Some(end)) = (
+                visible.iter().position(|entry| entry == anchor),
+                visible.iter().position(|entry| entry == &location),
+            )
+        {
+            if !additive {
+                self.selection.clear();
+            }
+            for entry in &visible[start.min(end)..=start.max(end)] {
+                if !self.selection.contains(entry) {
+                    self.selection.push(entry.clone());
+                }
+            }
+            self.selected = Some(location);
+        } else if additive {
+            if let Some(index) = self.selection.iter().position(|entry| entry == &location) {
+                self.selection.remove(index);
+                self.selected = self.selection.last().cloned();
+            } else {
+                self.selection.push(location.clone());
+                self.selected = Some(location.clone());
+            }
+            self.selection_anchor = Some(location);
+        } else {
+            self.set_selected(Some(location));
+        }
     }
 
     pub fn selected(&self) -> Option<&IdeLocation> {
@@ -92,11 +137,16 @@ impl FileTreeState {
     }
 
     pub fn clear(&mut self) {
-        if self.expanded.is_empty() && self.selected.is_none() && self.directories.is_empty() {
+        if self.expanded.is_empty()
+            && self.selection_anchor.is_none()
+            && self.directories.is_empty()
+        {
             return;
         }
         self.expanded.clear();
         self.selected = None;
+        self.selection.clear();
+        self.selection_anchor = None;
         self.directories.clear();
         self.bump_revision();
     }
@@ -137,6 +187,9 @@ impl FileTreeState {
             .collect();
         Self {
             expanded: snapshot.expanded.into_iter().collect(),
+            // Multi-selection is transient; the saved primary row remains the restore contract.
+            selection: snapshot.selected.iter().cloned().collect(),
+            selection_anchor: snapshot.selected.clone(),
             selected: snapshot.selected,
             directories,
             revision: 1,

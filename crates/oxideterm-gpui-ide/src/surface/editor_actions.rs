@@ -1085,6 +1085,38 @@ impl IdeSurface {
         }
     }
 
+    fn select_tree_row(
+        &mut self,
+        entry: FileTreeEntry,
+        modifiers: gpui::Modifiers,
+        cx: &mut Context<Self>,
+    ) {
+        if modifiers.platform || modifiers.control || modifiers.shift {
+            let Some(root) = self
+                .workspace
+                .snapshot()
+                .ok()
+                .map(|snapshot| snapshot.project.root)
+            else {
+                return;
+            };
+            let visible = self
+                .flatten_tree_rows(root)
+                .iter()
+                .map(|row| row.entry.location.clone())
+                .collect::<Vec<_>>();
+            let _ = self.workspace.select_tree_entries(
+                entry.location,
+                &visible,
+                modifiers.platform || modifiers.control,
+                modifiers.shift,
+            );
+            cx.notify();
+        } else {
+            self.open_tree_entry(entry, cx);
+        }
+    }
+
     fn open_tree_entry(&mut self, entry: FileTreeEntry, cx: &mut Context<Self>) {
         let _ = self
             .workspace
@@ -1373,15 +1405,25 @@ impl IdeSurface {
         if !self.ensure_remote_actions_ready(cx) {
             return;
         }
-        let affected = self.workspace.affected_tabs_under(&location);
+        let entries = self.tree_operation_entries(location, name, is_directory);
+        let affected = entries
+            .iter()
+            .flat_map(|entry| self.workspace.affected_tabs_under(&entry.location))
+            .collect::<HashSet<_>>();
         let unsaved_tab_count = affected
             .iter()
             .filter(|tab_id| self.is_tab_dirty(**tab_id, cx))
             .count();
         self.delete_confirm = Some(DeleteConfirmState {
-            location,
-            name,
-            is_directory,
+            name: entries
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>()
+                .join("\n"),
+            is_directory: entries
+                .iter()
+                .any(|entry| entry.kind == FileKind::Directory),
+            entries,
             affected_tab_count: affected.len(),
             unsaved_tab_count,
             deleting: false,
@@ -1399,11 +1441,10 @@ impl IdeSurface {
         if !self.ensure_remote_actions_ready(cx) {
             return;
         }
+        let entries = self.tree_operation_entries(location, name, is_directory);
         self.tree_clipboard = Some(TreeClipboardState {
             operation: TreeClipboardOperation::Copy,
-            location,
-            name,
-            is_directory,
+            entries,
         });
         cx.notify();
     }
@@ -1418,13 +1459,69 @@ impl IdeSurface {
         if !self.ensure_remote_actions_ready(cx) {
             return;
         }
+        let entries = self.tree_operation_entries(location, name, is_directory);
         self.tree_clipboard = Some(TreeClipboardState {
             operation: TreeClipboardOperation::Cut,
-            location,
-            name,
-            is_directory,
+            entries,
         });
         cx.notify();
+    }
+
+    fn tree_operation_entries(
+        &self,
+        location: IdeLocation,
+        name: String,
+        is_directory: bool,
+    ) -> Vec<FileTreeEntry> {
+        let tree = self.workspace.file_tree();
+        let mut entries = if tree.selection().contains(&location) {
+            tree.snapshot()
+                .directories
+                .into_iter()
+                .flat_map(|directory| directory.children)
+                .filter(|entry| tree.selection().contains(&entry.location))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if entries.is_empty() {
+            entries.push(FileTreeEntry {
+                location,
+                name,
+                kind: if is_directory {
+                    FileKind::Directory
+                } else {
+                    FileKind::File
+                },
+                version: SavedFileVersion::unknown(),
+            });
+        }
+        // A selected directory already owns its descendants during copy, move and delete.
+        let parents = entries
+            .iter()
+            .filter(|entry| entry.kind == FileKind::Directory)
+            .map(|entry| entry.location.clone())
+            .collect::<Vec<_>>();
+        entries.retain(|entry| {
+            !parents.iter().any(|parent| {
+                parent != &entry.location
+                    && match (parent, &entry.location) {
+                        (
+                            IdeLocation::Remote {
+                                node_id: parent_node,
+                                path: parent_path,
+                            },
+                            IdeLocation::Remote { node_id, path },
+                        ) => parent_node == node_id && remote_path_contains_path(parent_path, path),
+                        (IdeLocation::Local { path: parent }, IdeLocation::Local { path }) => {
+                            path.starts_with(parent)
+                        }
+                        _ => false,
+                    }
+            })
+        });
+        entries.sort_by(|left, right| left.location.stable_key().cmp(&right.location.stable_key()));
+        entries
     }
 
     fn paste_tree_clipboard(
@@ -1444,45 +1541,74 @@ impl IdeSurface {
         else {
             return;
         };
-        let (source_node_id, source_path) = match &clipboard.location {
-            IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
-            IdeLocation::Local { .. } => return,
-        };
-        if source_node_id != node_id {
-            self.last_error = Some("Cannot paste between different remote connections".to_string());
-            cx.notify();
-            return;
+        let mut jobs = Vec::new();
+        for entry in &clipboard.entries {
+            let IdeLocation::Remote {
+                node_id: source_node_id,
+                path: source_path,
+            } = &entry.location
+            else {
+                return;
+            };
+            if source_node_id != &node_id {
+                self.last_error =
+                    Some("Cannot paste between different remote connections".to_string());
+                cx.notify();
+                return;
+            }
+            let target_path = join_remote_child(&target_dir, &entry.name);
+            if normalize_remote_path(source_path) == normalize_remote_path(&target_path) {
+                continue;
+            }
+            if entry.kind == FileKind::Directory
+                && remote_path_contains_path(source_path, &target_path)
+            {
+                self.last_error = Some("Cannot paste a directory into itself".to_string());
+                cx.notify();
+                return;
+            }
+            jobs.push((entry.location.clone(), source_path.clone(), target_path));
         }
-        let target_path = join_remote_child(&target_dir, &clipboard.name);
-        if normalize_remote_path(&source_path) == normalize_remote_path(&target_path) {
-            return;
-        }
-        if clipboard.is_directory && remote_path_contains_path(&source_path, &target_path) {
-            self.last_error = Some("Cannot paste a directory into itself".to_string());
-            cx.notify();
+        if jobs.is_empty() {
             return;
         }
 
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
         let generation = self.generation;
-        let source_parent = parent_remote_path(&source_path);
+        let operation = clipboard.operation;
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
-            let result = await_ide_backend(backend_runtime.spawn({
+            let delivery = await_ide_backend(backend_runtime.spawn({
                 let node_id = node_id.clone();
-                let source_path = source_path.clone();
-                let target_path = target_path.clone();
                 async move {
-                    match clipboard.operation {
-                        TreeClipboardOperation::Copy => {
-                            fs.copy_item(node_id, source_path, target_path).await
+                    let mut completed = Vec::new();
+                    for (location, source_path, target_path) in jobs {
+                        let result = match operation {
+                            TreeClipboardOperation::Copy => {
+                                fs.copy_item(
+                                    node_id.clone(),
+                                    source_path.clone(),
+                                    target_path.clone(),
+                                )
+                                .await
+                            }
+                            TreeClipboardOperation::Cut => {
+                                fs.rename_item(
+                                    node_id.clone(),
+                                    source_path.clone(),
+                                    target_path.clone(),
+                                )
+                                .await
+                            }
+                        };
+                        if let Err(error) = result {
+                            return Ok((completed, Some(error)));
                         }
-                        TreeClipboardOperation::Cut => {
-                            fs.rename_item(node_id, source_path, target_path).await
-                        }
+                        completed.push((location, source_path, target_path));
                     }
+                    Ok((completed, None))
                 }
             }))
             .await;
@@ -1490,27 +1616,41 @@ impl IdeSurface {
                 if this.generation != generation {
                     return;
                 }
-                match result {
-                    Ok(()) => {
-                        if clipboard.operation == TreeClipboardOperation::Cut {
-                            let new_location =
-                                IdeLocation::remote(source_node_id.clone(), target_path.clone());
-                            if let Err(error) =
-                                this.workspace.rename_tabs_under(&clipboard.location, &new_location)
-                            {
-                                this.last_error = Some(error.to_string());
+                match delivery {
+                    Ok((completed, error)) => {
+                        let mut refresh = HashSet::from([target_dir]);
+                        for (location, source_path, target_path) in &completed {
+                            if operation == TreeClipboardOperation::Cut {
+                                let new_location =
+                                    IdeLocation::remote(node_id.clone(), target_path.clone());
+                                if let Err(error) =
+                                    this.workspace.rename_tabs_under(location, &new_location)
+                                {
+                                    this.last_error = Some(error.to_string());
+                                }
+                                refresh.insert(parent_remote_path(source_path));
                             }
-                            this.tree_clipboard = None;
+                        }
+                        if operation == TreeClipboardOperation::Cut
+                            && this.tree_clipboard.as_ref() == Some(&clipboard)
+                        {
+                            let mut remaining = clipboard;
+                            remaining.entries.retain(|entry| {
+                                !completed
+                                    .iter()
+                                    .any(|(location, _, _)| location == &entry.location)
+                            });
+                            this.tree_clipboard =
+                                (!remaining.entries.is_empty()).then_some(remaining);
+                            let _ = this.workspace.select_tree_entry(None);
+                        }
+                        if let Some(error) = error {
+                            this.last_error = Some(this.file_error_message(&error));
                         }
                         this.clear_search_cache();
-                        this.load_directory(
-                            IdeLocation::remote(source_node_id.clone(), target_dir),
-                            None,
-                            cx,
-                        );
-                        if source_parent != parent_remote_path(&target_path) {
+                        for path in refresh {
                             this.load_directory(
-                                IdeLocation::remote(source_node_id, source_parent),
+                                IdeLocation::remote(node_id.clone(), path),
                                 None,
                                 cx,
                             );
@@ -1819,55 +1959,82 @@ impl IdeSurface {
         if confirm.deleting || confirm.unsaved_tab_count > 0 {
             return;
         }
-        let (node_id, path) = match &confirm.location {
-            IdeLocation::Remote { node_id, path } => (node_id.clone(), path.clone()),
-            IdeLocation::Local { .. } => return,
-        };
         self.sync_all_editors(cx);
-        match self.workspace.close_clean_tabs_under(&confirm.location) {
-            Ok(closed_tabs) => {
-                for tab_id in closed_tabs {
-                    self.editors.remove(&tab_id);
+        confirm.unsaved_tab_count = confirm
+            .entries
+            .iter()
+            .flat_map(|entry| self.workspace.affected_tabs_under(&entry.location))
+            .collect::<HashSet<_>>()
+            .iter()
+            .filter(|tab| self.is_tab_dirty(**tab, cx))
+            .count();
+        if confirm.unsaved_tab_count > 0 {
+            self.delete_confirm = Some(confirm);
+            cx.notify();
+            return;
+        }
+        for entry in &confirm.entries {
+            match self.workspace.close_clean_tabs_under(&entry.location) {
+                Ok(closed_tabs) => {
+                    for tab_id in closed_tabs {
+                        self.editors.remove(&tab_id);
+                    }
                 }
-            }
-            Err(error) => {
-                self.last_error = Some(error.to_string());
-                self.delete_confirm = None;
-                cx.notify();
-                return;
+                Err(error) => {
+                    self.last_error = Some(error.to_string());
+                    self.delete_confirm = None;
+                    cx.notify();
+                    return;
+                }
             }
         }
         confirm.deleting = true;
         self.delete_confirm = Some(confirm.clone());
         let fs = self.fs.clone();
         let backend_runtime = self.backend_runtime.clone();
-        let parent_path = parent_remote_path(&path);
+        let parents = confirm
+            .entries
+            .iter()
+            .filter_map(|entry| match &entry.location {
+                IdeLocation::Remote { node_id, path } => {
+                    Some((node_id.clone(), parent_remote_path(path)))
+                }
+                IdeLocation::Local { .. } => None,
+            })
+            .collect::<HashSet<_>>();
         let root_path = self.root_path.clone();
         let generation = self.generation;
         cx.notify();
 
         cx.spawn(async move |weak, cx| {
             let result = await_ide_backend(backend_runtime.spawn(async move {
-                fs.delete_item(node_id, path, confirm.is_directory).await
+                for entry in confirm.entries {
+                    if let IdeLocation::Remote { node_id, path } = entry.location {
+                        fs.delete_item(node_id, path, entry.kind == FileKind::Directory)
+                            .await?;
+                    }
+                }
+                Ok(())
             }))
             .await;
             let _ = weak.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
                 }
+                // Earlier items may have succeeded before a later deletion failed.
+                this.clear_search_cache();
+                this.delete_confirm = None;
+                let _ = this.workspace.select_tree_entry(None);
+                for (node_id, path) in parents {
+                    this.load_directory(IdeLocation::remote(node_id, path), None, cx);
+                }
                 match result {
                     Ok(()) => {
-                        this.clear_search_cache();
-                        this.delete_confirm = None;
-                        if let Some(node_id) = this.node_id.clone() {
-                            this.load_directory(IdeLocation::remote(node_id, parent_path), None, cx);
-                        }
                         if root_path.as_deref() == this.root_path.as_deref() {
                             this.start_agent_watch_if_ready(cx);
                         }
                     }
                     Err(error) => {
-                        this.delete_confirm = None;
                         this.last_error = Some(this.file_error_message(&error));
                     }
                 }

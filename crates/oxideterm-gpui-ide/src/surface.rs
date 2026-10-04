@@ -56,7 +56,6 @@ const IDE_TREE_MIN_WIDTH: f32 = 200.0;
 const IDE_TREE_MAX_WIDTH: f32 = 500.0;
 // The project header and editor tab strip share one workspace chrome baseline.
 const IDE_WORKSPACE_HEADER_HEIGHT: f32 = 36.0;
-const IDE_STATUS_BAR_HEIGHT: f32 = 24.0;
 const IDE_TAB_PADDING_X: f32 = 12.0;
 const IDE_TAB_PADDING_Y: f32 = 6.0;
 const IDE_ICON_SIZE: f32 = 16.0;
@@ -359,7 +358,7 @@ struct IdeMarkedText {
 
 #[derive(Clone, Debug, PartialEq)]
 struct DeleteConfirmState {
-    location: IdeLocation,
+    entries: Vec<FileTreeEntry>,
     name: String,
     is_directory: bool,
     affected_tab_count: usize,
@@ -376,9 +375,7 @@ enum TreeClipboardOperation {
 #[derive(Clone, Debug, PartialEq)]
 struct TreeClipboardState {
     operation: TreeClipboardOperation,
-    location: IdeLocation,
-    name: String,
-    is_directory: bool,
+    entries: Vec<FileTreeEntry>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
