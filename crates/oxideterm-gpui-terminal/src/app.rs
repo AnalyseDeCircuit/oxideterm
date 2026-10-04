@@ -24,7 +24,7 @@ use oxideterm_terminal::{
     GraphicsOptions, KittyFileTransmissionControl, LocalPtyConfig, SerialControlLine,
     SerialControlState, SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode,
     SerialSessionConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig,
-    TelnetSessionConfig, TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TelnetSessionConfig, TermMode, TerminalCell, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
     TerminalCwdIntegrationLaunchState, TerminalDrainBudget, TerminalDrainReport,
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
@@ -4439,7 +4439,13 @@ fn trim_row_timestamp_history(
 fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
     let mut hasher = DefaultHasher::new();
     row.wrapped.hash(&mut hasher);
-    for cell in row.cells.iter() {
+    // Ignore unstyled trailing padding so a grid resize does not restamp output.
+    // Styled blanks and links remain part of the content signature.
+    let content_end = row.cells.iter().rposition(terminal_cell_has_content);
+    let Some(content_end) = content_end else {
+        return hasher.finish();
+    };
+    for cell in &row.cells[..=content_end] {
         cell.ch.hash(&mut hasher);
         cell.zerowidth().hash(&mut hasher);
         cell.wide.hash(&mut hasher);
@@ -4452,9 +4458,17 @@ fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
 }
 
 fn terminal_row_has_timestamp_content(row: &TerminalRow) -> bool {
-    row.cells
-        .iter()
-        .any(|cell| !cell.ch.is_whitespace() || !cell.zerowidth().is_empty())
+    row.cells.iter().any(terminal_cell_has_content)
+}
+
+/// Explicit styling and links distinguish meaningful blanks from grid padding.
+fn terminal_cell_has_content(cell: &TerminalCell) -> bool {
+    !cell.ch.is_whitespace()
+        || !cell.zerowidth().is_empty()
+        || cell.style_origin.foreground_explicit()
+        || cell.style_origin.background_explicit()
+        || cell.attrs != Default::default()
+        || cell.hyperlink().is_some()
 }
 
 fn hex_color(color: u32) -> String {
@@ -5798,14 +5812,52 @@ mod tests {
             Some("10:00:03")
         );
 
+        // Showing or hiding the timestamp gutter reserves columns and resizes
+        // the grid; the wider row must keep the label of the unchanged content.
+        let wider_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "pwd        "));
+        record_timestampable_snapshot_rows(&mut store, &wider_snapshot, "10:00:04");
+        assert_eq!(
+            store.get(42).map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:03"),
+            "a width-only change must not re-stamp an unchanged row"
+        );
+        assert_eq!(
+            store.get(42).map(|timestamp| timestamp.source_signature),
+            Some(wider_snapshot.lines[0].signature),
+            "the cheap invalidation key still follows the snapshot"
+        );
+
         let label = terminal_timestamp_label(1, 2, 3, 4);
         assert_eq!(label, "[01:02:03.004]");
         assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
 
         let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
-        record_timestampable_snapshot_rows(&mut store, &cleared_snapshot, "10:00:04");
+        record_timestampable_snapshot_rows(&mut store, &cleared_snapshot, "10:00:05");
 
         assert!(!store.entries.contains_key(&42));
+    }
+
+    #[test]
+    fn row_timestamps_track_styled_trailing_spaces() {
+        for style in ["\x1b[41m", "\x1b[4m", "\x1b]8;;https://example.com\x07"] {
+            let mut terminal =
+                TerminalSession::recording_playback(12, 1, GraphicsOptions::default(), 10);
+            terminal.feed_recording_output(b"pwd   ");
+            let initial = terminal.snapshot();
+            let key = terminal_row_timestamp_identity(&initial.lines[0]);
+            let mut store = TerminalRowTimestampStore::default();
+            record_timestampable_snapshot_rows(&mut store, &initial, "old");
+
+            terminal.feed_recording_output(b"\x1b[1;4H");
+            terminal.feed_recording_output(style.as_bytes());
+            terminal.feed_recording_output(b" \x1b[0m\x1b]8;;\x07");
+            record_timestampable_snapshot_rows(&mut store, &terminal.snapshot(), "styled");
+            assert_eq!(store.get(key).unwrap().label, "styled", "{style:?}");
+
+            terminal.feed_recording_output(b"\x1b[1;4H ");
+            record_timestampable_snapshot_rows(&mut store, &terminal.snapshot(), "cleared");
+            assert_eq!(store.get(key).unwrap().label, "cleared", "{style:?}");
+        }
     }
 
     #[test]
