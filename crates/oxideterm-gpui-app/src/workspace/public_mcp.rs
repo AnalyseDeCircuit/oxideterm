@@ -2957,6 +2957,7 @@ fn public_command_error(error: SshTransportError) -> String {
             "SSH algorithm negotiation failed".to_owned()
         }
         SshTransportError::ConnectionFailed(_)
+        | SshTransportError::Protocol(_)
         | SshTransportError::PreflightComplete
         | SshTransportError::Channel(_) => "The remote command could not be completed".to_owned(),
     }

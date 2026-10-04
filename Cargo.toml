@@ -102,7 +102,7 @@ gpui-pre-windows = { path = "crates/gpui-ce/gpui_windows" }
 gpui-pre-linux = { path = "crates/gpui-ce/gpui_linux" }
 gpui-pre-wgpu = { path = "crates/gpui-ce/gpui_wgpu" }
 # Keep the SSH protocol fork independent from application lint and test targets.
-russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "58542ed1045f033abeca4a91164109ab18d9304a" }
+russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "df41ee42819999db363e67309bbde0955a43e693" }
 russh-sftp = { path = "crates/russh-sftp" }
 vte = { path = "crates/vte" }
 

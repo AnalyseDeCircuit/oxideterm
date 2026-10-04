@@ -324,8 +324,90 @@ impl NativeClientHandler {
     }
 }
 
+fn ssh_protocol_diagnostic(error: &russh::Error) -> String {
+    // Preserve protocol types and numeric details, never plugin/server text,
+    // custom I/O messages, key material, or task panic payloads.
+    match error {
+        russh::Error::IO(error) => {
+            format!("io: {:?}, os_code={:?}", error.kind(), error.raw_os_error())
+        }
+        russh::Error::SshEncoding(error) => match error {
+            ssh_encoding::Error::CharacterEncoding
+            | ssh_encoding::Error::Length
+            | ssh_encoding::Error::MpintEncoding
+            | ssh_encoding::Error::Overflow
+            | ssh_encoding::Error::TrailingData { .. }
+            | ssh_encoding::Error::InvalidDiscriminant(_) => format!("encoding: {error}"),
+            _ => "encoding: invalid encoded value".into(),
+        },
+        russh::Error::CouldNotReadKey
+        | russh::Error::KexInit
+        | russh::Error::UnknownAlgo
+        | russh::Error::Version
+        | russh::Error::Kex
+        | russh::Error::PacketAuth
+        | russh::Error::Inconsistent
+        | russh::Error::NotAuthenticated
+        | russh::Error::UnsupportedAuthMethod
+        | russh::Error::IndexOutOfBounds
+        | russh::Error::UnknownKey
+        | russh::Error::WrongServerSig
+        | russh::Error::PacketSize(_)
+        | russh::Error::WrongChannel
+        | russh::Error::ChannelOpenFailure(_)
+        | russh::Error::Disconnect
+        | russh::Error::NoHomeDir
+        | russh::Error::KeyChanged { .. }
+        | russh::Error::HUP
+        | russh::Error::ConnectionTimeout
+        | russh::Error::KeepaliveTimeout
+        | russh::Error::InactivityTimeout
+        | russh::Error::NoAuthMethod
+        | russh::Error::SendError
+        | russh::Error::Pending
+        | russh::Error::DecryptionError
+        | russh::Error::RequestDenied
+        | russh::Error::Utf8(_)
+        | russh::Error::Elapsed(_)
+        | russh::Error::StrictKeyExchangeViolation { .. }
+        | russh::Error::RecvError => error.to_string(),
+        russh::Error::NoCommonAlgo { kind, .. } => format!("no common {kind:?} algorithm"),
+        russh::Error::Keys(_) | russh::Error::SshKey(_) => "key_error".into(),
+        russh::Error::Signature(_) => "signature_error".into(),
+        russh::Error::Join(_) => "session_task_failure".into(),
+        russh::Error::InvalidConfig(_) => "invalid_configuration".into(),
+        russh::Error::Compress(_) => "compression_error".into(),
+        russh::Error::Decompress(_) => "decompression_error".into(),
+    }
+}
+
 impl client::Handler for NativeClientHandler {
     type Error = SshTransportError;
+
+    async fn disconnected(
+        &mut self,
+        reason: client::DisconnectReason<Self::Error>,
+    ) -> Result<(), Self::Error> {
+        match reason {
+            client::DisconnectReason::ReceivedDisconnect(info) => {
+                // Server descriptions may contain arbitrary text; log only the protocol code.
+                let _message = Zeroizing::new(info.message);
+                let _language = Zeroizing::new(info.lang_tag);
+                tracing::warn!(reason = ?info.reason_code, "SSH server disconnected shared transport");
+                Ok(())
+            }
+            client::DisconnectReason::Error(error) => {
+                let cause = match &error {
+                    SshTransportError::Protocol(source) => ssh_protocol_diagnostic(source),
+                    SshTransportError::ConnectionFailed(_) => "connection_error".into(),
+                    SshTransportError::Channel(_) => "channel_error".into(),
+                    _ => "handshake_error".into(),
+                };
+                tracing::warn!(cause, "SSH client stopped shared transport");
+                Err(error)
+            }
+        }
+    }
 
     fn kex_done(
         &mut self,

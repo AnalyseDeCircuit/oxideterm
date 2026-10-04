@@ -10559,7 +10559,7 @@ dependencies = [
 [[package]]
 name = "russh"
 version = "0.63.0"
-source = "git+https://github.com/AnalyseDeCircuit/russh?rev=58542ed1045f033abeca4a91164109ab18d9304a#58542ed1045f033abeca4a91164109ab18d9304a"
+source = "git+https://github.com/AnalyseDeCircuit/russh?rev=df41ee42819999db363e67309bbde0955a43e693#df41ee42819999db363e67309bbde0955a43e693"
 dependencies = [
  "aes 0.9.1",
  "aws-lc-rs",
