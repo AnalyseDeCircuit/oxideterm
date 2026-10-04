@@ -567,6 +567,7 @@ impl WorkspaceApp {
             _tab_host_subscription: tab_host_subscription,
             search: actions::TerminalSearchState::default(),
             terminal_recording_menu_open: false,
+            terminal_toolbar_menu: None,
             terminal_highlight_popover_open: false,
             terminal_trigger_settings_pane: None,
             terminal_trigger_shell_confirmation_pending: false,

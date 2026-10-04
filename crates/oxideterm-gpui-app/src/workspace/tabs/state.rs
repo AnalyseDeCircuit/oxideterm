@@ -76,6 +76,11 @@ impl WorkspaceApp {
         cx: &mut App,
     ) {
         if previous_active_tab_id != active_tab_id {
+            self.dismiss_terminal_toolbar_menu();
+            self.terminal_recording_menu_open = false;
+            self.terminal_highlight_popover_open = false;
+            self.terminal
+                .update(cx, |terminal, _| terminal.dismiss_broadcast_menu());
             if let Some(tab_id) = previous_active_tab_id {
                 self.sync_ide_surface_mount(tab_id, cx);
                 self.sync_remote_desktop_frame_visibility(tab_id, cx);

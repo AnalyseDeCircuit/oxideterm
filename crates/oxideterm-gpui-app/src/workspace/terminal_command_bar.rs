@@ -37,6 +37,8 @@ mod git;
 mod highlight;
 mod privilege;
 mod sender;
+mod toolbar;
+pub(in crate::workspace) use toolbar::{TerminalToolbarMenu, TerminalToolbarMenuState};
 
 const TERMINAL_BROADCAST_MENU_WIDTH: f32 = 340.0;
 const TERMINAL_BROADCAST_MENU_MAX_HEIGHT: f32 = 520.0;

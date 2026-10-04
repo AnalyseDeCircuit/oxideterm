@@ -608,10 +608,9 @@ impl WorkspaceApp {
                     | SelectAnchorId::AiContextPopover
                     | SelectAnchorId::AiAutocomplete
             ) && self.has_ai_sidebar_floating_overlay(cx))
-            || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
+            || (anchor.id == SelectAnchorId::TerminalToolsMenu
                 && self.terminal.read(cx).broadcast_menu_open())
-            || (anchor.id == SelectAnchorId::TerminalCommandBar
-                && self.terminal.read(cx).quick_commands.is_open())
+            || anchor.id == SelectAnchorId::TerminalCommandBar
             || (anchor.id == SelectAnchorId::TerminalCwdMenu
                 && self.terminal.read(cx).cwd_picker_open())
             || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
@@ -1686,6 +1685,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
     matches!(
         anchor_id,
         SelectAnchorId::ActiveSessionSort
+            | SelectAnchorId::TerminalToolsMenu
             | SelectAnchorId::AuditCategory
             | SelectAnchorId::AuditSeverity
             | SelectAnchorId::AuditSource
@@ -1724,11 +1724,6 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             | SelectAnchorId::NewConnectionSerialParity
             | SelectAnchorId::NewConnectionSerialFlowControl
             | SelectAnchorId::IdeAgentStatus
-            // Broadcast targets are rendered through the root backdrop, but
-            // Tauri/Radix positions them from the trigger button. Keep the
-            // closed trigger rect warm so the first pointer-down opens at the
-            // command-bar/tabbar button even when the AI sidebar changes root width.
-            | SelectAnchorId::TerminalBroadcastMenu
             // Quick Commands uses Tauri's `min(860px, calc(100% - 1.5rem))`
             // width against the command bar. Keep the bar rect warm so the
             // first open and later resizes can compute the same adaptive width.

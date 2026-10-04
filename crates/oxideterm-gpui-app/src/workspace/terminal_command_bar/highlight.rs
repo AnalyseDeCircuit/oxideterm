@@ -8,7 +8,6 @@ use oxideterm_settings_model::TerminalSettingsPage;
 
 // Hallmark · pre-emit critique: P4 H5 E4 S5 R5 V4
 const TERMINAL_HIGHLIGHT_POPOVER_WIDTH: f32 = 340.0;
-const TERMINAL_HIGHLIGHT_POPOVER_BOTTOM: f32 = 44.0;
 const TERMINAL_HIGHLIGHT_CHOICES_MAX_HEIGHT: f32 = 180.0;
 const TERMINAL_HIGHLIGHT_SECTIONS_MAX_HEIGHT: f32 = 400.0;
 
@@ -149,6 +148,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_terminal_highlight_popover(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_toolbar_menu();
         self.terminal_highlight_popover_open = !self.terminal_highlight_popover_open;
         if self.terminal_highlight_popover_open {
             self.blur_terminal_quick_commands_input(cx);
@@ -349,12 +349,6 @@ impl WorkspaceApp {
         });
         let saved_profile_id = self.active_terminal_saved_profile_id(cx);
         let settings = self.settings_store.settings();
-        let anchor_left = self
-            .select_anchors
-            .get(&SelectAnchorId::TerminalHighlightRuleSet)
-            .map(|anchor| {
-                (f32::from(anchor.bounds.right()) - TERMINAL_HIGHLIGHT_POPOVER_WIDTH).max(12.0)
-            });
         let mut choices = div().w_full().flex().flex_col();
         let inherited_selected = session_rule_set_id.is_none();
         choices = choices.child(self.terminal_highlight_choice_row(
@@ -638,7 +632,9 @@ impl WorkspaceApp {
 
         let sections = div()
             .w_full()
-            .max_h(px(TERMINAL_HIGHLIGHT_SECTIONS_MAX_HEIGHT))
+            .max_h(px(TERMINAL_HIGHLIGHT_SECTIONS_MAX_HEIGHT.min(
+                (self.terminal_toolbar_popup_available_height() - 60.0).max(40.0),
+            )))
             .overflow_y_scrollbar()
             .flex()
             .flex_col()
@@ -650,12 +646,17 @@ impl WorkspaceApp {
             .child(self.card_separator())
             .child(selection_section);
 
-        context_menu_event_boundary({
-            let popover = div()
+        context_menu_event_boundary(
+            div()
                 .absolute()
-                .bottom(px(TERMINAL_HIGHLIGHT_POPOVER_BOTTOM))
+                .bottom_full()
+                .mb(px(4.0))
+                .right(px(8.0))
                 .w(px(TERMINAL_HIGHLIGHT_POPOVER_WIDTH))
-                .max_h(px(460.0))
+                .max_w_full()
+                .max_h(px(
+                    460.0_f32.min(self.terminal_toolbar_popup_available_height())
+                ))
                 .overflow_hidden()
                 .rounded(px(self.tokens.radii.lg))
                 .border_1()
@@ -663,13 +664,8 @@ impl WorkspaceApp {
                 .bg(rgba((theme.bg_elevated << 8) | 0xf7))
                 .shadow_lg()
                 .p(px(8.0))
-                .text_size(px(12.0));
-            if let Some(left) = anchor_left {
-                popover.left(px(left))
-            } else {
-                popover.right(px(12.0))
-            }
-        })
+                .text_size(px(12.0)),
+        )
         .child(
             div()
                 .px(px(8.0))

@@ -1026,7 +1026,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let mut changed = false;
+        let mut changed = self.dismiss_terminal_toolbar_menu();
 
         // Radix ContextMenu uses one close policy for outside pointer and Esc.
         // Keep all native context-menu owners here so feature handlers do not

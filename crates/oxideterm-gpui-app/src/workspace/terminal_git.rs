@@ -756,6 +756,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_terminal_git_branch_picker(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_toolbar_menu();
         let Some(key) = self.active_terminal_git_key(cx) else {
             return;
         };

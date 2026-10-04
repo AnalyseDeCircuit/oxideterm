@@ -762,6 +762,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.dismiss_terminal_toolbar_menu() {
+            cx.notify();
+            return true;
+        }
         if self.dismiss_terminal_recording_menu() {
             cx.notify();
             return true;
@@ -880,6 +884,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn toggle_terminal_broadcast_menu(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_toolbar_menu();
         // Opening the broadcast target menu replaces sibling terminal command
         // popovers, matching browser overlay ownership where only one floating
         // command surface receives pointer/wheel events at a time.

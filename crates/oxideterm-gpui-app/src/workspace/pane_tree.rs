@@ -1141,6 +1141,7 @@ impl WorkspaceApp {
                             let pane_id = *pane_id;
                             move |this, _event, window, cx| {
                                 // Release logical input ownership before focusing the native pane.
+                                this.close_terminal_command_overlays(cx);
                                 this.blur_text_inputs(cx);
                                 if let Some(tab_id) = tab_id {
                                     this.release_remote_desktop_inputs_for_tab(tab_id, cx);

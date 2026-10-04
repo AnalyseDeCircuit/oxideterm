@@ -45,6 +45,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_terminal_project_panel(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_toolbar_menu();
         let Some(key) = self.active_terminal_project_key(cx) else {
             return;
         };

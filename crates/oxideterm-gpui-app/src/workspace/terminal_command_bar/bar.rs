@@ -8,139 +8,67 @@ use oxideterm_gpui_ui::dropdown_menu::{
 };
 
 const TERMINAL_RECORDING_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_RECORDING_MENU_BOTTOM: f32 = 30.0;
 
 impl WorkspaceApp {
     pub(super) fn render_terminal_command_bar(&self, cx: &mut Context<Self>) -> AnyElement {
-        const COMMAND_BAR_BG_ALPHA: u32 = 0xf2; // Tauri bg-theme-bg/95
-        const COMMAND_BAR_BORDER_ALPHA: u32 = 0xb3; // Tauri border-theme-border/70
-
         let theme = self.tokens.ui;
-        let command_bar_background = if self.window_background_preferences().is_some() {
-            self.workspace_chrome_background(theme.bg)
-        } else {
-            rgba((theme.bg << 8) | COMMAND_BAR_BG_ALPHA)
-        };
         let workspace = cx.entity();
-        // The visible chip and completion providers share Tauri's target-label
-        // inference so local shells that are currently inside SSH show the
-        // remote identity consistently in both places.
+        let sender_visible = self.terminal_command_sender.read(cx).is_visible();
         let target_label = self.terminal_command_active_target_label(cx);
-        let cwd_display_enabled = self.terminal_current_directory_awareness_enabled()
+        let target_is_local = self.active_terminal_kind(cx)
+            == Some(oxideterm_terminal::TerminalSessionKind::LocalPty)
+            && target_label == self.i18n.t("terminal.command_bar.local_shell");
+        let cwd_enabled = self.terminal_current_directory_awareness_enabled()
             && self
                 .settings_store
                 .settings()
                 .terminal
                 .command_bar
                 .show_current_directory;
-        let cwd_snapshot = cwd_display_enabled
+        let cwd_supported = cwd_enabled && self.active_terminal_cwd_scope_and_pane(cx).is_some();
+        let cwd = cwd_enabled
             .then(|| self.active_terminal_cwd_snapshot(cx))
             .flatten();
-        let cwd_supported =
-            cwd_display_enabled && self.active_terminal_cwd_scope_and_pane(cx).is_some();
-        let git_snapshot = self.active_terminal_git_snapshot(cx);
-        let project_tasks_enabled = self.terminal_project_tasks_enabled();
-        let project_snapshot = project_tasks_enabled
+        let git = self.active_terminal_git_snapshot(cx);
+        let project = self
+            .terminal_project_tasks_enabled()
             .then(|| self.active_terminal_project_snapshot(cx))
             .flatten();
-        let active_pane_id = self.active_pane_id(cx);
-        let is_local_terminal = self.active_terminal_kind(cx)
-            == Some(oxideterm_terminal::TerminalSessionKind::LocalPty);
-        let split_controls_visible = matches!(
+        // Use the terminal surface width, not the window width: sidebars share the window.
+        let compact = self
+            .select_anchors
+            .get(&SelectAnchorId::TerminalCommandBar)
+            .is_some_and(|anchor| f32::from(anchor.bounds.size.width) < 640.0);
+        let has_context = cwd_supported || git.is_some() || project.is_some();
+        let split_visible = matches!(
             self.active_terminal_kind(cx),
             Some(
                 oxideterm_terminal::TerminalSessionKind::LocalPty
                     | oxideterm_terminal::TerminalSessionKind::SshPty
             )
         );
-        let can_configure_remote_integration = self.active_ssh_terminal_node_id(cx).is_some();
-        let remote_integration_pending = self.remote_shell_integration_pending(cx);
-        let remote_integration_tooltip_id = "terminal-command-configure-directory-tracking";
-        let remote_integration_tooltip_title = self
-            .i18n
-            .t("settings_view.connections.shell_integration.toolbar_action");
-        let target_indicator_is_local =
-            is_local_terminal && target_label == self.i18n.t("terminal.command_bar.local_shell");
-        let can_split = self.can_split_active_pane(cx);
-        let broadcast_targets =
-            self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)), cx);
-        let broadcast_enabled = active_pane_id
-            .and_then(|pane| self.terminal.read(cx).sync_groups().member(pane))
-            .is_some_and(|member| {
-                !member.isolated && self.terminal.read(cx).sync_groups().enabled(member.group)
-            });
-        let broadcast_label = if broadcast_enabled {
-            broadcast_targets.len().to_string()
-        } else {
-            String::new()
-        };
-        let quick_commands_enabled = self
-            .settings_store
-            .settings()
-            .terminal
-            .command_bar
-            .quick_commands_enabled;
-        let quick_commands_open = self.terminal.read(cx).quick_commands.is_open();
-        let (command_sender_visible, command_sender_expanded, command_sender_running_count) = {
-            let sender = self.terminal_command_sender.read(cx);
-            (
-                sender.is_visible(),
-                sender.is_expanded(),
-                sender.running_count(),
-            )
-        };
-        let recording_status = self.active_terminal_recording_status(cx);
-        let recording_active = recording_status.state != TerminalRecordingState::Idle;
-        let session_log_active =
-            self.active_terminal_session_log_status(cx).state != TerminalSessionLogState::Idle;
-        let timestamps_active = self.active_terminal_timestamps_enabled(cx);
-        let highlight_override_active = self.active_terminal_highlight_override(cx);
-        let timestamps_tooltip_title = if timestamps_active {
-            self.i18n.t("terminal.recording.hide_timestamps")
-        } else {
-            self.i18n.t("terminal.recording.show_timestamps")
-        };
-        let recording_toggle_tooltip_title = match recording_status.state {
-            TerminalRecordingState::Idle => self.i18n.t("terminal.recording.title"),
-            TerminalRecordingState::Recording => self.i18n.t("terminal.recording.pause"),
-            TerminalRecordingState::Paused => self.i18n.t("terminal.recording.resume"),
-        };
-        let capture_menu_tooltip_title = if session_log_active {
-            self.i18n.t("terminal.session_log.title")
-        } else {
-            self.i18n.t("terminal.recording.title")
-        };
+        let tools_active = self
+            .terminal_toolbar_menu
+            .as_ref()
+            .is_some_and(|menu| menu.kind == TerminalToolbarMenu::Tools)
+            || self.terminal_highlight_popover_open
+            || self.terminal_recording_menu_open
+            || self.terminal.read(cx).broadcast_menu_open();
         let bar = div()
             .relative()
             .flex_none()
             .border_t_1()
-            .border_color(rgba((theme.border << 8) | COMMAND_BAR_BORDER_ALPHA))
-            .bg(command_bar_background)
-            .px(px(12.0))
+            .border_color(self.workspace_chrome_divider())
+            .bg(self.workspace_chrome_background(theme.bg))
+            .px(px(self.tokens.spacing.two))
             .py(px(4.0))
-            .shadow_lg()
-            .when(self.terminal_highlight_popover_open, |bar| {
-                bar.child(self.render_terminal_highlight_popover(cx))
-            })
-            .when(self.terminal.read(cx).git_panel_open(), |bar| {
-                bar.child(self.render_terminal_git_branch_picker(cx))
-            })
-            .when(
-                cwd_display_enabled && self.terminal.read(cx).cwd_picker_open(),
-                |bar| bar.child(self.render_terminal_cwd_picker(cx)),
-            )
-            .when(
-                project_tasks_enabled && self.terminal.read(cx).project_panel_open(),
-                |bar| bar.child(self.render_terminal_project_panel(cx)),
-            )
             .child(
                 div()
                     .w_full()
-                    .min_w(px(0.0))
+                    .min_w_0()
                     .min_h(px(24.0))
                     .flex()
                     .items_center()
-                    .justify_between()
                     .gap(px(8.0))
                     .child(
                         div()
@@ -148,67 +76,56 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(4.0))
                             .flex_1()
-                            .min_w(px(0.0))
+                            .min_w_0()
                             .overflow_hidden()
                             .child(self.terminal_command_action_button(
-                                if command_sender_visible {
+                                if sender_visible {
                                     LucideIcon::ChevronDown
                                 } else {
                                     LucideIcon::ChevronRight
                                 },
                                 rgb(theme.text_muted),
                                 false,
-                                Some(if command_sender_visible {
-                                    rgba(0x00000000)
-                                } else {
-                                    rgba((theme.bg_hover << 8) | 0x99)
-                                }),
+                                None,
                                 "terminal-command-sender-visibility",
-                                if command_sender_visible {
-                                    self.i18n.t("terminal.sender.hide")
+                                self.i18n.t(if sender_visible {
+                                    "terminal.sender.hide"
                                 } else {
-                                    self.i18n.t("terminal.sender.show")
-                                },
-                                |this, _event, window, cx| {
-                                    let visible = this
-                                        .terminal_command_sender
-                                        .update(cx, |sender, cx| sender.toggle_visible(cx));
-                                    if visible {
-                                        this.blur_terminal_quick_commands_input(cx);
-                                        this.terminal_command_sender.update(cx, |sender, cx| {
-                                            sender.set_compact_focused(true, cx);
-                                        });
-                                        this.clear_ime_selection();
-                                        window.focus(&this.focus_handle, cx);
-                                    } else {
-                                        this.focus_active_pane(window, cx);
-                                    }
+                                    "terminal.sender.show"
+                                }),
+                                |this, _, window, cx| {
+                                    this.toggle_terminal_input(window, cx);
                                     cx.stop_propagation();
                                 },
                                 cx,
                             ))
                             .child(self.render_terminal_target_indicator(
                                 target_label,
-                                target_indicator_is_local,
+                                target_is_local,
                                 cx,
                             ))
                             .when(cwd_supported, |row| {
                                 row.child(self.terminal_command_context_chip_slot(
                                     TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
-                                    self.render_terminal_cwd_chip(cwd_snapshot, cx),
+                                    self.render_terminal_cwd_chip(cwd, cx),
                                 ))
                             })
-                            .when_some(git_snapshot, |row, snapshot| {
-                                row.child(self.terminal_command_context_chip_slot(
-                                    TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
-                                    self.render_terminal_git_chip(snapshot, cx),
-                                ))
-                            })
-                            .when_some(project_snapshot, |row, snapshot| {
-                                row.child(self.terminal_command_context_chip_slot(
-                                    TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH,
-                                    self.render_terminal_project_chip(snapshot, cx),
-                                ))
+                            .when(!compact, |row| {
+                                row.when_some(git, |row, snapshot| {
+                                    row.child(self.terminal_command_context_chip_slot(
+                                        TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
+                                        self.render_terminal_git_chip(snapshot, cx),
+                                    ))
+                                })
+                                .when_some(
+                                    project,
+                                    |row, snapshot| {
+                                        row.child(self.terminal_command_context_chip_slot(
+                                            TERMINAL_COMMAND_PROJECT_CHIP_MAX_WIDTH,
+                                            self.render_terminal_project_chip(snapshot, cx),
+                                        ))
+                                    },
+                                )
                             }),
                     )
                     .child(
@@ -217,476 +134,156 @@ impl WorkspaceApp {
                             .flex_none()
                             .items_center()
                             .gap(px(4.0))
-                            .when(
-                                broadcast_enabled && !broadcast_label.is_empty(),
-                                |actions| {
-                                    actions.child(
-                                        div()
-                                            .h(px(20.0))
-                                            .px(px(6.0))
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(4.0))
-                                            .rounded(px(self.tokens.radii.md))
-                                            .border_1()
-                                            .border_color(rgba((theme.accent << 8) | 0x4d))
-                                            .bg(rgba((theme.accent << 8) | 0x1a))
-                                            .text_size(px(11.0))
-                                            .text_color(rgb(theme.accent))
-                                            .child(Self::render_lucide_icon(
-                                                LucideIcon::Radio,
-                                                12.0,
-                                                rgb(theme.accent),
-                                            ))
-                                            .child(broadcast_label),
-                                    )
-                                },
-                            )
-                            .when(split_controls_visible, |actions| {
-                                // Transport readiness controls the disabled state; keeping SSH
-                                // actions visible makes their placement match local terminals.
-                                actions
-                                    .child(self.terminal_command_action_button(
-                                        LucideIcon::SplitSquareHorizontal,
-                                        rgb(theme.text_muted),
-                                        !can_split,
-                                        None,
-                                        "terminal-command-split-horizontal",
-                                        self.i18n.t("command_palette.cmd_split_horizontal"),
-                                        |this, _event, window, cx| {
-                                            this.split_active_pane(
-                                                SplitDirection::Horizontal,
-                                                window,
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        },
-                                        cx,
-                                    ))
-                                    .child(self.terminal_command_action_button(
-                                        LucideIcon::SplitSquareVertical,
-                                        rgb(theme.text_muted),
-                                        !can_split,
-                                        None,
-                                        "terminal-command-split-vertical",
-                                        self.i18n.t("command_palette.cmd_split_vertical"),
-                                        |this, _event, window, cx| {
-                                            this.split_active_pane(
-                                                SplitDirection::Vertical,
-                                                window,
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        },
-                                        cx,
-                                    ))
-                            })
-                            .when(can_configure_remote_integration, |actions| {
-                                actions.child(self.terminal_command_action_button(
-                                    LucideIcon::FolderSync,
-                                    rgb(theme.text_muted),
-                                    remote_integration_pending,
-                                    None,
-                                    remote_integration_tooltip_id,
-                                    remote_integration_tooltip_title,
-                                    |this, _event, _window, cx| {
-                                        this.open_remote_shell_integration_confirm(cx);
-                                        cx.stop_propagation();
-                                    },
-                                    cx,
-                                ))
-                            })
-                            .child(self.terminal_command_action_button(
-                                LucideIcon::ListChecks,
-                                if command_sender_expanded {
-                                    rgb(theme.accent)
-                                } else if command_sender_running_count > 0 {
-                                    rgb(theme.warning)
-                                } else {
-                                    rgb(theme.text_muted)
-                                },
-                                false,
-                                Some(if command_sender_expanded {
-                                    rgba((theme.accent << 8) | 0x26)
-                                } else {
-                                    rgba(0x00000000)
-                                }),
-                                "terminal-command-sender-toggle",
-                                if command_sender_expanded {
-                                    self.i18n.t("terminal.sender.collapse")
-                                } else if command_sender_running_count > 0 {
-                                    format!(
-                                        "{} ({})",
-                                        self.i18n.t("terminal.sender.running"),
-                                        command_sender_running_count
-                                    )
-                                } else {
-                                    self.i18n.t("terminal.sender.expand")
-                                },
-                                move |this, _event, window, cx| {
-                                    let expanding =
-                                        !this.terminal_command_sender.read(cx).is_expanded();
-                                    if expanding {
-                                        this.close_terminal_quick_commands_panel(cx);
-                                        this.close_terminal_command_overlays(cx);
-                                        this.ime_marked_text = None;
-                                    }
-                                    this.terminal_command_sender.update(cx, |sender, cx| {
-                                        sender.toggle_expanded(cx);
-                                    });
-                                    let sender_id =
-                                        this.terminal_command_sender.read(cx).active_document_id();
-                                    if expanding {
-                                        this.focus_terminal_command_sender_editor(
-                                            sender_id, window, cx,
-                                        );
-                                    } else {
-                                        this.terminal_command_sender.update(cx, |sender, cx| {
-                                            sender.set_compact_focused(true, cx);
-                                        });
-                                        this.clear_ime_selection();
-                                        window.focus(&this.focus_handle, cx);
-                                    }
-                                    cx.stop_propagation();
-                                },
-                                cx,
-                            ))
-                            .when(command_sender_running_count > 0, |actions| {
-                                actions.child(
-                                    div()
-                                        .h(px(20.0))
-                                        .min_w(px(20.0))
-                                        .px(px(5.0))
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .rounded_full()
-                                        .bg(rgba((theme.warning << 8) | 0x24))
-                                        .text_size(px(10.0))
-                                        .text_color(rgb(theme.warning))
-                                        .child(command_sender_running_count.to_string()),
-                                )
-                            })
-                            .when(
-                                quick_commands_enabled
-                                    && (!command_sender_visible || command_sender_expanded),
-                                |actions| {
-                                    actions.child(self.terminal_command_action_button(
-                                        LucideIcon::Zap,
-                                        if quick_commands_open {
-                                            rgb(theme.accent)
-                                        } else {
-                                            rgb(theme.text_muted)
-                                        },
-                                        false,
-                                        Some(if quick_commands_open {
-                                            rgba((theme.accent << 8) | 0x26)
-                                        } else {
-                                            rgba(0x00000000)
-                                        }),
-                                        "terminal-command-quick-commands",
-                                        self.i18n.t("terminal.quick_commands.title"),
-                                        |this, _event, window, cx| {
-                                            this.toggle_terminal_quick_commands_panel(window, cx);
-                                            cx.stop_propagation();
-                                        },
-                                        cx,
-                                    ))
-                                },
-                            )
-                            .when_some(active_pane_id, |actions, pane_id| {
-                                // Capture the visible pane so the shortcut cannot retarget after a tab switch.
-                                actions.child(self.terminal_command_action_button(
-                                    LucideIcon::Activity,
+                            .when(compact && has_context, |row| {
+                                row.child(self.terminal_command_action_button(
+                                    LucideIcon::MoreVertical,
                                     rgb(theme.text_muted),
                                     false,
                                     None,
-                                    "terminal-command-session-triggers",
-                                    self.i18n.t("terminal.command_selection.manage_triggers"),
-                                    move |this, _event, window, cx| {
-                                        this.open_terminal_trigger_settings_for_pane(
-                                            pane_id, window, cx,
+                                    "terminal-context-overflow",
+                                    self.i18n.t("terminal.command_bar.context"),
+                                    |this, _, window, cx| {
+                                        this.toggle_terminal_toolbar_menu(
+                                            TerminalToolbarMenu::Context,
+                                            window,
+                                            cx,
                                         );
                                         cx.stop_propagation();
                                     },
                                     cx,
                                 ))
                             })
-                            .child(select_anchor_probe(
-                                SelectAnchorId::TerminalBroadcastMenu,
-                                self.terminal_command_action_button(
-                                    LucideIcon::Radio,
-                                    if broadcast_enabled {
-                                        rgb(theme.accent)
-                                    } else {
-                                        rgb(theme.text_muted)
-                                    },
-                                    false,
-                                    Some(if broadcast_enabled {
-                                        rgba((theme.accent << 8) | 0x26)
-                                    } else {
-                                        rgba(theme.bg_hover << 8)
-                                    }),
-                                    "terminal-command-broadcast",
-                                    self.i18n.t("terminal.broadcast.select_targets"),
-                                    |this, _event, _window, cx| {
-                                        this.terminal_highlight_popover_open = false;
-                                        this.toggle_terminal_broadcast_menu(cx);
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    },
-                                    cx,
-                                )
-                                .relative(),
-                                {
-                                    let workspace = workspace.clone();
-                                    move |anchor, _window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            this.update_select_anchor(anchor, cx);
-                                        });
-                                    }
-                                },
-                            ))
-                            .child(select_anchor_probe(
-                                SelectAnchorId::TerminalHighlightRuleSet,
-                                self.terminal_command_action_button(
-                                    LucideIcon::Hash,
-                                    if highlight_override_active {
-                                        rgb(theme.accent)
-                                    } else {
-                                        rgb(theme.text_muted)
-                                    },
-                                    false,
-                                    Some(if highlight_override_active {
-                                        rgba((theme.accent << 8) | 0x26)
-                                    } else {
-                                        rgba(0x00000000)
-                                    }),
-                                    "terminal-command-highlight-rules",
-                                    self.i18n.t("terminal.highlight_override.title"),
-                                    |this, _event, _window, cx| {
-                                        this.toggle_terminal_highlight_popover(cx);
-                                        cx.stop_propagation();
-                                    },
-                                    cx,
-                                )
-                                .relative(),
-                                {
-                                    let workspace = workspace.clone();
-                                    move |anchor, _window, cx| {
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            this.update_select_anchor(anchor, cx);
-                                        });
-                                    }
-                                },
-                            ))
-                            .child(self.terminal_command_action_button(
+                            .child(self.terminal_toolbar_icon_button(
+                                self.i18n.t("terminal.command_bar.search"),
                                 LucideIcon::Search,
-                                if self.search_visible(cx) {
-                                    rgb(theme.accent)
-                                } else {
-                                    rgb(theme.text_muted)
-                                },
+                                self.search_visible(cx),
                                 false,
-                                Some(if self.search_visible(cx) {
-                                    rgba((theme.accent << 8) | 0x26)
-                                } else {
-                                    rgba(0x00000000)
-                                }),
                                 "terminal-command-search",
-                                self.i18n.t("search.placeholder"),
-                                |this, _event, window, cx| {
+                                |this, _, window, cx| {
+                                    this.close_terminal_command_overlays(cx);
                                     if this.search_visible(cx) {
                                         this.close_search(window, cx);
                                     } else {
                                         this.open_search(window, cx);
                                     }
-                                    cx.stop_propagation();
                                 },
                                 cx,
                             ))
-                            .child(self.terminal_command_action_button(
-                                LucideIcon::Clock,
-                                if timestamps_active {
-                                    rgb(theme.accent)
-                                } else {
-                                    rgb(theme.text_muted)
-                                },
-                                false,
-                                Some(if timestamps_active {
-                                    rgba((theme.accent << 8) | 0x26)
-                                } else {
-                                    rgba(0x00000000)
-                                }),
-                                "terminal-command-timestamps",
-                                timestamps_tooltip_title,
-                                |this, _event, _window, cx| {
-                                    this.toggle_active_terminal_timestamps(cx);
-                                    cx.stop_propagation();
-                                },
-                                cx,
-                            ))
-                            .when(recording_active, |actions| {
-                                actions.child(
-                                    div()
-                                        .h(px(20.0))
-                                        .px(px(6.0))
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(4.0))
-                                        .rounded(px(self.tokens.radii.md))
-                                        .border_1()
-                                        .border_color(rgba((theme.error << 8) | 0x4d))
-                                        .bg(rgba((theme.error << 8) | 0x1a))
-                                        .text_size(px(11.0))
-                                        .text_color(rgb(theme.error))
-                                        .child(Self::render_lucide_icon(
-                                            LucideIcon::Circle,
-                                            10.0,
-                                            rgb(theme.error),
-                                        ))
-                                        .child(format_recording_elapsed(recording_status.elapsed)),
-                                )
-                            })
-                            .when(!recording_active, |actions| {
-                                actions.child(
-                                    div()
-                                        .relative()
-                                        .flex_none()
-                                        .child(self.terminal_command_action_button(
-                                            if session_log_active {
-                                                LucideIcon::FileText
-                                            } else {
-                                                LucideIcon::FileVideo
-                                            },
-                                            if session_log_active {
-                                                rgb(theme.accent)
-                                            } else {
-                                                rgb(theme.text_muted)
-                                            },
-                                            false,
-                                            Some(if self.terminal_recording_menu_open {
-                                                rgba((theme.accent << 8) | 0x26)
-                                            } else {
-                                                rgba(0x00000000)
-                                            }),
-                                            "terminal-command-recording-menu",
-                                            capture_menu_tooltip_title.clone(),
-                                            |this, _event, _window, cx| {
-                                                this.toggle_terminal_recording_menu(cx);
-                                                cx.stop_propagation();
-                                            },
+                            .when(split_visible, |row| {
+                                row.child(self.terminal_toolbar_icon_button(
+                                    self.i18n.t("terminal.command_bar.split"),
+                                    LucideIcon::SplitSquareHorizontal,
+                                    self.terminal_toolbar_menu.as_ref().is_some_and(|menu| {
+                                        menu.kind == TerminalToolbarMenu::Split
+                                    }),
+                                    !self.can_split_active_pane(cx),
+                                    "terminal-command-split",
+                                    |this, _, window, cx| {
+                                        this.toggle_terminal_toolbar_menu(
+                                            TerminalToolbarMenu::Split,
+                                            window,
                                             cx,
-                                        ))
-                                        .when(self.terminal_recording_menu_open, |anchor| {
-                                            // Keep the menu in the toolbar button's local coordinate
-                                            // owner so its anchor is current in the same draw pass.
-                                            anchor.child(self.render_terminal_recording_menu(cx))
-                                        }),
-                                )
-                            })
-                            .when(recording_active, |actions| {
-                                actions.child(
-                                    div()
-                                        .relative()
-                                        .flex_none()
-                                        .child(self.terminal_command_action_button(
-                                            LucideIcon::FileText,
-                                            if session_log_active {
-                                                rgb(theme.accent)
-                                            } else {
-                                                rgb(theme.text_muted)
-                                            },
-                                            false,
-                                            Some(if self.terminal_recording_menu_open {
-                                                rgba((theme.accent << 8) | 0x26)
-                                            } else {
-                                                rgba(0x00000000)
-                                            }),
-                                            "terminal-command-session-log-menu",
-                                            self.i18n.t("terminal.session_log.title"),
-                                            |this, _event, _window, cx| {
-                                                this.toggle_terminal_recording_menu(cx);
-                                                cx.stop_propagation();
-                                            },
-                                            cx,
-                                        ))
-                                        .when(self.terminal_recording_menu_open, |anchor| {
-                                            anchor.child(self.render_terminal_recording_menu(cx))
-                                        }),
-                                )
-                            })
-                            .when(recording_active, |actions| {
-                                actions.child(self.terminal_command_action_button(
-                                    if recording_status.state == TerminalRecordingState::Paused {
-                                        LucideIcon::Play
-                                    } else {
-                                        LucideIcon::Circle
-                                    },
-                                    rgb(theme.error),
-                                    false,
-                                    Some(rgba((theme.error << 8) | 0x26)),
-                                    "terminal-command-recording-toggle",
-                                    recording_toggle_tooltip_title.clone(),
-                                    move |this, _event, _window, cx| {
-                                        match recording_status.state {
-                                            TerminalRecordingState::Recording => {
-                                                this.pause_active_terminal_recording(cx)
-                                            }
-                                            TerminalRecordingState::Paused => {
-                                                this.resume_active_terminal_recording(cx)
-                                            }
-                                            TerminalRecordingState::Idle => {}
-                                        }
-                                        cx.stop_propagation();
+                                        )
                                     },
                                     cx,
                                 ))
                             })
-                            .when(recording_active, |actions| {
-                                actions
-                                    .child(self.terminal_command_action_button(
-                                        LucideIcon::Square,
-                                        rgb(theme.error),
+                            .when(
+                                self.settings_store
+                                    .settings()
+                                    .terminal
+                                    .command_bar
+                                    .quick_commands_enabled,
+                                |row| {
+                                    row.child(self.terminal_toolbar_icon_button(
+                                        self.i18n.t("terminal.quick_commands.title"),
+                                        LucideIcon::Zap,
+                                        self.terminal.read(cx).quick_commands.is_open(),
                                         false,
-                                        None,
-                                        "terminal-command-recording-stop",
-                                        self.i18n.t("terminal.recording.stop"),
-                                        |this, _event, _window, cx| {
-                                            this.stop_active_terminal_recording(cx);
-                                            cx.stop_propagation();
+                                        "terminal-command-quick-commands",
+                                        |this, _, window, cx| {
+                                            this.toggle_terminal_quick_commands_panel(window, cx)
                                         },
                                         cx,
                                     ))
-                                    .child(self.terminal_command_action_button(
-                                        LucideIcon::Trash2,
-                                        rgb(theme.error),
-                                        false,
-                                        None,
-                                        "terminal-command-recording-discard",
-                                        self.i18n.t("terminal.recording.discard"),
-                                        |this, _event, _window, cx| {
-                                            this.discard_active_terminal_recording(cx);
-                                            cx.stop_propagation();
-                                        },
-                                        cx,
-                                    ))
-                            }),
+                                },
+                            )
+                            .child(self.terminal_toolbar_icon_button(
+                                self.i18n.t(
+                                    if self.terminal_command_sender.read(cx).is_expanded() {
+                                        "terminal.sender.collapse"
+                                    } else {
+                                        "terminal.sender.expand"
+                                    },
+                                ),
+                                LucideIcon::ListChecks,
+                                self.terminal_command_sender.read(cx).is_expanded(),
+                                false,
+                                "terminal-command-sender-toggle",
+                                |this, _, window, cx| this.toggle_terminal_sender_panel(window, cx),
+                                cx,
+                            ))
+                            .child(select_anchor_probe(
+                                SelectAnchorId::TerminalToolsMenu,
+                                self.terminal_toolbar_icon_button(
+                                    self.i18n.t("terminal.command_bar.tools"),
+                                    LucideIcon::Settings,
+                                    tools_active,
+                                    false,
+                                    "terminal-command-tools",
+                                    |this, _, window, cx| {
+                                        this.toggle_terminal_toolbar_menu(
+                                            TerminalToolbarMenu::Tools,
+                                            window,
+                                            cx,
+                                        )
+                                    },
+                                    cx,
+                                ),
+                                {
+                                    let workspace = workspace.clone();
+                                    move |anchor, _, cx| {
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            this.update_select_anchor(anchor, cx)
+                                        });
+                                    }
+                                },
+                            )),
                     ),
-            );
+            )
+            .when(self.terminal_highlight_popover_open, |bar| {
+                bar.child(self.render_terminal_highlight_popover(cx))
+            })
+            .when(self.terminal_recording_menu_open, |bar| {
+                bar.child(self.render_terminal_recording_menu(cx))
+            })
+            .when(self.terminal.read(cx).git_panel_open(), |bar| {
+                bar.child(self.render_terminal_git_branch_picker(cx))
+            })
+            .when(
+                cwd_enabled && self.terminal.read(cx).cwd_picker_open(),
+                |bar| bar.child(self.render_terminal_cwd_picker(cx)),
+            )
+            .when(
+                self.terminal_project_tasks_enabled()
+                    && self.terminal.read(cx).project_panel_open(),
+                |bar| bar.child(self.render_terminal_project_panel(cx)),
+            )
+            .when_some(self.render_terminal_toolbar_menu(cx), |bar, menu| {
+                bar.child(menu)
+            });
         select_anchor_probe(
             SelectAnchorId::TerminalCommandBar,
             bar,
-            move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_select_anchor(anchor, cx);
-                });
+            move |anchor, _, cx| {
+                let _ = workspace.update(cx, |this, cx| this.update_select_anchor(anchor, cx));
             },
         )
         .into_any_element()
     }
 
-    fn toggle_terminal_recording_menu(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn toggle_terminal_recording_menu(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_toolbar_menu();
         let should_open = !self.terminal_recording_menu_open;
         self.terminal_recording_menu_open = should_open;
         if should_open {
@@ -705,19 +302,29 @@ impl WorkspaceApp {
     }
 
     fn render_terminal_recording_menu(&self, cx: &mut Context<Self>) -> AnyElement {
+        let recording = self.active_terminal_recording_status(cx).state;
         let session_log_status = self.active_terminal_session_log_status(cx);
         let session_log_available = self.active_terminal_session_log_available(cx);
         let menu = context_menu_event_boundary(
             dropdown_menu_content(&self.tokens)
                 .absolute()
-                .bottom(px(TERMINAL_RECORDING_MENU_BOTTOM))
-                .right(px(0.0))
+                .bottom_full()
+                .mb(px(4.0))
+                .right(px(8.0))
                 .w(px(TERMINAL_RECORDING_MENU_WIDTH))
+                .max_w_full()
+                .max_h(px(self.terminal_toolbar_popup_available_height()))
                 .occlude(),
-        );
+        )
+        .id("terminal-recording-menu-scroll")
+        .overflow_y_scroll();
         let start_item = dropdown_menu_item(
             &self.tokens,
-            self.i18n.t("terminal.recording.start"),
+            self.i18n.t(match recording {
+                TerminalRecordingState::Idle => "terminal.recording.start",
+                TerminalRecordingState::Recording => "terminal.recording.pause",
+                TerminalRecordingState::Paused => "terminal.recording.resume",
+            }),
             DropdownMenuItemKind::Plain,
             false,
             false,
@@ -739,11 +346,44 @@ impl WorkspaceApp {
                 |this| {
                     this.terminal_recording_menu_open = false;
                 },
-                |this, _event, _window, cx| {
-                    this.start_active_terminal_recording(cx);
+                move |this, _event, _window, cx| match recording {
+                    TerminalRecordingState::Idle => this.start_active_terminal_recording(cx),
+                    TerminalRecordingState::Recording => this.pause_active_terminal_recording(cx),
+                    TerminalRecordingState::Paused => this.resume_active_terminal_recording(cx),
                 },
                 cx,
             ))
+            .when(recording != TerminalRecordingState::Idle, |mut menu| {
+                for (discard, key) in [
+                    (false, "terminal.recording.stop"),
+                    (true, "terminal.recording.discard"),
+                ] {
+                    let item = dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t(key),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    );
+                    menu = menu.child(self.workspace_context_menu_action(
+                        item,
+                        false,
+                        false,
+                        |this| {
+                            this.terminal_recording_menu_open = false;
+                        },
+                        move |this, _, _, cx| {
+                            if discard {
+                                this.discard_active_terminal_recording(cx);
+                            } else {
+                                this.stop_active_terminal_recording(cx);
+                            }
+                        },
+                        cx,
+                    ));
+                }
+                menu
+            })
             .child(self.workspace_context_menu_styled_action(
                 open_item,
                 false,
@@ -902,7 +542,7 @@ impl WorkspaceApp {
             .map(|(kind, value)| (kind, value.to_string()));
         let anchor_left = self
             .select_anchors
-            .get(&SelectAnchorId::TerminalBroadcastMenu)
+            .get(&SelectAnchorId::TerminalToolsMenu)
             .map(|anchor| {
                 // Tauri uses Radix DropdownMenuContent with `align="end"`.
                 // Align to the trigger instead of the workspace root, because
@@ -915,7 +555,12 @@ impl WorkspaceApp {
             let menu = div()
                 .absolute()
                 .w(px(TERMINAL_BROADCAST_MENU_WIDTH))
-                .max_h(px(TERMINAL_BROADCAST_MENU_MAX_HEIGHT))
+                .max_h(px(match placement {
+                    TerminalBroadcastMenuPlacement::Bottom(_) => self
+                        .terminal_toolbar_popup_available_height()
+                        .min(TERMINAL_BROADCAST_MENU_MAX_HEIGHT),
+                    TerminalBroadcastMenuPlacement::Top(_) => TERMINAL_BROADCAST_MENU_MAX_HEIGHT,
+                }))
                 .rounded(px(self.tokens.radii.lg))
                 .border_1()
                 .border_color(rgb(theme.border))

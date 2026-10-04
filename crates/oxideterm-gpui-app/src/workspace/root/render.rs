@@ -536,6 +536,9 @@ impl WorkspaceApp {
                     this.handle_keybinding_recording_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_terminal_toolbar_menu_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if {
                     let quick_commands = &this.terminal.read(cx).quick_commands;
                     quick_commands.is_open() && quick_commands.focused_input().is_some()
@@ -1272,7 +1275,17 @@ impl WorkspaceApp {
             )
             .when(self.terminal.read(cx).broadcast_menu_open(), |root| {
                 let placement = if self.settings_store.settings().terminal.command_bar.enabled {
-                    actions::TerminalBroadcastMenuPlacement::Bottom(62.0)
+                    self.select_anchors
+                        .get(&SelectAnchorId::TerminalToolsMenu)
+                        .map(|anchor| {
+                            actions::TerminalBroadcastMenuPlacement::Bottom(
+                                f32::from(window.viewport_size().height - anchor.bounds.top())
+                                    + 4.0,
+                            )
+                        })
+                        .unwrap_or(actions::TerminalBroadcastMenuPlacement::Top(
+                            effective_titlebar_height + self.tokens.metrics.tabbar_height + 6.0,
+                        ))
                 } else {
                     actions::TerminalBroadcastMenuPlacement::Top(
                         effective_titlebar_height + self.tokens.metrics.tabbar_height + 6.0,

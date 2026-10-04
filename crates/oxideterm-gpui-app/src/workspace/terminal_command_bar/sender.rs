@@ -13,9 +13,7 @@ use crate::workspace::terminal_command_sender::{
 use oxideterm_terminal::{TerminalSenderInputMode, TerminalSenderPacing};
 use zeroize::Zeroizing;
 
-const TERMINAL_SENDER_CONTROL_HEIGHT: f32 = 28.0;
 const TERMINAL_SENDER_PANEL_PADDING: f32 = 8.0;
-const TERMINAL_SENDER_COMPACT_HORIZONTAL_PADDING: f32 = 12.0;
 const TERMINAL_SENDER_COMPACT_EDITOR_HEIGHT: f32 = 24.0;
 const TERMINAL_SENDER_COMPACT_BACKGROUND_ALPHA: u32 = 0xf2;
 const TERMINAL_SENDER_COMPACT_BORDER_ALPHA: u32 = 0x73;
@@ -185,13 +183,6 @@ impl WorkspaceApp {
         let ghost_text = (focused && !suggestions_open)
             .then(|| self.terminal_command_sender_compact_ghost_text(snapshot, &draft, cx))
             .flatten();
-        let quick_commands_enabled = self
-            .settings_store
-            .settings()
-            .terminal
-            .command_bar
-            .quick_commands_enabled;
-        let quick_commands_open = self.terminal.read(cx).quick_commands.is_open();
         let background = if self.window_background_preferences().is_some() {
             self.workspace_chrome_background(theme.bg)
         } else {
@@ -251,7 +242,7 @@ impl WorkspaceApp {
             .relative()
             .flex_none()
             .h(px(TERMINAL_SENDER_COMPACT_HEIGHT))
-            .px(px(TERMINAL_SENDER_COMPACT_HORIZONTAL_PADDING))
+            .px(px(self.tokens.spacing.two))
             .py(px(4.0))
             .flex()
             .items_center()
@@ -300,7 +291,7 @@ impl WorkspaceApp {
                             .justify_center()
                             .child(Self::render_lucide_icon(
                                 LucideIcon::ChevronRight,
-                                16.0,
+                                14.0,
                                 rgb(theme.text_muted),
                             )),
                     )
@@ -313,41 +304,6 @@ impl WorkspaceApp {
                             .child(compact_input),
                     ),
             )
-            .when(quick_commands_enabled, |row| {
-                row.child(
-                    div()
-                        .id("terminal-command-quick-commands-compact")
-                        .flex_none()
-                        .size(px(TERMINAL_SENDER_COMPACT_EDITOR_HEIGHT))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(self.tokens.radii.md))
-                        .cursor_pointer()
-                        .bg(if quick_commands_open {
-                            rgba((theme.accent << 8) | 0x1a)
-                        } else {
-                            rgba(0x00000000)
-                        })
-                        .hover(move |style| style.bg(rgb(theme.bg_hover)))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, window, cx| {
-                                this.toggle_terminal_quick_commands_panel(window, cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Zap,
-                            14.0,
-                            if quick_commands_open {
-                                rgb(theme.accent)
-                            } else {
-                                rgb(theme.text_muted)
-                            },
-                        )),
-                )
-            })
             .into_any_element()
     }
 
@@ -545,6 +501,19 @@ impl WorkspaceApp {
             .bg(rgb(self.tokens.ui.bg))
             .child(tab_list)
             .child(task_actions)
+            .child(self.terminal_command_action_button(
+                LucideIcon::ChevronDown,
+                rgb(self.tokens.ui.text_muted),
+                false,
+                None,
+                "terminal-command-sender-collapse",
+                self.i18n.t("terminal.sender.collapse"),
+                |this, _, window, cx| {
+                    this.toggle_terminal_sender_panel(window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -585,9 +554,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .flex_wrap()
             .child(self.render_terminal_sender_mode_control(snapshot, cx))
-            .child(self.render_terminal_sender_control_divider())
             .child(self.render_terminal_sender_pacing_control(snapshot, cx))
-            .child(self.render_terminal_sender_control_divider())
             .child(self.render_terminal_sender_stepper(
                 self.i18n.t("terminal.sender.interval"),
                 format!("{} ms", snapshot.interval_ms),
@@ -603,7 +570,6 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
-            .child(self.render_terminal_sender_control_divider())
             .child(self.render_terminal_sender_stepper(
                 self.i18n.t("terminal.sender.repeat"),
                 format!("{}×", snapshot.repeat_count),
@@ -778,9 +744,9 @@ impl WorkspaceApp {
                     label,
                     index == active_index,
                 )
-                .rounded_none()
                 .px(px(8.0))
-                .py(px(4.0))
+                .h(px(self.tokens.metrics.ui_button_sm_height))
+                .py_0()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -807,7 +773,7 @@ impl WorkspaceApp {
             ("terminal-sender-mode", sender_id.0),
             oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 2)
                 .user_transition_active(transition_active)
-                .underline(TERMINAL_SENDER_MODE_CONTROL_WIDTH),
+                .compact(TERMINAL_SENDER_MODE_CONTROL_WIDTH),
             items,
         )
         .into_any_element()
@@ -845,9 +811,9 @@ impl WorkspaceApp {
                     label,
                     index == active_index,
                 )
-                .rounded_none()
                 .px(px(8.0))
-                .py(px(4.0))
+                .h(px(self.tokens.metrics.ui_button_sm_height))
+                .py_0()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -874,7 +840,7 @@ impl WorkspaceApp {
             ("terminal-sender-pacing", sender_id.0),
             oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 2)
                 .user_transition_active(transition_active)
-                .underline(TERMINAL_SENDER_PACING_CONTROL_WIDTH),
+                .compact(TERMINAL_SENDER_PACING_CONTROL_WIDTH),
             items,
         )
         .into_any_element()
@@ -922,9 +888,9 @@ impl WorkspaceApp {
                 ),
             };
             oxideterm_gpui_ui::segmented_control_item(&self.tokens, label, index == active_index)
-                .rounded_none()
                 .px(px(8.0))
-                .py(px(4.0))
+                .h(px(self.tokens.metrics.ui_button_sm_height))
+                .py_0()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
                 .on_mouse_down(
                     MouseButton::Left,
@@ -951,7 +917,7 @@ impl WorkspaceApp {
             ("terminal-sender-scope", sender_id.0),
             oxideterm_gpui_ui::SegmentedControlOptions::new(active_index, previous_index, 4)
                 .user_transition_active(transition_active)
-                .underline(TERMINAL_SENDER_SCOPE_CONTROL_WIDTH),
+                .compact(TERMINAL_SENDER_SCOPE_CONTROL_WIDTH),
             items,
         )
         .into_any_element()
@@ -1073,15 +1039,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_terminal_sender_control_divider(&self) -> AnyElement {
-        div()
-            .w(px(1.0))
-            .h(px(18.0))
-            .flex_none()
-            .bg(self.workspace_chrome_divider())
-            .into_any_element()
-    }
-
     fn render_terminal_sender_stepper(
         &self,
         label: String,
@@ -1090,67 +1047,68 @@ impl WorkspaceApp {
         increment: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        use oxideterm_gpui_ui::button::{ButtonOptions, ButtonSize, ButtonVariant, button_with};
+
+        let height = self.tokens.metrics.ui_button_sm_height;
+        let options = ButtonOptions {
+            variant: ButtonVariant::Ghost,
+            size: ButtonSize::Sm,
+            radius: ButtonRadius::None,
+            disabled: false,
+        };
         div()
-            .h(px(TERMINAL_SENDER_CONTROL_HEIGHT))
+            .flex_none()
             .flex()
             .items_center()
-            .overflow_hidden()
+            .gap(px(self.tokens.spacing.two))
             .child(
                 div()
-                    .h_full()
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .text_size(px(11.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(label),
             )
             .child(
                 div()
-                    .h_full()
-                    .w(px(24.0))
+                    .h(px(height))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
-                    .child("−")
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            decrement(this, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-            )
-            .child(
-                div()
-                    .h_full()
-                    .min_w(px(56.0))
-                    .px(px(4.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .text_size(px(11.0))
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .child(value),
-            )
-            .child(
-                div()
-                    .h_full()
-                    .w(px(24.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .hover(|button| button.bg(rgb(self.tokens.ui.bg_hover)))
-                    .child("+")
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            increment(this, cx);
-                            cx.stop_propagation();
-                        }),
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(self.workspace_chrome_divider())
+                    .bg(rgb(self.tokens.ui.bg_panel))
+                    .overflow_hidden()
+                    .child(
+                        button_with(&self.tokens, "−".into(), options)
+                            .w(px(height))
+                            .px_0()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    decrement(this, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(56.0))
+                            .px(px(self.tokens.spacing.one))
+                            .text_center()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .child(value),
+                    )
+                    .child(
+                        button_with(&self.tokens, "+".into(), options)
+                            .w(px(height))
+                            .px_0()
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    increment(this, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
                     ),
             )
             .into_any_element()
@@ -1174,10 +1132,10 @@ impl WorkspaceApp {
                 variant: if running {
                     oxideterm_gpui_ui::button::ButtonVariant::Destructive
                 } else {
-                    oxideterm_gpui_ui::button::ButtonVariant::Default
+                    oxideterm_gpui_ui::button::ButtonVariant::Secondary
                 },
                 size: oxideterm_gpui_ui::button::ButtonSize::Sm,
-                radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
+                radius: oxideterm_gpui_ui::button::ButtonRadius::Sm,
                 disabled: false,
             },
         )

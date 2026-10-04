@@ -833,6 +833,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_terminal_cwd_picker(&mut self, cx: &mut Context<Self>) {
+        self.dismiss_terminal_toolbar_menu();
         if !self.terminal_current_directory_awareness_enabled() {
             return;
         }

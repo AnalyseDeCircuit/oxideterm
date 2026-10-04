@@ -389,16 +389,7 @@ impl WorkspaceApp {
             .size_full()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .child(terminal)
-                    .when(recording_active, |surface| {
-                        surface.child(self.render_terminal_recording_controls(recording_status, cx))
-                    }),
-            )
+            .child(div().relative().flex_1().min_h(px(0.0)).child(terminal))
             .when(
                 self.settings_store
                     .settings()
@@ -408,6 +399,10 @@ impl WorkspaceApp {
                 |surface| surface.child(self.render_terminal_quick_bar(window, cx)),
             )
             .child(self.render_terminal_command_bar(cx))
+            .when_some(
+                self.render_terminal_toolbar_status(cx),
+                |surface, status| surface.child(status),
+            )
             .child(self.render_terminal_quick_commands_panel(cx))
             // The toolbar is the sender header. Hidden, compact, and expanded
             // layouts all retain the same document and running jobs below it.
