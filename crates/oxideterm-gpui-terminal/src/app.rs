@@ -24,7 +24,7 @@ use oxideterm_terminal::{
     GraphicsOptions, KittyFileTransmissionControl, LocalPtyConfig, SerialControlLine,
     SerialControlState, SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode,
     SerialSessionConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig,
-    TelnetSessionConfig, TermMode, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TelnetSessionConfig, TermMode, TerminalCell, TerminalCommandMark, TerminalCommandMarkClosedBy,
     TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
     TerminalCwdIntegrationLaunchState, TerminalDrainBudget, TerminalDrainReport,
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
@@ -4439,7 +4439,16 @@ fn trim_row_timestamp_history(
 fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
     let mut hasher = DefaultHasher::new();
     row.wrapped.hash(&mut hasher);
-    for cell in row.cells.iter() {
+    // Hash only up to the last cell that carries content. Everything after it
+    // is width padding: the timestamp and line-number gutters reserve real grid
+    // columns, so toggling either gutter (or resizing the window) rewrites the
+    // trailing cells of every row. Hashing that padding made unchanged rows look
+    // modified and re-stamped them with the current time.
+    let content_end = row.cells.iter().rposition(terminal_cell_has_content);
+    let Some(content_end) = content_end else {
+        return hasher.finish();
+    };
+    for cell in &row.cells[..=content_end] {
         cell.ch.hash(&mut hasher);
         cell.zerowidth().hash(&mut hasher);
         cell.wide.hash(&mut hasher);
@@ -4452,9 +4461,14 @@ fn terminal_row_timestamp_signature(row: &TerminalRow) -> u64 {
 }
 
 fn terminal_row_has_timestamp_content(row: &TerminalRow) -> bool {
-    row.cells
-        .iter()
-        .any(|cell| !cell.ch.is_whitespace() || !cell.zerowidth().is_empty())
+    row.cells.iter().any(terminal_cell_has_content)
+}
+
+/// Whether a cell carries something the user can read; the content boundary for
+/// timestamps and the "row has content" gate must agree, or a row could be
+/// stamped with no boundary to hash and never be re-stamped again.
+fn terminal_cell_has_content(cell: &TerminalCell) -> bool {
+    !cell.ch.is_whitespace() || !cell.zerowidth().is_empty()
 }
 
 fn hex_color(color: u32) -> String {
@@ -5798,12 +5812,27 @@ mod tests {
             Some("10:00:03")
         );
 
+        // Showing or hiding the timestamp gutter reserves columns and resizes
+        // the grid; the wider row must keep the label of the unchanged content.
+        let wider_snapshot = timestamp_test_snapshot(timestamp_test_row(42, "pwd        "));
+        record_timestampable_snapshot_rows(&mut store, &wider_snapshot, "10:00:04");
+        assert_eq!(
+            store.get(42).map(|timestamp| timestamp.label.as_str()),
+            Some("10:00:03"),
+            "a width-only change must not re-stamp an unchanged row"
+        );
+        assert_eq!(
+            store.get(42).map(|timestamp| timestamp.source_signature),
+            Some(wider_snapshot.lines[0].signature),
+            "the cheap invalidation key still follows the snapshot"
+        );
+
         let label = terminal_timestamp_label(1, 2, 3, 4);
         assert_eq!(label, "[01:02:03.004]");
         assert_eq!(label.chars().count(), TERMINAL_TIMESTAMP_LABEL_CELLS);
 
         let cleared_snapshot = timestamp_test_snapshot(timestamp_test_row(42, ""));
-        record_timestampable_snapshot_rows(&mut store, &cleared_snapshot, "10:00:04");
+        record_timestampable_snapshot_rows(&mut store, &cleared_snapshot, "10:00:05");
 
         assert!(!store.entries.contains_key(&42));
     }
