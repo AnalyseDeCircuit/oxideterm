@@ -72,6 +72,7 @@ pub struct NativePluginRuntime {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NativePluginRuntimeKind {
+    Language,
     Wasm,
     Process,
     ManifestOnly,
@@ -80,6 +81,8 @@ pub enum NativePluginRuntimeKind {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
+    #[serde(default)]
+    pub language: Option<NativePluginLanguage>,
     #[serde(default)]
     pub tabs: Option<Vec<NativePluginTabDef>>,
     #[serde(default)]
@@ -100,6 +103,15 @@ pub struct NativePluginContributes {
     pub api_commands: Option<Vec<String>>,
     #[serde(default)]
     pub host_monitors: Option<Vec<NativePluginHostMonitorDef>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginLanguage {
+    pub id: String,
+    pub highlights: String,
+    pub parser_sha256: String,
+    pub highlights_sha256: String,
 }
 
 /// Declares one activity-bar action that dispatches a plugin runtime command.

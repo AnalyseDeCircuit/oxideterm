@@ -1,7 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{cell::Cell, ops::Range};
+use std::{
+    cell::Cell,
+    ops::{ControlFlow, Range},
+};
 
 use oxideterm_editor_core::{BufferOffset, TextRange};
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
@@ -28,7 +31,11 @@ pub(crate) fn highlight_spans(
     let mut pause = |_: &tree_sitter::QueryCursorState| {
         let stop = work.is_some_and(crate::SyntaxWork::should_pause);
         paused.set(stop);
-        stop
+        if stop {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
     };
     let mut captures = cursor.captures_with_options(
         highlight_query,
@@ -51,7 +58,7 @@ pub(crate) fn highlight_spans(
         let Some((query_match, capture_index)) = captures.get() else {
             continue;
         };
-        let Some(capture) = query_match.captures.get(*capture_index).copied() else {
+        let Some(capture) = query_match.captures().get(*capture_index).copied() else {
             continue;
         };
         let Some(capture_name) = names.get(capture.index as usize).copied() else {
@@ -198,7 +205,11 @@ fn collect_markdown_inline_node_highlights(
     let mut pause = |_: &tree_sitter::QueryCursorState| {
         let stop = work.is_some_and(crate::SyntaxWork::should_pause);
         paused.set(stop);
-        stop
+        if stop {
+            ControlFlow::Break(())
+        } else {
+            ControlFlow::Continue(())
+        }
     };
     let mut captures = query_cursor.captures_with_options(
         inline_query,
@@ -220,7 +231,7 @@ fn collect_markdown_inline_node_highlights(
         let Some((query_match, capture_index)) = captures.get() else {
             continue;
         };
-        let Some(capture) = query_match.captures.get(*capture_index).copied() else {
+        let Some(capture) = query_match.captures().get(*capture_index).copied() else {
             continue;
         };
         let Some(capture_name) = names.get(capture.index as usize).copied() else {

@@ -6,11 +6,13 @@ on:
     branches: [main, experiment/rust-native-v2]
     paths:
       - 'agent/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/agent-ci.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
     paths:
       - 'agent/**'
+      - 'rust-toolchain.toml'
       - '.github/workflows/agent-ci.yml'
 
 permissions:
@@ -31,7 +33,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
-          toolchain: 1.94.1
+          toolchain: 1.97.0
           components: rustfmt
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 

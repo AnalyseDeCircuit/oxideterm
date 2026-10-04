@@ -1,0 +1,4 @@
+interface:
+  display_name: "OxideTerm Plugin Compatibility"
+  short_description: "Maintain host, catalog, and installed-plugin compatibility"
+  default_prompt: "Use $oxideterm-plugin-compatibility to assess a host or language-plugin change and preserve its compatibility checks."

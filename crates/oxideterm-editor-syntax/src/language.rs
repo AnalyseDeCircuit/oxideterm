@@ -151,45 +151,106 @@ impl LanguageId {
             .or_else(|| language_from_shebang(source))
     }
 
-    pub(crate) fn tree_sitter_language(self) -> Language {
+    pub fn plugin_key(self) -> Option<&'static str> {
         match self {
+            Self::C => Some("c"),
+            Self::Cpp => Some("cpp"),
+            Self::Css => Some("css"),
+            Self::Go => Some("go"),
+            Self::Html => Some("html"),
+            Self::Java => Some("java"),
+            Self::Javascript => Some("javascript"),
+            Self::Php => Some("php"),
+            Self::Rust => Some("rust"),
+            Self::Tsx => Some("tsx"),
+            Self::TypeScript => Some("typescript"),
+            Self::CSharp => Some("c-sharp"),
+            Self::Elixir => Some("elixir"),
+            Self::Lisp => Some("commonlisp"),
+            Self::Swift => Some("swift"),
+            Self::R => Some("r"),
+            Self::Scala => Some("scala"),
+            Self::ObjectiveC => Some("objc"),
+            Self::Perl => Some("perl"),
+            Self::Ruby => Some("ruby"),
+            Self::Zig => Some("zig"),
+            _ => None,
+        }
+    }
+
+    pub fn from_plugin_key(key: &str) -> Option<Self> {
+        SUPPORTED_LANGUAGES
+            .iter()
+            .copied()
+            .find(|language| language.plugin_key() == Some(key))
+    }
+
+    pub fn plugin_display_name(self) -> Option<&'static str> {
+        match self {
+            Self::C => Some("C"),
+            Self::Cpp => Some("C++"),
+            Self::Css => Some("CSS"),
+            Self::Go => Some("Go"),
+            Self::Html => Some("HTML"),
+            Self::Java => Some("Java"),
+            Self::Javascript => Some("JavaScript"),
+            Self::Php => Some("PHP"),
+            Self::Rust => Some("Rust"),
+            Self::Tsx => Some("TSX"),
+            Self::TypeScript => Some("TypeScript"),
+            Self::CSharp => Some("C#"),
+            Self::Elixir => Some("Elixir"),
+            Self::Lisp => Some("Common Lisp"),
+            Self::Swift => Some("Swift"),
+            Self::R => Some("R"),
+            Self::Scala => Some("Scala"),
+            Self::ObjectiveC => Some("Objective-C"),
+            Self::Perl => Some("Perl"),
+            Self::Ruby => Some("Ruby"),
+            Self::Zig => Some("Zig"),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn tree_sitter_language(self) -> Result<Language, crate::SyntaxError> {
+        Ok(match self {
             Self::Bash => tree_sitter_bash::LANGUAGE.into(),
-            Self::C => tree_sitter_c::LANGUAGE.into(),
-            Self::CSharp => tree_sitter_c_sharp::LANGUAGE.into(),
+            Self::C => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::CSharp => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::CMake => tree_sitter_cmake::LANGUAGE.into(),
-            Self::Cpp => tree_sitter_cpp::LANGUAGE.into(),
-            Self::Css => tree_sitter_css::LANGUAGE.into(),
+            Self::Cpp => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Css => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Diff => tree_sitter_diff::LANGUAGE.into(),
             Self::Dockerfile => tree_sitter_containerfile::LANGUAGE.into(),
-            Self::Elixir => tree_sitter_elixir::LANGUAGE.into(),
+            Self::Elixir => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Fish => fish_language(),
-            Self::Go => tree_sitter_go::LANGUAGE.into(),
-            Self::Html => tree_sitter_html::LANGUAGE.into(),
-            Self::Java => tree_sitter_java::LANGUAGE.into(),
-            Self::Javascript => tree_sitter_javascript::LANGUAGE.into(),
+            Self::Go => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Html => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Java => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Javascript => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Json => tree_sitter_json::LANGUAGE.into(),
-            Self::Lisp => tree_sitter_commonlisp::LANGUAGE_COMMONLISP.into(),
+            Self::Lisp => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Lua => tree_sitter_lua::LANGUAGE.into(),
             Self::Make => tree_sitter_make::LANGUAGE.into(),
             Self::Markdown => tree_sitter_md::LANGUAGE.into(),
-            Self::ObjectiveC => tree_sitter_objc::LANGUAGE.into(),
-            Self::Perl => ts_parser_perl::LANGUAGE.into(),
-            Self::Php => tree_sitter_php::LANGUAGE_PHP.into(),
+            Self::ObjectiveC => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Perl => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Php => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Powershell => tree_sitter_powershell::LANGUAGE.into(),
             Self::Python => tree_sitter_python::LANGUAGE.into(),
-            Self::R => tree_sitter_r::LANGUAGE.into(),
-            Self::Ruby => tree_sitter_ruby::LANGUAGE.into(),
-            Self::Rust => tree_sitter_rust::LANGUAGE.into(),
-            Self::Scala => tree_sitter_scala::LANGUAGE.into(),
+            Self::R => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Ruby => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Rust => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Scala => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Sql => tree_sitter_sequel::LANGUAGE.into(),
-            Self::Swift => tree_sitter_swift::LANGUAGE.into(),
+            Self::Swift => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Toml => tree_sitter_toml_ng::LANGUAGE.into(),
-            Self::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
-            Self::TypeScript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+            Self::Tsx => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::TypeScript => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
             Self::Zsh => tree_sitter_zsh::LANGUAGE.into(),
-            Self::Zig => tree_sitter_zig::LANGUAGE.into(),
-        }
+            Self::Zig => return Err(crate::SyntaxError::LanguageUnavailable),
+        })
     }
 
     pub(crate) fn highlight_query(self) -> &'static str {
@@ -242,6 +303,18 @@ fn language_from_shebang(source: &str) -> Option<LanguageId> {
         return None;
     }
     let lower = first.to_ascii_lowercase();
+    for (interpreter, language) in [
+        ("elixir", LanguageId::Elixir),
+        ("sbcl", LanguageId::Lisp),
+        ("clisp", LanguageId::Lisp),
+        ("swift", LanguageId::Swift),
+        ("rscript", LanguageId::R),
+        ("scala", LanguageId::Scala),
+    ] {
+        if lower.contains(interpreter) {
+            return Some(language);
+        }
+    }
     if lower.contains("rust-script") {
         return Some(LanguageId::Rust);
     }

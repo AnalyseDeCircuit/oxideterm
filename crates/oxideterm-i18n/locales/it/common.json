@@ -197,6 +197,8 @@
     "shortcut_count": "scorciatoie"
   },
   "plugin": {
+    "marketplace_all": "Tutti",
+    "marketplace_updates_only": "Solo aggiornamenti",
     "manager_title": "Gestore plugin",
     "manager_description": "Gestisci i plugin installati e sfoglia il registro",
     "compatibility_title": "Compatibilità",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "Non disponibile su questa piattaforma",
     "marketplace_requires_version": "Richiede OxideTerm {{version}} o successivo",
     "marketplace_incompatible": "Non compatibile con questa versione di OxideTerm",
+    "marketplace_newer_requires": "La versione {{version}} richiede OxideTerm {{requirement}}.",
+    "language_missing": "Il supporto per {{language}} non è attivo.",
+    "language_manage": "Ottieni supporto per il linguaggio",
+    "language_dismiss": "Nascondi",
+    "marketplace_installed_version": "Versione installata: {{version}}",
+    "host_version_incompatible": "Questo plugin richiede OxideTerm {{requirement}}; versione attuale: {{current}}.",
     "marketplace_unverified": "Impossibile verificare il pacchetto",
     "marketplace_homepage": "Pagina iniziale",
     "registry_error": "Impossibile caricare il registro",

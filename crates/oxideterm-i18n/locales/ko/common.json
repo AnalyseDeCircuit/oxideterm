@@ -197,6 +197,8 @@
     "shortcut_count": "개의 단축키"
   },
   "plugin": {
+    "marketplace_all": "전체",
+    "marketplace_updates_only": "업데이트 가능만",
     "manager_title": "플러그인 관리",
     "manager_description": "설치된 플러그인 관리 및 레지스트리 탐색",
     "compatibility_title": "호환성",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "현재 플랫폼에서 사용할 수 없음",
     "marketplace_requires_version": "OxideTerm {{version}} 이상 필요",
     "marketplace_incompatible": "현재 OxideTerm 버전과 호환되지 않음",
+    "marketplace_newer_requires": "v{{version}}에는 OxideTerm {{requirement}}이 필요합니다.",
+    "language_missing": "{{language}} 언어 지원이 활성화되지 않았습니다.",
+    "language_manage": "언어 지원 추가",
+    "language_dismiss": "다시 표시하지 않기",
+    "marketplace_installed_version": "설치된 버전: v{{version}}",
+    "host_version_incompatible": "이 플러그인에는 OxideTerm {{requirement}}이 필요합니다. 현재 버전: {{current}}.",
     "marketplace_unverified": "패키지를 검증할 수 없음",
     "marketplace_homepage": "홈페이지",
     "registry_error": "레지스트리 로드 실패",

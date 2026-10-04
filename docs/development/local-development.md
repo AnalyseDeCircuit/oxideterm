@@ -2,11 +2,11 @@
 
 ## Baseline
 
-CI uses Rust `1.94.1`. Install that toolchain before diagnosing compiler differences:
+Local builds and CI use Rust `1.97.0`, pinned in `rust-toolchain.toml`:
 
 ```sh
-rustup toolchain install 1.94.1
-cargo +1.94.1 run
+rustup toolchain install 1.97.0
+cargo run
 ```
 
 The workspace default member is the native application, so the normal local loop is:

@@ -197,6 +197,8 @@
     "shortcut_count": "件のショートカット"
   },
   "plugin": {
+    "marketplace_all": "すべて",
+    "marketplace_updates_only": "更新可能のみ",
     "manager_title": "プラグイン管理",
     "manager_description": "インストール済みプラグインの管理とレジストリの閲覧",
     "compatibility_title": "互換性",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "このプラットフォームでは利用できません",
     "marketplace_requires_version": "OxideTerm {{version}} 以降が必要です",
     "marketplace_incompatible": "現在の OxideTerm バージョンとは互換性がありません",
+    "marketplace_newer_requires": "v{{version}} には OxideTerm {{requirement}} が必要です。",
+    "language_missing": "{{language}} の言語サポートは有効になっていません。",
+    "language_manage": "言語サポートを追加",
+    "language_dismiss": "今後表示しない",
+    "marketplace_installed_version": "インストール済み：v{{version}}",
+    "host_version_incompatible": "このプラグインには OxideTerm {{requirement}} が必要です。現在のバージョン：{{current}}。",
     "marketplace_unverified": "パッケージを検証できません",
     "marketplace_homepage": "ホームページ",
     "registry_error": "レジストリの読み込みに失敗",

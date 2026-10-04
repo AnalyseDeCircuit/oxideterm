@@ -4,6 +4,7 @@
 use crate::SyntaxError;
 use std::{
     cell::Cell,
+    ops::ControlFlow,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -67,7 +68,13 @@ pub(crate) fn parse(
 ) -> Result<tree_sitter::Tree, SyntaxError> {
     loop {
         checkpoint(work)?;
-        let mut pause = |_: &tree_sitter::ParseState| work.is_some_and(SyntaxWork::should_pause);
+        let mut pause = |_: &tree_sitter::ParseState| {
+            if work.is_some_and(SyntaxWork::should_pause) {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
         if let Some(tree) = parser.parse_with_options(
             &mut |offset, _| source.as_bytes().get(offset..).unwrap_or_default(),
             old,
@@ -84,7 +91,7 @@ pub(crate) fn parse(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HighlightCache, LanguageId, StructureCache, SyntaxSession};
+    use crate::{HighlightCache, LanguageId, StructureCache};
 
     #[test]
     fn sliced_work_preserves_results_and_cancelled_work_is_not_reusable() {
@@ -92,8 +99,9 @@ mod tests {
         let generation = Arc::new(AtomicU64::new(1));
         let work = SyntaxWork::new(generation.clone(), 1, Duration::from_micros(1));
         let session =
-            SyntaxSession::parse_controlled(LanguageId::Rust, &source, Some(&work)).unwrap();
-        let expected = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+            crate::grammar_fixture::parse_controlled(LanguageId::Rust, &source, Some(&work))
+                .unwrap();
+        let expected = crate::grammar_fixture::parse(LanguageId::Rust, &source).unwrap();
         let mut highlights = HighlightCache::default();
         let mut structure = StructureCache::default();
         highlights
@@ -112,7 +120,8 @@ mod tests {
         assert_eq!(structure.columns_for_line(1), [0]);
         let markdown = "**中文🙂** and [link](https://example.com)\n\n".repeat(128);
         let md =
-            SyntaxSession::parse_controlled(LanguageId::Markdown, &markdown, Some(&work)).unwrap();
+            crate::grammar_fixture::parse_controlled(LanguageId::Markdown, &markdown, Some(&work))
+                .unwrap();
         let range = oxideterm_editor_core::TextRange::new(
             oxideterm_editor_core::BufferOffset(0),
             oxideterm_editor_core::BufferOffset(markdown.len()),
@@ -124,7 +133,7 @@ mod tests {
         );
         generation.store(2, Ordering::Release);
         assert!(matches!(
-            SyntaxSession::parse_controlled(LanguageId::Rust, &source, Some(&work)),
+            crate::grammar_fixture::parse_controlled(LanguageId::Rust, &source, Some(&work)),
             Err(SyntaxError::ParseCancelled)
         ));
         assert!(matches!(

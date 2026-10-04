@@ -35,7 +35,7 @@ impl SyntaxSession {
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Self, SyntaxError> {
         crate::work::checkpoint(work)?;
-        let language = language_id.tree_sitter_language();
+        let language = language_id.tree_sitter_language()?;
         let mut parser = Parser::new();
         parser.set_language(&language)?;
         let queries = LanguageQueries::shared(language_id, &language)?;
@@ -54,6 +54,26 @@ impl SyntaxSession {
 
     pub fn language_id(&self) -> LanguageId {
         self.language_id
+    }
+
+    pub fn parse_plugin(
+        grammar: &crate::PluginGrammar,
+        source: &str,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<Self, SyntaxError> {
+        crate::work::checkpoint(work)?;
+        let (mut parser, language, queries) = grammar.parser()?;
+        crate::work::checkpoint(work)?;
+        let tree = crate::work::parse(&mut parser, source, None, work)?;
+        Ok(Self {
+            language_id: grammar.source.language,
+            language,
+            parser,
+            queries,
+            tree,
+            cache_owner: Arc::new(()),
+            revision: 0,
+        })
     }
 
     pub fn root_has_error(&self) -> bool {
@@ -170,6 +190,12 @@ pub(crate) struct LanguageQueries {
 }
 
 impl LanguageQueries {
+    pub(crate) fn for_plugin(language: &Language, highlights: &str) -> Result<Self, SyntaxError> {
+        Ok(Self {
+            highlight: Query::new(language, highlights)?,
+            markdown_inline: None,
+        })
+    }
     fn shared(language_id: LanguageId, language: &Language) -> Result<Arc<Self>, SyntaxError> {
         static QUERIES: OnceLock<Mutex<HashMap<LanguageId, Weak<LanguageQueries>>>> =
             OnceLock::new();

@@ -128,6 +128,10 @@ pub(super) struct NativePluginManagerState {
     pub(super) install_checksum_draft: String,
     pub(super) registry_url_draft: String,
     pub(super) marketplace_search_draft: String,
+    marketplace_tag: Option<String>,
+    marketplace_updates_only: bool,
+    marketplace_expanded_ids: HashSet<String>,
+    package_manager_expanded: bool,
     pub(super) marketplace_entries: Vec<plugin_host::NativePluginRegistryEntry>,
     pub(super) marketplace_load_state: NativePluginMarketplaceLoadState,
     pub(super) available_updates: Vec<plugin_host::NativePluginRegistryEntry>,
@@ -159,6 +163,10 @@ impl NativePluginManagerState {
             install_checksum_draft: String::new(),
             registry_url_draft: String::new(),
             marketplace_search_draft: String::new(),
+            marketplace_tag: None,
+            marketplace_updates_only: false,
+            marketplace_expanded_ids: HashSet::new(),
+            package_manager_expanded: false,
             marketplace_entries: Vec::new(),
             marketplace_load_state: NativePluginMarketplaceLoadState::NotLoaded,
             available_updates: Vec::new(),
@@ -222,6 +230,49 @@ impl WorkspaceApp {
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window, cx);
         self.persist_sidebar_settings(cx);
+        cx.notify();
+    }
+
+    pub(super) fn open_language_plugin(
+        &mut self,
+        language: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let installed = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .plugins()
+            .iter()
+            .any(|plugin| {
+                plugin
+                    .manifest
+                    .contributes
+                    .as_ref()
+                    .and_then(|value| value.language.as_ref())
+                    .is_some_and(|value| value.id == language)
+            });
+        self.open_plugin_manager_tab(window, cx);
+        self.update_plugin_manager_state(cx, |manager| {
+            manager.previous_tab = manager.active_tab;
+            manager.active_tab = if installed {
+                NativePluginManagerTab::Installed
+            } else {
+                NativePluginManagerTab::Marketplace
+            };
+            manager.marketplace_search_draft = format!("com.oxideterm.language.{language}");
+            manager.marketplace_tag = None;
+            manager.marketplace_updates_only = false;
+            manager.section_list_state.splice(
+                PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
+                    ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
+                1,
+            );
+        });
+        if !installed {
+            self.start_native_plugin_marketplace_load(cx);
+        }
         cx.notify();
     }
 
@@ -305,7 +356,16 @@ impl WorkspaceApp {
                             div()
                                 .text_size(px(self.tokens.metrics.ui_text_base))
                                 .text_color(rgb(theme.text_muted))
-                                .child(self.i18n.t("plugin.manager_description")),
+                                .child(self.i18n.t(
+                                    match self.plugin_manager_state(cx).active_tab {
+                                        NativePluginManagerTab::Installed => {
+                                            "plugin.manager_description"
+                                        }
+                                        NativePluginManagerTab::Marketplace => {
+                                            "plugin.marketplace_description"
+                                        }
+                                    },
+                                )),
                         ),
                 )
                 .child(self.render_native_plugin_tab_bar(has_background, cx))
@@ -373,7 +433,7 @@ impl WorkspaceApp {
 
     fn render_native_plugin_actions_card(
         &self,
-        has_background: bool,
+        _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -388,12 +448,16 @@ impl WorkspaceApp {
                     .count(),
             )
         };
-        self.native_plugin_card_surface(has_background)
+        div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
+            .gap(px(self.tokens.spacing.three))
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
@@ -461,28 +525,83 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }),
                             ))
-                            .child(self.render_native_plugin_action_button(
-                                LucideIcon::RefreshCw,
-                                self.i18n.t("plugin.refresh"),
-                                false,
-                                cx.listener(|this, _event, _window, cx| {
-                                    let registry = plugin_host::NativePluginRegistry::discover(
-                                        this.settings_store.path(),
-                                    );
-                                    this.plugin_entity.update(cx, |plugins, _cx| {
-                                        plugins.replace_registry(registry);
-                                    });
-                                    let refreshed = this.i18n.t("plugin.refresh");
-                                    this.update_plugin_manager_state(cx, |manager| {
-                                        manager.operation_status =
-                                            NativePluginManagerOperationStatus::Success(refreshed);
-                                    });
-                                    cx.notify();
-                                }),
-                            )),
+                            .when(
+                                self.plugin_manager_state(cx).active_tab
+                                    == NativePluginManagerTab::Installed,
+                                |actions| {
+                                    actions.child(self.render_native_plugin_action_button(
+                                        LucideIcon::RefreshCw,
+                                        self.i18n.t("plugin.refresh"),
+                                        false,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            let registry =
+                                                plugin_host::NativePluginRegistry::discover(
+                                                    this.settings_store.path(),
+                                                );
+                                            this.plugin_entity.update(cx, |plugins, _cx| {
+                                                plugins.replace_registry(registry, _cx);
+                                            });
+                                            let refreshed = this.i18n.t("plugin.refresh");
+                                            this.update_plugin_manager_state(cx, |manager| {
+                                                manager.operation_status =
+                                                    NativePluginManagerOperationStatus::Success(
+                                                        refreshed,
+                                                    );
+                                            });
+                                            cx.notify();
+                                        }),
+                                    ))
+                                },
+                            )
+                            .when(
+                                self.plugin_manager_state(cx).active_tab
+                                    == NativePluginManagerTab::Marketplace,
+                                |actions| {
+                                    actions
+                                        .child(self.render_native_plugin_action_button(
+                                            LucideIcon::ExternalLink,
+                                            self.i18n.t("plugin.marketplace_repository"),
+                                            false,
+                                            |_event, _window, cx| {
+                                                cx.open_url(OFFICIAL_PLUGIN_MARKETPLACE_HOME);
+                                            },
+                                        ))
+                                        .child(
+                                            self.render_native_plugin_action_button(
+                                                LucideIcon::RefreshCw,
+                                                self.i18n.t("plugin.refresh"),
+                                                self.plugin_entity
+                                                    .read(cx)
+                                                    .manager_operation_in_flight(),
+                                                cx.listener(|this, _event, _window, cx| {
+                                                    this.start_native_plugin_marketplace_load(cx);
+                                                    cx.stop_propagation();
+                                                }),
+                                            ),
+                                        )
+                                },
+                            ),
                     ),
             )
+            .when_some(
+                self.render_native_plugin_manager_status(cx),
+                |panel, status| panel.child(status),
+            )
             .into_any_element()
+    }
+
+    fn native_plugin_browse_card(&self, has_background: bool) -> Div {
+        semantic_surface(
+            &self.tokens,
+            SurfaceOptions::new(SurfaceKind::Panel)
+                .padding(SurfacePadding::Normal)
+                .has_background_image(has_background),
+        )
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(self.tokens.spacing.three))
     }
 
     fn render_native_plugin_tabbed_content(
@@ -666,8 +785,9 @@ impl WorkspaceApp {
                     .collect::<Vec<_>>(),
             )
         };
-        let card = self
-            .native_plugin_card_surface(has_background)
+        let card = div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(16.0))
@@ -708,34 +828,23 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        let mut card = card
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(theme.text))
-                    .child(self.i18n.t("plugin.empty_title")),
-            )
-            .children(
-                diagnostics
-                    .iter()
-                    .map(|diagnostic| self.render_native_plugin_diagnostic_row(diagnostic, cx)),
-            );
-        for (index, plugin) in plugin_rows.iter().enumerate() {
-            card = card.child(self.render_native_plugin_registry_row(plugin, has_background, cx));
-            if index + 1 < plugin_rows.len() {
-                card = card.child(
-                    div()
-                        .w_full()
-                        .h(px(1.0))
-                        .bg(plugin_manager_theme_border_half(
-                            theme.border,
-                            has_background,
-                        )),
-                );
-            }
-        }
-        card.into_any_element()
+        card.children(
+            diagnostics
+                .iter()
+                .map(|diagnostic| self.render_native_plugin_diagnostic_row(diagnostic, cx)),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.spacing.three))
+                .children(plugin_rows.iter().map(|plugin| {
+                    self.render_native_plugin_registry_row(plugin, has_background, cx)
+                })),
+        )
+        .into_any_element()
     }
 
     fn render_native_plugin_marketplace_content(
@@ -743,6 +852,8 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let expanded = self.plugin_manager_state(cx).package_manager_expanded
+            || self.plugin_manager_state(cx).pending_overwrite.is_some();
         div()
             .w_full()
             .min_w(px(0.0))
@@ -750,8 +861,26 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(16.0))
             .child(self.render_native_plugin_marketplace(has_background, cx))
-            .child(self.render_native_plugin_package_manager(has_background, cx))
-            .child(self.render_native_plugin_url_disclaimer())
+            .child(self.render_native_plugin_action_button(
+                if expanded {
+                    LucideIcon::ChevronDown
+                } else {
+                    LucideIcon::ChevronRight
+                },
+                self.i18n.t("plugin.url_install_title"),
+                false,
+                cx.listener(|this, _event, _window, cx| {
+                    this.update_plugin_manager_state(cx, |manager| {
+                        manager.package_manager_expanded = !manager.package_manager_expanded;
+                    });
+                    cx.notify();
+                }),
+            ))
+            .when(expanded, |content| {
+                content
+                    .child(self.render_native_plugin_package_manager(has_background, cx))
+                    .child(self.render_native_plugin_url_disclaimer())
+            })
             .into_any_element()
     }
 
@@ -761,84 +890,50 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (entries, query, load_state, busy) = {
+        let (entries, query, tag, updates_only, load_state) = {
             let manager = self.plugin_manager_state(cx);
             (
                 manager.marketplace_entries.clone(),
                 manager.marketplace_search_draft.clone(),
+                manager.marketplace_tag.clone(),
+                manager.marketplace_updates_only,
                 manager.marketplace_load_state,
-                matches!(
-                    manager.operation_status,
-                    NativePluginManagerOperationStatus::Busy(_)
-                ),
             )
         };
+        let mut tags = entries
+            .iter()
+            .flat_map(|entry| entry.tags.iter().flatten())
+            .filter(|tag| !tag.trim().is_empty())
+            .cloned()
+            .collect::<Vec<_>>();
+        tags.sort();
+        tags.dedup();
         let query = query.trim().to_lowercase();
+        let plugins = self.plugin_entity.read(cx).registry().plugins();
         let visible_entries = entries
             .into_iter()
-            .filter(|entry| native_plugin_marketplace_entry_matches(entry, &query))
+            .filter(|entry| {
+                let installed_version = plugins
+                    .iter()
+                    .find(|plugin| plugin.manifest.id == entry.id)
+                    .map(|plugin| plugin.manifest.version.as_str());
+                native_plugin_marketplace_entry_visible(
+                    entry,
+                    &query,
+                    tag.as_deref(),
+                    updates_only,
+                    installed_version,
+                )
+            })
             .collect::<Vec<_>>();
         let entry_count = visible_entries.len();
 
-        let mut card = self
-            .native_plugin_card_surface(has_background)
+        let mut card = div()
+            .w_full()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(14.0))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text_heading))
-                                    .child(self.i18n.t("plugin.marketplace_title")),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .line_height(px(18.0))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("plugin.marketplace_description")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(self.render_native_plugin_action_button(
-                                LucideIcon::ExternalLink,
-                                self.i18n.t("plugin.marketplace_repository"),
-                                false,
-                                |_event, _window, cx| {
-                                    cx.open_url(OFFICIAL_PLUGIN_MARKETPLACE_HOME);
-                                },
-                            ))
-                            .child(self.render_native_plugin_action_button(
-                                LucideIcon::RefreshCw,
-                                self.i18n.t("plugin.refresh"),
-                                busy,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.start_native_plugin_marketplace_load(cx);
-                                    cx.stop_propagation();
-                                }),
-                            )),
-                    ),
-            )
             .child(
                 self.render_native_plugin_manager_icon_input(
                     LucideIcon::Search,
@@ -848,6 +943,45 @@ impl WorkspaceApp {
                 )
                 .w_full()
                 .flex_none(),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.two))
+                    .child(self.render_native_plugin_marketplace_filter(
+                        self.i18n.t("plugin.marketplace_all"),
+                        tag.is_none(),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.update_plugin_manager_state(cx, |manager| {
+                                manager.marketplace_tag = None
+                            });
+                            cx.notify();
+                        }),
+                    ))
+                    .children(tags.into_iter().map(|value| {
+                        self.render_native_plugin_marketplace_filter(
+                            value.clone(),
+                            tag.as_ref() == Some(&value),
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.update_plugin_manager_state(cx, |manager| {
+                                    manager.marketplace_tag = Some(value.clone())
+                                });
+                                cx.notify();
+                            }),
+                        )
+                    }))
+                    .child(self.render_native_plugin_marketplace_filter(
+                        self.i18n.t("plugin.marketplace_updates_only"),
+                        updates_only,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.update_plugin_manager_state(cx, |manager| {
+                                manager.marketplace_updates_only = !manager.marketplace_updates_only
+                            });
+                            cx.notify();
+                        }),
+                    )),
             );
 
         if visible_entries.is_empty() {
@@ -863,11 +997,15 @@ impl WorkspaceApp {
                     self.i18n.t("plugin.marketplace_load_error"),
                     theme.error,
                 ),
-                NativePluginMarketplaceLoadState::Loaded if query.is_empty() => (
-                    LucideIcon::Puzzle,
-                    self.i18n.t("plugin.marketplace_empty"),
-                    theme.text_muted,
-                ),
+                NativePluginMarketplaceLoadState::Loaded
+                    if query.is_empty() && tag.is_none() && !updates_only =>
+                {
+                    (
+                        LucideIcon::Puzzle,
+                        self.i18n.t("plugin.marketplace_empty"),
+                        theme.text_muted,
+                    )
+                }
                 NativePluginMarketplaceLoadState::Loaded => (
                     LucideIcon::Search,
                     self.i18n.t("plugin.no_search_results"),
@@ -902,12 +1040,36 @@ impl WorkspaceApp {
                             .replace("{{count}}", &entry_count.to_string()),
                     ),
             )
-            .children(
-                visible_entries.iter().map(|entry| {
-                    self.render_native_plugin_marketplace_row(entry, has_background, cx)
-                }),
+            .child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.three))
+                    .children(visible_entries.iter().map(|entry| {
+                        self.render_native_plugin_marketplace_row(entry, has_background, cx)
+                    })),
             );
         card.into_any_element()
+    }
+
+    fn render_native_plugin_marketplace_filter(
+        &self,
+        label: String,
+        active: bool,
+        listener: impl Fn(&gpui::MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        oxideterm_gpui_ui::action_chip(
+            &self.tokens,
+            label,
+            None,
+            oxideterm_gpui_ui::ActionChipOptions::new()
+                .active(active)
+                .font_size(self.tokens.metrics.ui_text_xs),
+        )
+        .on_mouse_down(MouseButton::Left, listener)
+        .into_any_element()
     }
 
     fn render_native_plugin_marketplace_row(
@@ -917,6 +1079,38 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let compatible = plugin_host::NativePluginRegistry::select_registry_release(entry);
+        let latest = plugin_host::NativePluginRegistry::latest_registry_release(entry);
+        let newer_requirement = latest
+            .as_ref()
+            .filter(|latest| {
+                !plugin_host::NativePluginRegistry::registry_entry_supports_current_version(latest)
+                    && compatible.as_ref().is_none_or(|selected| {
+                        plugin_host::NativePluginRegistry::registry_entry_is_update(
+                            latest,
+                            &selected.version,
+                        )
+                    })
+            })
+            .map(|latest| {
+                let requirement = latest
+                    .engines
+                    .as_ref()
+                    .and_then(|engines| engines.oxideterm.as_deref())
+                    .map(str::to_string)
+                    .or_else(|| {
+                        latest
+                            .min_oxideterm_version
+                            .as_ref()
+                            .map(|version| format!(">={version}"))
+                    })
+                    .unwrap_or_default();
+                self.i18n
+                    .t("plugin.marketplace_newer_requires")
+                    .replace("{{version}}", &latest.version)
+                    .replace("{{requirement}}", &requirement)
+            });
+        let entry = compatible.as_ref().or(latest.as_ref()).unwrap_or(entry);
         let installed_version = self
             .plugin_entity
             .read(cx)
@@ -925,9 +1119,10 @@ impl WorkspaceApp {
             .iter()
             .find(|plugin| plugin.manifest.id == entry.id)
             .map(|plugin| plugin.manifest.version.clone());
-        let update_available = installed_version.as_deref().is_some_and(|version| {
-            plugin_host::NativePluginRegistry::registry_entry_is_update(entry, version)
-        });
+        let update_available = compatible.is_some()
+            && installed_version.as_deref().is_some_and(|version| {
+                plugin_host::NativePluginRegistry::registry_entry_is_update(entry, version)
+            });
         let host_supported =
             plugin_host::NativePluginRegistry::registry_entry_supports_current_host(entry);
         let version_supported =
@@ -973,21 +1168,46 @@ impl WorkspaceApp {
                 self.i18n.t("plugin.marketplace_unverified"),
                 StatusTone::Error,
             ))
-        } else if update_available {
-            Some((self.i18n.t("plugin.update_available"), StatusTone::Success))
-        } else if installed {
-            Some((self.i18n.t("plugin.installed"), StatusTone::Neutral))
         } else {
             None
         };
         let capabilities = native_plugin_registry_capabilities_label(&self.i18n, entry);
+        let expanded = self
+            .plugin_manager_state(cx)
+            .marketplace_expanded_ids
+            .contains(&entry.id);
+        let detail_id = entry.id.clone();
         let expected_id = entry.id.clone();
         let package_for_install = package;
         let homepage = entry
             .homepage
             .as_deref()
             .and_then(native_plugin_safe_https_url);
-        let mut actions = Vec::with_capacity(2);
+        let mut actions = Vec::with_capacity(3);
+        actions.push(
+            self.render_native_plugin_action_button(
+                if expanded {
+                    LucideIcon::ChevronDown
+                } else {
+                    LucideIcon::ChevronRight
+                },
+                self.i18n.t(if expanded {
+                    "plugin.hide_details"
+                } else {
+                    "plugin.show_details"
+                }),
+                false,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.update_plugin_manager_state(cx, |manager| {
+                        if !manager.marketplace_expanded_ids.insert(detail_id.clone()) {
+                            manager.marketplace_expanded_ids.remove(&detail_id);
+                        }
+                    });
+                    cx.notify();
+                }),
+            )
+            .into_any_element(),
+        );
         if let Some(homepage) = homepage {
             actions.push(
                 self.render_native_plugin_action_button(
@@ -1022,108 +1242,161 @@ impl WorkspaceApp {
             }),
         ));
 
-        div()
-            .w_full()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(plugin_manager_theme_border_half(
-                theme.border,
-                has_background,
-            ))
-            .bg(plugin_manager_theme_panel_bg(
-                theme.bg_panel,
-                has_background,
-            ))
-            .p(px(14.0))
-            .child(action_slot_row(
-                &self.tokens,
-                ActionSlotRowOptions::new().align_start().gap(12.0),
-                Some(
-                    div()
-                        .h(px(self.tokens.metrics.ui_button_sm_height))
-                        .flex()
-                        .items_center()
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Puzzle,
-                            18.0,
-                            rgb(theme.accent),
-                        ))
-                        .into_any_element(),
-                ),
+        self.native_plugin_browse_card(has_background)
+            .child(
                 div()
-                    .min_w(px(0.0))
                     .flex()
-                    .flex_col()
-                    .gap(px(5.0))
+                    .items_start()
+                    .gap(px(self.tokens.spacing.three))
                     .child(
                         div()
+                            .size(px(36.0))
+                            .flex_none()
+                            .rounded(px(self.tokens.radii.md))
+                            .bg(plugin_manager_theme_alpha(
+                                theme.accent,
+                                PLUGIN_MANAGER_TW_ALPHA_10,
+                            ))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Puzzle,
+                                18.0,
+                                rgb(theme.accent),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(5.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .min_h(px(self.tokens.metrics.ui_button_sm_height))
+                                    .items_center()
+                                    .gap(px(8.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .text_color(rgb(theme.text))
+                                            .child(entry.name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_none()
+                                            .rounded(px(self.tokens.radii.sm))
+                                            .bg(plugin_manager_theme_alpha(
+                                                theme.accent,
+                                                PLUGIN_MANAGER_TW_ALPHA_10,
+                                            ))
+                                            .px(px(6.0))
+                                            .py(px(2.0))
+                                            .text_size(px(PLUGIN_MANAGER_ROW_META_TEXT_SIZE))
+                                            .text_color(rgb(theme.accent))
+                                            .child(format!("v{}", entry.version)),
+                                    ),
+                            )
+                            .when_some(entry.author.clone(), |body, author| {
+                                body.child(
+                                    div()
+                                        .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
+                                        .text_color(rgb(theme.text_muted))
+                                        .child(
+                                            self.i18n
+                                                .t("plugin.by_author")
+                                                .replace("{{author}}", &author),
+                                        ),
+                                )
+                            }),
+                    ),
+            )
+            .when_some(entry.description.clone(), |card, description| {
+                card.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .line_height(px(self.tokens.metrics.ui_text_sm * 1.5))
+                        .text_color(rgb(theme.text_muted))
+                        .when(!expanded, |text| text.line_clamp(2))
+                        .child(description),
+                )
+            })
+            .when_some(
+                installed_version.filter(|version| version != &entry.version),
+                |card, version| {
+                    card.child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("plugin.marketplace_installed_version")
+                                    .replace("{{version}}", &version),
+                            ),
+                    )
+                },
+            )
+            .when_some(newer_requirement, |card, message| {
+                card.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.warning))
+                        .child(message),
+                )
+            })
+            .when(expanded, |card| {
+                card.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.text_muted))
+                        .child(entry.id.clone()),
+                )
+                .when_some(capabilities, |card, label| {
+                    card.child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(label),
+                    )
+                })
+                .when_some(entry.tags.as_ref(), |card, tags| {
+                    card.child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(tags.join(" · ")),
+                    )
+                })
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(self.tokens.spacing.two))
+                    .when_some(availability, |footer, (label, tone)| {
+                        footer.child(div().child(status_pill(
+                            &self.tokens,
+                            label,
+                            StatusPillOptions::new(tone).compact(),
+                        )))
+                    })
+                    .child(
+                        div()
+                            .ml_auto()
                             .flex()
                             .flex_wrap()
-                            .min_h(px(self.tokens.metrics.ui_button_sm_height))
                             .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text))
-                                    .child(entry.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .bg(plugin_manager_theme_alpha(
-                                        theme.accent,
-                                        PLUGIN_MANAGER_TW_ALPHA_10,
-                                    ))
-                                    .px(px(6.0))
-                                    .py(px(2.0))
-                                    .text_size(px(PLUGIN_MANAGER_ROW_META_TEXT_SIZE))
-                                    .text_color(rgb(theme.accent))
-                                    .child(format!("v{}", entry.version)),
-                            )
-                            .when_some(availability, |header, (label, tone)| {
-                                header.child(status_pill(
-                                    &self.tokens,
-                                    label,
-                                    StatusPillOptions::new(tone).compact(),
-                                ))
-                            }),
-                    )
-                    .when_some(entry.description.clone(), |body, description| {
-                        body.child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .line_height(px(18.0))
-                                .text_color(rgb(theme.text_muted))
-                                .child(description),
-                        )
-                    })
-                    .when_some(entry.author.clone(), |body, author| {
-                        body.child(
-                            div()
-                                .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
-                                .text_color(rgb(theme.text_muted))
-                                .child(
-                                    self.i18n
-                                        .t("plugin.by_author")
-                                        .replace("{{author}}", &author),
-                                ),
-                        )
-                    })
-                    .when_some(capabilities, |body, capabilities| {
-                        body.child(
-                            div()
-                                .text_size(px(PLUGIN_MANAGER_HINT_TEXT_SIZE))
-                                .line_height(px(18.0))
-                                .text_color(rgb(theme.text_muted))
-                                .child(capabilities),
-                        )
-                    })
-                    .into_any_element(),
-                actions,
-            ))
+                            .gap(px(self.tokens.spacing.two))
+                            .children(actions),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -1344,10 +1617,6 @@ impl WorkspaceApp {
                     ),
                 )
             })
-            .when_some(
-                self.render_native_plugin_manager_status(cx),
-                |panel, status| panel.child(status),
-            )
             .into_any_element()
     }
 
@@ -1870,7 +2139,7 @@ impl WorkspaceApp {
                 let settings_path = self.settings_store.path();
                 let i18n = &self.i18n;
                 let bootstrap_runtime = self.plugin_entity.update(cx, |plugins, _cx| {
-                    plugins.apply_manager_deliveries(settings_path, i18n)
+                    plugins.apply_manager_deliveries(settings_path, i18n, _cx)
                 });
                 if bootstrap_runtime {
                     self.bootstrap_native_plugin_runtime(cx);
@@ -1964,7 +2233,7 @@ impl WorkspaceApp {
     fn render_native_plugin_registry_row(
         &self,
         plugin: &plugin_host::NativePluginInfo,
-        _has_background: bool,
+        has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -1993,21 +2262,14 @@ impl WorkspaceApp {
         let expand_plugin_id = plugin.manifest.id.clone();
         let uninstall_plugin_id = plugin.manifest.id.clone();
         let reload_plugin_id = plugin.manifest.id.clone();
-        // Tauri keeps plugin details collapsed by default. Native mirrors that
-        // visual shape here; settings/details remain available through later
-        // expansion work instead of being shown under every row.
-        let mut row = div().w_full().flex().flex_col().gap(px(12.0)).child(
+        let mut row = self.native_plugin_browse_card(has_background).child(
             div()
                 .w_full()
                 .flex()
                 .items_start()
-                .justify_between()
                 .gap(px(16.0))
                 .child(
                     div()
-                        // Tauri's min-w-0 left column must also be flex-bounded
-                        // in GPUI; otherwise long descriptions can overlap and
-                        // intercept clicks intended for the right action group.
                         .flex_1()
                         .min_w(px(0.0))
                         .overflow_hidden()
@@ -2063,6 +2325,7 @@ impl WorkspaceApp {
                                 .child(
                                     div()
                                         .flex()
+                                        .flex_wrap()
                                         .min_h(px(PLUGIN_MANAGER_ROW_ACTION_SIZE))
                                         .items_center()
                                         .gap(px(8.0))
@@ -2078,29 +2341,29 @@ impl WorkspaceApp {
                                         .child(
                                             div()
                                                 .flex_none()
-                                                .rounded(px(self.tokens.radii.sm))
-                                                .bg(plugin_manager_theme_alpha(
-                                                    theme.accent,
-                                                    PLUGIN_MANAGER_TW_ALPHA_20,
-                                                ))
-                                                .px(px(6.0))
-                                                .py(px(2.0))
-                                                .text_size(px(PLUGIN_MANAGER_ROW_META_TEXT_SIZE))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(theme.accent))
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .text_color(rgb(theme.text_muted))
                                                 .child(format!("v{}", plugin.manifest.version)),
                                         )
-                                        .child(status_pill(
-                                            &self.tokens,
-                                            state_label,
-                                            StatusPillOptions::new(state_tone).compact(),
-                                        )),
+                                        .child(
+                                            div()
+                                                .flex_none()
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .text_color(
+                                                    oxideterm_gpui_ui::status_pill_colors(
+                                                        &self.tokens,
+                                                        state_tone,
+                                                        false,
+                                                    )
+                                                    .text,
+                                                )
+                                                .child(state_label),
+                                        ),
                                 )
                                 .child(
                                     div()
                                         .min_w(px(0.0))
-                                        .max_h(px(36.0))
-                                        .overflow_hidden()
+                                        .when(!is_expanded, |description| description.line_clamp(2))
                                         .text_size(px(self.tokens.metrics.ui_text_xs))
                                         .line_height(px(18.0))
                                         .text_color(rgb(theme.text_muted))
@@ -2119,6 +2382,7 @@ impl WorkspaceApp {
                         .flex_shrink_0()
                         .flex()
                         .items_center()
+                        .justify_end()
                         .gap(px(12.0))
                         .when(is_error || is_active, |right| {
                             right.child(self.render_native_plugin_row_icon_button(
@@ -2129,7 +2393,7 @@ impl WorkspaceApp {
                                         this.settings_store.path(),
                                     );
                                     this.plugin_entity.update(cx, |plugins, _cx| {
-                                        plugins.replace_registry(registry);
+                                        plugins.replace_registry(registry, _cx);
                                     });
                                     this.bootstrap_native_plugin_runtime(cx);
                                     let success_template = this.i18n.t("plugin.reload_success");
@@ -2150,7 +2414,7 @@ impl WorkspaceApp {
                             toggle_color,
                             Some(cx.listener(move |this, _event, _window, cx| {
                                 let result = this.plugin_entity.update(cx, |plugins, _cx| {
-                                    plugins.set_plugin_enabled(&plugin_id, next_enabled)
+                                    plugins.set_plugin_enabled(&plugin_id, next_enabled, _cx)
                                 });
                                 if let Err(error) = result {
                                     this.update_plugin_manager_state(cx, |manager| {
@@ -2192,7 +2456,7 @@ impl WorkspaceApp {
                                 // storage cleanup to the manager flow. Native mirrors the
                                 // file removal path while preserving settings for now.
                                 let result = this.plugin_entity.update(cx, |plugins, _cx| {
-                                    plugins.uninstall_plugin(&uninstall_plugin_id, false)
+                                    plugins.uninstall_plugin(&uninstall_plugin_id, false, _cx)
                                 });
                                 if let Err(error) = result {
                                     this.plugin_entity.update(cx, |plugins, _cx| {
@@ -2286,38 +2550,25 @@ impl WorkspaceApp {
 
         div()
             .ml(px(28.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
+            .min_w(px(0.0))
+            .border_t_1()
             .border_color(plugin_manager_theme_alpha(
                 theme.border,
                 PLUGIN_MANAGER_TW_ALPHA_50,
             ))
-            .bg(plugin_manager_theme_alpha(
-                theme.bg_panel,
-                PLUGIN_MANAGER_TW_ALPHA_30,
-            ))
-            .p(px(12.0))
+            .pt(px(self.tokens.spacing.three))
             .flex()
             .flex_col()
             .gap(px(8.0))
             .text_size(px(self.tokens.metrics.ui_text_xs))
             .line_height(px(18.0))
             .text_color(rgb(theme.text_muted))
-            .when_some(manifest.description.clone(), |panel, description| {
-                panel.child(div().text_color(rgb(theme.text_muted)).child(description))
-            })
-            // Tauri PluginRow renders a compact two-column detail grid. GPUI
-            // mirrors that with fixed labels and flexible values.
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(6.0))
                     .child(self.render_native_plugin_detail_row("ID", manifest.id.clone()))
-                    .child(self.render_native_plugin_detail_row(
-                        self.i18n.t("plugin.detail_version"),
-                        manifest.version.clone(),
-                    ))
                     .child(self.render_native_plugin_detail_row(
                         self.i18n.t("plugin.detail_entry"),
                         main_entry,
@@ -2353,21 +2604,7 @@ impl WorkspaceApp {
                                 .text_color(rgb(theme.text))
                                 .child(self.i18n.t("plugin.detail_contributes")),
                         )
-                        .child(div().flex().flex_wrap().gap(px(6.0)).children(
-                            contribution_labels.into_iter().map(|label| {
-                                div()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .bg(plugin_manager_theme_alpha(
-                                        theme.accent,
-                                        PLUGIN_MANAGER_TW_ALPHA_10,
-                                    ))
-                                    .px(px(8.0))
-                                    .py(px(2.0))
-                                    .text_size(px(PLUGIN_MANAGER_ROW_META_TEXT_SIZE))
-                                    .text_color(rgb(theme.accent))
-                                    .child(label)
-                            }),
-                        )),
+                        .child(div().child(contribution_labels.join(" · "))),
                 )
             })
             .child(
@@ -2391,53 +2628,36 @@ impl WorkspaceApp {
                         permissions.child(self.i18n.t("plugin.permission_none"))
                     })
                     .when(!permission_capabilities.is_empty(), |permissions| {
-                        permissions.child(div().flex().flex_wrap().gap(px(6.0)).children(
-                            permission_capabilities.into_iter().map(|capability| {
-                                let (label, is_trusted_process) = if capability
-                                    == plugin_host::NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY
-                                {
-                                    (self.i18n.t("plugin.permission_trusted_process"), true)
-                                } else {
-                                    (capability, false)
-                                };
-                                div()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .bg(plugin_manager_theme_alpha(
-                                        if is_trusted_process {
+                        permissions.child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .children(permission_capabilities.into_iter().map(|capability| {
+                                    let (label, is_trusted_process) = if capability
+                                        == plugin_host::NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY
+                                    {
+                                        (self.i18n.t("plugin.permission_trusted_process"), true)
+                                    } else {
+                                        (capability, false)
+                                    };
+                                    div()
+                                        .min_w(px(0.0))
+                                        .whitespace_normal()
+                                        .text_color(rgb(if is_trusted_process {
                                             theme.warning
                                         } else {
-                                            theme.accent
-                                        },
-                                        PLUGIN_MANAGER_TW_ALPHA_10,
-                                    ))
-                                    .px(px(8.0))
-                                    .py(px(2.0))
-                                    .text_size(px(PLUGIN_MANAGER_ROW_META_TEXT_SIZE))
-                                    .text_color(rgb(if is_trusted_process {
-                                        theme.warning
-                                    } else {
-                                        theme.accent
-                                    }))
-                                    .child(label)
-                            }),
-                        ))
+                                            theme.text_muted
+                                        }))
+                                        .child(label)
+                                })),
+                        )
                     })
                     .when(permission_requires_review, |permissions| {
                         permissions.child(
                             div()
                                 .mt(px(2.0))
-                                .rounded(px(self.tokens.radii.sm))
-                                .border_1()
-                                .border_color(plugin_manager_theme_alpha(
-                                    theme.warning,
-                                    PLUGIN_MANAGER_TW_ALPHA_30,
-                                ))
-                                .bg(plugin_manager_theme_alpha(
-                                    theme.warning,
-                                    PLUGIN_MANAGER_TW_ALPHA_10,
-                                ))
-                                .px(px(10.0))
-                                .py(px(8.0))
                                 .flex()
                                 .items_start()
                                 .gap(px(8.0))
@@ -2554,6 +2774,30 @@ fn native_plugin_marketplace_entry_matches(
             .is_some_and(|tags| tags.iter().any(|tag| tag.to_lowercase().contains(query)))
 }
 
+fn native_plugin_marketplace_entry_visible(
+    entry: &plugin_host::NativePluginRegistryEntry,
+    query: &str,
+    tag: Option<&str>,
+    updates_only: bool,
+    installed_version: Option<&str>,
+) -> bool {
+    native_plugin_marketplace_entry_matches(entry, query)
+        && tag.is_none_or(|tag| {
+            entry
+                .tags
+                .as_ref()
+                .is_some_and(|tags| tags.iter().any(|value| value == tag))
+        })
+        && (!updates_only
+            || installed_version.is_some_and(|version| {
+                plugin_host::NativePluginRegistry::select_registry_release(entry).is_some_and(
+                    |entry| {
+                        plugin_host::NativePluginRegistry::registry_entry_is_update(&entry, version)
+                    },
+                )
+            }))
+}
+
 fn native_plugin_safe_https_url(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
     (parsed.scheme() == "https" && parsed.username().is_empty() && parsed.password().is_none())
@@ -2663,6 +2907,12 @@ fn native_plugin_status_badge(
     i18n: &I18n,
     plugin: &plugin_host::NativePluginInfo,
 ) -> (String, StatusTone) {
+    if plugin_host::validate_native_plugin_host(&plugin.manifest).is_err() {
+        return (
+            i18n.t("plugin.marketplace_incompatible"),
+            StatusTone::Warning,
+        );
+    }
     match plugin.state {
         plugin_host::NativePluginState::Active
         | plugin_host::NativePluginState::ReadyManifestOnly
@@ -2692,6 +2942,19 @@ fn native_plugin_visible_error(
     i18n: &I18n,
     plugin: &plugin_host::NativePluginInfo,
 ) -> Option<String> {
+    if plugin_host::validate_native_plugin_host(&plugin.manifest).is_err() {
+        let requirement = plugin
+            .manifest
+            .engines
+            .as_ref()
+            .and_then(|engines| engines.oxideterm.as_deref())
+            .unwrap_or_default();
+        return Some(
+            i18n.t("plugin.host_version_incompatible")
+                .replace("{{requirement}}", requirement)
+                .replace("{{current}}", env!("CARGO_PKG_VERSION")),
+        );
+    }
     if !matches!(
         plugin.state,
         plugin_host::NativePluginState::Error | plugin_host::NativePluginState::AutoDisabled
@@ -2836,6 +3099,8 @@ mod tests {
             homepage: None,
             updated_at: None,
             packages: Vec::new(),
+            engines: None,
+            releases: Vec::new(),
         }
     }
 
@@ -2853,6 +3118,53 @@ mod tests {
 
         let entry = registry_entry_with_capabilities(Some(Vec::new()));
         assert!(native_plugin_registry_capabilities_label(&i18n, &entry).is_none());
+    }
+
+    #[test]
+    fn marketplace_filters_combine_search_tag_and_installed_version() {
+        let entries = [
+            ("older", "language", Some("1.1.0")),
+            ("current", "language", Some("1.2.0")),
+            ("newer", "language", Some("2.0.0")),
+            ("uninstalled", "language", None),
+            ("tool", "terminal", Some("1.1.0")),
+        ]
+        .map(|(id, tag, installed)| {
+            let mut entry = registry_entry_with_capabilities(None);
+            entry.id = id.into();
+            entry.tags = Some(vec![tag.into()]);
+            (entry, installed)
+        });
+        for (query, tag, updates_only, expected) in [
+            ("", None, true, vec!["older", "tool"]),
+            ("", Some("language"), true, vec!["older"]),
+            ("tool", Some("language"), true, vec![]),
+            ("uninstalled", Some("language"), false, vec!["uninstalled"]),
+            (
+                "language",
+                None,
+                false,
+                vec!["older", "current", "newer", "uninstalled"],
+            ),
+        ] {
+            let actual = entries
+                .iter()
+                .filter(|(entry, installed)| {
+                    native_plugin_marketplace_entry_visible(
+                        entry,
+                        query,
+                        tag,
+                        updates_only,
+                        *installed,
+                    )
+                })
+                .map(|(entry, _)| entry.id.as_str())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                actual, expected,
+                "query={query}, tag={tag:?}, updates_only={updates_only}"
+            );
+        }
     }
 
     #[test]

@@ -4,6 +4,7 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NativePluginRuntimePlan {
     ManifestOnly,
+    Language { entry: String },
     Wasm { entry: String },
     Process { entry: String },
     UnsupportedLegacyJs { entry: String },

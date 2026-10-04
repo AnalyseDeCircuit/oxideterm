@@ -193,7 +193,7 @@ mod tests {
     #[test]
     fn adjacent_root_headers_preserve_the_previous_closing_guide() {
         let source = "fn first() {\n  call();\n  } fn second() {\n\tcall();\n\t}\n";
-        let session = SyntaxSession::parse(LanguageId::Rust, source).unwrap();
+        let session = crate::grammar_fixture::parse(LanguageId::Rust, source).unwrap();
         let mut cache = StructureCache::default();
         cache.update(&session, source, 4, None);
         assert_eq!(cache.fold_at_line(0), Some((0, 2)));
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn shifted_structures_reuse_storage_and_tab_width_recomputes_guides() {
         let mut source = "fn first() {\n\tcall();\n}\nfn second() {\n\tcall();\n\t}\n".to_string();
-        let mut session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+        let mut session = crate::grammar_fixture::parse(LanguageId::Rust, &source).unwrap();
         let mut cache = StructureCache::default();
         cache.update(&session, &source, 4, None);
         let second = cache.blocks[1].folds.as_ptr();
@@ -256,7 +256,7 @@ mod tests {
     #[test]
     fn comment_boundaries_and_skipped_edits_rebuild_structure() {
         let mut source = "fn first() {\n    if ready {\n        call();\n    }\n}\nfn second() {\n    call();\n}\n".to_string();
-        let mut session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+        let mut session = crate::grammar_fixture::parse(LanguageId::Rust, &source).unwrap();
         let mut cache = StructureCache::default();
         cache.update(&session, &source, 4, None);
         for (index, (start, end, text)) in [(0, 0, "/*"), (2, 2, "*/"), (0, 4, ""), (0, 0, "\n")]
@@ -274,7 +274,7 @@ mod tests {
                 continue;
             }
             cache.update(&session, &source, 4, Some(&change));
-            let fresh = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+            let fresh = crate::grammar_fixture::parse(LanguageId::Rust, &source).unwrap();
             assert_eq!(
                 cache.fold_lines().collect::<Vec<_>>(),
                 normalized_folds(&fresh)

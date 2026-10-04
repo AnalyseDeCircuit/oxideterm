@@ -197,6 +197,8 @@
     }
   },
   "plugin": {
+    "marketplace_all": "全部",
+    "marketplace_updates_only": "仅显示可更新",
     "manager_title": "插件管理器",
     "manager_description": "管理已安装的插件并浏览插件仓库",
     "compatibility_title": "兼容性说明",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "当前平台不可用",
     "marketplace_requires_version": "需要 OxideTerm {{version}} 或更高版本",
     "marketplace_incompatible": "与当前 OxideTerm 版本不兼容",
+    "marketplace_newer_requires": "v{{version}} 需要 OxideTerm {{requirement}}。",
+    "language_missing": "尚未启用 {{language}} 语言支持。",
+    "language_manage": "获取语言支持",
+    "language_dismiss": "不再提示",
+    "marketplace_installed_version": "已安装：v{{version}}",
+    "host_version_incompatible": "此插件需要 OxideTerm {{requirement}}，当前版本为 {{current}}。",
     "marketplace_unverified": "无法验证安装包",
     "marketplace_homepage": "主页",
     "registry_error": "加载仓库失败",

@@ -37,6 +37,7 @@ fn editor_input_performance(cx: &mut TestAppContext) {
         let started = Instant::now();
         let (editor, cx) = cx.add_window_view(move |_, cx| {
             let mut editor = TextEditorView::new(text, &oxideterm_theme::default_tokens(), cx);
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(language, cx);
             editor
         });
@@ -142,6 +143,7 @@ fn editor_memory_performance(cx: &mut TestAppContext) {
         let bytes = text.len();
         let (editor, cx) = cx.add_window_view(move |_, cx| {
             let mut editor = TextEditorView::new(text, &oxideterm_theme::default_tokens(), cx);
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(language, cx);
             editor
         });
@@ -236,6 +238,7 @@ fn editor_disruptive_edit_performance(cx: &mut TestAppContext) {
             let (editor, cx) = cx.add_window_view(move |_, cx| {
                 let mut editor =
                     TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx);
+                crate::grammar_fixture::install_rust(cx);
                 editor.set_language(Some(LanguageId::Rust), cx);
                 editor
             });
@@ -267,7 +270,7 @@ fn editor_disruptive_edit_performance(cx: &mut TestAppContext) {
             let ready_ms = started.elapsed().as_secs_f64() * 1000.0;
             editor.read_with(cx, |editor, _| {
                 assert_eq!(editor.buffer.text(), expected);
-                let syntax = SyntaxSession::parse(LanguageId::Rust, &expected).unwrap();
+                let syntax = crate::grammar_fixture::parse(LanguageId::Rust, &expected).unwrap();
                 assert_eq!(
                     editor
                         .highlight_spans
@@ -294,6 +297,7 @@ fn editor_burst_performance(cx: &mut TestAppContext) {
     let editor =
         cx.new(|cx| TextEditorView::new(source.clone(), &oxideterm_theme::default_tokens(), cx));
     editor.update(cx, |editor, cx| {
+        crate::grammar_fixture::install_rust(cx);
         editor.set_language(Some(LanguageId::Rust), cx)
     });
     cx.run_until_parked();
@@ -321,7 +325,7 @@ fn editor_burst_performance(cx: &mut TestAppContext) {
                     .highlight_spans
                     .spans_in_range(0..expected.len())
                     .collect::<Vec<_>>(),
-                SyntaxSession::parse(LanguageId::Rust, &expected)
+                crate::grammar_fixture::parse(LanguageId::Rust, &expected)
                     .unwrap()
                     .highlight_spans(&expected)
             );

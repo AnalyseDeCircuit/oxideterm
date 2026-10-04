@@ -197,6 +197,8 @@
     "shortcut_count": "atajos"
   },
   "plugin": {
+    "marketplace_all": "Todos",
+    "marketplace_updates_only": "Solo actualizaciones",
     "manager_title": "Gestor de plugins",
     "manager_description": "Gestionar complementos instalados y explorar el registro",
     "compatibility_title": "Compatibilidad",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "No disponible en esta plataforma",
     "marketplace_requires_version": "Requiere OxideTerm {{version}} o posterior",
     "marketplace_incompatible": "No es compatible con esta versión de OxideTerm",
+    "marketplace_newer_requires": "La versión {{version}} requiere OxideTerm {{requirement}}.",
+    "language_missing": "El soporte de {{language}} no está activado.",
+    "language_manage": "Obtener soporte del lenguaje",
+    "language_dismiss": "Ocultar",
+    "marketplace_installed_version": "Versión instalada: {{version}}",
+    "host_version_incompatible": "Este complemento requiere OxideTerm {{requirement}}; versión actual: {{current}}.",
     "marketplace_unverified": "No se puede verificar el paquete",
     "marketplace_homepage": "Página principal",
     "registry_error": "Error al cargar el registro",

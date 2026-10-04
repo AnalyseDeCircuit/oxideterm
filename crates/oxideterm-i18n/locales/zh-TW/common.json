@@ -197,6 +197,8 @@
     "shortcut_count": "個快捷鍵"
   },
   "plugin": {
+    "marketplace_all": "全部",
+    "marketplace_updates_only": "僅顯示可更新",
     "manager_title": "外掛管理器",
     "manager_description": "管理已安裝的外掛並瀏覽外掛倉庫",
     "compatibility_title": "相容性說明",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "目前平台不可用",
     "marketplace_requires_version": "需要 OxideTerm {{version}} 或更新版本",
     "marketplace_incompatible": "與目前 OxideTerm 版本不相容",
+    "marketplace_newer_requires": "v{{version}} 需要 OxideTerm {{requirement}}。",
+    "language_missing": "尚未啟用 {{language}} 語言支援。",
+    "language_manage": "取得語言支援",
+    "language_dismiss": "不再提示",
+    "marketplace_installed_version": "已安裝：v{{version}}",
+    "host_version_incompatible": "此外掛需要 OxideTerm {{requirement}}，目前版本為 {{current}}。",
     "marketplace_unverified": "無法驗證安裝包",
     "marketplace_homepage": "首頁",
     "registry_error": "載入倉庫失敗",

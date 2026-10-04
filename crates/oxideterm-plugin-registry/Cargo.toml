@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }

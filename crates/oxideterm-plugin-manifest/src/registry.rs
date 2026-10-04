@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::NativePluginConfigEntry,
-    manifest::NativePluginManifest,
+    manifest::{NativePluginEngines, NativePluginManifest},
     runtime::{NativePluginRuntimePlan, NativePluginState},
 };
 
@@ -47,7 +47,7 @@ pub struct NativePluginRegistryEntry {
     #[serde(default)]
     pub author: Option<String>,
     pub version: String,
-    #[serde(default)]
+    #[serde(default, rename = "minOxideTermVersion", alias = "minOxidetermVersion")]
     pub min_oxideterm_version: Option<String>,
     #[serde(default)]
     pub download_url: String,
@@ -66,6 +66,37 @@ pub struct NativePluginRegistryEntry {
     /// Immutable release packages available for specific host targets.
     #[serde(default)]
     pub packages: Vec<NativePluginRegistryPackage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engines: Option<NativePluginEngines>,
+    /// The top-level release remains readable by clients without history support.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub releases: Vec<NativePluginRegistryRelease>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginRegistryRelease {
+    pub version: String,
+    pub engines: NativePluginEngines,
+    pub packages: Vec<NativePluginRegistryPackage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compatibility_corrections: Vec<NativePluginCompatibilityCorrection>,
+}
+
+impl NativePluginRegistryRelease {
+    pub fn effective_engines(&self) -> &NativePluginEngines {
+        self.compatibility_corrections
+            .last()
+            .map_or(&self.engines, |correction| &correction.engines)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginCompatibilityCorrection {
+    pub engines: NativePluginEngines,
+    pub reason: String,
+    pub recorded_at: String,
 }
 
 #[allow(dead_code)]

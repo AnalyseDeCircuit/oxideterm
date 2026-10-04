@@ -159,7 +159,7 @@ impl HighlightCache {
         } else {
             let root = session.tree.root_node();
             let mut cursor = root.walk();
-            let mut blocks = Vec::with_capacity(root.child_count());
+            let mut blocks = Vec::with_capacity(root.child_count() as usize);
             // Initial/full refresh uses one query rather than one query per node.
             let mut full = if reusable {
                 None
@@ -295,7 +295,7 @@ mod tests {
                 LanguageId::Rust => "fn sample() { let value = 42; }\n".repeat(34000),
                 _ => "value = 42 # sample\n".repeat(56000),
             };
-            let mut session = SyntaxSession::parse(language, &source).unwrap();
+            let mut session = crate::grammar_fixture::parse(language, &source).unwrap();
             let mut cache = HighlightCache::default();
             cache.update(&session, &source, None);
             for run in 0..4 {
@@ -337,7 +337,7 @@ mod tests {
             ),
             (LanguageId::Python, "value = \"中文🙂\"\n".repeat(128)),
         ] {
-            let session = SyntaxSession::parse(language, &source).unwrap();
+            let session = crate::grammar_fixture::parse(language, &source).unwrap();
             let full = session.highlight_spans(&source);
             let mut cache = HighlightCache::default();
             cache.update(&session, &source, None);
@@ -365,7 +365,7 @@ mod tests {
     fn edits_reuse_distant_blocks_without_moving_their_relative_spans() {
         let mut source =
             "fn first() { let value = foo; }\nfn second() {}\nfn third() {}\n".to_string();
-        let mut session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+        let mut session = crate::grammar_fixture::parse(LanguageId::Rust, &source).unwrap();
         let mut cache = HighlightCache::default();
         cache.update(&session, &source, None);
         assert_eq!(cache.blocks.len(), 3);
@@ -414,7 +414,7 @@ mod tests {
     fn boundary_edits_and_stale_changes_match_a_fresh_query() {
         let initial = "fn first() { let value = \"中文🙂\"; }\nfn second() {}\n";
         let mut source = initial.to_string();
-        let mut session = SyntaxSession::parse(LanguageId::Rust, &source).unwrap();
+        let mut session = crate::grammar_fixture::parse(LanguageId::Rust, &source).unwrap();
         let mut cache = HighlightCache::default();
         cache.update(&session, &source, None);
         let mut stale = None;
@@ -433,7 +433,7 @@ mod tests {
             source.replace_range(start..end, replacement);
             let change = session.apply_edit(&source, edit).unwrap();
             cache.update(&session, &source, Some(&change));
-            let expected = SyntaxSession::parse(LanguageId::Rust, &source)
+            let expected = crate::grammar_fixture::parse(LanguageId::Rust, &source)
                 .unwrap()
                 .highlight_spans(&source);
             assert_eq!(
@@ -452,7 +452,7 @@ mod tests {
         }
         assert_eq!(source, initial);
         let markdown = "**中文** and `code`\n";
-        let session = SyntaxSession::parse(LanguageId::Markdown, markdown).unwrap();
+        let session = crate::grammar_fixture::parse(LanguageId::Markdown, markdown).unwrap();
         cache.update(&session, markdown, stale.as_ref());
         assert_eq!(
             cache.spans_in_range(0..markdown.len()).collect::<Vec<_>>(),

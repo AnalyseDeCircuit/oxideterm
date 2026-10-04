@@ -15,6 +15,7 @@ mod highlight;
 mod indent;
 mod indent_index;
 mod language;
+mod plugin;
 mod queries;
 mod session;
 mod structure;
@@ -24,11 +25,20 @@ mod work;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod grammar_fixture {
+    use crate::{
+        LanguageId, PluginGrammar, PluginGrammarSource, SyntaxError, SyntaxSession, SyntaxWork,
+    };
+    include!("../tests/support/grammars.rs");
+}
+
 pub use brackets::BracketIndex;
 pub use cache::HighlightCache;
 pub use edit::{SyntaxChange, SyntaxEdit};
 pub use error::SyntaxError;
 pub use language::{LanguageId, SUPPORTED_LANGUAGES};
+pub use plugin::{PluginGrammar, PluginGrammarSource};
 pub use session::SyntaxSession;
 pub use structure::StructureCache;
 pub use types::{BracketPair, FoldRange, HighlightSpan, IndentGuide, SyntaxScope};

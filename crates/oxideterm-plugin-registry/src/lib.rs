@@ -29,7 +29,7 @@ pub use oxideterm_plugin_manifest::{
     NativePluginHostMonitorOutputDef, NativePluginHostMonitorOutputFormat, NativePluginInfo,
     NativePluginInstalledInfo, NativePluginManifest, NativePluginPermissions,
     NativePluginProcessActivationPlan, NativePluginRegistryEntry, NativePluginRegistryIndex,
-    NativePluginRegistryPackage, NativePluginRuntime,
+    NativePluginRegistryPackage, NativePluginRegistryRelease, NativePluginRuntime,
     NativePluginRuntimeActivityBarItemContribution, NativePluginRuntimeCommandContribution,
     NativePluginRuntimeContextMenuContribution, NativePluginRuntimeContextMenuItem,
     NativePluginRuntimeEventSubscriptionContribution, NativePluginRuntimeKeybindingContribution,
@@ -46,6 +46,7 @@ use oxideterm_plugin_protocol::{
     PluginOutboundMessage, PluginRegistration, PluginRegistrationKind, PluginRuntimeLogLevel,
 };
 
+mod compatibility;
 mod constants;
 mod contributions;
 mod discovery;
@@ -59,6 +60,7 @@ mod validation;
 #[cfg(test)]
 mod tests;
 
+pub use compatibility::validate_native_plugin_host;
 pub use constants::{
     NATIVE_PLUGIN_AI_MESSAGE_EVENT, NATIVE_PLUGIN_APP_SETTINGS_CHANGED_EVENT,
     NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT, NATIVE_PLUGIN_EVENT_LOG_ENTRY_EVENT,
@@ -99,6 +101,7 @@ pub const NATIVE_PLUGIN_PACKAGE_MAX_BYTES: u64 = PLUGIN_PACKAGE_MAX_BYTES;
 
 // Internal modules intentionally share helper functions through the crate root;
 // that keeps the split mechanical while the public API remains explicit above.
+pub(crate) use compatibility::*;
 pub(crate) use constants::*;
 pub(crate) use discovery::*;
 pub(crate) use install::*;

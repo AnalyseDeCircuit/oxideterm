@@ -151,7 +151,7 @@ impl WorkspaceApp {
             Ok(result) => result,
             Err(_) => {
                 self.plugin_entity.update(cx, |plugins, _cx| {
-                    plugins.finish_managed_package_install(settings_path, false);
+                    plugins.finish_managed_package_install(settings_path, false, _cx);
                 });
                 request.finish(ToolEnvelope::failed(
                     "The addon installation worker stopped before completion",
@@ -161,7 +161,7 @@ impl WorkspaceApp {
         };
         let installed = result.is_ok();
         self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.finish_managed_package_install(settings_path, installed);
+            plugins.finish_managed_package_install(settings_path, installed, _cx);
         });
         if request_cancelled {
             if let Err(error) = result {
@@ -229,7 +229,7 @@ impl WorkspaceApp {
             return;
         };
         let result = self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.set_plugin_enabled(&plugin_id, args.enabled)
+            plugins.set_plugin_enabled(&plugin_id, args.enabled, _cx)
         });
         if result.is_err() {
             request.finish(ToolEnvelope::failed("The addon state could not be changed"));
@@ -270,7 +270,7 @@ impl WorkspaceApp {
         };
         let retain_settings = args.retain_settings.unwrap_or(true);
         let result = self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.uninstall_plugin(&plugin_id, !retain_settings)
+            plugins.uninstall_plugin(&plugin_id, !retain_settings, _cx)
         });
         if result.is_err() {
             request.finish(ToolEnvelope::failed("The addon could not be removed"));

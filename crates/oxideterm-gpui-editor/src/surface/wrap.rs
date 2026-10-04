@@ -432,6 +432,7 @@ mod edit_layout_tests {
             TextEditorView::new("fn sample() {\n    call();\n}\nlast", &default_tokens(), cx)
         });
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx)
         });
         cx.run_until_parked();

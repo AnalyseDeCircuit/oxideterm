@@ -14,6 +14,7 @@ default = []
 gpui.workspace = true
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 tracing.workspace = true
+serde.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-theme = { path = "../oxideterm-theme" }
@@ -21,4 +22,8 @@ unicode-segmentation.workspace = true
 unicode-width.workspace = true
 
 [dev-dependencies]
+tempfile = "3"
+zip.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 gpui = { workspace = true, features = ["test-support"] }

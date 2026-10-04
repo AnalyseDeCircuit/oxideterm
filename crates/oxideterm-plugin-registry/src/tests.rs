@@ -99,6 +99,254 @@ fn plugin_paths_cannot_escape_install_directory() {
 }
 
 #[test]
+fn language_packages_validate_assets_and_follow_install_update_disable_uninstall() {
+    let directory = unique_temp_dir("language-package");
+    let settings = directory.join("settings.json");
+    let package = include_bytes!("../../oxideterm-editor-syntax/tests/fixtures/elixir.zip");
+    let id = "com.oxideterm.language.elixir";
+    NativePluginRegistry::install_managed_plugin_package(&settings, id, None, package, false)
+        .unwrap();
+    let mut registry = NativePluginRegistry::discover(&settings);
+    assert_eq!(
+        registry.plugins()[0]
+            .manifest
+            .contributes
+            .as_ref()
+            .unwrap()
+            .language
+            .as_ref()
+            .unwrap()
+            .id,
+        "elixir"
+    );
+    registry.set_plugin_enabled(id, false).unwrap();
+    assert_eq!(registry.plugins()[0].state, NativePluginState::Disabled);
+    registry.set_plugin_enabled(id, true).unwrap();
+    assert_eq!(
+        registry.plugins()[0].state,
+        NativePluginState::ReadyManifestOnly
+    );
+    for corrupt in [true, false] {
+        use std::io::Read as _;
+        let mut source = zip::ZipArchive::new(Cursor::new(package)).unwrap();
+        let mut updated = ZipWriter::new(Cursor::new(Vec::new()));
+        for index in 0..source.len() {
+            let mut entry = source.by_index(index).unwrap();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            if entry.name() == "plugin.json" {
+                let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                manifest["version"] = serde_json::json!("0.2.0");
+                bytes = serde_json::to_vec(&manifest).unwrap();
+            }
+            if corrupt && entry.name() == "highlights.scm" {
+                bytes = b"(integer) @string".to_vec();
+            }
+            updated
+                .start_file(entry.name(), SimpleFileOptions::default())
+                .unwrap();
+            updated.write_all(&bytes).unwrap();
+        }
+        let updated = updated.finish().unwrap().into_inner();
+        let result = NativePluginRegistry::install_managed_plugin_package(
+            &settings, id, None, &updated, true,
+        );
+        if corrupt {
+            assert!(result.unwrap_err().contains("checksum mismatch"));
+            assert_eq!(
+                NativePluginRegistry::discover(&settings).plugins()[0]
+                    .manifest
+                    .version,
+                "0.1.0"
+            );
+        } else {
+            result.unwrap();
+            registry = NativePluginRegistry::discover(&settings);
+            assert_eq!(registry.plugins()[0].manifest.version, "0.2.0");
+        }
+    }
+    registry.uninstall_plugin(id, false).unwrap();
+    assert!(!native_plugins_dir(&settings).join(id).exists());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn cached_catalog_corrections_apply_on_offline_restart_and_install() {
+    let temp_dir = unique_temp_dir("plugin-catalog-corrections");
+    let settings_path = temp_dir.join("settings.json");
+    let original = manifest_json("com.example.demo", "1.0.0");
+    let package = plugin_package(&[("plugin.json", original.clone())]);
+    NativePluginRegistry::install_plugin_package_from_bytes(&settings_path, &package, None, false)
+        .unwrap();
+    let mut registry = NativePluginRegistry::discover(&settings_path);
+    registry
+        .set_plugin_enabled("com.example.demo", true)
+        .unwrap();
+    registry
+        .set_plugin_setting_value("com.example.demo", "enabled", serde_json::json!(false))
+        .unwrap();
+    let config_before = fs::read(registry.config_path()).unwrap();
+    let plugin_dir = registry.plugins()[0].install_dir.clone();
+    // A correction may also relax the requirement embedded in an older package.
+    let mut declared: serde_json::Value = serde_json::from_str(&original).unwrap();
+    declared["engines"] = serde_json::json!({"oxideterm": ">=999.0.0"});
+    let original = declared.to_string();
+    fs::write(plugin_dir.join("plugin.json"), &original).unwrap();
+    let package = plugin_package(&[("plugin.json", original.clone())]);
+    let package_record = serde_json::json!({
+        "target": "any", "downloadUrl": "https://example.com/plugin/1.0.0.zip",
+        "checksum": native_plugin_sha256_hex(&package), "size": package.len()
+    });
+    let mut catalog: NativePluginRegistryIndex = serde_json::from_value(serde_json::json!({
+        "version": 1, "plugins": [{
+            "id": "com.example.demo", "name": "Demo", "version": "1.0.0",
+            "packages": [package_record.clone()],
+            "releases": [{
+                "version": "1.0.0", "engines": {"oxideterm": ">=999.0.0"},
+                "packages": [package_record],
+                "compatibilityCorrections": [{
+                    "engines": {"oxideterm": ">=999.0.0"},
+                    "reason": "Requires a newer host", "recordedAt": "2026-10-04T00:00:00Z"
+                }]
+            }]
+        }]
+    }))
+    .unwrap();
+    NativePluginRegistry::cache_official_catalog(&settings_path, &catalog).unwrap();
+    let offline = NativePluginRegistry::discover(&settings_path);
+    assert_eq!(offline.plugins()[0].state, NativePluginState::Error);
+    assert_eq!(offline.contributions().total_count(), 0);
+    assert!(NativePluginRegistry::select_registry_release(&catalog.plugins[0]).is_none());
+    assert!(
+        NativePluginRegistry::install_plugin_package_from_bytes(
+            &settings_path,
+            &package,
+            None,
+            true
+        )
+        .unwrap_err()
+        .contains("plugin_host_incompatible")
+    );
+    assert_eq!(
+        fs::read_to_string(plugin_dir.join("plugin.json")).unwrap(),
+        original
+    );
+    assert_eq!(fs::read(offline.config_path()).unwrap(), config_before);
+
+    catalog.plugins[0].releases[0]
+        .compatibility_corrections
+        .push(
+            serde_json::from_value(serde_json::json!({
+                "engines": {"oxideterm": format!("={}", env!("CARGO_PKG_VERSION"))},
+                "reason": "Verified on this host", "recordedAt": "2026-10-04T01:00:00Z"
+            }))
+            .unwrap(),
+        );
+    NativePluginRegistry::cache_official_catalog(&settings_path, &catalog).unwrap();
+    let restored = NativePluginRegistry::discover(&settings_path);
+    assert_eq!(
+        restored.plugins()[0].state,
+        NativePluginState::ReadyManifestOnly
+    );
+    assert_eq!(
+        restored.plugin_setting_value("com.example.demo", "enabled"),
+        Some(serde_json::json!(false))
+    );
+    assert_eq!(
+        restored.contributions().settings[0].definition.id,
+        "enabled"
+    );
+    assert_eq!(
+        NativePluginRegistry::select_registry_release(&catalog.plugins[0])
+            .unwrap()
+            .version,
+        "1.0.0"
+    );
+    assert_eq!(
+        fs::read_to_string(plugin_dir.join("plugin.json")).unwrap(),
+        original
+    );
+    let cached = fs::read(catalog_cache_path(&settings_path)).unwrap();
+    catalog.plugins[0].releases[0].compatibility_corrections[1]
+        .reason
+        .clear();
+    assert!(NativePluginRegistry::cache_official_catalog(&settings_path, &catalog).is_err());
+    assert_eq!(
+        fs::read(catalog_cache_path(&settings_path)).unwrap(),
+        cached
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn host_incompatibility_blocks_install_and_restart_without_losing_plugin_state() {
+    let temp_dir = unique_temp_dir("plugin-host-compatibility");
+    let settings_path = temp_dir.join("settings.json");
+    let original = manifest_json("com.example.demo", "1.0.0");
+    let package = plugin_package(&[("plugin.json", original.clone())]);
+    NativePluginRegistry::install_plugin_package_from_bytes(&settings_path, &package, None, false)
+        .unwrap();
+    let mut registry = NativePluginRegistry::discover(&settings_path);
+    registry
+        .set_plugin_enabled("com.example.demo", true)
+        .unwrap();
+    registry
+        .set_plugin_setting_value("com.example.demo", "enabled", serde_json::json!(false))
+        .unwrap();
+    let plugin_dir = registry.plugins()[0].install_dir.clone();
+    let saved_config = fs::read(registry.config_path()).unwrap();
+    for requirement in [">=999.0.0", "<1.0.0", "invalid"] {
+        let mut incompatible: serde_json::Value = serde_json::from_str(&original).unwrap();
+        incompatible["engines"] = serde_json::json!({"oxideterm": requirement});
+        let package = plugin_package(&[("plugin.json", incompatible.to_string())]);
+        let error = NativePluginRegistry::install_plugin_package_from_bytes(
+            &settings_path,
+            &package,
+            None,
+            true,
+        )
+        .unwrap_err();
+        assert!(error.contains("plugin_host_incompatible"), "{error}");
+        assert_eq!(
+            fs::read_to_string(plugin_dir.join("plugin.json")).unwrap(),
+            original
+        );
+
+        // A copied package must be checked again, even when previously enabled.
+        fs::write(plugin_dir.join("plugin.json"), incompatible.to_string()).unwrap();
+        let mut restarted = NativePluginRegistry::discover(&settings_path);
+        assert_eq!(restarted.plugins()[0].state, NativePluginState::Error);
+        assert_eq!(restarted.contributions().total_count(), 0);
+        assert!(
+            restarted
+                .set_plugin_enabled("com.example.demo", true)
+                .unwrap_err()
+                .contains("plugin_host_incompatible")
+        );
+        assert!(
+            restarted
+                .mark_runtime_active("com.example.demo")
+                .unwrap_err()
+                .contains("plugin_host_incompatible")
+        );
+        assert_eq!(fs::read(restarted.config_path()).unwrap(), saved_config);
+
+        fs::write(plugin_dir.join("plugin.json"), &original).unwrap();
+        let restored = NativePluginRegistry::discover(&settings_path);
+        assert_eq!(
+            restored.plugins()[0].state,
+            NativePluginState::ReadyManifestOnly
+        );
+        assert_eq!(
+            restored.contributions().settings[0].definition.id,
+            "enabled"
+        );
+        assert_eq!(fs::read(restored.config_path()).unwrap(), saved_config);
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn manifest_permissions_use_camel_case_and_round_trip() {
     let manifest: NativePluginManifest = serde_json::from_value(serde_json::json!({
         "id": "com.example.demo",
@@ -306,6 +554,8 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     homepage: None,
                     updated_at: None,
                     packages: Vec::new(),
+                    engines: None,
+                    releases: Vec::new(),
                 },
                 NativePluginRegistryEntry {
                     id: "com.example.other".to_string(),
@@ -322,6 +572,8 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     homepage: None,
                     updated_at: None,
                     packages: Vec::new(),
+                    engines: None,
+                    releases: Vec::new(),
                 },
             ],
         },
@@ -1728,6 +1980,7 @@ fn write_manifest(plugin_dir: &Path, manifest: &NativePluginManifest) {
 
 fn sample_contributes() -> NativePluginContributes {
     NativePluginContributes {
+        language: None,
         tabs: Some(vec![NativePluginTabDef {
             id: "demo-tab".to_string(),
             title: "Demo".to_string(),

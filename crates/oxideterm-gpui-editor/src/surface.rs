@@ -299,6 +299,9 @@ pub struct TextEditorView {
     on_modified_word_click: Option<ModifiedWordClickCallback>,
     save_status: EditorSaveStatus,
     language: Option<LanguageId>,
+    plugin_grammar: Option<Arc<oxideterm_editor_syntax::PluginGrammar>>,
+    _language_subscription: gpui::Subscription,
+    language_notice_tokens: ThemeTokens,
     syntax: Option<SyntaxSession>,
     syntax_version: Option<u64>,
     syntax_generation: Arc<std::sync::atomic::AtomicU64>,
@@ -345,6 +348,24 @@ impl TextEditorView {
             text
         };
         let buffer = TextBuffer::new(text);
+        let language_subscription =
+            cx.observe_global::<crate::EditorLanguagePlugins>(|this, cx| {
+                let next = this.language.and_then(|id| {
+                    cx.try_global::<crate::EditorLanguagePlugins>()
+                        .and_then(|plugins| plugins.grammars.get(&id))
+                        .cloned()
+                });
+                let changed = match (&this.plugin_grammar, &next) {
+                    (Some(old), Some(new)) => !Arc::ptr_eq(old, new),
+                    (None, None) => false,
+                    _ => true,
+                };
+                if changed {
+                    this.request_syntax(None, true, cx);
+                    this.refresh_foldable_ranges();
+                }
+                cx.notify();
+            });
         Self {
             buffer,
             cursor: Cursor::new(BufferOffset::ZERO),
@@ -369,6 +390,9 @@ impl TextEditorView {
             syntax_task: None,
             pending_syntax: None,
             language: None,
+            plugin_grammar: None,
+            _language_subscription: language_subscription,
+            language_notice_tokens: *tokens,
             highlight_spans: HighlightCache::default(),
             structure_cache: StructureCache::default(),
             bracket_index: BracketIndex::default(),
@@ -649,6 +673,7 @@ impl TextEditorView {
     ) {
         self.pending_layout_anchor = Some(self.scroll_anchor());
         self.appearance = EditorAppearance::from_theme(tokens);
+        self.language_notice_tokens = *tokens;
         // Embedded editors can follow the typography of their owning surface.
         self.appearance.font_family = font_family;
         self.appearance.font_fallback_family = font_fallback_family;
@@ -1631,12 +1656,90 @@ mod tests {
     }
 
     #[gpui::test]
+    fn language_plugin_install_update_disable_preserves_document_history(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use super::{LanguageId, TextEditorView};
+        use oxideterm_editor_syntax::{PluginGrammarSource, SyntaxScope};
+        use sha2::{Digest, Sha256};
+        let directory = tempfile::tempdir().unwrap();
+        zip::ZipArchive::new(std::io::Cursor::new(include_bytes!(
+            "../../oxideterm-editor-syntax/tests/fixtures/elixir.zip"
+        )))
+        .unwrap()
+        .extract(directory.path())
+        .unwrap();
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(directory.path().join("plugin.json")).unwrap())
+                .unwrap();
+        let declared = &manifest["contributes"]["language"];
+        let mut grammar = PluginGrammarSource {
+            language: LanguageId::Elixir,
+            parser: directory.path().join("parser.wasm"),
+            highlights: directory.path().join("highlights.scm"),
+            parser_sha256: declared["parserSha256"].as_str().unwrap().into(),
+            highlights_sha256: declared["highlightsSha256"].as_str().unwrap().into(),
+        };
+        let source = "defmodule Demo do\n  def value, do: 42\nend\n";
+        let editor =
+            cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            editor.set_language(Some(LanguageId::Elixir), cx);
+            editor.insert_text("# edited\n", cx);
+            assert!(editor.syntax.is_none());
+        });
+        cx.update(|cx| crate::EditorLanguagePlugins::update(vec![grammar.clone()], cx));
+        cx.run_until_parked();
+        editor.update(cx, |editor, _| {
+            let syntax = editor
+                .syntax
+                .as_ref()
+                .expect("installed grammar parsed the open document");
+            let text = editor.buffer.text();
+            assert!(
+                syntax
+                    .highlight_spans(&text)
+                    .iter()
+                    .any(|span| span.scope == SyntaxScope::Number
+                        && &text[span.range.start.0..span.range.end.0] == "42")
+            );
+        });
+        let query = "(integer) @string\n";
+        std::fs::write(&grammar.highlights, query).unwrap();
+        grammar.highlights_sha256 = format!("{:x}", Sha256::digest(query.as_bytes()));
+        cx.update(|cx| crate::EditorLanguagePlugins::update(vec![grammar.clone()], cx));
+        cx.run_until_parked();
+        editor.update(cx, |editor, _| {
+            let text = editor.buffer.text();
+            let spans = editor.syntax.as_ref().unwrap().highlight_spans(&text);
+            assert!(spans.iter().any(|span| span.scope == SyntaxScope::String
+                && &text[span.range.start.0..span.range.end.0] == "42"));
+            assert!(!spans.iter().any(|span| span.scope == SyntaxScope::Number));
+        });
+        cx.update(|cx| crate::EditorLanguagePlugins::update(Vec::new(), cx));
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
+            assert!(editor.syntax.is_none());
+            assert_eq!(editor.buffer.text(), format!("# edited\n{source}"));
+            editor.undo(cx);
+            assert_eq!(editor.buffer.text(), source);
+        });
+        cx.update(|cx| crate::EditorLanguagePlugins::update(vec![grammar], cx));
+        cx.run_until_parked();
+        editor.update(cx, |editor, _| {
+            assert!(!editor.syntax.as_ref().unwrap().root_has_error());
+            assert_eq!(editor.buffer.text(), source);
+        });
+    }
+
+    #[gpui::test]
     fn folds_and_guides_follow_newlines_and_history(cx: &mut gpui::TestAppContext) {
         use super::{BufferOffset, LanguageId, Selection, TextEditorView};
         let source = "fn first() {\n    call();\n}\nfn second() {\n    call();\n}\n";
         let editor =
             cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx);
         });
         cx.run_until_parked();
@@ -1686,6 +1789,7 @@ mod tests {
         let editor =
             cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx);
         });
         cx.run_until_parked();
@@ -1746,6 +1850,7 @@ mod tests {
             )
         });
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx);
         });
         cx.run_until_parked();

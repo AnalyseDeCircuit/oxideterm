@@ -632,7 +632,7 @@ flowchart TB
 
 | 区域 | Tauri/Web 插件 | Native 插件 |
 |---|---|---|
-| 运行时 | 通过动态导入加载 ESM `main.js` | `runtime.kind` 为 `process`、`wasm` 或 `manifest-only` |
+| 运行时 | 通过动态导入加载 ESM `main.js` | `runtime.kind` 为 `process`、`wasm`、`manifest-only` 或 `language` |
 | 界面 | React 组件和 CSS | GPUI 渲染的声明式 Native UI 结构 |
 | 共享模块 | `window.__OXIDE__` | 不可用 |
 | 样式 | CSS 和主题变量 | 只使用宿主拥有的 Native 控件 |
@@ -692,6 +692,24 @@ flowchart TB
 ```
 
 支持的设置类型是 `string`、`number`、`boolean` 和 `select`。`select` 设置必须提供 `options`，选项值必须是字符串或数字。
+
+## 编辑器语言插件
+
+主程序保留 15 个内置语法条目：Bash、Zsh、Fish、PowerShell、JSON、YAML、TOML、Markdown、
+Dockerfile、Make、CMake、Diff、Python、Lua 和 SQL。
+其余 21 个通过语言插件提供：C、C++、C#、CSS、Common Lisp、Elixir、Go、HTML、Java、
+JavaScript、Objective-C、Perl、PHP、R、Ruby、Rust、Scala、Swift、TypeScript、TSX 和 Zig。
+TypeScript 与 TSX 分别打包为独立插件。
+文件类型识别保留在主程序中。未安装或已禁用时，文档仍可编辑，并提供插件管理器入口。
+安装或启用后按需加载解析器；更新与禁用会刷新已打开文档的语法状态，保留文本和撤销历史。
+`.h` 头文件继续识别为 C++。
+
+语言包声明 `runtime.kind: "language"` 和 `contributes.language`，包含 Tree-sitter
+WebAssembly 解析器、高亮查询、各自的 SHA-256 校验值、宿主版本范围及上游许可证。
+它不使用通用 WASI 插件的宿主接口。市场仓库维护
+[固定版本的构建配方与发布流程](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/language-plugins.md)。
+每种语言在 `plugins/` 下有独立目录、版本和发布资产。
+语言插件自身采用 Apache-2.0，上游许可证单独保留；安装需要严格高于 2.2.0 且包含语言加载能力的主程序。
 
 ## 进程运行时插件
 
@@ -1089,8 +1107,16 @@ com.example.native-dashboard/
 - 归档条目不能逃逸插件目录。
 - 包大小和条目数量应低于宿主限制。
 - 一个包优先只包含一个插件 id。
-- 使用类似 semver 的版本，便于更新检查比较。
+- 使用语义化版本，便于更新检查比较。
+- 根据实际兼容性测试，在 `engines.oxideterm` 中声明宿主范围，例如 `>=2.3.0, <3.0.0`。
 - 除非入口本身可移植，否则运行时二进制应按平台分发。
+
+插件市场保留每个发布版本的宿主范围和各平台安装包，选择当前可用的最高版本。
+更高版本不兼容时单独说明要求，保留当前插件。安装和启动都会检查清单中的兼容范围，
+应用升级和降级后同样生效。不兼容插件保留文件与设置，但停止加载。
+启动激活前会刷新官方目录并缓存，离线时读取缓存；有记录的兼容性纠错优先于包内声明，
+但不会改写安装包。未收录且未声明范围的旧安装包仍允许使用；旧版主应用不会因此自动获得兼容检查。
+目录格式和发布流程见[发布指南](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/PUBLISHING.md)。
 
 开发时：
 
@@ -1137,11 +1163,17 @@ interface NativePluginPermissions {
 }
 
 interface NativePluginRuntime {
-  kind: 'wasm' | 'process' | 'manifest-only';
+  kind: 'wasm' | 'process' | 'manifest-only' | 'language';
   entry: string;
 }
 
 interface NativePluginContributes {
+  language?: {
+    id: 'elixir' | 'commonlisp' | 'swift' | 'r' | 'scala' | 'objc';
+    highlights: string;
+    parserSha256: string;
+    highlightsSha256: string;
+  };
   tabs?: NativePluginTabDef[];
   sidebarPanels?: NativePluginSidebarDef[];
   activityBarItems?: NativePluginActivityBarItemDef[];

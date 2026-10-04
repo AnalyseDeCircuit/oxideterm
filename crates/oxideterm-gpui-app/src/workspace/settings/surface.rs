@@ -1260,6 +1260,13 @@ impl WorkspaceApp {
             .set_locale(locale_from_settings(settings.general.language));
         if previous_settings.general.language != settings.general.language {
             cx.set_menus(crate::platform::app_menus(settings));
+            oxideterm_gpui_editor::EditorLanguagePlugins::set_labels(
+                self.i18n.t("plugin.language_missing"),
+                self.i18n.t("plugin.load_failed_default"),
+                self.i18n.t("plugin.language_manage"),
+                self.i18n.t("plugin.language_dismiss"),
+                cx,
+            );
         }
         oxideterm_desktop_presence::set_keep_running_on_close(
             settings.general.minimize_to_tray_on_close,

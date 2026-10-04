@@ -197,6 +197,8 @@
     "shortcut_count": "Tastaturkürzel"
   },
   "plugin": {
+    "marketplace_all": "Alle",
+    "marketplace_updates_only": "Nur Updates",
     "manager_title": "Plugin-Verwaltung",
     "manager_description": "Installierte Plugins verwalten und Registry durchsuchen",
     "compatibility_title": "Kompatibilität",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "Auf dieser Plattform nicht verfügbar",
     "marketplace_requires_version": "Erfordert OxideTerm {{version}} oder neuer",
     "marketplace_incompatible": "Mit dieser OxideTerm-Version nicht kompatibel",
+    "marketplace_newer_requires": "v{{version}} erfordert OxideTerm {{requirement}}.",
+    "language_missing": "Die Sprachunterstützung für {{language}} ist nicht aktiviert.",
+    "language_manage": "Sprachunterstützung hinzufügen",
+    "language_dismiss": "Ausblenden",
+    "marketplace_installed_version": "Installiert: v{{version}}",
+    "host_version_incompatible": "Dieses Plugin erfordert OxideTerm {{requirement}}; aktuelle Version: {{current}}.",
     "marketplace_unverified": "Paket kann nicht überprüft werden",
     "marketplace_homepage": "Homepage",
     "registry_error": "Registry konnte nicht geladen werden",

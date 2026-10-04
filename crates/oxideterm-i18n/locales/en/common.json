@@ -197,6 +197,8 @@
     }
   },
   "plugin": {
+    "marketplace_all": "All",
+    "marketplace_updates_only": "Updates only",
     "manager_title": "Plugin Manager",
     "manager_description": "Manage installed plugins and browse the plugin registry",
     "compatibility_title": "Compatibility",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "Unavailable on this platform",
     "marketplace_requires_version": "Requires OxideTerm {{version}} or later",
     "marketplace_incompatible": "Incompatible with this OxideTerm version",
+    "marketplace_newer_requires": "v{{version}} requires OxideTerm {{requirement}}.",
+    "language_missing": "{{language}} language support is not enabled.",
+    "language_manage": "Get language support",
+    "language_dismiss": "Dismiss",
+    "marketplace_installed_version": "Installed: v{{version}}",
+    "host_version_incompatible": "This plugin requires OxideTerm {{requirement}}; current version: {{current}}.",
     "marketplace_unverified": "Package verification unavailable",
     "marketplace_homepage": "Homepage",
     "registry_error": "Failed to load registry",

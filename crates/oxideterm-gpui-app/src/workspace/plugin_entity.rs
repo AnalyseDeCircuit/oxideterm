@@ -178,6 +178,7 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     manager_state: plugin_manager::NativePluginManagerState,
     ui_state: plugin_ui::NativePluginUiState,
     manager_operation_in_flight: bool,
+    compatibility_refresh_pending: bool,
     manager_delivery_tx:
         delivery::ActiveDeliverySender<plugin_manager::NativePluginManagerDelivery>,
     manager_delivery_rx: std::sync::mpsc::Receiver<plugin_manager::NativePluginManagerDelivery>,
@@ -245,6 +246,7 @@ impl PluginWorkspaceEntity {
             manager_state: plugin_manager::NativePluginManagerState::new(),
             ui_state: plugin_ui::NativePluginUiState::default(),
             manager_operation_in_flight: false,
+            compatibility_refresh_pending: false,
             manager_delivery_tx,
             manager_delivery_rx,
             manager_deliveries: VecDeque::new(),
@@ -278,6 +280,7 @@ impl PluginWorkspaceEntity {
         entity.schedule_runtime_request_delivery(cx);
         entity.schedule_oxide_import_delivery(cx);
         entity.schedule_release_shutdown(cx);
+        entity.sync_language_plugins(cx);
         entity
     }
 
@@ -331,6 +334,7 @@ impl PluginWorkspaceEntity {
     pub(in crate::workspace) fn replace_registry(
         &mut self,
         registry: plugin_host::NativePluginRegistry,
+        cx: &mut gpui::App,
     ) {
         let enabled_runtime_plugin_ids = registry
             .plugins()
@@ -353,6 +357,7 @@ impl PluginWorkspaceEntity {
             .cloned()
             .collect::<Vec<_>>();
         self.registry = Arc::new(registry);
+        self.sync_language_plugins(cx);
         for plugin_id in stale_runtime_plugin_ids {
             self.start_runtime_deactivation(plugin_id);
         }
@@ -362,9 +367,13 @@ impl PluginWorkspaceEntity {
         &mut self,
         plugin_id: &str,
         enabled: bool,
+        cx: &mut gpui::App,
     ) -> Result<(), String> {
         let audit = plugin_management_audit(Some(plugin_id), "plugin_enabled_change");
         let result = self.registry_mut().set_plugin_enabled(plugin_id, enabled);
+        if result.is_ok() {
+            self.sync_language_plugins(cx);
+        }
         if result.is_ok() && !enabled {
             self.start_runtime_deactivation(plugin_id.to_string());
         }
@@ -385,12 +394,14 @@ impl PluginWorkspaceEntity {
         &mut self,
         plugin_id: &str,
         remove_storage: bool,
+        cx: &mut gpui::App,
     ) -> Result<(), String> {
         let audit = plugin_management_audit(Some(plugin_id), "plugin_uninstall");
         let result = self
             .registry_mut()
             .uninstall_plugin(plugin_id, remove_storage);
         if result.is_ok() {
+            self.sync_language_plugins(cx);
             self.start_runtime_deactivation(plugin_id.to_string());
         }
         audit.finish(
@@ -404,6 +415,34 @@ impl PluginWorkspaceEntity {
             None,
         );
         result
+    }
+
+    fn sync_language_plugins(&self, cx: &mut gpui::App) {
+        let sources = self
+            .registry
+            .plugins()
+            .iter()
+            .filter(|plugin| {
+                matches!(
+                    plugin.state,
+                    plugin_host::NativePluginState::ReadyManifestOnly
+                )
+            })
+            .filter_map(|plugin| {
+                let language = plugin.manifest.contributes.as_ref()?.language.as_ref()?;
+                let id = oxideterm_editor_syntax::LanguageId::from_plugin_key(&language.id)?;
+                Some(oxideterm_editor_syntax::PluginGrammarSource {
+                    language: id,
+                    parser: plugin
+                        .install_dir
+                        .join(&plugin.manifest.runtime.as_ref()?.entry),
+                    highlights: plugin.install_dir.join(&language.highlights),
+                    parser_sha256: language.parser_sha256.clone(),
+                    highlights_sha256: language.highlights_sha256.clone(),
+                })
+            })
+            .collect();
+        oxideterm_gpui_editor::EditorLanguagePlugins::update(sources, cx);
     }
 
     pub(in crate::workspace) fn set_plugin_setting_value(
@@ -461,7 +500,7 @@ impl PluginWorkspaceEntity {
         &mut self,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
     ) -> bool {
-        if self.release_shutdown_started {
+        if self.release_shutdown_started || self.compatibility_refresh_pending {
             return false;
         }
         let process_plans = self.registry.process_activation_plans();
@@ -812,15 +851,43 @@ impl PluginWorkspaceEntity {
         }
         self.manager_operation_in_flight = true;
         let delivery_tx = self.manager_delivery_tx.clone();
+        let settings_path = self.registry.config_path().with_file_name("settings.json");
         self.spawn_owned_task(async move {
-            let registry = plugin_host::NativePluginRegistry::fetch_official_plugin_registry()
-                .await
-                .map_err(Zeroizing::new)
-                .ok();
+            let registry = match tokio::time::timeout(
+                NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                plugin_host::NativePluginRegistry::fetch_official_plugin_registry(),
+            )
+            .await
+            {
+                Ok(Ok(registry)) => {
+                    match plugin_host::NativePluginRegistry::cache_official_catalog(
+                        &settings_path,
+                        &registry,
+                    ) {
+                        Ok(()) => Some(registry),
+                        Err(error) => {
+                            drop(Zeroizing::new(error));
+                            None
+                        }
+                    }
+                }
+                Ok(Err(error)) => {
+                    drop(Zeroizing::new(error));
+                    None
+                }
+                Err(_) => None,
+            };
             let _ = delivery_tx
                 .send(plugin_manager::NativePluginManagerDelivery::LoadMarketplace(registry));
         });
         true
+    }
+
+    pub(in crate::workspace) fn start_compatibility_refresh(&mut self) {
+        // The owned fetch is cancelled with this entity; offline startup uses the last cache.
+        if !self.registry.plugins().is_empty() && self.start_marketplace_load() {
+            self.compatibility_refresh_pending = true;
+        }
     }
 
     pub(in crate::workspace) fn start_managed_package_install(
@@ -886,10 +953,14 @@ impl PluginWorkspaceEntity {
         &mut self,
         settings_path: &Path,
         installed: bool,
+        cx: &mut gpui::App,
     ) {
         self.manager_operation_in_flight = false;
         if installed {
-            self.replace_registry(plugin_host::NativePluginRegistry::discover(settings_path));
+            self.replace_registry(
+                plugin_host::NativePluginRegistry::discover(settings_path),
+                cx,
+            );
         }
     }
 
@@ -928,10 +999,11 @@ impl PluginWorkspaceEntity {
         &mut self,
         settings_path: &std::path::Path,
         i18n: &I18n,
+        cx: &mut gpui::App,
     ) -> bool {
         let mut bootstrap_runtime = false;
         while let Some(delivery) = self.manager_deliveries.pop_front() {
-            bootstrap_runtime |= self.apply_manager_delivery(delivery, settings_path, i18n);
+            bootstrap_runtime |= self.apply_manager_delivery(delivery, settings_path, i18n, cx);
         }
         bootstrap_runtime
     }
@@ -941,6 +1013,7 @@ impl PluginWorkspaceEntity {
         delivery: plugin_manager::NativePluginManagerDelivery,
         settings_path: &std::path::Path,
         i18n: &I18n,
+        cx: &mut gpui::App,
     ) -> bool {
         match delivery {
             plugin_manager::NativePluginManagerDelivery::Install {
@@ -954,9 +1027,10 @@ impl PluginWorkspaceEntity {
                     let message = i18n
                         .t("plugin.url_install_success")
                         .replace("{{name}}", &result.manifest.name);
-                    self.replace_registry(plugin_host::NativePluginRegistry::discover(
-                        settings_path,
-                    ));
+                    self.replace_registry(
+                        plugin_host::NativePluginRegistry::discover(settings_path),
+                        cx,
+                    );
                     self.manager_state
                         .available_updates
                         .retain(|entry| entry.id != installed_id);
@@ -989,6 +1063,13 @@ impl PluginWorkspaceEntity {
                 }
             },
             plugin_manager::NativePluginManagerDelivery::LoadMarketplace(result) => {
+                let initial_refresh = std::mem::take(&mut self.compatibility_refresh_pending);
+                if initial_refresh && result.is_some() {
+                    self.replace_registry(
+                        plugin_host::NativePluginRegistry::discover(settings_path),
+                        cx,
+                    );
+                }
                 match result {
                     Some(registry) => {
                         let installed = self
@@ -1025,7 +1106,7 @@ impl PluginWorkspaceEntity {
                         ..plugin_manager::PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
                     1,
                 );
-                false
+                initial_refresh
             }
             plugin_manager::NativePluginManagerDelivery::CheckUpdates(result) => {
                 match result {
@@ -1863,11 +1944,32 @@ mod tests {
         entity.update(cx, |entity, _cx| {
             assert!(!entity.manager_operation_in_flight());
             let i18n = I18n::new(Locale::En);
-            assert!(!entity.apply_manager_deliveries(std::path::Path::new(""), &i18n));
+            assert!(!entity.apply_manager_deliveries(std::path::Path::new(""), &i18n, _cx));
             assert!(entity.manager_deliveries.is_empty());
             assert!(matches!(
                 entity.manager_state().operation_status,
                 plugin_manager::NativePluginManagerOperationStatus::Success(_)
+            ));
+            entity.compatibility_refresh_pending = true;
+            entity.manager_operation_in_flight = true;
+            entity
+                .manager_delivery_tx
+                .send(plugin_manager::NativePluginManagerDelivery::LoadMarketplace(None))
+                .unwrap();
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, _cx| {
+            // Offline completion must release startup so cached compatible plugins can activate.
+            assert!(entity.apply_manager_deliveries(
+                std::path::Path::new(""),
+                &I18n::new(Locale::En),
+                _cx
+            ));
+            assert!(!entity.compatibility_refresh_pending);
+            assert!(!entity.manager_operation_in_flight());
+            assert!(matches!(
+                entity.manager_state.marketplace_load_state,
+                plugin_manager::NativePluginMarketplaceLoadState::Failed
             ));
         });
     }

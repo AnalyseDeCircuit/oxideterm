@@ -41,6 +41,45 @@ pub(crate) fn install_native_plugin_package_bytes(
         let manifest = read_native_plugin_manifest_from_dir(&source_dir)?;
         validate_native_plugin_id(&manifest.id)
             .map_err(|error| format!("Invalid plugin ID in manifest: {error}"))?;
+        validate_native_plugin_manifest(&manifest)?;
+        if let Some(language) = manifest
+            .contributes
+            .as_ref()
+            .and_then(|value| value.language.as_ref())
+        {
+            let parser = &manifest
+                .runtime
+                .as_ref()
+                .expect("validated language runtime")
+                .entry;
+            for (file, checksum, maximum) in [
+                (parser, &language.parser_sha256, 16 * 1024 * 1024),
+                (
+                    &language.highlights,
+                    &language.highlights_sha256,
+                    1024 * 1024,
+                ),
+            ] {
+                use std::io::Read as _;
+                let mut bytes = Vec::new();
+                fs::File::open(source_dir.join(file))
+                    .map_err(|error| error.to_string())?
+                    .take(maximum + 1)
+                    .read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+                if bytes.len() as u64 > maximum || native_plugin_sha256_hex(&bytes) != *checksum {
+                    return Err("Language asset size or checksum mismatch".into());
+                }
+                if file == parser && !bytes.starts_with(b"\0asm") {
+                    return Err("Language parser is not a WebAssembly module".into());
+                }
+            }
+        }
+        let mut effective_manifest = manifest.clone();
+        if let Some(catalog) = load_catalog_cache(settings_path)? {
+            apply_catalog_compatibility(&mut effective_manifest, &catalog);
+        }
+        validate_native_plugin_host(&effective_manifest)?;
         if let Some(expected_id) = expected_id
             && manifest.id != expected_id
         {
@@ -260,7 +299,7 @@ pub(crate) fn native_plugin_version_is_newer(new_version: &str, old_version: &st
         semver::Version::parse(new_version),
         semver::Version::parse(old_version),
     ) {
-        return new_version > old_version;
+        return new_version.cmp_precedence(&old_version).is_gt();
     }
 
     // Preserve comparison for legacy manifests that predate semantic-version

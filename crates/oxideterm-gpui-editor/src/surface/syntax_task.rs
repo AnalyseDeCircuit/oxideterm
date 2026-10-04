@@ -12,6 +12,7 @@ pub(super) struct SyntaxRequest {
     generation: u64,
     version: u64,
     language: LanguageId,
+    grammar: Option<Arc<oxideterm_editor_syntax::PluginGrammar>>,
     edit: Option<SyntaxEdit>,
     reset: bool,
     tab_size: usize,
@@ -69,7 +70,19 @@ impl TextEditorView {
     ) {
         let generation = self.syntax_generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.highlight_chunk_cache.borrow_mut().clear();
-        let Some(language) = self.language.filter(|_| !self.is_large_file()) else {
+        self.plugin_grammar = self.language.and_then(|id| {
+            cx.try_global::<crate::EditorLanguagePlugins>()
+                .and_then(|plugins| plugins.grammars.get(&id))
+                .cloned()
+        });
+        let Some(language) = self.language.filter(|language| {
+            !self.is_large_file()
+                && (language.plugin_key().is_none()
+                    || self
+                        .plugin_grammar
+                        .as_ref()
+                        .is_some_and(|grammar| !grammar.failed()))
+        }) else {
             self.pending_syntax = None;
             drop(self.take_syntax_state());
             return;
@@ -78,6 +91,7 @@ impl TextEditorView {
             generation,
             version: self.buffer.version(),
             language,
+            grammar: self.plugin_grammar.clone(),
             edit,
             reset,
             tab_size: self.settings.tab_size,
@@ -116,6 +130,7 @@ impl TextEditorView {
                 if let Err(error) = &result {
                     if !matches!(error, SyntaxError::ParseCancelled) {
                         tracing::warn!(%error, "Editor syntax calculation failed");
+                        cx.notify();
                     }
                 }
                 if let Some(pending) = this.pending_syntax.take() {
@@ -197,11 +212,11 @@ fn compute(
                     Some(work),
                 )?)
             } else {
-                state.syntax = Some(SyntaxSession::parse_controlled(
-                    request.language,
-                    text,
-                    Some(work),
-                )?);
+                state.syntax = Some(if let Some(grammar) = &request.grammar {
+                    SyntaxSession::parse_plugin(grammar, text, Some(work))?
+                } else {
+                    SyntaxSession::parse_controlled(request.language, text, Some(work))?
+                });
                 None
             };
         let syntax = state.syntax.as_ref().unwrap();
@@ -247,6 +262,7 @@ mod tests {
             )
         });
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx)
         });
         cx.run_until_parked();
@@ -283,6 +299,7 @@ mod tests {
         let editor =
             cx.new(|cx| TextEditorView::new("fn old() {}", &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx)
         });
         cx.run_until_parked();
@@ -316,6 +333,7 @@ mod tests {
             TextEditorView::new("fn main() {}\n", &oxideterm_theme::default_tokens(), cx)
         });
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx)
         });
         cx.run_until_parked();
@@ -346,7 +364,7 @@ mod tests {
                     .highlight_spans
                     .spans_in_range(0..editor.buffer.len())
                     .collect::<Vec<_>>(),
-                SyntaxSession::parse(LanguageId::Rust, "fn abcmain() {}\n")
+                crate::grammar_fixture::parse(LanguageId::Rust, "fn abcmain() {}\n")
                     .unwrap()
                     .highlight_spans("fn abcmain() {}\n")
             );
@@ -358,6 +376,7 @@ mod tests {
         let editor =
             cx.new(|cx| TextEditorView::new("fn old() {}", &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx);
             editor.replace_text_external("{\"value\": 7}", cx);
             editor.set_language(Some(LanguageId::Json), cx);
@@ -388,6 +407,7 @@ mod tests {
             TextEditorView::new("fn main() {}", &oxideterm_theme::default_tokens(), cx)
         });
         let (token, generation) = editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
             editor.set_language(Some(LanguageId::Rust), cx);
             (
                 editor.syntax_generation.clone(),

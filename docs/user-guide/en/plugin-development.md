@@ -632,7 +632,7 @@ The plugin never receives raw GPUI elements, DOM nodes, React instances, SSH tra
 
 | Area | Tauri/Web Plugin | Native Plugin |
 |---|---|---|
-| Runtime | ESM `main.js` loaded through dynamic import | `runtime.kind` is `process`, `wasm`, or `manifest-only` |
+| Runtime | ESM `main.js` loaded through dynamic import | `runtime.kind` is `process`, `wasm`, `manifest-only`, or `language` |
 | UI | React components and CSS | Declarative native UI schema rendered by GPUI |
 | Shared modules | `window.__OXIDE__` | Not available |
 | Styling | CSS and theme variables | Host-owned native controls only |
@@ -692,6 +692,29 @@ Manifest-only plugins are useful for static metadata, declared settings, AI tool
 ```
 
 Supported setting types are `string`, `number`, `boolean`, and `select`. A `select` setting must provide `options`, and option values must be strings or numbers.
+
+## Editor Language Plugins
+
+The host keeps 15 grammar entries built in: Bash, Zsh, Fish, PowerShell, JSON,
+YAML, TOML, Markdown, Dockerfile, Make, CMake, Diff, Python, Lua, and SQL.
+The other 21 use language plugins: C, C++, C#, CSS, Common Lisp, Elixir, Go,
+HTML, Java, JavaScript, Objective-C, Perl, PHP, R, Ruby, Rust, Scala, Swift,
+TypeScript, TSX, and Zig. TypeScript and TSX are separate plugin packages.
+File type
+recognition stays in the host. When support is missing or disabled, the editor keeps
+the document editable and offers a link to Plugin Manager. Installing or enabling
+support loads the parser on demand; updates and disabling refresh open documents
+without discarding their text or undo history. Header files ending in `.h`
+continue to select C++ support.
+
+A language package declares `runtime.kind: "language"` and `contributes.language`.
+It contains a Tree-sitter WebAssembly parser, highlight queries, their SHA-256
+checksums, a host version range, and the upstream licenses. It does not receive the
+general-purpose WASI plugin host API. The marketplace repository maintains the
+[pinned build recipes and release workflow](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/language-plugins.en.md).
+Each language has its own directory under `plugins/`, version, and release asset.
+Language plugin files use Apache-2.0, with upstream licenses retained separately.
+Packages require a host strictly newer than 2.2.0 with the language loader.
 
 ## Process Runtime Plugin
 
@@ -1093,8 +1116,20 @@ Package rules:
 - Archive entries must not escape the plugin directory.
 - Keep packages below the host package size and entry-count limits.
 - Prefer one plugin id per package.
-- Use semver-like versions so update checks can compare releases.
+- Use semantic versions so update checks can compare releases.
+- Declare the supported host range in `engines.oxideterm`, for example `>=2.3.0, <3.0.0`, based on actual compatibility testing.
 - Keep runtime binaries platform-specific unless the entry is portable.
+
+The marketplace retains each release's host range and platform packages, and selects the
+highest compatible version. Newer incompatible releases display their requirements without
+replacing the installed plugin. Installation and startup both check the manifest range,
+including after app upgrades and downgrades. Incompatible plugins keep their files and settings
+but do not load. The official catalog is refreshed before startup activation and cached for
+offline use. Recorded compatibility corrections take precedence without changing package files.
+Unlisted older packages without a declared range remain permitted; older app builds
+do not gain these checks retroactively. See the
+[publishing guide](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/PUBLISHING.en.md)
+for the catalog format and release workflow.
 
 During development:
 
@@ -1141,11 +1176,17 @@ interface NativePluginPermissions {
 }
 
 interface NativePluginRuntime {
-  kind: 'wasm' | 'process' | 'manifest-only';
+  kind: 'wasm' | 'process' | 'manifest-only' | 'language';
   entry: string;
 }
 
 interface NativePluginContributes {
+  language?: {
+    id: 'elixir' | 'commonlisp' | 'swift' | 'r' | 'scala' | 'objc';
+    highlights: string;
+    parserSha256: string;
+    highlightsSha256: string;
+  };
   tabs?: NativePluginTabDef[];
   sidebarPanels?: NativePluginSidebarDef[];
   activityBarItems?: NativePluginActivityBarItemDef[];

@@ -284,7 +284,7 @@ impl WorkspaceApp {
                 let enabled = action == "enable";
                 self.plugin_entity
                     .update(cx, |plugins, _cx| {
-                        plugins.set_plugin_enabled(plugin_id, enabled)
+                        plugins.set_plugin_enabled(plugin_id, enabled, _cx)
                     })
                     .map(|_| {
                         if enabled {
@@ -298,7 +298,7 @@ impl WorkspaceApp {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 self.plugin_entity.update(cx, |plugins, _cx| {
-                    plugins.uninstall_plugin(plugin_id, remove_storage)
+                    plugins.uninstall_plugin(plugin_id, remove_storage, _cx)
                 })
             }
             "invoke" => {

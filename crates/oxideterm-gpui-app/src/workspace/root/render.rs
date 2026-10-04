@@ -794,6 +794,11 @@ impl WorkspaceApp {
             .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
                 let _ = this.create_local_terminal_tab(window, cx);
             }))
+            .on_action(cx.listener(
+                |this, action: &oxideterm_gpui_editor::ManageLanguagePlugin, window, cx| {
+                    this.open_language_plugin(&action.language, window, cx);
+                },
+            ))
             .on_action(cx.listener(|this, _: &ShellLauncher, _window, cx| {
                 this.open_local_shell_launcher(cx);
             }))

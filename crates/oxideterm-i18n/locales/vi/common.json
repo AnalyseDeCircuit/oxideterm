@@ -197,6 +197,8 @@
     "shortcut_count": "phím tắt"
   },
   "plugin": {
+    "marketplace_all": "Tất cả",
+    "marketplace_updates_only": "Chỉ có bản cập nhật",
     "manager_title": "Quản lý plugin",
     "manager_description": "Quản lý các plugin đã cài đặt và duyệt kho plugin",
     "compatibility_title": "Khả năng tương thích",
@@ -873,6 +875,12 @@
     "marketplace_platform_unavailable": "Không khả dụng trên nền tảng này",
     "marketplace_requires_version": "Yêu cầu OxideTerm {{version}} trở lên",
     "marketplace_incompatible": "Không tương thích với phiên bản OxideTerm này",
+    "marketplace_newer_requires": "Phiên bản {{version}} yêu cầu OxideTerm {{requirement}}.",
+    "language_missing": "Chưa bật hỗ trợ ngôn ngữ {{language}}.",
+    "language_manage": "Thêm hỗ trợ ngôn ngữ",
+    "language_dismiss": "Ẩn thông báo",
+    "marketplace_installed_version": "Đã cài đặt: v{{version}}",
+    "host_version_incompatible": "Phần mở rộng này yêu cầu OxideTerm {{requirement}}; phiên bản hiện tại: {{current}}.",
     "marketplace_unverified": "Không thể xác minh gói",
     "marketplace_homepage": "Trang chủ",
     "registry_error": "Không thể tải kho plugin",

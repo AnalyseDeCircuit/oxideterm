@@ -65,12 +65,15 @@ pub(crate) fn load_native_plugin_manifest(
         .map_err(|error| native_plugin_diagnostic(plugin_dir, Some(manifest.id.clone()), error))?;
     validate_runtime_entry_exists(plugin_dir, &runtime_plan)
         .map_err(|error| native_plugin_diagnostic(plugin_dir, Some(manifest.id.clone()), error))?;
-    let config_entry = config
+    let mut config_entry = config
         .plugins
         .get(&manifest.id)
         .cloned()
         .unwrap_or_else(NativePluginConfigEntry::default);
     let state = native_plugin_state_for_manifest(&manifest, &runtime_plan, &config_entry);
+    if let Err(error) = validate_native_plugin_host(&manifest) {
+        config_entry.last_error = Some(error);
+    }
     Ok(NativePluginInfo {
         manifest,
         install_dir: plugin_dir.to_path_buf(),
