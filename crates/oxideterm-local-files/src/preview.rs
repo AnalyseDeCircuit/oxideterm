@@ -56,8 +56,25 @@ pub fn read_local_preview(path: &str) -> LocalPreview {
             mime_type: mime_type_for_extension(&ext),
         };
     }
-    if ext == "pdf" {
-        return LocalPreview::Unsupported("fileManager.openExternal".to_string());
+    let sqlite = matches!(ext.as_str(), "sqlite" | "sqlite3")
+        || (matches!(ext.as_str(), "db" | "db3")
+            && std::fs::File::open(path_ref).is_ok_and(|mut file| {
+                let mut header = [0; 16];
+                file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0"
+            }));
+    if ext == "pdf" || sqlite {
+        if file_size > MAX_PREVIEW_SIZE {
+            return LocalPreview::TooLarge { size: file_size };
+        }
+        return LocalPreview::Document {
+            path: path.into(),
+            mime_type: if sqlite {
+                "application/vnd.sqlite3"
+            } else {
+                "application/pdf"
+            }
+            .into(),
+        };
     }
     if archive_extensions().contains(&ext.as_str()) {
         return match list_local_archive_contents(path) {
@@ -379,6 +396,7 @@ pub fn mime_type_for_extension(ext: &str) -> String {
         "woff" => "font/woff",
         "woff2" => "font/woff2",
         "pdf" => "application/pdf",
+        "sqlite" | "sqlite3" | "db" | "db3" => "application/vnd.sqlite3",
         "doc" => "application/msword",
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xls" => "application/vnd.ms-excel",
@@ -411,6 +429,47 @@ pub fn mime_type_for_extension(ext: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sqlite_preview_sniffs_ambiguous_db_files_and_preserves_other_previews() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("database.DB");
+        std::fs::write(&path, b"SQLite format 3\0fixture").unwrap();
+        assert!(
+            matches!(read_local_preview(path.to_str().unwrap()), LocalPreview::Document { mime_type, .. } if mime_type == "application/vnd.sqlite3")
+        );
+        std::fs::write(&path, b"unrelated text database").unwrap();
+        assert!(
+            matches!(read_local_preview(path.to_str().unwrap()), LocalPreview::Text { content, .. } if content == "unrelated text database")
+        );
+    }
+
+    #[test]
+    fn pdf_preview_uses_a_document_asset_and_respects_the_size_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("manual.PDF");
+        std::fs::write(&path, b"%PDF-1.4\n").unwrap();
+        match read_local_preview(path.to_str().unwrap()) {
+            LocalPreview::Document {
+                path: asset,
+                mime_type,
+            } => {
+                assert_eq!(asset, path.to_str().unwrap());
+                assert_eq!(mime_type, "application/pdf");
+            }
+            other => panic!("Expected a document asset, got {other:?}"),
+        }
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_PREVIEW_SIZE + 1)
+            .unwrap();
+        assert!(
+            matches!(read_local_preview(path.to_str().unwrap()), LocalPreview::TooLarge { size } if size == MAX_PREVIEW_SIZE + 1)
+        );
+        assert!(path.exists());
+    }
 
     #[test]
     fn extension_ignores_single_dotfiles() {

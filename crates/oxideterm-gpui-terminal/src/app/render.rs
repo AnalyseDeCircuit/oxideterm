@@ -2005,6 +2005,16 @@ impl TerminalPane {
             context_menu_event_boundary(
                 context_menu_content(tokens)
                     .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                    .children(self.plugin_text_actions.iter().cloned().map(|action| {
+                        self.render_terminal_context_menu_item(
+                            action.label.clone(),
+                            !menu.has_selection,
+                            move |this, _, _, cx| {
+                                this.request_plugin_text_action(action.clone(), cx);
+                            },
+                            cx,
+                        )
+                    }))
                     .child(self.render_terminal_context_menu_item(
                         copy_label,
                         !menu.has_selection,
@@ -2462,13 +2472,26 @@ impl TerminalPane {
         // Context menu rendering is token-driven; positioning uses the same
         // Radix-mapped padding and shared line box as the rendered rows.
         tokens.metrics.ui_menu_padding * 2.0
-            + TERMINAL_CONTEXT_MENU_ACTION_COUNT * context_menu_item_height_estimate(tokens)
+            + (TERMINAL_CONTEXT_MENU_ACTION_COUNT + self.plugin_text_actions.len() as f32)
+                * context_menu_item_height_estimate(tokens)
             + TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT * context_menu_separator_height_estimate(tokens)
     }
 
     fn copy_selection_from_context_menu(&mut self, cx: &mut Context<Self>) {
         self.dismiss_terminal_context_menu(cx);
         let _copied = self.copy_selection_to_clipboard_if_present(cx);
+    }
+
+    pub(super) fn request_plugin_text_action(
+        &mut self,
+        action: super::TerminalPluginTextAction,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(text) = self.selected_text_snapshot() else {
+            return;
+        };
+        self.pending_plugin_text = Some((action, zeroize::Zeroizing::new(text)));
+        self.request_context_action(super::TerminalContextAction::PluginTextTool, false, cx);
     }
 
     fn request_context_action(

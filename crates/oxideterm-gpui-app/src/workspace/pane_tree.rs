@@ -221,6 +221,7 @@ impl WorkspaceApp {
         self.ai_runtime_context.update(cx, |runtime, _cx| {
             runtime.register_terminal_session(session_id, terminal_label);
         });
+        self.refresh_native_plugin_terminal_hooks(cx);
     }
 
     pub(super) fn handle_terminal_pane_delivery(

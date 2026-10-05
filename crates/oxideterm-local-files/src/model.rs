@@ -87,6 +87,10 @@ pub struct LocalBookmark {
 
 #[derive(Clone, Debug)]
 pub enum LocalPreview {
+    Document {
+        path: String,
+        mime_type: String,
+    },
     Loading,
     Text {
         content: String,

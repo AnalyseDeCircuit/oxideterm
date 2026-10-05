@@ -34,6 +34,7 @@ mod path_completion;
 mod plugin_entity;
 mod plugin_lifecycle;
 mod plugin_manager;
+mod plugin_preview;
 mod plugin_ui;
 mod public_mcp;
 mod quick_commands;

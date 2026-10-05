@@ -113,10 +113,10 @@ impl fmt::Debug for PluginRequestKind {
                 }
                 debug.finish()
             }
-            Self::DispatchCommand { command, args } => formatter
+            Self::DispatchCommand { command, .. } => formatter
                 .debug_struct("DispatchCommand")
                 .field("command", command)
-                .field("args", args)
+                .field("args", &"<redacted>")
                 .finish(),
             Self::SendEvent { event } => formatter
                 .debug_struct("SendEvent")
@@ -138,6 +138,13 @@ mod tests {
 
     #[test]
     fn sensitive_host_calls_redact_debug_and_clear_owned_arguments() {
+        let command = PluginRequestKind::DispatchCommand {
+            command: "json.pretty".into(),
+            args: serde_json::json!({"input":"terminal-private-token"}),
+        };
+        let debug = format!("{command:?}");
+        assert!(!debug.contains("terminal-private-token"));
+        assert!(debug.contains("json.pretty"));
         for method in ["exportOxide", "previewImport"] {
             let mut request = PluginRequest {
                 request_id: "sync-1".to_string(),

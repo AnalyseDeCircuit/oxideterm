@@ -21,6 +21,21 @@ impl WorkspaceApp {
         };
 
         match action {
+            TerminalContextAction::PluginTextTool => {
+                let Some((action, text)) =
+                    source_pane.update(cx, |pane, _| pane.take_plugin_text_request())
+                else {
+                    return false;
+                };
+                self.open_native_plugin_text_workbench(
+                    &action.plugin_id,
+                    &action.tab_id,
+                    &action.control_id,
+                    text,
+                    cx,
+                );
+                true
+            }
             TerminalContextAction::OpenSearch => {
                 self.open_search(window, cx);
                 true

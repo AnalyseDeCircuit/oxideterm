@@ -21,3 +21,4 @@ pub mod sftp;
 pub mod sync;
 pub mod terminal;
 pub mod transfers;
+pub mod workspace;

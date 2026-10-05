@@ -16,6 +16,7 @@ pub(crate) fn highlight_query_for(language: LanguageId) -> &'static str {
         LanguageId::Elixir => "",
         LanguageId::Fish => tree_sitter_fish::HIGHLIGHTS_QUERY,
         LanguageId::Go => "",
+        LanguageId::Hcl | LanguageId::Nginx | LanguageId::Protobuf => "",
         LanguageId::Html => "",
         LanguageId::Java => "",
         LanguageId::Javascript => "",

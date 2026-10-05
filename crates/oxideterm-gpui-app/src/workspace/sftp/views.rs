@@ -18,6 +18,22 @@ impl Drop for SftpSurfaceScope {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn sftp_page_remote_keys(
+        &self,
+        tab_id: TabId,
+        cx: &App,
+    ) -> Vec<String> {
+        let Some(page) = self.sftp_pages.get(&tab_id) else {
+            return Vec::new();
+        };
+        let view = page.view.read(cx);
+        view.current_remote_id
+            .iter()
+            .chain(view.pair_primary_remote_id.iter())
+            .map(SftpRemoteId::storage_key)
+            .collect()
+    }
+
     pub(in crate::workspace) fn sftp_surface_id(&self) -> SftpSurfaceId {
         self.sftp_dispatch_surface
             .get()

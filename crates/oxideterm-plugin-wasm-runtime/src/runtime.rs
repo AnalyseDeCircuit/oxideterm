@@ -20,6 +20,7 @@ use wasmtime::{
     Memory as WasmMemory, Store as WasmStore,
 };
 use wasmtime_wasi::{WasiCtxBuilder, p1::WasiP1Ctx};
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::resolve_wasm_runtime_entry;
 
@@ -38,6 +39,13 @@ struct NativeWasmPluginInstance {
     store: WasmStore<WasiP1Ctx>,
     instance: WasmInstance,
     memory: WasmMemory,
+}
+
+impl Drop for NativeWasmPluginInstance {
+    fn drop(&mut self) {
+        // Guest heaps may contain terminal selections and decoded credentials.
+        self.memory.data_mut(&mut self.store).zeroize();
+    }
 }
 
 #[derive(Deserialize)]
@@ -154,7 +162,7 @@ impl NativeWasmPluginRuntime {
 
     fn call_wasm_guest(
         &mut self,
-        request: PluginRequest,
+        mut request: PluginRequest,
         export_name: &str,
     ) -> Result<PluginResponse, PluginError> {
         let request_id = request.request_id.clone();
@@ -162,14 +170,23 @@ impl NativeWasmPluginRuntime {
             .timeout_ms
             .map(Duration::from_millis)
             .unwrap_or_else(|| self.supervisor.lifecycle_timeout());
-        let instance = self.instance.as_mut().ok_or_else(|| {
-            PluginError::runtime(
-                "wasm_runtime_not_active",
-                "Native WASM plugin runtime is not active",
-            )
-        })?;
-        instance.reset_epoch_deadline(timeout);
-        let guest_response = instance.call_json_request(export_name, &request)?;
+        let result = self
+            .instance
+            .as_mut()
+            .ok_or_else(|| {
+                PluginError::runtime(
+                    "wasm_runtime_not_active",
+                    "Native WASM plugin runtime is not active",
+                )
+            })
+            .and_then(|instance| {
+                instance.reset_epoch_deadline(timeout);
+                instance.call_json_request(export_name, &request)
+            });
+        if let PluginRequestKind::DispatchCommand { args, .. } = &mut request.kind {
+            oxideterm_plugin_protocol::zeroize_json_value(args);
+        }
+        let guest_response = result?;
         self.capture_wasm_outbound_messages(guest_response.messages)?;
         let response = guest_response.response;
         if response.request_id != request_id {
@@ -244,12 +261,12 @@ impl NativeWasmPluginInstance {
         export_name: &str,
         request: &PluginRequest,
     ) -> Result<WasmGuestCallResult, PluginError> {
-        let request_bytes = serde_json::to_vec(request).map_err(|error| {
+        let request_bytes = Zeroizing::new(serde_json::to_vec(request).map_err(|error| {
             PluginError::protocol(
                 "wasm_request_encode_failed",
                 format!("Cannot encode native WASM plugin request: {error}"),
             )
-        })?;
+        })?);
         let request_ptr = self.guest_alloc(request_bytes.len())?;
         self.memory
             .write(&mut self.store, request_ptr, &request_bytes)
@@ -313,7 +330,8 @@ impl NativeWasmPluginInstance {
     }
 
     fn read_guest_call_result(&self, packed: i64) -> Result<WasmGuestCallResult, PluginError> {
-        let response_bytes = self.read_guest_bytes(packed, "wasm_response_read_failed")?;
+        let response_bytes =
+            Zeroizing::new(self.read_guest_bytes(packed, "wasm_response_read_failed")?);
         let guest_response = serde_json::from_slice::<NativeWasmGuestResponse>(&response_bytes)
             .map_err(|error| {
                 PluginError::protocol(

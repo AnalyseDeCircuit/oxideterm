@@ -35,6 +35,7 @@ mod terminal_queries;
 mod types;
 mod ui_helpers;
 mod ui_host_calls;
+mod workspace;
 
 use host_api_snapshot::*;
 use ide::*;
@@ -482,6 +483,48 @@ impl WorkspaceApp {
     }
 
     pub(super) fn refresh_native_plugin_terminal_hooks(&mut self, cx: &mut Context<Self>) {
+        let contributions = self.plugin_entity.read(cx).registry().contributions();
+        let mut actions = Vec::new();
+        for menu in &contributions.runtime_context_menus {
+            if menu.target != "terminal" {
+                continue;
+            }
+            for item in &menu.items {
+                if !item.enabled {
+                    continue;
+                }
+                let (Some(tab_id), Some(control_id)) = (&item.tab_id, &item.control_id) else {
+                    continue;
+                };
+                let Some(mut view) = contributions.runtime_tab_view(&menu.plugin_id, tab_id) else {
+                    continue;
+                };
+                view.schema.title = Some(item.label.clone());
+                super::plugin_ui::localize_native_plugin_schema(
+                    &mut view.schema,
+                    self.i18n.locale(),
+                );
+                actions.push(oxideterm_gpui_terminal::TerminalPluginTextAction {
+                    plugin_id: menu.plugin_id.clone(),
+                    tab_id: tab_id.clone(),
+                    control_id: control_id.clone(),
+                    label: view.schema.title.unwrap_or_else(|| item.label.clone()),
+                });
+            }
+        }
+        let panes = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        for pane in panes {
+            pane.update(cx, |pane, cx| {
+                pane.set_plugin_text_actions(actions.clone());
+                cx.notify();
+            });
+        }
         self.refresh_native_plugin_terminal_input_interceptors(cx);
         self.refresh_native_plugin_terminal_output_processors(cx);
     }
@@ -1739,7 +1782,10 @@ impl WorkspaceApp {
     ) {
         let is_product_effect = matches!(
             (namespace, method),
-            ("connections", "connect" | "reconnect" | "disconnect")
+            (
+                "connections",
+                "connect" | "reconnect" | "disconnect" | "openForm"
+            ) | ("ui", "openWorkspace")
                 | (
                     "notifications",
                     "markRead" | "markAllRead" | "setDnd" | "remove" | "clear"
@@ -1815,6 +1861,7 @@ impl WorkspaceApp {
                 | "secrets"
                 | "sync"
         ) || (namespace == "app" && method != "refreshAfterExternalSync")
+            || (namespace == "i18n" && matches!(method, "getLanguage" | "t"))
             || (namespace == "storage" && method == "get")
             || (namespace == "settings" && matches!(method, "get" | "exportSyncableSettings"))
         {

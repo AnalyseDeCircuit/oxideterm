@@ -124,6 +124,8 @@ pub struct NativePluginRuntimeContextMenuItem {
     pub label: String,
     pub icon: Option<String>,
     pub enabled: bool,
+    pub tab_id: Option<String>,
+    pub control_id: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -551,6 +551,7 @@ pub(super) enum SftpWorkerResult {
         result: Result<Vec<BackgroundTransferSnapshot>, String>,
     },
     PreviewLoaded {
+        asset_owner: Option<PreviewAssetOwner>,
         generation: u64,
         path: String,
         result: Result<PreviewContent, String>,
@@ -1070,7 +1071,9 @@ pub(super) struct SftpWorkspaceEntity {
     // immutable snapshots instead of cloning the payload on every frame.
     preview_content: Option<Arc<PreviewContent>>,
     preview_asset_owner: Option<PreviewAssetOwner>,
+    preview_plugin: Option<Entity<super::plugin_preview::PluginFilePreview>>,
     preview_generation: u64,
+    preview_load_task: Option<tokio::task::AbortHandle>,
     preview_audio: RodioAudioPreviewBackend,
     preview_audio_tick_active: bool,
     preview_audio_tick_task: Option<Task<()>>,
@@ -1191,7 +1194,9 @@ impl Default for SftpWorkspaceEntity {
             preview_path: None,
             preview_content: None,
             preview_asset_owner: None,
+            preview_plugin: None,
             preview_generation: 0,
+            preview_load_task: None,
             preview_audio: RodioAudioPreviewBackend::new(),
             preview_audio_tick_active: false,
             preview_audio_tick_task: None,
@@ -1286,7 +1291,10 @@ impl SftpWorkspaceEntity {
     fn schedule_worker_delivery(&self, cx: &mut Context<Self>) {
         let worker_wake = self.worker_tx.wake();
         let release_wake = worker_wake.clone();
-        cx.on_release(move |_, _| {
+        cx.on_release(move |this, _| {
+            if let Some(task) = this.preview_load_task.take() {
+                task.abort();
+            }
             // Releasing the page owner stops UI delivery without cancelling
             // node-owned transfers or their backend tasks.
             release_wake.stop();
@@ -1459,6 +1467,7 @@ impl SftpWorkspaceEntity {
         self.conflict_state = None;
         self.dialog_value.clear();
         self.preview_asset_owner = None;
+        self.preview_plugin = None;
         self.preview_hex_loading_more = false;
         self.preview_markdown_source_mode = false;
         self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
@@ -1490,6 +1499,10 @@ impl SftpWorkspaceEntity {
     }
 
     pub(in crate::workspace::sftp) fn stop_preview_media(&mut self) {
+        if let Some(task) = self.preview_load_task.take() {
+            task.abort();
+        }
+        self.preview_plugin = None;
         let _ = self.preview_audio.command(AudioPreviewCommand::Stop);
         self.preview_audio_tick_active = false;
         self.preview_audio_tick_task = None;

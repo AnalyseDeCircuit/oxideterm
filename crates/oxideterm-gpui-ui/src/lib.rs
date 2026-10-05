@@ -62,7 +62,7 @@ pub use entity_row::{EntityListRowDensity, EntityListRowOptions, entity_list_row
 pub use form_field::form_field;
 pub use modal::{modal_body, modal_container, modal_footer, modal_header, modal_overlay};
 pub use scroll::{Scrollable, ScrollableElement, Scrollbar, ScrollbarAxis};
-pub use section::{SectionHeaderOptions, section_header};
+pub use section::{SectionHeaderOptions, page_header, section_header};
 pub use segmented_control::{
     SegmentedControlLayout, SegmentedControlMotion, SegmentedControlOptions, segmented_control,
     segmented_control_item, segmented_control_item_content, segmented_control_motion,

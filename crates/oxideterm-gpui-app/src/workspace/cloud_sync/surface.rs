@@ -493,63 +493,18 @@ impl WorkspaceApp {
 
 impl CloudSyncPageRenderer {
     pub(super) fn render_cloud_sync_header(&self, cx: &mut App) -> AnyElement {
-        let theme = self.tokens.ui;
         div()
             .w_full()
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.settings_page_gap))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .min_w(px(280.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_2xl))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(theme.text_heading))
-                                    // Page chrome must not start a text drag that
-                                    // competes with window-level pointer handling.
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::NonSelectable,
-                                        "cloud-sync-panel",
-                                        "title",
-                                        self.i18n.t("plugin.cloud_sync.panel_title"),
-                                        theme.text_heading,
-                                        cx,
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .max_w(px(680.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_base))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::NonSelectable,
-                                        "cloud-sync-panel",
-                                        "subtitle",
-                                        self.i18n.t("plugin.cloud_sync.native_description"),
-                                        theme.text_muted,
-                                        cx,
-                                    )),
-                            ),
-                    )
-                    .child(self.render_cloud_sync_tab_bar(cx)),
-            )
-            .child(
-                // Match the Plugin Manager header rhythm with a full-width rule.
-                div().w_full().h(px(1.0)).bg(rgb(theme.border)),
-            )
+            .child(oxideterm_gpui_ui::page_header(
+                &self.tokens,
+                self.i18n.t("plugin.cloud_sync.panel_title"),
+                Some(self.i18n.t("plugin.cloud_sync.native_description")),
+                Some(self.render_cloud_sync_tab_bar(cx)),
+            ))
+            .child(div().w_full().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
             .into_any_element()
     }
 

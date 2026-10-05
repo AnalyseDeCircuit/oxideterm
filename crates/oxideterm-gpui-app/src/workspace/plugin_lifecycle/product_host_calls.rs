@@ -25,7 +25,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         match (namespace, method) {
-            ("connections", "connect" | "reconnect" | "disconnect")
+            ("connections", "connect" | "reconnect" | "disconnect" | "openForm")
+            | ("ui", "openWorkspace")
             | ("quickCommands", "execute") => {
                 // These effects require a live GPUI Window, so the Entity keeps
                 // them until its reliable delivery event reaches the adapter.
@@ -67,6 +68,49 @@ impl WorkspaceApp {
             let audit_context = effect.audit_context.clone();
             oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
                 match (effect.namespace.as_str(), effect.method.as_str()) {
+                    ("connections", "openForm") => {
+                        if let Ok(host) =
+                            oxideterm_plugin_host_api::workspace::discovered_ssh_host(&effect.args)
+                        {
+                            // A queued plugin action must not discard an in-progress credential draft.
+                            if self.connection_form_state(cx).form.is_some() {
+                                let message = self.i18n.t("plugin.connection_form_open");
+                                self.plugin_entity.update(cx, |plugins, _| {
+                                    plugins.registry_mut().record_manager_error(
+                                        effect.plugin_id.clone(),
+                                        message,
+                                    );
+                                });
+                                return;
+                            }
+                            self.prepare_modal_interaction_boundary(cx);
+                            let mut form = super::super::NewConnectionForm::default();
+                            form.name = host.name;
+                            form.host = host.host;
+                            form.port = host.port.to_string();
+                            form.username = host.username;
+                            form.group = if host.group.is_empty() {
+                                self.i18n.t("ssh.form.ungrouped")
+                            } else {
+                                host.group
+                            };
+                            self.update_connection_form_state(cx, |state| {
+                                state.replace_with_new_form(form)
+                            });
+                            self.show_active_input_caret(cx);
+                            self.needs_active_pane_focus = false;
+                            window.focus(&self.focus_handle, cx);
+                            cx.notify();
+                        }
+                    }
+                    ("ui", "openWorkspace") => {
+                        self.open_native_plugin_workspace_destination(
+                            &effect.plugin_id,
+                            &effect.args,
+                            window,
+                            cx,
+                        );
+                    }
                     ("connections", "connect") => {
                         if let Some(connection_id) = string_arg(&effect.args, "connectionId") {
                             self.open_saved_connection(connection_id, window, cx);

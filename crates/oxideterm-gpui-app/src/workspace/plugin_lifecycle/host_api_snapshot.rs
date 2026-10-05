@@ -139,6 +139,7 @@ pub(super) fn native_plugin_host_api_snapshot_from_workspace(
         cloud_sync_summary,
         cloud_sync_history,
         host_tools_snapshots,
+        workspace_summary: workspace.native_plugin_workspace_summary(cx),
     }
 }
 

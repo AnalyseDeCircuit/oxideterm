@@ -68,6 +68,8 @@ pub struct NativePluginHostApiSnapshot {
     pub cloud_sync_history: Value,
     /// Cached Host Tools snapshots keyed by their stable node identifiers.
     pub host_tools_snapshots: Value,
+    /// Workspace metadata only; excludes terminal buffers, paths and diagnostic text.
+    pub workspace_summary: Value,
 }
 
 fn native_plugin_ui_registration_preflight_response(
@@ -207,6 +209,19 @@ pub fn native_plugin_returnable_host_api_response(
     call: plugin_runtime::PluginHostCall,
 ) -> Option<plugin_runtime::PluginResponse> {
     match (call.namespace.as_str(), call.method.as_str()) {
+        ("app", "getWorkspaceSummary") => Some(plugin_runtime::PluginResponse::ok(
+            call.request_id,
+            snapshot.workspace_summary.clone(),
+        )),
+        ("ui", "openWorkspace") => Some(match crate::workspace::validate_workspace_destination(
+            &call.args, &snapshot.workspace_summary, &snapshot.session_node_states,
+        ) {
+            Ok(_) => native_plugin_queued_response(call.request_id),
+            Err(message) => plugin_runtime::PluginResponse::error(
+                call.request_id,
+                plugin_runtime::PluginError::protocol("invalid_workspace_destination", message),
+            ),
+        }),
         ("api", "invoke") => Some(plugin_runtime::PluginResponse::error(
             call.request_id,
             plugin_runtime::PluginError::runtime(
@@ -632,6 +647,13 @@ pub fn native_plugin_returnable_host_api_response(
                 .unwrap_or(serde_json::Value::Null);
             Some(plugin_runtime::PluginResponse::ok(call.request_id, value))
         }
+        ("connections", "openForm") => Some(match crate::workspace::discovered_ssh_host(&call.args) {
+            Ok(_) => native_plugin_queued_response(call.request_id),
+            Err(message) => plugin_runtime::PluginResponse::error(
+                call.request_id,
+                plugin_runtime::PluginError::protocol("invalid_discovered_host", message),
+            ),
+        }),
         ("connections", "connect") => {
             let Some(connection_id) = call.args.get("connectionId").and_then(Value::as_str) else {
                 return Some(plugin_runtime::PluginResponse::error(
@@ -1119,6 +1141,7 @@ mod tests {
             }),
             cloud_sync_history: json!([]),
             host_tools_snapshots: json!([]),
+            workspace_summary: json!({ "tabs": [], "nodes": [], "pluginIssues": [] }),
         }
     }
 
@@ -1239,6 +1262,117 @@ mod tests {
                 "{namespace}.{method}"
             );
         }
+    }
+
+    #[test]
+    fn workspace_navigation_accepts_live_destinations_and_rejects_stale_or_arbitrary_routes() {
+        let mut snapshot = sample_snapshot();
+        snapshot.workspace_summary = json!({
+            "tabs": [{"id": "42", "title": "Build", "kind": "terminal", "recordings": []}],
+            "nodes": [], "pluginIssues": []
+        });
+        snapshot
+            .session_node_states
+            .insert("node-live".into(), "active".into());
+        let response = native_plugin_returnable_host_api_response(
+            &snapshot,
+            "test",
+            host_call("app", "getWorkspaceSummary", json!({})),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(response).unwrap()["result"]["value"]["tabs"][0],
+            json!({"id": "42", "title": "Build", "kind": "terminal", "recordings": []})
+        );
+        for (args, expected) in [
+            (json!({"kind": "tab", "id": "42"}), "ok"),
+            (json!({"kind": "tab", "id": "99"}), "error"),
+            (json!({"kind": "sftp", "nodeId": "node-live"}), "ok"),
+            (json!({"kind": "forwards", "nodeId": "removed"}), "error"),
+            (json!({"kind": "page", "page": "plugins"}), "ok"),
+            (
+                json!({"kind": "page", "page": "executeCommand", "command": "unexpected"}),
+                "error",
+            ),
+        ] {
+            let response = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "test",
+                host_call("ui", "openWorkspace", args.clone()),
+            )
+            .unwrap();
+            let response = serde_json::to_value(response).unwrap();
+            assert_eq!(response["result"]["status"], expected, "{args}");
+            if expected == "error" {
+                assert_eq!(
+                    response["result"]["error"]["code"],
+                    "invalid_workspace_destination"
+                );
+            } else {
+                assert_eq!(response["result"]["value"], json!({"queued": true}));
+            }
+        }
+        let baseline = crate::catalog::allowed_host_apis_for_capabilities(Vec::<String>::new());
+        assert!(
+            !baseline
+                .iter()
+                .any(|api| api == "app.getWorkspaceSummary" || api == "ui.openWorkspace")
+        );
+        let allowed =
+            crate::catalog::allowed_host_apis_for_capabilities(["sessions.read", "ui.write"]);
+        assert!(allowed.iter().any(|api| api == "app.getWorkspaceSummary"));
+        assert!(allowed.iter().any(|api| api == "ui.openWorkspace"));
+    }
+
+    #[test]
+    fn discovered_host_form_rejects_credentials_commands_and_invalid_endpoints() {
+        let snapshot = sample_snapshot();
+        let valid = json!({"name":"Build host","host":"100.64.0.8","port":2222,"username":"builder","group":"Development"});
+        for (field, value) in [
+            ("host", json!("ssh://user:secret@example.com")),
+            ("host", json!("-oProxyCommand=command")),
+            ("port", json!(0)),
+            ("port", json!(65536)),
+            ("username", json!("user\ncommand")),
+            ("password", json!("private-test-password")),
+            ("proxyCommand", json!("private-test-command")),
+        ] {
+            let mut args = valid.clone();
+            args[field] = value;
+            let response = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "test",
+                host_call("connections", "openForm", args),
+            )
+            .unwrap();
+            let value = serde_json::to_value(response).unwrap();
+            assert_eq!(value["result"]["error"]["code"], "invalid_discovered_host");
+            assert!(!value.to_string().contains("private-test"));
+        }
+        for host in ["100.64.0.8", "fd7a:115c:a1e0::1", "build.example.ts.net"] {
+            let mut args = valid.clone();
+            args["host"] = json!(host);
+            let response = native_plugin_returnable_host_api_response(
+                &snapshot,
+                "test",
+                host_call("connections", "openForm", args),
+            )
+            .unwrap();
+            assert_eq!(
+                response.result,
+                plugin_runtime::PluginResponseResult::Ok {
+                    value: json!({"queued":true})
+                }
+            );
+        }
+        assert!(
+            !crate::catalog::allowed_host_apis_for_capabilities(["ui.write"])
+                .contains(&"connections.openForm".into())
+        );
+        assert!(
+            crate::catalog::allowed_host_apis_for_capabilities(["connections.control"])
+                .contains(&"connections.openForm".into())
+        );
     }
 
     #[test]

@@ -1,6 +1,13 @@
 use super::*;
+use gpui::point;
 use oxideterm_gpui_ui::scroll::ScrollableElement;
+use oxideterm_gpui_ui::{
+    modal::overlay_content_boundary,
+    select::{select_option, select_option_action, select_panel_overlay_popup_with_max_height},
+};
 use zeroize::Zeroizing;
+mod text_workbench;
+use text_workbench::PluginTextWorkbench;
 
 const NATIVE_PLUGIN_UI_LIST_OVERSCAN: usize = 8;
 const NATIVE_PLUGIN_UI_MAX_VISIBLE_ROWS: usize = 8;
@@ -27,13 +34,17 @@ struct NativePluginUiControlState {
     draft: NativePluginUiControlDraft,
     source_signature: u64,
     render_generation: u64,
+    select_options: Vec<plugin_host::NativePluginDeclarativeUiOption>,
 }
 
 #[derive(Default)]
 pub(super) struct NativePluginUiState {
     controls: HashMap<u64, NativePluginUiControlState>,
+    workbenches: HashMap<u64, Entity<PluginTextWorkbench>>,
     pub focused_input: Option<u64>,
     pub(in crate::workspace) open_select: Option<u64>,
+    select_window: Option<gpui::WindowId>,
+    select_anchors: HashMap<(gpui::WindowId, u64), OverlayAnchor>,
     render_generation: u64,
 }
 
@@ -55,6 +66,7 @@ impl NativePluginUiState {
             Some(state) => {
                 state.context = context;
                 state.render_generation = render_generation;
+                state.select_options = control.options.clone().unwrap_or_default();
                 if state.source_signature != source_signature {
                     state.draft = native_plugin_ui_control_source_draft(control);
                     state.source_signature = source_signature;
@@ -68,6 +80,7 @@ impl NativePluginUiState {
                         draft: native_plugin_ui_control_source_draft(control),
                         source_signature,
                         render_generation,
+                        select_options: control.options.clone().unwrap_or_default(),
                     },
                 );
             }
@@ -115,6 +128,10 @@ impl NativePluginUiState {
     }
 
     fn clear_stale_focus(&mut self) {
+        self.workbenches
+            .retain(|key, _| self.controls.contains_key(key));
+        self.select_anchors
+            .retain(|(_, key), _| self.controls.contains_key(key));
         if self
             .focused_input
             .is_some_and(|key| !self.controls.contains_key(&key))
@@ -202,6 +219,118 @@ pub(super) struct NativePluginSidebarPanelSelection {
 }
 
 impl WorkspaceApp {
+    fn native_plugin_text_workbench(
+        &mut self,
+        plugin_id: &str,
+        surface_kind: &str,
+        surface_id: &str,
+        section_id: &str,
+        control: &plugin_host::NativePluginDeclarativeUiControl,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<PluginTextWorkbench>> {
+        let plugin = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .plugins()
+            .iter()
+            .find(|plugin| plugin.manifest.id == plugin_id)?
+            .clone();
+        if !matches!(
+            plugin.runtime_plan,
+            plugin_host::NativePluginRuntimePlan::Wasm { .. }
+        ) {
+            return None;
+        }
+        let context = native_plugin_ui_control_context(
+            plugin_id,
+            surface_kind,
+            surface_id,
+            section_id,
+            control,
+        );
+        let key =
+            self.update_plugin_ui_state(cx, |ui| ui.sync_control(context, control, generation));
+        if let Some(view) = self.plugin_ui_state(cx).workbenches.get(&key).cloned() {
+            view.update(cx, |view, cx| {
+                view.update_definition(plugin, control.clone(), self.tokens, self.i18n.clone(), cx)
+            });
+            return Some(view);
+        }
+        let runtime = self.forwarding_runtime.clone();
+        let tokens = self.tokens;
+        let view = cx.new(|cx| {
+            PluginTextWorkbench::new(
+                plugin,
+                control.clone(),
+                runtime,
+                tokens,
+                self.i18n.clone(),
+                cx,
+            )
+        });
+        self.update_plugin_ui_state(cx, |ui| {
+            ui.workbenches.insert(key, view.clone());
+        });
+        Some(view)
+    }
+
+    pub(super) fn open_native_plugin_text_workbench(
+        &mut self,
+        plugin_id: &str,
+        tab_id: &str,
+        control_id: &str,
+        text: Zeroizing<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut view) = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .contributions()
+            .runtime_tab_view(plugin_id, tab_id)
+        else {
+            return;
+        };
+        localize_native_plugin_schema(&mut view.schema, self.i18n.locale());
+        // The input target is declared by the owning plugin, never resolved from the active pane.
+        let mut candidates = vec![("root", view.schema.controls.as_slice())];
+        candidates.extend(
+            view.schema
+                .sections
+                .iter()
+                .map(|section| (section.id.as_str(), section.controls.as_slice())),
+        );
+        fn find<'a>(
+            controls: &'a [plugin_host::NativePluginDeclarativeUiControl],
+            id: &str,
+        ) -> Option<&'a plugin_host::NativePluginDeclarativeUiControl> {
+            for control in controls {
+                if control.kind == "textWorkbench" && control.id.as_deref() == Some(id) {
+                    return Some(control);
+                }
+                if let Some(found) = find(&control.children, id) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        let Some((section, control)) = candidates.iter().find_map(|(section, controls)| {
+            find(controls, control_id).map(|control| (*section, control.clone()))
+        }) else {
+            return;
+        };
+        let generation = self.update_plugin_ui_state(cx, NativePluginUiState::begin_surface_render);
+        let Some(editor) = self.native_plugin_text_workbench(
+            plugin_id, "tab", tab_id, section, &control, generation, cx,
+        ) else {
+            return;
+        };
+        editor.update(cx, |editor, cx| editor.set_input(text, cx));
+        let _ = self.open_native_plugin_tab(plugin_id, tab_id, cx);
+    }
+
     pub(in crate::workspace) fn plugin_ui_state<'a>(&self, cx: &'a App) -> &'a NativePluginUiState {
         // IME and render adapters access the Entity-owned control state without
         // keeping a second workspace copy of secret-bearing drafts.
@@ -283,15 +412,23 @@ impl WorkspaceApp {
             .registry()
             .contributions()
             .tab_contribution(plugin_id, tab_id);
-        let runtime_view = self
+        let mut runtime_view = self
             .plugin_entity
             .read(cx)
             .registry()
             .contributions()
             .runtime_tab_view(plugin_id, tab_id);
+        if let Some(view) = &mut runtime_view {
+            localize_native_plugin_schema(&mut view.schema, self.i18n.locale());
+        }
         let title = runtime_view
             .as_ref()
-            .map(|view| view.title.clone())
+            .map(|view| {
+                view.schema
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| view.title.clone())
+            })
             .or_else(|| {
                 contribution
                     .as_ref()
@@ -299,42 +436,54 @@ impl WorkspaceApp {
             })
             .unwrap_or_else(|| tab_id.to_string());
 
+        let description = runtime_view
+            .as_ref()
+            .and_then(|view| view.schema.description.clone());
+        let body = match runtime_view {
+            Some(view) => self.render_native_plugin_declarative_schema(
+                plugin_id,
+                "tab",
+                &view.tab_id,
+                &view.schema,
+                cx,
+            ),
+            None => self.render_native_plugin_missing_view(
+                "Register a declarative tab schema before opening this plugin tab.",
+            ),
+        };
         div()
             .size_full()
             .min_h_0()
-            .flex()
-            .flex_col()
             .bg(self.workspace_chrome_background(theme.bg))
             .text_color(rgb(theme.text))
             .child(
-                self.render_native_plugin_surface_header(
-                    plugin_id,
-                    &title,
-                    contribution
-                        .as_ref()
-                        .map(|entry| entry.plugin_name.as_str())
-                        .unwrap_or(plugin_id),
-                ),
-            )
-            .child(
                 div()
-                    .flex_1()
-                    .min_h_0()
+                    .id("native-plugin-tab-scroll")
+                    .size_full()
+                    .min_w_0()
                     .overflow_y_scrollbar()
-                    .px(px(self.tokens.metrics.settings_content_padding))
-                    .py(px(self.tokens.metrics.settings_page_gap))
-                    .child(match runtime_view {
-                        Some(view) => self.render_native_plugin_declarative_schema(
-                            plugin_id,
-                            "tab",
-                            &view.tab_id,
-                            &view.schema,
-                            cx,
-                        ),
-                        None => self.render_native_plugin_missing_view(
-                            "Register a declarative tab schema before opening this plugin tab.",
-                        ),
-                    }),
+                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                        this.close_native_plugin_select(cx);
+                    }))
+                    .child(
+                        // Scrollable moves its own styles onto the viewport; page
+                        // spacing belongs to a content child inside that viewport.
+                        div()
+                            .w_full()
+                            .min_w_0()
+                            .p(px(self.tokens.metrics.settings_content_padding))
+                            .flex()
+                            .flex_col()
+                            .gap(px(self.tokens.metrics.settings_page_gap))
+                            .child(oxideterm_gpui_ui::page_header(
+                                &self.tokens,
+                                title,
+                                description,
+                                None,
+                            ))
+                            .child(div().w_full().h(px(1.0)).flex_none().bg(rgb(theme.border)))
+                            .child(body),
+                    ),
             )
             .into_any_element()
     }
@@ -368,6 +517,9 @@ impl WorkspaceApp {
             .min_h_0()
             .w_full()
             .overflow_y_scrollbar()
+            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                this.close_native_plugin_select(cx);
+            }))
             .px_2()
             .py_2()
             .flex()
@@ -381,46 +533,6 @@ impl WorkspaceApp {
                 &panel.schema,
                 cx,
             ))
-            .into_any_element()
-    }
-
-    fn render_native_plugin_surface_header(
-        &self,
-        plugin_id: &str,
-        title: &str,
-        plugin_name: &str,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        div()
-            .h(px(52.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .px(px(self.tokens.metrics.settings_content_padding))
-            .border_b_1()
-            .border_color(rgb(theme.border))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(16.0))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text_heading))
-                            .child(title.to_string()),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(format!("{plugin_name} · {plugin_id}")),
-                    ),
-            )
             .into_any_element()
     }
 
@@ -462,10 +574,13 @@ impl WorkspaceApp {
             self.update_plugin_ui_state(cx, NativePluginUiState::begin_surface_render);
         let mut body = div()
             .w_full()
+            .min_w_0()
             .flex()
             .flex_col()
             .gap(px(self.tokens.spacing.three));
-        if let Some(title) = &schema.title {
+        if let Some(title) = &schema.title
+            && surface_kind != "tab"
+        {
             let mut options = oxideterm_gpui_ui::SectionHeaderOptions::new();
             if let Some(description) = &schema.description {
                 options = options.description(description.clone());
@@ -589,21 +704,35 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match control.kind.as_str() {
-            "stack" | "row" | "card" | "toolbar" => self.render_native_plugin_layout_control(
-                plugin_id,
-                surface_kind,
-                surface_id,
-                section_id,
-                control,
-                render_generation,
-                cx,
-            ),
+            "textWorkbench" => self
+                .native_plugin_text_workbench(
+                    plugin_id,
+                    surface_kind,
+                    surface_id,
+                    section_id,
+                    control,
+                    render_generation,
+                    cx,
+                )
+                .map(|view| div().w_full().min_w_0().child(view).into_any_element())
+                .unwrap_or_else(|| div().into_any_element()),
+            "stack" | "row" | "columns" | "actionRow" | "card" | "toolbar" => self
+                .render_native_plugin_layout_control(
+                    plugin_id,
+                    surface_kind,
+                    surface_id,
+                    section_id,
+                    control,
+                    render_generation,
+                    cx,
+                ),
             "button" | "iconButton" | "icon-button" => self.render_native_plugin_button_control(
                 plugin_id,
                 surface_kind,
                 surface_id,
                 section_id,
                 control,
+                false,
                 cx,
             ),
             "text" | "password" | "number" => self.render_native_plugin_input_control(
@@ -688,6 +817,7 @@ impl WorkspaceApp {
         surface_id: &str,
         section_id: &str,
         control: &plugin_host::NativePluginDeclarativeUiControl,
+        full_width: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let actionable = plugin_host::native_plugin_declarative_control_is_actionable(control);
@@ -754,7 +884,10 @@ impl WorkspaceApp {
                 loading: control.loading,
                 ..oxideterm_gpui_ui::ToolbarButtonOptions::default()
             },
-        );
+        )
+        .when(full_width, |button| {
+            button.w_full().min_w_0().justify_start().truncate()
+        });
 
         if actionable {
             button
@@ -961,9 +1094,10 @@ impl WorkspaceApp {
         } else {
             trigger.on_mouse_down(
                 MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
+                cx.listener(move |this, _event, window, cx| {
                     this.blur_native_plugin_ui_input(cx);
                     this.update_plugin_ui_state(cx, |ui| {
+                        ui.select_window = Some(window.window_handle().window_id());
                         ui.open_select = if ui.open_select == Some(key) {
                             None
                         } else {
@@ -975,37 +1109,105 @@ impl WorkspaceApp {
                 }),
             )
         };
-        let mut select = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.spacing.one))
-            .child(trigger);
-        if open {
-            let mut menu = oxideterm_gpui_ui::select::select_inline_menu(&self.tokens);
-            for option in options {
-                let selected = option.value == value;
-                let option_value = option.value.clone();
-                menu = menu.child(
-                    oxideterm_gpui_ui::select::select_inline_option_row(
-                        &self.tokens,
-                        selected,
-                        false,
-                    )
-                    .child(option.label)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.update_plugin_ui_state(cx, |ui| ui.open_select = None);
-                            this.set_native_plugin_ui_control_value(key, option_value.clone(), cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                );
-            }
-            select = select.child(menu);
+        let workspace = cx.entity();
+        let trigger = select_anchor_probe(
+            SelectAnchorId::NativePluginControl(key),
+            trigger,
+            move |anchor, window, cx| {
+                let window_id = window.window_handle().window_id();
+                let _ = workspace.update(cx, |this, cx| {
+                    let changed = this.update_plugin_ui_state(cx, |ui| {
+                        let previous = ui.select_anchors.insert((window_id, key), anchor);
+                        ui.open_select == Some(key)
+                            && ui.select_window == Some(window_id)
+                            && previous != Some(anchor)
+                    });
+                    if changed {
+                        cx.notify();
+                    }
+                });
+            },
+        );
+        self.render_native_plugin_form_field(control, trigger)
+    }
+
+    pub(in crate::workspace) fn close_native_plugin_select(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let changed = self.update_plugin_ui_state(cx, |ui| ui.open_select.take().is_some());
+        if changed {
+            cx.notify();
         }
-        self.render_native_plugin_form_field(control, select)
+        changed
+    }
+
+    pub(in crate::workspace) fn render_native_plugin_select_overlay(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let window_id = window.window_handle().window_id();
+        let (key, anchor, options, value) = {
+            let ui = self.plugin_ui_state(cx);
+            let key = ui.open_select?;
+            if ui.select_window != Some(window_id) {
+                return None;
+            }
+            let anchor = *ui.select_anchors.get(&(window_id, key))?;
+            let options = ui.controls.get(&key)?.select_options.clone();
+            (key, anchor, options, ui.value(key))
+        };
+        let mut popup = select_panel_overlay_popup_with_max_height(
+            &self.tokens,
+            f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width),
+            self.tokens.metrics.ui_select_max_height,
+        );
+        for option in options {
+            let selected = value.as_ref() == Some(&option.value);
+            popup = popup.child(select_option_action(
+                select_option(&self.tokens, option.label, selected),
+                false,
+                false,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.close_native_plugin_select(cx);
+                    this.set_native_plugin_ui_control_value(key, option.value.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            ));
+        }
+        Some(
+            popover_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(Corner::TopLeft)
+                            .position(anchor.bounds.bottom_left())
+                            .offset(point(
+                                px(0.0),
+                                px(self.tokens.metrics.settings_select_popup_gap),
+                            ))
+                            .position_mode(AnchoredPositionMode::Window)
+                            .child(overlay_content_boundary(popup)),
+                    )
+                    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+                )
+                .into_any_element(),
+        )
     }
 
     fn render_native_plugin_radio_control(
@@ -1217,7 +1419,19 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let gap = native_plugin_layout_gap(&self.tokens, control.gap.as_deref());
         let mut children = Vec::with_capacity(control.children.len());
-        for child in &control.children {
+        for (index, child) in control.children.iter().enumerate() {
+            if control.kind == "actionRow" && index == 0 && child.kind == "button" {
+                children.push(self.render_native_plugin_button_control(
+                    plugin_id,
+                    surface_kind,
+                    surface_id,
+                    section_id,
+                    child,
+                    true,
+                    cx,
+                ));
+                continue;
+            }
             children.push(self.render_native_plugin_declarative_control(
                 plugin_id,
                 surface_kind,
@@ -1228,7 +1442,33 @@ impl WorkspaceApp {
                 cx,
             ));
         }
-        match control.kind.as_str() {
+        let layout = match control.kind.as_str() {
+            "columns" => div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_wrap()
+                .items_start()
+                .gap(px(gap))
+                .children(
+                    children
+                        .into_iter()
+                        .map(|child| div().min_w_0().flex_1().flex_basis(px(360.0)).child(child)),
+                )
+                .into_any_element(),
+            "actionRow" => {
+                let mut children = children.into_iter();
+                oxideterm_gpui_ui::action_slot_row(
+                    &self.tokens,
+                    oxideterm_gpui_ui::ActionSlotRowOptions::new()
+                        .gap(gap)
+                        .trailing_gap(gap),
+                    None,
+                    children.next().unwrap_or_else(|| div().into_any_element()),
+                    children.collect(),
+                )
+                .into_any_element()
+            }
             "row" => div()
                 .w_full()
                 .flex()
@@ -1268,6 +1508,29 @@ impl WorkspaceApp {
                 .gap(px(gap))
                 .children(children)
                 .into_any_element(),
+        };
+        if let Some(title) = &control.label {
+            let mut options = oxideterm_gpui_ui::SectionHeaderOptions::new().compact();
+            if let Some(description) = &control.description {
+                options = options.description(description.clone());
+            }
+            div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.spacing.two))
+                .child(oxideterm_gpui_ui::section_header(
+                    &self.tokens,
+                    title.clone(),
+                    options,
+                    None,
+                    None,
+                ))
+                .child(layout)
+                .into_any_element()
+        } else {
+            layout
         }
     }
 
@@ -1722,6 +1985,61 @@ impl WorkspaceApp {
     }
 }
 
+pub(super) fn localize_native_plugin_schema(
+    schema: &mut plugin_host::NativePluginDeclarativeUiSchema,
+    locale: oxideterm_i18n::Locale,
+) {
+    use oxideterm_i18n::Locale;
+    let locale = match locale {
+        Locale::De => "de",
+        Locale::En => "en",
+        Locale::EsEs => "es-ES",
+        Locale::FrFr => "fr-FR",
+        Locale::It => "it",
+        Locale::Ja => "ja",
+        Locale::Ko => "ko",
+        Locale::PtBr => "pt-BR",
+        Locale::Vi => "vi",
+        Locale::ZhCn => "zh-CN",
+        Locale::ZhTw => "zh-TW",
+    };
+    let Some(messages) = schema
+        .translations
+        .get(locale)
+        .or_else(|| schema.translations.get("en"))
+        .cloned()
+    else {
+        return;
+    };
+    schema.translations.clear();
+    fn translate(value: &mut serde_json::Value, messages: &HashMap<String, String>) {
+        match value {
+            serde_json::Value::String(text) => {
+                if let Some(translated) = text.strip_prefix('@').and_then(|key| messages.get(key)) {
+                    *text = translated.clone();
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    translate(item, messages)
+                }
+            }
+            serde_json::Value::Object(items) => {
+                for item in items.values_mut() {
+                    translate(item, messages)
+                }
+            }
+            _ => {}
+        }
+    }
+    if let Ok(mut value) = serde_json::to_value(&*schema) {
+        translate(&mut value, &messages);
+        if let Ok(localized) = serde_json::from_value(value) {
+            *schema = localized;
+        }
+    }
+}
+
 fn native_plugin_ui_control_context(
     plugin_id: &str,
     surface_kind: &str,
@@ -1990,6 +2308,16 @@ fn native_plugin_password_event_value(
 #[cfg(test)]
 mod tests {
     use super::native_plugin_password_event_value;
+
+    #[test]
+    fn plugin_schema_localizes_owned_labels_without_changing_command_identity() {
+        let mut schema=serde_json::from_value(serde_json::json!({"title":"@title","translations":{"en":{"title":"Tools","run":"Run"},"zh-CN":{"title":"工具箱","run":"执行"}},"controls":[{"kind":"textWorkbench","id":"text","options":[{"label":"@run","value":{"command":"base64.encode"}}]}]})).unwrap();
+        super::localize_native_plugin_schema(&mut schema, oxideterm_i18n::Locale::ZhCn);
+        assert_eq!(schema.title.as_deref(), Some("工具箱"));
+        let option = &schema.controls[0].options.as_ref().unwrap()[0];
+        assert_eq!(option.label, "执行");
+        assert_eq!(option.value["command"], "base64.encode");
+    }
 
     #[test]
     fn password_event_is_redacted_without_sensitive_approval() {

@@ -22,6 +22,7 @@ pub enum LanguageId {
     Elixir,
     Fish,
     Go,
+    Hcl,
     Html,
     Java,
     Javascript,
@@ -30,10 +31,12 @@ pub enum LanguageId {
     Lua,
     Make,
     Markdown,
+    Nginx,
     ObjectiveC,
     Perl,
     Php,
     Powershell,
+    Protobuf,
     Python,
     R,
     Ruby,
@@ -63,6 +66,7 @@ pub const SUPPORTED_LANGUAGES: &[LanguageId] = &[
     LanguageId::Elixir,
     LanguageId::Fish,
     LanguageId::Go,
+    LanguageId::Hcl,
     LanguageId::Html,
     LanguageId::Java,
     LanguageId::Javascript,
@@ -71,10 +75,12 @@ pub const SUPPORTED_LANGUAGES: &[LanguageId] = &[
     LanguageId::Lua,
     LanguageId::Make,
     LanguageId::Markdown,
+    LanguageId::Nginx,
     LanguageId::ObjectiveC,
     LanguageId::Perl,
     LanguageId::Php,
     LanguageId::Powershell,
+    LanguageId::Protobuf,
     LanguageId::Python,
     LanguageId::R,
     LanguageId::Ruby,
@@ -117,6 +123,7 @@ impl LanguageId {
             Some("ex" | "exs") => Some(Self::Elixir),
             Some("fish") => Some(Self::Fish),
             Some("go") => Some(Self::Go),
+            Some("hcl" | "tf" | "tfvars") => Some(Self::Hcl),
             Some("html" | "htm") => Some(Self::Html),
             Some("java") => Some(Self::Java),
             Some("js" | "mjs" | "cjs" | "jsx") => Some(Self::Javascript),
@@ -126,9 +133,11 @@ impl LanguageId {
             Some("m" | "mm") => Some(Self::ObjectiveC),
             Some("mk") => Some(Self::Make),
             Some("md" | "mdx" | "markdown") => Some(Self::Markdown),
+            Some("nginx") => Some(Self::Nginx),
             Some("php" | "phtml" | "php3" | "php4" | "php5" | "php7" | "php8") => Some(Self::Php),
             Some("pl" | "pm" | "pod" | "psgi") => Some(Self::Perl),
             Some("ps1" | "psm1" | "psd1") => Some(Self::Powershell),
+            Some("proto") => Some(Self::Protobuf),
             Some("py" | "pyw") => Some(Self::Python),
             Some("r") => Some(Self::R),
             Some("rb" | "rake") => Some(Self::Ruby),
@@ -157,6 +166,9 @@ impl LanguageId {
             Self::Cpp => Some("cpp"),
             Self::Css => Some("css"),
             Self::Go => Some("go"),
+            Self::Hcl => Some("hcl"),
+            Self::Nginx => Some("nginx"),
+            Self::Protobuf => Some("proto"),
             Self::Html => Some("html"),
             Self::Java => Some("java"),
             Self::Javascript => Some("javascript"),
@@ -191,6 +203,9 @@ impl LanguageId {
             Self::Cpp => Some("C++"),
             Self::Css => Some("CSS"),
             Self::Go => Some("Go"),
+            Self::Hcl => Some("Terraform / HCL"),
+            Self::Nginx => Some("Nginx"),
+            Self::Protobuf => Some("Protobuf"),
             Self::Html => Some("HTML"),
             Self::Java => Some("Java"),
             Self::Javascript => Some("JavaScript"),
@@ -225,6 +240,9 @@ impl LanguageId {
             Self::Elixir => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Fish => fish_language(),
             Self::Go => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Hcl | Self::Nginx | Self::Protobuf => {
+                return Err(crate::SyntaxError::LanguageUnavailable);
+            }
             Self::Html => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Java => return Err(crate::SyntaxError::LanguageUnavailable),
             Self::Javascript => return Err(crate::SyntaxError::LanguageUnavailable),
@@ -259,6 +277,13 @@ impl LanguageId {
 }
 
 fn language_from_known_file_name(file_name: &str) -> Option<LanguageId> {
+    if matches!(
+        file_name,
+        "nginx.conf" | "nginx.conf.template" | "nginx.conf.default"
+    ) || file_name.ends_with(".nginx.conf")
+    {
+        return Some(LanguageId::Nginx);
+    }
     if matches!(file_name, "makefile" | "gnumakefile" | "bsdmakefile") {
         return Some(LanguageId::Make);
     }

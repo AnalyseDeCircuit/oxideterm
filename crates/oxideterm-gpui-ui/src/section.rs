@@ -3,6 +3,46 @@ use oxideterm_theme::ThemeTokens;
 
 use crate::{StatusPillOptions, StatusTone, status_pill};
 
+pub fn page_header(
+    tokens: &ThemeTokens,
+    title: impl Into<String>,
+    description: Option<String>,
+    trailing: Option<AnyElement>,
+) -> Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_wrap()
+        .items_start()
+        .justify_between()
+        .gap(px(16.0))
+        .child(
+            div()
+                .min_w(px(280.0))
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(tokens.spacing.two))
+                .child(
+                    div()
+                        .text_size(px(tokens.metrics.ui_text_2xl))
+                        .font_weight(FontWeight::NORMAL)
+                        .text_color(rgb(tokens.ui.text_heading))
+                        .child(title.into()),
+                )
+                .when_some(description, |header, description| {
+                    header.child(
+                        div()
+                            .max_w(px(680.0))
+                            .text_size(px(tokens.metrics.ui_text_base))
+                            .text_color(rgb(tokens.ui.text_muted))
+                            .child(description),
+                    )
+                }),
+        )
+        .when_some(trailing, |header, trailing| header.child(trailing))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SectionHeaderOptions {
     pub description: Option<String>,

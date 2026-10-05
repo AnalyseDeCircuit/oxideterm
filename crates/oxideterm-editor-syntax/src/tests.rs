@@ -28,6 +28,21 @@ fn syntax_scope_covers_range(
 
 #[test]
 fn detects_supported_language_extensions_and_shebangs() {
+    for (path, language) in [
+        ("main.tf", LanguageId::Hcl),
+        ("production.tfvars", LanguageId::Hcl),
+        ("terragrunt.hcl", LanguageId::Hcl),
+        ("terraform.tfvars.json", LanguageId::Json),
+        ("/etc/nginx/nginx.conf", LanguageId::Nginx),
+        ("nginx.conf.template", LanguageId::Nginx),
+        ("site.nginx.conf", LanguageId::Nginx),
+        ("site.nginx", LanguageId::Nginx),
+        ("api/service.proto", LanguageId::Protobuf),
+    ] {
+        assert_eq!(LanguageId::from_path(path), Some(language), "{path}");
+    }
+    assert_eq!(LanguageId::from_path("postgresql.conf"), None);
+    assert_eq!(LanguageId::from_path("sshd_config"), None);
     assert_eq!(LanguageId::from_path("src/main.rs"), Some(LanguageId::Rust));
     assert_eq!(LanguageId::from_path("install.sh"), Some(LanguageId::Bash));
     assert_eq!(
@@ -121,6 +136,15 @@ fn detects_supported_language_extensions_and_shebangs() {
 #[test]
 fn builtin_grammars_and_plugin_fixtures_preserve_syntax_features() {
     let samples = [
+        (
+            LanguageId::Hcl,
+            "variable \"region\" { default = \"west\" }\n",
+        ),
+        (LanguageId::Nginx, "http { server { listen 80; } }\n"),
+        (
+            LanguageId::Protobuf,
+            "syntax = \"proto3\"; message Example {}\n",
+        ),
         (
             LanguageId::Bash,
             "if command -v cargo; then\n  echo \"ok\"\nfi\n",

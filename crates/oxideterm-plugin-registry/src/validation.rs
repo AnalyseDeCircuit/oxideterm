@@ -51,6 +51,31 @@ pub(crate) fn validate_native_plugin_manifest(
     normalize_native_plugin_capabilities(&manifest.permissions.capabilities)?;
     if let Some(contributes) = &manifest.contributes {
         validate_native_plugin_contributions(contributes)?;
+        if let Some(previews) = &contributes.file_previews {
+            if !manifest
+                .runtime
+                .as_ref()
+                .is_some_and(|runtime| runtime.kind == NativePluginRuntimeKind::Process)
+            {
+                return Err("File preview providers require a process runtime".into());
+            }
+            let mut types = HashSet::new();
+            for preview in previews {
+                validate_manifest_text_field("contributes.filePreviews.command", &preview.command)?;
+                if preview.mime_types.is_empty() {
+                    return Err("File preview providers must declare MIME types".into());
+                }
+                for mime in &preview.mime_types {
+                    if !mime.contains('/')
+                        || mime.contains('*')
+                        || mime.chars().any(char::is_whitespace)
+                        || !types.insert(mime)
+                    {
+                        return Err("File preview MIME types must be exact and unique".into());
+                    }
+                }
+            }
+        }
     }
     let language = manifest
         .contributes
@@ -87,6 +112,9 @@ pub(crate) fn validate_native_plugin_manifest(
                 | "rust"
                 | "tsx"
                 | "typescript"
+                | "nginx"
+                | "hcl"
+                | "proto"
         ) {
             return Err("Unsupported plugin language".into());
         }
@@ -753,6 +781,21 @@ pub(crate) fn validate_native_plugin_declarative_controls(
 fn validate_native_plugin_declarative_control_options(
     control: &NativePluginDeclarativeUiControl,
 ) -> Result<(), String> {
+    if control.kind == "textWorkbench" {
+        let options = control
+            .options
+            .as_ref()
+            .filter(|options| !options.is_empty())
+            .ok_or("Text workbench requires tools")?;
+        for option in options {
+            let command = option
+                .value
+                .get("command")
+                .and_then(Value::as_str)
+                .ok_or("Text workbench tool requires a command")?;
+            validate_manifest_text_field("textWorkbench.command", command)?;
+        }
+    }
     if let (Some(min), Some(max)) = (control.min, control.max)
         && max < min
     {
@@ -825,7 +868,10 @@ fn validate_native_plugin_declarative_control_options(
         ));
     }
     if !control.children.is_empty()
-        && !matches!(control.kind.as_str(), "stack" | "row" | "card" | "toolbar")
+        && !matches!(
+            control.kind.as_str(),
+            "stack" | "row" | "columns" | "actionRow" | "card" | "toolbar"
+        )
     {
         return Err(format!(
             "Runtime declarative UI control kind \"{}\" cannot contain children",
@@ -850,6 +896,7 @@ pub(crate) fn native_plugin_declarative_control_requires_id(kind: &str) -> bool 
     matches!(
         kind,
         "text"
+            | "textWorkbench"
             | "password"
             | "number"
             | "checkbox"
@@ -891,6 +938,8 @@ pub(crate) fn runtime_context_menu_items(
         validate_manifest_text_field("runtime.contextMenu.items.label", &label)?;
         parsed.push(NativePluginRuntimeContextMenuItem {
             label,
+            tab_id: runtime_metadata_string(item, "tabId"),
+            control_id: runtime_metadata_string(item, "controlId"),
             icon: runtime_metadata_string(item, "icon"),
             // Tauri allowed a render-time `when()` predicate. Native cannot run
             // arbitrary plugin code while painting a menu, so runtime plugins

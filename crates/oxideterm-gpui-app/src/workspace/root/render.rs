@@ -1272,6 +1272,10 @@ impl WorkspaceApp {
             .children(active_tab_window_modals)
             .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
             .when_some(
+                self.render_native_plugin_select_overlay(window, cx),
+                |root, overlay| root.child(overlay),
+            )
+            .when_some(
                 self.render_ai_sidebar_floating_overlay(window, cx),
                 |root, overlay| root.child(overlay),
             )

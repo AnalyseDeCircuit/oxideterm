@@ -82,6 +82,8 @@ pub enum NativePluginRuntimeKind {
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
     #[serde(default)]
+    pub file_previews: Option<Vec<NativePluginFilePreviewDef>>,
+    #[serde(default)]
     pub language: Option<NativePluginLanguage>,
     #[serde(default)]
     pub tabs: Option<Vec<NativePluginTabDef>>,
@@ -112,6 +114,14 @@ pub struct NativePluginLanguage {
     pub highlights: String,
     pub parser_sha256: String,
     pub highlights_sha256: String,
+}
+
+/// A paginated file renderer invoked through the process plugin protocol.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginFilePreviewDef {
+    pub mime_types: Vec<String>,
+    pub command: String,
 }
 
 /// Declares one activity-bar action that dispatches a plugin runtime command.
@@ -229,6 +239,8 @@ pub struct NativePluginShortcutDef {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginDeclarativeUiSchema {
+    #[serde(default)]
+    pub translations: HashMap<String, HashMap<String, String>>,
     #[serde(default = "default_declarative_ui_component_version")]
     pub component_version: u8,
     #[serde(default = "default_declarative_ui_kind")]

@@ -13,6 +13,7 @@ pub enum PreviewAssetKind {
     Audio,
     Office,
     Font,
+    Document,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,6 +25,7 @@ pub enum PreviewKind {
     Video,
     Office,
     Font,
+    Document,
     TooLarge,
     Unsupported,
 }
@@ -78,6 +80,7 @@ impl PreviewContent {
                 PreviewAssetKind::Audio => PreviewKind::Audio,
                 PreviewAssetKind::Office => PreviewKind::Office,
                 PreviewAssetKind::Font => PreviewKind::Font,
+                PreviewAssetKind::Document => PreviewKind::Document,
             },
             Self::Hex { .. } => PreviewKind::Hex,
             Self::TooLarge { .. } => PreviewKind::TooLarge,
@@ -106,8 +109,16 @@ pub fn classify_preview_path(path: impl AsRef<Path>) -> PreviewKind {
 }
 
 pub fn classify_preview_type(extension: &str, mime_type: &str) -> PreviewKind {
-    if extension == "pdf" || mime_type == "application/pdf" {
-        return PreviewKind::Unsupported;
+    if inspection_mime_type(extension, &[]).is_some() {
+        return PreviewKind::Document;
+    }
+    if matches!(extension, "pdf" | "sqlite" | "sqlite3" | "db" | "db3")
+        || matches!(
+            mime_type,
+            "application/pdf" | "application/vnd.sqlite3" | "application/x-sqlite3"
+        )
+    {
+        return PreviewKind::Document;
     }
     if is_office_extension(extension) {
         return PreviewKind::Office;
@@ -137,6 +148,33 @@ pub fn classify_preview_type(extension: &str, mime_type: &str) -> PreviewKind {
         return PreviewKind::Text;
     }
     PreviewKind::Hex
+}
+
+/// Inspection routes precede text preview so mixed certificate/key PEM files stay opaque to the host.
+pub fn inspection_mime_type(extension: &str, header: &[u8]) -> Option<&'static str> {
+    if matches!(extension, "pem" | "der" | "crt" | "cer") || header.starts_with(b"-----BEGIN ") {
+        return Some("application/pkix-cert");
+    }
+    if matches!(
+        extension,
+        "exe" | "dll" | "elf" | "so" | "dylib" | "macho" | "bin" | "o"
+    ) || header.starts_with(b"\x7fELF")
+        || header.starts_with(b"MZ")
+        || header.get(..4).is_some_and(|magic| {
+            matches!(
+                magic,
+                [0xfe, 0xed, 0xfa, 0xce]
+                    | [0xce, 0xfa, 0xed, 0xfe]
+                    | [0xfe, 0xed, 0xfa, 0xcf]
+                    | [0xcf, 0xfa, 0xed, 0xfe]
+                    | [0xca, 0xfe, 0xba, 0xbe]
+                    | [0xca, 0xfe, 0xba, 0xbf]
+            )
+        })
+    {
+        return Some("application/x-oxideterm-binary");
+    }
+    None
 }
 
 fn is_office_extension(extension: &str) -> bool {

@@ -348,6 +348,7 @@ pub(super) struct FileManagerState {
     // Preview payloads can contain large text or archive listings. Share the
     // immutable payload across render snapshots instead of cloning its contents.
     pub(super) preview: Option<Arc<LocalPreview>>,
+    pub(super) preview_plugin: Option<Entity<super::plugin_preview::PluginFilePreview>>,
     pub(super) preview_metadata: Option<LocalPreviewMetadata>,
     pub(super) preview_show_metadata: bool,
     pub(super) preview_markdown_source: bool,
@@ -417,6 +418,7 @@ impl Default for FileManagerState {
             bookmarks_visible: true,
             list_scroll: UniformListScrollHandle::new(),
             preview: None,
+            preview_plugin: None,
             preview_metadata: None,
             preview_show_metadata: true,
             preview_markdown_source: false,
@@ -470,6 +472,7 @@ impl FileManagerState {
         self.focused_dialog_footer_action = None;
         self.dialog_value.clear();
         self.preview = None;
+        self.preview_plugin = None;
         self.preview_metadata = None;
         self.preview_markdown_source = false;
         self.preview_code_scroll = UniformListScrollHandle::new();

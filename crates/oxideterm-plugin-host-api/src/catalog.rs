@@ -150,6 +150,20 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
     ),
     api!(
         "app",
+        "getWorkspaceSummary",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_SESSIONS_READ),
+        "Returns open tab labels, recording states and plugin issue identities without content or paths."
+    ),
+    api!(
+        "ui",
+        "openWorkspace",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_UI_WRITE),
+        "Opens a known workspace page or focuses an existing tab."
+    ),
+    api!(
+        "app",
         "refreshAfterExternalSync",
         Mutating,
         Some(NATIVE_PLUGIN_CAPABILITY_APP_SYNC_REFRESH),
@@ -203,6 +217,13 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         SensitiveRead,
         Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_READ),
         "Returns the saved connection for a node."
+    ),
+    api!(
+        "connections",
+        "openForm",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_CONNECTIONS_CONTROL),
+        "Opens the native SSH connection form with discovered metadata, without saving or connecting."
     ),
     api!(
         "connections",

@@ -13,6 +13,7 @@ mod trzsz_worker;
 pub use app::TerminalPlaybackUpdateTimings;
 pub use app::{
     SharedTerminalSession, TerminalBroadcastInputKind, TerminalContextAction, TerminalCursorAnchor,
+    TerminalPluginTextAction,
     TerminalCwdShellIntegrationStatus, TerminalInputBroadcaster, TerminalInputInterceptor,
     TerminalInputInterceptorResult, TerminalKeybindings, TerminalPane, TerminalPaneEvent,
     TerminalSearchStatus, TerminalSerialAction, TerminalSerialStatus, TerminalShortcut,

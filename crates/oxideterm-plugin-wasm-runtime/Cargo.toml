@@ -13,6 +13,7 @@ serde.workspace = true
 serde_json.workspace = true
 wasmtime.workspace = true
 wasmtime-wasi.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }

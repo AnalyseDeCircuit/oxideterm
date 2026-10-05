@@ -1649,6 +1649,10 @@ impl WorkspaceApp {
             root.child(self.render_mermaid_zoom_modal(window, cx))
         })
         .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
+        .when_some(
+            self.render_native_plugin_select_overlay(window, cx),
+            |root, overlay| root.child(overlay),
+        )
         .child(WorkspaceImeElement::new(
             cx.entity(),
             self.focus_handle.clone(),

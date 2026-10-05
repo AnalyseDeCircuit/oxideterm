@@ -61,7 +61,9 @@ impl SftpSession {
         let max_size = match kind {
             AssetFileKind::Audio | AssetFileKind::Video => constants::MAX_MEDIA_PREVIEW_SIZE,
             AssetFileKind::Office => constants::MAX_OFFICE_CONVERT_SIZE,
-            AssetFileKind::Image | AssetFileKind::Font => constants::MAX_PREVIEW_SIZE,
+            AssetFileKind::Image | AssetFileKind::Font | AssetFileKind::Document => {
+                constants::MAX_PREVIEW_SIZE
+            }
         };
         if size > max_size {
             return Ok(PreviewContent::TooLarge {
@@ -70,7 +72,7 @@ impl SftpSession {
                 recommend_download: true,
             });
         }
-        let path = self.download_to_temp(path).await?;
+        let path = self.download_to_temp(path, max_size).await?;
         Ok(PreviewContent::AssetFile {
             path: path.to_string_lossy().to_string(),
             mime_type: mime_type.to_string(),
@@ -125,7 +127,11 @@ impl SftpSession {
         let mut content =
             Vec::with_capacity(max_bytes.min(constants::STREAMING_PREVIEW_CHUNK_SIZE));
         let mut remaining = max_bytes;
-        let mut buffer = vec![0u8; constants::STREAMING_PREVIEW_CHUNK_SIZE.min(max_bytes.max(1))];
+        let mut buffer = zeroize::Zeroizing::new(vec![
+            0u8;
+            constants::STREAMING_PREVIEW_CHUNK_SIZE
+                .min(max_bytes.max(1))
+        ]);
         while remaining > 0 {
             let read_len = remaining.min(buffer.len());
             let read = file
@@ -141,7 +147,11 @@ impl SftpSession {
         Ok(content)
     }
 
-    async fn download_to_temp(&self, remote_path: &str) -> Result<PathBuf, SftpError> {
+    async fn download_to_temp(
+        &self,
+        remote_path: &str,
+        max_size: u64,
+    ) -> Result<PathBuf, SftpError> {
         let extension = Path::new(remote_path)
             .extension()
             .and_then(|extension| extension.to_str())
@@ -150,7 +160,12 @@ impl SftpSession {
         tokio::fs::create_dir_all(&temp_dir)
             .await
             .map_err(SftpError::IoError)?;
-        let temp_path = temp_dir.join(format!("{}.{}", uuid::Uuid::new_v4(), extension));
+        // Keep the file under an RAII owner until a complete download is handed off.
+        let temp_path = tempfile::Builder::new()
+            .suffix(&format!(".{extension}"))
+            .tempfile_in(temp_dir)
+            .map_err(SftpError::IoError)?
+            .into_temp_path();
         let mut remote_file = self
             .sftp
             .open(remote_path)
@@ -159,7 +174,9 @@ impl SftpSession {
         let mut local_file = tokio::fs::File::create(&temp_path)
             .await
             .map_err(SftpError::IoError)?;
-        let mut buffer = vec![0u8; constants::STREAMING_PREVIEW_CHUNK_SIZE];
+        let mut buffer =
+            zeroize::Zeroizing::new(vec![0u8; constants::STREAMING_PREVIEW_CHUNK_SIZE]);
+        let mut downloaded = 0u64;
         loop {
             let read = remote_file
                 .read(&mut buffer)
@@ -168,13 +185,23 @@ impl SftpSession {
             if read == 0 {
                 break;
             }
+            downloaded += read as u64;
+            if downloaded > max_size {
+                return Err(SftpError::IoError(std::io::Error::other(
+                    "Preview file exceeds size limit",
+                )));
+            }
             local_file
                 .write_all(&buffer[..read])
                 .await
                 .map_err(SftpError::IoError)?;
         }
         local_file.flush().await.map_err(SftpError::IoError)?;
-        std::fs::canonicalize(&temp_path).map_err(SftpError::IoError)
+        let canonical = std::fs::canonicalize(&temp_path).map_err(SftpError::IoError)?;
+        temp_path
+            .keep()
+            .map_err(|error| SftpError::IoError(error.error))?;
+        Ok(canonical)
     }
 
     async fn write_to_swap_and_rename(

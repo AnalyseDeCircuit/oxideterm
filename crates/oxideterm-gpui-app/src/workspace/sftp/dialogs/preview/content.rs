@@ -7,6 +7,16 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match content {
+            PreviewContent::AssetFile {
+                kind: AssetFileKind::Document,
+                ..
+            } => self
+                .sftp_view()
+                .read(cx)
+                .preview_plugin
+                .clone()
+                .map(|view| view.into_any_element())
+                .unwrap_or_else(|| div().into_any_element()),
             PreviewContent::Text {
                 data,
                 mime_type,
@@ -59,6 +69,11 @@ impl WorkspaceApp {
                 has_more,
             } => {
                 self.render_sftp_preview_hex(data, *total_size, *offset, *chunk_size, *has_more, cx)
+            }
+            PreviewContent::Unsupported { reason, .. }
+                if reason == "file_preview.sqlite_snapshot_required" =>
+            {
+                self.render_sftp_preview_text(self.i18n.t(reason))
             }
             PreviewContent::TooLarge { .. } | PreviewContent::Unsupported { .. } => {
                 self.render_sftp_preview_text(preview_content_text(content))

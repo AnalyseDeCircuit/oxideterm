@@ -373,6 +373,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let preview = self.file_manager.read(cx).preview.clone();
         match preview.as_deref() {
+            Some(LocalPreview::Document { .. }) => self
+                .file_manager
+                .read(cx)
+                .preview_plugin
+                .clone()
+                .map(|view| view.into_any_element())
+                .unwrap_or_else(|| div().into_any_element()),
             Some(LocalPreview::Loading) => self.render_file_manager_preview_status(
                 LucideIcon::LoaderCircle,
                 self.i18n.t("fileManager.loadingMore"),
@@ -1835,6 +1842,7 @@ impl WorkspaceApp {
 
 fn preview_icon(preview: &LocalPreview) -> LucideIcon {
     match preview {
+        LocalPreview::Document { .. } => LucideIcon::FileText,
         LocalPreview::Markdown { .. }
         | LocalPreview::TextStream {
             language: Some(_), ..

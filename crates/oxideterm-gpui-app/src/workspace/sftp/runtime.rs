@@ -683,10 +683,11 @@ impl SftpWorkspaceEntity {
                 true
             }
             SftpWorkerResult::PreviewLoaded {
+                asset_owner,
                 generation,
                 path,
                 result,
-            } => self.apply_preview_loaded(generation, path, result, cx),
+            } => self.apply_preview_loaded(generation, path, result, asset_owner, cx),
             SftpWorkerResult::PreviewHexLoaded {
                 generation,
                 path,
@@ -1756,19 +1757,25 @@ impl SftpWorkspaceEntity {
         generation: u64,
         path: String,
         result: Result<PreviewContent, String>,
+        asset_owner: Option<PreviewAssetOwner>,
         cx: &mut Context<Self>,
     ) -> bool {
         if generation != self.preview_generation {
             return false;
         }
+        self.preview_load_task = None;
         self.preview_loading = false;
         self.preview_hex_loading_more = false;
         self.preview_path = Some(path);
         match result {
             Ok(content) => {
-                let asset_owner = PreviewAssetOwner::from_asset_content_owned_temp(&content);
                 if let Some(owner) = asset_owner.as_ref() {
                     match owner.kind() {
+                        AssetFileKind::Document => {
+                            if let Some(view) = &self.preview_plugin {
+                                view.update(cx, |view, cx| view.set_source(owner.clone(), cx));
+                            }
+                        }
                         AssetFileKind::Audio => {
                             let _ = self.preview_audio.load(owner.path());
                         }

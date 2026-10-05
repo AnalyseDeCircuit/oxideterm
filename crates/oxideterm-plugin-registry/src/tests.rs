@@ -279,6 +279,30 @@ fn cached_catalog_corrections_apply_on_offline_restart_and_install() {
 }
 
 #[test]
+fn cached_catalog_tags_are_available_offline_and_follow_catalog_updates() {
+    let directory = unique_temp_dir("plugin-catalog-tags");
+    fs::create_dir_all(&directory).unwrap();
+    let settings = directory.join("settings.json");
+    let mut catalog: NativePluginRegistryIndex = serde_json::from_value(serde_json::json!({
+        "version": 1,
+        "plugins": [{"id": "com.example.demo", "name": "Demo", "version": "1.0.0", "tags": ["preview", "future-tag"]}]
+    })).unwrap();
+    NativePluginRegistry::cache_official_catalog(&settings, &catalog).unwrap();
+    let registry = NativePluginRegistry::discover(&settings);
+    assert_eq!(
+        registry.catalog_tags("com.example.demo"),
+        &["preview", "future-tag"]
+    );
+    assert_eq!(registry.catalog_tags("com.example.local"), &[] as &[String]);
+
+    catalog.plugins[0].tags = Some(vec!["utilities".into()]);
+    NativePluginRegistry::cache_official_catalog(&settings, &catalog).unwrap();
+    let registry = NativePluginRegistry::discover(&settings);
+    assert_eq!(registry.catalog_tags("com.example.demo"), &["utilities"]);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn host_incompatibility_blocks_install_and_restart_without_losing_plugin_state() {
     let temp_dir = unique_temp_dir("plugin-host-compatibility");
     let settings_path = temp_dir.join("settings.json");
@@ -888,11 +912,18 @@ fn process_activation_plans_and_runtime_state_transitions_are_host_owned() {
         kind: NativePluginRuntimeKind::Process,
         entry: "bin/plugin".to_string(),
     });
+    manifest.contributes = Some(
+        serde_json::from_value(serde_json::json!({
+            "filePreviews": [{"mimeTypes": ["application/pdf"], "command": "preview.render"}]
+        }))
+        .unwrap(),
+    );
     write_manifest(&plugin_dir, &manifest);
 
     let mut registry = NativePluginRegistry::discover(&settings_path);
     assert_eq!(registry.plugins()[0].state, NativePluginState::Disabled);
     assert!(registry.process_activation_plans().is_empty());
+    assert!(registry.file_preview_provider("application/pdf").is_none());
     registry
         .set_plugin_enabled("com.example.process", true)
         .unwrap();
@@ -901,6 +932,10 @@ fn process_activation_plans_and_runtime_state_transitions_are_host_owned() {
     assert_eq!(plans[0].plugin_id, "com.example.process");
     assert_eq!(plans[0].entry, "bin/plugin");
     assert_eq!(registry.plugins()[0].state, NativePluginState::ReadyProcess);
+    let (provider, command) = registry.file_preview_provider("application/pdf").unwrap();
+    assert_eq!(provider.manifest.id, "com.example.process");
+    assert_eq!(command, "preview.render");
+    assert!(registry.file_preview_provider("image/png").is_none());
     let config = load_native_plugin_config(registry.config_path());
     assert_eq!(
         config.plugins["com.example.process"].approved_capabilities,
@@ -1197,7 +1232,7 @@ fn runtime_registrations_feed_host_owned_contribution_store_and_cleanup() {
             metadata: serde_json::json!({
                 "target": "terminal",
                 "items": [
-                    { "label": "Run Demo", "icon": "play", "enabled": true }
+                    { "label": "Run Demo", "icon": "play", "enabled": true, "tabId":"tools", "controlId":"text" }
                 ],
             }),
         })
@@ -1360,6 +1395,18 @@ fn runtime_registrations_feed_host_owned_contribution_store_and_cleanup() {
     );
     assert_eq!(contributions.runtime_status_items[0].alignment, "right");
     assert_eq!(contributions.runtime_context_menus[0].target, "terminal");
+    assert_eq!(
+        contributions.runtime_context_menus[0].items[0]
+            .tab_id
+            .as_deref(),
+        Some("tools")
+    );
+    assert_eq!(
+        contributions.runtime_context_menus[0].items[0]
+            .control_id
+            .as_deref(),
+        Some("text")
+    );
     assert_eq!(
         contributions.runtime_event_subscriptions_for(NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT)[0]
             .registration_id,
@@ -1699,11 +1746,21 @@ fn declarative_component_schema_accepts_shared_components_and_rejects_unsafe_sha
             "variant": "inspector",
             "children": [
                 { "kind": "statusBadge", "label": "Ready", "tone": "success" },
+                { "kind": "textWorkbench", "id": "tools", "options":[{"label":"Encode","value":{"command":"base64.encode"}}] },
                 { "kind": "select", "id": "environment", "options": [
                     { "label": "Production", "value": "production" }
                 ] },
                 { "kind": "slider", "id": "parallelism", "min": 1, "max": 8, "step": 1 },
-                { "kind": "iconButton", "id": "refresh", "icon": "refresh-cw", "label": "Refresh" }
+                { "kind": "iconButton", "id": "refresh", "icon": "refresh-cw", "label": "Refresh" },
+                { "kind": "columns", "children": [
+                    { "kind": "stack", "label": "Recent work", "children": [
+                        { "kind": "actionRow", "children": [
+                            { "kind": "button", "id": "open", "label": "Build server" },
+                            { "kind": "iconButton", "id": "pin", "icon": "pin", "label": "Pin" }
+                        ] }
+                    ] },
+                    { "kind": "markdown", "text": "No active tasks" }
+                ] }
             ]
         }]
     }))
@@ -1980,6 +2037,7 @@ fn write_manifest(plugin_dir: &Path, manifest: &NativePluginManifest) {
 
 fn sample_contributes() -> NativePluginContributes {
     NativePluginContributes {
+        file_previews: None,
         language: None,
         tabs: Some(vec![NativePluginTabDef {
             id: "demo-tab".to_string(),

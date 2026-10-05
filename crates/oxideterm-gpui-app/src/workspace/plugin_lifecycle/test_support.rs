@@ -100,6 +100,7 @@ pub(super) fn test_host_api_snapshot() -> NativePluginHostApiSnapshot {
         }),
         cloud_sync_history: serde_json::json!([]),
         host_tools_snapshots: serde_json::json!([]),
+        workspace_summary: serde_json::json!({ "tabs": [], "nodes": [], "pluginIssues": [] }),
     }
 }
 

@@ -946,6 +946,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let mut changed = self.audit.open_filter.take().is_some();
+        changed |= self.close_native_plugin_select(cx);
 
         // Match browser/Radix outside-click behavior for non-modal UI only.
         // Auth prompts, confirm dialogs, QuickLook, and SFTP editor shells keep

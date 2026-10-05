@@ -295,6 +295,7 @@ pub struct TextEditorView {
     text_system: Arc<gpui::TextSystem>,
     appearance: EditorAppearance,
     read_only: bool,
+    preserve_line_endings: bool,
     on_save: Option<SaveCallback>,
     on_modified_word_click: Option<ModifiedWordClickCallback>,
     save_status: EditorSaveStatus,
@@ -339,10 +340,28 @@ pub struct TextEditorView {
 
 impl TextEditorView {
     pub fn new(text: impl Into<Arc<str>>, tokens: &ThemeTokens, cx: &mut Context<Self>) -> Self {
+        Self::new_with_line_endings(text, false, tokens, cx)
+    }
+
+    /// Text transformations must preserve pasted CR/LF bytes instead of normalizing them.
+    pub fn new_verbatim(
+        text: impl Into<Arc<str>>,
+        tokens: &ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new_with_line_endings(text, true, tokens, cx)
+    }
+
+    fn new_with_line_endings(
+        text: impl Into<Arc<str>>,
+        preserve_line_endings: bool,
+        tokens: &ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let metrics = EditorMetrics::from_theme(tokens);
         let settings = EditorSettings::default();
         let text: Arc<str> = text.into();
-        let text = if text.contains('\r') {
+        let text = if !preserve_line_endings && text.contains('\r') {
             normalize_editor_text(text.to_string()).into()
         } else {
             text
@@ -380,6 +399,7 @@ impl TextEditorView {
             metrics,
             appearance: EditorAppearance::from_theme(tokens),
             read_only: false,
+            preserve_line_endings,
             on_save: None,
             on_modified_word_click: None,
             save_status: EditorSaveStatus::Clean,
@@ -504,7 +524,12 @@ impl TextEditorView {
     }
 
     pub fn replace_text_external(&mut self, text: impl Into<String>, cx: &mut Context<Self>) {
-        let text = normalize_editor_text(text.into());
+        let text = text.into();
+        let text = if self.preserve_line_endings {
+            text
+        } else {
+            normalize_editor_text(text)
+        };
         if self.buffer.text() == text {
             return;
         }
@@ -706,7 +731,13 @@ impl TextEditorView {
         if self.read_only {
             return;
         }
-        self.replace_all_selections_with_caret(normalize_editor_text(text.into()), cx);
+        let text = text.into();
+        let text = if self.preserve_line_endings {
+            text
+        } else {
+            normalize_editor_text(text)
+        };
+        self.replace_all_selections_with_caret(text, cx);
     }
 
     /// Exposes undo to embedding surfaces without bypassing editor history bookkeeping.
@@ -2004,6 +2035,18 @@ mod line_ending_tests {
             ));
             editor.paste_from_clipboard(cx);
             assert_eq!(editor.buffer().text(), "first\nsecond\nthird\n");
+        });
+        let verbatim = cx.new(|cx| {
+            TextEditorView::new_verbatim("prefix\r\n", &oxideterm_theme::default_tokens(), cx)
+        });
+        verbatim.update(cx, |editor, cx| {
+            editor.move_cursor_to_document_end(cx);
+            editor.paste_from_clipboard(cx);
+            assert_eq!(editor.buffer().text(), "prefix\r\nfirst\r\nsecond\rthird\n");
+            editor.replace_text_external("result\r\n", cx);
+            editor.set_read_only(true);
+            editor.paste_from_clipboard(cx);
+            assert_eq!(editor.buffer().text(), "result\r\n");
         });
     }
 }

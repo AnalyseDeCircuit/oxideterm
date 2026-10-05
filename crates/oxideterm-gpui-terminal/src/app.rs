@@ -491,6 +491,8 @@ pub struct TerminalPane {
     context_menu: Option<TerminalContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_action_requested: Option<TerminalContextAction>,
+    plugin_text_actions: Vec<TerminalPluginTextAction>,
+    pending_plugin_text: Option<(TerminalPluginTextAction, zeroize::Zeroizing<String>)>,
     pending_trigger_matches: VecDeque<oxideterm_terminal_triggers::TriggerMatched>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
     win32_pressed_keys: HashSet<String>,
@@ -643,10 +645,19 @@ pub(crate) enum FreeTypeDragAction {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalContextAction {
+    PluginTextTool,
     SendSelectionToAi,
     FillCommandBarFromSelection,
     OpenSearch,
     OpenSessionTriggers,
+}
+
+#[derive(Clone)]
+pub struct TerminalPluginTextAction {
+    pub plugin_id: String,
+    pub tab_id: String,
+    pub control_id: String,
+    pub label: String,
 }
 
 #[derive(Clone, Debug)]
@@ -1214,6 +1225,8 @@ impl TerminalPane {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_action_requested: None,
+            plugin_text_actions: Vec::new(),
+            pending_plugin_text: None,
             pending_trigger_matches: VecDeque::new(),
             plugin_input_interceptor: None,
             win32_pressed_keys: HashSet::new(),
@@ -1835,6 +1848,16 @@ impl TerminalPane {
 
     pub fn take_context_action_request(&mut self) -> Option<TerminalContextAction> {
         self.context_action_requested.take()
+    }
+
+    pub fn set_plugin_text_actions(&mut self, actions: Vec<TerminalPluginTextAction>) {
+        self.plugin_text_actions = actions;
+    }
+
+    pub fn take_plugin_text_request(
+        &mut self,
+    ) -> Option<(TerminalPluginTextAction, zeroize::Zeroizing<String>)> {
+        self.pending_plugin_text.take()
     }
 
     pub fn set_privilege_prompt_inline_hint(
@@ -4523,6 +4546,51 @@ mod tests {
 
     use gpui::{AppContext, IntoElement, Render, TestAppContext, div};
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
+
+    #[gpui::test]
+    fn plugin_text_action_captures_selection_before_focus_or_output_changes(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx).unwrap()
+        });
+        pane.update(cx, |pane, cx| {
+            pane.terminal.lock().feed_recording_output(b"captured text");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.set_selection(Some(TerminalSelection {
+                anchor: TerminalGridPoint { line: 0, col: 0 },
+                head: TerminalGridPoint { line: 0, col: 7 },
+                mode: TerminalSelectionMode::Simple,
+            }));
+            pane.request_plugin_text_action(
+                TerminalPluginTextAction {
+                    plugin_id: "test.tools".into(),
+                    tab_id: "tools".into(),
+                    control_id: "text".into(),
+                    label: "Process".into(),
+                },
+                cx,
+            );
+            pane.set_selection(None);
+            pane.terminal.lock().feed_recording_output(b"\rreplaced");
+            assert_eq!(
+                pane.take_context_action_request(),
+                Some(TerminalContextAction::PluginTextTool)
+            );
+            let (target, text) = pane.take_plugin_text_request().unwrap();
+            assert_eq!(
+                (
+                    target.plugin_id.as_str(),
+                    target.tab_id.as_str(),
+                    target.control_id.as_str()
+                ),
+                ("test.tools", "tools", "text")
+            );
+            assert_eq!(text.as_str(), "captured");
+            assert!(pane.take_plugin_text_request().is_none());
+        });
+    }
 
     #[gpui::test]
     fn modem_failure_notice_includes_localized_reason(cx: &mut TestAppContext) {

@@ -11,12 +11,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut top_items_before_plugins = vec![(SidebarSection::Sessions, LucideIcon::Link2)];
-        top_items_before_plugins.extend([
+        let top_items = [
+            (SidebarSection::Sessions, LucideIcon::Link2),
             (SidebarSection::Connections, LucideIcon::LayoutList),
             (SidebarSection::Runtime, LucideIcon::Gauge),
-        ]);
-        let top_items_after_plugins = [
+            (SidebarSection::Extensions, LucideIcon::Puzzle),
             (SidebarSection::CloudSync, LucideIcon::Cloud),
             (SidebarSection::Knowledge, LucideIcon::BookOpen),
             (SidebarSection::Assistant, LucideIcon::Sparkles),
@@ -111,42 +110,21 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center();
-        for (section, icon) in top_items_before_plugins {
+        for (section, icon) in top_items {
             primary_items = primary_items.child(self.render_activity_icon(section, icon, cx));
         }
-        primary_items = primary_items.child(self.render_activity_icon(
-            SidebarSection::Extensions,
-            LucideIcon::Puzzle,
-            cx,
-        ));
         let plugin_activity_items = self
             .plugin_entity
             .read(cx)
             .registry()
             .contributions()
             .runtime_activity_bar_items();
-        // Tauri inserts plugin-provided sidebar panels as independent activity
-        // buttons immediately after the built-in Plugin Manager tab button.
-        for panel in self
+        let plugin_sidebar_panels = self
             .plugin_entity
             .read(cx)
             .registry()
             .contributions()
-            .runtime_sidebar_panels()
-        {
-            primary_items =
-                primary_items.child(self.render_plugin_sidebar_activity_icon(panel, cx));
-        }
-        for item in plugin_activity_items
-            .iter()
-            .filter(|item| item.position == "top")
-            .cloned()
-        {
-            primary_items = primary_items.child(self.render_plugin_activity_action_icon(item, cx));
-        }
-        for (section, icon) in top_items_after_plugins {
-            primary_items = primary_items.child(self.render_activity_icon(section, icon, cx));
-        }
+            .runtime_sidebar_panels();
         // The sessions footer owns the lock action while visible. Keep the rail
         // entry reachable when that footer is hidden or another panel is selected.
         if self.settings_store.settings().sidebar_ui.show_app_lock_icon
@@ -159,12 +137,51 @@ impl WorkspaceApp {
                 ));
         }
 
+        // Keep built-in entries stationary as plugins are enabled or disabled.
+        if plugin_sidebar_panels
+            .iter()
+            .any(|panel| panel.position == "top")
+            || plugin_activity_items
+                .iter()
+                .any(|item| item.position == "top")
+        {
+            primary_items = primary_items.child(
+                div()
+                    .flex_none()
+                    .w(px(self.tokens.metrics.divider_width))
+                    .h(px(self.tokens.metrics.divider_height))
+                    .mb(px(self.tokens.metrics.activity_icon_gap))
+                    .bg(rgb(theme.divider)),
+            );
+        }
+        for panel in plugin_sidebar_panels
+            .iter()
+            .filter(|panel| panel.position == "top")
+            .cloned()
+        {
+            primary_items =
+                primary_items.child(self.render_plugin_sidebar_activity_icon(panel, cx));
+        }
+        for item in plugin_activity_items
+            .iter()
+            .filter(|item| item.position == "top")
+            .cloned()
+        {
+            primary_items = primary_items.child(self.render_plugin_activity_action_icon(item, cx));
+        }
+
         let mut bottom = div().relative().flex().flex_col().items_center().child(
             div()
                 .w(px(self.tokens.metrics.divider_width))
                 .h(px(self.tokens.metrics.divider_height))
                 .bg(rgb(theme.divider)),
         );
+        for panel in plugin_sidebar_panels
+            .into_iter()
+            .filter(|panel| panel.position == "bottom")
+        {
+            bottom = bottom.child(self.render_plugin_sidebar_activity_icon(panel, cx));
+        }
         for item in plugin_activity_items
             .into_iter()
             .filter(|item| item.position == "bottom")

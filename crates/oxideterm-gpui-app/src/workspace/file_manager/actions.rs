@@ -970,6 +970,7 @@ impl WorkspaceApp {
     ) {
         let audio_stop_error = self.file_manager.update(cx, |file_manager, cx| {
             file_manager.preview = Some(Arc::new(LocalPreview::Loading));
+            file_manager.preview_plugin = None;
             file_manager.preview_metadata = None;
             file_manager.preview_markdown_source = false;
             file_manager.preview_code_scroll = UniformListScrollHandle::new();
@@ -997,7 +998,8 @@ impl WorkspaceApp {
             );
         }
         let audit = local_file_operation("file_preview", &entry.path);
-        let preview = read_local_preview(&entry.path);
+        let preview = super::super::plugin_preview::local_inspection_preview(&entry.path)
+            .unwrap_or_else(|| read_local_preview(&entry.path));
         audit.finish(
             match &preview {
                 LocalPreview::Error(_) => oxideterm_audit::AuditOutcome::Failed,
@@ -1014,6 +1016,30 @@ impl WorkspaceApp {
             None,
         );
         match &preview {
+            LocalPreview::Document { path, mime_type } => {
+                let plugins = self.plugin_entity.clone();
+                let runtime = self.forwarding_runtime.clone();
+                let tokens = self.tokens;
+                let i18n = self.i18n.clone();
+                let view = cx.new(|cx| {
+                    super::super::plugin_preview::PluginFilePreview::new(
+                        plugins, runtime, tokens, i18n, cx,
+                    )
+                });
+                view.update(cx, |view, cx| {
+                    view.set_source(
+                        oxideterm_preview::PreviewAssetOwner::local(
+                            path,
+                            mime_type,
+                            oxideterm_preview::PreviewAssetKind::Document,
+                        ),
+                        cx,
+                    )
+                });
+                self.file_manager.update(cx, |file_manager, _| {
+                    file_manager.preview_plugin = Some(view)
+                });
+            }
             LocalPreview::Audio { path, .. } => {
                 if let Err(error) = self.file_manager.update(cx, |file_manager, _cx| {
                     file_manager.preview_audio.load(std::path::Path::new(path))
