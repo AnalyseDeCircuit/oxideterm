@@ -1487,6 +1487,115 @@ fn terminal_shortcut_registration_requires_manifest_declaration() {
 }
 
 #[test]
+fn toggling_another_plugin_preserves_loading_and_active_tabs() {
+    let directory = unique_temp_dir("plugin-toggle-runtime");
+    let settings_path = directory.join("settings.json");
+    let plugins_dir = native_plugins_dir(&settings_path);
+    let plugin_dir = plugins_dir.join("com.example.demo");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    let mut manifest = minimal_manifest();
+    manifest.runtime = Some(NativePluginRuntime {
+        kind: NativePluginRuntimeKind::Wasm,
+        entry: "plugin.wasm".into(),
+    });
+    manifest.contributes = Some(sample_contributes());
+    fs::write(plugin_dir.join("plugin.wasm"), b"\0asm").unwrap();
+    write_manifest(&plugin_dir, &manifest);
+    let other_dir = plugins_dir.join("com.example.other");
+    fs::create_dir_all(&other_dir).unwrap();
+    let mut other = minimal_manifest();
+    other.id = "com.example.other".into();
+    write_manifest(&other_dir, &other);
+    let mut registry = NativePluginRegistry::discover(&settings_path);
+    registry.set_plugin_enabled(&manifest.id, true).unwrap();
+    registry.mark_runtime_loading(&manifest.id).unwrap();
+    registry.apply_runtime_registration(PluginRegistration {
+        registration_id: "view".into(), plugin_id: manifest.id.clone(), kind: PluginRegistrationKind::Tab,
+        metadata: serde_json::json!({"tabId":"demo-tab","schema":{"kind":"form","controls":[{"kind":"text","id":"status","value":"Ready"}]}}),
+    }).unwrap();
+    let declaration = registry
+        .contributions()
+        .tab_contribution(&manifest.id, "demo-tab")
+        .unwrap();
+    let view = registry
+        .contributions()
+        .runtime_tab_view(&manifest.id, "demo-tab")
+        .unwrap();
+    for state in [NativePluginState::Loading, NativePluginState::Active] {
+        match state {
+            NativePluginState::Loading => registry.mark_runtime_loading(&manifest.id).unwrap(),
+            NativePluginState::Active => registry.mark_runtime_active(&manifest.id).unwrap(),
+            _ => unreachable!(),
+        }
+        registry.set_plugin_enabled(&other.id, false).unwrap();
+        assert_eq!(
+            registry
+                .contributions()
+                .tab_contribution(&manifest.id, "demo-tab"),
+            Some(declaration.clone()),
+            "{state:?}"
+        );
+        assert_eq!(
+            registry
+                .contributions()
+                .runtime_tab_view(&manifest.id, "demo-tab"),
+            Some(view.clone()),
+            "{state:?}"
+        );
+        let mut refreshed = NativePluginRegistry::discover(&settings_path);
+        refreshed.preserve_unchanged_runtimes(&registry);
+        assert_eq!(
+            refreshed
+                .plugins()
+                .iter()
+                .find(|plugin| plugin.manifest.id == manifest.id)
+                .unwrap()
+                .state,
+            state
+        );
+        assert_eq!(
+            refreshed
+                .contributions()
+                .runtime_tab_view(&manifest.id, "demo-tab"),
+            Some(view.clone())
+        );
+        registry = refreshed;
+    }
+    registry.uninstall_plugin(&other.id, false).unwrap();
+    assert_eq!(
+        registry
+            .contributions()
+            .runtime_tab_view(&manifest.id, "demo-tab"),
+        Some(view.clone())
+    );
+    let mut changed_manifest = manifest.clone();
+    changed_manifest.name = "Updated demo".into();
+    write_manifest(&plugin_dir, &changed_manifest);
+    let mut changed = NativePluginRegistry::discover(&settings_path);
+    changed.preserve_unchanged_runtimes(&registry);
+    assert!(
+        changed
+            .contributions()
+            .runtime_tab_view(&manifest.id, "demo-tab")
+            .is_none()
+    );
+    registry.set_plugin_enabled(&manifest.id, false).unwrap();
+    assert!(
+        registry
+            .contributions()
+            .tab_contribution(&manifest.id, "demo-tab")
+            .is_none()
+    );
+    assert!(
+        registry
+            .contributions()
+            .runtime_tab_view(&manifest.id, "demo-tab")
+            .is_none()
+    );
+    let _ = fs::remove_dir_all(directory);
+}
+
+#[test]
 fn terminal_hook_registration_requires_manifest_declaration() {
     let temp_dir = unique_temp_dir("plugin-terminal-hook-gate");
     let settings_path = temp_dir.join("settings.json");

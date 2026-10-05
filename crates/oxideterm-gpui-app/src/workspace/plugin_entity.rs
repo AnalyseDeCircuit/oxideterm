@@ -333,9 +333,10 @@ impl PluginWorkspaceEntity {
 
     pub(in crate::workspace) fn replace_registry(
         &mut self,
-        registry: plugin_host::NativePluginRegistry,
+        mut registry: plugin_host::NativePluginRegistry,
         cx: &mut gpui::App,
     ) {
+        registry.preserve_unchanged_runtimes(&self.registry);
         let enabled_runtime_plugin_ids = registry
             .plugins()
             .iter()

@@ -95,6 +95,34 @@ impl NativePluginRegistry {
         &self.plugins
     }
 
+    pub fn preserve_unchanged_runtimes(&mut self, previous: &Self) {
+        for plugin in &mut self.plugins {
+            if !matches!(
+                plugin.state,
+                NativePluginState::ReadyWasm
+                    | NativePluginState::ReadyProcess
+                    | NativePluginState::Loading
+                    | NativePluginState::Active
+            ) {
+                continue;
+            }
+            let Some(old) = previous.plugins.iter().find(|old| {
+                old.manifest == plugin.manifest
+                    && old.install_dir == plugin.install_dir
+                    && old.runtime_plan == plugin.runtime_plan
+                    && matches!(
+                        old.state,
+                        NativePluginState::Loading | NativePluginState::Active
+                    )
+            }) else {
+                continue;
+            };
+            plugin.state = old.state;
+            self.contributions
+                .copy_runtime_plugin_from(&previous.contributions, &plugin.manifest.id);
+        }
+    }
+
     pub fn catalog_tags(&self, plugin_id: &str) -> &[String] {
         self.catalog_tags
             .get(plugin_id)
@@ -418,7 +446,9 @@ impl NativePluginRegistry {
         }
         save_native_plugin_config(&self.config_path, &self.config)?;
         let settings_path = settings_path_from_native_plugin_config_path(&self.config_path);
-        *self = NativePluginRegistry::discover(&settings_path);
+        let mut refreshed = NativePluginRegistry::discover(&settings_path);
+        refreshed.preserve_unchanged_runtimes(self);
+        *self = refreshed;
         Ok(())
     }
 
@@ -654,7 +684,18 @@ impl NativePluginRegistry {
 
         save_native_plugin_config(&self.config_path, &self.config)?;
         self.refresh_plugin_state(plugin_id);
-        self.contributions = NativePluginContributionStore::from_plugins(&self.plugins);
+        let mut contributions = NativePluginContributionStore::from_plugins(&self.plugins);
+        for plugin in &self.plugins {
+            if plugin.manifest.id != plugin_id
+                && matches!(
+                    plugin.state,
+                    NativePluginState::Loading | NativePluginState::Active
+                )
+            {
+                contributions.copy_runtime_plugin_from(&self.contributions, &plugin.manifest.id);
+            }
+        }
+        self.contributions = contributions;
         Ok(())
     }
 
