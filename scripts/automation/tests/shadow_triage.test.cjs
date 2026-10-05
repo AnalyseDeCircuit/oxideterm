@@ -34,6 +34,15 @@ macOS
 ### Expected vs actual / 预期与实际
 
 预期能够横向滚动，实际无法查看后面的目录。
+
+### Checklist
+
+- [x] I tested with the latest release, can still reproduce the issue, and searched existing issues / 我已使用最新正式版测试，问题仍然存在，并已搜索过已有 Issue
+- [x] This is one reproducible bug, not a usage question or feature request / 这是一个可复现的 bug，而不是使用问题或功能建议
+- [x] I provided the OxideTerm version, platform, and steps to reproduce; I understand vague, incomplete, or inactive issues may be closed.
+我已提供 OxideTerm 版本、平台及复现步骤；我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。
+- [x] I removed passwords, private keys, and other secrets from this report.
+我已从本报告中删除密码、私钥及其他敏感信息。
 `,
   };
 }

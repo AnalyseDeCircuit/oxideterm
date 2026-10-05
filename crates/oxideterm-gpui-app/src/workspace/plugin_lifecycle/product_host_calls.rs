@@ -76,10 +76,9 @@ impl WorkspaceApp {
                             if self.connection_form_state(cx).form.is_some() {
                                 let message = self.i18n.t("plugin.connection_form_open");
                                 self.plugin_entity.update(cx, |plugins, _| {
-                                    plugins.registry_mut().record_manager_error(
-                                        effect.plugin_id.clone(),
-                                        message,
-                                    );
+                                    plugins
+                                        .registry_mut()
+                                        .record_manager_error(effect.plugin_id.clone(), message);
                                 });
                                 return;
                             }

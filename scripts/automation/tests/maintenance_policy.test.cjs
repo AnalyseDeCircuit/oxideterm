@@ -13,6 +13,12 @@ function bugIssue({
   extra = '',
   labels = ['bug'],
   state = 'open',
+  checklist = `- [x] I tested with the latest release, can still reproduce the issue, and searched existing issues / 我已使用最新正式版测试，问题仍然存在，并已搜索过已有 Issue
+- [x] This is one reproducible bug, not a usage question or feature request / 这是一个可复现的 bug，而不是使用问题或功能建议
+- [x] I provided the OxideTerm version, platform, and steps to reproduce; I understand vague, incomplete, or inactive issues may be closed.
+我已提供 OxideTerm 版本、平台及复现步骤；我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。
+- [x] I removed passwords, private keys, and other secrets from this report.
+我已从本报告中删除密码、私钥及其他敏感信息。`,
 } = {}) {
   return {
     number,
@@ -44,7 +50,7 @@ ${extra}
 
 ### Checklist
 
-- [x] I tested with the latest release and searched existing issues.
+${checklist}
 `,
   };
 }
@@ -61,6 +67,8 @@ test('routes bug reports by state, platform, credentials and quality without aut
       'needs_human', ['credential_or_secret_boundary', 'authentication_boundary'],
       ['automation:needs-human'], ['macos'], 'medium'],
     ['quality gate', { labels: ['bug', 'incomplete'] }, 'blocked_by_quality_gate',
+      ['quality_gate_blocking'], [], ['macos'], 'medium'],
+    ['missing confirmations', { checklist: '' }, 'blocked_by_quality_gate',
       ['quality_gate_blocking'], [], ['macos'], 'medium'],
     ['closed', { state: 'closed' }, 'observe_only', ['issue_not_open'], [], ['macos'], 'medium'],
   ]) {
@@ -94,6 +102,13 @@ VNC 无法满足虚拟机控制场景中的低延迟和设备共享需求。
 ### Why is this important? / 为什么这个功能对你重要？
 
 虚拟机维护需要低延迟画面和设备共享能力。
+
+### Checklist
+
+- [x] I am using the latest release, confirmed this feature does not already exist, and searched existing issues / 我正在使用最新正式版，已确认该功能尚不存在，并已搜索过已有 Issue
+- [x] This is one focused request within OxideTerm's scope / 这是一个聚焦且属于 OxideTerm 范围内的请求
+- [x] I have described a concrete problem/use case and proposed solution; I understand feature requests are handled best-effort, and vague or inactive issues may be closed.
+我已描述具体问题/使用场景和期望方案；我理解功能请求会尽力处理，描述模糊或长期无回复的 Issue 可能会被关闭。
 `,
   };
   const report = policy.analyzeIssue(issue);
