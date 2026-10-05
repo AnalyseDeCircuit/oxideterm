@@ -1712,7 +1712,7 @@ impl WorkspaceApp {
 
         div()
             .flex_none()
-            .h(px(36.0))
+            .h(px(oxideterm_gpui_ui::WORKSPACE_STATUS_BAR_HEIGHT))
             .px(px(14.0))
             .flex()
             .items_center()
