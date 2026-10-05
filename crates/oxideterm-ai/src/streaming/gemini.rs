@@ -141,7 +141,12 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
     let mut contents = Vec::<Value>::new();
     let mut tool_names_by_id = HashMap::<String, String>::new();
     for message in messages {
-        if message.role == AiChatRole::Assistant
+        let role = if crate::runtime_context::is_runtime_context_message(message) {
+            AiChatRole::User
+        } else {
+            message.role
+        };
+        if role == AiChatRole::Assistant
             && let Some(parts) =
                 ai_provider_parts(message, "gemini").filter(|parts| !parts.is_empty())
         {
@@ -156,7 +161,7 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
             }));
             continue;
         }
-        match message.role {
+        match role {
             AiChatRole::System => {
                 system_instruction = Some(match system_instruction {
                     // Gemini's Tauri adapter uses JavaScript truthiness here:
@@ -202,7 +207,7 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
                 contents.push(serde_json::json!({ "role": "model", "parts": parts }));
             }
             AiChatRole::User | AiChatRole::Assistant => {
-                let role = if message.role == AiChatRole::Assistant {
+                let role = if role == AiChatRole::Assistant {
                     "model"
                 } else {
                     "user"

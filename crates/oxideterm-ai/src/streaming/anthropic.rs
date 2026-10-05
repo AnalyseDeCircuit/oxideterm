@@ -181,6 +181,10 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
     let mut system: Option<String> = None;
     let mut converted = Vec::<(String, Value)>::new();
     for message in messages {
+        if crate::runtime_context::is_runtime_context_message(message) {
+            converted.push(("user".to_string(), Value::String(message.content.clone())));
+            continue;
+        }
         match message.role {
             AiChatRole::System => {
                 system = Some(match system {

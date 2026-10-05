@@ -718,11 +718,6 @@ impl WorkspaceApp {
         };
         let value = serde_json::json!({
             "runtimeContext": projection,
-            "instructions": [
-                "Use stable resource_ref only for durable actions such as connecting a saved connection, reading settings or knowledge, and opening an application surface.",
-                "Use handle_id only for the current live terminal, local shell, SFTP session, or IDE workspace.",
-                "A stale handle must be rediscovered; never substitute a tab, session, node, or target id.",
-            ],
         });
         serde_json::to_string_pretty(&value)
             .map(|text| ai_model_safe_runtime_text(&text))
