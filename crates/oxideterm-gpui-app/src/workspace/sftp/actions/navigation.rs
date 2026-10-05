@@ -635,9 +635,16 @@ impl WorkspaceApp {
                 let index = {
                     let sftp = self.sftp_view().read(cx);
                     match pane {
-                        SftpPane::Local => sftp.local_path_completion.selected_index(),
-                        SftpPane::Remote => sftp.remote_path_completion.selected_index(),
+                        SftpPane::Local => sftp
+                            .local_path_completion
+                            .acceptance_index(&event.keystroke.key),
+                        SftpPane::Remote => sftp
+                            .remote_path_completion
+                            .acceptance_index(&event.keystroke.key),
                     }
+                };
+                let Some(index) = index else {
+                    return false;
                 };
                 self.accept_sftp_path_completion(pane, index, cx);
                 true

@@ -735,7 +735,14 @@ impl WorkspaceApp {
                 true
             }
             "enter" | "tab" => {
-                let index = self.file_manager.read(cx).path_completion.selected_index();
+                let Some(index) = self
+                    .file_manager
+                    .read(cx)
+                    .path_completion
+                    .acceptance_index(&event.keystroke.key)
+                else {
+                    return false;
+                };
                 self.accept_file_manager_path_completion_without_context(index, cx);
                 true
             }
