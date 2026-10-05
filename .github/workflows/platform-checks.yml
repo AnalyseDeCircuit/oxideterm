@@ -56,6 +56,9 @@ jobs:
       - name: Check Windows GPUI backend
         run: cargo check -p gpui-pre-windows
 
+      - name: Check Windows precompiled release shaders
+        run: cargo check --release -p gpui-pre-windows
+
       - name: Test Windows frame and quit message handling
         run: cargo test -p gpui-pre-windows --lib windows_message_
 

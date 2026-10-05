@@ -38,6 +38,10 @@ mod shader_compilation {
             "monochrome_sprite",
             "subpixel_sprite",
             "polychrome_sprite",
+            // OxideTerm retains CE blur passes in the release renderer as well as debug builds.
+            "blur_downsample",
+            "blur",
+            "blur_composite",
         ];
 
         let rust_binding_path = format!("{}/shaders_bytes.rs", out_dir);
