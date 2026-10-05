@@ -787,7 +787,7 @@ Graphics sessions are visual runtime surfaces. They are separate from terminal b
 The detailed RDP/VNC/X11 ownership boundary is tracked in [Remote Desktop Boundary](../../design/remote-desktop-boundary.md). Native currently treats visual remoting as three related but separate paths:
 
 - **WSL Graphics**: `oxideterm-wsl-graphics` owns WSL distro probing, VNC server startup, desktop/app child processes, and cleanup.
-- **Remote Desktop**: `oxideterm-remote-desktop` and `oxideterm-gpui-remote-desktop` own the shared model, viewer state, and provider registry; `oxideterm-rdp-helper` and `oxideterm-vnc-helper` own protocol engines behind stdio. RDP reports explicit unsupported errors for integrations outside the current compatibility scope, while VNC uses the direct TCP/RFB path.
+- **Remote Desktop**: `oxideterm-remote-desktop` and `oxideterm-gpui-remote-desktop` own the shared model, viewer state and binary transport. Protocol engines are independent `plugins/rdp` and `plugins/vnc` packages in the marketplace repository, discovered through the trusted plugin registry and launched by the session owner. Connection forms indicate whether the required plugin is available. Saved profiles, credentials, SSH gateways and the native viewer retain their existing behavior.
 - **SSH X11 forwarding**: `oxideterm-x11-forwarding` owns DISPLAY, xauth, fake-cookie, setup rewrite, and SSH X11 channel bridge semantics; it is not a full desktop viewer.
 
 ### Responsibilities
@@ -1231,7 +1231,7 @@ flowchart TB
 | Forwarding | `oxideterm-forwarding`, app forwarding modules | Rules are configuration; listeners are runtime state |
 | Privilege credentials | Settings privilege page, terminal privilege prompt, secret-aware storage | Scope and prompt matchers are configuration; secret values stay outside ordinary settings |
 | Terminal modem transfers | `oxideterm-modem-transfer`, `oxideterm-gpui-terminal` modem worker | Protocol state is terminal-runtime work; file selection and progress are UI concerns |
-| Graphics sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, app graphics/remote-desktop modules | WSL lifecycle, remote protocol helpers, viewer framebuffer, and terminal buffers have separate owners |
+| Graphics sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, marketplace `plugins/rdp` and `plugins/vnc`, app graphics/remote-desktop modules | WSL lifecycle, remote protocol helpers, viewer framebuffer, and terminal buffers have separate owners |
 | Plugins | `oxideterm-plugin-*`, plugin manager and lifecycle modules | Manifests, settings, host API calls, and plugin secrets have separate boundaries |
 | Cloud sync | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, app cloud-sync modules | Sync plans, backup creation, and apply steps are explicit control-plane operations |
 | Portable runtime | `oxideterm-portable-runtime`, settings portable-runtime modules | Portable metadata and encrypted payload handling are separate from normal settings pages |
@@ -1865,12 +1865,12 @@ Staleness means "the app cannot prove this state is current." It does not automa
 | SFTP and transfers | `oxideterm-sftp` |
 | Saved connections | `oxideterm-connections` |
 | Forwarding | `oxideterm-forwarding`, app forwarding surface |
-| Graphics and remote desktop sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, app graphics/remote-desktop surfaces |
+| Graphics and remote desktop sessions | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, marketplace `plugins/rdp` and `plugins/vnc`, app graphics/remote-desktop surfaces |
 | IDE and editor | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
 | Knowledge workspace and Markdown | `oxideterm-ai` RAG domain, `oxideterm-gpui-markdown`, `oxideterm-gpui-editor`, `workspace/knowledge.rs` |
 | Settings and privilege credentials | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, secret-aware app boundary |
 | AI, RAG, MCP, reasoning, and tool policy | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, app AI sidebar |
-| ACP agent sessions and host tools | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |
+| ACP agent sessions and host tools | `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs`, `workspace/acp_plugins.rs`; Codex and Claude Code adapters are independent packages in the plugin repository |
 | Plugins | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, app plugin entities |
 | Cloud sync and portable runtime | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
 | Notifications and update | `oxideterm-notification-center`, `oxideterm-update` |

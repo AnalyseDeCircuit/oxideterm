@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "Đã tắt",
       "acp_agent_name": "Tên hiển thị",
       "acp_agent_command": "Lệnh",
+      "acp_agent_plugin": "Tiện ích",
+      "acp_agent_plugin_unavailable": "Cài đặt và bật tiện ích ACP của tác nhân này trong trình quản lý tiện ích.",
       "acp_agent_command_placeholder": "Đường dẫn hoặc tên lệnh",
       "acp_agent_cwd": "Thư mục làm việc",
       "acp_agent_cwd_placeholder": "Dùng không gian làm việc hiện tại",

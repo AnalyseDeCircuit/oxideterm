@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "Désactivé",
       "acp_agent_name": "Nom affiché",
       "acp_agent_command": "Commande",
+      "acp_agent_plugin": "Extension",
+      "acp_agent_plugin_unavailable": "Installez et activez l’extension ACP de cet agent dans le gestionnaire d’extensions.",
       "acp_agent_command_placeholder": "Chemin ou nom de commande",
       "acp_agent_cwd": "Répertoire de travail",
       "acp_agent_cwd_placeholder": "Utiliser l’espace de travail actuel",

@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "已禁用",
       "acp_agent_name": "显示名称",
       "acp_agent_command": "命令",
+      "acp_agent_plugin": "插件",
+      "acp_agent_plugin_unavailable": "请在插件管理器中安装并启用此智能体的 ACP 插件。",
       "acp_agent_command_placeholder": "路径或命令名",
       "acp_agent_cwd": "工作目录",
       "acp_agent_cwd_placeholder": "使用当前工作区",

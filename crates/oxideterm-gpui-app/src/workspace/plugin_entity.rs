@@ -178,6 +178,9 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     manager_state: plugin_manager::NativePluginManagerState,
     ui_state: plugin_ui::NativePluginUiState,
     manager_operation_in_flight: bool,
+    remote_desktop_install_pending: HashSet<String>,
+    remote_desktop_removals: HashSet<String>,
+    uninstall_task: Option<Task<()>>,
     compatibility_refresh_pending: bool,
     manager_delivery_tx:
         delivery::ActiveDeliverySender<plugin_manager::NativePluginManagerDelivery>,
@@ -246,6 +249,9 @@ impl PluginWorkspaceEntity {
             manager_state: plugin_manager::NativePluginManagerState::new(),
             ui_state: plugin_ui::NativePluginUiState::default(),
             manager_operation_in_flight: false,
+            remote_desktop_install_pending: HashSet::new(),
+            remote_desktop_removals: HashSet::new(),
+            uninstall_task: None,
             compatibility_refresh_pending: false,
             manager_delivery_tx,
             manager_delivery_rx,
@@ -285,7 +291,7 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn manager_operation_in_flight(&self) -> bool {
-        self.manager_operation_in_flight
+        self.manager_operation_in_flight || !self.remote_desktop_removals.is_empty()
     }
 
     pub(in crate::workspace) fn manager_state(&self) -> &plugin_manager::NativePluginManagerState {
@@ -329,6 +335,31 @@ impl PluginWorkspaceEntity {
 
     pub(in crate::workspace) fn registry_snapshot(&self) -> Arc<plugin_host::NativePluginRegistry> {
         Arc::clone(&self.registry)
+    }
+
+    pub(in crate::workspace) fn acp_agents(&self) -> Vec<plugin_host::NativePluginAcpAgent> {
+        if self.compatibility_refresh_pending || self.release_shutdown_started {
+            Vec::new()
+        } else {
+            self.registry.acp_agents()
+        }
+    }
+
+    pub(in crate::workspace) fn remote_desktop_providers(
+        &self,
+    ) -> Vec<oxideterm_remote_desktop::RemoteDesktopProviderManifest> {
+        if self.compatibility_refresh_pending || self.release_shutdown_started {
+            Vec::new()
+        } else {
+            self.registry
+                .remote_desktop_providers()
+                .into_iter()
+                .filter(|provider| {
+                    !self.remote_desktop_install_pending.contains(&provider.id)
+                        && !self.remote_desktop_removals.contains(&provider.id)
+                })
+                .collect()
+        }
     }
 
     pub(in crate::workspace) fn replace_registry(
@@ -391,6 +422,39 @@ impl PluginWorkspaceEntity {
         result
     }
 
+    pub(in crate::workspace) fn begin_remote_desktop_removal(&mut self, plugin_id: &str) {
+        self.remote_desktop_removals.insert(plugin_id.to_string());
+    }
+
+    pub(in crate::workspace) fn start_plugin_uninstall(
+        &mut self,
+        plugin_id: String,
+        remove_storage: bool,
+        workers: Vec<std::thread::JoinHandle<()>>,
+        cx: &mut Context<Self>,
+    ) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        // The plugin entity survives window handoff and owns file replacement.
+        self.uninstall_task = Some(cx.spawn(async move |plugins, cx| {
+            cx.background_executor()
+                .spawn(async move {
+                    for worker in workers {
+                        let _ = worker.join();
+                    }
+                })
+                .await;
+            let result = plugins
+                .update(cx, |plugins, cx| {
+                    let result = plugins.uninstall_plugin(&plugin_id, remove_storage, cx);
+                    cx.notify();
+                    result
+                })
+                .unwrap_or_else(|_| Err(NATIVE_PLUGIN_WORKSPACE_RELEASED_CODE.to_string()));
+            let _ = sender.send(result);
+        }));
+        receiver
+    }
+
     pub(in crate::workspace) fn uninstall_plugin(
         &mut self,
         plugin_id: &str,
@@ -401,6 +465,7 @@ impl PluginWorkspaceEntity {
         let result = self
             .registry_mut()
             .uninstall_plugin(plugin_id, remove_storage);
+        self.remote_desktop_removals.remove(plugin_id);
         if result.is_ok() {
             self.sync_language_plugins(cx);
             self.start_runtime_deactivation(plugin_id.to_string());
@@ -770,11 +835,21 @@ impl PluginWorkspaceEntity {
         download_url: Zeroizing<String>,
         checksum: Option<String>,
         overwrite: bool,
+        retired_desktops: Vec<std::thread::JoinHandle<()>>,
     ) -> bool {
-        if self.manager_operation_in_flight || self.release_shutdown_started {
+        if self.manager_operation_in_flight() || self.release_shutdown_started {
             return false;
         }
         self.manager_operation_in_flight = true;
+        self.remote_desktop_install_pending = self
+            .registry
+            .remote_desktop_providers()
+            .into_iter()
+            .filter(|provider| {
+                overwrite && expected_id.as_ref().is_none_or(|id| id == &provider.id)
+            })
+            .map(|provider| provider.id)
+            .collect();
         let delivery_tx = self.manager_delivery_tx.clone();
         let mut audit = plugin_management_audit(
             expected_id.as_deref(),
@@ -785,6 +860,14 @@ impl PluginWorkspaceEntity {
             },
         );
         self.spawn_owned_task(async move {
+            if !retired_desktops.is_empty() {
+                let _ = tokio::task::spawn_blocking(move || {
+                    for worker in retired_desktops {
+                        let _ = worker.join();
+                    }
+                })
+                .await;
+            }
             let result = match (expected_id.as_deref(), checksum.as_deref()) {
                 (Some(expected_id), Some(checksum)) => {
                     plugin_host::NativePluginRegistry::install_managed_plugin_package_from_url(
@@ -847,7 +930,7 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn start_marketplace_load(&mut self) -> bool {
-        if self.manager_operation_in_flight || self.release_shutdown_started {
+        if self.manager_operation_in_flight() || self.release_shutdown_started {
             return false;
         }
         self.manager_operation_in_flight = true;
@@ -899,13 +982,21 @@ impl PluginWorkspaceEntity {
         package_bytes: Zeroizing<Vec<u8>>,
         overwrite: bool,
         cancellation: tokio_util::sync::CancellationToken,
+        retired_desktops: Vec<std::thread::JoinHandle<()>>,
     ) -> Option<
         tokio::sync::oneshot::Receiver<Result<plugin_host::NativePluginUrlInstallResult, String>>,
     > {
-        if self.manager_operation_in_flight || self.release_shutdown_started {
+        if self.manager_operation_in_flight() || self.release_shutdown_started {
             return None;
         }
         self.manager_operation_in_flight = true;
+        self.remote_desktop_install_pending = self
+            .registry
+            .remote_desktop_providers()
+            .into_iter()
+            .filter(|provider| overwrite && expected_id == provider.id)
+            .map(|provider| provider.id)
+            .collect();
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let audit = plugin_management_audit(
             Some(&expected_id),
@@ -916,6 +1007,14 @@ impl PluginWorkspaceEntity {
             },
         );
         self.spawn_owned_task(async move {
+            if !retired_desktops.is_empty() {
+                let _ = tokio::task::spawn_blocking(move || {
+                    for worker in retired_desktops {
+                        let _ = worker.join();
+                    }
+                })
+                .await;
+            }
             if cancellation.is_cancelled() {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Cancelled,
@@ -957,6 +1056,7 @@ impl PluginWorkspaceEntity {
         cx: &mut gpui::App,
     ) {
         self.manager_operation_in_flight = false;
+        self.remote_desktop_install_pending.clear();
         if installed {
             self.replace_registry(
                 plugin_host::NativePluginRegistry::discover(settings_path),
@@ -970,7 +1070,7 @@ impl PluginWorkspaceEntity {
         registry_url: Zeroizing<String>,
         installed: Vec<plugin_host::NativePluginInstalledInfo>,
     ) -> bool {
-        if self.manager_operation_in_flight || self.release_shutdown_started {
+        if self.manager_operation_in_flight() || self.release_shutdown_started {
             return false;
         }
         self.manager_operation_in_flight = true;
@@ -1237,6 +1337,7 @@ impl PluginWorkspaceEntity {
             return false;
         }
         self.release_shutdown_started = true;
+        self.uninstall_task.take();
         self.runtime_services_started = false;
         self.manager_operation_in_flight = false;
         self.subscription_sampler_running = false;
@@ -1892,6 +1993,7 @@ impl PluginWorkspaceEntity {
         );
         if !drain.items.is_empty() {
             self.manager_operation_in_flight = false;
+            self.remote_desktop_install_pending.clear();
             self.manager_deliveries.extend(drain.items);
             cx.emit(PluginWorkspaceEvent::ManagerDeliveryReady);
             cx.notify();
@@ -1917,6 +2019,111 @@ mod tests {
         fn create(&self, id: &str) -> Result<Zeroizing<Vec<u8>>, oxideterm_audit::AuditError> {
             self.load(id)
         }
+    }
+
+    #[gpui::test]
+    fn remote_desktop_updates_and_removal_gate_only_the_target_provider(cx: &mut TestAppContext) {
+        use sha2::Digest;
+        let directory = tempfile::tempdir().unwrap();
+        let settings = directory.path().join("settings.json");
+        let root = plugin_host::native_plugins_dir(&settings);
+        for protocol in ["rdp", "vnc"] {
+            let plugin = root.join(format!("com.example.{protocol}"));
+            std::fs::create_dir_all(plugin.join("bin")).unwrap();
+            std::fs::write(plugin.join("bin/helper"), b"fixture").unwrap();
+            let manifest = serde_json::json!({
+                "id": format!("com.example.{protocol}"), "name": protocol, "version": "0.1.0",
+                "runtime": {"kind": "remote-desktop", "entry": "bin/helper"},
+                "engines": {"oxideterm": ">=2.2.1"},
+                "contributes": {"remoteDesktop": {"protocol": protocol, "protocolVersion": 1}},
+            });
+            std::fs::write(plugin.join("plugin.json"), manifest.to_string()).unwrap();
+        }
+        let mut registry = plugin_host::NativePluginRegistry::discover(&settings);
+        for id in ["com.example.rdp", "com.example.vnc"] {
+            registry.set_plugin_enabled(id, true).unwrap();
+        }
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let entity = cx.new(|cx| PluginWorkspaceEntity::new(runtime.clone(), registry, cx));
+        let bytes = b"invalid replacement archive".to_vec();
+        let checksum = format!("{:x}", sha2::Sha256::digest(&bytes));
+        let receiver = entity
+            .update(cx, |entity, _| {
+                entity.start_managed_package_install(
+                    settings.clone(),
+                    "com.example.vnc".into(),
+                    checksum,
+                    Zeroizing::new(bytes),
+                    true,
+                    tokio_util::sync::CancellationToken::new(),
+                    Vec::new(),
+                )
+            })
+            .unwrap();
+        assert_eq!(
+            cx.read(|cx| entity
+                .read(cx)
+                .remote_desktop_providers()
+                .into_iter()
+                .map(|provider| provider.id)
+                .collect::<Vec<_>>()),
+            ["com.example.rdp"]
+        );
+        assert!(runtime.block_on(receiver).unwrap().is_err());
+        entity.update(cx, |entity, cx| {
+            entity.finish_managed_package_install(&settings, false, cx)
+        });
+        assert_eq!(
+            cx.read(|cx| entity
+                .read(cx)
+                .remote_desktop_providers()
+                .into_iter()
+                .map(|provider| provider.id)
+                .collect::<Vec<_>>()),
+            ["com.example.rdp", "com.example.vnc"]
+        );
+        let mut removal = entity.update(cx, |entity, cx| {
+            entity.begin_remote_desktop_removal("com.example.vnc");
+            assert!(entity.manager_operation_in_flight());
+            // Re-enabling while shutdown is pending must not launch the executable
+            // that the removal task is about to delete.
+            entity
+                .set_plugin_enabled("com.example.vnc", true, cx)
+                .unwrap();
+            assert_eq!(
+                entity
+                    .remote_desktop_providers()
+                    .into_iter()
+                    .map(|provider| provider.id)
+                    .collect::<Vec<_>>(),
+                ["com.example.rdp"]
+            );
+            entity.start_plugin_uninstall("com.example.vnc".into(), false, Vec::new(), cx)
+        });
+        cx.run_until_parked();
+        assert_eq!(removal.try_recv().unwrap(), Ok(()));
+        cx.read(|cx| {
+            let entity = entity.read(cx);
+            assert!(!entity.manager_operation_in_flight());
+            assert_eq!(
+                entity
+                    .remote_desktop_providers()
+                    .into_iter()
+                    .map(|provider| provider.id)
+                    .collect::<Vec<_>>(),
+                ["com.example.rdp"]
+            );
+        });
+        assert!(!root.join("com.example.vnc").exists());
+        assert_eq!(
+            std::fs::read(root.join("com.example.rdp/bin/helper")).unwrap(),
+            b"fixture"
+        );
     }
 
     #[gpui::test]

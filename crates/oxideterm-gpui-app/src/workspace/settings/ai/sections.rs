@@ -66,16 +66,6 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::ClaudeCode.display_name().to_string(),
-                                Some(AcpAgentPreset::ClaudeCode),
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::Codex.display_name().to_string(),
-                                Some(AcpAgentPreset::Codex),
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
                                 AcpAgentPreset::GeminiCli.display_name().to_string(),
                                 Some(AcpAgentPreset::GeminiCli),
                                 cx,
@@ -194,18 +184,26 @@ impl WorkspaceApp {
                             cx,
                         ),
                     ))
-                    .child(
-                        self.ai_responsive_field(
-                            AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                        if let Some(plugin_id) = agent.plugin_id.as_ref() {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .child(self.i18n.t("settings_view.ai.acp_agent_plugin"))
+                                .child(self.ai_readonly_value(plugin_id.clone()))
+                                .into_any_element()
+                        } else {
                             self.ai_labeled_text_input(
                                 "settings_view.ai.acp_agent_command",
                                 SettingsInput::AiAcpAgentCommand(index),
                                 self.i18n
                                     .t("settings_view.ai.acp_agent_command_placeholder"),
                                 cx,
-                            ),
-                        ),
-                    )
+                            )
+                        },
+                    ))
                     .child(self.ai_responsive_field(
                         AI_ACP_AGENT_FIELD_MIN_WIDTH,
                         self.ai_labeled_text_input(
@@ -450,7 +448,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let Some(agent) = self
+        let Some(mut agent) = self
             .settings_store
             .settings()
             .ai
@@ -462,6 +460,10 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
+        if let Err(message) = self.resolve_ai_acp_plugin(&mut agent, cx) {
+            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx);
+            return;
+        }
         self.ai_entity.update(cx, |ai, _cx| {
             ai.request_acp_agent_probe(agent);
         });

@@ -46,13 +46,11 @@ STABLE_APP_IDENTIFIER = "com.oxideterm.app"
 APP_BIN = "oxideterm-native"
 CLI_BIN = "oxideterm"
 CONNECTION_URI_SCHEMES = ("ssh", "telnet", "mosh", "rdp", "vnc")
-HELPER_BINS = ("oxideterm-rdp-helper", "oxideterm-vnc-helper")
 UPDATE_HELPER_PACKAGE = "oxideterm-update"
 UPDATE_HELPER_BIN = "oxideterm-update-helper"
 AGENT_RESOURCE_DIR = "agents"
 AGENT_BINARY_PREFIX = "oxideterm-agent-"
 ENCODED_AGENT_SUFFIX = ".b64"
-HELPER_RESOURCE_DIR = "helpers"
 UPDATE_HELPER_DIR = "tools"
 WINDOWS_UPDATE_STAGING_DIR = "install"
 WINDOWS_UPDATE_FLAG = "OXIDETERM_UPDATE"
@@ -408,9 +406,8 @@ def copy_agent_resources(dst: Path, *, encode_binaries: bool) -> None:
 
 def copy_runtime_resources(dst: Path, target: str, *, encode_agent_binaries: bool = False) -> None:
     dst.mkdir(parents=True, exist_ok=True)
-    # Keep the app bundle layout aligned with Tauri's resource contract: agents
-    # the target-specific CLI, and protocol helpers live under resources instead
-    # of relying on PATH.
+    # Agents and the target-specific CLI retain their resource layout.
+    # Remote desktop executables are distributed through the plugin catalog.
     copy_agent_resources(dst / AGENT_RESOURCE_DIR, encode_binaries=encode_agent_binaries)
     copy_tree(RESOURCE_DIR / "icons", dst / "icons")
 
@@ -422,10 +419,6 @@ def copy_runtime_resources(dst: Path, target: str, *, encode_agent_binaries: boo
         raise FileNotFoundError(f"target CLI resource directory not found: {cli_source}")
     copy_tree(cli_source, dst / "cli-bin" / target)
 
-    helper_source = RESOURCE_DIR / HELPER_RESOURCE_DIR / target
-    if not helper_source.exists():
-        raise FileNotFoundError(f"target helper resource directory not found: {helper_source}")
-    copy_tree(helper_source, dst / HELPER_RESOURCE_DIR / target)
     if "windows" in target:
         stage_conpty_runtime(dst, target)
 
@@ -478,30 +471,6 @@ def build_cli(target: str, target_was_explicit: bool) -> Path:
     make_executable(dest)
     print(f"CLI artifact written to {dest}")
     return dest
-
-
-def build_helper(package: str, target: str, target_was_explicit: bool) -> Path:
-    args = ["cargo", "build", "-p", package, "--release"]
-    if target_was_explicit:
-        args.extend(["--target", target])
-    run(args, env=native_cargo_build_env(target))
-
-    source = release_binary(target, target_was_explicit, package)
-    if not source.exists():
-        raise FileNotFoundError(f"helper binary not found: {source}")
-
-    out_dir = RESOURCE_DIR / HELPER_RESOURCE_DIR / target
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dest = out_dir / source.name
-    shutil.copy2(source, dest)
-    make_executable(dest)
-    print(f"Remote desktop helper artifact written to {dest}")
-    return dest
-
-
-def build_remote_desktop_helpers(target: str, target_was_explicit: bool) -> None:
-    for package in HELPER_BINS:
-        build_helper(package, target, target_was_explicit)
 
 
 def build_update_helper(target: str, target_was_explicit: bool) -> Path:
@@ -1805,7 +1774,6 @@ def main() -> None:
         flush=True,
     )
     build_cli(target, target_was_explicit)
-    build_remote_desktop_helpers(target, target_was_explicit)
     app_binary = build_app(target, target_was_explicit)
     update_helper = build_update_helper(target, target_was_explicit)
     if "windows" in target:

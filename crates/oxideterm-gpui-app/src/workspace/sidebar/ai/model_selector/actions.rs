@@ -134,7 +134,10 @@ impl WorkspaceApp {
         {
             return Some(state.config_options);
         }
-        let conversation_id = self.ai_entity.read(cx).conversation_state()
+        let conversation_id = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.as_str())?;
         self.ai_entity
@@ -147,7 +150,10 @@ impl WorkspaceApp {
         agent_id: &str,
         cx: &App,
     ) -> bool {
-        let Some(conversation_id) = self.ai_entity.read(cx).conversation_state()
+        let Some(conversation_id) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.as_str())
         else {
@@ -163,13 +169,13 @@ impl WorkspaceApp {
         agent_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .ai_acp_model_options_for_agent(&agent_id, cx)
-            .is_some()
-        {
+        if self.ai_acp_model_options_for_agent(&agent_id, cx).is_some() {
             return;
         }
-        let Some(conversation_id) = self.ai_entity.read(cx).conversation_state()
+        let Some(conversation_id) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .map(|conversation| conversation.id.clone())
         else {
@@ -182,7 +188,7 @@ impl WorkspaceApp {
         {
             return;
         }
-        let Some(agent) = self
+        let Some(mut agent) = self
             .settings_store
             .settings()
             .ai
@@ -195,7 +201,12 @@ impl WorkspaceApp {
         };
         // Only the native Codex adapter promises model metadata during session/new.
         // Other ACP agents keep their existing first-prompt or explicit-model behavior.
-        if !oxideterm_ai::acp_model_report_is_available_during_session_start(&agent.args) {
+        if agent.plugin_id.as_deref() != Some("com.oxideterm.acp.codex")
+            && !oxideterm_ai::acp_model_report_is_available_during_session_start(&agent.args)
+        {
+            return;
+        }
+        if self.resolve_ai_acp_plugin(&mut agent, cx).is_err() {
             return;
         }
         let session_cwd = acp_session_cwd_from_agent(&agent);
@@ -357,11 +368,8 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some((provider_id, model)) = self
-            .ai_entity
-            .read(cx)
-            .model_selector_highlight()
-            .cloned()
+        let Some((provider_id, model)) =
+            self.ai_entity.read(cx).model_selector_highlight().cloned()
         else {
             return false;
         };
@@ -389,10 +397,25 @@ impl WorkspaceApp {
         self.ensure_ai_provider_key_statuses(cx);
         let providers = self.ai_model_selector_providers(cx);
         for provider in providers {
-            if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+            if let Some(agent_id) = Self::ai_acp_agent_id_from_provider_id(&provider.id) {
                 self.ai_entity.update(cx, |ai, _cx| {
                     ai.set_provider_key_status(provider.id.clone(), true);
                 });
+                if self
+                    .settings_store
+                    .settings()
+                    .ai
+                    .acp_agents
+                    .iter()
+                    .any(|agent| {
+                        agent.id == agent_id
+                            && agent.enabled
+                            && agent.plugin_id.is_some()
+                            && agent.status.state == AcpAgentRuntimeState::Unknown
+                    })
+                {
+                    self.test_ai_acp_agent(agent_id.to_string(), cx);
+                }
                 continue;
             }
             match resolve_model_selector_provider_probe(&provider) {
@@ -449,14 +472,15 @@ impl WorkspaceApp {
         cx: &App,
     ) -> bool {
         if Self::ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
-            return self.ai_acp_provider_ready(&provider.id);
+            return self.ai_acp_provider_ready(&provider.id, cx);
         }
         match resolve_model_selector_provider_probe(provider) {
             ModelSelectorProviderProbe::Disabled => false,
             ModelSelectorProviderProbe::StoredKey => true,
-            ModelSelectorProviderProbe::ImplicitKey { .. } => {
-                self.ai_entity.read(cx).selector_provider_is_online(&provider.id)
-            }
+            ModelSelectorProviderProbe::ImplicitKey { .. } => self
+                .ai_entity
+                .read(cx)
+                .selector_provider_is_online(&provider.id),
         }
     }
 
@@ -513,12 +537,7 @@ impl WorkspaceApp {
                     Some((option.config_id.clone(), choice.value_id.clone()))
                 });
             if let Some((config_id, value_id)) = session_model_selection {
-                self.select_ai_acp_model_from_selector(
-                    agent_id,
-                    config_id,
-                    value_id,
-                    cx,
-                );
+                self.select_ai_acp_model_from_selector(agent_id, config_id, value_id, cx);
                 return;
             }
             self.edit_settings(
@@ -551,7 +570,10 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn ai_model_selector_providers(&self, cx: &App) -> Vec<AiProviderView> {
+    pub(in crate::workspace) fn ai_model_selector_providers(
+        &self,
+        cx: &App,
+    ) -> Vec<AiProviderView> {
         let settings = self.settings_store.settings();
         let mut providers = ai_provider_views(&settings.ai.providers);
         providers.extend(
@@ -648,7 +670,8 @@ impl WorkspaceApp {
             if self.ai_acp_model_discovery_is_pending(agent_id, cx) {
                 self.i18n.t("ai.model_selector.agent_model_loading")
             } else if agent.is_some_and(|agent| {
-                oxideterm_ai::acp_model_report_is_deferred_until_first_prompt(&agent.args)
+                agent.plugin_id.as_deref() == Some("com.oxideterm.acp.claude-code")
+                    || oxideterm_ai::acp_model_report_is_deferred_until_first_prompt(&agent.args)
             }) {
                 self.i18n
                     .t("ai.model_selector.agent_model_after_first_message")
@@ -658,7 +681,7 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn ai_acp_provider_ready(&self, provider_id: &str) -> bool {
+    pub(in crate::workspace) fn ai_acp_provider_ready(&self, provider_id: &str, cx: &App) -> bool {
         let Some(agent_id) = Self::ai_acp_agent_id_from_provider_id(provider_id) else {
             return false;
         };
@@ -668,7 +691,17 @@ impl WorkspaceApp {
             .acp_agents
             .iter()
             .find(|agent| agent.id == agent_id)
-            .is_some_and(|agent| agent.enabled && agent.status.state == AcpAgentRuntimeState::Ready)
+            .is_some_and(|agent| {
+                agent.enabled
+                    && agent.status.state == AcpAgentRuntimeState::Ready
+                    && agent.plugin_id.as_ref().is_none_or(|id| {
+                        self.plugin_entity
+                            .read(cx)
+                            .acp_agents()
+                            .iter()
+                            .any(|plugin| &plugin.plugin_id == id)
+                    })
+            })
     }
 
     pub(in crate::workspace) fn select_ai_acp_model_from_selector(
@@ -800,7 +833,12 @@ impl WorkspaceApp {
         model: &str,
         cx: &mut Context<Self>,
     ) {
-        let Some(_conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
+        let Some(_conversation) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .active_conversation()
+        else {
             return;
         };
         let total_tokens = self.ai_context_token_breakdown(cx).total;
@@ -834,7 +872,9 @@ pub(in crate::workspace) fn ai_conversation_reasoning_effort<'a>(
         .as_ref()?
         .get(AI_REASONING_EFFORT_SESSION_METADATA_KEY)?;
     // Read the first implementation's scalar value for backward compatibility.
-    value.as_str().or_else(|| value.get(provider_id)?.get(model)?.as_str())
+    value
+        .as_str()
+        .or_else(|| value.get(provider_id)?.get(model)?.as_str())
 }
 
 pub(in crate::workspace) fn store_ai_reasoning_level_in_conversation(
@@ -986,7 +1026,7 @@ mod acp_model_selection_tests {
     #[test]
     fn discovered_model_choice_is_stored_for_the_next_real_session() {
         let mut conversation = AiConversation {
-        archived: false,
+            archived: false,
             id: "conversation-1".to_string(),
             title: "Conversation".to_string(),
             messages: Vec::new(),
@@ -1041,7 +1081,7 @@ mod acp_model_selection_tests {
     #[test]
     fn reasoning_level_is_scoped_to_the_conversation_without_erasing_other_metadata() {
         let mut conversation = AiConversation {
-        archived: false,
+            archived: false,
             id: "conversation-1".to_string(),
             title: "Conversation".to_string(),
             messages: Vec::new(),
@@ -1067,9 +1107,10 @@ mod acp_model_selection_tests {
             Some("high")
         );
         assert_eq!(
-            conversation.session_metadata.as_ref().and_then(|value| {
-                value.get("other").and_then(serde_json::Value::as_bool)
-            }),
+            conversation
+                .session_metadata
+                .as_ref()
+                .and_then(|value| { value.get("other").and_then(serde_json::Value::as_bool) }),
             Some(true)
         );
 

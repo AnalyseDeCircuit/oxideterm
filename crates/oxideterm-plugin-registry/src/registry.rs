@@ -168,6 +168,38 @@ impl NativePluginRegistry {
             .collect()
     }
 
+    /// ACP processes are launched lazily by the ACP owner, never by the plugin supervisor.
+    pub fn acp_agents(&self) -> Vec<NativePluginAcpAgent> {
+        self.plugins
+            .iter()
+            .filter_map(|plugin| {
+                if !native_plugin_state_is_active_like(plugin.state)
+                    || native_plugin_requires_permission_review(
+                        &plugin.manifest,
+                        &plugin.runtime_plan,
+                        &plugin.config,
+                    )
+                {
+                    return None;
+                }
+                let NativePluginRuntimePlan::Acp { entry } = &plugin.runtime_plan else {
+                    return None;
+                };
+                let root = plugin.install_dir.canonicalize().ok()?;
+                let command = root.join(entry).canonicalize().ok()?;
+                if !command.starts_with(&root) || !command.is_file() {
+                    return None;
+                }
+                Some(NativePluginAcpAgent {
+                    plugin_id: plugin.manifest.id.clone(),
+                    name: plugin.manifest.name.clone(),
+                    version: plugin.manifest.version.clone(),
+                    command,
+                })
+            })
+            .collect()
+    }
+
     pub fn file_preview_provider(&self, mime_type: &str) -> Option<(NativePluginInfo, String)> {
         self.plugins.iter().find_map(|plugin| {
             if !native_plugin_state_is_active_like(plugin.state)
@@ -189,6 +221,54 @@ impl NativePluginRegistry {
                 .find(|preview| preview.mime_types.iter().any(|value| value == mime_type))?;
             Some((plugin.clone(), preview.command.clone()))
         })
+    }
+
+    /// Protocol helpers use the session-owned binary transport, not plugin messages.
+    pub fn remote_desktop_providers(
+        &self,
+    ) -> Vec<oxideterm_remote_desktop::RemoteDesktopProviderManifest> {
+        self.plugins
+            .iter()
+            .filter_map(|plugin| {
+                if !native_plugin_state_is_active_like(plugin.state)
+                    || native_plugin_requires_permission_review(
+                        &plugin.manifest,
+                        &plugin.runtime_plan,
+                        &plugin.config,
+                    )
+                {
+                    return None;
+                }
+                let NativePluginRuntimePlan::RemoteDesktop { entry } = &plugin.runtime_plan else {
+                    return None;
+                };
+                let definition = plugin
+                    .manifest
+                    .contributes
+                    .as_ref()?
+                    .remote_desktop
+                    .as_ref()?;
+                let root = plugin.install_dir.canonicalize().ok()?;
+                let command = root.join(entry).canonicalize().ok()?;
+                if !command.starts_with(&root) || !command.is_file() {
+                    return None;
+                }
+                Some(oxideterm_remote_desktop::RemoteDesktopProviderManifest {
+                    id: plugin.manifest.id.clone(),
+                    name: plugin.manifest.name.clone(),
+                    description: plugin.manifest.description.clone().unwrap_or_default(),
+                    version: plugin.manifest.version.clone(),
+                    protocol: definition.protocol,
+                    entry: oxideterm_remote_desktop::RemoteDesktopProviderEntry {
+                        command: command.to_string_lossy().into_owned(),
+                        args: vec!["--stdio".into()],
+                        working_dir: Some(root.to_string_lossy().into_owned()),
+                    },
+                    capabilities: definition.capabilities.clone(),
+                    ui: None,
+                })
+            })
+            .collect()
     }
 
     pub fn wasm_activation_plans(&self) -> Vec<NativePluginWasmActivationPlan> {

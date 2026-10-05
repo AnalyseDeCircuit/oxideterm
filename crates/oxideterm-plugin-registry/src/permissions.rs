@@ -76,7 +76,7 @@ fn normalized_requested_capabilities(
     runtime_kind: &str,
 ) -> Result<Vec<String>, String> {
     let mut capabilities = normalize_native_plugin_capabilities(declared_capabilities)?;
-    if runtime_kind == "process"
+    if matches!(runtime_kind, "process" | "acp" | "remote-desktop")
         && capabilities
             .binary_search_by(|candidate| {
                 candidate

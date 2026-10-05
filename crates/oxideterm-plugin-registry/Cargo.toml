@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }

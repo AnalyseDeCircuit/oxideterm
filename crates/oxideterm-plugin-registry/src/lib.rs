@@ -30,16 +30,16 @@ pub use oxideterm_plugin_manifest::{
     NativePluginHostMonitorOutputDef, NativePluginHostMonitorOutputFormat, NativePluginInfo,
     NativePluginInstalledInfo, NativePluginManifest, NativePluginPermissions,
     NativePluginProcessActivationPlan, NativePluginRegistryEntry, NativePluginRegistryIndex,
-    NativePluginRegistryPackage, NativePluginRegistryRelease, NativePluginRuntime,
-    NativePluginRuntimeActivityBarItemContribution, NativePluginRuntimeCommandContribution,
-    NativePluginRuntimeContextMenuContribution, NativePluginRuntimeContextMenuItem,
-    NativePluginRuntimeEventSubscriptionContribution, NativePluginRuntimeKeybindingContribution,
-    NativePluginRuntimeKind, NativePluginRuntimePlan, NativePluginRuntimeSidebarPanelContribution,
-    NativePluginRuntimeStatusItemContribution, NativePluginRuntimeTabViewContribution,
-    NativePluginRuntimeTerminalHookContribution, NativePluginSettingContribution,
-    NativePluginSettingDef, NativePluginSettingOption, NativePluginShortcutContribution,
-    NativePluginShortcutDef, NativePluginSidebarContribution, NativePluginSidebarDef,
-    NativePluginState, NativePluginTabContribution, NativePluginTabDef,
+    NativePluginRegistryPackage, NativePluginRegistryRelease, NativePluginRemoteDesktopDef,
+    NativePluginRuntime, NativePluginRuntimeActivityBarItemContribution,
+    NativePluginRuntimeCommandContribution, NativePluginRuntimeContextMenuContribution,
+    NativePluginRuntimeContextMenuItem, NativePluginRuntimeEventSubscriptionContribution,
+    NativePluginRuntimeKeybindingContribution, NativePluginRuntimeKind, NativePluginRuntimePlan,
+    NativePluginRuntimeSidebarPanelContribution, NativePluginRuntimeStatusItemContribution,
+    NativePluginRuntimeTabViewContribution, NativePluginRuntimeTerminalHookContribution,
+    NativePluginSettingContribution, NativePluginSettingDef, NativePluginSettingOption,
+    NativePluginShortcutContribution, NativePluginShortcutDef, NativePluginSidebarContribution,
+    NativePluginSidebarDef, NativePluginState, NativePluginTabContribution, NativePluginTabDef,
     NativePluginTerminalHooksDef, NativePluginTransportContribution, NativePluginUrlInstallResult,
     NativePluginWasmActivationPlan,
 };
@@ -99,6 +99,14 @@ pub use validation::{
 
 /// Maximum package size accepted by every managed plugin install path.
 pub const NATIVE_PLUGIN_PACKAGE_MAX_BYTES: u64 = PLUGIN_PACKAGE_MAX_BYTES;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativePluginAcpAgent {
+    pub plugin_id: String,
+    pub name: String,
+    pub version: String,
+    pub command: PathBuf,
+}
 
 // Internal modules intentionally share helper functions through the crate root;
 // that keeps the split mechanical while the public API remains explicit above.

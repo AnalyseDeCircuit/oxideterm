@@ -102,6 +102,19 @@ impl WorkspaceApp {
         }
         let settings_path = self.settings_store.path().to_path_buf();
         let cancellation = request.cancellation_token();
+        if self.plugin_entity.read(cx).manager_operation_in_flight() {
+            request.finish(ToolEnvelope::failed(
+                "Another addon management operation is already running",
+            ));
+            return;
+        }
+        let retired_desktops = if args.replace_existing {
+            self.remote_desktop.update(cx, |desktops, cx| {
+                desktops.stop_plugins(Some(&expected_identity), cx)
+            })
+        } else {
+            Vec::new()
+        };
         let receiver = self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.start_managed_package_install(
                 settings_path.clone(),
@@ -110,6 +123,7 @@ impl WorkspaceApp {
                 artifact.bytes,
                 args.replace_existing,
                 cancellation,
+                retired_desktops,
             )
         });
         let Some(receiver) = receiver else {
@@ -235,9 +249,7 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The addon state could not be changed"));
             return;
         }
-        if args.enabled {
-            self.bootstrap_native_plugin_runtime(cx);
-        }
+        self.bootstrap_native_plugin_runtime(cx);
         let registry = self.plugin_entity.read(cx).registry_snapshot();
         let Some(plugin) = registry
             .plugins()
@@ -269,20 +281,53 @@ impl WorkspaceApp {
             return;
         };
         let retain_settings = args.retain_settings.unwrap_or(true);
-        let result = self.plugin_entity.update(cx, |plugins, _cx| {
-            plugins.uninstall_plugin(&plugin_id, !retain_settings, _cx)
-        });
-        if result.is_err() {
-            request.finish(ToolEnvelope::failed("The addon could not be removed"));
+        if self.plugin_entity.read(cx).manager_operation_in_flight() {
+            request.finish(ToolEnvelope::failed(
+                "Another addon management operation is already running",
+            ));
             return;
         }
-        self.public_mcp
-            .remove_addon_ref(&request.client_ref, &args.addon_ref);
-        finish_serialized(
-            request,
-            json!({ "removed": true, "settings_retained": retain_settings }),
-        );
-        cx.notify();
+        let addon_ref = args.addon_ref.clone();
+        if self
+            .plugin_entity
+            .update(cx, |plugins, cx| {
+                plugins.set_plugin_enabled(&plugin_id, false, cx)?;
+                plugins.begin_remote_desktop_removal(&plugin_id);
+                Ok::<_, String>(())
+            })
+            .is_err()
+        {
+            request.finish(ToolEnvelope::failed(
+                "The addon could not be disabled before removal",
+            ));
+            return;
+        }
+        self.stop_acp_plugin(Some(&plugin_id), cx);
+        let workers = self.remote_desktop.update(cx, |desktops, cx| {
+            desktops.stop_plugins(Some(&plugin_id), cx)
+        });
+        let receiver = self.plugin_entity.update(cx, |plugins, cx| {
+            plugins.start_plugin_uninstall(plugin_id, !retain_settings, workers, cx)
+        });
+        cx.spawn(async move |workspace, cx| {
+            let result = receiver.await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                if !matches!(result, Ok(Ok(()))) {
+                    request.finish(ToolEnvelope::failed("The addon could not be removed"));
+                    return;
+                }
+                workspace.bootstrap_native_plugin_runtime(cx);
+                workspace
+                    .public_mcp
+                    .remove_addon_ref(&request.client_ref, &addon_ref);
+                finish_serialized(
+                    request,
+                    json!({ "removed": true, "settings_retained": retain_settings }),
+                );
+                cx.notify();
+            });
+        })
+        .detach();
     }
 }
 

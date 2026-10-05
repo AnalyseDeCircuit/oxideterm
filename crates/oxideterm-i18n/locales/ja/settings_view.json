@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "無効",
       "acp_agent_name": "表示名",
       "acp_agent_command": "コマンド",
+      "acp_agent_plugin": "プラグイン",
+      "acp_agent_plugin_unavailable": "プラグインマネージャーで、このエージェントの ACP プラグインをインストールして有効にしてください。",
       "acp_agent_command_placeholder": "パスまたはコマンド名",
       "acp_agent_cwd": "作業ディレクトリ",
       "acp_agent_cwd_placeholder": "現在のワークスペースを使用",

@@ -11,7 +11,6 @@ members = [
   "crates/oxideterm-app-lock",
   "crates/oxideterm-gpui-markdown",
   "crates/oxideterm-cli",
-  "crates/oxideterm-rdp-helper",
   "crates/oxideterm-pcm-audio",
   "crates/oxideterm-gpui-cloud-sync",
   "crates/oxideterm-gpui-remote-desktop",
@@ -28,7 +27,6 @@ members = [
   "crates/oxideterm-ai",
   "crates/oxideterm-ai-tasks",
   "crates/oxideterm-skills",
-  "crates/oxideterm-acp-adapter",
   "crates/oxideterm-acp-host-tools",
   "crates/oxideterm-public-mcp",
   "crates/oxideterm-editor-core",
@@ -59,7 +57,6 @@ members = [
   "crates/oxideterm-gpui-app",
   "crates/oxideterm-render-policy",
   "crates/oxideterm-remote-desktop",
-  "crates/oxideterm-vnc-helper",
   "crates/oxideterm-settings",
   "crates/oxideterm-settings-model",
   "crates/oxideterm-session-adapter",
@@ -110,7 +107,7 @@ vte = { path = "crates/vte" }
 edition = "2024"
 license = "GPL-3.0-only"
 publish = false
-version = "2.2.1"
+version = "2.2.2"
 
 [workspace.dependencies]
 accesskit = { version = "0.24.0", features = ["enumn"] }

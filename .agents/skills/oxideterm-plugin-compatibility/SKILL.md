@@ -31,7 +31,23 @@ For language extraction, verify the grammar loader, Tree-sitter ABI, and actual
 old-client behavior. A host range cannot replace those checks. Do not assign an
 upper bound to old plugins just because a new plugin or app version was released.
 
+For ACP agent extraction, keep the ACP client, permission decisions and process
+ownership in the host. Agent packages use the dedicated `acp` runtime and speak
+ACP stdio directly; do not route their traffic through the ordinary plugin
+supervisor. Check `registry.acp_agents`, `workspace/acp_plugins.rs`, and
+`workspace/acp_workspace.rs` for startup gating, launch resolution and cleanup.
+Hosts through 2.2.1 cannot load this runtime. Preserve existing agent identities
+and user options when migrating bundled adapters to plugin bindings.
+
 ## Coordinate publication
+
+Remote desktop plugins use `remote-desktop`, not the ordinary plugin supervisor.
+Keep the native viewer, input, credentials and SSH tunnel ownership in the host.
+Require a supported `contributes.remoteDesktop.protocolVersion` and resolve only
+trusted, enabled, compatible installed executables. Stop and reap helper processes
+before updating or removing their files; disable automatic reconnect until a
+compatible provider is available. Keep the existing binary stdio format unchanged
+when extracting helpers. Hosts through 2.2.1 cannot load this runtime.
 
 Plugin creation, release records, and compatibility corrections belong in the
 `AnalyseDeCircuit/oxideterm-plugins` repository. Locate its actual checkout by

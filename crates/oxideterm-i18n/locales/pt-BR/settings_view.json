@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "Desativado",
       "acp_agent_name": "Nome de exibição",
       "acp_agent_command": "Comando",
+      "acp_agent_plugin": "Plugin",
+      "acp_agent_plugin_unavailable": "Instale e ative o plugin ACP deste agente no gerenciador de plugins.",
       "acp_agent_command_placeholder": "Caminho ou nome do comando",
       "acp_agent_cwd": "Diretório de trabalho",
       "acp_agent_cwd_placeholder": "Usar workspace atual",

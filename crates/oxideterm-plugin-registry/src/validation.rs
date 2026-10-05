@@ -49,6 +49,61 @@ pub(crate) fn validate_native_plugin_manifest(
     // Permission declarations cover only sensitive data and side effects; safe
     // redacted host projections remain available without declarations.
     normalize_native_plugin_capabilities(&manifest.permissions.capabilities)?;
+    let desktop = manifest
+        .contributes
+        .as_ref()
+        .and_then(|value| value.remote_desktop.as_ref());
+    let is_desktop = manifest
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.kind == NativePluginRuntimeKind::RemoteDesktop);
+    if is_desktop != desktop.is_some() {
+        return Err("Remote desktop runtime and provider must be declared together".into());
+    }
+    if let Some(desktop) = desktop {
+        if desktop.protocol_version
+            != oxideterm_remote_desktop::REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION
+        {
+            return Err("Unsupported remote desktop plugin protocol version".into());
+        }
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.remote_desktop = None;
+        if ordinary != NativePluginContributes::default() {
+            return Err(
+                "Remote desktop providers cannot declare ordinary plugin contributions".into(),
+            );
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|value| value.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("Remote desktop plugins must declare a host version range".into());
+        }
+    }
+    if manifest
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.kind == NativePluginRuntimeKind::Acp)
+    {
+        // ACP owns its stdio stream and cannot serve the ordinary plugin protocol.
+        if manifest
+            .contributes
+            .as_ref()
+            .is_some_and(|value| value != &NativePluginContributes::default())
+        {
+            return Err("ACP agents cannot declare ordinary plugin contributions".into());
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|value| value.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("ACP plugins must declare a host version range".into());
+        }
+    }
     if let Some(contributes) = &manifest.contributes {
         validate_native_plugin_contributions(contributes)?;
         if let Some(previews) = &contributes.file_previews {
@@ -431,6 +486,8 @@ pub(crate) fn validate_runtime_entry_exists(
     let entry = match runtime_plan {
         NativePluginRuntimePlan::Wasm { entry }
         | NativePluginRuntimePlan::Process { entry }
+        | NativePluginRuntimePlan::Acp { entry }
+        | NativePluginRuntimePlan::RemoteDesktop { entry }
         | NativePluginRuntimePlan::Language { entry } => entry,
         NativePluginRuntimePlan::ManifestOnly
         | NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => return Ok(()),
@@ -1122,6 +1179,12 @@ pub fn native_runtime_plan_for_manifest(
             NativePluginRuntimeKind::Process => NativePluginRuntimePlan::Process {
                 entry: runtime.entry.clone(),
             },
+            NativePluginRuntimeKind::Acp => NativePluginRuntimePlan::Acp {
+                entry: runtime.entry.clone(),
+            },
+            NativePluginRuntimeKind::RemoteDesktop => NativePluginRuntimePlan::RemoteDesktop {
+                entry: runtime.entry.clone(),
+            },
             NativePluginRuntimeKind::ManifestOnly => NativePluginRuntimePlan::ManifestOnly,
             NativePluginRuntimeKind::Language => NativePluginRuntimePlan::Language {
                 entry: runtime.entry.clone(),
@@ -1160,7 +1223,9 @@ pub fn native_plugin_state_for(
             NativePluginState::ReadyManifestOnly
         }
         NativePluginRuntimePlan::Wasm { .. } => NativePluginState::ReadyWasm,
-        NativePluginRuntimePlan::Process { .. } => NativePluginState::ReadyProcess,
+        NativePluginRuntimePlan::Process { .. }
+        | NativePluginRuntimePlan::Acp { .. }
+        | NativePluginRuntimePlan::RemoteDesktop { .. } => NativePluginState::ReadyProcess,
         NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => {
             NativePluginState::UnsupportedLegacyJs
         }
@@ -1196,6 +1261,8 @@ pub fn native_runtime_kind_label(runtime_plan: &NativePluginRuntimePlan) -> &'st
         NativePluginRuntimePlan::Language { .. } => "language",
         NativePluginRuntimePlan::Wasm { .. } => "wasm",
         NativePluginRuntimePlan::Process { .. } => "process",
+        NativePluginRuntimePlan::Acp { .. } => "acp",
+        NativePluginRuntimePlan::RemoteDesktop { .. } => "remote-desktop",
         NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => "legacy-js",
     }
 }

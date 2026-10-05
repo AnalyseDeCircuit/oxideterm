@@ -7,6 +7,8 @@ pub enum NativePluginRuntimePlan {
     Language { entry: String },
     Wasm { entry: String },
     Process { entry: String },
+    Acp { entry: String },
+    RemoteDesktop { entry: String },
     UnsupportedLegacyJs { entry: String },
 }
 

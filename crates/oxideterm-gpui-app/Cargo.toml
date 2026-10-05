@@ -28,7 +28,6 @@ image.workspace = true
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
-oxideterm-acp-adapter = { path = "../oxideterm-acp-adapter" }
 oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-app-lock = { path = "../oxideterm-app-lock" }

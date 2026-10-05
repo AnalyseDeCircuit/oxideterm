@@ -204,6 +204,7 @@ struct AiModelSelectorProbeDelivery {
 }
 
 struct AiAcpAgentProbeDelivery {
+    epoch: u64,
     agent_id: String,
     result: AiAcpAgentProbeResult,
 }
@@ -215,6 +216,7 @@ struct AiAcpAgentProbeResult {
 }
 
 struct AiAcpModelDiscoveryDelivery {
+    epoch: u64,
     conversation_id: String,
     agent_id: String,
     config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
@@ -322,6 +324,9 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     selector_probe_pending: usize,
     next_selector_probe_generation: u64,
     acp_agent_probe_pending: HashSet<String>,
+    acp_agent_epochs: HashMap<String, u64>,
+    acp_probe_tasks: HashMap<String, tokio::task::AbortHandle>,
+    acp_discovery_tasks: HashMap<(String, String), tokio::task::AbortHandle>,
     acp_agent_probe_tx: crate::workspace::delivery::ActiveDeliverySender<AiAcpAgentProbeDelivery>,
     acp_agent_probe_rx: std::sync::mpsc::Receiver<AiAcpAgentProbeDelivery>,
     acp_agent_probe_intents: VecDeque<AiAcpAgentProbeIntent>,
@@ -1109,6 +1114,9 @@ impl AiWorkspaceEntity {
             selector_probe_pending: 0,
             next_selector_probe_generation: 0,
             acp_agent_probe_pending: HashSet::new(),
+            acp_agent_epochs: HashMap::new(),
+            acp_probe_tasks: HashMap::new(),
+            acp_discovery_tasks: HashMap::new(),
             acp_agent_probe_tx,
             acp_agent_probe_rx,
             acp_agent_probe_intents: VecDeque::new(),
@@ -1169,6 +1177,15 @@ impl AiWorkspaceEntity {
         entity.schedule_provider_key_status_delivery(cx);
         entity.schedule_selector_probe_delivery(cx);
         entity.schedule_acp_agent_probe_delivery(cx);
+        cx.on_release(|entity, _cx| {
+            for (_, task) in entity.acp_probe_tasks.drain() {
+                task.abort();
+            }
+            for (_, task) in entity.acp_discovery_tasks.drain() {
+                task.abort();
+            }
+        })
+        .detach();
         entity.schedule_acp_model_discovery_delivery(cx);
         entity.schedule_knowledge_reindex_delivery(cx);
         entity.schedule_terminal_inline_delivery(cx);
@@ -2973,11 +2990,40 @@ impl AiWorkspaceEntity {
         self.acp_agent_probe_pending.contains(agent_id)
     }
 
+    pub(in crate::workspace) fn invalidate_acp_agent_metadata(&mut self, agent_id: &str) {
+        *self
+            .acp_agent_epochs
+            .entry(agent_id.to_string())
+            .or_default() += 1;
+        if let Some(task) = self.acp_probe_tasks.remove(agent_id) {
+            task.abort();
+        }
+        self.acp_discovery_tasks.retain(|(_, id), task| {
+            if id == agent_id {
+                task.abort();
+                false
+            } else {
+                true
+            }
+        });
+        self.acp_agent_probe_pending.remove(agent_id);
+        self.acp_model_discovery_pending
+            .retain(|(_, id)| id != agent_id);
+        self.acp_model_options.retain(|(_, id), _| id != agent_id);
+        self.acp_agent_probe_intents
+            .retain(|intent| intent.agent_id != agent_id);
+        self.acp_model_discovery_intents
+            .retain(|intent| intent.agent_id != agent_id);
+        self.model_ui.selector_status_signature = None;
+    }
+
     pub(in crate::workspace) fn request_acp_agent_probe(
         &mut self,
         agent: oxideterm_settings::AcpAgentConfig,
     ) -> bool {
-        if !self.visibility.settings_surface || self.acp_agent_probe_pending.contains(&agent.id) {
+        if !(self.visibility.settings_surface || self.visibility.model_selector_surface)
+            || self.acp_agent_probe_pending.contains(&agent.id)
+        {
             return false;
         }
         let agent_id = agent.id.clone();
@@ -2998,7 +3044,13 @@ impl AiWorkspaceEntity {
         };
         self.acp_agent_probe_pending.insert(agent_id.clone());
         let worker_tx = self.acp_agent_probe_tx.clone();
-        self.task_runtime.spawn(async move {
+        let epoch = self
+            .acp_agent_epochs
+            .get(&agent_id)
+            .copied()
+            .unwrap_or_default();
+        let task_agent_id = agent_id.clone();
+        let task = self.task_runtime.spawn(async move {
             let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
                 Ok(launcher) => {
                     if !oxideterm_ai::acp_launch_command_available(launcher.config())
@@ -3033,8 +3085,14 @@ impl AiWorkspaceEntity {
                 }
                 Err(_) => ai_acp_probe_error_result("config"),
             };
-            let _ = worker_tx.send(AiAcpAgentProbeDelivery { agent_id, result });
+            let _ = worker_tx.send(AiAcpAgentProbeDelivery {
+                epoch,
+                agent_id,
+                result,
+            });
         });
+        self.acp_probe_tasks
+            .insert(task_agent_id, task.abort_handle());
         true
     }
 
@@ -3100,7 +3158,13 @@ impl AiWorkspaceEntity {
             cwd: agent.cwd.map(std::path::PathBuf::from),
         };
         let worker_tx = self.acp_model_discovery_tx.clone();
-        self.task_runtime.spawn(async move {
+        let epoch = self
+            .acp_agent_epochs
+            .get(&agent_id)
+            .copied()
+            .unwrap_or_default();
+        let task_key = (conversation_id.clone(), agent_id.clone());
+        let task = self.task_runtime.spawn(async move {
             let config_options = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
                 Ok(launcher) => oxideterm_ai::discover_acp_session_config_options(
                     launcher,
@@ -3117,11 +3181,14 @@ impl AiWorkspaceEntity {
                 Err(_) => None,
             };
             let _ = worker_tx.send(AiAcpModelDiscoveryDelivery {
+                epoch,
                 conversation_id,
                 agent_id,
                 config_options,
             });
         });
+        self.acp_discovery_tasks
+            .insert(task_key, task.abort_handle());
         true
     }
 
@@ -4336,6 +4403,16 @@ impl AiWorkspaceEntity {
             crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
         );
         for delivery in drain.items {
+            if self
+                .acp_agent_epochs
+                .get(&delivery.agent_id)
+                .copied()
+                .unwrap_or_default()
+                != delivery.epoch
+            {
+                continue;
+            }
+            self.acp_probe_tasks.remove(&delivery.agent_id);
             self.acp_agent_probe_pending.remove(&delivery.agent_id);
             self.acp_agent_probe_intents
                 .push_back(AiAcpAgentProbeIntent {
@@ -4389,6 +4466,17 @@ impl AiWorkspaceEntity {
             crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
         );
         for delivery in drain.items {
+            if self
+                .acp_agent_epochs
+                .get(&delivery.agent_id)
+                .copied()
+                .unwrap_or_default()
+                != delivery.epoch
+            {
+                continue;
+            }
+            self.acp_discovery_tasks
+                .remove(&(delivery.conversation_id.clone(), delivery.agent_id.clone()));
             self.acp_model_discovery_pending
                 .remove(&(delivery.conversation_id.clone(), delivery.agent_id.clone()));
             self.acp_model_discovery_intents
@@ -5386,10 +5474,55 @@ pub(in crate::workspace) mod entity_tests {
         }
     }
 
+    #[gpui::test]
+    fn acp_plugin_change_discards_old_probe_results_and_cancels_owned_probes(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = test_runtime();
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(runtime.clone(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let task = runtime.spawn(std::future::pending::<()>());
+        entity.update(cx, |entity, cx| {
+            entity
+                .acp_probe_tasks
+                .insert("agent".into(), task.abort_handle());
+            entity.acp_agent_probe_pending.insert("agent".into());
+            entity
+                .acp_agent_probe_tx
+                .send(AiAcpAgentProbeDelivery {
+                    epoch: 0,
+                    agent_id: "agent".into(),
+                    result: ai_acp_probe_error_result("initialize"),
+                })
+                .unwrap();
+            entity.invalidate_acp_agent_metadata("agent");
+            entity
+                .acp_agent_probe_tx
+                .send(AiAcpAgentProbeDelivery {
+                    epoch: 1,
+                    agent_id: "agent".into(),
+                    result: ai_acp_probe_error_result("config"),
+                })
+                .unwrap();
+            entity.drain_acp_agent_probe_results(cx);
+            let intents = entity.take_acp_agent_probe_intents();
+            assert_eq!(
+                intents
+                    .iter()
+                    .map(|intent| (intent.agent_id.as_str(), intent.last_error_kind.as_deref()))
+                    .collect::<Vec<_>>(),
+                [("agent", Some("config"))]
+            );
+        });
+        assert!(runtime.block_on(task).unwrap_err().is_cancelled());
+    }
+
     fn test_acp_agent(agent_id: &str) -> oxideterm_settings::AcpAgentConfig {
         oxideterm_settings::AcpAgentConfig {
             id: agent_id.to_string(),
             display_name: "Test Agent".to_string(),
+            plugin_id: None,
             command: "test-agent".to_string(),
             args: Vec::new(),
             env: std::collections::BTreeMap::new(),

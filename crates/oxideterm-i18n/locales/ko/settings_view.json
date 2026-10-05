@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "비활성화됨",
       "acp_agent_name": "표시 이름",
       "acp_agent_command": "명령",
+      "acp_agent_plugin": "플러그인",
+      "acp_agent_plugin_unavailable": "플러그인 관리자에서 이 에이전트의 ACP 플러그인을 설치하고 활성화하세요.",
       "acp_agent_command_placeholder": "경로 또는 명령 이름",
       "acp_agent_cwd": "작업 디렉터리",
       "acp_agent_cwd_placeholder": "현재 작업 공간 사용",

@@ -260,6 +260,15 @@ impl WorkspaceApp {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false);
             let settings_path = self.settings_store.path().to_path_buf();
+            if self.plugin_entity.read(cx).manager_operation_in_flight() {
+                return Err("Another plugin operation is already running.".to_string());
+            }
+            let retired_desktops = if overwrite {
+                self.remote_desktop
+                    .update(cx, |desktops, cx| desktops.stop_plugins(None, cx))
+            } else {
+                Vec::new()
+            };
             let accepted = self.plugin_entity.update(cx, |plugins, _cx| {
                 plugins.start_package_install(
                     settings_path,
@@ -267,6 +276,7 @@ impl WorkspaceApp {
                     zeroize::Zeroizing::new(package_url.to_string()),
                     checksum,
                     overwrite,
+                    retired_desktops,
                 )
             });
             if !accepted {
@@ -287,19 +297,46 @@ impl WorkspaceApp {
                         plugins.set_plugin_enabled(plugin_id, enabled, _cx)
                     })
                     .map(|_| {
-                        if enabled {
-                            self.bootstrap_native_plugin_runtime(cx);
-                        }
+                        self.bootstrap_native_plugin_runtime(cx);
                     })
             }
             "uninstall" => {
+                if self.plugin_entity.read(cx).manager_operation_in_flight() {
+                    return Err("Another plugin operation is already running.".to_string());
+                }
                 let remove_storage = arguments
                     .get("remove_storage")
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
-                self.plugin_entity.update(cx, |plugins, _cx| {
-                    plugins.uninstall_plugin(plugin_id, remove_storage, _cx)
+                self.plugin_entity.update(cx, |plugins, cx| {
+                    plugins.set_plugin_enabled(plugin_id, false, cx)?;
+                    plugins.begin_remote_desktop_removal(plugin_id);
+                    Ok::<_, String>(())
+                })?;
+                self.stop_acp_plugin(Some(plugin_id), cx);
+                let workers = self.remote_desktop.update(cx, |desktops, cx| {
+                    desktops.stop_plugins(Some(plugin_id), cx)
+                });
+                let plugin_id = plugin_id.to_string();
+                let receiver = self.plugin_entity.update(cx, |plugins, cx| {
+                    plugins.start_plugin_uninstall(plugin_id.clone(), remove_storage, workers, cx)
+                });
+                cx.spawn(async move |workspace, cx| {
+                    let result = receiver.await;
+                    let _ = workspace.update(cx, |workspace, cx| {
+                        if let Ok(Err(error)) = result {
+                            workspace.plugin_entity.update(cx, |plugins, _cx| {
+                                plugins
+                                    .registry_mut()
+                                    .record_manager_error(plugin_id, error)
+                            });
+                        }
+                        workspace.bootstrap_native_plugin_runtime(cx);
+                        cx.notify();
+                    });
                 })
+                .detach();
+                Ok(())
             }
             "invoke" => {
                 let command_id = arguments

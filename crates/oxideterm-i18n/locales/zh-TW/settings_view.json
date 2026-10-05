@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "已停用",
       "acp_agent_name": "顯示名稱",
       "acp_agent_command": "命令",
+      "acp_agent_plugin": "外掛",
+      "acp_agent_plugin_unavailable": "請在外掛管理員中安裝並啟用此智慧代理的 ACP 外掛。",
       "acp_agent_command_placeholder": "路徑或命令名稱",
       "acp_agent_cwd": "工作目錄",
       "acp_agent_cwd_placeholder": "使用目前工作區",

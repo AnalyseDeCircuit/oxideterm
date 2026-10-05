@@ -1243,6 +1243,8 @@
       "acp_agent_disabled": "Desactivado",
       "acp_agent_name": "Nombre visible",
       "acp_agent_command": "Comando",
+      "acp_agent_plugin": "Complemento",
+      "acp_agent_plugin_unavailable": "Instala y activa el complemento ACP de este agente en el gestor de complementos.",
       "acp_agent_command_placeholder": "Ruta o nombre del comando",
       "acp_agent_cwd": "Directorio de trabajo",
       "acp_agent_cwd_placeholder": "Usar espacio de trabajo actual",

@@ -19,6 +19,7 @@ mod graphics;
 mod graphics_vnc;
 mod history_quit;
 pub(crate) use history_quit::request_app_quit;
+mod acp_plugins;
 mod ide;
 mod ime;
 mod knowledge;

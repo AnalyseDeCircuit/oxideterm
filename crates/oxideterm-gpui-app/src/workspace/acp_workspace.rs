@@ -104,6 +104,8 @@ pub(in crate::workspace) struct AcpWorkspaceEntity {
     diagnostics: HashMap<String, VecDeque<String>>,
     auth_methods: HashMap<String, Vec<oxideterm_ai::AcpAuthMethod>>,
     deliveries: VecDeque<AcpWorkspaceDelivery>,
+    plugin_agents: HashMap<String, super::plugin_host::NativePluginAcpAgent>,
+    updating_plugins: std::collections::HashSet<String>,
 }
 
 struct AcpApplicationToolBridge {
@@ -249,6 +251,79 @@ impl AcpWorkspaceEntity {
             diagnostics: HashMap::new(),
             auth_methods: HashMap::new(),
             deliveries: VecDeque::new(),
+            plugin_agents: HashMap::new(),
+            updating_plugins: std::collections::HashSet::new(),
+        }
+    }
+
+    pub(in crate::workspace) fn begin_plugin_update(&mut self, plugin_id: Option<&str>) {
+        if let Some(id) = plugin_id {
+            self.updating_plugins.insert(id.into());
+        } else {
+            self.updating_plugins
+                .extend(self.plugin_agents.keys().cloned());
+        }
+    }
+
+    pub(in crate::workspace) fn finish_plugin_update(&mut self) {
+        self.updating_plugins.clear();
+    }
+
+    pub(in crate::workspace) fn plugin_is_updating(&self, plugin_id: &str) -> bool {
+        self.updating_plugins.contains(plugin_id)
+    }
+
+    pub(in crate::workspace) fn sync_plugins(
+        &mut self,
+        plugins: Vec<super::plugin_host::NativePluginAcpAgent>,
+        bindings: &[(String, String)],
+        cx: &mut Context<Self>,
+    ) -> Vec<String> {
+        let current = plugins
+            .into_iter()
+            .map(|plugin| (plugin.plugin_id.clone(), plugin))
+            .collect::<HashMap<_, _>>();
+        let changed = bindings
+            .iter()
+            .filter(|(_, plugin_id)| self.plugin_agents.get(plugin_id) != current.get(plugin_id))
+            .map(|(agent_id, _)| agent_id.clone())
+            .collect::<Vec<_>>();
+        self.stop_agents(&changed, cx);
+        self.plugin_agents = current;
+        changed
+    }
+
+    pub(in crate::workspace) fn stop_agents(
+        &mut self,
+        agent_ids: &[String],
+        cx: &mut Context<Self>,
+    ) {
+        for agent_id in agent_ids {
+            let threads = self
+                .threads
+                .iter()
+                .filter(|(_, thread)| &thread.agent_id == agent_id)
+                .map(|(id, thread)| (id.clone(), thread.clone()))
+                .collect::<Vec<_>>();
+            for (thread_id, thread) in threads {
+                if let Some(turn_id) = &thread.active_turn_id {
+                    // Complete the UI delivery before releasing routes and killing the process.
+                    self.receive_event(
+                        oxideterm_ai::AcpManagedEvent::TurnFinished {
+                            agent_id: agent_id.clone(),
+                            thread_id: thread_id.clone(),
+                            turn_id: turn_id.clone(),
+                            result: Err(oxideterm_ai::AcpConnectionError::Unavailable),
+                        },
+                        cx,
+                    );
+                }
+                self.release_thread_resources(&thread_id, &thread);
+                self.threads.remove(&thread_id);
+            }
+            self.manager.shutdown_agent(agent_id);
+            self.active_connection_ids.remove(agent_id);
+            self.auth_methods.remove(agent_id);
         }
     }
 
@@ -1106,6 +1181,76 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
     use gpui::AppContext;
+
+    #[gpui::test]
+    fn acp_plugin_replacement_finishes_its_turn_and_keeps_other_agents(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let entity = cx.new(|cx| AcpWorkspaceEntity::new(runtime.clone(), cx));
+        entity.update(cx, |entity, cx| {
+            let old = super::super::plugin_host::NativePluginAcpAgent {
+                plugin_id: "com.example.agent".into(),
+                name: "Agent".into(),
+                version: "1.0.0".into(),
+                command: "/plugin/agent".into(),
+            };
+            entity
+                .plugin_agents
+                .insert(old.plugin_id.clone(), old.clone());
+            let mut thread = AcpThreadSnapshot::new(
+                "configured-agent".into(),
+                "/project".into(),
+                Default::default(),
+            );
+            thread.active_turn_id = Some("active-turn".into());
+            entity.threads.insert("chat".into(), thread);
+            entity.threads.insert(
+                "other-chat".into(),
+                AcpThreadSnapshot::new("other-agent".into(), "/other".into(), Default::default()),
+            );
+            entity.turn_routes.insert(
+                "active-turn".into(),
+                AcpTurnRoute {
+                    generation: 7,
+                    conversation_id: "chat".into(),
+                    assistant_id: "reply".into(),
+                },
+            );
+            let bindings = [("configured-agent".into(), old.plugin_id.clone())];
+            assert!(
+                entity
+                    .sync_plugins(vec![old.clone()], &bindings, cx)
+                    .is_empty()
+            );
+            assert_eq!(
+                entity.threads["chat"].active_turn_id.as_deref(),
+                Some("active-turn")
+            );
+            let mut updated = old;
+            updated.version = "1.1.0".into();
+            assert_eq!(
+                entity.sync_plugins(vec![updated], &bindings, cx),
+                ["configured-agent"]
+            );
+            assert!(!entity.threads.contains_key("chat"));
+            assert_eq!(entity.threads["other-chat"].agent_id, "other-agent");
+            let delivery = entity.deliveries.pop_front().unwrap();
+            assert_eq!(delivery.route.unwrap().assistant_id, "reply");
+            assert!(matches!(
+                delivery.event,
+                oxideterm_ai::AcpManagedEvent::TurnFinished {
+                    result: Err(oxideterm_ai::AcpConnectionError::Unavailable),
+                    ..
+                }
+            ));
+        });
+    }
 
     #[test]
     fn acp_application_tools_match_the_provider_catalog() {

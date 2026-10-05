@@ -781,7 +781,7 @@ IDE 文件操作可以使用远端文件层，但 IDE 不是简单 SFTP 表格�
 RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../design/remote-desktop-boundary.zh-Hans.md)。Native 当前应把视觉远程能力分成三条相关但独立的路径：
 
 - **WSL 图形**：`oxideterm-wsl-graphics` 拥有 WSL 发行版探测、VNC server 启动、桌面/应用子进程和清理。
-- **远程桌面**：`oxideterm-remote-desktop` 和 `oxideterm-gpui-remote-desktop` 负责共享模型、查看器状态和 provider registry；`oxideterm-rdp-helper` 与 `oxideterm-vnc-helper` 通过 stdio 边界负责协议引擎。RDP 对当前兼容范围之外的集成返回明确的 unsupported 错误，VNC 使用直接 TCP/RFB 路径。
+- **远程桌面**：`oxideterm-remote-desktop` 和 `oxideterm-gpui-remote-desktop` 负责共享模型、查看器状态与二进制传输。协议引擎在市场仓库的 `plugins/rdp` 和 `plugins/vnc` 中独立分发，通过受信任的插件注册表发现，由远程桌面会话启动。连接表单提示所需插件是否可用；已保存连接、凭据、SSH 网关和原生查看器保持原有行为。
 - **SSH X11 转发**：`oxideterm-x11-forwarding` 拥有 DISPLAY、xauth、假 cookie、setup rewrite 和 SSH X11 channel 桥接语义；它不是完整桌面查看器。
 
 ### 职责
@@ -1216,7 +1216,7 @@ flowchart TB
 | 转发 | `oxideterm-forwarding`, 应用转发模块 | 规则是配置；监听器是运行时状态 |
 | 提权凭据 | 设置提权页面、终端提权提示、凭据感知存储 | 作用域和提示匹配器是配置；secret 值留在普通设置之外 |
 | 终端 modem 传输 | `oxideterm-modem-transfer`, `oxideterm-gpui-terminal` modem worker | 协议状态属于终端运行时；文件选择和进度属于 UI |
-| 图形会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, 应用图形/远程桌面模块 | WSL 生命周期、远程协议 helper、viewer framebuffer 和终端缓冲区各自归属清晰 |
+| 图形会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, 市场仓库的 `plugins/rdp`、`plugins/vnc`, 应用图形/远程桌面模块 | WSL 生命周期、远程协议 helper、viewer framebuffer 和终端缓冲区各自归属清晰 |
 | 插件 | `oxideterm-plugin-*`, 插件管理器和生命周期模块 | manifest、设置、宿主 API 调用和插件凭据有各自边界 |
 | 云同步 | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, 应用云同步模块 | 同步计划、备份创建和应用步骤都是显式控制平面操作 |
 | 便携运行时 | `oxideterm-portable-runtime`, 设置中的便携运行时模块 | 便携元数据和加密载荷处理与普通设置页分离 |
@@ -1848,12 +1848,12 @@ flowchart LR
 | SFTP 与传输 | `oxideterm-sftp` |
 | 保存连接 | `oxideterm-connections` |
 | 转发 | `oxideterm-forwarding`, 应用转发页面 |
-| 图形和远程桌面会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, `oxideterm-rdp-helper`, `oxideterm-vnc-helper`, 应用图形/远程桌面页面 |
+| 图形和远程桌面会话 | `oxideterm-wsl-graphics`, `oxideterm-remote-desktop`, `oxideterm-gpui-remote-desktop`, 市场仓库的 `plugins/rdp`、`plugins/vnc`, 应用图形/远程桌面页面 |
 | IDE 和编辑器 | `oxideterm-gpui-ide`, `oxideterm-gpui-editor`, `oxideterm-ide-core`, `oxideterm-ide-fs`, `oxideterm-editor-*` |
 | 知识库工作区与 Markdown | `oxideterm-ai` RAG 领域、`oxideterm-gpui-markdown`、`oxideterm-gpui-editor`、`workspace/knowledge.rs` |
 | 设置和提权凭据 | `oxideterm-settings`, `oxideterm-settings-model`, `oxideterm-gpui-settings-view`, 应用凭据感知边界 |
 | AI、RAG、MCP、推理和工具策略 | `oxideterm-ai`, `oxideterm-ai-tasks`, `oxideterm-skills`, 应用 AI 侧边栏 |
-| ACP agent session 和主机工具 | `oxideterm-acp-adapter`, `oxideterm-acp-host-tools`, `workspace/acp_workspace.rs` |
+| ACP 智能体会话和主机工具 | `oxideterm-acp-host-tools`、`workspace/acp_workspace.rs`、`workspace/acp_plugins.rs`；Codex 和 Claude Code 适配器在插件仓库中独立打包 |
 | 插件 | `oxideterm-plugin-manifest`, `oxideterm-plugin-registry`, `oxideterm-plugin-host-api`, `oxideterm-plugin-wasm-runtime`, 应用插件 Entity |
 | 云同步和便携运行时 | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
 | 通知与更新 | `oxideterm-notification-center`, `oxideterm-update` |

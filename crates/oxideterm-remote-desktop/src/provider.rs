@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use crate::RemoteDesktopProtocol;
 
 pub const REMOTE_DESKTOP_PROVIDER_MANIFEST: &str = "remote_desktop_provider.json";
+pub const REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION: u32 = 1;
 const BUILTIN_RDP_PROVIDER_ID: &str = "builtin-rdp";
 const BUILTIN_VNC_PROVIDER_ID: &str = "builtin-vnc";
 

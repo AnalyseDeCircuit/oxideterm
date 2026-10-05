@@ -353,6 +353,34 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn open_remote_desktop_plugin(
+        &mut self,
+        protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let protocol = match protocol {
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => "rdp",
+            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => "vnc",
+        };
+        self.open_plugin_manager_tab(window, cx);
+        self.update_plugin_manager_state(cx, |manager| {
+            manager.previous_tab = manager.active_tab;
+            manager.active_tab = NativePluginManagerTab::Marketplace;
+            manager.marketplace_search_draft = format!("com.oxideterm.remote-desktop.{protocol}");
+            manager.marketplace_tag = Some("remote-desktop".to_string());
+            manager.marketplace_updates_only = false;
+            manager.pagination[1].page = 0;
+            manager.section_list_state.splice(
+                PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
+                    ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
+                1,
+            );
+        });
+        self.start_native_plugin_marketplace_load(cx);
+        cx.notify();
+    }
+
     pub(super) fn render_plugin_manager_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
         self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
@@ -1103,6 +1131,8 @@ impl WorkspaceApp {
             "host-sources" => self.i18n.t("plugin.marketplace_sources"),
             "workspace" => self.i18n.t("plugin.marketplace_workspace"),
             "utilities" => self.i18n.t("plugin.marketplace_utilities"),
+            "acp" => self.i18n.t("plugin.marketplace_acp"),
+            "remote-desktop" => self.i18n.t("plugin.marketplace_remote_desktop"),
             _ => tag.to_string(),
         }
     }
@@ -2405,6 +2435,19 @@ impl WorkspaceApp {
             return;
         }
 
+        if overwrite {
+            self.stop_acp_plugin(expected_id.as_deref(), cx);
+            self.acp_entity.update(cx, |entity, _cx| {
+                entity.begin_plugin_update(expected_id.as_deref())
+            });
+        }
+        let retired_desktops = if overwrite {
+            self.remote_desktop.update(cx, |desktops, cx| {
+                desktops.stop_plugins(expected_id.as_deref(), cx)
+            })
+        } else {
+            Vec::new()
+        };
         let settings_path = self.settings_store.path().to_path_buf();
         let message = self.i18n.t("plugin.installing");
         self.update_plugin_manager_state(cx, |manager| {
@@ -2420,6 +2463,7 @@ impl WorkspaceApp {
                 download_url,
                 checksum,
                 overwrite,
+                retired_desktops,
             )
         });
         debug_assert!(started, "manager operation gate changed before start");
@@ -2491,6 +2535,8 @@ impl WorkspaceApp {
     ) {
         match event {
             plugin_entity::PluginWorkspaceEvent::ManagerDeliveryReady => {
+                self.acp_entity
+                    .update(cx, |entity, _cx| entity.finish_plugin_update());
                 let settings_path = self.settings_store.path();
                 let i18n = &self.i18n;
                 let bootstrap_runtime = self.plugin_entity.update(cx, |plugins, _cx| {
@@ -2797,9 +2843,7 @@ impl WorkspaceApp {
                                                 .record_manager_error(plugin_id.clone(), error);
                                         });
                                     } else {
-                                        if next_enabled {
-                                            this.bootstrap_native_plugin_runtime(cx);
-                                        }
+                                        this.bootstrap_native_plugin_runtime(cx);
                                         let success_key = if next_enabled {
                                             "plugin.enable_success"
                                         } else {
@@ -2827,17 +2871,50 @@ impl WorkspaceApp {
                                     // Tauri's row deletes through the plugin API and leaves
                                     // storage cleanup to the manager flow. Native mirrors the
                                     // file removal path while preserving settings for now.
-                                    let result = this.plugin_entity.update(cx, |plugins, _cx| {
-                                        plugins.uninstall_plugin(&uninstall_plugin_id, false, _cx)
-                                    });
-                                    if let Err(error) = result {
-                                        this.plugin_entity.update(cx, |plugins, _cx| {
-                                            plugins.registry_mut().record_manager_error(
-                                                uninstall_plugin_id.clone(),
-                                                error,
-                                            );
-                                        });
+                                    if this.plugin_entity.read(cx).manager_operation_in_flight() {
+                                        return;
                                     }
+                                    this.stop_acp_plugin(Some(&uninstall_plugin_id), cx);
+                                    let _ = this.plugin_entity.update(cx, |plugins, cx| {
+                                        let result = plugins.set_plugin_enabled(
+                                            &uninstall_plugin_id,
+                                            false,
+                                            cx,
+                                        );
+                                        if result.is_ok() {
+                                            plugins
+                                                .begin_remote_desktop_removal(&uninstall_plugin_id);
+                                        }
+                                        result
+                                    });
+                                    let workers = this.remote_desktop.update(cx, |desktops, cx| {
+                                        desktops.stop_plugins(Some(&uninstall_plugin_id), cx)
+                                    });
+                                    let uninstall_plugin_id = uninstall_plugin_id.clone();
+                                    let receiver = this.plugin_entity.update(cx, |plugins, cx| {
+                                        plugins.start_plugin_uninstall(
+                                            uninstall_plugin_id.clone(),
+                                            false,
+                                            workers,
+                                            cx,
+                                        )
+                                    });
+                                    cx.spawn(async move |workspace, cx| {
+                                        let result = receiver.await;
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            if let Ok(Err(error)) = result {
+                                                this.plugin_entity.update(cx, |plugins, _cx| {
+                                                    plugins.registry_mut().record_manager_error(
+                                                        uninstall_plugin_id,
+                                                        error,
+                                                    )
+                                                });
+                                            }
+                                            this.bootstrap_native_plugin_runtime(cx);
+                                            cx.notify();
+                                        });
+                                    })
+                                    .detach();
                                     cx.stop_propagation();
                                     cx.notify();
                                 })),
