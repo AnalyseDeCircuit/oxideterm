@@ -13,6 +13,8 @@ OxideTerm 2.2.1 完善了插件市场、按需语言支持和文件预览，新�
 
 - 插件市场和已安装列表统一采用紧凑行布局，保留介绍、版本、状态与操作入口，展开详情减少重复说明和嵌套容器。分类来自市场索引，已安装插件也可以按分类筛选。
 - 两个列表均支持分页，默认每页 10 项，可自定义每页数量并直接跳转页码；每页数量设置放在列表底部。启用、禁用等结果提示使用插件名称。
+- 修复插件管理器搜索框及分页输入框获得焦点后无法输入文字的问题。
+- 刷新插件列表或启用、禁用、卸载其他插件时，保留未发生变化的运行中插件入口和界面，修复 Toolbox 等插件报“标签页未声明”的问题。
 - 插件入口集中排列在内置工具下方，以分隔线区分；修复插件侧栏面板声明底部位置却显示在上方的问题。插件标签页复用应用统一页头、原生控件和主题。
 - 将 C、C++、C#、CSS、Common Lisp、Elixir、Go、HTML、Java、JavaScript、Objective-C、Perl、PHP、R、Ruby、Rust、Scala、Swift、TypeScript、TSX、Zig 共 21 种语言的语法支持移入独立插件；另增加 Nginx、Terraform/HCL 和 Protobuf 的识别与插件入口。
 - 继续内置 Bash、Zsh、Fish、PowerShell、JSON、YAML、TOML、Markdown、Dockerfile、Make、CMake、Diff、Python、Lua、SQL 共 15 种语言。外置语言缺少插件时仍可编辑文件，并通过语言插件提示补装语法支持。
@@ -21,6 +23,7 @@ OxideTerm 2.2.1 完善了插件市场、按需语言支持和文件预览，新�
 #### 🔎 原生文件预览与插件工作区
 
 - 本地文件管理器和 SFTP 的文件预览入口支持调用已安装的 PDF、SQLite、证书和二进制检查插件，无需为每种文件打开额外工作区。
+- 本地代码预览也会显示缺少语言支持的安装入口；只读预览接入原生编辑器，并在安装语言插件后更新高亮。
 - PDF 预览支持翻页；SQLite 使用原生表格展示表和分页数据，保持只读。远程数据库存在非空 WAL、回滚日志或下载期间发生变化时会拒绝预览，避免展示不完整的数据库副本。
 - 证书预览支持浏览同一文件中的多个证书，分别展示有效期和详细字段；有效期不等同于系统信任或吊销检查。二进制检查可展示格式、架构和节区，并结合现有十六进制预览定位文件偏移。
 - 关闭预览会取消相关后台任务并释放远程临时文件，继续使用共享 SSH 连接的终端和其他消费者不受影响。进程插件沿用启用时的本机代码信任确认。
@@ -72,6 +75,8 @@ OxideTerm 2.2.1 improves the plugin marketplace, on-demand language support, and
 
 - The marketplace and installed-plugin pages use compact rows with descriptions, versions, status, and actions. Expanded details remove repeated descriptions and nested containers. Categories come from the catalog and also filter installed plugins.
 - Both lists support pagination, defaulting to 10 entries per page, with a custom page size and direct page navigation. Page-size controls appear below the list, and enable/disable notifications use plugin names.
+- Fixed focused search and pagination fields in the plugin manager not accepting text input.
+- Refreshing the plugin list or enabling, disabling, or uninstalling another plugin preserves unchanged running plugins' navigation entries and views, fixing undeclared-tab errors in plugins such as Toolbox.
 - Plugin navigation entries are grouped below built-in tools with a separator. Plugin sidebar panels now honor their declared bottom position. Plugin tabs reuse the application's page headers, native controls, and themes.
 - Moved syntax support for 21 languages into independent plugins: C, C++, C#, CSS, Common Lisp, Elixir, Go, HTML, Java, JavaScript, Objective-C, Perl, PHP, R, Ruby, Rust, Scala, Swift, TypeScript, TSX, and Zig. Added file recognition and plugin entry points for Nginx, Terraform/HCL, and Protobuf.
 - Kept 15 languages built in: Bash, Zsh, Fish, PowerShell, JSON, YAML, TOML, Markdown, Dockerfile, Make, CMake, Diff, Python, Lua, and SQL. Files remain editable when an external language plugin is missing, with a prompt to install syntax support.
@@ -80,6 +85,7 @@ OxideTerm 2.2.1 improves the plugin marketplace, on-demand language support, and
 #### 🔎 Native file previews and plugin workspaces
 
 - Local file-manager and SFTP previews can use installed PDF, SQLite, certificate, and binary-inspection plugins through the existing preview entry point.
+- Local code previews also offer installation of missing language support. Read-only previews use the native editor and update highlighting after a language plugin is installed.
 - PDF previews support page navigation. SQLite previews provide read-only native tables with table selection and pagination. Remote databases with nonempty WAL or rollback journals, or changes during download, are rejected to avoid displaying an incomplete copy.
 - Certificate previews browse multiple certificates in one file and show validity dates separately from trust or revocation verification. Binary inspection displays format, architecture, and sections, with offset navigation through the existing hexadecimal preview.
 - Closing a preview cancels its background work and releases remote temporary files without disconnecting other consumers of the shared SSH connection. Process plugins retain the existing enable-time approval for trusted local code.
