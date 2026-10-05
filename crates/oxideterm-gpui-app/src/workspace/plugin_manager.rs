@@ -3470,6 +3470,84 @@ fn plugin_manager_palette_alpha(color: u32, alpha: u32) -> Rgba {
 mod tests {
     use super::*;
 
+    #[gpui::test]
+    fn plugin_manager_fields_receive_platform_text(cx: &mut gpui::TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_PLUGIN_INPUT_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Workspace startup must not discover the user's settings or installed plugins.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "plugin input regression failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(std::path::PathBuf::from(fixture_dir)));
+        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
+        settings.save().unwrap();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_plugin_manager_tab(window, cx);
+                workspace.focus_settings_input(
+                    SettingsInput::NativePluginMarketplaceSearch,
+                    String::new(),
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_input("rust语言");
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.plugin_manager_state(cx).marketplace_search_draft,
+                "rust语言"
+            );
+        });
+        cx.simulate_keystrokes("backspace");
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.plugin_manager_state(cx).marketplace_search_draft,
+                "rust语"
+            );
+        });
+        for input in [
+            SettingsInput::NativePluginInstalledPageSize,
+            SettingsInput::NativePluginMarketplacePageSize,
+        ] {
+            workspace.update(cx, |workspace, cx| {
+                workspace.focus_settings_input(input, String::new(), cx);
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_input("25");
+            cx.simulate_keystrokes("enter");
+            workspace.update(cx, |workspace, cx| {
+                assert_eq!(workspace.current_settings_input_value(input, cx), "25");
+            });
+        }
+    }
+
     #[test]
     fn plugin_pagination_keeps_order_and_clamps_after_removal() {
         let plugins = (0..23).collect::<Vec<_>>();
