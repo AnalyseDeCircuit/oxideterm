@@ -9,7 +9,23 @@ const QUALITY_OVERRIDE_PERMISSIONS = new Set(['admin', 'maintain', 'write', 'tri
 
 const REQUIRED_SECTIONS = [
   {
+    label: 'plugin-api',
+    titlePrefix: '[Plugin API]',
+    signature: 'What are you trying to build? / 你想构建什么功能？',
+    headings: [
+      'What are you trying to build? / 你想构建什么功能？',
+      'What API do you need? / 你需要什么接口？',
+    ],
+    checklistHeading: 'Before submitting / 提交前确认',
+    checks: [
+      'I searched existing issues for this API request / 我已搜索过已有 Issue，确认此接口尚未被请求',
+      'This is a plugin host API request, not a general feature request / 这是一个插件接口请求，不是通用功能建议',
+    ],
+  },
+  {
     label: 'bug',
+    titlePrefix: '[Bug]',
+    signature: 'Steps to reproduce / 复现步骤',
     headings: [
       'OxideTerm version / 版本',
       'Platform / 平台',
@@ -17,18 +33,35 @@ const REQUIRED_SECTIONS = [
       'Steps to reproduce / 复现步骤',
       'Expected vs actual / 预期与实际',
     ],
+    checklistHeading: 'Checklist',
+    checks: [
+      'I tested with the latest release, can still reproduce the issue, and searched existing issues / 我已使用最新正式版测试，问题仍然存在，并已搜索过已有 Issue',
+      'This is one reproducible bug, not a usage question or feature request / 这是一个可复现的 bug，而不是使用问题或功能建议',
+      'I provided the OxideTerm version, platform, and steps to reproduce; I understand vague, incomplete, or inactive issues may be closed. 我已提供 OxideTerm 版本、平台及复现步骤；我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。',
+      'I removed passwords, private keys, and other secrets from this report. 我已从本报告中删除密码、私钥及其他敏感信息。',
+    ],
   },
   {
     label: 'enhancement',
+    titlePrefix: '[Feature]',
+    signature: 'Problem or use case / 问题或使用场景',
     headings: [
       'OxideTerm version / 版本',
       'Problem or use case / 问题或使用场景',
       'Proposed solution / 期望方案',
       'Why is this important? / 为什么这个功能对你重要？',
     ],
+    checklistHeading: 'Checklist',
+    checks: [
+      'I am using the latest release, confirmed this feature does not already exist, and searched existing issues / 我正在使用最新正式版，已确认该功能尚不存在，并已搜索过已有 Issue',
+      "This is one focused request within OxideTerm's scope / 这是一个聚焦且属于 OxideTerm 范围内的请求",
+      'I have described a concrete problem/use case and proposed solution; I understand feature requests are handled best-effort, and vague or inactive issues may be closed. 我已描述具体问题/使用场景和期望方案；我理解功能请求会尽力处理，描述模糊或长期无回复的 Issue 可能会被关闭。',
+    ],
   },
   {
     label: 'compatibility',
+    titlePrefix: '[Compatibility]',
+    signature: 'SSH server details / 服务端信息',
     headings: [
       'OxideTerm version / 版本',
       'Client platform / 客户端平台',
@@ -36,6 +69,12 @@ const REQUIRED_SECTIONS = [
       'SSH server details / 服务端信息',
       'Error message or behavior / 错误信息或现象',
       'Working client comparison / 可正常连接的客户端对比',
+    ],
+    checklistHeading: 'Checklist',
+    checks: [
+      'I tested with the latest release, the issue persists, and another SSH client can connect with the same credentials and server / 我已使用最新正式版测试，问题仍然存在，且其他 SSH 客户端使用相同凭据和服务端可以正常连接',
+      'I searched existing issues and provided server details, error messages, and a working-client comparison / 我已搜索过已有 Issue，并提供了服务端信息、错误信息和可正常连接的客户端对比',
+      'I understand vague, incomplete, or inactive issues may be closed. 我理解描述模糊、信息不足或长期无回复的 Issue 可能会被关闭。',
     ],
   },
 ];
@@ -47,6 +86,7 @@ const NON_NARRATIVE_HEADING_PREFIXES = [
   'area',
   'authentication method',
   'checklist',
+  'before submitting',
 ];
 
 function normalizeHeading(value) {
@@ -116,16 +156,48 @@ function hasRepeatedNarrative(sections) {
   return Math.max(...frequency.values()) >= 3;
 }
 
-function findRequiredSectionPolicy(labels) {
+function findRequiredSectionPolicy(labels, title, sections) {
   const labelSet = new Set(labels);
-  return REQUIRED_SECTIONS.find((policy) => labelSet.has(policy.label));
+  // API-created issues may have no template labels; their title or headings still identify the form.
+  return REQUIRED_SECTIONS.find((policy) => labelSet.has(policy.label))
+    || REQUIRED_SECTIONS.find((policy) => title.trim().toLowerCase().startsWith(policy.titlePrefix.toLowerCase()))
+    || REQUIRED_SECTIONS.find((policy) => sections.has(normalizeHeading(policy.signature)));
+}
+
+function checkedItems(markdown) {
+  const items = [];
+  let current = null;
+  let fence = null;
+  for (const line of markdown.split(/\r?\n/)) {
+    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length && !marker[2].trim()) fence = null;
+      continue;
+    }
+    if (marker) {
+      fence = marker[1];
+      current = null;
+      continue;
+    }
+    const checkbox = line.match(/^ {0,3}[-*] \[([ xX])\]\s+(.+)$/);
+    if (checkbox) {
+      current = checkbox[1].toLowerCase() === 'x' ? [checkbox[2]] : null;
+      if (current) items.push(current);
+    } else if (!line.trim() || /^\s*(?:>|[-*] |#{1,6} )/.test(line)) {
+      current = null;
+    } else if (current) {
+      // GitHub renders multiline checkbox labels as continuation lines.
+      current.push(line.trim());
+    }
+  }
+  return new Set(items.map((parts) => normalizeAnswer(parts.join(' '))));
 }
 
 function readSubmittedVersion(body) {
   const sections = parseSections(body);
   const value = sections.get(normalizeHeading('OxideTerm version / 版本'));
   if (!value) return null;
-  const match = value.match(/(?:^|\s)v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?)(?:\s|$)/);
+  const match = value.match(/(?:^|[^\w.+-])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?)(?![\w.+-])/);
   return match?.[1] || null;
 }
 
@@ -158,12 +230,23 @@ function evaluateIssue({ title, body, labels, releasedVersions = [] }) {
     blockingFindings.push({ code: 'title_needs_detail' });
   }
 
-  const sectionPolicy = findRequiredSectionPolicy(labels);
+  const sectionPolicy = findRequiredSectionPolicy(labels, title, sections);
   if (sectionPolicy) {
     for (const heading of sectionPolicy.headings) {
       const answer = sections.get(normalizeHeading(heading));
       if (isMissingAnswer(answer)) {
         blockingFindings.push({ code: 'required_section_missing', heading });
+      }
+    }
+    const checklist = sections.get(normalizeHeading(sectionPolicy.checklistHeading));
+    if (isMissingAnswer(checklist)) {
+      blockingFindings.push({ code: 'required_section_missing', heading: sectionPolicy.checklistHeading });
+    } else {
+      const checked = checkedItems(checklist);
+      for (const item of sectionPolicy.checks) {
+        if (!checked.has(normalizeAnswer(item))) {
+          blockingFindings.push({ code: 'required_checkbox_unchecked', heading: sectionPolicy.checklistHeading, item });
+        }
       }
     }
   } else if (meaningfulCharacterCount(plainBodyText(body)) < 12) {
@@ -174,7 +257,7 @@ function evaluateIssue({ title, body, labels, releasedVersions = [] }) {
     blockingFindings.push({ code: 'repeated_section_content' });
   }
 
-  if (labels.includes('bug')) {
+  if (sectionPolicy?.label === 'bug') {
     const reproduction = sections.get(normalizeHeading('Steps to reproduce / 复现步骤')) || '';
     if (meaningfulCharacterCount(reproduction) < 12 && !hasUsefulArtifact(body)) {
       reviewFindings.push({ code: 'reproduction_evidence_thin' });
@@ -208,6 +291,8 @@ function blockingFindingText(finding) {
       return '- The description needs more concrete information. / 描述需要补充具体信息。';
     case 'required_section_missing':
       return `- Complete the required section: **${finding.heading}**. / 请完整填写必填部分：**${finding.heading}**。`;
+    case 'required_checkbox_unchecked':
+      return `- Confirm this required item / 请勾选此必填确认项 (**${finding.heading}**): ${finding.item}`;
     case 'repeated_section_content':
       return '- Different template sections need distinct answers. / 模板中的不同部分需要分别填写。';
     case 'release_version_unverified':
