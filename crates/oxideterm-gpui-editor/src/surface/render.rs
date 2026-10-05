@@ -4,11 +4,11 @@
 use std::{cell::Cell, collections::BTreeMap, ops::Range, rc::Rc};
 
 use gpui::{
-    Anchor, AnchoredPositionMode, AnyElement, App, AppContext, BorrowAppContext, Context,
-    CursorStyle, Div, EmptyView, Entity, InteractiveElement, IntoElement, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent,
-    SharedString, StatefulInteractiveElement, Styled, Window, anchored, deferred, div,
-    prelude::FluentBuilder, px, rgb, rgba,
+    Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Context, CursorStyle, Div,
+    EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent, SharedString,
+    StatefulInteractiveElement, Styled, Window, anchored, deferred, div, prelude::FluentBuilder,
+    px, rgb, rgba,
 };
 use oxideterm_editor_core::{BufferOffset, Selection};
 use oxideterm_editor_syntax::{BracketPair, SyntaxScope};
@@ -241,90 +241,14 @@ impl Render for TextEditorView {
         else {
             return root.into_any_element();
         };
-        let Some(plugins) = cx.try_global::<crate::EditorLanguagePlugins>() else {
-            return root.into_any_element();
-        };
-        let failed = plugins
-            .grammars
-            .get(&language)
-            .is_some_and(|grammar| grammar.failed());
-        if self.presentation == EditorPresentation::Inline
-            || self.is_large_file()
-            || (plugins.grammars.contains_key(&language) && !failed)
-            || plugins.dismissed.contains(&language)
-            || plugins.missing_label.is_empty()
-        {
+        if self.presentation == EditorPresentation::Inline || self.is_large_file() {
             return root.into_any_element();
         }
-        use oxideterm_gpui_ui::button::{ButtonOptions, ButtonSize, ButtonVariant, button_with};
-        let name = language.plugin_key().unwrap().to_string();
-        let message = if failed {
-            format!(
-                "{}: {}",
-                language.plugin_display_name().unwrap(),
-                plugins.failed_label
-            )
-        } else {
-            plugins
-                .missing_label
-                .replace("{{language}}", language.plugin_display_name().unwrap())
+        let Some(notice) =
+            crate::render_language_plugin_notice(language, &self.language_notice_tokens, cx)
+        else {
+            return root.into_any_element();
         };
-        let notice = div()
-            .flex()
-            .flex_wrap()
-            .flex_shrink_0()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(10.0))
-            .py(px(4.0))
-            .bg(rgb(self.appearance.gutter_background_hex))
-            .text_color(rgb(self.appearance.muted_text_hex))
-            .text_size(px(self.language_notice_tokens.metrics.ui_text_xs))
-            .child(div().flex_1().min_w(px(0.0)).child(message))
-            .child(
-                button_with(
-                    &self.language_notice_tokens,
-                    plugins.manage_label.clone(),
-                    ButtonOptions {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Sm,
-                        ..Default::default()
-                    },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _, window, cx| {
-                        window.focus(&this.focus_handle, cx);
-                        window.dispatch_action(
-                            Box::new(crate::ManageLanguagePlugin {
-                                language: name.clone(),
-                            }),
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                button_with(
-                    &self.language_notice_tokens,
-                    plugins.dismiss_label.clone(),
-                    ButtonOptions {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Sm,
-                        ..Default::default()
-                    },
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |_, _, _, cx| {
-                        cx.update_global::<crate::EditorLanguagePlugins, _>(|plugins, _| {
-                            plugins.dismissed.insert(language);
-                        });
-                        cx.stop_propagation();
-                    }),
-                ),
-            );
         div()
             .flex()
             .flex_col()

@@ -7,6 +7,7 @@ use gpui::{
     prelude::*,
 };
 use oxideterm_editor_core::utf16::replace_utf16;
+use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
 use oxideterm_gpui_markdown::{
     MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
 };
@@ -349,6 +350,7 @@ pub(super) struct FileManagerState {
     // immutable payload across render snapshots instead of cloning its contents.
     pub(super) preview: Option<Arc<LocalPreview>>,
     pub(super) preview_plugin: Option<Entity<super::plugin_preview::PluginFilePreview>>,
+    pub(super) preview_editor: Option<Entity<TextEditorView>>,
     pub(super) preview_metadata: Option<LocalPreviewMetadata>,
     pub(super) preview_show_metadata: bool,
     pub(super) preview_markdown_source: bool,
@@ -419,6 +421,7 @@ impl Default for FileManagerState {
             list_scroll: UniformListScrollHandle::new(),
             preview: None,
             preview_plugin: None,
+            preview_editor: None,
             preview_metadata: None,
             preview_show_metadata: true,
             preview_markdown_source: false,
@@ -473,6 +476,7 @@ impl FileManagerState {
         self.dialog_value.clear();
         self.preview = None;
         self.preview_plugin = None;
+        self.preview_editor = None;
         self.preview_metadata = None;
         self.preview_markdown_source = false;
         self.preview_code_scroll = UniformListScrollHandle::new();

@@ -1182,6 +1182,46 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if let Some(language) = oxideterm_editor_syntax::LanguageId::detect(
+            Some(std::path::Path::new(filename)),
+            content,
+        ) {
+            let existing = self.file_manager.read(cx).preview_editor.clone();
+            let editor = existing.unwrap_or_else(|| {
+                let tokens = self.tokens;
+                let settings = self.ide_runtime_settings();
+                let labels = EditorContextMenuLabels {
+                    copy: self.i18n.t("menu.copy"),
+                    cut: self.i18n.t("fileManager.cut"),
+                    paste: self.i18n.t("menu.paste"),
+                    select_all: self.i18n.t("fileManager.selectAll"),
+                };
+                let editor = cx.new(|cx| {
+                    let mut editor = TextEditorView::new(content, &tokens, cx);
+                    editor.set_read_only(true);
+                    editor.set_context_menu_labels(labels);
+                    editor.apply_ide_runtime_settings(
+                        &tokens,
+                        settings.editor_font_family.clone(),
+                        settings.editor_font_weight,
+                        settings.editor_font_fallback.clone(),
+                        settings.editor_font_size,
+                        settings.editor_line_height,
+                        settings.word_wrap,
+                        settings.background_active,
+                        cx,
+                    );
+                    editor.set_language(Some(language), cx);
+                    editor
+                });
+                self.file_manager.update(cx, |state, _| {
+                    // Retain the editor so grammar updates preserve selection and scroll position.
+                    state.preview_editor = Some(editor.clone());
+                });
+                editor
+            });
+            return div().size_full().child(editor).into_any_element();
+        }
         if content.is_empty() {
             return self.render_file_manager_preview_text_status(
                 &self.i18n.t("fileManager.emptyFile"),
@@ -1309,10 +1349,17 @@ impl WorkspaceApp {
             .unwrap_or_else(|| file_manager_preview_language_for_name(filename))
             .to_ascii_lowercase();
         let row_count = lines.len() + usize::from(!eof || error.is_some());
+        let notice = oxideterm_editor_syntax::LanguageId::detect(
+            Some(std::path::Path::new(filename)),
+            lines.first().map(String::as_str).unwrap_or_default(),
+        )
+        .and_then(|language| {
+            oxideterm_gpui_editor::render_language_plugin_notice(language, &self.tokens, cx)
+        });
         let font_family = settings_mono_font_family(self.settings_store.settings());
         let font_size = self.settings_store.settings().terminal.font_size as f32;
         let row_height = font_size * 1.5;
-        div()
+        let body = div()
             .size_full()
             .bg(file_manager_bg(theme.bg_sunken, has_background))
             .child(
@@ -1400,6 +1447,13 @@ impl WorkspaceApp {
                     )),
                 ),
             )
+            .into_any_element();
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .children(notice)
+            .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
     }
 
@@ -2019,4 +2073,99 @@ fn file_manager_preview_language_for_name(filename: &str) -> String {
         _ => "plain",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn local_code_preview_shows_language_notice_and_keeps_files_read_only(cx: &mut TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_LOCAL_PREVIEW_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Isolate real workspace storage discovery from the user's settings and credentials.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "local preview regression failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let fixture_dir = std::path::PathBuf::from(fixture_dir);
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(&fixture_dir));
+        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.save().unwrap();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let source = "fn main() {}\n";
+        let path = fixture_dir.join("missing.rs");
+        std::fs::write(&path, source).unwrap();
+        let entry = LocalFileEntry {
+            name: "missing.rs".into(),
+            path: path.to_string_lossy().into_owned(),
+            file_type: LocalFileType::File,
+            size: source.len() as u64,
+            modified: None,
+            readonly: false,
+            symlink_target: None,
+        };
+        workspace.update(cx, |workspace, cx| {
+            workspace.open_file_manager_preview(entry.clone(), cx)
+        });
+        cx.draw(
+            gpui::Point::default(),
+            gpui::size(px(800.0), px(600.0)),
+            |window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.render_file_manager_preview_content(entry.clone(), false, window, cx)
+                })
+            },
+        );
+        let bounds = cx
+            .debug_bounds("editor-language-notice")
+            .expect("missing Rust support must be visible in local preview");
+        assert!(bounds.size.width > px(0.0) && bounds.size.height > px(0.0));
+        let editor = workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .file_manager
+                .read(cx)
+                .preview_editor
+                .clone()
+                .unwrap()
+        });
+        editor.update(cx, |editor, cx| editor.insert_text("unexpected edit", cx));
+        assert_eq!(
+            editor.read_with(cx, |editor, _| editor.buffer().text()),
+            source
+        );
+        let weak = editor.downgrade();
+        drop(editor);
+        workspace.update(cx, |workspace, cx| workspace.close_file_manager_dialog(cx));
+        cx.update(|_, _| {});
+        assert!(
+            weak.upgrade().is_none(),
+            "closing preview releases its editor"
+        );
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), source);
+    }
 }

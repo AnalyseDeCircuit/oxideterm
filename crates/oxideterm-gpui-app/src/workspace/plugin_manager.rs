@@ -306,6 +306,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if matches!(
+            self.file_manager.read(cx).dialog,
+            Some(super::file_manager::FileManagerDialog::Preview { .. })
+        ) {
+            self.close_file_manager_dialog(cx);
+        }
         let installed = self
             .plugin_entity
             .read(cx)

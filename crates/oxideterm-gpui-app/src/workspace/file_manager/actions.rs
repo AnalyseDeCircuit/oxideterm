@@ -971,6 +971,7 @@ impl WorkspaceApp {
         let audio_stop_error = self.file_manager.update(cx, |file_manager, cx| {
             file_manager.preview = Some(Arc::new(LocalPreview::Loading));
             file_manager.preview_plugin = None;
+            file_manager.preview_editor = None;
             file_manager.preview_metadata = None;
             file_manager.preview_markdown_source = false;
             file_manager.preview_code_scroll = UniformListScrollHandle::new();
@@ -2164,7 +2165,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn close_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn close_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.close_dialog(cx);
         });

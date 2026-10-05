@@ -1,8 +1,12 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{App, BorrowAppContext, Global};
+use gpui::{
+    AnyElement, App, BorrowAppContext, Global, InteractiveElement, IntoElement, MouseButton,
+    ParentElement, Styled, div, px, rgb,
+};
 use oxideterm_editor_syntax::{LanguageId, PluginGrammar, PluginGrammarSource};
+use oxideterm_theme::ThemeTokens;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -25,6 +29,92 @@ pub struct EditorLanguagePlugins {
 }
 
 impl Global for EditorLanguagePlugins {}
+
+/// Shared by native editors and streamed previews that do not own an editor buffer.
+pub fn render_language_plugin_notice(
+    language: LanguageId,
+    tokens: &ThemeTokens,
+    cx: &App,
+) -> Option<AnyElement> {
+    let name = language.plugin_key()?.to_string();
+    let plugins = cx.try_global::<EditorLanguagePlugins>()?;
+    let failed = plugins
+        .grammars
+        .get(&language)
+        .is_some_and(|grammar| grammar.failed());
+    if (plugins.grammars.contains_key(&language) && !failed)
+        || plugins.dismissed.contains(&language)
+        || plugins.missing_label.is_empty()
+    {
+        return None;
+    }
+    let message = if failed {
+        format!(
+            "{}: {}",
+            language.plugin_display_name()?,
+            plugins.failed_label
+        )
+    } else {
+        plugins
+            .missing_label
+            .replace("{{language}}", language.plugin_display_name()?)
+    };
+    use oxideterm_gpui_ui::button::{ButtonOptions, ButtonSize, ButtonVariant, button_with};
+    Some(
+        div()
+            .debug_selector(|| "editor-language-notice".into())
+            .flex()
+            .flex_wrap()
+            .flex_shrink_0()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(10.0))
+            .py(px(4.0))
+            .bg(rgb(tokens.ui.bg_panel))
+            .text_color(rgb(tokens.ui.text_muted))
+            .text_size(px(tokens.metrics.ui_text_xs))
+            .child(div().flex_1().min_w(px(0.0)).child(message))
+            .child(
+                button_with(
+                    tokens,
+                    plugins.manage_label.clone(),
+                    ButtonOptions {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Sm,
+                        ..Default::default()
+                    },
+                )
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    window.dispatch_action(
+                        Box::new(ManageLanguagePlugin {
+                            language: name.clone(),
+                        }),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            )
+            .child(
+                button_with(
+                    tokens,
+                    plugins.dismiss_label.clone(),
+                    ButtonOptions {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Sm,
+                        ..Default::default()
+                    },
+                )
+                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                    cx.update_global::<EditorLanguagePlugins, _>(|plugins, _| {
+                        plugins.dismissed.insert(language);
+                    });
+                    window.refresh();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element(),
+    )
+}
 
 impl EditorLanguagePlugins {
     pub fn update(sources: Vec<PluginGrammarSource>, cx: &mut App) {
