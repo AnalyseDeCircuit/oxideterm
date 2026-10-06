@@ -1268,6 +1268,8 @@ impl WorkspaceApp {
 
     pub(super) fn bootstrap_native_plugin_runtime(&mut self, cx: &mut Context<Self>) {
         self.sync_acp_plugins(cx);
+        self.mosh_plugin_sessions
+            .set_available(self.plugin_entity.read(cx).mosh_executable().is_some());
         let providers = self.plugin_entity.read(cx).remote_desktop_providers();
         self.remote_desktop
             .update(cx, |desktops, cx| desktops.sync_plugins(&providers, cx));

@@ -76,14 +76,16 @@ fn normalized_requested_capabilities(
     runtime_kind: &str,
 ) -> Result<Vec<String>, String> {
     let mut capabilities = normalize_native_plugin_capabilities(declared_capabilities)?;
-    if matches!(runtime_kind, "process" | "acp" | "remote-desktop")
-        && capabilities
-            .binary_search_by(|candidate| {
-                candidate
-                    .as_str()
-                    .cmp(NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY)
-            })
-            .is_err()
+    if matches!(
+        runtime_kind,
+        "process" | "acp" | "remote-desktop" | "terminal-transport"
+    ) && capabilities
+        .binary_search_by(|candidate| {
+            candidate
+                .as_str()
+                .cmp(NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY)
+        })
+        .is_err()
     {
         capabilities.push(NATIVE_PLUGIN_TRUSTED_PROCESS_CAPABILITY.to_string());
         capabilities.sort_unstable();

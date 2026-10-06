@@ -1013,18 +1013,11 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let breakdown = self.ai_context_token_breakdown(cx);
         let acp_backend_active =
             self.settings_store.settings().ai.active_backend == AiActiveBackend::Acp;
-        let acp_usage = self.active_ai_acp_usage(cx);
-        let (total_tokens, max_tokens) = acp_usage
-            .or_else(|| (!acp_backend_active).then_some((breakdown.total, breakdown.max_tokens)))
-            .unwrap_or((0, 0));
-        let percentage = if max_tokens == 0 {
-            0.0
-        } else {
-            ((total_tokens as f32 / max_tokens as f32) * 100.0).min(100.0)
-        };
+        let counts = self.ai_context_message_usage_counts(cx);
+        let (total_tokens, max_tokens) = counts.unwrap_or((0, 0));
+        let percentage = ai_context_percentage(total_tokens, max_tokens);
         let usage = AiContextUsage {
             percentage,
             warning: percentage > 70.0,
@@ -1033,7 +1026,7 @@ impl WorkspaceApp {
         let indicator = ai_context_usage_indicator(
             &self.tokens,
             usage,
-            if acp_backend_active && acp_usage.is_none() {
+            if acp_backend_active && counts.is_none() {
                 "—".to_string()
             } else {
                 ai_format_tokens(total_tokens)
@@ -1068,13 +1061,8 @@ impl WorkspaceApp {
         if self.settings_store.settings().ai.active_backend != AiActiveBackend::Acp {
             return None;
         }
-        let usage = self
-            .ai_entity
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .and_then(ai_acp_session_state)?
-            .usage?;
+        let agent_id = self.settings_store.settings().ai.active_acp_agent_id.as_deref()?;
+        let usage = self.active_ai_acp_session_state(agent_id, cx)?.usage?;
         let used = usage.get("used")?.as_u64()?.try_into().ok()?;
         let size = usage.get("size")?.as_u64()?.try_into().ok()?;
         Some((used, size))
@@ -1811,6 +1799,58 @@ impl WorkspaceApp {
         });
         self.ime_marked_text = None;
         cx.notify();
+    }
+}
+
+fn ai_context_counts_for_backend(
+    backend: AiActiveBackend,
+    acp_usage: Option<(usize, usize)>,
+    provider_estimate: impl FnOnce() -> (usize, usize),
+) -> Option<(usize, usize)> {
+    // ACP owns its history and model budget; the provider estimate cannot measure it.
+    match backend {
+        AiActiveBackend::Acp => acp_usage.filter(|(_, size)| *size > 0),
+        AiActiveBackend::Provider => Some(provider_estimate()),
+    }
+}
+
+#[cfg(test)]
+mod context_usage_tests {
+    use super::*;
+
+    #[test]
+    fn acp_context_usage_does_not_fall_back_to_provider_history_estimates() {
+        for (reported, expected, danger) in [
+            (None, None, false),
+            (Some((12_000, 100_000)), Some((12_000, 100_000)), false),
+            (Some((90_000, 100_000)), Some((90_000, 100_000)), true),
+            (Some((900, 0)), None, false),
+        ] {
+            let counts = ai_context_counts_for_backend(AiActiveBackend::Acp, reported, || {
+                (95_000, 100_000)
+            });
+            assert_eq!(counts, expected);
+            assert_eq!(
+                counts.is_some_and(|(used, size)| {
+                    ai_context_percentage(used, size) > AI_CONTEXT_DANGER_PERCENT
+                }),
+                danger,
+            );
+        }
+        assert_eq!(
+            ai_context_counts_for_backend(
+                AiActiveBackend::Provider,
+                Some((12_000, 100_000)),
+                || (95_000, 100_000),
+            ),
+            Some((95_000, 100_000)),
+        );
+        assert_eq!(
+            ai_context_counts_for_backend(AiActiveBackend::Acp, None, || {
+                panic!("ACP must not prepare a provider prompt")
+            }),
+            None,
+        );
     }
 }
 

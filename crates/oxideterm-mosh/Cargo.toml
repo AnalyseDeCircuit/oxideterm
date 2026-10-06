@@ -6,15 +6,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-fernomade-crypto = { path = "../fernomade/crypto" }
-fernomade-runtime = { path = "../fernomade/runtime" }
+base64.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
+serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 zeroize.workspace = true
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-fernomade-wire = { path = "../fernomade/wire" }

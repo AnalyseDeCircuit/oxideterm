@@ -9,6 +9,7 @@ pub enum NativePluginRuntimePlan {
     Process { entry: String },
     Acp { entry: String },
     RemoteDesktop { entry: String },
+    TerminalTransport { entry: String },
     UnsupportedLegacyJs { entry: String },
 }
 

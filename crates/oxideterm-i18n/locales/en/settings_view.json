@@ -1238,6 +1238,7 @@
       "acp_agents_summary": "{{count}} configured ACP agents",
       "acp_agent_add": "Add ACP agent",
       "acp_agents_empty": "No ACP agents configured yet.",
+      "acp_agents_custom_hint": "Installing and enabling an ACP plugin from the marketplace adds its agent automatically. Use this section only to connect your own ACP program manually.",
       "acp_agent_new_name": "New ACP Agent",
       "acp_agent_enabled": "Enabled",
       "acp_agent_disabled": "Disabled",

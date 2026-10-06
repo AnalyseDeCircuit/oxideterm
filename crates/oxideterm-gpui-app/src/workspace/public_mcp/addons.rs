@@ -108,13 +108,16 @@ impl WorkspaceApp {
             ));
             return;
         }
-        let retired_desktops = if args.replace_existing {
+        let mut retired_desktops = if args.replace_existing {
             self.remote_desktop.update(cx, |desktops, cx| {
                 desktops.stop_plugins(Some(&expected_identity), cx)
             })
         } else {
             Vec::new()
         };
+        if args.replace_existing && expected_identity == "com.oxideterm.terminal.mosh" {
+            retired_desktops.push(self.mosh_plugin_sessions.stop());
+        }
         let receiver = self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.start_managed_package_install(
                 settings_path.clone(),
@@ -303,9 +306,12 @@ impl WorkspaceApp {
             return;
         }
         self.stop_acp_plugin(Some(&plugin_id), cx);
-        let workers = self.remote_desktop.update(cx, |desktops, cx| {
+        let mut workers = self.remote_desktop.update(cx, |desktops, cx| {
             desktops.stop_plugins(Some(&plugin_id), cx)
         });
+        if plugin_id == "com.oxideterm.terminal.mosh" {
+            workers.push(self.mosh_plugin_sessions.stop());
+        }
         let receiver = self.plugin_entity.update(cx, |plugins, cx| {
             plugins.start_plugin_uninstall(plugin_id, !retain_settings, workers, cx)
         });

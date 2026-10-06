@@ -7489,10 +7489,10 @@ dependencies = [
 name = "oxideterm-mosh"
 version = "2.2.2"
 dependencies = [
- "fernomade-crypto",
- "fernomade-runtime",
- "fernomade-wire",
+ "base64 0.22.1",
  "oxideterm-ssh",
+ "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
  "zeroize",
@@ -7578,6 +7578,7 @@ dependencies = [
 name = "oxideterm-plugin-registry"
 version = "2.2.2"
 dependencies = [
+ "futures-util",
  "oxideterm-ai",
  "oxideterm-atomic-file",
  "oxideterm-network-proxy",
@@ -7588,6 +7589,7 @@ dependencies = [
  "semver",
  "serde_json",
  "sha2 0.10.9",
+ "tokio",
  "zip",
 ]
 

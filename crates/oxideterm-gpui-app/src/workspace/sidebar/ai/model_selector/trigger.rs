@@ -124,6 +124,24 @@ impl WorkspaceApp {
         ai_model_selector_dropdown(&self.tokens, AiModelSelectorPlacement::Up)
             .child(self.render_ai_model_selector_search(cx))
             .child(self.render_ai_model_selector_list(providers, cx))
+            .child(ai_model_selector_footer(
+                &self.tokens,
+                Self::render_lucide_icon(LucideIcon::Puzzle, 12.0, rgb(self.tokens.ui.text_muted)),
+                self.i18n.t("ai.model_selector.manage_acp_agents"),
+            ).on_mouse_down(MouseButton::Left, cx.listener(|this, _event, window, cx| {
+                this.close_ai_model_selector(cx);
+                this.open_acp_plugin_manager(false, window, cx);
+                cx.stop_propagation();
+            })))
+            .child(ai_model_selector_footer(
+                &self.tokens,
+                Self::render_lucide_icon(LucideIcon::Plus, 12.0, rgb(self.tokens.ui.text_muted)),
+                self.i18n.t("ai.model_selector.add_custom_acp_agent"),
+            ).on_mouse_down(MouseButton::Left, cx.listener(|this, _event, window, cx| {
+                this.close_ai_model_selector(cx);
+                this.open_acp_plugin_manager(true, window, cx);
+                cx.stop_propagation();
+            })))
             .child(
                 ai_model_selector_footer(
                     &self.tokens,

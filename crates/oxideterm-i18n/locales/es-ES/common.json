@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Instala o activa el complemento Mosh antes de conectarte.",
+    "ready": "El complemento Mosh está instalado y activado."
+  },
   "file_preview": {
     "entry_file_offset": "Desplazamiento de entrada",
     "subject": "Sujeto",
@@ -261,7 +265,8 @@
     "marketplace_workspace": "Espacio de trabajo",
     "marketplace_utilities": "Utilidades",
     "marketplace_acp": "ACP",
-    "marketplace_remote_desktop": "Escritorio remoto",
+    "acp_setup_hint": "Al instalar y activar el complemento, la configuración del agente se crea automáticamente; no hace falta indicar un comando de inicio. El directorio de trabajo, los argumentos adicionales y las variables de entorno son opcionales: déjelos vacíos para usar los valores predeterminados. Los complementos que usan un programa local requieren su herramienta oficial de línea de comandos; siga las instrucciones del complemento para instalarla e iniciar sesión.",
+    "marketplace_remote_connections": "Conexiones remotas",
     "apply_page_size": "Aplicar",
     "invalid_page_size": "Introduce un número entero positivo válido",
     "page_range": "{{start}}–{{end}} de {{total}} complementos",

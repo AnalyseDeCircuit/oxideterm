@@ -30,6 +30,7 @@ fn sample_manifest() -> oxideterm_plugin_manifest::NativePluginManifest {
         version: "1.0.0".to_string(),
         description: None,
         author: None,
+        tags: None,
         main: None,
         engines: None,
         manifest_version: None,

@@ -243,7 +243,6 @@ pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
         // Feature activation and privacy guidance are independent cards.
         AiSettingsPage::General => 2,
         AiSettingsPage::Providers => 1,
-        AiSettingsPage::Agents => 1,
         // Context controls, prompt, memory, and model windows are
         // separate cards so each virtual row owns one stable responsibility.
         AiSettingsPage::Context => 4,

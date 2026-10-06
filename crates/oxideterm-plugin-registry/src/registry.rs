@@ -7,6 +7,7 @@ use super::*;
 
 /// Official catalog endpoint shipped with OxideTerm builds.
 pub const OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL: &str = "https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm-plugins/main/registry/v1/index.json";
+pub const OFFICIAL_NATIVE_PLUGIN_REGISTRY_V2_URL: &str = "https://raw.githubusercontent.com/AnalyseDeCircuit/oxideterm-plugins/main/registry/v2/index.json";
 const NATIVE_PLUGIN_REGISTRY_VERSION: u32 = 1;
 // The catalog is metadata, not a package transport. Keep malformed endpoints
 // from allocating package-sized responses on the application runtime.
@@ -49,7 +50,11 @@ impl NativePluginRegistry {
             ),
         };
         let mut catalog_tags = HashMap::new();
-        match load_catalog_cache(settings_path) {
+        let installed_ids = plugins
+            .iter()
+            .map(|plugin| plugin.manifest.id.as_str())
+            .collect::<Vec<_>>();
+        match load_catalog_cache(settings_path, &installed_ids) {
             Ok(Some(catalog)) => {
                 catalog_tags = catalog
                     .plugins
@@ -127,6 +132,12 @@ impl NativePluginRegistry {
         self.catalog_tags
             .get(plugin_id)
             .map(Vec::as_slice)
+            .or_else(|| {
+                self.plugins
+                    .iter()
+                    .find(|plugin| plugin.manifest.id == plugin_id)
+                    .and_then(|plugin| plugin.manifest.tags.as_deref())
+            })
             .unwrap_or_default()
     }
 
@@ -198,6 +209,28 @@ impl NativePluginRegistry {
                 })
             })
             .collect()
+    }
+
+    /// The terminal session owns this process and its private pipe.
+    pub fn mosh_executable(&self) -> Option<PathBuf> {
+        self.plugins.iter().find_map(|plugin| {
+            if plugin.manifest.id != "com.oxideterm.terminal.mosh"
+                || !native_plugin_state_is_active_like(plugin.state)
+                || native_plugin_requires_permission_review(
+                    &plugin.manifest,
+                    &plugin.runtime_plan,
+                    &plugin.config,
+                )
+            {
+                return None;
+            }
+            let NativePluginRuntimePlan::TerminalTransport { entry } = &plugin.runtime_plan else {
+                return None;
+            };
+            let root = plugin.install_dir.canonicalize().ok()?;
+            let command = root.join(entry).canonicalize().ok()?;
+            (command.starts_with(&root) && command.is_file()).then_some(command)
+        })
     }
 
     pub fn file_preview_provider(&self, mime_type: &str) -> Option<(NativePluginInfo, String)> {
@@ -338,45 +371,20 @@ impl NativePluginRegistry {
 
     #[allow(dead_code)]
     pub async fn fetch_plugin_registry(url: &str) -> Result<NativePluginRegistryIndex, String> {
-        validate_native_plugin_package_url(url)?;
-        let client = oxideterm_network_proxy::application_http_client()
-            .map_err(|error| format!("Failed to create HTTP client: {error}"))?;
-        let response = client
-            .get(url)
-            .send()
+        let body = catalog::download_metadata(url, NATIVE_PLUGIN_REGISTRY_MAX_BYTES)
             .await
-            .map_err(|error| format!("Failed to fetch registry: {error}"))?;
-        if !response.status().is_success() {
-            return Err(format!(
-                "Registry returned HTTP {}",
-                response.status().as_u16()
-            ));
-        }
-        if let Some(content_length) = response.content_length()
-            && content_length > NATIVE_PLUGIN_REGISTRY_MAX_BYTES
-        {
-            return Err(format!(
-                "Plugin registry too large: {content_length} bytes (max {NATIVE_PLUGIN_REGISTRY_MAX_BYTES} bytes)"
-            ));
-        }
-        let body = response
-            .bytes()
-            .await
-            .map_err(|error| format!("Failed to read registry response: {error}"))?;
-        if body.len() as u64 > NATIVE_PLUGIN_REGISTRY_MAX_BYTES {
-            return Err(format!(
-                "Plugin registry too large: {} bytes (max {NATIVE_PLUGIN_REGISTRY_MAX_BYTES} bytes)",
-                body.len()
-            ));
-        }
-        let registry = serde_json::from_slice(&body)
-            .map_err(|error| format!("Failed to parse registry index: {error}"))?;
+            .map_err(|error| error.to_string())?;
+        let registry: NativePluginRegistryIndex =
+            serde_json::from_slice(&body).map_err(|_| "Invalid plugin catalog JSON".to_string())?;
         validate_native_plugin_registry(&registry)?;
+        catalog::validate_history_origins(url, &registry)?;
         Ok(registry)
     }
 
     pub async fn fetch_official_plugin_registry() -> Result<NativePluginRegistryIndex, String> {
-        Self::fetch_plugin_registry(OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL).await
+        // Frozen v1 cannot replace newer compatibility corrections when v2 is
+        // unavailable. The workspace keeps its last valid cache on fetch failure.
+        Self::fetch_plugin_registry(OFFICIAL_NATIVE_PLUGIN_REGISTRY_V2_URL).await
     }
 
     pub fn cache_official_catalog(
@@ -384,7 +392,8 @@ impl NativePluginRegistry {
         catalog: &NativePluginRegistryIndex,
     ) -> Result<(), String> {
         validate_native_plugin_registry(catalog)?;
-        let bytes = serde_json::to_vec(catalog).map_err(|error| error.to_string())?;
+        let summary = catalog::summaries(catalog);
+        let bytes = serde_json::to_vec(&summary).map_err(|error| error.to_string())?;
         if bytes.len() as u64 > NATIVE_PLUGIN_REGISTRY_MAX_BYTES {
             return Err("Plugin catalog cache exceeds size limit".into());
         }
@@ -1050,7 +1059,7 @@ fn select_registry_release_for(
 pub(crate) fn validate_native_plugin_registry(
     registry: &NativePluginRegistryIndex,
 ) -> Result<(), String> {
-    if registry.version != NATIVE_PLUGIN_REGISTRY_VERSION {
+    if registry.version != NATIVE_PLUGIN_REGISTRY_VERSION && registry.version != 2 {
         return Err(format!(
             "Unsupported plugin registry version {}",
             registry.version
@@ -1058,6 +1067,24 @@ pub(crate) fn validate_native_plugin_registry(
     }
     let mut plugin_ids = std::collections::HashSet::new();
     for entry in &registry.plugins {
+        if registry.version == 2 && entry.history.is_none() {
+            return Err("Catalog v2 entries require history references".into());
+        }
+        if entry.history_pending()
+            && entry
+                .engines
+                .as_ref()
+                .and_then(|engines| engines.oxideterm.as_deref())
+                .is_none()
+        {
+            return Err("Catalog summaries must declare engines.oxideterm".into());
+        }
+        if let Some(history) = &entry.history {
+            if registry.version != 2 {
+                return Err("History references require catalog v2".into());
+            }
+            catalog::validate_history_reference(history)?;
+        }
         validate_native_plugin_id(&entry.id)
             .map_err(|error| format!("Invalid registry plugin id: {error}"))?;
         if !plugin_ids.insert(entry.id.as_str()) {
@@ -1153,7 +1180,9 @@ pub(crate) fn validate_native_plugin_registry(
                 entry.id
             ));
         }
-        validate_registry_packages(&entry.id, &entry.packages)?;
+        if !entry.history_pending() {
+            validate_registry_packages(&entry.id, &entry.packages)?;
+        }
     }
     Ok(())
 }

@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Install or enable the Mosh plugin before connecting.",
+    "ready": "Mosh plugin is installed and enabled."
+  },
   "file_preview": {
     "entry_file_offset": "Entry file offset",
     "subject": "Subject",
@@ -261,7 +265,8 @@
     "marketplace_workspace": "Workspace",
     "marketplace_utilities": "Utilities",
     "marketplace_acp": "ACP",
-    "marketplace_remote_desktop": "Remote desktop",
+    "acp_setup_hint": "Installing and enabling the plugin creates the agent configuration automatically; no launch command is needed. Working directory, extra arguments, and environment variables are optional; leave them blank to use the defaults. Plugins that use a local program require its official command-line tool; follow the plugin instructions to install it and sign in.",
+    "marketplace_remote_connections": "Remote connections",
     "apply_page_size": "Apply",
     "invalid_page_size": "Enter a valid positive integer",
     "page_range": "{{start}}–{{end}} of {{total}} plugins",

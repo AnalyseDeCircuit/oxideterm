@@ -1238,6 +1238,7 @@
       "acp_agents_summary": "{{count}} 件の ACP エージェントを設定済み",
       "acp_agent_add": "ACP エージェントを追加",
       "acp_agents_empty": "ACP エージェントはまだ設定されていません。",
+      "acp_agents_custom_hint": "マーケットから ACP プラグインをインストールして有効にすると、エージェントが自動で追加されます。ここは独自の ACP プログラムを手動で接続する場合に使用します。",
       "acp_agent_new_name": "新しい ACP エージェント",
       "acp_agent_enabled": "有効",
       "acp_agent_disabled": "無効",

@@ -1773,6 +1773,10 @@ impl WorkspaceApp {
                 ));
             }
 
+            if let Some(prompt) = self.render_cursor_request(approval_generation, &id, cx) {
+                item = item.child(prompt);
+            }
+
             if name == "ask_user" {
                 let active = self.ai_entity.read(cx).active_user_question()
                     == Some((approval_generation, id.clone()));
@@ -2434,7 +2438,77 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_tool_display_name(&self, name: &str) -> String {
+        if name == "cursor/ask_question" { return self.i18n.t("ai.questions.waiting"); }
+        if name == "cursor/create_plan" { return self.i18n.t("ai.tool_use.approval_required"); }
         self.localized_ai_tool_value("tool_names", name)
+    }
+
+    fn render_cursor_request(&self, generation: u64, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (request, selections) = {
+            let ai = self.ai_entity.read(cx);
+            let pending = ai.pending_cursor_requests.get(&(generation, id.into()))?;
+            if pending.response_tx.as_ref().is_none_or(|sender| sender.is_closed()) { return None; }
+            (pending.request.clone(), pending.selections.clone())
+        };
+        let mut body = div().w_full().min_w_0().flex().flex_col()
+            .gap(px(self.tokens.spacing.two)).p(px(self.tokens.spacing.three)).text_size(px(12.0));
+        match &request {
+            oxideterm_ai::CursorRequest::Questions(request) => {
+                if let Some(title) = &request.title { body = body.child(title.clone()); }
+                for (question_index, question) in request.questions.iter().enumerate() {
+                    body = body.child(question.prompt.clone());
+                    for (option_index, option) in question.options.iter().enumerate() {
+                        let selected = selections[question_index].contains(&option.id);
+                        let call_id = id.to_owned();
+                        body = body.child(self.agent_control(
+                            format!("cursor-choice-{generation}-{id}-{question_index}-{option_index}"), option.label.clone(),
+                            checkbox(&self.tokens, option.label.clone(), selected),
+                            move |this, _, cx| {
+                                this.ai_entity.update(cx, |ai, _| ai.select_cursor_option(generation, &call_id, question_index, option_index));
+                                cx.notify();
+                            }, cx,
+                        ));
+                    }
+                }
+            }
+            oxideterm_ai::CursorRequest::Plan(request) => {
+                if let Some(name) = &request.name { body = body.child(name.clone()); }
+                if let Some(overview) = &request.overview { body = body.child(overview.clone()); }
+                body = body.child(self.render_selectable_text(
+                    crate::workspace::selectable_text::selectable_text_id("cursor-plan", &format!("{generation}:{id}")),
+                    request.plan.clone(), self.tokens.ui.text, cx,
+                ));
+            }
+        }
+        let ready = request.response(true, &selections).is_some();
+        let is_plan = matches!(&request, oxideterm_ai::CursorRequest::Plan(_));
+        let accept_id = id.to_owned();
+        let reject_id = id.to_owned();
+        let actions = div().flex().flex_wrap().gap(px(8.0))
+            .child(self.workspace_toolbar_action_button(
+                self.i18n.t(if is_plan {"ai.tool_use.approve"} else {"ai.questions.answer"}),
+                None,
+                ToolbarButtonOptions { button: ButtonOptions { disabled: !ready, ..Default::default() }, ..Default::default() },
+                cx.listener(move |this, _, _, cx| { this.resolve_ai_cursor_request(generation, &accept_id, true, cx); }),
+            ))
+            .child(self.agent_button(
+                format!("cursor-reject-{generation}-{id}"),
+                self.i18n.t(if is_plan {"ai.tool_use.reject"} else {"ai.message.cancel"}),
+                move |this, _, cx| { this.resolve_ai_cursor_request(generation, &reject_id, false, cx); }, cx,
+            ));
+        Some(body.child(actions).into_any_element())
+    }
+
+    fn resolve_ai_cursor_request(&mut self, generation: u64, id: &str, accepted: bool, cx: &mut Context<Self>) {
+        let route = self.ai_entity.read(cx).pending_cursor_requests.get(&(generation, id.into()))
+            .map(|pending| (pending.conversation_id.clone(), pending.assistant_id.clone(), pending.request.method()));
+        let Some((conversation, assistant, method)) = route else { return; };
+        if self.ai_entity.update(cx, |ai, _| ai.resolve_cursor_request(generation, id, accepted)) {
+            self.apply_ai_tool_status(generation, &conversation, &assistant, id, method, "{}",
+                if accepted {"completed"} else {"rejected"}, None, Some("read".into()), None,
+                false, None, None, None, cx);
+            cx.notify();
+        }
     }
 
     pub(in crate::workspace) fn ai_tool_risk_label(&self, risk: AiToolRisk) -> String {

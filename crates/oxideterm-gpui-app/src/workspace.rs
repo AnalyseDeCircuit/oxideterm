@@ -825,6 +825,7 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
     acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
+    mosh_plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
     skill_registry: std::sync::Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
     skill_workspace_root: Option<std::path::PathBuf>,
     loaded_conversation_skills: HashMap<String, HashMap<String, String>>,

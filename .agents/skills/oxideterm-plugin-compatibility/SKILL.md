@@ -27,6 +27,19 @@ rewriting package files. Retain files, settings, and enable preferences while
 blocking incompatible activation. Keep the startup refresh bounded and owned
 by the plugin entity; offline startup uses the last valid cache.
 
+The official client uses the v2 summary catalog and loads checksum-bound histories
+for installed plugins and the current marketplace page. A history must match its
+summary identity, latest version, effective host range, size, and SHA-256. Preserve
+the frozen v1 endpoint, exact historical snapshot, referenced assets, and v1 cache
+reader. All subsequent plugins, releases and corrections belong only to v2;
+existing clients must upgrade the host to receive them. New clients fetch only v2;
+on failure retain the last valid cache rather than replace it with frozen v1.
+Publish v2 before shipping a host that requires it. Save verified raw histories before replacing
+the compact root cache; startup and manual installation must resolve corrections
+for the exact installed version. Cancel obsolete page requests and discard results
+from another page or catalog snapshot. Catalog maintenance and generation belong
+to the marketplace's per-plugin source records and release automation.
+
 For language extraction, verify the grammar loader, Tree-sitter ABI, and actual
 old-client behavior. A host range cannot replace those checks. Do not assign an
 upper bound to old plugins just because a new plugin or app version was released.
@@ -38,6 +51,14 @@ supervisor. Check `registry.acp_agents`, `workspace/acp_plugins.rs`, and
 `workspace/acp_workspace.rs` for startup gating, launch resolution and cleanup.
 Hosts through 2.2.1 cannot load this runtime. Preserve existing agent identities
 and user options when migrating bundled adapters to plugin bindings.
+
+Mosh uses `terminal-transport` with a versioned private binary pipe. Keep SSH
+bootstrap, terminal rendering and local prediction in the host; UDP, SSP and
+encryption belong to the engine plugin. Hosts through 2.2.1 cannot load it.
+Check `oxideterm-mosh` and its workspace-owned `MoshPluginSessions` for launch
+gating and process retirement before package replacement. Both pipe directions
+must remain independent under output backpressure. RDP, VNC and Mosh share the
+`remote-connections` catalog category.
 
 ## Coordinate publication
 

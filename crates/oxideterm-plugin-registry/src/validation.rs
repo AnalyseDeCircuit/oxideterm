@@ -49,6 +49,35 @@ pub(crate) fn validate_native_plugin_manifest(
     // Permission declarations cover only sensitive data and side effects; safe
     // redacted host projections remain available without declarations.
     normalize_native_plugin_capabilities(&manifest.permissions.capabilities)?;
+    let terminal = manifest
+        .contributes
+        .as_ref()
+        .and_then(|value| value.terminal_transport.as_ref());
+    let is_terminal = manifest
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.kind == NativePluginRuntimeKind::TerminalTransport);
+    if is_terminal != terminal.is_some() {
+        return Err("Terminal transport runtime and provider must be declared together".into());
+    }
+    if let Some(terminal) = terminal {
+        if terminal.protocol != "mosh" || terminal.protocol_version != 1 {
+            return Err("Unsupported terminal transport plugin protocol".into());
+        }
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.terminal_transport = None;
+        if ordinary != NativePluginContributes::default() {
+            return Err("Terminal transports cannot declare ordinary plugin contributions".into());
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|value| value.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("Terminal transport plugins must declare a host version range".into());
+        }
+    }
     let desktop = manifest
         .contributes
         .as_ref()
@@ -488,6 +517,7 @@ pub(crate) fn validate_runtime_entry_exists(
         | NativePluginRuntimePlan::Process { entry }
         | NativePluginRuntimePlan::Acp { entry }
         | NativePluginRuntimePlan::RemoteDesktop { entry }
+        | NativePluginRuntimePlan::TerminalTransport { entry }
         | NativePluginRuntimePlan::Language { entry } => entry,
         NativePluginRuntimePlan::ManifestOnly
         | NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => return Ok(()),
@@ -1185,6 +1215,11 @@ pub fn native_runtime_plan_for_manifest(
             NativePluginRuntimeKind::RemoteDesktop => NativePluginRuntimePlan::RemoteDesktop {
                 entry: runtime.entry.clone(),
             },
+            NativePluginRuntimeKind::TerminalTransport => {
+                NativePluginRuntimePlan::TerminalTransport {
+                    entry: runtime.entry.clone(),
+                }
+            }
             NativePluginRuntimeKind::ManifestOnly => NativePluginRuntimePlan::ManifestOnly,
             NativePluginRuntimeKind::Language => NativePluginRuntimePlan::Language {
                 entry: runtime.entry.clone(),
@@ -1225,7 +1260,8 @@ pub fn native_plugin_state_for(
         NativePluginRuntimePlan::Wasm { .. } => NativePluginState::ReadyWasm,
         NativePluginRuntimePlan::Process { .. }
         | NativePluginRuntimePlan::Acp { .. }
-        | NativePluginRuntimePlan::RemoteDesktop { .. } => NativePluginState::ReadyProcess,
+        | NativePluginRuntimePlan::RemoteDesktop { .. }
+        | NativePluginRuntimePlan::TerminalTransport { .. } => NativePluginState::ReadyProcess,
         NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => {
             NativePluginState::UnsupportedLegacyJs
         }
@@ -1263,6 +1299,7 @@ pub fn native_runtime_kind_label(runtime_plan: &NativePluginRuntimePlan) -> &'st
         NativePluginRuntimePlan::Process { .. } => "process",
         NativePluginRuntimePlan::Acp { .. } => "acp",
         NativePluginRuntimePlan::RemoteDesktop { .. } => "remote-desktop",
+        NativePluginRuntimePlan::TerminalTransport { .. } => "terminal-transport",
         NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => "legacy-js",
     }
 }

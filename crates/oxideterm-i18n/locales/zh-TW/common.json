@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "連線前請安裝或啟用 Mosh 外掛。",
+    "ready": "Mosh 外掛已安裝並啟用。"
+  },
   "file_preview": {
     "entry_file_offset": "進入點檔案偏移",
     "subject": "主體",
@@ -261,7 +265,8 @@
     "marketplace_workspace": "工作區",
     "marketplace_utilities": "實用工具",
     "marketplace_acp": "ACP",
-    "marketplace_remote_desktop": "遠端桌面",
+    "acp_setup_hint": "安裝並啟用後會自動建立代理設定，無須填寫啟動指令。工作目錄、額外參數和環境變數是選用設定，留空即可使用預設設定。使用本機程式的外掛須先安裝對應的官方命令列程式，並依外掛說明登入。",
+    "marketplace_remote_connections": "遠端連線",
     "apply_page_size": "套用",
     "invalid_page_size": "請輸入有效的正整數",
     "page_range": "第 {{start}}–{{end}} 項，共 {{total}} 個外掛",

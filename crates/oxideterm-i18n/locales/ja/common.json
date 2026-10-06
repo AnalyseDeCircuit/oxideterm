@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "接続する前に Mosh プラグインをインストールまたは有効にしてください。",
+    "ready": "Mosh プラグインはインストール済みで有効です。"
+  },
   "file_preview": {
     "entry_file_offset": "エントリーポイントのファイル位置",
     "subject": "主体",
@@ -261,7 +265,8 @@
     "marketplace_workspace": "ワークスペース",
     "marketplace_utilities": "ユーティリティ",
     "marketplace_acp": "ACP",
-    "marketplace_remote_desktop": "リモートデスクトップ",
+    "acp_setup_hint": "プラグインをインストールして有効にすると、エージェント設定が自動で作成されます。起動コマンドの入力は不要です。作業ディレクトリ、追加の引数、環境変数は任意で、空欄なら既定の設定を使用します。ローカルのプログラムを利用するプラグインでは、対応する公式コマンドラインツールをインストールし、プラグインの説明に従ってログインしてください。",
+    "marketplace_remote_connections": "リモート接続",
     "apply_page_size": "適用",
     "invalid_page_size": "有効な正の整数を入力してください",
     "page_range": "{{total}} 件中 {{start}}–{{end}} 件",

@@ -1238,6 +1238,7 @@
       "acp_agents_summary": "已設定 {{count}} 個 ACP Agent",
       "acp_agent_add": "新增 ACP Agent",
       "acp_agents_empty": "尚未設定 ACP Agent。",
+      "acp_agents_custom_hint": "從市集安裝並啟用 ACP 外掛會自動建立代理，無須在此新增。此處用於手動接入自己的 ACP 程式。",
       "acp_agent_new_name": "新的 ACP Agent",
       "acp_agent_enabled": "已啟用",
       "acp_agent_disabled": "已停用",

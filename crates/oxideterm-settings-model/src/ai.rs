@@ -653,6 +653,21 @@ pub fn ai_add_acp_plugin_agent(settings: &mut PersistedSettings, plugin_id: &str
     {
         return;
     }
+    // Preserve conversation identity when the built-in OpenCode preset becomes a plugin.
+    if plugin_id == "com.oxideterm.acp.opencode" {
+        let mut migrated = false;
+        for agent in &mut settings.ai.acp_agents {
+            if agent.plugin_id.is_none() && agent.command == "opencode" && agent.args == ["acp"] {
+                agent.plugin_id = Some(plugin_id.into());
+                agent.command.clear();
+                agent.args.clear();
+                migrated = true;
+            }
+        }
+        if migrated {
+            return;
+        }
+    }
     let id = ai_unique_acp_agent_id(settings, plugin_id);
     settings.ai.acp_agents.push(AcpAgentConfig {
         id,
@@ -948,6 +963,26 @@ mod tests {
             Some("/my/project")
         );
         assert!(!settings.ai.acp_agents[1].enabled);
+
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::OpenCode);
+        let index = settings.ai.acp_agents.len() - 1;
+        settings.ai.acp_agents[index].cwd = Some("/work/project".into());
+        settings.ai.acp_agents[index]
+            .capability_policy
+            .fs_read_text_file = true;
+        settings.ai.active_acp_agent_id = Some("opencode".into());
+        ai_add_acp_plugin_agent(&mut settings, "com.oxideterm.acp.opencode", "OpenCode");
+        let migrated = &settings.ai.acp_agents[index];
+        assert_eq!(migrated.id, "opencode");
+        assert_eq!(
+            migrated.plugin_id.as_deref(),
+            Some("com.oxideterm.acp.opencode")
+        );
+        assert_eq!(migrated.command, "");
+        assert_eq!(migrated.args, Vec::<String>::new());
+        assert_eq!(migrated.cwd.as_deref(), Some("/work/project"));
+        assert!(migrated.capability_policy.fs_read_text_file);
+        assert_eq!(settings.ai.active_acp_agent_id.as_deref(), Some("opencode"));
     }
 }
 

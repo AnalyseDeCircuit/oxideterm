@@ -71,6 +71,22 @@ pub struct NativePluginRegistryEntry {
     /// The top-level release remains readable by clients without history support.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub releases: Vec<NativePluginRegistryRelease>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<NativePluginRegistryHistory>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginRegistryHistory {
+    pub download_url: String,
+    pub checksum: String,
+    pub size: u64,
+}
+
+impl NativePluginRegistryEntry {
+    pub fn history_pending(&self) -> bool {
+        self.history.is_some() && self.releases.is_empty() && self.packages.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

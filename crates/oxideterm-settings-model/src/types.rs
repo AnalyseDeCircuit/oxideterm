@@ -59,7 +59,6 @@ pub enum TerminalSettingsPage {
 pub enum AiSettingsPage {
     General,
     Providers,
-    Agents,
     Context,
     Tools,
 }
@@ -341,20 +340,13 @@ impl TerminalSettingsPage {
 
 impl AiSettingsPage {
     pub fn all() -> &'static [Self] {
-        &[
-            Self::General,
-            Self::Providers,
-            Self::Agents,
-            Self::Context,
-            Self::Tools,
-        ]
+        &[Self::General, Self::Providers, Self::Context, Self::Tools]
     }
 
     pub fn label_key(self) -> &'static str {
         match self {
             Self::General => "settings_view.ai.page_general",
             Self::Providers => "settings_view.ai.page_providers",
-            Self::Agents => "settings_view.ai.page_agents",
             Self::Context => "settings_view.ai.page_context",
             Self::Tools => "settings_view.ai.page_tools",
         }

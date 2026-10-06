@@ -29,6 +29,7 @@ pub struct MoshTerminalSession {
     resize: TerminalResize,
     lifecycle: TerminalLifecycle,
     command_tx: tokio::sync::mpsc::Sender<MoshTerminalCommand>,
+    startup_cancellation: Option<oxideterm_mosh::MoshSessionCancellation>,
     connection_status: MoshConnectionStatus,
     graphics_ingress: GraphicsIngress,
     graphics: TerminalGraphicsState,
@@ -138,7 +139,11 @@ impl MoshTerminalSession {
             MoshPredictionDisplay::Always => PredictionDisplay::Always,
             MoshPredictionDisplay::Never => PredictionDisplay::Never,
         };
+        let lease = config.plugin_sessions.acquire();
+        let startup_cancellation = lease.as_ref().ok().map(|lease| lease.cancellation());
         config.task_runtime.spawn(run_mosh_terminal_worker(
+            config.executable,
+            lease,
             config.bootstrap,
             config.bootstrap_context,
             resize,
@@ -161,6 +166,7 @@ impl MoshTerminalSession {
             resize,
             lifecycle: TerminalLifecycle::Running,
             command_tx,
+            startup_cancellation,
             connection_status: MoshConnectionStatus::Connecting,
             graphics_ingress: GraphicsIngress::new(graphics_options),
             graphics: TerminalGraphicsState::default(),
@@ -268,6 +274,9 @@ impl MoshTerminalSession {
 
             match event.into_inner() {
                 MoshTerminalWorkerEvent::Connected => {
+                    // Connected sessions close through the protocol; only pending
+                    // bootstrap needs immediate cancellation when its pane disappears.
+                    self.startup_cancellation = None;
                     self.connected = true;
                     if let Some(operation) = self.connect_audit.take() {
                         operation.finish(
@@ -831,6 +840,7 @@ impl TerminalSessionBackend for MoshTerminalSession {
         if matches!(self.lifecycle, TerminalLifecycle::Closed) {
             return;
         }
+        if let Some(cancellation) = self.startup_cancellation.take() { cancellation.cancel(); }
         if let Some(sink) = &self.recording_sink {
             sink.interrupt();
         }
@@ -861,6 +871,8 @@ impl TerminalSessionBackend for MoshTerminalSession {
 }
 
 async fn run_mosh_terminal_worker(
+    executable: std::path::PathBuf,
+    lease: Result<oxideterm_mosh::MoshSessionLease, oxideterm_mosh::MoshSessionStartError>,
     mut bootstrap: oxideterm_mosh::MoshBootstrapConfig,
     bootstrap_context: oxideterm_mosh::MoshBootstrapContext,
     initial_resize: TerminalResize,
@@ -869,7 +881,22 @@ async fn run_mosh_terminal_worker(
 ) {
     bootstrap.terminal_columns = u16::try_from(initial_resize.cols).unwrap_or(u16::MAX);
     bootstrap.terminal_rows = u16::try_from(initial_resize.rows).unwrap_or(u16::MAX);
-    let bootstrap = match oxideterm_mosh::bootstrap_mosh(bootstrap, bootstrap_context).await {
+    let mut lease = match lease {
+        Ok(lease) => lease,
+        Err(error) => {
+            let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Failed(error.to_string()));
+            return;
+        }
+    };
+    let bootstrap = tokio::select! {
+        biased;
+        _ = lease.cancelled() => {
+            let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Closed(false));
+            return;
+        }
+        result = oxideterm_mosh::bootstrap_mosh(bootstrap, bootstrap_context) => result,
+    };
+    let bootstrap = match bootstrap {
         Ok(bootstrap) => bootstrap,
         Err(error) => {
             let _ = worker_tx.send_control(MoshTerminalWorkerEvent::Failed(error.to_string()));
@@ -877,6 +904,8 @@ async fn run_mosh_terminal_worker(
         }
     };
     let session_config = oxideterm_mosh::MoshSessionConfig {
+        executable,
+        lease,
         remote_host: bootstrap.remote_host,
         remote_port: bootstrap.remote_port,
         ip_family: bootstrap.ip_family,

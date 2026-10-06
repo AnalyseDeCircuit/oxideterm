@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use gpui::{Context, EventEmitter};
 use oxideterm_gpui_terminal::{SharedTerminalSession, TerminalNoticeVariant};
@@ -96,6 +96,7 @@ pub(in crate::workspace) struct AcpWorkspaceEntity {
     threads: HashMap<String, AcpThreadSnapshot>,
     active_connection_ids: HashMap<String, u64>,
     session_threads: HashMap<AcpSessionOwner, String>,
+    cursor_tool_sessions: HashMap<(String, String), HashSet<String>>,
     turn_routes: HashMap<String, AcpTurnRoute>,
     turn_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     application_tool_bridges: HashMap<String, AcpApplicationToolBridge>,
@@ -243,6 +244,7 @@ impl AcpWorkspaceEntity {
             threads: HashMap::new(),
             active_connection_ids: HashMap::new(),
             session_threads: HashMap::new(),
+            cursor_tool_sessions: HashMap::new(),
             turn_routes: HashMap::new(),
             turn_tasks: HashMap::new(),
             application_tool_bridges: HashMap::new(),
@@ -556,6 +558,12 @@ impl AcpWorkspaceEntity {
         };
         let owner = AcpSessionOwner::new(thread.agent_id.clone(), session_id);
         self.session_threads.remove(&owner);
+        self.cursor_tool_sessions.retain(|(agent, _), sessions| {
+            if agent == &thread.agent_id {
+                sessions.remove(session_id);
+            }
+            !sessions.is_empty()
+        });
         let owned_terminal_ids = self
             .terminals
             .iter()
@@ -591,6 +599,41 @@ impl AcpWorkspaceEntity {
     fn conversation_for_session(&self, agent_id: &str, session_id: &str) -> Option<&str> {
         let owner = AcpSessionOwner::new(agent_id, session_id);
         self.session_threads.get(&owner).map(String::as_str)
+    }
+
+    fn route_for_cursor_request(
+        &self,
+        agent_id: &str,
+        tool_call_id: &str,
+    ) -> Option<&AcpTurnRoute> {
+        if let Some(sessions) = self
+            .cursor_tool_sessions
+            .get(&(agent_id.into(), tool_call_id.into()))
+        {
+            let mut routes = sessions
+                .iter()
+                .filter_map(|session| self.route_for_session(agent_id, session));
+            let route = routes.next()?;
+            return if routes.next().is_some() {
+                None
+            } else {
+                Some(route)
+            };
+        }
+        // Cursor omits sessionId. Without a preceding tool notification, only
+        // a single live turn can identify the request's conversation safely.
+        let mut routes = self
+            .threads
+            .values()
+            .filter(|thread| thread.agent_id == agent_id)
+            .filter_map(|thread| thread.active_turn_id.as_deref())
+            .filter_map(|turn_id| self.turn_routes.get(turn_id));
+        let route = routes.next()?;
+        if routes.next().is_some() {
+            None
+        } else {
+            Some(route)
+        }
     }
 
     pub(in crate::workspace) fn session_context(
@@ -683,6 +726,17 @@ impl AcpWorkspaceEntity {
         if !self.accepts_event(&event) {
             return;
         }
+        if let oxideterm_ai::AcpManagedEvent::Client {
+            agent_id, event, ..
+        } = &event
+            && let Some((tool_call_id, session_id)) = event.tool_call_session()
+            && self.route_for_session(agent_id, &session_id).is_some()
+        {
+            self.cursor_tool_sessions
+                .entry((agent_id.clone(), tool_call_id))
+                .or_default()
+                .insert(session_id);
+        }
         match &event {
             oxideterm_ai::AcpManagedEvent::ConnectionState {
                 agent_id,
@@ -690,6 +744,10 @@ impl AcpWorkspaceEntity {
                 message,
                 ..
             } => {
+                if *state != oxideterm_ai::AcpConnectionState::Ready {
+                    self.cursor_tool_sessions
+                        .retain(|(owner, _), _| owner != agent_id);
+                }
                 for thread in self
                     .threads
                     .values_mut()
@@ -809,11 +867,24 @@ impl AcpWorkspaceEntity {
                 }
             }
             oxideterm_ai::AcpManagedEvent::TurnFinished {
+                agent_id,
                 thread_id,
                 turn_id,
                 result,
                 ..
             } => {
+                if let Some(session_id) = self
+                    .threads
+                    .get(thread_id)
+                    .and_then(|thread| thread.session_id.as_ref())
+                {
+                    self.cursor_tool_sessions.retain(|(owner, _), sessions| {
+                        if owner == agent_id {
+                            sessions.remove(session_id);
+                        }
+                        !sessions.is_empty()
+                    });
+                }
                 if let Some(bridge) = self.application_tool_bridges.get(thread_id) {
                     if let Some(turn) = bridge.active_turn.write().take() {
                         turn.cancel();
@@ -862,6 +933,13 @@ impl AcpWorkspaceEntity {
             oxideterm_ai::AcpManagedEvent::ConfigUpdated { .. } => None,
             oxideterm_ai::AcpManagedEvent::ModeUpdated { .. } => None,
             oxideterm_ai::AcpManagedEvent::ControlFailed { .. } => None,
+            oxideterm_ai::AcpManagedEvent::Client {
+                agent_id,
+                event: oxideterm_ai::AcpClientEvent::CursorRequest { request, .. },
+                ..
+            } => self
+                .route_for_cursor_request(agent_id, request.tool_call_id())
+                .cloned(),
             oxideterm_ai::AcpManagedEvent::Client {
                 agent_id, event, ..
             } => event
@@ -1135,6 +1213,13 @@ impl WorkspaceApp {
                 });
             }
             let Some(route) = delivery.route else {
+                if let oxideterm_ai::AcpManagedEvent::Client {
+                    event: oxideterm_ai::AcpClientEvent::CursorRequest { response_tx, .. },
+                    ..
+                } = delivery.event
+                {
+                    let _ = response_tx.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
+                }
                 continue;
             };
             let event = match delivery.event {
@@ -1301,6 +1386,90 @@ mod tests {
             sessions.get(&AcpSessionOwner::new("agent-b", "session-1")),
             Some(&"chat-b")
         );
+    }
+
+    #[gpui::test]
+    fn cursor_requests_use_tool_session_identity_and_reject_ambiguous_turns(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let runtime = std::sync::Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let entity = cx.new(|cx| AcpWorkspaceEntity::new(runtime, cx));
+        entity.update(cx, |entity, cx| {
+            for (chat, agent, session, turn) in [
+                ("one", "cursor", "s1", "t1"),
+                ("two", "cursor", "s2", "t2"),
+                ("other", "other", "s1", "t3"),
+            ] {
+                let mut thread =
+                    AcpThreadSnapshot::new(agent.into(), "/project".into(), Default::default());
+                thread.active_turn_id = Some(turn.into());
+                thread.session_id = Some(session.into());
+                entity.threads.insert(chat.into(), thread);
+                entity
+                    .session_threads
+                    .insert(AcpSessionOwner::new(agent, session), chat.into());
+                entity.turn_routes.insert(
+                    turn.into(),
+                    AcpTurnRoute {
+                        generation: 1,
+                        conversation_id: chat.into(),
+                        assistant_id: format!("reply-{chat}"),
+                    },
+                );
+            }
+            assert!(
+                entity
+                    .route_for_cursor_request("cursor", "unknown")
+                    .is_none()
+            );
+            entity.active_connection_ids.insert("cursor".into(), 1);
+            let notification = serde_json::from_value(serde_json::json!({
+                "sessionId":"s2", "update":{"sessionUpdate":"tool_call","toolCallId":"call","title":"Need input","status":"in_progress"}
+            })).unwrap();
+            entity.receive_event(oxideterm_ai::AcpManagedEvent::Client {
+                agent_id: "cursor".into(), connection_id: 1,
+                event: oxideterm_ai::AcpClientEvent::SessionUpdate(notification),
+            }, cx);
+            assert_eq!(
+                entity
+                    .route_for_cursor_request("cursor", "call")
+                    .unwrap()
+                    .conversation_id,
+                "two"
+            );
+            entity
+                .cursor_tool_sessions
+                .get_mut(&("cursor".into(), "call".into()))
+                .unwrap()
+                .insert("s1".into());
+            assert!(entity.route_for_cursor_request("cursor", "call").is_none());
+            entity
+                .cursor_tool_sessions
+                .get_mut(&("cursor".into(), "call".into()))
+                .unwrap()
+                .remove("s1");
+            assert_eq!(
+                entity
+                    .route_for_cursor_request("other", "call")
+                    .unwrap()
+                    .conversation_id,
+                "other"
+            );
+            entity.threads.get_mut("two").unwrap().active_turn_id = None;
+            assert!(entity.route_for_cursor_request("cursor", "call").is_none());
+            assert_eq!(
+                entity
+                    .route_for_cursor_request("cursor", "new-call")
+                    .unwrap()
+                    .conversation_id,
+                "one"
+            );
+        });
     }
 
     #[gpui::test]

@@ -263,12 +263,13 @@ impl WorkspaceApp {
             if self.plugin_entity.read(cx).manager_operation_in_flight() {
                 return Err("Another plugin operation is already running.".to_string());
             }
-            let retired_desktops = if overwrite {
+            let mut retired_desktops = if overwrite {
                 self.remote_desktop
                     .update(cx, |desktops, cx| desktops.stop_plugins(None, cx))
             } else {
                 Vec::new()
             };
+            if overwrite { retired_desktops.push(self.mosh_plugin_sessions.stop()); }
             let accepted = self.plugin_entity.update(cx, |plugins, _cx| {
                 plugins.start_package_install(
                     settings_path,
@@ -314,9 +315,12 @@ impl WorkspaceApp {
                     Ok::<_, String>(())
                 })?;
                 self.stop_acp_plugin(Some(plugin_id), cx);
-                let workers = self.remote_desktop.update(cx, |desktops, cx| {
+                let mut workers = self.remote_desktop.update(cx, |desktops, cx| {
                     desktops.stop_plugins(Some(plugin_id), cx)
                 });
+                if plugin_id == "com.oxideterm.terminal.mosh" {
+                    workers.push(self.mosh_plugin_sessions.stop());
+                }
                 let plugin_id = plugin_id.to_string();
                 let receiver = self.plugin_entity.update(cx, |plugins, cx| {
                     plugins.start_plugin_uninstall(plugin_id.clone(), remove_storage, workers, cx)

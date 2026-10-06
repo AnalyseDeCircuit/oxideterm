@@ -1,4 +1,5 @@
 mod acp;
+pub use acp::{CursorAskQuestion, CursorCreatePlan, CursorRequest, CursorResponseSender};
 pub mod agent;
 mod application_tools;
 mod chat;

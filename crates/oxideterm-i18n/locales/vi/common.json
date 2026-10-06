@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Cài đặt hoặc bật plugin Mosh trước khi kết nối.",
+    "ready": "Plugin Mosh đã được cài đặt và bật."
+  },
   "file_preview": {
     "entry_file_offset": "Vị trí điểm vào trong tệp",
     "subject": "Chủ thể",
@@ -261,7 +265,8 @@
     "marketplace_workspace": "Không gian làm việc",
     "marketplace_utilities": "Công cụ tiện ích",
     "marketplace_acp": "ACP",
-    "marketplace_remote_desktop": "Máy tính từ xa",
+    "acp_setup_hint": "Cài đặt và bật plugin sẽ tự động tạo cấu hình tác nhân; bạn không cần nhập lệnh khởi chạy. Thư mục làm việc, tham số bổ sung và biến môi trường là tùy chọn; để trống để dùng cấu hình mặc định. Plugin sử dụng chương trình cục bộ cần công cụ dòng lệnh chính thức tương ứng; hãy làm theo hướng dẫn của plugin để cài đặt và đăng nhập.",
+    "marketplace_remote_connections": "Kết nối từ xa",
     "apply_page_size": "Áp dụng",
     "invalid_page_size": "Nhập một số nguyên dương hợp lệ",
     "page_range": "{{start}}–{{end}} trong {{total}} tiện ích",

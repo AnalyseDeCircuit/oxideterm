@@ -76,7 +76,7 @@ pub(crate) fn install_native_plugin_package_bytes(
             }
         }
         let mut effective_manifest = manifest.clone();
-        if let Some(catalog) = load_catalog_cache(settings_path)? {
+        if let Some(catalog) = load_catalog_cache(settings_path, &[&manifest.id])? {
             apply_catalog_compatibility(&mut effective_manifest, &catalog);
         }
         validate_native_plugin_host(&effective_manifest)?;

@@ -675,6 +675,9 @@ impl WorkspaceApp {
         if name == "ask_user" && matches!(status, "completed" | "error" | "rejected") {
             self.ai_entity.update(cx, |ai, _| { ai.pending_user_questions.remove(&(generation, tool_call_id.to_owned())); });
         }
+        if matches!(name, "cursor/ask_question" | "cursor/create_plan") && matches!(status, "completed" | "error" | "rejected") {
+            self.ai_entity.update(cx, |ai, _| { ai.pending_cursor_requests.remove(&(generation, tool_call_id.to_owned())); });
+        }
         let persisted_arguments = sanitize_ai_tool_arguments_for_persistence(arguments);
         if status == "pending_user_approval" { self.notify_ai_agent_attention(conversation_id, message_id, "ai.agents.approval", cx); }
         let persisted_result = result

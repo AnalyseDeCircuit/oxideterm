@@ -1238,6 +1238,7 @@
       "acp_agents_summary": "Đã cấu hình {{count}} tác nhân ACP",
       "acp_agent_add": "Thêm tác nhân ACP",
       "acp_agents_empty": "Chưa cấu hình tác nhân ACP nào.",
+      "acp_agents_custom_hint": "Cài đặt và bật plugin ACP từ kho sẽ tự động thêm tác nhân. Phần này chỉ dùng để kết nối thủ công chương trình ACP của riêng bạn.",
       "acp_agent_new_name": "Tác nhân ACP mới",
       "acp_agent_enabled": "Đã bật",
       "acp_agent_disabled": "Đã tắt",

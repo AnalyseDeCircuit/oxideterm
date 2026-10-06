@@ -32,6 +32,8 @@ impl std::fmt::Debug for TelnetLoginCredentials {
 }
 
 pub struct MoshTerminalConfig {
+    pub executable: std::path::PathBuf,
+    pub plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
     pub title: String,
     pub bootstrap: oxideterm_mosh::MoshBootstrapConfig,
     pub bootstrap_context: oxideterm_mosh::MoshBootstrapContext,

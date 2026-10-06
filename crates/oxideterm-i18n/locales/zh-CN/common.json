@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "连接前请安装或启用 Mosh 插件。",
+    "ready": "Mosh 插件已安装并启用。"
+  },
   "file_preview": {
     "entry_file_offset": "入口文件偏移",
     "subject": "主体",
@@ -261,7 +265,8 @@
     "marketplace_workspace": "工作区",
     "marketplace_utilities": "实用工具",
     "marketplace_acp": "ACP",
-    "marketplace_remote_desktop": "远程桌面",
+    "acp_setup_hint": "安装并启用后会自动创建代理配置，无需填写启动命令。工作目录、额外参数和环境变量是可选设置，留空即可使用默认配置。复用本机程序的插件需先安装对应的官方命令行程序，并按插件说明登录。",
+    "marketplace_remote_connections": "远程连接",
     "apply_page_size": "应用",
     "invalid_page_size": "请输入有效的正整数",
     "page_range": "第 {{start}}–{{end}} 项，共 {{total}} 个插件",

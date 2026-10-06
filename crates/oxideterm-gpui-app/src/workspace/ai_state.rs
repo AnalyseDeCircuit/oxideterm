@@ -28,6 +28,23 @@ impl AiPendingUserQuestion {
     }
 }
 
+pub(in crate::workspace) struct AiPendingCursorRequest {
+    pub conversation_id: String,
+    pub assistant_id: String,
+    pub request: oxideterm_ai::CursorRequest,
+    pub selections: Vec<Vec<String>>,
+    pub response_tx: Option<oxideterm_ai::CursorResponseSender>,
+}
+
+impl Drop for AiPendingCursorRequest {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.selections);
+        if let Some(sender) = self.response_tx.take() {
+            let _ = sender.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
+        }
+    }
+}
+
 /// Pending input is owned by this workspace and is never replayed from chat persistence.
 pub(in crate::workspace) struct AiQueuedChatTurn {
     pub id: String,
@@ -366,6 +383,8 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     pub(in crate::workspace) chat_launches: HashMap<String, String>,
     chat_drafts: HashMap<String, zeroize::Zeroizing<String>>,
     pub(in crate::workspace) pending_user_questions: HashMap<(u64, String), AiPendingUserQuestion>,
+    pub(in crate::workspace) pending_cursor_requests:
+        HashMap<(u64, String), AiPendingCursorRequest>,
     pending_tool_approvals: HashMap<(u64, String), tokio::sync::oneshot::Sender<bool>>,
     // Approval previews are runtime-only; conversation history never owns execution payloads.
     pub(in crate::workspace) tool_approval_previews:
@@ -1156,6 +1175,7 @@ impl AiWorkspaceEntity {
             chat_launches: HashMap::new(),
             chat_drafts: HashMap::new(),
             pending_user_questions: HashMap::new(),
+            pending_cursor_requests: HashMap::new(),
             pending_tool_approvals: HashMap::new(),
             tool_approval_previews: HashMap::new(),
             pending_acp_permission_choices: HashMap::new(),
@@ -3737,6 +3757,8 @@ impl AiWorkspaceEntity {
         });
         self.pending_user_questions
             .retain(|(run, _), _| *run != generation);
+        self.pending_cursor_requests
+            .retain(|(run, _), _| *run != generation);
         let approvals: Vec<_> = self
             .pending_tool_approvals
             .keys()
@@ -3834,6 +3856,68 @@ impl AiWorkspaceEntity {
         });
         if let Some(previous) = self.history.answers.insert(key, task) {
             previous.abort();
+        }
+        true
+    }
+
+    pub(in crate::workspace) fn select_cursor_option(
+        &mut self,
+        generation: u64,
+        id: &str,
+        question_index: usize,
+        option_index: usize,
+    ) {
+        if !self.run_accepts_tools(generation) {
+            return;
+        }
+        let Some(pending) = self
+            .pending_cursor_requests
+            .get_mut(&(generation, id.into()))
+        else {
+            return;
+        };
+        let oxideterm_ai::CursorRequest::Questions(request) = &pending.request else {
+            return;
+        };
+        let Some(question) = request.questions.get(question_index) else {
+            return;
+        };
+        let Some(option) = question.options.get(option_index) else {
+            return;
+        };
+        let selected = &mut pending.selections[question_index];
+        if selected.contains(&option.id) {
+            selected.retain(|id| id != &option.id);
+        } else {
+            if !question.allow_multiple {
+                selected.clear();
+            }
+            selected.push(option.id.clone());
+        }
+    }
+
+    pub(in crate::workspace) fn resolve_cursor_request(
+        &mut self,
+        generation: u64,
+        id: &str,
+        accepted: bool,
+    ) -> bool {
+        if !self.run_accepts_tools(generation) {
+            return false;
+        }
+        let key = (generation, id.into());
+        let Some(pending) = self.pending_cursor_requests.get(&key) else {
+            return false;
+        };
+        let Some(response) = pending.request.response(accepted, &pending.selections) else {
+            return false;
+        };
+        let mut pending = self
+            .pending_cursor_requests
+            .remove(&key)
+            .expect("validated pending request");
+        if let Some(sender) = pending.response_tx.take() {
+            let _ = sender.send(Ok(response));
         }
         true
     }
@@ -3940,6 +4024,7 @@ impl AiWorkspaceEntity {
     fn reject_all_tool_approvals(&mut self) {
         self.tool_approval_previews.clear();
         self.pending_user_questions.clear();
+        self.pending_cursor_requests.clear();
         for (_, sender) in self.pending_tool_approvals.drain() {
             let _ = sender.send(false);
         }
@@ -6814,6 +6899,56 @@ pub(in crate::workspace) mod entity_tests {
         assert!(
             held.upgrade().is_none(),
             "scrolling away must release uncached body ownership"
+        );
+    }
+
+    #[gpui::test]
+    fn cursor_answers_require_submission_and_stopping_cancels_only_its_run(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = test_runtime();
+        let entity = cx
+            .new(|cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx));
+        let (first_tx, mut first_rx) = tokio::sync::oneshot::channel();
+        let (second_tx, mut second_rx) = tokio::sync::oneshot::channel();
+        entity.update(cx, |ai, _| {
+            ai.create_conversation("first".into(), None, 1, None);
+            ai.create_conversation("second".into(), None, 2, None);
+            let first = ai.begin_chat_stream("first".into(), "reply-first".into()).0;
+            let second = ai.begin_chat_stream("second".into(), "reply-second".into()).0;
+            for (generation, conversation, sender) in [(first, "first", first_tx), (second, "second", second_tx)] {
+                let request = serde_json::from_value(serde_json::json!({
+                    "toolCallId":"same-call", "questions":[
+                        {"id":"mode","prompt":"Which mode?","options":[{"id":"a","label":"Agent"},{"id":"p","label":"Plan"}]},
+                        {"id":"features","prompt":"Which features?","options":[{"id":"x","label":"One"},{"id":"y","label":"Two"}],"allowMultiple":true}
+                    ]
+                })).unwrap();
+                ai.pending_cursor_requests.insert((generation, "same-call".into()), AiPendingCursorRequest {
+                    conversation_id: conversation.into(), assistant_id: format!("reply-{conversation}"),
+                    request: oxideterm_ai::CursorRequest::Questions(request), selections: vec![vec![],vec![]], response_tx: Some(sender),
+                });
+            }
+            ai.cancel_chat_stream_for("first");
+            assert!(!ai.resolve_cursor_request(first, "same-call", true));
+            assert!(!ai.resolve_cursor_request(second, "same-call", true));
+            ai.select_cursor_option(second, "same-call", 0, 0);
+            ai.select_cursor_option(second, "same-call", 0, 1);
+            ai.select_cursor_option(second, "same-call", 1, 0);
+            ai.select_cursor_option(second, "same-call", 1, 1);
+            assert_eq!(ai.pending_cursor_requests[&(second, "same-call".into())].selections, [vec!["p"],vec!["x","y"]]);
+            assert!(matches!(second_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+            assert!(ai.resolve_cursor_request(second, "same-call", true));
+            assert!(!ai.resolve_cursor_request(second, "same-call", true));
+        });
+        assert_eq!(
+            first_rx.try_recv().unwrap().unwrap(),
+            serde_json::json!({"outcome":{"outcome":"cancelled"}})
+        );
+        assert_eq!(
+            second_rx.try_recv().unwrap().unwrap(),
+            serde_json::json!({"outcome":{"outcome":"answered","answers":[
+                {"questionId":"mode","selectedOptionIds":["p"]}, {"questionId":"features","selectedOptionIds":["x","y"]}
+            ]}})
         );
     }
 

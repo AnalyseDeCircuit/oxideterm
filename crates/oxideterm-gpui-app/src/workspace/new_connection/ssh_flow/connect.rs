@@ -1315,6 +1315,16 @@ impl WorkspaceApp {
                 );
             }
             SshConnectionIntent::Mosh(options) => {
+                let Some(executable) = self.plugin_entity.read(cx).mosh_executable() else {
+                    let message = self.i18n.t("mosh_plugin.required");
+                    self.fail_public_mcp_mosh_open_for_intent(
+                        &SshConnectionIntent::Mosh(options),
+                        message.clone(),
+                    );
+                    self.session_manager
+                        .update(cx, |manager, cx| manager.set_status(Some(message), cx));
+                    return;
+                };
                 let public_mcp_open_token = options.public_mcp_open_token.clone();
                 let runtime_connection_attempt_id = options.runtime_connection_attempt_id.clone();
                 if runtime_connection_attempt_id
@@ -1381,6 +1391,8 @@ impl WorkspaceApp {
                     )),
                 };
                 let terminal_config = MoshTerminalConfig {
+                    executable,
+                    plugin_sessions: self.mosh_plugin_sessions.clone(),
                     title: title.clone(),
                     bootstrap,
                     bootstrap_context,

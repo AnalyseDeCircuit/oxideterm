@@ -81,6 +81,13 @@ impl From<&plugin_host::NativePluginDiagnostic> for NativePluginDiagnosticKey {
 }
 
 pub(in crate::workspace) enum NativePluginManagerDelivery {
+    CatalogHistories {
+        expected: Vec<plugin_host::NativePluginRegistryEntry>,
+        results: Vec<(
+            String,
+            Result<plugin_host::NativePluginRegistryEntry, String>,
+        )>,
+    },
     Install {
         expected_id: Option<String>,
         download_url: Zeroizing<String>,
@@ -134,7 +141,12 @@ pub(super) struct NativePluginManagerState {
     marketplace_updates_only: bool,
     marketplace_expanded_ids: HashSet<String>,
     package_manager_expanded: bool,
+    pub(super) custom_acp_expanded: bool,
     pub(super) marketplace_entries: Vec<plugin_host::NativePluginRegistryEntry>,
+    pub(super) catalog_version: u32,
+    pub(super) history_page_ids: Vec<String>,
+    pub(super) pending_histories: HashSet<String>,
+    pub(super) failed_histories: HashSet<String>,
     pub(super) marketplace_load_state: NativePluginMarketplaceLoadState,
     pub(super) available_updates: Vec<plugin_host::NativePluginRegistryEntry>,
     pub(super) operation_status: NativePluginManagerOperationStatus,
@@ -171,7 +183,12 @@ impl NativePluginManagerState {
             marketplace_updates_only: false,
             marketplace_expanded_ids: HashSet::new(),
             package_manager_expanded: false,
+            custom_acp_expanded: false,
             marketplace_entries: Vec::new(),
+            catalog_version: 1,
+            history_page_ids: Vec::new(),
+            pending_histories: HashSet::new(),
+            failed_histories: HashSet::new(),
             marketplace_load_state: NativePluginMarketplaceLoadState::NotLoaded,
             available_updates: Vec::new(),
             operation_status: NativePluginManagerOperationStatus::Idle,
@@ -368,7 +385,7 @@ impl WorkspaceApp {
             manager.previous_tab = manager.active_tab;
             manager.active_tab = NativePluginManagerTab::Marketplace;
             manager.marketplace_search_draft = format!("com.oxideterm.remote-desktop.{protocol}");
-            manager.marketplace_tag = Some("remote-desktop".to_string());
+            manager.marketplace_tag = Some("remote-connections".to_string());
             manager.marketplace_updates_only = false;
             manager.pagination[1].page = 0;
             manager.section_list_state.splice(
@@ -869,7 +886,11 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(16.0))
             .min_h(px(260.0))
-            .child(self.render_plugin_tag_filter(NativePluginManagerTab::Installed, cx));
+            .child(self.render_plugin_tag_filter(NativePluginManagerTab::Installed, cx))
+            .when(
+                self.plugin_manager_state(cx).installed_tag.as_deref() == Some("acp"),
+                |card| card.child(self.ai_acp_agents_section(self.settings_store.settings(), cx)),
+            );
         let range = self.update_plugin_manager_state(cx, |manager| {
             manager.pagination[0].range(plugin_rows.len())
         });
@@ -1021,6 +1042,12 @@ impl WorkspaceApp {
         let entry_count = visible_entries.len();
         let range = self
             .update_plugin_manager_state(cx, |manager| manager.pagination[1].range(entry_count));
+        let requested = visible_entries[range.clone()]
+            .iter()
+            .map(|entry| entry.id.clone())
+            .collect();
+        self.plugin_entity
+            .update(cx, |entity, _| entity.start_catalog_history_load(requested));
 
         let mut card = div()
             .w_full()
@@ -1132,9 +1159,57 @@ impl WorkspaceApp {
             "workspace" => self.i18n.t("plugin.marketplace_workspace"),
             "utilities" => self.i18n.t("plugin.marketplace_utilities"),
             "acp" => self.i18n.t("plugin.marketplace_acp"),
-            "remote-desktop" => self.i18n.t("plugin.marketplace_remote_desktop"),
+            "remote-connections" => self.i18n.t("plugin.marketplace_remote_connections"),
             _ => tag.to_string(),
         }
+    }
+
+    pub(in crate::workspace) fn open_mosh_plugin(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_plugin_manager_tab(window, cx);
+        self.update_plugin_manager_state(cx, |manager| {
+            manager.previous_tab = manager.active_tab;
+            manager.active_tab = NativePluginManagerTab::Marketplace;
+            manager.marketplace_search_draft = "com.oxideterm.terminal.mosh".into();
+            manager.marketplace_tag = Some("remote-connections".into());
+            manager.marketplace_updates_only = false;
+            manager.pagination[1].page = 0;
+            manager.section_list_state.splice(
+                PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
+                    ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
+                1,
+            );
+        });
+        self.start_native_plugin_marketplace_load(cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_acp_plugin_manager(
+        &mut self,
+        add_custom: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if add_custom {
+            self.edit_settings(oxideterm_settings_model::ai_add_acp_agent, cx);
+        }
+        self.open_plugin_manager_tab(window, cx);
+        self.update_plugin_manager_state(cx, |manager| {
+            manager.previous_tab = manager.active_tab;
+            manager.active_tab = NativePluginManagerTab::Installed;
+            manager.installed_tag = Some("acp".into());
+            manager.pagination[0].page = 0;
+            manager.custom_acp_expanded |= add_custom;
+            manager.section_list_state.splice(
+                PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
+                    ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
+                1,
+            );
+        });
+        cx.notify();
     }
 
     fn render_plugin_tag_filter(
@@ -1536,7 +1611,22 @@ impl WorkspaceApp {
         } else {
             (self.i18n.t("plugin.install"), LucideIcon::Download)
         };
-        let availability = if !host_supported {
+        let availability = if entry.history_pending() {
+            Some((
+                self.i18n.t(
+                    if self
+                        .plugin_manager_state(cx)
+                        .failed_histories
+                        .contains(&entry.id)
+                    {
+                        "plugin.marketplace_load_error"
+                    } else {
+                        "plugin.loading_marketplace"
+                    },
+                ),
+                StatusTone::Info,
+            ))
+        } else if !host_supported {
             Some((
                 self.i18n.t("plugin.marketplace_platform_unavailable"),
                 StatusTone::Warning,
@@ -1779,7 +1869,20 @@ impl WorkspaceApp {
                                 )
                             },
                         )
-                        .when_some(capabilities, |details, label| details.child(label)),
+                        .when_some(capabilities, |details, label| details.child(label))
+                        .when(
+                            entry
+                                .tags
+                                .as_ref()
+                                .is_some_and(|tags| tags.iter().any(|tag| tag == "acp")),
+                            |details| {
+                                details.child(
+                                    div()
+                                        .whitespace_normal()
+                                        .child(self.i18n.t("plugin.acp_setup_hint")),
+                                )
+                            },
+                        ),
                 )
             })
             .into_any_element()
@@ -2441,13 +2544,20 @@ impl WorkspaceApp {
                 entity.begin_plugin_update(expected_id.as_deref())
             });
         }
-        let retired_desktops = if overwrite {
+        let mut retired_desktops = if overwrite {
             self.remote_desktop.update(cx, |desktops, cx| {
                 desktops.stop_plugins(expected_id.as_deref(), cx)
             })
         } else {
             Vec::new()
         };
+        if overwrite
+            && expected_id
+                .as_deref()
+                .is_none_or(|id| id == "com.oxideterm.terminal.mosh")
+        {
+            retired_desktops.push(self.mosh_plugin_sessions.stop());
+        }
         let settings_path = self.settings_store.path().to_path_buf();
         let message = self.i18n.t("plugin.installing");
         self.update_plugin_manager_state(cx, |manager| {
@@ -2887,9 +2997,13 @@ impl WorkspaceApp {
                                         }
                                         result
                                     });
-                                    let workers = this.remote_desktop.update(cx, |desktops, cx| {
-                                        desktops.stop_plugins(Some(&uninstall_plugin_id), cx)
-                                    });
+                                    let mut workers =
+                                        this.remote_desktop.update(cx, |desktops, cx| {
+                                            desktops.stop_plugins(Some(&uninstall_plugin_id), cx)
+                                        });
+                                    if uninstall_plugin_id == "com.oxideterm.terminal.mosh" {
+                                        workers.push(this.mosh_plugin_sessions.stop());
+                                    }
                                     let uninstall_plugin_id = uninstall_plugin_id.clone();
                                     let receiver = this.plugin_entity.update(cx, |plugins, cx| {
                                         plugins.start_plugin_uninstall(
@@ -2977,7 +3091,7 @@ impl WorkspaceApp {
             );
         }
         if is_expanded {
-            row = row.child(self.render_native_plugin_expanded_details(plugin));
+            row = row.child(self.render_native_plugin_expanded_details(plugin, cx));
         }
         row.into_any_element()
     }
@@ -2985,6 +3099,7 @@ impl WorkspaceApp {
     fn render_native_plugin_expanded_details(
         &self,
         plugin: &plugin_host::NativePluginInfo,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let manifest = &plugin.manifest;
@@ -3124,6 +3239,34 @@ impl WorkspaceApp {
                         )
                     }),
             )
+            .when(
+                matches!(
+                    plugin.runtime_plan,
+                    plugin_host::NativePluginRuntimePlan::Acp { .. }
+                ),
+                |details| {
+                    let settings = self.settings_store.settings();
+                    details
+                        .child(
+                            div()
+                                .min_w_0()
+                                .whitespace_normal()
+                                .text_color(rgb(theme.text_muted))
+                                .child(self.i18n.t("plugin.acp_setup_hint")),
+                        )
+                        .children(
+                            settings
+                                .ai
+                                .acp_agents
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, agent)| {
+                                    agent.plugin_id.as_deref() == Some(manifest.id.as_str())
+                                })
+                                .map(|(index, agent)| self.ai_acp_agent_card(index, agent, cx)),
+                        )
+                },
+            )
             .into_any_element()
     }
 
@@ -3222,7 +3365,7 @@ fn native_plugin_marketplace_entry_matches(
 }
 
 fn native_plugin_filter_tags<'a>(tags: impl Iterator<Item = &'a str>) -> Vec<String> {
-    tags.map(|tag| tag.trim().to_lowercase())
+    tags.map(native_plugin_category)
         .filter(|tag| !tag.is_empty())
         .collect::<std::collections::BTreeSet<_>>()
         .into_iter()
@@ -3230,7 +3373,18 @@ fn native_plugin_filter_tags<'a>(tags: impl Iterator<Item = &'a str>) -> Vec<Str
 }
 
 fn native_plugin_tag_matches(tags: &[String], selected: Option<&str>) -> bool {
-    selected.is_none_or(|selected| tags.iter().any(|tag| tag.trim().to_lowercase() == selected))
+    selected.is_none_or(|selected| {
+        tags.iter()
+            .any(|tag| native_plugin_category(tag) == native_plugin_category(selected))
+    })
+}
+
+fn native_plugin_category(tag: &str) -> String {
+    match tag.trim().to_lowercase().as_str() {
+        // Published catalogs remain usable until their cached tags refresh.
+        "remote-desktop" => "remote-connections".into(),
+        tag => tag.to_string(),
+    }
 }
 
 fn native_plugin_tags_for_id<'a>(
@@ -3623,6 +3777,27 @@ mod tests {
                 assert_eq!(workspace.current_settings_input_value(input, cx), "25");
             });
         }
+        let agent_index = cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_acp_plugin_manager(true, window, cx);
+                let index = workspace.settings_store.settings().ai.acp_agents.len() - 1;
+                workspace.focus_settings_input(
+                    SettingsInput::AiAcpAgentDisplayName(index),
+                    String::new(),
+                    cx,
+                );
+                index
+            })
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_input("测试代理");
+        cx.simulate_keystrokes("enter");
+        workspace.read_with(cx, |workspace, _cx| {
+            assert_eq!(
+                workspace.settings_store.settings().ai.acp_agents[agent_index].display_name,
+                "测试代理"
+            );
+        });
     }
 
     #[test]
@@ -3721,11 +3896,22 @@ mod tests {
             packages: Vec::new(),
             engines: None,
             releases: Vec::new(),
+            history: None,
         }
     }
 
     #[test]
     fn dynamic_plugin_tags_filter_installed_ids_without_a_category_allowlist() {
+        assert_eq!(
+            native_plugin_filter_tags(
+                ["remote-desktop", "remote-connections", "host-tools"].into_iter()
+            ),
+            ["host-tools", "remote-connections"]
+        );
+        assert!(native_plugin_tag_matches(
+            &["remote-desktop".into()],
+            Some("remote-connections")
+        ));
         let registry = plugin_host::NativePluginRegistry::default();
         let mut first = registry_entry_with_capabilities(None);
         first.id = "com.example.first".into();
