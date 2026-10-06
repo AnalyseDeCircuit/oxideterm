@@ -969,9 +969,11 @@ printf '%s\n' '{"protocolVersion":2,"requestId":"activate-test","payload":{"requ
 async fn process_runtime_cleans_up_when_activate_process_exits() {
     let temp_dir = unique_temp_dir("plugin-process-exits");
     let plugin_dir = temp_dir.join("plugin");
+    // Consume activation so this tests response EOF, not a race with stdin writes.
     write_process_plugin(
         &plugin_dir,
         r#"#!/bin/sh
+read request
 exit 0
 "#,
     );
