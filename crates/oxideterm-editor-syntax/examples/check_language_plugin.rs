@@ -41,22 +41,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sample = expectation["source"]
         .as_str()
         .ok_or("Missing source sample")?;
-    let expected_text = expectation["highlight"]["text"]
-        .as_str()
-        .ok_or("Missing expected highlighted text")?;
-    let expected_scope = expectation["highlight"]["scope"]
-        .as_str()
-        .ok_or("Missing expected highlight scope")?;
     let session = SyntaxSession::parse_plugin(&grammar, &sample, None)?;
     if session.root_has_error() {
         return Err("Grammar rejected its source sample".into());
     }
     let spans = session.highlight_spans(&sample);
-    if !spans.iter().any(|span| {
-        format!("{:?}", span.scope) == expected_scope
-            && &sample[span.range.start.0..span.range.end.0] == expected_text
-    }) {
-        return Err(format!("Missing {expected_scope} capture for {expected_text:?}").into());
+    let captures = expectation["highlight"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(&expectation["highlight"]));
+    if captures.is_empty() {
+        return Err("Missing expected highlight captures".into());
+    }
+    for capture in captures {
+        let expected_text = capture["text"]
+            .as_str()
+            .ok_or("Missing expected highlighted text")?;
+        let expected_scope = capture["scope"]
+            .as_str()
+            .ok_or("Missing expected highlight scope")?;
+        if !spans.iter().any(|span| {
+            format!("{:?}", span.scope) == expected_scope
+                && &sample[span.range.start.0..span.range.end.0] == expected_text
+        }) {
+            return Err(format!("Missing {expected_scope} capture for {expected_text:?}").into());
+        }
     }
     println!(
         "Verified {} parser, ABI, queries and highlighting",
