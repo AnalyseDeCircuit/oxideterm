@@ -93,7 +93,6 @@ rustPlatform.buildRustPackage {
     #    the matching entry below with the `got:` sha256 output.
     # 4. Run `nix flake check -L` to ensure package checks pass.
     outputHashes = {
-      "ironrdp-0.17.0" = "sha256-gBkwaq6m1iunsQ2Xz/5l5ajuI3uRmYkdlFdiE5wx7to=";
       "russh-0.63.0" = "sha256-oMUSzDpWWh9/W+HEipJrU2A8CRbpyCoJVeDchIbBsNM=";
     };
   };
@@ -116,10 +115,6 @@ rustPlatform.buildRustPackage {
     "oxideterm-gpui-app"
     "-p"
     "oxideterm-cli"
-    "-p"
-    "oxideterm-rdp-helper"
-    "-p"
-    "oxideterm-vnc-helper"
     "--bins"
   ];
 
@@ -138,7 +133,6 @@ rustPlatform.buildRustPackage {
     install -d "$resource_root/agents"
     install -d "$resource_root/icons"
     install -d "$resource_root/cli-bin/$target_triple"
-    install -d "$resource_root/helpers/$target_triple"
 
     cp -R crates/oxideterm-gpui-app/resources/agents/. "$resource_root/agents/"
     cp -R crates/oxideterm-gpui-app/resources/icons/. "$resource_root/icons/"
@@ -162,16 +156,6 @@ rustPlatform.buildRustPackage {
       --set SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}"
 
-    wrapProgram "$out/bin/oxideterm-rdp-helper" \
-      --set SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
-      --set OXIDETERM_OPENH264_LIBRARY "${openh264}/lib/libopenh264.so" \
-      --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}"
-
-    wrapProgram "$out/bin/oxideterm-vnc-helper" \
-      --set SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
-      --set OXIDETERM_OPENH264_LIBRARY "${openh264}/lib/libopenh264.so" \
-      --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}"
-
     wrapProgram "$out/bin/oxideterm-native" \
       --set OXIDETERM_CLI_BIN "$out/bin/oxideterm" \
       --set SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
@@ -179,8 +163,6 @@ rustPlatform.buildRustPackage {
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins}"
 
     ln -s "$out/bin/oxideterm" "$resource_root/cli-bin/$target_triple/oxideterm"
-    ln -s "$out/bin/oxideterm-rdp-helper" "$resource_root/helpers/$target_triple/oxideterm-rdp-helper"
-    ln -s "$out/bin/oxideterm-vnc-helper" "$resource_root/helpers/$target_triple/oxideterm-vnc-helper"
   '';
 
   desktopItems = [

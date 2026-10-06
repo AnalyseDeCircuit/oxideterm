@@ -28,7 +28,7 @@ nix develop
 
 Nix builds Rust packages in an isolated network sandbox. During the build:
 1. Standard crates from `crates.io` have their checksums recorded directly in `Cargo.lock`. Nix uses these checksums to verify downloaded crates.
-2. Git dependencies (such as `russh` or `ironrdp`) are cloned as fixed-output derivations. Because `Cargo.lock` only records Git commit SHAs (and not Nix tree SHA-256 hashes), Nix requires explicit hashes in `cargoLock.outputHashes` inside `nix/package.nix`.
+2. Git dependencies (such as `russh`) are cloned as fixed-output derivations. Because `Cargo.lock` only records Git commit SHAs (and not Nix tree SHA-256 hashes), Nix requires explicit hashes in `cargoLock.outputHashes` inside `nix/package.nix`.
 
 If a Git dependency commit is bumped or added in `Cargo.toml` / `Cargo.lock` without updating `nix/package.nix`, Nix will fail with a fixed-output derivation hash mismatch:
 
