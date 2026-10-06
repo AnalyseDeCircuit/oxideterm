@@ -19,6 +19,10 @@ pub struct NativePluginManifest {
     #[serde(default)]
     pub author: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub main: Option<String>,
@@ -80,12 +84,15 @@ pub enum NativePluginRuntimeKind {
     Acp,
     RemoteDesktop,
     TerminalTransport,
+    Helper,
     ManifestOnly,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
+    #[serde(default)]
+    pub helper: Option<NativePluginHelperDef>,
     #[serde(default)]
     pub terminal_transport: Option<NativePluginTerminalTransportDef>,
     #[serde(default)]
@@ -114,6 +121,14 @@ pub struct NativePluginContributes {
     pub api_commands: Option<Vec<String>>,
     #[serde(default)]
     pub host_monitors: Option<Vec<NativePluginHostMonitorDef>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginHelperDef {
+    pub feature: String,
+    pub protocol: String,
+    pub protocol_version: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

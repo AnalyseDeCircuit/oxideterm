@@ -4,7 +4,7 @@
 use super::*;
 
 impl RemoteDesktopSessionEntity {
-    fn refresh_plugin_provider(&mut self, cx: &App) -> bool {
+    fn refresh_plugin_provider(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(plugins) = self.plugin_entity.as_ref() else {
             return true;
         };
@@ -23,6 +23,10 @@ impl RemoteDesktopSessionEntity {
                 status: RemoteDesktopSessionStatus::Disconnected,
                 message: None,
             });
+            cx.emit(RemoteDesktopSessionEvent::PluginRequired {
+                protocol: self.profile.protocol,
+            });
+            cx.notify();
             false
         }
     }
@@ -1062,7 +1066,8 @@ impl RemoteDesktopSessionEntity {
             let generation = match event {
                 RemoteDesktopSessionEvent::DeliveryReady { generation }
                 | RemoteDesktopSessionEvent::FrameApplyReady { generation } => generation,
-                RemoteDesktopSessionEvent::CredentialsRequired { .. }
+                RemoteDesktopSessionEvent::PluginRequired { .. }
+                | RemoteDesktopSessionEvent::CredentialsRequired { .. }
                 | RemoteDesktopSessionEvent::ClipboardTransferFailed
                 | RemoteDesktopSessionEvent::VncFileTransferCompleted
                 | RemoteDesktopSessionEvent::VncFileTransferFailed(_) => return,
@@ -1124,7 +1129,8 @@ impl RemoteDesktopSessionEntity {
                                 cx.notify();
                             }
                         }
-                        RemoteDesktopSessionEvent::CredentialsRequired { .. }
+                        RemoteDesktopSessionEvent::PluginRequired { .. }
+                        | RemoteDesktopSessionEvent::CredentialsRequired { .. }
                         | RemoteDesktopSessionEvent::ClipboardTransferFailed
                         | RemoteDesktopSessionEvent::VncFileTransferCompleted
                         | RemoteDesktopSessionEvent::VncFileTransferFailed(_) => {}
@@ -1266,6 +1272,10 @@ impl WorkspaceApp {
     ) {
         debug_assert_eq!(session_entity.read(cx).tab_id, tab_id);
         match event {
+            RemoteDesktopSessionEvent::PluginRequired { protocol } => {
+                self.show_missing_remote_desktop_plugin(*protocol, cx);
+                return;
+            }
             RemoteDesktopSessionEvent::CredentialsRequired { generation } => {
                 self.prompt_remote_desktop_credentials(session_entity, *generation, cx);
                 return;
@@ -2941,10 +2951,25 @@ mod tests {
             assert!(sessions[1].read(cx).password.is_some());
         });
         assert!(completed[1].try_recv().is_err());
+        let events = cx.new(|_| Vec::<RemoteDesktopSessionEvent>::new());
+        let _subscription = events.update(cx, |_, cx| {
+            cx.subscribe(&sessions[0], |events, _session, event, _cx| {
+                events.push(*event)
+            })
+        });
         sessions[0].update(cx, |session, cx| {
             assert!(!session.start_worker(RemoteDesktopSize::clamped(200, 120), None, None, cx));
             assert_eq!(session.worker_generation, 8);
             assert!(session.worker.is_none());
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert_eq!(
+                events.read(cx).as_slice(),
+                &[RemoteDesktopSessionEvent::PluginRequired {
+                    protocol: RemoteDesktopProtocol::Vnc,
+                }]
+            )
         });
         let workers = desktops.update(cx, |desktops, cx| desktops.stop_plugins(None, cx));
         for worker in workers {

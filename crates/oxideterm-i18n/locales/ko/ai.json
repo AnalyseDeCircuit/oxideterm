@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "도구 호출",
+      "group_heading": "도구 호출 · {{count}}개",
+      "total_duration": "도구 누적 실행 시간: {{duration}}밀리초",
       "arguments": "인수",
       "output": "출력",
       "summary": "요약",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "읽기",
         "write-file": "파일 쓰기",
-        "execute-command": "명령 실행",
+        "execute-command": "실행",
         "interactive-input": "대화형 입력",
         "destructive": "위험 작업",
         "network-expose": "네트워크 노출",

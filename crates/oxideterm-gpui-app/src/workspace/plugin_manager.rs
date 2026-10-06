@@ -104,6 +104,18 @@ pub(in crate::workspace) enum NativePluginInstallOutcome {
     Failed,
 }
 
+pub(super) struct NativePluginInstallRequest {
+    pub expected_id: Option<String>,
+    pub download_url: Zeroizing<String>,
+    pub checksum: Option<String>,
+    pub overwrite: bool,
+}
+
+pub(super) struct NativePluginInstallTarget {
+    pub expected_id: Option<String>,
+    pub name: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum NativePluginManagerTab {
     Installed,
@@ -151,6 +163,9 @@ pub(super) struct NativePluginManagerState {
     pub(super) available_updates: Vec<plugin_host::NativePluginRegistryEntry>,
     pub(super) operation_status: NativePluginManagerOperationStatus,
     pub(super) pending_overwrite: Option<NativePluginPendingOverwrite>,
+    pub(super) install_queue: VecDeque<NativePluginInstallRequest>,
+    pub(super) active_install: Option<NativePluginInstallTarget>,
+    pub(super) failed_install_ids: HashSet<String>,
     pub(super) expanded_plugin_ids: HashSet<String>,
     dismissed_diagnostic_keys: HashSet<NativePluginDiagnosticKey>,
     pub(super) active_sidebar_panel: Option<plugin_ui::NativePluginSidebarPanelSelection>,
@@ -193,10 +208,43 @@ impl NativePluginManagerState {
             available_updates: Vec::new(),
             operation_status: NativePluginManagerOperationStatus::Idle,
             pending_overwrite: None,
+            install_queue: VecDeque::new(),
+            active_install: None,
+            failed_install_ids: HashSet::new(),
             expanded_plugin_ids: HashSet::new(),
             dismissed_diagnostic_keys: HashSet::new(),
             active_sidebar_panel: None,
         }
+    }
+
+    pub(super) fn install_pending(&self, id: Option<&str>) -> bool {
+        self.active_install
+            .as_ref()
+            .is_some_and(|active| active.expected_id.as_deref() == id)
+            || self
+                .install_queue
+                .iter()
+                .any(|request| request.expected_id.as_deref() == id)
+            || self
+                .pending_overwrite
+                .as_ref()
+                .is_some_and(|pending| pending.expected_id.as_deref() == id)
+    }
+
+    pub(super) fn enqueue_install(&mut self, request: NativePluginInstallRequest) -> bool {
+        if self.install_pending(request.expected_id.as_deref()) {
+            return false;
+        }
+        if let Some(id) = &request.expected_id {
+            self.failed_install_ids.remove(id);
+        }
+        self.install_queue.push_back(request);
+        true
+    }
+
+    pub(super) fn cancel_queued_install(&mut self, id: Option<&str>) {
+        self.install_queue
+            .retain(|request| request.expected_id.as_deref() != id);
     }
 }
 
@@ -376,26 +424,123 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let protocol = match protocol {
-            oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp => "rdp",
-            oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc => "vnc",
-        };
+        self.open_required_plugin(
+            &format!("com.oxideterm.remote-desktop.{}", protocol.provider_id()),
+            window,
+            cx,
+        );
+    }
+
+    pub(in crate::workspace) fn open_required_plugin(
+        &mut self,
+        plugin_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let installed = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .plugins()
+            .iter()
+            .position(|plugin| plugin.manifest.id == plugin_id);
+        let category = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .catalog_tags(plugin_id)
+            .first()
+            .cloned();
         self.open_plugin_manager_tab(window, cx);
         self.update_plugin_manager_state(cx, |manager| {
             manager.previous_tab = manager.active_tab;
-            manager.active_tab = NativePluginManagerTab::Marketplace;
-            manager.marketplace_search_draft = format!("com.oxideterm.remote-desktop.{protocol}");
-            manager.marketplace_tag = Some("remote-connections".to_string());
+            manager.active_tab = if installed.is_some() {
+                NativePluginManagerTab::Installed
+            } else {
+                NativePluginManagerTab::Marketplace
+            };
+            manager.marketplace_search_draft = plugin_id.into();
+            manager.marketplace_tag = category;
             manager.marketplace_updates_only = false;
             manager.pagination[1].page = 0;
+            if let Some(index) = installed {
+                manager.installed_tag = None;
+                manager.pagination[0].page = index / manager.pagination[0].page_size;
+                manager.expanded_plugin_ids.insert(plugin_id.into());
+            }
             manager.section_list_state.splice(
                 PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
                     ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
                 1,
             );
         });
-        self.start_native_plugin_marketplace_load(cx);
+        if installed.is_none() {
+            self.start_native_plugin_marketplace_load(cx);
+        }
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn plugin_requirement_message(
+        &self,
+        plugin_id: &str,
+        plugin_name: &str,
+        cx: &App,
+    ) -> String {
+        let installed = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .plugins()
+            .iter()
+            .any(|plugin| plugin.manifest.id == plugin_id);
+        self.i18n
+            .t(if installed {
+                "plugin.enable_required"
+            } else {
+                "plugin.install_required"
+            })
+            .replace(
+                "{{name}}",
+                if plugin_name.trim().is_empty() {
+                    plugin_id
+                } else {
+                    plugin_name
+                },
+            )
+    }
+
+    pub(in crate::workspace) fn show_required_plugin_notice(
+        &self,
+        plugin_id: &str,
+        plugin_name: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let installed = self
+            .plugin_entity
+            .read(cx)
+            .registry()
+            .plugins()
+            .iter()
+            .any(|plugin| plugin.manifest.id == plugin_id);
+        self.apply_workspace_overlay_intent(
+            WorkspaceOverlayIntent::PluginRequired {
+                notice: TerminalNotice {
+                    title: self.plugin_requirement_message(plugin_id, plugin_name, cx),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Warning,
+                },
+                plugin_id: plugin_id.into(),
+                label: self.i18n.t(if installed {
+                    "remote_desktop.manage_plugin"
+                } else {
+                    "plugin.tab_marketplace"
+                }),
+                workspace: cx.entity().downgrade(),
+            },
+            cx,
+        );
     }
 
     pub(super) fn render_plugin_manager_surface(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -665,7 +810,9 @@ impl WorkspaceApp {
                                                 self.i18n.t("plugin.refresh"),
                                                 self.plugin_entity
                                                     .read(cx)
-                                                    .manager_operation_in_flight(),
+                                                    .manager_state()
+                                                    .marketplace_load_state
+                                                    == NativePluginMarketplaceLoadState::Loading,
                                                 cx.listener(|this, _event, _window, cx| {
                                                     this.start_native_plugin_marketplace_load(cx);
                                                     cx.stop_propagation();
@@ -1169,22 +1316,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.open_plugin_manager_tab(window, cx);
-        self.update_plugin_manager_state(cx, |manager| {
-            manager.previous_tab = manager.active_tab;
-            manager.active_tab = NativePluginManagerTab::Marketplace;
-            manager.marketplace_search_draft = "com.oxideterm.terminal.mosh".into();
-            manager.marketplace_tag = Some("remote-connections".into());
-            manager.marketplace_updates_only = false;
-            manager.pagination[1].page = 0;
-            manager.section_list_state.splice(
-                PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
-                    ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
-                1,
-            );
-        });
-        self.start_native_plugin_marketplace_load(cx);
-        cx.notify();
+        self.open_required_plugin("com.oxideterm.terminal.mosh", window, cx);
     }
 
     pub(in crate::workspace) fn open_acp_plugin_manager(
@@ -1597,14 +1729,23 @@ impl WorkspaceApp {
         let package_verified = package
             .as_ref()
             .is_some_and(|package| !package.checksum.trim().is_empty());
-        let busy = self.plugin_entity.read(cx).manager_operation_in_flight();
         let installed = installed_version.is_some();
-        let action_disabled = busy
-            || !host_supported
+        let action_disabled = !host_supported
             || !version_supported
             || !package_verified
-            || (installed && !update_available);
-        let (action_label, action_icon) = if update_available {
+            || (installed && !update_available)
+            || self
+                .plugin_manager_state(cx)
+                .pending_overwrite
+                .as_ref()
+                .is_some_and(|pending| pending.expected_id.as_deref() == Some(&entry.id));
+        let failed = self
+            .plugin_manager_state(cx)
+            .failed_install_ids
+            .contains(&entry.id);
+        let (action_label, action_icon) = if failed {
+            (self.i18n.t("common.actions.retry"), LucideIcon::RefreshCw)
+        } else if update_available {
             (self.i18n.t("plugin.update"), LucideIcon::RefreshCw)
         } else if installed {
             (self.i18n.t("plugin.installed"), LucideIcon::CheckCircle)
@@ -1694,23 +1835,28 @@ impl WorkspaceApp {
             )
             .into_any_element(),
         );
-        actions.push(self.render_native_plugin_manager_button(
-            action_icon,
-            action_label,
-            action_disabled,
-            cx.listener(move |this, _event, _window, cx| {
-                let Some(package) = package_for_install.clone() else {
-                    return;
-                };
-                this.start_native_plugin_package_install(
-                    Some(expected_id.clone()),
-                    Zeroizing::new(package.download_url),
-                    Some(package.checksum),
-                    installed,
-                    cx,
-                );
-            }),
-        ));
+        actions.push(
+            self.render_native_plugin_install_activity(Some(&entry.id), cx)
+                .unwrap_or_else(|| {
+                    self.render_native_plugin_manager_button(
+                        action_icon,
+                        action_label,
+                        action_disabled,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let Some(package) = package_for_install.clone() else {
+                                return;
+                            };
+                            this.start_native_plugin_package_install(
+                                Some(expected_id.clone()),
+                                Zeroizing::new(package.download_url),
+                                Some(package.checksum),
+                                installed,
+                                cx,
+                            );
+                        }),
+                    )
+                }),
+        );
 
         let notice = newer_requirement
             .map(|message| (message, theme.warning))
@@ -1771,6 +1917,14 @@ impl WorkspaceApp {
                         .child(message),
                 )
             });
+        let summary = summary.when(failed, |body| {
+            body.child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.error))
+                    .child(self.i18n.t("plugin.install_error")),
+            )
+        });
 
         div()
             .w_full()
@@ -1855,6 +2009,16 @@ impl WorkspaceApp {
                                     )
                                 }),
                         )
+                        .child(
+                            self.render_native_plugin_license(
+                                entry.license.as_deref(),
+                                entry
+                                    .license_url
+                                    .as_deref()
+                                    .and_then(native_plugin_safe_https_url),
+                                None,
+                            ),
+                        )
                         .child(self.render_native_plugin_detail_row(
                             self.i18n.t("plugin.create_plugin_id"),
                             entry.id.clone(),
@@ -1919,10 +2083,7 @@ impl WorkspaceApp {
         let (busy, install_url_empty, pending_plugin_id, available_updates) = {
             let manager = self.plugin_manager_state(cx);
             (
-                matches!(
-                    manager.operation_status,
-                    NativePluginManagerOperationStatus::Busy(_)
-                ),
+                manager.install_pending(None),
                 manager.install_url_draft.trim().is_empty(),
                 manager
                     .pending_overwrite
@@ -1981,33 +2142,39 @@ impl WorkspaceApp {
                         .flex_1()
                         .flex_basis(px(PLUGIN_MANAGER_INLINE_INPUT_BASIS)),
                     )
-                    .child(div().ml_auto().flex_none().child(
-                        self.render_native_plugin_manager_button(
-                            LucideIcon::Download,
-                            self.i18n.t("plugin.install"),
-                            busy || install_url_empty,
-                            cx.listener(|this, _event, _window, cx| {
-                                let (download_url, checksum) =
-                                    this.update_plugin_manager_state(cx, |manager| {
-                                        let download_url = Zeroizing::new(std::mem::take(
-                                            &mut manager.install_url_draft,
-                                        ));
-                                        let checksum = normalized_optional_string(
-                                            &manager.install_checksum_draft,
-                                        );
-                                        manager.install_checksum_draft.clear();
-                                        (download_url, checksum)
-                                    });
-                                this.start_native_plugin_package_install(
-                                    None,
-                                    download_url,
-                                    checksum,
-                                    false,
-                                    cx,
-                                );
-                            }),
+                    .child(
+                        div().ml_auto().flex_none().child(
+                            self.render_native_plugin_install_activity(None, cx)
+                                .unwrap_or_else(|| {
+                                    self.render_native_plugin_manager_button(
+                                        LucideIcon::Download,
+                                        self.i18n.t("plugin.install"),
+                                        busy || install_url_empty,
+                                        cx.listener(|this, _event, _window, cx| {
+                                            let (download_url, checksum) = this
+                                                .update_plugin_manager_state(cx, |manager| {
+                                                    let download_url =
+                                                        Zeroizing::new(std::mem::take(
+                                                            &mut manager.install_url_draft,
+                                                        ));
+                                                    let checksum = normalized_optional_string(
+                                                        &manager.install_checksum_draft,
+                                                    );
+                                                    manager.install_checksum_draft.clear();
+                                                    (download_url, checksum)
+                                                });
+                                            this.start_native_plugin_package_install(
+                                                None,
+                                                download_url,
+                                                checksum,
+                                                false,
+                                                cx,
+                                            );
+                                        }),
+                                    )
+                                }),
                         ),
-                    )),
+                    ),
             )
             .child(
                 div()
@@ -2068,12 +2235,13 @@ impl WorkspaceApp {
                                             manager.operation_status =
                                                 NativePluginManagerOperationStatus::Idle;
                                         });
+                                        this.process_native_plugin_install_queue(cx);
                                         cx.notify();
                                     }),
                                 ),
                                 self.render_native_plugin_manager_text_button(
                                     self.i18n.t("plugin.url_conflict_confirm"),
-                                    busy,
+                                    self.plugin_entity.read(cx).manager_operation_in_flight(),
                                     cx.listener(|this, _event, _window, cx| {
                                         let pending = this
                                             .update_plugin_manager_state(cx, |manager| {
@@ -2222,6 +2390,7 @@ impl WorkspaceApp {
             } else {
                 CursorStyle::Arrow
             })
+            .when(listener.is_none(), |button| button.opacity(0.45))
             .hover(move |button| button.bg(rgb(theme.bg_panel)))
             .child(Self::render_lucide_icon(
                 icon,
@@ -2409,10 +2578,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let busy = matches!(
-            self.plugin_manager_state(cx).operation_status,
-            NativePluginManagerOperationStatus::Busy(_)
-        );
         let package = plugin_host::NativePluginRegistry::resolve_registry_package(entry).ok();
         let expected_id = entry.id.clone();
         let package_available = package
@@ -2460,42 +2625,144 @@ impl WorkspaceApp {
                         )
                     })
                     .into_any_element(),
-                vec![self.render_native_plugin_manager_button(
-                    LucideIcon::Download,
-                    self.i18n.t("plugin.update"),
-                    busy || !package_available,
-                    cx.listener(move |this, _event, _window, cx| {
-                        let Some(package) = package.clone() else {
-                            return;
-                        };
-                        // Registry entries remain visible after a click; move
-                        // only the resolved public package into the worker boundary.
-                        this.start_native_plugin_package_install(
-                            Some(expected_id.clone()),
-                            Zeroizing::new(package.download_url),
-                            Some(package.checksum),
-                            false,
-                            cx,
-                        );
-                    }),
-                )],
+                vec![
+                    self.render_native_plugin_install_activity(Some(&entry.id), cx)
+                        .unwrap_or_else(|| {
+                            self.render_native_plugin_manager_button(
+                                LucideIcon::Download,
+                                self.i18n.t("plugin.update"),
+                                !package_available,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    let Some(package) = package.clone() else {
+                                        return;
+                                    };
+                                    // Registry entries remain visible after a click; move
+                                    // only the resolved public package into the worker boundary.
+                                    this.start_native_plugin_package_install(
+                                        Some(expected_id.clone()),
+                                        Zeroizing::new(package.download_url),
+                                        Some(package.checksum),
+                                        false,
+                                        cx,
+                                    );
+                                }),
+                            )
+                        }),
+                ],
             ))
             .into_any_element()
     }
 
+    fn render_native_plugin_install_activity(
+        &self,
+        id: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let manager = self.plugin_manager_state(cx);
+        let active = manager
+            .active_install
+            .as_ref()
+            .is_some_and(|active| active.expected_id.as_deref() == id);
+        let position = manager
+            .install_queue
+            .iter()
+            .position(|request| request.expected_id.as_deref() == id);
+        if !active && position.is_none() {
+            return None;
+        }
+        let color = rgb(self.tokens.ui.accent);
+        let id = id.map(str::to_owned);
+        let content = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(self.tokens.spacing.two))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .text_color(color);
+        if active {
+            Some(
+                content
+                    .child(self.render_loading_icon(
+                        SharedString::from(format!(
+                            "plugin-install-{}",
+                            id.as_deref().unwrap_or("url")
+                        )),
+                        PLUGIN_MANAGER_ACTION_ICON_SIZE,
+                        color,
+                    ))
+                    .child(self.i18n.t("plugin.installing"))
+                    .into_any_element(),
+            )
+        } else {
+            Some(
+                content
+                    .child(
+                        self.i18n
+                            .t("plugin.install_queued")
+                            .replace("{{position}}", &(position.unwrap() + 1).to_string()),
+                    )
+                    .child(self.workspace_tooltip_icon_button(
+                        LucideIcon::X,
+                        PLUGIN_MANAGER_ACTION_ICON_SIZE,
+                        color,
+                        oxideterm_gpui_ui::IconButtonOptions::compact(
+                            PLUGIN_MANAGER_ROW_ACTION_SIZE,
+                        ),
+                        self.i18n.t("common.actions.cancel"),
+                        "plugin-cancel-install",
+                        false,
+                        cx.listener(move |this, _, _, cx| {
+                            this.update_plugin_manager_state(cx, |manager| {
+                                manager.cancel_queued_install(id.as_deref())
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                        cx.entity(),
+                    ))
+                    .into_any_element(),
+            )
+        }
+    }
+
     fn render_native_plugin_manager_status(&self, cx: &Context<Self>) -> Option<AnyElement> {
         let theme = self.tokens.ui;
-        let (icon, color, message) = match &self.plugin_manager_state(cx).operation_status {
-            // The dedicated disclaimer card below already owns the idle-state guidance.
-            NativePluginManagerOperationStatus::Idle => return None,
-            NativePluginManagerOperationStatus::Busy(message) => {
-                (LucideIcon::RefreshCw, theme.warning, message.clone())
+        let manager = self.plugin_manager_state(cx);
+        let queue_message = (!manager.install_queue.is_empty()).then(|| {
+            self.i18n
+                .t("plugin.install_queue_count")
+                .replace("{{count}}", &manager.install_queue.len().to_string())
+        });
+        let (icon, color, message) = if let Some(active) = &manager.active_install {
+            let name = active
+                .name
+                .clone()
+                .or_else(|| active.expected_id.clone())
+                .unwrap_or_else(|| self.i18n.t("plugin.url_install_title"));
+            let mut message = self
+                .i18n
+                .t("plugin.installing_named")
+                .replace("{{name}}", &name);
+            if let Some(queued) = queue_message {
+                message.push_str(" · ");
+                message.push_str(&queued);
             }
-            NativePluginManagerOperationStatus::Success(message) => {
-                (LucideIcon::CheckCircle, theme.success, message.clone())
-            }
-            NativePluginManagerOperationStatus::Error(message) => {
-                (LucideIcon::ShieldAlert, theme.error, message.clone())
+            (LucideIcon::LoaderCircle, theme.accent, message)
+        } else if let Some(queued) = queue_message {
+            (LucideIcon::Clock, theme.text_muted, queued)
+        } else {
+            match &manager.operation_status {
+                // The dedicated disclaimer card below already owns the idle-state guidance.
+                NativePluginManagerOperationStatus::Idle => return None,
+                NativePluginManagerOperationStatus::Busy(message) => {
+                    (LucideIcon::RefreshCw, theme.warning, message.clone())
+                }
+                NativePluginManagerOperationStatus::Success(message) => {
+                    (LucideIcon::CheckCircle, theme.success, message.clone())
+                }
+                NativePluginManagerOperationStatus::Error(message) => {
+                    (LucideIcon::ShieldAlert, theme.error, message.clone())
+                }
             }
         };
         Some(
@@ -2529,14 +2796,34 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        if self.plugin_entity.read(cx).manager_operation_in_flight() {
-            let message = self.i18n.t("plugin.installing");
-            self.update_plugin_manager_state(cx, |manager| {
-                manager.operation_status = NativePluginManagerOperationStatus::Busy(message);
+        self.update_plugin_manager_state(cx, |manager| {
+            manager.enqueue_install(NativePluginInstallRequest {
+                expected_id,
+                download_url,
+                checksum,
+                overwrite,
             });
-            cx.notify();
+        });
+        self.process_native_plugin_install_queue(cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn process_native_plugin_install_queue(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(request) = self
+            .plugin_entity
+            .update(cx, |plugins, _| plugins.take_next_package_install())
+        else {
             return;
-        }
+        };
+        let NativePluginInstallRequest {
+            expected_id,
+            download_url,
+            checksum,
+            overwrite,
+        } = request;
 
         if overwrite {
             self.stop_acp_plugin(expected_id.as_deref(), cx);
@@ -2560,6 +2847,13 @@ impl WorkspaceApp {
         }
         let settings_path = self.settings_store.path().to_path_buf();
         let message = self.i18n.t("plugin.installing");
+        if overwrite {
+            if let Some(worker) = self.plugin_entity.update(cx, |plugins, _| {
+                plugins.retire_security_key(expected_id.as_deref())
+            }) {
+                retired_desktops.push(worker);
+            }
+        }
         self.update_plugin_manager_state(cx, |manager| {
             manager.operation_status = NativePluginManagerOperationStatus::Busy(message);
             if overwrite {
@@ -2622,12 +2916,13 @@ impl WorkspaceApp {
     }
 
     fn start_native_plugin_marketplace_load(&mut self, cx: &mut Context<Self>) {
-        if self.plugin_entity.read(cx).manager_operation_in_flight() {
+        if self.plugin_manager_state(cx).marketplace_load_state
+            == NativePluginMarketplaceLoadState::Loading
+        {
             return;
         }
         let message = self.i18n.t("plugin.loading_marketplace");
         self.update_plugin_manager_state(cx, |manager| {
-            manager.marketplace_load_state = NativePluginMarketplaceLoadState::Loading;
             manager.operation_status = NativePluginManagerOperationStatus::Busy(message);
         });
         let started = self
@@ -2645,16 +2940,20 @@ impl WorkspaceApp {
     ) {
         match event {
             plugin_entity::PluginWorkspaceEvent::ManagerDeliveryReady => {
-                self.acp_entity
-                    .update(cx, |entity, _cx| entity.finish_plugin_update());
+                let was_installing = self.plugin_manager_state(cx).active_install.is_some();
                 let settings_path = self.settings_store.path();
                 let i18n = &self.i18n;
                 let bootstrap_runtime = self.plugin_entity.update(cx, |plugins, _cx| {
                     plugins.apply_manager_deliveries(settings_path, i18n, _cx)
                 });
+                if was_installing && self.plugin_manager_state(cx).active_install.is_none() {
+                    self.acp_entity
+                        .update(cx, |entity, _| entity.finish_plugin_update());
+                }
                 if bootstrap_runtime {
                     self.bootstrap_native_plugin_runtime(cx);
                 }
+                self.process_native_plugin_install_queue(cx);
                 cx.notify();
             }
             plugin_entity::PluginWorkspaceEvent::RuntimeRequestsReady => {
@@ -2774,6 +3073,12 @@ impl WorkspaceApp {
         let expand_plugin_id = plugin.manifest.id.clone();
         let uninstall_plugin_id = plugin.manifest.id.clone();
         let reload_plugin_name = plugin.manifest.name.clone();
+        let locked = self
+            .plugin_entity
+            .read(cx)
+            .plugin_change_in_flight(&plugin.manifest.id);
+        let install_activity =
+            self.render_native_plugin_install_activity(Some(&plugin.manifest.id), cx);
         let mut row = div()
             .w_full()
             .min_w_0()
@@ -2876,6 +3181,9 @@ impl WorkspaceApp {
                             .items_center()
                             .justify_end()
                             .gap(px(self.tokens.spacing.two))
+                            .when_some(install_activity, |actions, activity| {
+                                actions.child(activity)
+                            })
                             .child(self.workspace_tooltip_icon_button(
                                 if is_expanded {
                                     LucideIcon::ChevronDown
@@ -2912,126 +3220,162 @@ impl WorkspaceApp {
                                 right.child(self.render_native_plugin_row_icon_button(
                                     LucideIcon::RefreshCw,
                                     theme.text_muted,
-                                    Some(cx.listener(move |this, _event, _window, cx| {
-                                        let registry = plugin_host::NativePluginRegistry::discover(
-                                            this.settings_store.path(),
-                                        );
-                                        this.plugin_entity.update(cx, |plugins, _cx| {
-                                            plugins.replace_registry(registry, _cx);
-                                        });
-                                        this.bootstrap_native_plugin_runtime(cx);
-                                        let success_template = this.i18n.t("plugin.reload_success");
-                                        this.update_plugin_manager_state(cx, |manager| {
-                                            manager.operation_status =
-                                                NativePluginManagerOperationStatus::Success(
-                                                    success_template
-                                                        .replace("{{name}}", &reload_plugin_name),
+                                    (!locked).then_some(cx.listener(
+                                        move |this, _event, _window, cx| {
+                                            let registry =
+                                                plugin_host::NativePluginRegistry::discover(
+                                                    this.settings_store.path(),
                                                 );
-                                        });
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    })),
+                                            this.plugin_entity.update(cx, |plugins, _cx| {
+                                                plugins.replace_registry(registry, _cx);
+                                            });
+                                            this.bootstrap_native_plugin_runtime(cx);
+                                            let success_template =
+                                                this.i18n.t("plugin.reload_success");
+                                            this.update_plugin_manager_state(cx, |manager| {
+                                                manager.operation_status =
+                                                    NativePluginManagerOperationStatus::Success(
+                                                        success_template.replace(
+                                                            "{{name}}",
+                                                            &reload_plugin_name,
+                                                        ),
+                                                    );
+                                            });
+                                            cx.stop_propagation();
+                                            cx.notify();
+                                        },
+                                    )),
                                 ))
                             })
                             .child(self.render_native_plugin_row_icon_button(
                                 LucideIcon::Power,
                                 toggle_color,
-                                Some(cx.listener(move |this, _event, _window, cx| {
-                                    let result = this.plugin_entity.update(cx, |plugins, _cx| {
-                                        plugins.set_plugin_enabled(&plugin_id, next_enabled, _cx)
-                                    });
-                                    if let Err(error) = result {
-                                        this.update_plugin_manager_state(cx, |manager| {
-                                            manager.operation_status =
-                                                NativePluginManagerOperationStatus::Error(
-                                                    error.clone(),
-                                                );
-                                        });
-                                        this.plugin_entity.update(cx, |plugins, _cx| {
-                                            plugins
-                                                .registry_mut()
-                                                .record_manager_error(plugin_id.clone(), error);
-                                        });
-                                    } else {
-                                        this.bootstrap_native_plugin_runtime(cx);
-                                        let success_key = if next_enabled {
-                                            "plugin.enable_success"
+                                (!locked).then_some(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        let result =
+                                            this.plugin_entity.update(cx, |plugins, _cx| {
+                                                plugins.set_plugin_enabled(
+                                                    &plugin_id,
+                                                    next_enabled,
+                                                    _cx,
+                                                )
+                                            });
+                                        if let Err(error) = result {
+                                            this.update_plugin_manager_state(cx, |manager| {
+                                                manager.operation_status =
+                                                    NativePluginManagerOperationStatus::Error(
+                                                        error.clone(),
+                                                    );
+                                            });
+                                            this.plugin_entity.update(cx, |plugins, _cx| {
+                                                plugins
+                                                    .registry_mut()
+                                                    .record_manager_error(plugin_id.clone(), error);
+                                            });
                                         } else {
-                                            "plugin.disable_success"
-                                        };
-                                        let message = this
-                                            .i18n
-                                            .t(success_key)
-                                            .replace("{{name}}", &plugin_name);
-                                        this.update_plugin_manager_state(cx, |manager| {
-                                            manager.operation_status =
-                                                NativePluginManagerOperationStatus::Success(
-                                                    message,
-                                                );
-                                        });
-                                    }
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                })),
+                                            this.bootstrap_native_plugin_runtime(cx);
+                                            let success_key = if next_enabled {
+                                                "plugin.enable_success"
+                                            } else {
+                                                "plugin.disable_success"
+                                            };
+                                            let message = this
+                                                .i18n
+                                                .t(success_key)
+                                                .replace("{{name}}", &plugin_name);
+                                            this.update_plugin_manager_state(cx, |manager| {
+                                                manager.operation_status =
+                                                    NativePluginManagerOperationStatus::Success(
+                                                        message,
+                                                    );
+                                            });
+                                        }
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    },
+                                )),
                             ))
                             .child(self.render_native_plugin_row_icon_button(
                                 LucideIcon::Trash2,
                                 theme.text_muted,
-                                Some(cx.listener(move |this, _event, _window, cx| {
-                                    // Tauri's row deletes through the plugin API and leaves
-                                    // storage cleanup to the manager flow. Native mirrors the
-                                    // file removal path while preserving settings for now.
-                                    if this.plugin_entity.read(cx).manager_operation_in_flight() {
-                                        return;
-                                    }
-                                    this.stop_acp_plugin(Some(&uninstall_plugin_id), cx);
-                                    let _ = this.plugin_entity.update(cx, |plugins, cx| {
-                                        let result = plugins.set_plugin_enabled(
-                                            &uninstall_plugin_id,
-                                            false,
-                                            cx,
-                                        );
-                                        if result.is_ok() {
-                                            plugins
-                                                .begin_remote_desktop_removal(&uninstall_plugin_id);
+                                (!locked).then_some(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        // Tauri's row deletes through the plugin API and leaves
+                                        // storage cleanup to the manager flow. Native mirrors the
+                                        // file removal path while preserving settings for now.
+                                        if this
+                                            .plugin_entity
+                                            .read(cx)
+                                            .plugin_change_in_flight(&uninstall_plugin_id)
+                                        {
+                                            return;
                                         }
-                                        result
-                                    });
-                                    let mut workers =
-                                        this.remote_desktop.update(cx, |desktops, cx| {
-                                            desktops.stop_plugins(Some(&uninstall_plugin_id), cx)
-                                        });
-                                    if uninstall_plugin_id == "com.oxideterm.terminal.mosh" {
-                                        workers.push(this.mosh_plugin_sessions.stop());
-                                    }
-                                    let uninstall_plugin_id = uninstall_plugin_id.clone();
-                                    let receiver = this.plugin_entity.update(cx, |plugins, cx| {
-                                        plugins.start_plugin_uninstall(
-                                            uninstall_plugin_id.clone(),
-                                            false,
-                                            workers,
-                                            cx,
-                                        )
-                                    });
-                                    cx.spawn(async move |workspace, cx| {
-                                        let result = receiver.await;
-                                        let _ = workspace.update(cx, |this, cx| {
-                                            if let Ok(Err(error)) = result {
-                                                this.plugin_entity.update(cx, |plugins, _cx| {
-                                                    plugins.registry_mut().record_manager_error(
-                                                        uninstall_plugin_id,
-                                                        error,
-                                                    )
-                                                });
+                                        this.stop_acp_plugin(Some(&uninstall_plugin_id), cx);
+                                        let _ = this.plugin_entity.update(cx, |plugins, cx| {
+                                            let result = plugins.set_plugin_enabled(
+                                                &uninstall_plugin_id,
+                                                false,
+                                                cx,
+                                            );
+                                            if result.is_ok() {
+                                                plugins.begin_remote_desktop_removal(
+                                                    &uninstall_plugin_id,
+                                                );
                                             }
-                                            this.bootstrap_native_plugin_runtime(cx);
-                                            cx.notify();
+                                            result
                                         });
-                                    })
-                                    .detach();
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                })),
+                                        let mut workers =
+                                            this.remote_desktop.update(cx, |desktops, cx| {
+                                                desktops
+                                                    .stop_plugins(Some(&uninstall_plugin_id), cx)
+                                            });
+                                        if uninstall_plugin_id == "com.oxideterm.terminal.mosh" {
+                                            workers.push(this.mosh_plugin_sessions.stop());
+                                        }
+                                        if let Some(worker) =
+                                            this.plugin_entity.update(cx, |plugins, _| {
+                                                plugins
+                                                    .retire_security_key(Some(&uninstall_plugin_id))
+                                            })
+                                        {
+                                            workers.push(worker);
+                                        }
+                                        let uninstall_plugin_id = uninstall_plugin_id.clone();
+                                        let receiver =
+                                            this.plugin_entity.update(cx, |plugins, cx| {
+                                                plugins.start_plugin_uninstall(
+                                                    uninstall_plugin_id.clone(),
+                                                    false,
+                                                    workers,
+                                                    cx,
+                                                )
+                                            });
+                                        cx.spawn(async move |workspace, cx| {
+                                            let result = receiver.await;
+                                            let _ = workspace.update(cx, |this, cx| {
+                                                if let Ok(Err(error)) = result {
+                                                    this.plugin_entity.update(
+                                                        cx,
+                                                        |plugins, _cx| {
+                                                            plugins
+                                                                .registry_mut()
+                                                                .record_manager_error(
+                                                                    uninstall_plugin_id,
+                                                                    error,
+                                                                )
+                                                        },
+                                                    );
+                                                }
+                                                this.bootstrap_native_plugin_runtime(cx);
+                                                this.process_native_plugin_install_queue(cx);
+                                                cx.notify();
+                                            });
+                                        })
+                                        .detach();
+                                        cx.stop_propagation();
+                                        cx.notify();
+                                    },
+                                )),
                             )),
                     ),
             );
@@ -3141,6 +3485,32 @@ impl WorkspaceApp {
                             author,
                         ))
                     })
+                    .child(
+                        self.render_native_plugin_license(
+                            manifest.license.as_deref(),
+                            native_plugin_package_document_url(
+                                &plugin.install_dir,
+                                &["LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"],
+                            )
+                            .or_else(|| {
+                                manifest
+                                    .license_url
+                                    .as_deref()
+                                    .and_then(native_plugin_safe_https_url)
+                            }),
+                            native_plugin_package_document_url(
+                                &plugin.install_dir,
+                                &[
+                                    "THIRD_PARTY_NOTICES.txt",
+                                    "THIRD_PARTY_NOTICES.md",
+                                    "THIRD_PARTY_NOTICES",
+                                    "NOTICE",
+                                    "NOTICES",
+                                    "licenses",
+                                ],
+                            ),
+                        ),
+                    )
                     .when_some(required_version, |details, version| {
                         details.child(self.render_native_plugin_detail_row(
                             self.i18n.t("plugin.detail_requires"),
@@ -3240,10 +3610,7 @@ impl WorkspaceApp {
                     }),
             )
             .when(
-                matches!(
-                    plugin.runtime_plan,
-                    plugin_host::NativePluginRuntimePlan::Acp { .. }
-                ),
+                plugin.runtime_plan.helper_entry("acp", "acp", 1).is_some(),
                 |details| {
                     let settings = self.settings_store.settings();
                     details
@@ -3266,6 +3633,59 @@ impl WorkspaceApp {
                                 .map(|(index, agent)| self.ai_acp_agent_card(index, agent, cx)),
                         )
                 },
+            )
+            .into_any_element()
+    }
+
+    fn render_native_plugin_license(
+        &self,
+        license: Option<&str>,
+        license_url: Option<String>,
+        notices_url: Option<String>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(self.tokens.spacing.three))
+            .child(
+                self.i18n.t("plugin.license_label").replace(
+                    "{{license}}",
+                    license
+                        .map(str::trim)
+                        .filter(|license| !license.is_empty())
+                        .unwrap_or(&self.i18n.t("plugin.license_not_declared")),
+                ),
+            )
+            .children(
+                [
+                    (license_url, "plugin.view_license"),
+                    (notices_url, "plugin.third_party_licenses"),
+                ]
+                .into_iter()
+                .filter_map(|(url, label)| {
+                    url.map(|url| {
+                        oxideterm_gpui_ui::button::button_with(
+                            &self.tokens,
+                            self.i18n.t(label),
+                            oxideterm_gpui_ui::button::ButtonOptions {
+                                variant: oxideterm_gpui_ui::button::ButtonVariant::Link,
+                                size: oxideterm_gpui_ui::button::ButtonSize::Sm,
+                                ..Default::default()
+                            },
+                        )
+                        .h_auto()
+                        .px_0()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            move |_event, _window, cx| {
+                                cx.open_url(&url);
+                                cx.stop_propagation();
+                            },
+                        )
+                    })
+                }),
             )
             .into_any_element()
     }
@@ -3422,6 +3842,20 @@ fn native_plugin_safe_https_url(url: &str) -> Option<String> {
     let parsed = url::Url::parse(url).ok()?;
     (parsed.scheme() == "https" && parsed.username().is_empty() && parsed.password().is_none())
         .then(|| url.to_string())
+}
+
+fn native_plugin_package_document_url(root: &std::path::Path, names: &[&str]) -> Option<String> {
+    let root = root.canonicalize().ok()?;
+    names.iter().find_map(|name| {
+        let document = root.join(name).canonicalize().ok()?;
+        // A locally edited package must not point the document link outside its installation.
+        if !document.starts_with(&root) {
+            return None;
+        }
+        url::Url::from_file_path(document)
+            .ok()
+            .map(|url| url.to_string())
+    })
 }
 
 fn native_plugin_registry_capabilities_label(
@@ -3701,6 +4135,39 @@ fn plugin_manager_palette_alpha(color: u32, alpha: u32) -> Rgba {
 mod tests {
     use super::*;
 
+    #[test]
+    fn plugin_license_documents_stay_within_the_installed_package() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("installed plugin");
+        std::fs::create_dir(&root).unwrap();
+        let license = root.join("LICENSE.txt");
+        std::fs::write(&license, "Packaged license").unwrap();
+        let resolved =
+            native_plugin_package_document_url(&root, &["LICENSE", "LICENSE.txt"]).unwrap();
+        assert_eq!(
+            url::Url::parse(&resolved).unwrap().to_file_path().unwrap(),
+            license.canonicalize().unwrap()
+        );
+        assert_eq!(native_plugin_package_document_url(&root, &["NOTICE"]), None);
+        #[cfg(unix)]
+        {
+            let external = directory.path().join("outside-license");
+            std::fs::write(&external, "External file").unwrap();
+            std::os::unix::fs::symlink(external, root.join("LICENSE")).unwrap();
+            assert_eq!(
+                native_plugin_package_document_url(&root, &["LICENSE"]),
+                None
+            );
+        }
+        for invalid in [
+            "file:///etc/passwd",
+            "http://example.com/LICENSE",
+            "https://user:secret@example.com/LICENSE",
+        ] {
+            assert_eq!(native_plugin_safe_https_url(invalid), None);
+        }
+    }
+
     #[gpui::test]
     fn plugin_manager_fields_receive_platform_text(cx: &mut gpui::TestAppContext) {
         let executable = std::env::current_exe().unwrap();
@@ -3741,6 +4208,12 @@ mod tests {
         cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
                 workspace.open_plugin_manager_tab(window, cx);
+                workspace.update_plugin_manager_state(cx, |manager| {
+                    manager.active_install = Some(NativePluginInstallTarget {
+                        expected_id: Some("com.example.installing".into()),
+                        name: Some("Installing fixture".into()),
+                    });
+                });
                 workspace.focus_settings_input(
                     SettingsInput::NativePluginMarketplaceSearch,
                     String::new(),
@@ -3779,6 +4252,7 @@ mod tests {
         }
         let agent_index = cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
+                workspace.update_plugin_manager_state(cx, |manager| manager.active_install = None);
                 workspace.open_acp_plugin_manager(true, window, cx);
                 let index = workspace.settings_store.settings().ai.acp_agents.len() - 1;
                 workspace.focus_settings_input(
@@ -3884,6 +4358,8 @@ mod tests {
             name: "Demo".to_string(),
             description: None,
             author: None,
+            license: None,
+            license_url: None,
             version: "1.2.0".to_string(),
             min_oxideterm_version: None,
             download_url: "https://example.invalid/demo.zip".to_string(),

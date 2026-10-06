@@ -18,6 +18,7 @@ oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
 oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-security-key = { path = "../oxideterm-security-key" }
 oxideterm-topology = { path = "../oxideterm-topology" }
 oxideterm-x11-forwarding = { path = "../oxideterm-x11-forwarding" }
 parking_lot.workspace = true

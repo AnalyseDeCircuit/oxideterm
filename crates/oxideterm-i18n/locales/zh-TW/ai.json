@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "工具呼叫",
+      "group_heading": "呼叫了 {{count}} 個工具",
+      "total_duration": "累計工具耗時：{{duration}} 毫秒",
       "arguments": "參數",
       "output": "輸出",
       "summary": "摘要",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "唯讀",
         "write-file": "寫入檔案",
-        "execute-command": "執行命令",
+        "execute-command": "執行",
         "interactive-input": "互動輸入",
         "destructive": "危險操作",
         "network-expose": "網路暴露",

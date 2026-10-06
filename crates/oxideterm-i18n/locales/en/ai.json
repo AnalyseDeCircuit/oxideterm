@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "Tool Calls",
+      "group_heading": "Tool calls · {{count}}",
+      "total_duration": "Cumulative tool time: {{duration}} ms",
       "arguments": "Arguments",
       "output": "Output",
       "summary": "Summary",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "Read",
         "write-file": "Write File",
-        "execute-command": "Execute Command",
+        "execute-command": "Execute",
         "interactive-input": "Interactive Input",
         "destructive": "Destructive",
         "network-expose": "Network Exposure",

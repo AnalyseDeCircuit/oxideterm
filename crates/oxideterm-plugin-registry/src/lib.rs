@@ -26,7 +26,7 @@ pub use oxideterm_plugin_manifest::{
     NativePluginDeclarativeUiColumn, NativePluginDeclarativeUiControl,
     NativePluginDeclarativeUiOption, NativePluginDeclarativeUiSchema,
     NativePluginDeclarativeUiSection, NativePluginDiagnostic, NativePluginGlobalConfig,
-    NativePluginHostMonitorContribution, NativePluginHostMonitorDef,
+    NativePluginHelperDef, NativePluginHostMonitorContribution, NativePluginHostMonitorDef,
     NativePluginHostMonitorOutputDef, NativePluginHostMonitorOutputFormat, NativePluginInfo,
     NativePluginInstalledInfo, NativePluginManifest, NativePluginPermissions,
     NativePluginProcessActivationPlan, NativePluginRegistryEntry, NativePluginRegistryHistory,

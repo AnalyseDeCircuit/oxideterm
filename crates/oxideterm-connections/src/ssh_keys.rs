@@ -75,13 +75,7 @@ pub(crate) fn default_private_key_status(
         return None;
     }
     match russh::keys::decode_secret_key(&key_data, passphrase) {
-        Ok(key) => {
-            if key.algorithm().to_string().starts_with("sk-") {
-                None
-            } else {
-                Some(DefaultPrivateKeyStatus::Loadable)
-            }
-        }
+        Ok(_) => Some(DefaultPrivateKeyStatus::Loadable),
         Err(error) if private_key_error_is_passphrase_related(&error) => {
             Some(DefaultPrivateKeyStatus::RequiresPassphrase)
         }
@@ -99,10 +93,7 @@ fn default_key_candidate_name(path: &PathBuf) -> Option<&str> {
 }
 
 fn private_key_text_looks_unsupported_direct_key(private_key: &str) -> bool {
-    private_key.contains("-----BEGIN DSA PRIVATE KEY-----")
-        || private_key.contains("ssh-dss")
-        || private_key.contains("sk-ecdsa-sha2-nistp256")
-        || private_key.contains("sk-ssh-ed25519")
+    private_key.contains("-----BEGIN DSA PRIVATE KEY-----") || private_key.contains("ssh-dss")
 }
 
 pub(crate) fn private_key_error_is_passphrase_related(error: &russh::keys::Error) -> bool {
@@ -118,7 +109,11 @@ pub(crate) fn private_key_error_is_passphrase_related(error: &russh::keys::Error
 }
 
 fn ssh_key_type_from_name(name: &str) -> &'static str {
-    if name.contains("ed25519") {
+    if name.contains("ed25519") && name.ends_with("_sk") {
+        "ED25519-SK"
+    } else if name.contains("ecdsa") && name.ends_with("_sk") {
+        "ECDSA-SK"
+    } else if name.contains("ed25519") {
         "ED25519"
     } else if name.contains("ecdsa") {
         "ECDSA"
@@ -169,9 +164,19 @@ mod tests {
         let loadable = home.join("id_work");
         let encrypted = home.join("id_secret");
         let invalid = home.join("id_invalid");
+        let hardware = home.join("id_ed25519_sk");
         write_test_key(&loadable, None);
         write_test_key(&encrypted, Some("secret-pass"));
         std::fs::write(&invalid, "not a private key").unwrap();
+        let pair = russh::keys::ssh_key::private::Ed25519Keypair::from_seed(&[42; 32]);
+        let public = russh::keys::ssh_key::public::SkEd25519::new(pair.public, "ssh:fixture");
+        let sk = russh::keys::ssh_key::private::SkEd25519::new(public, 1, vec![1, 2, 3]).unwrap();
+        let key = PrivateKey::new(
+            russh::keys::ssh_key::private::KeypairData::SkEd25519(sk),
+            "fixture",
+        )
+        .unwrap();
+        key.write_openssh_file(&hardware, LineEnding::LF).unwrap();
 
         assert_eq!(
             default_private_key_status(&loadable, None),
@@ -182,6 +187,11 @@ mod tests {
             Some(DefaultPrivateKeyStatus::RequiresPassphrase)
         );
         assert_eq!(default_private_key_status(&invalid, None), None);
+        assert_eq!(
+            default_private_key_status(&hardware, None),
+            Some(DefaultPrivateKeyStatus::Loadable)
+        );
+        assert_eq!(super::ssh_key_type_from_name("id_ed25519_sk"), "ED25519-SK");
         let _ = std::fs::remove_dir_all(home);
     }
 }

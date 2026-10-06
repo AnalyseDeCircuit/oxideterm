@@ -64,6 +64,7 @@ members = [
   "crates/oxideterm-ftp",
   "crates/oxideterm-ssh-launch",
   "crates/oxideterm-ssh",
+  "crates/oxideterm-security-key",
   "crates/oxideterm-terminal",
   "crates/oxideterm-terminal-recording",
   "crates/oxideterm-terminal-triggers",

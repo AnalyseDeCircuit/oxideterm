@@ -257,6 +257,9 @@
     "shortcut_count": "scorciatoie"
   },
   "plugin": {
+    "install_queued": "In attesa · posizione {{position}}",
+    "installing_named": "Installazione di {{name}}",
+    "install_queue_count": "{{count}} in attesa",
     "jump_to_page": "Vai alla pagina",
     "total_pages": "di {{pages}} pagine",
     "jump_page": "Vai",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Vista scheda plugin non disponibile",
     "tab_crashed": "La scheda del plugin si è bloccata",
     "detail_author": "Autore",
+    "license_label": "Licenza: {{license}}",
+    "install_required": "Il plugin {{name}} non è installato. Installalo dal catalogo dei plugin e riprova.",
+    "enable_required": "Il plugin {{name}} installato non è disponibile. Attivalo o aggiornalo nel gestore dei plugin e riprova.",
+    "license_not_declared": "Non dichiarata",
+    "view_license": "Visualizza licenza",
+    "third_party_licenses": "Licenze di terze parti",
     "registry_capabilities": "Funzionalità: {{capabilities}}",
     "reload_success": "{{name}} scansionato di nuovo.",
     "enable_success": "{{name}} abilitato.",

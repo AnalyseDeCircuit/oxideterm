@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "工具调用",
+      "group_heading": "调用了 {{count}} 个工具",
+      "total_duration": "累计工具耗时：{{duration}} 毫秒",
       "arguments": "参数",
       "output": "输出",
       "summary": "摘要",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "只读",
         "write-file": "写入文件",
-        "execute-command": "执行命令",
+        "execute-command": "执行",
         "interactive-input": "交互输入",
         "destructive": "危险操作",
         "network-expose": "网络暴露",

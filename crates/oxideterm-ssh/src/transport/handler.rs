@@ -815,7 +815,7 @@ async fn authenticate_flow(
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
             let result =
-                authenticate_publickey_best_algo(handle, &config.username, key, audit).await?;
+                authenticate_publickey_best_algo(handle, &config.username, key, prompt_handler, audit).await?;
             log_auth_result("publickey", &result);
             result
         }
@@ -844,7 +844,7 @@ async fn authenticate_flow(
                 passphrase.as_ref().map(|passphrase| passphrase.as_str()),
             )?;
             let result =
-                authenticate_certificate_best_algo(handle, &config.username, key, cert, audit)
+                authenticate_certificate_best_algo(handle, &config.username, key, cert, prompt_handler, audit)
                     .await?;
             log_auth_result("certificate", &result);
             result
@@ -870,7 +870,7 @@ async fn authenticate_flow(
                 );
                 for key in fallback_keys {
                     let result =
-                        authenticate_publickey_best_algo(handle, &config.username, key, audit)
+                        authenticate_publickey_best_algo(handle, &config.username, key, prompt_handler, audit)
                             .await?;
                     log_auth_result("default-publickey", &result);
                     if result.success() || !server_allows_more_publickey_attempts(&result) {
@@ -919,8 +919,8 @@ async fn authenticate_flow(
                 if certificate.public_key() != key.public_key().key_data() {
                     return Err(SshTransportError::AuthenticationFailed("Managed SSH certificate does not match its private key".into()));
                 }
-                authenticate_certificate_best_algo(handle,&config.username,key,certificate,audit).await?
-            } else { authenticate_publickey_best_algo(handle, &config.username, key, audit).await? };
+                authenticate_certificate_best_algo(handle,&config.username,key,certificate,prompt_handler,audit).await?
+            } else { authenticate_publickey_best_algo(handle, &config.username, key, prompt_handler, audit).await? };
             log_auth_result("managed-key", &result);
             result
         }

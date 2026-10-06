@@ -2566,7 +2566,8 @@ impl WorkspaceApp {
                     "session-node-toggle-{}",
                     node_id.0
                 )))
-                .size(px(20.0))
+                .w(px(12.0))
+                .h(px(20.0))
                 .flex_none()
                 .flex()
                 .items_center()
@@ -2611,7 +2612,7 @@ impl WorkspaceApp {
         .when(
             !local_group || matches!(status.icon, LucideIcon::LoaderCircle),
             |row| {
-                row.child(div().ml_1().mr(px(6.0)).child(
+                row.child(div().ml(px(6.0)).mr(px(6.0)).child(
                     if matches!(status.icon, LucideIcon::LoaderCircle) {
                         self.render_loading_icon(
                             (

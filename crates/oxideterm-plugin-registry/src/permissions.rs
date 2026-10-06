@@ -78,7 +78,7 @@ fn normalized_requested_capabilities(
     let mut capabilities = normalize_native_plugin_capabilities(declared_capabilities)?;
     if matches!(
         runtime_kind,
-        "process" | "acp" | "remote-desktop" | "terminal-transport"
+        "process" | "acp" | "remote-desktop" | "terminal-transport" | "helper"
     ) && capabilities
         .binary_search_by(|candidate| {
             candidate

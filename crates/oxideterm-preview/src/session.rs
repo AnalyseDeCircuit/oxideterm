@@ -28,6 +28,7 @@ pub enum PreviewSource {
 pub struct PreviewLoadOptions {
     pub max_text_size: u64,
     pub max_preview_size: u64,
+    pub max_pdf_preview_size: u64,
     pub max_media_preview_size: u64,
     pub hex_chunk_size: u64,
     pub hex_offset: u64,
@@ -40,7 +41,9 @@ impl Default for PreviewLoadOptions {
         Self {
             max_text_size: 1024 * 1024,
             max_preview_size: 10 * 1024 * 1024,
-            max_media_preview_size: 50 * 1024 * 1024,
+            max_pdf_preview_size: 100 * 1024 * 1024,
+            // Local players read from the file; remote downloads enforce their own limits.
+            max_media_preview_size: u64::MAX,
             hex_chunk_size: 16 * 1024,
             hex_offset: 0,
             mmap_threshold: 1024 * 1024,
@@ -259,7 +262,12 @@ async fn load_local_path(
     match kind {
         PreviewKind::Image | PreviewKind::Office | PreviewKind::Font | PreviewKind::Document => {
             let asset_kind = preview_asset_kind(kind);
-            load_local_asset(path, mime_type, asset_kind, size, options.max_preview_size)
+            let max_size = if kind == PreviewKind::Document && mime_type == "application/pdf" {
+                options.max_pdf_preview_size
+            } else {
+                options.max_preview_size
+            };
+            load_local_asset(path, mime_type, asset_kind, size, max_size)
         }
         PreviewKind::Audio | PreviewKind::Video => load_local_asset(
             path,
@@ -457,6 +465,95 @@ mod tests {
         session.apply(PreviewAction::ResetZoom);
         assert_eq!(session.zoom(), 1.0);
         assert_eq!(session.rotation_degrees(), 0);
+    }
+
+    #[test]
+    fn local_asset_limits_distinguish_pdf_media_and_other_documents() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for (name, size, mime, kind, rejected) in [
+            (
+                "manual.pdf",
+                100 * 1024 * 1024,
+                "application/pdf",
+                PreviewAssetKind::Document,
+                false,
+            ),
+            (
+                "manual.pdf",
+                100 * 1024 * 1024 + 1,
+                "application/pdf",
+                PreviewAssetKind::Document,
+                true,
+            ),
+            (
+                "recording.mp4",
+                1024 * 1024 * 1024,
+                "video/mp4",
+                PreviewAssetKind::Video,
+                false,
+            ),
+            (
+                "recording.mp3",
+                1024 * 1024 * 1024,
+                "audio/mpeg",
+                PreviewAssetKind::Audio,
+                false,
+            ),
+            (
+                "database.sqlite",
+                10 * 1024 * 1024 + 1,
+                "application/vnd.sqlite3",
+                PreviewAssetKind::Document,
+                true,
+            ),
+        ] {
+            let path = directory.path().join(name);
+            std::fs::File::create(&path).unwrap().set_len(size).unwrap();
+            let session = runtime.block_on(PreviewSession::load(PreviewSource::LocalPath {
+                path: path.clone(),
+                mime_type: None,
+                encoding_hint: None,
+            }));
+            match session.state() {
+                PreviewSessionState::Ready {
+                    content:
+                        PreviewContent::AssetFile {
+                            path: source,
+                            mime_type,
+                            kind: asset_kind,
+                        },
+                    asset: Some(owner),
+                } if !rejected => {
+                    assert_eq!(Path::new(source), path);
+                    assert_eq!(mime_type, mime);
+                    assert_eq!(*asset_kind, kind);
+                    assert_eq!(owner.path(), path);
+                }
+                PreviewSessionState::Ready {
+                    content:
+                        PreviewContent::TooLarge {
+                            size: actual,
+                            max_size,
+                            ..
+                        },
+                    asset: None,
+                } if rejected => {
+                    assert_eq!(*actual, size);
+                    assert_eq!(
+                        *max_size,
+                        if name == "manual.pdf" {
+                            100 * 1024 * 1024
+                        } else {
+                            10 * 1024 * 1024
+                        }
+                    );
+                }
+                other => panic!("Unexpected local preview for {name} ({size} bytes): {other:?}"),
+            }
+            drop(session);
+            assert_eq!(std::fs::metadata(path).unwrap().len(), size);
+        }
     }
 
     #[test]

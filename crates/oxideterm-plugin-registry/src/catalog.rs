@@ -279,6 +279,7 @@ mod tests {
     fn history() -> NativePluginRegistryEntry {
         serde_json::from_value(serde_json::json!({
             "id":"com.example.demo", "name":"Demo", "version":"1.0.0",
+            "license":"MIT", "licenseUrl":"https://example.com/LICENSE",
             "engines":{"oxideterm":">=2.0.0"},
             "packages":[{"target":"any", "downloadUrl":"https://example.com/1.zip", "checksum":"a".repeat(64), "size":128}],
             "releases":[
@@ -305,7 +306,14 @@ mod tests {
     fn verified_history_selects_compatible_assets_and_rejects_mixed_snapshots() {
         let (summary, bytes) = referenced(history());
         let hydrated = decode_history(&summary, &bytes).unwrap();
+        assert_eq!(summary.license.as_deref(), Some("MIT"));
+        assert_eq!(hydrated.license.as_deref(), Some("MIT"));
+        assert_eq!(
+            hydrated.license_url.as_deref(),
+            Some("https://example.com/LICENSE")
+        );
         let old_host = NativePluginRegistry::select_registry_release(&hydrated).unwrap();
+        assert_eq!(old_host.license.as_deref(), Some("MIT"));
         assert_eq!(
             (
                 old_host.version.as_str(),

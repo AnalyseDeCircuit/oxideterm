@@ -16,6 +16,8 @@ pub(super) fn minimal_manifest() -> NativePluginManifest {
         version: "1.0.0".to_string(),
         description: None,
         author: None,
+        license: None,
+        license_url: None,
         tags: None,
         main: None,
         engines: None,
@@ -379,11 +381,20 @@ fn manifest_permissions_use_camel_case_and_round_trip() {
         "version": "1.0.0",
         "permissions": {
             "capabilities": ["terminal.content.read", "terminal.input.send"]
-        }
+        },
+        "license": "MIT",
+        "licenseUrl": "https://example.com/LICENSE"
     }))
     .unwrap();
 
-    let value = serde_json::to_value(manifest).unwrap();
+    assert_eq!(manifest.license.as_deref(), Some("MIT"));
+    assert_eq!(
+        manifest.license_url.as_deref(),
+        Some("https://example.com/LICENSE")
+    );
+    let mut value = serde_json::to_value(manifest).unwrap();
+    assert_eq!(value["license"], "MIT");
+    assert_eq!(value["licenseUrl"], "https://example.com/LICENSE");
     assert_eq!(
         value.pointer("/permissions/capabilities"),
         Some(&serde_json::json!([
@@ -391,6 +402,10 @@ fn manifest_permissions_use_camel_case_and_round_trip() {
             "terminal.input.send"
         ]))
     );
+    value.as_object_mut().unwrap().remove("license");
+    value.as_object_mut().unwrap().remove("licenseUrl");
+    let legacy: NativePluginManifest = serde_json::from_value(value).unwrap();
+    assert_eq!((legacy.license, legacy.license_url), (None, None));
 }
 
 #[test]
@@ -566,6 +581,8 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     name: "Demo".to_string(),
                     description: None,
                     author: None,
+                    license: None,
+                    license_url: None,
                     version: "1.2.0".to_string(),
                     min_oxideterm_version: None,
                     download_url: "https://example.invalid/demo.zip".to_string(),
@@ -588,6 +605,8 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     name: "Other".to_string(),
                     description: None,
                     author: None,
+                    license: None,
+                    license_url: None,
                     version: "9.0.0".to_string(),
                     min_oxideterm_version: None,
                     download_url: "https://example.invalid/other.zip".to_string(),
@@ -986,6 +1005,92 @@ fn acp_agents_require_trust_and_use_the_acp_owner_instead_of_plugin_bootstrap() 
 }
 
 #[test]
+fn helper_manifests_preserve_published_provider_routes_and_approvals() {
+    for (kind, feature, protocol, contribution) in [
+        (
+            NativePluginRuntimeKind::Acp,
+            "acp",
+            "acp",
+            serde_json::json!({}),
+        ),
+        (
+            NativePluginRuntimeKind::RemoteDesktop,
+            "remote-desktop",
+            "oxideterm-remote-desktop",
+            serde_json::json!({"remoteDesktop": {"protocol": "rdp", "protocolVersion": 1}}),
+        ),
+        (
+            NativePluginRuntimeKind::RemoteDesktop,
+            "remote-desktop",
+            "oxideterm-remote-desktop",
+            serde_json::json!({"remoteDesktop": {"protocol": "vnc", "protocolVersion": 1}}),
+        ),
+        (
+            NativePluginRuntimeKind::TerminalTransport,
+            "terminal-transport",
+            "oxideterm-mosh",
+            serde_json::json!({"terminalTransport": {"protocol": "mosh", "protocolVersion": 1}}),
+        ),
+    ] {
+        let root = unique_temp_dir("helper-upgrade");
+        let settings = root.join("settings.json");
+        let directory = native_plugins_dir(&settings).join("provider");
+        fs::create_dir_all(directory.join("bin")).unwrap();
+        fs::write(directory.join("bin/helper"), b"fixture").unwrap();
+        let mut manifest = minimal_manifest();
+        manifest.id = "com.oxideterm.terminal.mosh".into();
+        manifest.runtime = Some(NativePluginRuntime {
+            kind,
+            entry: "bin/helper".into(),
+        });
+        manifest.engines = Some(oxideterm_plugin_manifest::NativePluginEngines {
+            oxideterm: Some(">=2.2.2".into()),
+        });
+        manifest.contributes = Some(serde_json::from_value(contribution).unwrap());
+        write_manifest(&directory, &manifest);
+        let mut registry = NativePluginRegistry::discover(&settings);
+        registry.set_plugin_enabled(&manifest.id, true).unwrap();
+        let agents = registry.acp_agents();
+        let desktops = registry.remote_desktop_providers();
+        let mosh = registry.mosh_executable();
+        assert_eq!(
+            load_native_plugin_config(registry.config_path()).plugins[&manifest.id]
+                .approved_runtime_kind
+                .as_deref(),
+            Some(feature)
+        );
+        let published_manifest = manifest.clone();
+        manifest.runtime.as_mut().unwrap().kind = NativePluginRuntimeKind::Helper;
+        manifest.contributes.as_mut().unwrap().helper = Some(NativePluginHelperDef {
+            feature: feature.into(),
+            protocol: protocol.into(),
+            protocol_version: 1,
+        });
+        write_manifest(&directory, &manifest);
+        let upgraded = NativePluginRegistry::discover(&settings);
+        assert_eq!(
+            upgraded
+                .plugins()
+                .iter()
+                .map(|plugin| plugin.state)
+                .collect::<Vec<_>>(),
+            vec![NativePluginState::ReadyProcess],
+            "{feature}"
+        );
+        assert_eq!(upgraded.acp_agents(), agents, "{feature}");
+        assert_eq!(upgraded.remote_desktop_providers(), desktops, "{feature}");
+        assert_eq!(upgraded.mosh_executable(), mosh, "{feature}");
+        assert!(upgraded.process_activation_plans().is_empty());
+        write_manifest(&directory, &published_manifest);
+        let restored = NativePluginRegistry::discover(&settings);
+        assert_eq!(restored.acp_agents(), agents, "{feature}");
+        assert_eq!(restored.remote_desktop_providers(), desktops, "{feature}");
+        assert_eq!(restored.mosh_executable(), mosh, "{feature}");
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn discovery_classifies_native_wasm_and_process_runtime_states() {
     let temp_dir = unique_temp_dir("plugin-runtime-state");
     let plugins_dir = temp_dir.join(PLUGINS_DIR_NAME);
@@ -1232,6 +1337,113 @@ fn mosh_transport_requires_a_compatible_trusted_provider_and_supported_pipe_vers
                 .is_none()
         );
     }
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn security_key_provider_requires_trust_compatibility_and_private_runtime() {
+    let root = unique_temp_dir("security-key-plugin");
+    let settings = root.join("settings.json");
+    let directory = native_plugins_dir(&settings).join("fido2");
+    fs::create_dir_all(directory.join("bin")).unwrap();
+    fs::write(directory.join("bin/helper"), b"fixture").unwrap();
+    let mut manifest = minimal_manifest();
+    manifest.id = "com.oxideterm.auth.fido2".into();
+    manifest.runtime = Some(NativePluginRuntime {
+        kind: NativePluginRuntimeKind::Helper,
+        entry: "bin/helper".into(),
+    });
+    manifest.engines = Some(oxideterm_plugin_manifest::NativePluginEngines {
+        oxideterm: Some(">=2.2.2".into()),
+    });
+    manifest.contributes = Some(
+        serde_json::from_value(serde_json::json!({
+            "helper": {
+                "feature": "ssh-authentication",
+                "protocol": "oxideterm-security-key",
+                "protocolVersion": 1
+            }
+        }))
+        .unwrap(),
+    );
+    write_manifest(&directory, &manifest);
+    let mut registry = NativePluginRegistry::discover(&settings);
+    assert!(registry.security_key_executable().is_none());
+    registry.set_plugin_enabled(&manifest.id, true).unwrap();
+    assert_eq!(
+        registry.security_key_executable(),
+        Some(directory.join("bin/helper").canonicalize().unwrap())
+    );
+    assert!(registry.process_activation_plans().is_empty());
+    registry.set_plugin_enabled(&manifest.id, false).unwrap();
+    assert!(registry.security_key_executable().is_none());
+    registry.set_plugin_enabled(&manifest.id, true).unwrap();
+    for (range, version) in [("<2.2.2", 1), (">=2.2.2", 2)] {
+        manifest.engines.as_mut().unwrap().oxideterm = Some(range.into());
+        manifest
+            .contributes
+            .as_mut()
+            .unwrap()
+            .helper
+            .as_mut()
+            .unwrap()
+            .protocol_version = version;
+        write_manifest(&directory, &manifest);
+        assert!(
+            NativePluginRegistry::discover(&settings)
+                .security_key_executable()
+                .is_none()
+        );
+    }
+    manifest.engines.as_mut().unwrap().oxideterm = Some(">=2.2.2".into());
+    manifest
+        .contributes
+        .as_mut()
+        .unwrap()
+        .helper
+        .as_mut()
+        .unwrap()
+        .protocol_version = 1;
+    for (feature, protocol) in [
+        ("acp", "oxideterm-security-key"),
+        ("ssh-authentication", "acp"),
+    ] {
+        let helper = manifest
+            .contributes
+            .as_mut()
+            .unwrap()
+            .helper
+            .as_mut()
+            .unwrap();
+        helper.feature = feature.into();
+        helper.protocol = protocol.into();
+        write_manifest(&directory, &manifest);
+        assert!(
+            NativePluginRegistry::discover(&settings)
+                .security_key_executable()
+                .is_none(),
+            "Unexpected SSH provider for {feature}/{protocol}"
+        );
+    }
+    let helper = manifest
+        .contributes
+        .as_mut()
+        .unwrap()
+        .helper
+        .as_mut()
+        .unwrap();
+    helper.feature = "ssh-authentication".into();
+    helper.protocol = "oxideterm-security-key".into();
+    manifest.contributes.as_mut().unwrap().tabs = Some(vec![NativePluginTabDef {
+        id: "tab".into(),
+        title: "Invalid extra contribution".into(),
+        icon: "key".into(),
+    }]);
+    assert!(
+        validate_native_plugin_manifest(&manifest)
+            .unwrap_err()
+            .contains("ordinary plugin contributions")
+    );
     fs::remove_dir_all(root).unwrap();
 }
 
@@ -2420,6 +2632,7 @@ fn write_manifest(plugin_dir: &Path, manifest: &NativePluginManifest) {
 
 fn sample_contributes() -> NativePluginContributes {
     NativePluginContributes {
+        helper: None,
         terminal_transport: None,
         file_previews: None,
         language: None,

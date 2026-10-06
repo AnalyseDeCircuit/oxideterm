@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "Chamadas de ferramentas",
+      "group_heading": "Chamadas de ferramentas · {{count}}",
+      "total_duration": "Tempo acumulado das ferramentas: {{duration}} ms",
       "arguments": "Argumentos",
       "output": "Saída",
       "summary": "Resumo",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "Leitura",
         "write-file": "Escrever arquivo",
-        "execute-command": "Executar comando",
+        "execute-command": "Execução",
         "interactive-input": "Entrada interativa",
         "destructive": "Destrutivo",
         "network-expose": "Exposição de rede",

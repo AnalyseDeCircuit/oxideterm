@@ -170,6 +170,7 @@ impl WorkspaceApp {
                 self.plugin_entity.update(cx, |plugins, _cx| {
                     plugins.finish_managed_package_install(settings_path, false, _cx);
                 });
+                self.process_native_plugin_install_queue(cx);
                 request.finish(ToolEnvelope::failed(
                     "The addon installation worker stopped before completion",
                 ));
@@ -180,6 +181,7 @@ impl WorkspaceApp {
         self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.finish_managed_package_install(settings_path, installed, _cx);
         });
+        self.process_native_plugin_install_queue(cx);
         if request_cancelled {
             if let Err(error) = result {
                 // Discard package-controlled diagnostics when the caller can no longer receive them.

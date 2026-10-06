@@ -257,6 +257,9 @@
     "shortcut_count": "atalhos"
   },
   "plugin": {
+    "install_queued": "Na fila · posição {{position}}",
+    "installing_named": "Instalando {{name}}",
+    "install_queue_count": "{{count}} na fila",
     "jump_to_page": "Ir para a página",
     "total_pages": "de {{pages}} páginas",
     "jump_page": "Ir",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Visualização da aba do plugin não disponível",
     "tab_crashed": "A aba do plugin travou",
     "detail_author": "Autor",
+    "license_label": "Licença: {{license}}",
+    "install_required": "O plugin {{name}} não está instalado. Instale-o pelo marketplace de plugins e tente novamente.",
+    "enable_required": "O plugin {{name}} instalado está indisponível. Ative ou atualize-o no gerenciador de plugins e tente novamente.",
+    "license_not_declared": "Não declarada",
+    "view_license": "Ver licença",
+    "third_party_licenses": "Licenças de terceiros",
     "registry_capabilities": "Recursos: {{capabilities}}",
     "reload_success": "{{name}} verificado novamente.",
     "enable_success": "{{name}} ativado.",

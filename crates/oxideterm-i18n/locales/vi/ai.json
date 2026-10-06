@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "Gọi công cụ",
+      "group_heading": "Lượt gọi công cụ · {{count}}",
+      "total_duration": "Tổng thời gian chạy công cụ: {{duration}} ms",
       "arguments": "Tham số",
       "output": "Kết quả",
       "summary": "Tóm tắt",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "Chỉ đọc",
         "write-file": "Ghi tệp",
-        "execute-command": "Thực thi lệnh",
+        "execute-command": "Thực thi",
         "interactive-input": "Nhập tương tác",
         "destructive": "Thao tác nguy hiểm",
         "network-expose": "Lộ mạng",

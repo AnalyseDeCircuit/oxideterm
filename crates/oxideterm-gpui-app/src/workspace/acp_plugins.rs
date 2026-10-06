@@ -102,14 +102,36 @@ impl WorkspaceApp {
         };
         let plugins = self.plugin_entity.read(cx);
         if self.acp_entity.read(cx).plugin_is_updating(plugin_id) {
-            return Err(self.i18n.t("settings_view.ai.acp_agent_plugin_unavailable"));
+            return Err(self.plugin_requirement_message(plugin_id, &agent.display_name, cx));
         }
         let plugin = plugins
             .acp_agents()
             .into_iter()
             .find(|plugin| plugin.plugin_id == plugin_id)
-            .ok_or_else(|| self.i18n.t("settings_view.ai.acp_agent_plugin_unavailable"))?;
+            .ok_or_else(|| self.plugin_requirement_message(plugin_id, &agent.display_name, cx))?;
         agent.command = plugin.command.to_string_lossy().into_owned();
         Ok(())
+    }
+
+    pub(in crate::workspace) fn show_acp_plugin_requirement(
+        &self,
+        agent: &oxideterm_settings::AcpAgentConfig,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(plugin_id) = agent.plugin_id.as_deref() else {
+            return false;
+        };
+        if !self.acp_entity.read(cx).plugin_is_updating(plugin_id)
+            && self
+                .plugin_entity
+                .read(cx)
+                .acp_agents()
+                .iter()
+                .any(|plugin| plugin.plugin_id == plugin_id)
+        {
+            return false;
+        }
+        self.show_required_plugin_notice(plugin_id, &agent.display_name, cx);
+        true
     }
 }

@@ -7723,6 +7723,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-security-key"
+version = "2.2.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-util",
+ "zeroize",
+]
+
+[[package]]
 name = "oxideterm-session-adapter"
 version = "2.2.2"
 dependencies = [
@@ -7823,6 +7834,7 @@ dependencies = [
  "oxideterm-connections",
  "oxideterm-network-proxy",
  "oxideterm-portable-runtime",
+ "oxideterm-security-key",
  "oxideterm-sftp",
  "oxideterm-topology",
  "oxideterm-x11-forwarding",

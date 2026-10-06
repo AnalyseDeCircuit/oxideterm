@@ -32,6 +32,8 @@ fn sample_manifest() -> NativePluginManifest {
         version: "1.0.0".to_string(),
         description: None,
         author: None,
+        license: None,
+        license_url: None,
         tags: None,
         main: None,
         engines: None,

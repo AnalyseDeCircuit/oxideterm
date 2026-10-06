@@ -257,6 +257,9 @@
     "shortcut_count": "件のショートカット"
   },
   "plugin": {
+    "install_queued": "待機中 · {{position}} 番目",
+    "installing_named": "{{name}} をインストール中",
+    "install_queue_count": "{{count}} 件が待機中",
     "jump_to_page": "ページ指定",
     "total_pages": "全 {{pages}} ページ",
     "jump_page": "移動",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "プラグインタブビューは利用できません",
     "tab_crashed": "プラグインタブがクラッシュしました",
     "detail_author": "作者",
+    "license_label": "ライセンス：{{license}}",
+    "install_required": "{{name}} プラグインがインストールされていません。プラグインマーケットからインストールして、もう一度お試しください。",
+    "enable_required": "インストール済みの {{name}} プラグインは現在利用できません。プラグインマネージャーで有効化または更新して、もう一度お試しください。",
+    "license_not_declared": "未指定",
+    "view_license": "ライセンスを表示",
+    "third_party_licenses": "サードパーティのライセンス",
     "registry_capabilities": "機能: {{capabilities}}",
     "reload_success": "{{name}} を再スキャンしました。",
     "enable_success": "{{name}} を有効化しました。",

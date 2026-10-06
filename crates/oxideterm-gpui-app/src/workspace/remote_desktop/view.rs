@@ -5,6 +5,17 @@ use super::*;
 use oxideterm_session_adapter::ssh_config_from_saved_connection;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn show_missing_remote_desktop_plugin(
+        &self,
+        protocol: RemoteDesktopProtocol,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_required_plugin_notice(
+            &format!("com.oxideterm.remote-desktop.{}", protocol.provider_id()),
+            &protocol.provider_id().to_uppercase(),
+            cx,
+        );
+    }
     pub(in crate::workspace) fn remote_desktop_provider(
         &self,
         protocol: RemoteDesktopProtocol,
@@ -30,12 +41,7 @@ impl WorkspaceApp {
             if let Some(attempt) = connection_attempt_id.as_deref() {
                 self.standalone_connections.mark_attempt_error(attempt);
             }
-            self.push_command_palette_toast(
-                self.i18n.t("remote_desktop.provider_missing"),
-                None,
-                TerminalNoticeVariant::Error,
-                cx,
-            );
+            self.show_missing_remote_desktop_plugin(profile.protocol, cx);
             return;
         }
         if let Some(attempt) = connection_attempt_id.as_deref() {
@@ -58,12 +64,7 @@ impl WorkspaceApp {
                 }
             } else {
                 self.standalone_connections.mark_attempt_error(attempt);
-                self.push_command_palette_toast(
-                    self.i18n.t("remote_desktop.provider_missing"),
-                    None,
-                    TerminalNoticeVariant::Error,
-                    cx,
-                );
+                self.show_missing_remote_desktop_plugin(profile.protocol, cx);
                 return;
             };
             self.standalone_connections.replace_launch_for_attempt(
@@ -101,12 +102,7 @@ impl WorkspaceApp {
                 }
             } else {
                 let Some(provider) = self.remote_desktop_provider(profile.protocol, cx) else {
-                    self.push_command_palette_toast(
-                        self.i18n.t("remote_desktop.provider_missing"),
-                        None,
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    );
+                    self.show_missing_remote_desktop_plugin(profile.protocol, cx);
                     return;
                 };
                 standalone_connections::StandaloneConnectionLaunch::RemoteDesktop {
@@ -366,12 +362,7 @@ impl WorkspaceApp {
         let provider = match self.remote_desktop_provider(profile.protocol, cx) {
             Some(provider) => provider,
             None => {
-                self.push_command_palette_toast(
-                    self.i18n.t("remote_desktop.provider_missing"),
-                    None,
-                    TerminalNoticeVariant::Error,
-                    cx,
-                );
+                self.show_missing_remote_desktop_plugin(profile.protocol, cx);
                 if let Some(connection_attempt_id) = connection_attempt_id.as_deref() {
                     self.standalone_connections
                         .mark_attempt_error(connection_attempt_id);

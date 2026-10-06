@@ -163,6 +163,7 @@ fn plugin_workspace_released_response(request_id: String) -> plugin_runtime::Plu
 pub(in crate::workspace) struct PluginWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
     registry: Arc<plugin_host::NativePluginRegistry>,
+    security_key_provider: Option<Arc<oxideterm_ssh::SecurityKeyProvider>>,
     runtime_host: Arc<tokio::sync::Mutex<plugin_runtime::NativePluginRuntimeHost>>,
     runtime_delivery_tx: delivery::ActiveDeliverySender<NativePluginRuntimeDelivery>,
     runtime_delivery_rx: std::sync::mpsc::Receiver<NativePluginRuntimeDelivery>,
@@ -233,6 +234,7 @@ impl PluginWorkspaceEntity {
         let entity = Self {
             task_runtime,
             registry: Arc::new(registry),
+            security_key_provider: None,
             runtime_host: Arc::new(tokio::sync::Mutex::new(
                 plugin_runtime::NativePluginRuntimeHost::default(),
             )),
@@ -293,7 +295,52 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn manager_operation_in_flight(&self) -> bool {
-        self.manager_operation_in_flight || !self.remote_desktop_removals.is_empty()
+        self.manager_operation_in_flight
+            || self.manager_state.active_install.is_some()
+            || !self.remote_desktop_removals.is_empty()
+    }
+
+    pub(in crate::workspace) fn take_next_package_install(
+        &mut self,
+    ) -> Option<plugin_manager::NativePluginInstallRequest> {
+        if self.release_shutdown_started
+            || self.manager_operation_in_flight()
+            || self.manager_state.pending_overwrite.is_some()
+        {
+            return None;
+        }
+        self.manager_state.install_queue.pop_front()
+    }
+
+    pub(in crate::workspace) fn plugin_change_in_flight(&self, id: &str) -> bool {
+        self.manager_state.install_pending(Some(id))
+            || self
+                .manager_state
+                .active_install
+                .as_ref()
+                .is_some_and(|active| active.expected_id.is_none())
+            || !self.remote_desktop_removals.is_empty()
+    }
+
+    fn mark_package_install(&mut self, expected_id: Option<&str>) {
+        let name = expected_id.and_then(|id| {
+            self.manager_state
+                .marketplace_entries
+                .iter()
+                .find(|entry| entry.id == id)
+                .map(|entry| entry.name.clone())
+                .or_else(|| {
+                    self.registry
+                        .plugins()
+                        .iter()
+                        .find(|plugin| plugin.manifest.id == id)
+                        .map(|plugin| plugin.manifest.name.clone())
+                })
+        });
+        self.manager_state.active_install = Some(plugin_manager::NativePluginInstallTarget {
+            expected_id: expected_id.map(str::to_owned),
+            name,
+        });
     }
 
     pub(in crate::workspace) fn manager_state(&self) -> &plugin_manager::NativePluginManagerState {
@@ -363,6 +410,49 @@ impl PluginWorkspaceEntity {
         }
     }
 
+    pub(in crate::workspace) fn security_key_provider(
+        &mut self,
+    ) -> Option<Arc<oxideterm_ssh::SecurityKeyProvider>> {
+        if self.compatibility_refresh_pending
+            || self.release_shutdown_started
+            || self
+                .manager_state
+                .active_install
+                .as_ref()
+                .is_some_and(|active| {
+                    active
+                        .expected_id
+                        .as_deref()
+                        .is_none_or(|id| id == oxideterm_ssh::SECURITY_KEY_PLUGIN_ID)
+                })
+            || self
+                .remote_desktop_install_pending
+                .contains(oxideterm_ssh::SECURITY_KEY_PLUGIN_ID)
+            || self
+                .remote_desktop_removals
+                .contains(oxideterm_ssh::SECURITY_KEY_PLUGIN_ID)
+        {
+            return None;
+        }
+        let executable = self.registry.security_key_executable()?;
+        let provider = self
+            .security_key_provider
+            .get_or_insert_with(|| oxideterm_ssh::SecurityKeyProvider::new(executable));
+        Some(Arc::clone(provider))
+    }
+
+    pub(in crate::workspace) fn retire_security_key(
+        &mut self,
+        plugin_id: Option<&str>,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        if plugin_id.is_some_and(|id| id != oxideterm_ssh::SECURITY_KEY_PLUGIN_ID) {
+            return None;
+        }
+        self.security_key_provider
+            .take()
+            .map(|provider| provider.retire())
+    }
+
     pub(in crate::workspace) fn remote_desktop_providers(
         &self,
     ) -> Vec<oxideterm_remote_desktop::RemoteDesktopProviderManifest> {
@@ -386,6 +476,20 @@ impl PluginWorkspaceEntity {
         cx: &mut gpui::App,
     ) {
         registry.preserve_unchanged_runtimes(&self.registry);
+        let old_security_key = self
+            .registry
+            .plugins()
+            .iter()
+            .find(|plugin| plugin.manifest.id == oxideterm_ssh::SECURITY_KEY_PLUGIN_ID);
+        let new_security_key = registry
+            .plugins()
+            .iter()
+            .find(|plugin| plugin.manifest.id == oxideterm_ssh::SECURITY_KEY_PLUGIN_ID);
+        if old_security_key.map(|plugin| (&plugin.manifest, plugin.state))
+            != new_security_key.map(|plugin| (&plugin.manifest, plugin.state))
+        {
+            self.retire_security_key(None);
+        }
         let enabled_runtime_plugin_ids = registry
             .plugins()
             .iter()
@@ -425,6 +529,7 @@ impl PluginWorkspaceEntity {
             self.sync_language_plugins(cx);
         }
         if result.is_ok() && !enabled {
+            self.retire_security_key(Some(plugin_id));
             self.start_runtime_deactivation(plugin_id.to_string());
         }
         audit.finish(
@@ -859,6 +964,7 @@ impl PluginWorkspaceEntity {
             return false;
         }
         self.manager_operation_in_flight = true;
+        self.mark_package_install(expected_id.as_deref());
         self.remote_desktop_install_pending = self
             .registry
             .remote_desktop_providers()
@@ -956,10 +1062,14 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn start_marketplace_load(&mut self) -> bool {
-        if self.manager_operation_in_flight() || self.release_shutdown_started {
+        if self.manager_state.marketplace_load_state
+            == plugin_manager::NativePluginMarketplaceLoadState::Loading
+            || self.release_shutdown_started
+        {
             return false;
         }
-        self.manager_operation_in_flight = true;
+        self.manager_state.marketplace_load_state =
+            plugin_manager::NativePluginMarketplaceLoadState::Loading;
         let delivery_tx = self.manager_delivery_tx.clone();
         let settings_path = self.registry.config_path().with_file_name("settings.json");
         let installed_ids = self
@@ -1013,7 +1123,7 @@ impl PluginWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn start_catalog_history_load(&mut self, ids: Vec<String>) {
-        if self.release_shutdown_started || self.manager_operation_in_flight {
+        if self.release_shutdown_started {
             return;
         }
         if ids != self.manager_state.history_page_ids {
@@ -1102,6 +1212,7 @@ impl PluginWorkspaceEntity {
             self.remote_desktop_install_pending
                 .insert(expected_id.clone());
         }
+        self.mark_package_install(Some(&expected_id));
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
         let audit = plugin_management_audit(
             Some(&expected_id),
@@ -1161,6 +1272,7 @@ impl PluginWorkspaceEntity {
         cx: &mut gpui::App,
     ) {
         self.manager_operation_in_flight = false;
+        self.manager_state.active_install = None;
         self.remote_desktop_install_pending.clear();
         if installed {
             self.replace_registry(
@@ -1293,47 +1405,58 @@ impl PluginWorkspaceEntity {
                 download_url,
                 checksum,
                 outcome,
-            } => match outcome {
-                plugin_manager::NativePluginInstallOutcome::Installed(result) => {
-                    let installed_id = result.manifest.id.clone();
-                    let message = i18n
-                        .t("plugin.url_install_success")
-                        .replace("{{name}}", &result.manifest.name);
-                    self.replace_registry(
-                        plugin_host::NativePluginRegistry::discover(settings_path),
-                        cx,
-                    );
-                    self.manager_state
-                        .available_updates
-                        .retain(|entry| entry.id != installed_id);
-                    self.manager_state.pending_overwrite = None;
-                    self.manager_state.operation_status =
-                        plugin_manager::NativePluginManagerOperationStatus::Success(message);
-                    true
+            } => {
+                self.manager_state.active_install = None;
+                if let Some(id) = &expected_id {
+                    if matches!(&outcome, plugin_manager::NativePluginInstallOutcome::Failed) {
+                        self.manager_state.failed_install_ids.insert(id.clone());
+                    } else {
+                        self.manager_state.failed_install_ids.remove(id);
+                    }
                 }
-                plugin_manager::NativePluginInstallOutcome::Conflict { plugin_id } => {
-                    // The retry keeps the only secret-bearing URL owner.
-                    self.manager_state.pending_overwrite =
-                        Some(plugin_manager::NativePluginPendingOverwrite {
-                            plugin_id,
-                            expected_id,
-                            download_url,
-                            checksum,
-                        });
-                    self.manager_state.operation_status =
-                        plugin_manager::NativePluginManagerOperationStatus::Error(
-                            i18n.t("plugin.url_conflict_title"),
+                match outcome {
+                    plugin_manager::NativePluginInstallOutcome::Installed(result) => {
+                        let installed_id = result.manifest.id.clone();
+                        self.manager_state.failed_install_ids.remove(&installed_id);
+                        let message = i18n
+                            .t("plugin.url_install_success")
+                            .replace("{{name}}", &result.manifest.name);
+                        self.replace_registry(
+                            plugin_host::NativePluginRegistry::discover(settings_path),
+                            cx,
                         );
-                    false
+                        self.manager_state
+                            .available_updates
+                            .retain(|entry| entry.id != installed_id);
+                        self.manager_state.pending_overwrite = None;
+                        self.manager_state.operation_status =
+                            plugin_manager::NativePluginManagerOperationStatus::Success(message);
+                        true
+                    }
+                    plugin_manager::NativePluginInstallOutcome::Conflict { plugin_id } => {
+                        // The retry keeps the only secret-bearing URL owner.
+                        self.manager_state.pending_overwrite =
+                            Some(plugin_manager::NativePluginPendingOverwrite {
+                                plugin_id,
+                                expected_id,
+                                download_url,
+                                checksum,
+                            });
+                        self.manager_state.operation_status =
+                            plugin_manager::NativePluginManagerOperationStatus::Error(
+                                i18n.t("plugin.url_conflict_title"),
+                            );
+                        false
+                    }
+                    plugin_manager::NativePluginInstallOutcome::Failed => {
+                        self.manager_state.operation_status =
+                            plugin_manager::NativePluginManagerOperationStatus::Error(
+                                i18n.t("plugin.install_error"),
+                            );
+                        false
+                    }
                 }
-                plugin_manager::NativePluginInstallOutcome::Failed => {
-                    self.manager_state.operation_status =
-                        plugin_manager::NativePluginManagerOperationStatus::Error(
-                            i18n.t("plugin.install_error"),
-                        );
-                    false
-                }
-            },
+            }
             plugin_manager::NativePluginManagerDelivery::LoadMarketplace(result) => {
                 let initial_refresh = std::mem::take(&mut self.compatibility_refresh_pending);
                 if initial_refresh && result.is_some() {
@@ -1509,9 +1632,14 @@ impl PluginWorkspaceEntity {
             return false;
         }
         self.release_shutdown_started = true;
+        self.retire_security_key(None);
         self.uninstall_task.take();
         self.runtime_services_started = false;
         self.manager_operation_in_flight = false;
+        // Dropping queued requests erases their URL buffers with the runtime owner.
+        self.manager_state.install_queue.clear();
+        self.manager_state.active_install = None;
+        self.manager_state.pending_overwrite = None;
         self.subscription_sampler_running = false;
         self.subscription_sampler_generation = self.subscription_sampler_generation.wrapping_add(1);
         self.subscription_sampler_task.take();
@@ -2164,8 +2292,23 @@ impl PluginWorkspaceEntity {
             delivery::USER_ACTION_DELIVERY_BUDGET,
         );
         if !drain.items.is_empty() {
-            self.manager_operation_in_flight = false;
-            self.remote_desktop_install_pending.clear();
+            if drain.items.iter().any(|delivery| {
+                matches!(
+                    delivery,
+                    plugin_manager::NativePluginManagerDelivery::Install { .. }
+                        | plugin_manager::NativePluginManagerDelivery::CheckUpdates(_)
+                )
+            }) {
+                self.manager_operation_in_flight = false;
+            }
+            if drain.items.iter().any(|delivery| {
+                matches!(
+                    delivery,
+                    plugin_manager::NativePluginManagerDelivery::Install { .. }
+                )
+            }) {
+                self.remote_desktop_install_pending.clear();
+            }
             self.manager_deliveries.extend(drain.items);
             cx.emit(PluginWorkspaceEvent::ManagerDeliveryReady);
             cx.notify();
@@ -2398,6 +2541,109 @@ mod tests {
     }
 
     #[gpui::test]
+    fn install_queue_serializes_requests_and_continues_after_failure(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let settings = directory.path().join("settings.json");
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(
+                runtime.clone(),
+                plugin_host::NativePluginRegistry::default(),
+                cx,
+            )
+        });
+        let request = |id: &str| plugin_manager::NativePluginInstallRequest {
+            expected_id: Some(id.into()),
+            download_url: Zeroizing::new("invalid URL containing synthetic-secret".into()),
+            checksum: Some(
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000".into(),
+            ),
+            overwrite: false,
+        };
+        let wake = entity.update(cx, |entity, _| {
+            assert!(
+                entity
+                    .manager_state
+                    .enqueue_install(request("com.example.first"))
+            );
+            assert!(
+                entity
+                    .manager_state
+                    .enqueue_install(request("com.example.cancelled"))
+            );
+            assert!(
+                entity
+                    .manager_state
+                    .enqueue_install(request("com.example.next"))
+            );
+            assert!(
+                !entity
+                    .manager_state
+                    .enqueue_install(request("com.example.first"))
+            );
+            let first = entity.take_next_package_install().unwrap();
+            assert_eq!(first.expected_id.as_deref(), Some("com.example.first"));
+            assert!(entity.start_package_install(
+                settings.clone(),
+                first.expected_id,
+                first.download_url,
+                first.checksum,
+                first.overwrite,
+                Vec::new()
+            ));
+            assert!(entity.take_next_package_install().is_none());
+            assert!(
+                !entity
+                    .manager_state
+                    .enqueue_install(request("com.example.first"))
+            );
+            assert!(entity.plugin_change_in_flight("com.example.first"));
+            assert!(!entity.plugin_change_in_flight("com.example.unrelated"));
+            entity
+                .manager_state
+                .cancel_queued_install(Some("com.example.cancelled"));
+            entity.manager_delivery_tx.wake()
+        });
+        // Wait for the actual installer result, without a network server or timing sleeps.
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), wake.wait())
+                .await
+                .unwrap();
+        });
+        // The test consumed the producer notification; use the normal foreground drain.
+        entity.update(cx, |entity, cx| {
+            entity.drain_manager_deliveries(cx);
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            assert!(entity.take_next_package_install().is_none(), "Apply the result before starting another install");
+            entity.apply_manager_deliveries(&settings, &I18n::new(Locale::En), cx);
+            assert_eq!(entity.manager_state.failed_install_ids, HashSet::from(["com.example.first".into()]));
+            assert!(matches!(&entity.manager_state.operation_status, plugin_manager::NativePluginManagerOperationStatus::Error(message) if message == "Install failed"));
+            let next = entity.take_next_package_install().unwrap();
+            assert_eq!(next.expected_id.as_deref(), Some("com.example.next"));
+            assert!(entity.take_next_package_install().is_none());
+            entity.manager_state.enqueue_install(request("com.example.after-conflict"));
+            entity.manager_state.pending_overwrite = Some(plugin_manager::NativePluginPendingOverwrite {
+                plugin_id: "com.example.conflict".into(), expected_id: None,
+                download_url: Zeroizing::new("https://example.invalid/?token=synthetic-secret".into()), checksum: None,
+            });
+            assert!(entity.take_next_package_install().is_none());
+            entity.manager_state.pending_overwrite = None;
+            assert_eq!(entity.take_next_package_install().unwrap().expected_id.as_deref(), Some("com.example.after-conflict"));
+            entity.manager_state.enqueue_install(request("com.example.shutdown"));
+            entity.begin_release_shutdown();
+            assert!(entity.manager_state.install_queue.is_empty());
+            assert!(entity.take_next_package_install().is_none());
+        });
+    }
+
+    #[gpui::test]
     fn manager_operation_and_delivery_are_entity_owned(cx: &mut TestAppContext) {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
@@ -2411,6 +2657,22 @@ mod tests {
         let delivery_tx = entity.update(cx, |entity, _cx| {
             entity.manager_operation_in_flight = true;
             entity.manager_delivery_tx.clone()
+        });
+        delivery_tx
+            .send(
+                plugin_manager::NativePluginManagerDelivery::CatalogHistories {
+                    expected: Vec::new(),
+                    results: Vec::new(),
+                },
+            )
+            .unwrap();
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            entity.apply_manager_deliveries(Path::new(""), &I18n::new(Locale::En), cx);
+            assert!(
+                entity.manager_operation_in_flight(),
+                "History loading must not release the installer gate"
+            );
         });
         delivery_tx
             .send(plugin_manager::NativePluginManagerDelivery::CheckUpdates(
@@ -2430,7 +2692,8 @@ mod tests {
                 plugin_manager::NativePluginManagerOperationStatus::Success(_)
             ));
             entity.compatibility_refresh_pending = true;
-            entity.manager_operation_in_flight = true;
+            entity.manager_state.marketplace_load_state =
+                plugin_manager::NativePluginMarketplaceLoadState::Loading;
             entity
                 .manager_delivery_tx
                 .send(plugin_manager::NativePluginManagerDelivery::LoadMarketplace(None))

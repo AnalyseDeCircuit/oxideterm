@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "Khóa bảo mật",
+      "touch_instructions": "Chạm vào khóa bảo mật hoặc hoàn tất xác minh trên thiết bị.",
+      "pin_title": "PIN của khóa bảo mật",
+      "pin_instructions": "Nhập PIN của khóa bảo mật. PIN sẽ không được lưu.",
+      "pin_retry": "PIN không đúng. Hãy kiểm tra trước khi thử lại.",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "Cài đặt và bật phần bổ trợ FIDO Security Key để sử dụng khóa SSH này.",
+        "cancelled": "Đã hủy xác thực bằng khóa bảo mật.",
+        "timeout": "Xác thực bằng khóa bảo mật đã hết thời gian chờ.",
+        "invalid_request": "Yêu cầu ký bằng khóa bảo mật không hợp lệ.",
+        "incompatible": "Giao thức của phần bổ trợ khóa bảo mật không tương thích.",
+        "no_device": "Không tìm thấy khóa bảo mật FIDO. Kết nối thiết bị rồi thử lại.",
+        "credential_not_found": "Không tìm thấy thông tin xác thực SSH này trên khóa bảo mật đã kết nối.",
+        "pin_blocked": "PIN đã bị khóa. Làm theo hướng dẫn khôi phục của nhà sản xuất.",
+        "device_failure": "Thao tác với khóa bảo mật thất bại.",
+        "invalid_signature": "Không thể xác minh chữ ký của khóa bảo mật."
+      }
+    },
     "form": {
       "title": "Kết nối mới",
       "subtitle": "Cấu hình một máy chủ SSH cho terminal, SFTP, chuyển tiếp cổng và chỉnh sửa tệp từ xa.",

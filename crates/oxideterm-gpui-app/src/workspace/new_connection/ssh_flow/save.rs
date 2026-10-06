@@ -3446,7 +3446,11 @@ impl WorkspaceApp {
                 host,
                 port,
                 status: HostKeyStatus::Error {
-                    message: self.i18n.t("mosh_plugin.required"),
+                    message: self.plugin_requirement_message(
+                        "com.oxideterm.terminal.mosh",
+                        "Mosh",
+                        cx,
+                    ),
                 },
             });
             return;

@@ -257,6 +257,9 @@
     "shortcut_count": "Tastaturkürzel"
   },
   "plugin": {
+    "install_queued": "Wartet · Position {{position}}",
+    "installing_named": "{{name}} wird installiert",
+    "install_queue_count": "{{count}} warten",
     "jump_to_page": "Gehe zu Seite",
     "total_pages": "von {{pages}} Seiten",
     "jump_page": "Los",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Plugin-Tab-Ansicht nicht verfügbar",
     "tab_crashed": "Plugin-Tab ist abgestürzt",
     "detail_author": "Autor",
+    "license_label": "Lizenz: {{license}}",
+    "install_required": "Das Plugin {{name}} ist nicht installiert. Installieren Sie es aus dem Plugin-Markt und versuchen Sie es erneut.",
+    "enable_required": "Das installierte Plugin {{name}} ist nicht verfügbar. Aktivieren oder aktualisieren Sie es im Plugin-Manager und versuchen Sie es erneut.",
+    "license_not_declared": "Nicht angegeben",
+    "view_license": "Lizenz anzeigen",
+    "third_party_licenses": "Lizenzen von Drittanbietern",
     "registry_capabilities": "Funktionen: {{capabilities}}",
     "reload_success": "{{name}} wurde erneut gescannt.",
     "enable_success": "{{name}} wurde aktiviert.",

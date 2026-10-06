@@ -257,6 +257,9 @@
     "shortcut_count": "atajos"
   },
   "plugin": {
+    "install_queued": "En espera · posición {{position}}",
+    "installing_named": "Instalando {{name}}",
+    "install_queue_count": "{{count}} en espera",
     "jump_to_page": "Ir a la página",
     "total_pages": "de {{pages}} páginas",
     "jump_page": "Ir",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Vista de pestaña del plugin no disponible",
     "tab_crashed": "La pestaña del plugin ha fallado",
     "detail_author": "Autor",
+    "license_label": "Licencia: {{license}}",
+    "install_required": "El complemento {{name}} no está instalado. Instálalo desde el mercado de complementos y vuelve a intentarlo.",
+    "enable_required": "El complemento {{name}} instalado no está disponible. Actívalo o actualízalo en el administrador de complementos y vuelve a intentarlo.",
+    "license_not_declared": "Sin declarar",
+    "view_license": "Ver licencia",
+    "third_party_licenses": "Licencias de terceros",
     "registry_capabilities": "Capacidades: {{capabilities}}",
     "reload_success": "{{name}} se volvió a analizar.",
     "enable_success": "{{name}} habilitado.",

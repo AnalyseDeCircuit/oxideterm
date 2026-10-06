@@ -193,9 +193,7 @@ impl NativePluginRegistry {
                 {
                     return None;
                 }
-                let NativePluginRuntimePlan::Acp { entry } = &plugin.runtime_plan else {
-                    return None;
-                };
+                let entry = plugin.runtime_plan.helper_entry("acp", "acp", 1)?;
                 let root = plugin.install_dir.canonicalize().ok()?;
                 let command = root.join(entry).canonicalize().ok()?;
                 if !command.starts_with(&root) || !command.is_file() {
@@ -224,9 +222,34 @@ impl NativePluginRegistry {
             {
                 return None;
             }
-            let NativePluginRuntimePlan::TerminalTransport { entry } = &plugin.runtime_plan else {
+            let entry =
+                plugin
+                    .runtime_plan
+                    .helper_entry("terminal-transport", "oxideterm-mosh", 1)?;
+            let root = plugin.install_dir.canonicalize().ok()?;
+            let command = root.join(entry).canonicalize().ok()?;
+            (command.starts_with(&root) && command.is_file()).then_some(command)
+        })
+    }
+
+    /// Only the approved FIDO provider may receive private SSH key handles.
+    pub fn security_key_executable(&self) -> Option<PathBuf> {
+        self.plugins.iter().find_map(|plugin| {
+            if plugin.manifest.id != "com.oxideterm.auth.fido2"
+                || !native_plugin_state_is_active_like(plugin.state)
+                || native_plugin_requires_permission_review(
+                    &plugin.manifest,
+                    &plugin.runtime_plan,
+                    &plugin.config,
+                )
+            {
                 return None;
-            };
+            }
+            let entry = plugin.runtime_plan.helper_entry(
+                "ssh-authentication",
+                "oxideterm-security-key",
+                1,
+            )?;
             let root = plugin.install_dir.canonicalize().ok()?;
             let command = root.join(entry).canonicalize().ok()?;
             (command.starts_with(&root) && command.is_file()).then_some(command)
@@ -272,9 +295,11 @@ impl NativePluginRegistry {
                 {
                     return None;
                 }
-                let NativePluginRuntimePlan::RemoteDesktop { entry } = &plugin.runtime_plan else {
-                    return None;
-                };
+                let entry = plugin.runtime_plan.helper_entry(
+                    "remote-desktop",
+                    "oxideterm-remote-desktop",
+                    oxideterm_remote_desktop::REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION,
+                )?;
                 let definition = plugin
                     .manifest
                     .contributes

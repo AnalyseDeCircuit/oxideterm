@@ -257,6 +257,9 @@
     "shortcut_count": "raccourcis"
   },
   "plugin": {
+    "install_queued": "En attente · position {{position}}",
+    "installing_named": "Installation de {{name}}",
+    "install_queue_count": "{{count}} en attente",
     "jump_to_page": "Aller à la page",
     "total_pages": "sur {{pages}} pages",
     "jump_page": "Aller",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Vue d'onglet du plugin non disponible",
     "tab_crashed": "L'onglet du plugin a planté",
     "detail_author": "Auteur",
+    "license_label": "Licence : {{license}}",
+    "install_required": "Le plugin {{name}} n’est pas installé. Installez-le depuis le catalogue de plugins, puis réessayez.",
+    "enable_required": "Le plugin {{name}} installé est indisponible. Activez-le ou mettez-le à jour dans le gestionnaire de plugins, puis réessayez.",
+    "license_not_declared": "Non déclarée",
+    "view_license": "Afficher la licence",
+    "third_party_licenses": "Licences tierces",
     "registry_capabilities": "Capacités : {{capabilities}}",
     "reload_success": "{{name}} a été réanalysé.",
     "enable_success": "{{name}} activé.",

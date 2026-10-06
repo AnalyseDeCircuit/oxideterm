@@ -257,6 +257,9 @@
     "shortcut_count": "phím tắt"
   },
   "plugin": {
+    "install_queued": "Đang chờ · vị trí {{position}}",
+    "installing_named": "Đang cài đặt {{name}}",
+    "install_queue_count": "{{count}} mục đang chờ",
     "jump_to_page": "Đến trang",
     "total_pages": "trong {{pages}} trang",
     "jump_page": "Đến",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Chế độ xem tab plugin không khả dụng",
     "tab_crashed": "Tab plugin đã gặp lỗi",
     "detail_author": "Tác giả",
+    "license_label": "Giấy phép: {{license}}",
+    "install_required": "Plugin {{name}} chưa được cài đặt. Hãy cài đặt từ chợ plugin rồi thử lại.",
+    "enable_required": "Plugin {{name}} đã cài đặt hiện không khả dụng. Hãy bật hoặc cập nhật plugin trong trình quản lý plugin rồi thử lại.",
+    "license_not_declared": "Chưa khai báo",
+    "view_license": "Xem giấy phép",
+    "third_party_licenses": "Giấy phép bên thứ ba",
     "registry_capabilities": "Khả năng: {{capabilities}}",
     "reload_success": "{{name}} đã quét lại.",
     "enable_success": "{{name}} đã bật.",

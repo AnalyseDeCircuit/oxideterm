@@ -197,9 +197,9 @@ mod tests {
         motions.finish("ai:message-tools-0:call:tool", reopen);
         assert_eq!(motions.message_signature("message"), 0);
         assert!(!motions.retained("ai:message-tools-0:call:tool", false));
-        let thinking = motions.begin("ai:message-thinking-1:thinking".into(), true);
+        let thinking = motions.begin("ai:message-thinking-activity-1:thinking".into(), true);
         assert_ne!(motions.message_signature("message"), 0);
-        motions.finish("ai:message-thinking-1:thinking", thinking);
+        motions.finish("ai:message-thinking-activity-1:thinking", thinking);
         assert_eq!(motions.message_signature("message"), 0);
     }
 

@@ -9,10 +9,11 @@ use super::tokens::*;
 
 pub fn ai_tool_block(tokens: &ThemeTokens) -> Div {
     div()
-        .my(px(tokens.spacing.one))
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(tokens.spacing.one))
+        .gap(px(tokens.spacing.one / 2.0))
 }
 
 pub fn ai_tool_heading(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
@@ -84,13 +85,11 @@ pub fn ai_tool_item_header(
     call: &AiToolCallView,
     expanded: bool,
     status_icon: impl IntoElement,
-    tool_icon: impl IntoElement,
     chevron_icon: impl IntoElement,
 ) -> Div {
     div()
         .w_full()
         .flex()
-        .flex_wrap()
         .items_center()
         .gap(px(tokens.spacing.one + tokens.spacing.one / 2.0))
         .px(px(tokens.spacing.one))
@@ -99,26 +98,34 @@ pub fn ai_tool_item_header(
         .when(expanded, |header| {
             header.bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_CHIP_BG_ALPHA))
         })
-        .text_size(px(AI_TEXT_11))
+        .text_size(px(AI_TEXT_12))
         .cursor_pointer()
         .hover(|style| style.bg(bg_alpha(tokens, tokens.ui.bg_hover, AI_HOVER_BG_ALPHA)))
         .child(chevron_icon)
-        .child(status_icon)
-        .child(tool_icon)
+        .when(call.status != AiToolStatus::Completed, |header| {
+            header.child(status_icon)
+        })
         .child(
             div()
                 .min_w_0()
+                .flex_1()
                 .max_w_full()
                 .truncate()
-                .font_weight(FontWeight::MEDIUM)
+                .font_weight(if call.status == AiToolStatus::Completed {
+                    FontWeight::NORMAL
+                } else {
+                    FontWeight::MEDIUM
+                })
                 .text_color(rgb(tokens.ui.text_muted))
                 .child(call.name.clone()),
         )
-        .child(ai_tool_badge(
-            tokens,
-            risk_tone(call.risk),
-            call.risk_label.clone(),
-        ))
+        .when(call.status != AiToolStatus::Completed, |header| {
+            header.child(ai_tool_badge(
+                tokens,
+                risk_tone(call.risk),
+                call.risk_label.clone(),
+            ))
+        })
         .when(call.bypass_approval, |header| {
             header.child(ai_tool_badge(
                 tokens,
@@ -126,28 +133,18 @@ pub fn ai_tool_item_header(
                 call.bypass_label.clone(),
             ))
         })
-        .when_some(call.capability.clone(), |header, capability| {
-            header.child(ai_tool_neutral_badge(tokens, capability))
-        })
-        .child(
-            div()
-                .ml(px(tokens.spacing.one))
-                .min_w_0()
-                .flex_1()
-                .truncate()
-                .text_size(px(AI_TEXT_10))
-                .text_color(muted_text(tokens, AI_MUTED_TEXT_50_ALPHA))
-                .child(call.summary.clone()),
+        .when_some(
+            call.duration.clone().filter(|_| expanded),
+            |header, duration| {
+                header.child(
+                    div()
+                        .flex_none()
+                        .text_size(px(AI_TEXT_10))
+                        .text_color(rgb(tokens.ui.text_muted))
+                        .child(duration),
+                )
+            },
         )
-        .when_some(call.duration.clone(), |header, duration| {
-            header.child(
-                div()
-                    .flex_none()
-                    .text_size(px(AI_TEXT_9))
-                    .text_color(rgb(tokens.ui.text_muted))
-                    .child(duration),
-            )
-        })
 }
 
 pub fn ai_tool_badge(tokens: &ThemeTokens, tone: AiTone, label: impl Into<String>) -> Div {
@@ -160,19 +157,6 @@ pub fn ai_tool_badge(tokens: &ThemeTokens, tone: AiTone, label: impl Into<String
         .text_size(px(AI_TEXT_10))
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(tone_color(tokens, tone)))
-        .child(label.into())
-}
-
-pub fn ai_tool_neutral_badge(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
-    div()
-        .flex()
-        .items_center()
-        .flex_none()
-        .min_w_0()
-        .max_w_full()
-        .text_size(px(AI_TEXT_9))
-        .font_weight(FontWeight::MEDIUM)
-        .text_color(muted_text(tokens, AI_MUTED_TEXT_60_ALPHA))
         .child(label.into())
 }
 

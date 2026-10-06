@@ -46,6 +46,10 @@ pub struct NativePluginRegistryEntry {
     pub description: Option<String>,
     #[serde(default)]
     pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_url: Option<String>,
     pub version: String,
     #[serde(default, rename = "minOxideTermVersion", alias = "minOxidetermVersion")]
     pub min_oxideterm_version: Option<String>,

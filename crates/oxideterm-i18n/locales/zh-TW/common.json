@@ -257,6 +257,9 @@
     "shortcut_count": "個快捷鍵"
   },
   "plugin": {
+    "install_queued": "等待中 · 第 {{position}} 項",
+    "installing_named": "正在安裝 {{name}}",
+    "install_queue_count": "{{count}} 項等待安裝",
     "jump_to_page": "頁碼",
     "total_pages": "共 {{pages}} 頁",
     "jump_page": "跳轉",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "外掛分頁檢視不可用",
     "tab_crashed": "外掛分頁已崩潰",
     "detail_author": "作者",
+    "license_label": "授權條款：{{license}}",
+    "install_required": "尚未安裝 {{name}} 外掛。請前往外掛市集安裝後重試。",
+    "enable_required": "已安裝的 {{name}} 外掛目前無法使用。請在外掛管理員中啟用或更新後重試。",
+    "license_not_declared": "未聲明",
+    "view_license": "查看授權條款",
+    "third_party_licenses": "第三方授權",
     "registry_capabilities": "能力：{{capabilities}}",
     "reload_success": "{{name}} 已重新掃描。",
     "enable_success": "{{name}} 已啟用。",

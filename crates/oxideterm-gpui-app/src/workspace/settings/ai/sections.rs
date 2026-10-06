@@ -488,7 +488,9 @@ impl WorkspaceApp {
             return;
         };
         if let Err(message) = self.resolve_ai_acp_plugin(&mut agent, cx) {
-            self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx);
+            if !self.show_acp_plugin_requirement(&agent, cx) {
+                self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx);
+            }
             return;
         }
         self.ai_entity.update(cx, |ai, _cx| {

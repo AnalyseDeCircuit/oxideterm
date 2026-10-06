@@ -96,6 +96,7 @@ pub(in crate::workspace) struct KeyboardInteractiveChallenge {
     pub(in crate::workspace) responses: KeyboardInteractiveResponses,
     pub(in crate::workspace) focused_prompt: usize,
     pub(super) remember_password: bool,
+    pub(super) external_wait: bool,
     pub(super) expires_at: Instant,
     pub(super) response_tx: Option<NativeSshPromptSender>,
 }
@@ -113,6 +114,7 @@ impl KeyboardInteractiveChallenge {
             responses,
             focused_prompt: 0,
             remember_password: false,
+            external_wait: false,
             expires_at: Instant::now() + Duration::from_secs(KBI_PROMPT_TIMEOUT_SECS),
             response_tx: Some(response_tx),
         }
@@ -129,7 +131,7 @@ impl KeyboardInteractiveChallenge {
     }
 
     pub(super) fn all_responses_filled(&self) -> bool {
-        self.responses.iter().all(|response| !response.is_empty())
+        !self.external_wait && self.responses.iter().all(|response| !response.is_empty())
     }
 }
 
@@ -264,6 +266,7 @@ impl WorkspaceApp {
         let timed_out = challenge.timed_out();
         let seconds_left = challenge.seconds_left();
         let can_submit = !timed_out && challenge.all_responses_filled();
+        let external_wait = challenge.external_wait;
 
         let mut prompt_list = div()
             .flex()
@@ -473,13 +476,15 @@ impl WorkspaceApp {
                                 false,
                                 cx,
                             ))
-                            .child(self.render_keyboard_interactive_button(
-                                self.i18n.t("ssh.kbi.continue"),
-                                true,
-                                true,
-                                !can_submit,
-                                cx,
-                            )),
+                            .when(!external_wait, |footer| {
+                                footer.child(self.render_keyboard_interactive_button(
+                                    self.i18n.t("ssh.kbi.continue"),
+                                    true,
+                                    true,
+                                    !can_submit,
+                                    cx,
+                                ))
+                            }),
                     ),
                 dialog_visible,
             ))

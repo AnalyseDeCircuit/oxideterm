@@ -1099,9 +1099,7 @@ mod ai_turn_order_tests {
         assert_eq!(rounds.len(), 2);
         assert_eq!(rounds[0]["toolCalls"][0]["id"], "call-1");
         assert_eq!(rounds[1]["toolCalls"][0]["id"], "call-2");
-        let first_round = ai_tool_part_round_id(&message, &parts[0]).expect("first round");
-        let second_round = ai_tool_part_round_id(&message, &parts[2]).expect("second round");
-        assert_ne!(first_round, second_round);
+        assert_ne!(rounds[0]["id"], rounds[1]["id"]);
     }
 
     #[test]
@@ -1150,9 +1148,6 @@ mod ai_turn_order_tests {
                 .map(Vec::len),
             Some(2)
         );
-        let first_round = ai_tool_part_round_id(&message, &parts[0]).expect("first round");
-        let second_round = ai_tool_part_round_id(&message, &parts[1]).expect("second round");
-        assert_eq!(first_round, second_round);
     }
 
 

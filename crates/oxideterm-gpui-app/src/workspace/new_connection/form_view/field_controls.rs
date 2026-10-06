@@ -3221,11 +3221,11 @@ impl WorkspaceApp {
             .justify_between()
             .gap_3()
             .child(self.render_connection_hint_with_color(
-                self.i18n.t(if available {
-                    "mosh_plugin.ready"
+                if available {
+                    self.i18n.t("mosh_plugin.ready")
                 } else {
-                    "mosh_plugin.required"
-                }),
+                    self.plugin_requirement_message("com.oxideterm.terminal.mosh", "Mosh", cx)
+                },
                 if available {
                     self.tokens.ui.success
                 } else {
@@ -3515,11 +3515,15 @@ impl WorkspaceApp {
                     .justify_between()
                     .gap_3()
                     .child(self.render_connection_hint_with_color(
-                        self.i18n.t(if available {
-                            "remote_desktop.plugin_ready"
+                        if available {
+                            self.i18n.t("remote_desktop.plugin_ready")
                         } else {
-                            "remote_desktop.plugin_required"
-                        }),
+                            self.plugin_requirement_message(
+                                &format!("com.oxideterm.remote-desktop.{}", protocol.provider_id()),
+                                &protocol.provider_id().to_uppercase(),
+                                cx,
+                            )
+                        },
                         if available {
                             self.tokens.ui.success
                         } else {

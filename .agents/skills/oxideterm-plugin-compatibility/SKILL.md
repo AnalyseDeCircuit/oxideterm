@@ -45,14 +45,16 @@ old-client behavior. A host range cannot replace those checks. Do not assign an
 upper bound to old plugins just because a new plugin or app version was released.
 
 For ACP agent extraction, keep the ACP client, permission decisions and process
-ownership in the host. Agent packages use the dedicated `acp` runtime and speak
-ACP stdio directly; do not route their traffic through the ordinary plugin
-supervisor. Check `registry.acp_agents`, `workspace/acp_plugins.rs`, and
+ownership in the host. Published `acp` manifests remain supported and normalize
+into the common helper plan. New helper manifests declare feature `acp`, protocol
+`acp` and version 1. Agents speak ACP stdio directly; do not route their traffic
+through the ordinary plugin supervisor. Check `registry.acp_agents`, `workspace/acp_plugins.rs`, and
 `workspace/acp_workspace.rs` for startup gating, launch resolution and cleanup.
 Hosts through 2.2.1 cannot load this runtime. Preserve existing agent identities
 and user options when migrating bundled adapters to plugin bindings.
 
-Mosh uses `terminal-transport` with a versioned private binary pipe. Keep SSH
+Published Mosh manifests use `terminal-transport`; new helper manifests declare
+feature `terminal-transport`, protocol `oxideterm-mosh` and version 1. Keep SSH
 bootstrap, terminal rendering and local prediction in the host; UDP, SSP and
 encryption belong to the engine plugin. Hosts through 2.2.1 cannot load it.
 Check `oxideterm-mosh` and its workspace-owned `MoshPluginSessions` for launch
@@ -62,13 +64,21 @@ must remain independent under output backpressure. RDP, VNC and Mosh share the
 
 ## Coordinate publication
 
-Remote desktop plugins use `remote-desktop`, not the ordinary plugin supervisor.
+Published remote desktop manifests use `remote-desktop`; new helper manifests
+declare feature `remote-desktop`, protocol `oxideterm-remote-desktop` and version 1.
+Both normalize into the common helper plan, outside the ordinary plugin supervisor.
 Keep the native viewer, input, credentials and SSH tunnel ownership in the host.
 Require a supported `contributes.remoteDesktop.protocolVersion` and resolve only
 trusted, enabled, compatible installed executables. Stop and reap helper processes
 before updating or removing their files; disable automatic reconnect until a
 compatible provider is available. Keep the existing binary stdio format unchanged
 when extracting helpers. Hosts through 2.2.1 cannot load this runtime.
+
+Generic `helper` manifests require hosts from 2.2.2. Preserve published manifest
+kinds, capability approval boundaries and protocol payloads when normalizing them.
+Runtime-plan unification does not transfer child ownership to the plugin supervisor.
+FIDO declares feature `ssh-authentication`, protocol `oxideterm-security-key` and
+version 1; its authentication task owns cancellation and reaping.
 
 Plugin creation, release records, and compatibility corrections belong in the
 `AnalyseDeCircuit/oxideterm-plugins` repository. Locate its actual checkout by

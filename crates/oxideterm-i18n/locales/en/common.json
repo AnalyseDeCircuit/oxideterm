@@ -257,6 +257,9 @@
     }
   },
   "plugin": {
+    "install_queued": "Waiting · {{position}}",
+    "installing_named": "Installing {{name}}",
+    "install_queue_count": "{{count}} waiting",
     "jump_to_page": "Go to page",
     "total_pages": "of {{pages}} pages",
     "jump_page": "Go",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "Plugin tab view not available",
     "tab_crashed": "Plugin tab crashed",
     "detail_author": "Author",
+    "license_label": "License: {{license}}",
+    "install_required": "The {{name}} plugin is not installed. Install it from the plugin marketplace, then retry.",
+    "enable_required": "The installed {{name}} plugin is unavailable. Enable or update it in Plugin Manager, then retry.",
+    "license_not_declared": "Not declared",
+    "view_license": "View license",
+    "third_party_licenses": "Third-party licenses",
     "registry_capabilities": "Capabilities: {{capabilities}}",
     "reload_success": "{{name}} rescanned.",
     "enable_success": "{{name}} enabled.",

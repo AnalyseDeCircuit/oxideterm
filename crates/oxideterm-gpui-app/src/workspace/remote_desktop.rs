@@ -792,6 +792,7 @@ impl RemoteDesktopSessionEntity {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum RemoteDesktopSessionEvent {
+    PluginRequired { protocol: RemoteDesktopProtocol },
     CredentialsRequired { generation: u64 },
     DeliveryReady { generation: u64 },
     FrameApplyReady { generation: u64 },

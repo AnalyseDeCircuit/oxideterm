@@ -79,24 +79,22 @@ impl WorkspaceApp {
                 self.ai_entity.update(cx, |ai, _cx| {
                     ai.set_conversation_loading(&conversation_id, false)
                 });
+                let agent = self
+                    .settings_store
+                    .settings()
+                    .ai
+                    .acp_agents
+                    .iter()
+                    .find(|agent| Some(&agent.id) == config.acp_agent_id.as_ref())
+                    .cloned();
+                if agent
+                    .as_ref()
+                    .is_some_and(|agent| self.show_acp_plugin_requirement(agent, cx))
+                {
+                    return;
+                }
                 self.push_ai_settings_toast(
-                    self.i18n.t(
-                        if self
-                            .settings_store
-                            .settings()
-                            .ai
-                            .acp_agents
-                            .iter()
-                            .any(|agent| {
-                                Some(&agent.id) == config.acp_agent_id.as_ref()
-                                    && agent.plugin_id.is_some()
-                            })
-                        {
-                            "settings_view.ai.acp_agent_plugin_unavailable"
-                        } else {
-                            "settings_view.ai.acp_agent_error_unknown"
-                        },
-                    ),
+                    self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                     TerminalNoticeVariant::Error,
                     cx,
                 );

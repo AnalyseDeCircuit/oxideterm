@@ -257,6 +257,9 @@
     "shortcut_count": "개의 단축키"
   },
   "plugin": {
+    "install_queued": "대기 중 · {{position}}번째",
+    "installing_named": "{{name}} 설치 중",
+    "install_queue_count": "{{count}}개 대기 중",
     "jump_to_page": "페이지 이동",
     "total_pages": "총 {{pages}}페이지",
     "jump_page": "이동",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "플러그인 탭 뷰를 사용할 수 없습니다",
     "tab_crashed": "플러그인 탭이 충돌했습니다",
     "detail_author": "작성자",
+    "license_label": "라이선스: {{license}}",
+    "install_required": "{{name}} 플러그인이 설치되지 않았습니다. 플러그인 마켓에서 설치한 후 다시 시도하세요.",
+    "enable_required": "설치된 {{name}} 플러그인을 사용할 수 없습니다. 플러그인 관리자에서 활성화하거나 업데이트한 후 다시 시도하세요.",
+    "license_not_declared": "명시되지 않음",
+    "view_license": "라이선스 보기",
+    "third_party_licenses": "타사 라이선스",
     "registry_capabilities": "기능: {{capabilities}}",
     "reload_success": "{{name}} 다시 스캔되었습니다.",
     "enable_success": "{{name}} 활성화됨.",

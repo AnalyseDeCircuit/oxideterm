@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "Appels d'outils",
+      "group_heading": "Appels d’outils · {{count}}",
+      "total_duration": "Durée cumulée des outils : {{duration}} ms",
       "arguments": "Arguments",
       "output": "Sortie",
       "summary": "Résumé",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "Lecture",
         "write-file": "Écriture fichier",
-        "execute-command": "Exécution commande",
+        "execute-command": "Exécution",
         "interactive-input": "Entrée interactive",
         "destructive": "Destructif",
         "network-expose": "Exposition réseau",

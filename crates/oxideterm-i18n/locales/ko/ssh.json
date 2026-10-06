@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "보안 키",
+      "touch_instructions": "보안 키를 터치하거나 기기에서 인증을 완료하세요.",
+      "pin_title": "보안 키 PIN",
+      "pin_instructions": "보안 키의 PIN을 입력하세요. 저장되지 않습니다.",
+      "pin_retry": "PIN이 올바르지 않습니다. 확인한 후 다시 시도하세요.",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "이 SSH 키를 사용하려면 FIDO Security Key 플러그인을 설치하고 활성화하세요.",
+        "cancelled": "보안 키 인증이 취소되었습니다.",
+        "timeout": "보안 키 인증 시간이 초과되었습니다.",
+        "invalid_request": "보안 키 서명 요청이 유효하지 않습니다.",
+        "incompatible": "보안 키 플러그인의 프로토콜이 호환되지 않습니다.",
+        "no_device": "FIDO 보안 키를 찾을 수 없습니다. 기기를 연결하고 다시 시도하세요.",
+        "credential_not_found": "연결된 보안 키에서 이 SSH 자격 증명을 찾을 수 없습니다.",
+        "pin_blocked": "PIN이 잠겼습니다. 기기 제조사의 복구 지침을 따르세요.",
+        "device_failure": "보안 키 작업에 실패했습니다.",
+        "invalid_signature": "보안 키의 서명을 검증할 수 없습니다."
+      }
+    },
     "form": {
       "title": "새 연결",
       "subtitle": "터미널, SFTP, 포트 포워딩, 원격 파일 편집에 사용할 SSH 호스트를 설정합니다.",

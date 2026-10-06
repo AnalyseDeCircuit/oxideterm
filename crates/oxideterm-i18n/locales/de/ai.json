@@ -214,6 +214,8 @@
     },
     "tool_use": {
       "heading": "Werkzeugaufrufe",
+      "group_heading": "Werkzeugaufrufe · {{count}}",
+      "total_duration": "Kumulierte Werkzeuglaufzeit: {{duration}} ms",
       "arguments": "Argumente",
       "output": "Ausgabe",
       "summary": "Zusammenfassung",
@@ -368,7 +370,7 @@
       "risk_labels": {
         "read": "Lesen",
         "write-file": "Datei schreiben",
-        "execute-command": "Befehl ausführen",
+        "execute-command": "Ausführen",
         "interactive-input": "Interaktive Eingabe",
         "destructive": "Destruktiv",
         "network-expose": "Netzwerkfreigabe",

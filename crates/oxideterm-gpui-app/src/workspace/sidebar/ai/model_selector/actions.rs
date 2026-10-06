@@ -207,6 +207,7 @@ impl WorkspaceApp {
             return;
         }
         if self.resolve_ai_acp_plugin(&mut agent, cx).is_err() {
+            self.show_acp_plugin_requirement(&agent, cx);
             return;
         }
         let session_cwd = acp_session_cwd_from_agent(&agent);

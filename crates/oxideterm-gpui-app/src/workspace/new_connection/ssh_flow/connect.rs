@@ -427,6 +427,53 @@ impl WorkspaceApp {
                 } => {
                     self.open_keyboard_interactive_challenge(request, response_tx, window, cx);
                 }
+                SshConnectionWorkerResult::SecurityKeyProvider { response_tx } => {
+                    let provider = self
+                        .plugin_entity
+                        .update(cx, |plugins, _| plugins.security_key_provider());
+                    let _ = response_tx
+                        .send(provider.ok_or_else(|| self.i18n.t("ssh.fido.errors.unavailable")));
+                }
+                SshConnectionWorkerResult::SecurityKeyPrompt {
+                    flow_id,
+                    touch,
+                    retry,
+                    response_tx,
+                } => {
+                    let request = KeyboardInteractivePromptRequest {
+                        flow_id: flow_id.clone(),
+                        name: self.i18n.t(if touch {
+                            "ssh.fido.touch_title"
+                        } else {
+                            "ssh.fido.pin_title"
+                        }),
+                        instructions: self.i18n.t(if touch {
+                            "ssh.fido.touch_instructions"
+                        } else if retry {
+                            "ssh.fido.pin_retry"
+                        } else {
+                            "ssh.fido.pin_instructions"
+                        }),
+                        prompts: if touch {
+                            Vec::new()
+                        } else {
+                            vec![oxideterm_ssh::KeyboardInteractivePrompt {
+                                prompt: self.i18n.t("ssh.fido.pin_label"),
+                                echo: false,
+                            }]
+                        },
+                        chained: false,
+                    };
+                    self.open_keyboard_interactive_challenge(request, response_tx, window, cx);
+                    if touch {
+                        self.connection_flow.update(cx, |flow, cx| {
+                            flow.wait_for_security_key_touch(&flow_id, cx)
+                        });
+                    }
+                }
+                SshConnectionWorkerResult::SecurityKeyError { error, response_tx } => {
+                    let _ = response_tx.send(self.i18n.t(error.message_key()));
+                }
                 SshConnectionWorkerResult::PasswordPrompt {
                     node_id,
                     prompt,
@@ -496,6 +543,11 @@ impl WorkspaceApp {
             HostKeyStatus::Error { message } => {
                 if let Some(token) = intent.standalone_sftp_pair_launch_token() {
                     self.pending_standalone_sftp_pair_launches.remove(token);
+                }
+                if matches!(&intent, SshConnectionIntent::Mosh(_))
+                    && self.plugin_entity.read(cx).mosh_executable().is_none()
+                {
+                    self.show_required_plugin_notice("com.oxideterm.terminal.mosh", "Mosh", cx);
                 }
                 self.fail_public_mcp_mosh_open_for_intent(&intent, message.clone());
                 let reported_to_form = self.connection_flow.update(cx, |connection_flow, cx| {
@@ -1316,7 +1368,9 @@ impl WorkspaceApp {
             }
             SshConnectionIntent::Mosh(options) => {
                 let Some(executable) = self.plugin_entity.read(cx).mosh_executable() else {
-                    let message = self.i18n.t("mosh_plugin.required");
+                    let message =
+                        self.plugin_requirement_message("com.oxideterm.terminal.mosh", "Mosh", cx);
+                    self.show_required_plugin_notice("com.oxideterm.terminal.mosh", "Mosh", cx);
                     self.fail_public_mcp_mosh_open_for_intent(
                         &SshConnectionIntent::Mosh(options),
                         message.clone(),

@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "Chave de segurança",
+      "touch_instructions": "Toque na chave de segurança ou conclua a verificação no dispositivo.",
+      "pin_title": "PIN da chave de segurança",
+      "pin_instructions": "Digite o PIN da chave de segurança. Ele não será salvo.",
+      "pin_retry": "PIN incorreto. Confira antes de tentar novamente.",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "Instale e ative o plugin FIDO Security Key para usar esta chave SSH.",
+        "cancelled": "Autenticação com chave de segurança cancelada.",
+        "timeout": "A autenticação com chave de segurança excedeu o tempo limite.",
+        "invalid_request": "Solicitação de assinatura da chave de segurança inválida.",
+        "incompatible": "O protocolo do plugin da chave de segurança é incompatível.",
+        "no_device": "Nenhuma chave FIDO encontrada. Conecte o dispositivo e tente novamente.",
+        "credential_not_found": "Esta credencial SSH não foi encontrada na chave de segurança conectada.",
+        "pin_blocked": "O PIN está bloqueado. Siga as instruções de recuperação do fabricante.",
+        "device_failure": "A operação da chave de segurança falhou.",
+        "invalid_signature": "Não foi possível verificar a assinatura da chave de segurança."
+      }
+    },
     "form": {
       "title": "Nova conexão",
       "subtitle": "Configure um host SSH para terminais, SFTP, encaminhamento de portas e edição de arquivos remotos.",

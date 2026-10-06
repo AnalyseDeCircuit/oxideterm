@@ -257,6 +257,9 @@
     }
   },
   "plugin": {
+    "install_queued": "等待中 · 第 {{position}} 项",
+    "installing_named": "正在安装 {{name}}",
+    "install_queue_count": "{{count}} 项等待安装",
     "jump_to_page": "页码",
     "total_pages": "共 {{pages}} 页",
     "jump_page": "跳转",
@@ -1005,6 +1008,12 @@
     "tab_not_available": "插件标签页视图不可用",
     "tab_crashed": "插件标签页崩溃",
     "detail_author": "作者",
+    "license_label": "许可证：{{license}}",
+    "install_required": "尚未安装 {{name}} 插件。请前往插件市场安装后重试。",
+    "enable_required": "已安装的 {{name}} 插件当前不可用。请在插件管理器中启用或更新后重试。",
+    "license_not_declared": "未声明",
+    "view_license": "查看许可证",
+    "third_party_licenses": "第三方许可",
     "registry_capabilities": "能力：{{capabilities}}",
     "reload_success": "{{name}} 已重新扫描。",
     "enable_success": "{{name}} 已启用。",
