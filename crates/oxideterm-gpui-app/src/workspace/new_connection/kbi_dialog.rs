@@ -15,10 +15,10 @@ use crate::workspace::new_connection::entity::{
     KeyboardInteractiveKeyAction, KeyboardInteractiveSubmitResult,
 };
 use oxideterm_gpui_ui::{
-    MaterialRole, TextInputView,
+    TextInputView,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
-    form_field, material_surface,
-    modal::{dismissible_dialog_backdrop, rounded_shell_child_radius},
+    form_field,
+    modal::{dialog_backdrop_color, modal_backdrop, modal_container, rounded_shell_child_radius},
     text_input, text_input_anchor_probe,
 };
 
@@ -359,7 +359,9 @@ impl WorkspaceApp {
             );
         }
 
-        dismissible_dialog_backdrop()
+        // Authentication fields redraw while waiting and typing. Avoid sampling
+        // the entire window for blur on each of those frames.
+        modal_backdrop(dialog_backdrop_color())
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -372,7 +374,8 @@ impl WorkspaceApp {
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "keyboard-interactive-dialog-transition",
-                material_surface(&self.tokens, div(), MaterialRole::Dialog)
+                modal_container(&self.tokens)
+                    .bg(rgb(theme.bg_elevated))
                     .w(px(self.tokens.metrics.modal_width))
                     .rounded(px(self.tokens.radii.md))
                     .overflow_hidden()

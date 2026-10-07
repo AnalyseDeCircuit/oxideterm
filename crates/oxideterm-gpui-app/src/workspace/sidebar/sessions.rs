@@ -1554,7 +1554,7 @@ impl WorkspaceApp {
                     .gap(px(8.0))
                     .child(self.render_session_status_dot(status))
                     .child(if matches!(status.icon, LucideIcon::LoaderCircle) {
-                        self.render_loading_icon(
+                        self.render_connecting_session_icon(
                             (
                                 gpui::SharedString::from(format!(
                                     "session-focus-connecting-{:?}",
@@ -1564,6 +1564,7 @@ impl WorkspaceApp {
                             ),
                             SESSION_TREE_ICON_SIZE,
                             rgb(status.text_color),
+                            cx,
                         )
                     } else if local_group {
                         Self::render_lucide_icon(
@@ -2614,13 +2615,14 @@ impl WorkspaceApp {
             |row| {
                 row.child(div().ml(px(6.0)).mr(px(6.0)).child(
                     if matches!(status.icon, LucideIcon::LoaderCircle) {
-                        self.render_loading_icon(
+                        self.render_connecting_session_icon(
                             (
                                 gpui::SharedString::from(format!("session-connecting-{node_id:?}")),
                                 0usize,
                             ),
                             SESSION_TREE_ICON_SIZE,
                             row_text,
+                            cx,
                         )
                     } else {
                         self.node_session_icon(&node_id)
@@ -2719,6 +2721,25 @@ impl WorkspaceApp {
             cx.notify();
         }))
         .into_any_element()
+    }
+
+    fn render_connecting_session_icon(
+        &self,
+        id: impl Into<gpui::ElementId>,
+        size: f32,
+        color: gpui::Rgba,
+        cx: &App,
+    ) -> AnyElement {
+        // Authentication waits on user input; background animation would keep
+        // repainting the window even when the user has not entered anything.
+        if self
+            .connection_flow
+            .read(cx)
+            .has_keyboard_interactive_challenge()
+        {
+            return Self::render_lucide_icon(LucideIcon::LoaderCircle, size, color);
+        }
+        self.render_loading_icon(id, size, color)
     }
 
     pub(in crate::workspace) fn render_session_status_dot(
@@ -2991,6 +3012,105 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod terminal_open_tests {
     use super::*;
+    use gpui::{Render, TestAppContext};
+
+    struct ConnectingIconView {
+        workspace: Entity<WorkspaceApp>,
+    }
+
+    impl Render for ConnectingIconView {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.workspace.update(cx, |workspace, cx| {
+                workspace.render_connecting_session_icon(
+                    "connecting-fixture",
+                    16.0,
+                    rgb(0xffffff),
+                    cx,
+                )
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn authentication_prompt_pauses_connecting_animation_until_dismissed(cx: &mut TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_AUTH_ANIMATION_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Workspace storage is process-wide; a portable child keeps user data untouched.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            fs::hard_link(&executable, &child).unwrap();
+            fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
+        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
+        settings.save().unwrap();
+        let (response_tx, _response_rx) = tokio::sync::oneshot::channel();
+        let (view, cx) = cx.add_window_view(move |window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            workspace.update(cx, |workspace, cx| {
+                workspace.tokens.motion.enabled = true;
+                workspace.connection_flow.update(cx, |flow, cx| {
+                    flow.open_keyboard_interactive_challenge(
+                        oxideterm_ssh::KeyboardInteractivePromptRequest {
+                            flow_id: "authentication-fixture".into(),
+                            name: String::new(),
+                            instructions: String::new(),
+                            prompts: vec![oxideterm_ssh::KeyboardInteractivePrompt {
+                                prompt: "Verification code".into(),
+                                echo: false,
+                            }],
+                            chained: true,
+                        },
+                        response_tx,
+                        cx,
+                    );
+                });
+            });
+            ConnectingIconView { workspace }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(
+                window.simulate_next_frame(cx),
+                0,
+                "waiting for authentication must not schedule spinner frames"
+            );
+        });
+        view.update(cx, |view, cx| {
+            view.workspace.update(cx, |workspace, cx| {
+                workspace.connection_flow.update(cx, |flow, cx| {
+                    flow.cancel_keyboard_interactive_challenge(Duration::ZERO, cx);
+                });
+            });
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(
+                window.simulate_next_frame(cx) > 0,
+                "connecting animation must resume after dismissal"
+            );
+        });
+    }
 
     #[test]
     fn node_row_actions_keep_disconnect_and_removal_separate() {
