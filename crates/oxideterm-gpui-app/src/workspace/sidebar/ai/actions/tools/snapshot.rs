@@ -3286,7 +3286,7 @@ impl WorkspaceApp {
                             tool_name.clone(),
                             current_snapshot.ok(
                                 if matched.is_some() { "Terminal wait condition satisfied." } else { "Terminal observation returned; command completion is not confirmed." },
-                                output.clone(),
+                                output,
                                 data,
                                 "read",
                             ),

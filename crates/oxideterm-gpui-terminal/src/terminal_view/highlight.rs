@@ -260,7 +260,7 @@ fn build_runtime_rules(rules: &[TerminalHighlightRule]) -> Vec<RuntimeHighlightR
             })
         })
         .collect::<Vec<_>>();
-    rules.sort_by(|left, right| right.source.priority.cmp(&left.source.priority));
+    rules.sort_by_key(|rule| std::cmp::Reverse(rule.source.priority));
     rules
 }
 

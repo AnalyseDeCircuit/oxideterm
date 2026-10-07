@@ -422,11 +422,12 @@ impl TerminalLayoutCache {
             self.cache_misses = self.cache_misses.saturating_add(1);
         }
         let accesses = self.cache_hits.saturating_add(self.cache_misses);
-        self.performance.cache_hit_percent = if accesses == 0 {
-            0
-        } else {
-            ((self.cache_hits.saturating_mul(100) / accesses).min(100)) as u8
-        };
+        self.performance.cache_hit_percent = self
+            .cache_hits
+            .saturating_mul(100)
+            .checked_div(accesses)
+            .unwrap_or(0)
+            .min(100) as u8;
     }
 
     fn record_layout_duration(&mut self, duration: Duration) {

@@ -205,8 +205,8 @@ impl LanguageId {
         Some(
             SUPPORTED_LANGUAGES
                 .iter()
-                .cloned()
                 .find(|language| language.plugin_key() == Some(key))
+                .cloned()
                 .unwrap_or_else(|| Self::Plugin(Arc::from(key))),
         )
     }

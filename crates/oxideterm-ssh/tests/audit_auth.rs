@@ -534,7 +534,6 @@ async fn prompted_password_is_saved_only_after_successful_authentication_and_exp
         .await
         .unwrap();
         assert_eq!(result.is_ok(), authenticated);
-        let saved = prompt.saved.lock().unwrap();
         let expected = if authenticated && remember && answer == Some("fixture-auth-secret") {
             vec![(
                 expected_endpoint.0,
@@ -545,7 +544,7 @@ async fn prompted_password_is_saved_only_after_successful_authentication_and_exp
         } else {
             vec![]
         };
-        assert_eq!(*saved, expected);
+        assert_eq!(*prompt.saved.lock().unwrap(), expected);
         server.abort();
         let _ = server.await;
     }

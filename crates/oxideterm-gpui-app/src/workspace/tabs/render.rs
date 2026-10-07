@@ -1456,12 +1456,9 @@ impl WorkspaceApp {
                 );
             }
         }))
-        .on_hover(cx.listener({
-            let tooltip_id = tooltip_id.clone();
-            move |this, hovered: &bool, _window, cx| {
-                if !*hovered {
-                    this.clear_workspace_tooltip(&tooltip_id, cx);
-                }
+        .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+            if !*hovered {
+                this.clear_workspace_tooltip(&tooltip_id, cx);
             }
         }))
         .into_any_element()

@@ -179,7 +179,7 @@ impl TerminalSession {
             audit: audit.clone(),
             backend: Box::new(SshPtySession::new_with_audit(
                 config,
-                audit.clone(),
+                audit,
                 cols,
                 rows,
                 graphics_options,
@@ -412,7 +412,7 @@ impl TerminalSession {
             "serial_control",
             Some(&format!("{options:?}")),
         );
-        let result = (|| self.backend.set_serial_runtime_options(options))();
+        let result = self.backend.set_serial_runtime_options(options);
         audit.result(&result);
         result
     }
@@ -432,7 +432,7 @@ impl TerminalSession {
             "serial_control",
             Some(&format!("{line:?}={asserted}")),
         );
-        let result = (|| self.backend.set_serial_control_line(line, asserted))();
+        let result = self.backend.set_serial_control_line(line, asserted);
         audit.finish(
             if result.is_ok() { oxideterm_audit::AuditOutcome::Sent } else { oxideterm_audit::AuditOutcome::Failed },
             oxideterm_audit::AuditEvidence::Dispatch, None, None,
@@ -447,7 +447,7 @@ impl TerminalSession {
             "serial_control",
             Some("break"),
         );
-        let result = (|| self.backend.send_serial_break())();
+        let result = self.backend.send_serial_break();
         audit.finish(
             if result.is_ok() { oxideterm_audit::AuditOutcome::Sent } else { oxideterm_audit::AuditOutcome::Failed },
             oxideterm_audit::AuditEvidence::Dispatch, None, None,

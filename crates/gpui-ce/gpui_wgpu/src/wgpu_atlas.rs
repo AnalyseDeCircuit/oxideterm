@@ -644,10 +644,10 @@ mod tests {
         let mut first_build = || Ok(Some((size, Cow::Borrowed(bytes.as_slice()))));
         let mut second_build = || Ok(Some((size, Cow::Borrowed(bytes.as_slice()))));
         let first_tile = atlas
-            .get_or_insert_with(first_key.clone(), &mut first_build)?
+            .get_or_insert_with(first_key, &mut first_build)?
             .expect("first dynamic texture should be allocated");
         let second_tile = atlas
-            .get_or_insert_with(second_key.clone(), &mut second_build)?
+            .get_or_insert_with(second_key, &mut second_build)?
             .expect("second dynamic texture should be allocated");
 
         assert_ne!(first_tile.texture_id, second_tile.texture_id);
@@ -728,7 +728,7 @@ mod tests {
         let bytes = vec![0; 4];
         let mut build = || Ok(Some((size, Cow::Borrowed(bytes.as_slice()))));
         atlas
-            .get_or_insert_with(key.clone(), &mut build)?
+            .get_or_insert_with(key, &mut build)?
             .expect("dynamic texture should be allocated");
 
         assert_eq!(atlas.resource_generation(), 0);

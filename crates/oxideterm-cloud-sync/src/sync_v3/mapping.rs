@@ -933,7 +933,7 @@ mod tests {
             },
             EncryptedPortableSecret {
                 kind: PROFILE_CREDENTIAL_KIND.into(),
-                id: second.clone(),
+                id: second,
                 secret: Zeroizing::new("excluded-secret".into()),
             },
         ])

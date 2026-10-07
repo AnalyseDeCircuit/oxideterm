@@ -165,7 +165,7 @@ fn identity_filters_are_exact_and_pagination_finds_the_matching_event() {
         },
         AuditQuery {
             parent_id: Some("batch-two".into()),
-            ..query.clone()
+            ..query
         },
     ] {
         assert!(store.query(&mismatch).unwrap().records.is_empty());

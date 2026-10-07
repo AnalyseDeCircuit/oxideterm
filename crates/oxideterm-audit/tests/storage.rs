@@ -1022,7 +1022,7 @@ fn recovery_distinguishes_crashed_and_live_writers() {
     child.wait().unwrap();
     assert_eq!(before_outcomes, [AuditOutcome::Started]);
     let recovering_service = AuditService::with_key_provider(path.clone(), Keys(7)).unwrap();
-    let concurrent_service = AuditService::with_key_provider(path.clone(), Keys(7)).unwrap();
+    let concurrent_service = AuditService::with_key_provider(path, Keys(7)).unwrap();
     let client = recovering_service.client();
     let concurrent = concurrent_service.client();
     // Both workers start recovery before either barrier is awaited.

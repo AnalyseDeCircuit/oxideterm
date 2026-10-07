@@ -129,10 +129,10 @@ impl AuditReader {
         })
     }
 
-    pub(super) fn send(&self, request: ReadRequest) -> Result<(), (ReadRequest, AuditError)> {
+    pub(super) fn send(&self, request: ReadRequest) -> Result<(), Box<(ReadRequest, AuditError)>> {
         self.sender.try_send(request).map_err(|error| match error {
-            TrySendError::Full(request) => (request, AuditError::QueueFull),
-            TrySendError::Closed(request) => (request, AuditError::Closed),
+            TrySendError::Full(request) => Box::new((request, AuditError::QueueFull)),
+            TrySendError::Closed(request) => Box::new((request, AuditError::Closed)),
         })
     }
 }

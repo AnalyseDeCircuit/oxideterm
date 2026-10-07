@@ -182,7 +182,7 @@ impl AiChatPersistenceStore {
                 messages.push(message_from_persisted(persisted));
             }
         }
-        messages.sort_by(|left, right| left.timestamp_ms.cmp(&right.timestamp_ms));
+        messages.sort_by_key(|message| message.timestamp_ms);
         let transcript_round_summaries =
             load_round_summaries_from_transcript(&read_txn, conversation_id)?;
         apply_round_summaries_to_messages(&mut messages, &transcript_round_summaries);
@@ -451,7 +451,7 @@ impl AiChatPersistenceStore {
         if total_rows > 0 && total_rows == failed_rows {
             return Err(anyhow!("all conversations failed to deserialize"));
         }
-        conversations.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        conversations.sort_by_key(|conversation| std::cmp::Reverse(conversation.updated_at));
         Ok(conversations)
     }
 }

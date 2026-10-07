@@ -5434,7 +5434,7 @@ impl Window {
         let size = data.size();
         let tile = self
             .sprite_atlas
-            .get_or_insert_with(key.clone(), &mut || {
+            .get_or_insert_with(key, &mut || {
                 Ok(Some((size, Cow::Owned(dynamic_texture_blank(size)?))))
             })?
             .expect("dynamic texture creation always returns an atlas entry");

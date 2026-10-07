@@ -1540,7 +1540,7 @@ impl IdeSurface {
                     }
             })
         });
-        entries.sort_by(|left, right| left.location.stable_key().cmp(&right.location.stable_key()));
+        entries.sort_by_key(|entry| entry.location.stable_key());
         entries
     }
 

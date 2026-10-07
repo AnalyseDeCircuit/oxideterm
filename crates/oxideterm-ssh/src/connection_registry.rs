@@ -1071,17 +1071,12 @@ impl SshConnectionRegistry {
             return None;
         }
         let released_parent_ownership = if parent_connection_id.is_none() {
+            let parent_consumer = entry.parent_connection_consumer.write().take();
             entry
-                .parent_connection_consumer
-                .write()
-                .take()
-                .and_then(|parent_consumer| {
-                    entry
-                        .parent_connection_id
-                        .read()
-                        .clone()
-                        .map(|parent_id| (parent_id, parent_consumer))
-                })
+                .parent_connection_id
+                .read()
+                .clone()
+                .zip(parent_consumer)
         } else {
             None
         };
@@ -1160,18 +1155,12 @@ impl SshConnectionRegistry {
         }
         entry.cancel_idle_timer();
         let info = entry.info();
-        let parent_ownership =
-            entry
-                .parent_connection_consumer
-                .write()
-                .take()
-                .and_then(|parent_consumer| {
-                    entry
-                        .parent_connection_id
-                        .read()
-                        .clone()
-                        .map(|parent_id| (parent_id, parent_consumer))
-                });
+        let parent_consumer = entry.parent_connection_consumer.write().take();
+        let parent_ownership = entry
+            .parent_connection_id
+            .read()
+            .clone()
+            .zip(parent_consumer);
         if entry.connection_id == connection_id {
             self.by_key.remove(&key);
         }

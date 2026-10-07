@@ -399,7 +399,7 @@ mod tests {
             1,
         )
         .unwrap();
-        let debug = format!("{plan:?} {:?}", &plan.frames()[0]);
+        let debug = format!("{plan:?} {:?}", plan.frames()[0]);
 
         assert!(!debug.contains("super-secret"));
         assert!(debug.contains("frame_count"));

@@ -186,7 +186,7 @@ fn folder_picker_dirs(entries: Vec<FileTreeEntry>) -> Vec<FileTreeEntry> {
         .into_iter()
         .filter(|entry| matches!(entry.kind, FileKind::Directory))
         .collect::<Vec<_>>();
-    folders.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    folders.sort_by_key(|folder| folder.name.to_lowercase());
     folders
 }
 

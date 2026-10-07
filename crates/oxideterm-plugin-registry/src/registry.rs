@@ -1364,7 +1364,7 @@ mod release_tests {
         assert!(!NativePluginRegistry::registry_entry_is_update(
             &selected, "2.0.0"
         ));
-        let mut rebuilt = selected.clone();
+        let mut rebuilt = selected;
         rebuilt.version = "1.10.0+new-build".into();
         assert!(!NativePluginRegistry::registry_entry_is_update(
             &rebuilt, "1.10.0"

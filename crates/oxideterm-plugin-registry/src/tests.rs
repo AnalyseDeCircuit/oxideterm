@@ -297,7 +297,7 @@ fn cached_catalog_corrections_apply_on_offline_restart_and_install() {
     let mut catalog: NativePluginRegistryIndex = serde_json::from_value(serde_json::json!({
         "version": 1, "plugins": [{
             "id": "com.example.demo", "name": "Demo", "version": "1.0.0",
-            "packages": [package_record.clone()],
+            "packages": [package_record],
             "releases": [{
                 "version": "1.0.0", "engines": {"oxideterm": ">=999.0.0"},
                 "packages": [package_record],
@@ -2152,7 +2152,7 @@ fn toggling_another_plugin_preserves_loading_and_active_tabs() {
         registry
             .contributions()
             .runtime_tab_view(&manifest.id, "demo-tab"),
-        Some(view.clone())
+        Some(view)
     );
     let mut changed_manifest = manifest.clone();
     changed_manifest.name = "Updated demo".into();

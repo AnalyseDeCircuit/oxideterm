@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn metadata_download_bounds_advertised_and_chunked_bodies() {
-        use std::io::{Read, Write};
+        use std::io::{BufRead, BufReader, Write};
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -503,8 +503,19 @@ mod tests {
                 socket
                     .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                     .unwrap();
-                let mut request = [0; 1024];
-                socket.read(&mut request).unwrap();
+                let mut reader = BufReader::new(&mut socket);
+                let mut header = String::new();
+                loop {
+                    header.clear();
+                    assert_ne!(
+                        reader.read_line(&mut header).unwrap(),
+                        0,
+                        "incomplete HTTP request"
+                    );
+                    if header == "\r\n" {
+                        break;
+                    }
+                }
                 socket.write_all(response.as_bytes()).unwrap();
             });
             let result = runtime

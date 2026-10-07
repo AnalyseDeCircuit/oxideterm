@@ -1385,7 +1385,7 @@ where
                 }
                 buf.push_str("],");
             }
-            debug!("[unhandled osc_dispatch]: [{}] at line {}", &buf, line!());
+            debug!("[unhandled osc_dispatch]: [{}] at line {}", buf, line!());
         }
 
         if params.is_empty() || params[0].is_empty() {

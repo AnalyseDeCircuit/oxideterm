@@ -713,7 +713,7 @@ mod ai_turn_order_tests {
             })),
             summary_ref: Some(serde_json::json!({
                 "kind": "compaction",
-                "transcriptRef": source_ref.clone(),
+                "transcriptRef": source_ref,
             })),
             ..test_message("anchor-1", AiChatRole::System, "summary".to_string())
         };
@@ -725,7 +725,7 @@ mod ai_turn_order_tests {
         summary.summary_ref = Some(serde_json::json!({
             "kind": "conversation",
             "roundId": null,
-            "transcriptRef": source_ref.clone(),
+            "transcriptRef": source_ref,
         }));
         for (scenario, message, expected_content) in [
             (

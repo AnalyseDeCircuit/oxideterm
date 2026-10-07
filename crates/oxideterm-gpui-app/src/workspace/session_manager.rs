@@ -413,11 +413,10 @@ impl OxideTransferProgress {
     }
 
     pub(super) fn percent(&self) -> usize {
-        if self.total == 0 {
-            0
-        } else {
-            ((self.current.min(self.total) * 100) / self.total).min(100)
-        }
+        (self.current.min(self.total) * 100)
+            .checked_div(self.total)
+            .unwrap_or(0)
+            .min(100)
     }
 }
 

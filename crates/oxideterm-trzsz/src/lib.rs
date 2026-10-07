@@ -652,9 +652,7 @@ fn collect_expired_cleanup(inner: &mut TrzszStateInner, ttl: Duration) -> Cleanu
         .collect::<Vec<_>>();
     for owner_id in expired_owners {
         if let Some(owner) = inner.owners.remove(&owner_id) {
-            cleanup
-                .directory_paths
-                .extend(owner.download_directories.into_iter());
+            cleanup.directory_paths.extend(owner.download_directories);
         }
     }
 
