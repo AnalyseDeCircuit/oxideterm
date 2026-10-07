@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "安全密钥",
+      "touch_instructions": "请触摸安全密钥，或在设备上完成验证。",
+      "pin_title": "安全密钥 PIN",
+      "pin_instructions": "请输入安全密钥的 PIN，不会保存此内容。",
+      "pin_retry": "PIN 错误，请核对后再试。",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "请安装并启用 FIDO Security Key 插件以使用此 SSH 密钥。",
+        "cancelled": "已取消安全密钥认证。",
+        "timeout": "安全密钥认证超时。",
+        "invalid_request": "安全密钥签名请求无效。",
+        "incompatible": "安全密钥插件的协议不兼容。",
+        "no_device": "未找到 FIDO 安全密钥，请连接设备后重试。",
+        "credential_not_found": "连接的安全密钥中未找到此 SSH 凭据。",
+        "pin_blocked": "安全密钥的 PIN 已被锁定，请按照设备厂商的说明恢复。",
+        "device_failure": "安全密钥操作失败。",
+        "invalid_signature": "无法验证安全密钥的签名。"
+      }
+    },
     "form": {
       "title": "新建连接",
       "subtitle": "配置一台 SSH 主机，用于终端、SFTP、端口转发和远程文件编辑。",

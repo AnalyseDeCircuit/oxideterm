@@ -304,6 +304,8 @@ pub struct AcpAgentConfig {
     pub id: String,
     #[serde(default)]
     pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
     #[serde(default)]
     pub command: String,
     #[serde(default)]
@@ -328,6 +330,7 @@ impl std::fmt::Debug for AcpAgentConfig {
             .debug_struct("AcpAgentConfig")
             .field("id", &self.id)
             .field("display_name", &self.display_name)
+            .field("plugin_id", &self.plugin_id)
             .field("command", &self.command)
             // Args and env values can contain tokens, so Debug only exposes shape.
             .field("args", &format_args!("<redacted:{}>", self.args.len()))
@@ -474,8 +477,7 @@ mod ai_model_tests {
 
     #[test]
     fn skills_default_to_enabled_for_existing_settings_files() {
-        let skills: AiSkillsSettings =
-            serde_json::from_value(json!({})).expect("skills settings");
+        let skills: AiSkillsSettings = serde_json::from_value(json!({})).expect("skills settings");
 
         assert!(skills.enabled);
         assert!(skills.disabled_paths.is_empty());
@@ -544,10 +546,16 @@ mod ai_model_tests {
     }
 }
 
-fn deserialize_ai_extra<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<ExtraFields, D::Error> {
+fn deserialize_ai_extra<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<ExtraFields, D::Error> {
     let mut extra = ExtraFields::deserialize(deserializer)?;
     // Retired published controls must not reappear through the unknown-field preservation path.
-    for key in ["contextMaxChars", "contextVisibleLines", "modelMaxResponseTokens"] {
+    for key in [
+        "contextMaxChars",
+        "contextVisibleLines",
+        "modelMaxResponseTokens",
+    ] {
         extra.remove(key);
     }
     Ok(extra)

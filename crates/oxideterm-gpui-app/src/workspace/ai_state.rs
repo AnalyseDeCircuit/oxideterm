@@ -28,6 +28,23 @@ impl AiPendingUserQuestion {
     }
 }
 
+pub(in crate::workspace) struct AiPendingCursorRequest {
+    pub conversation_id: String,
+    pub assistant_id: String,
+    pub request: oxideterm_ai::CursorRequest,
+    pub selections: Vec<Vec<String>>,
+    pub response_tx: Option<oxideterm_ai::CursorResponseSender>,
+}
+
+impl Drop for AiPendingCursorRequest {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.selections);
+        if let Some(sender) = self.response_tx.take() {
+            let _ = sender.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
+        }
+    }
+}
+
 /// Pending input is owned by this workspace and is never replayed from chat persistence.
 pub(in crate::workspace) struct AiQueuedChatTurn {
     pub id: String,
@@ -204,6 +221,7 @@ struct AiModelSelectorProbeDelivery {
 }
 
 struct AiAcpAgentProbeDelivery {
+    epoch: u64,
     agent_id: String,
     result: AiAcpAgentProbeResult,
 }
@@ -215,6 +233,7 @@ struct AiAcpAgentProbeResult {
 }
 
 struct AiAcpModelDiscoveryDelivery {
+    epoch: u64,
     conversation_id: String,
     agent_id: String,
     config_options: Option<Vec<oxideterm_ai::AcpSessionConfigOption>>,
@@ -322,6 +341,9 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     selector_probe_pending: usize,
     next_selector_probe_generation: u64,
     acp_agent_probe_pending: HashSet<String>,
+    acp_agent_epochs: HashMap<String, u64>,
+    acp_probe_tasks: HashMap<String, tokio::task::AbortHandle>,
+    acp_discovery_tasks: HashMap<(String, String), tokio::task::AbortHandle>,
     acp_agent_probe_tx: crate::workspace::delivery::ActiveDeliverySender<AiAcpAgentProbeDelivery>,
     acp_agent_probe_rx: std::sync::mpsc::Receiver<AiAcpAgentProbeDelivery>,
     acp_agent_probe_intents: VecDeque<AiAcpAgentProbeIntent>,
@@ -361,6 +383,8 @@ pub(in crate::workspace) struct AiWorkspaceEntity {
     pub(in crate::workspace) chat_launches: HashMap<String, String>,
     chat_drafts: HashMap<String, zeroize::Zeroizing<String>>,
     pub(in crate::workspace) pending_user_questions: HashMap<(u64, String), AiPendingUserQuestion>,
+    pub(in crate::workspace) pending_cursor_requests:
+        HashMap<(u64, String), AiPendingCursorRequest>,
     pending_tool_approvals: HashMap<(u64, String), tokio::sync::oneshot::Sender<bool>>,
     // Approval previews are runtime-only; conversation history never owns execution payloads.
     pub(in crate::workspace) tool_approval_previews:
@@ -1109,6 +1133,9 @@ impl AiWorkspaceEntity {
             selector_probe_pending: 0,
             next_selector_probe_generation: 0,
             acp_agent_probe_pending: HashSet::new(),
+            acp_agent_epochs: HashMap::new(),
+            acp_probe_tasks: HashMap::new(),
+            acp_discovery_tasks: HashMap::new(),
             acp_agent_probe_tx,
             acp_agent_probe_rx,
             acp_agent_probe_intents: VecDeque::new(),
@@ -1148,6 +1175,7 @@ impl AiWorkspaceEntity {
             chat_launches: HashMap::new(),
             chat_drafts: HashMap::new(),
             pending_user_questions: HashMap::new(),
+            pending_cursor_requests: HashMap::new(),
             pending_tool_approvals: HashMap::new(),
             tool_approval_previews: HashMap::new(),
             pending_acp_permission_choices: HashMap::new(),
@@ -1169,6 +1197,15 @@ impl AiWorkspaceEntity {
         entity.schedule_provider_key_status_delivery(cx);
         entity.schedule_selector_probe_delivery(cx);
         entity.schedule_acp_agent_probe_delivery(cx);
+        cx.on_release(|entity, _cx| {
+            for (_, task) in entity.acp_probe_tasks.drain() {
+                task.abort();
+            }
+            for (_, task) in entity.acp_discovery_tasks.drain() {
+                task.abort();
+            }
+        })
+        .detach();
         entity.schedule_acp_model_discovery_delivery(cx);
         entity.schedule_knowledge_reindex_delivery(cx);
         entity.schedule_terminal_inline_delivery(cx);
@@ -2973,11 +3010,40 @@ impl AiWorkspaceEntity {
         self.acp_agent_probe_pending.contains(agent_id)
     }
 
+    pub(in crate::workspace) fn invalidate_acp_agent_metadata(&mut self, agent_id: &str) {
+        *self
+            .acp_agent_epochs
+            .entry(agent_id.to_string())
+            .or_default() += 1;
+        if let Some(task) = self.acp_probe_tasks.remove(agent_id) {
+            task.abort();
+        }
+        self.acp_discovery_tasks.retain(|(_, id), task| {
+            if id == agent_id {
+                task.abort();
+                false
+            } else {
+                true
+            }
+        });
+        self.acp_agent_probe_pending.remove(agent_id);
+        self.acp_model_discovery_pending
+            .retain(|(_, id)| id != agent_id);
+        self.acp_model_options.retain(|(_, id), _| id != agent_id);
+        self.acp_agent_probe_intents
+            .retain(|intent| intent.agent_id != agent_id);
+        self.acp_model_discovery_intents
+            .retain(|intent| intent.agent_id != agent_id);
+        self.model_ui.selector_status_signature = None;
+    }
+
     pub(in crate::workspace) fn request_acp_agent_probe(
         &mut self,
         agent: oxideterm_settings::AcpAgentConfig,
     ) -> bool {
-        if !self.visibility.settings_surface || self.acp_agent_probe_pending.contains(&agent.id) {
+        if !(self.visibility.settings_surface || self.visibility.model_selector_surface)
+            || self.acp_agent_probe_pending.contains(&agent.id)
+        {
             return false;
         }
         let agent_id = agent.id.clone();
@@ -2998,7 +3064,13 @@ impl AiWorkspaceEntity {
         };
         self.acp_agent_probe_pending.insert(agent_id.clone());
         let worker_tx = self.acp_agent_probe_tx.clone();
-        self.task_runtime.spawn(async move {
+        let epoch = self
+            .acp_agent_epochs
+            .get(&agent_id)
+            .copied()
+            .unwrap_or_default();
+        let task_agent_id = agent_id.clone();
+        let task = self.task_runtime.spawn(async move {
             let result = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
                 Ok(launcher) => {
                     if !oxideterm_ai::acp_launch_command_available(launcher.config())
@@ -3033,8 +3105,14 @@ impl AiWorkspaceEntity {
                 }
                 Err(_) => ai_acp_probe_error_result("config"),
             };
-            let _ = worker_tx.send(AiAcpAgentProbeDelivery { agent_id, result });
+            let _ = worker_tx.send(AiAcpAgentProbeDelivery {
+                epoch,
+                agent_id,
+                result,
+            });
         });
+        self.acp_probe_tasks
+            .insert(task_agent_id, task.abort_handle());
         true
     }
 
@@ -3100,7 +3178,13 @@ impl AiWorkspaceEntity {
             cwd: agent.cwd.map(std::path::PathBuf::from),
         };
         let worker_tx = self.acp_model_discovery_tx.clone();
-        self.task_runtime.spawn(async move {
+        let epoch = self
+            .acp_agent_epochs
+            .get(&agent_id)
+            .copied()
+            .unwrap_or_default();
+        let task_key = (conversation_id.clone(), agent_id.clone());
+        let task = self.task_runtime.spawn(async move {
             let config_options = match oxideterm_ai::build_acp_stdio_launcher(launch_config) {
                 Ok(launcher) => oxideterm_ai::discover_acp_session_config_options(
                     launcher,
@@ -3117,11 +3201,14 @@ impl AiWorkspaceEntity {
                 Err(_) => None,
             };
             let _ = worker_tx.send(AiAcpModelDiscoveryDelivery {
+                epoch,
                 conversation_id,
                 agent_id,
                 config_options,
             });
         });
+        self.acp_discovery_tasks
+            .insert(task_key, task.abort_handle());
         true
     }
 
@@ -3670,6 +3757,8 @@ impl AiWorkspaceEntity {
         });
         self.pending_user_questions
             .retain(|(run, _), _| *run != generation);
+        self.pending_cursor_requests
+            .retain(|(run, _), _| *run != generation);
         let approvals: Vec<_> = self
             .pending_tool_approvals
             .keys()
@@ -3767,6 +3856,68 @@ impl AiWorkspaceEntity {
         });
         if let Some(previous) = self.history.answers.insert(key, task) {
             previous.abort();
+        }
+        true
+    }
+
+    pub(in crate::workspace) fn select_cursor_option(
+        &mut self,
+        generation: u64,
+        id: &str,
+        question_index: usize,
+        option_index: usize,
+    ) {
+        if !self.run_accepts_tools(generation) {
+            return;
+        }
+        let Some(pending) = self
+            .pending_cursor_requests
+            .get_mut(&(generation, id.into()))
+        else {
+            return;
+        };
+        let oxideterm_ai::CursorRequest::Questions(request) = &pending.request else {
+            return;
+        };
+        let Some(question) = request.questions.get(question_index) else {
+            return;
+        };
+        let Some(option) = question.options.get(option_index) else {
+            return;
+        };
+        let selected = &mut pending.selections[question_index];
+        if selected.contains(&option.id) {
+            selected.retain(|id| id != &option.id);
+        } else {
+            if !question.allow_multiple {
+                selected.clear();
+            }
+            selected.push(option.id.clone());
+        }
+    }
+
+    pub(in crate::workspace) fn resolve_cursor_request(
+        &mut self,
+        generation: u64,
+        id: &str,
+        accepted: bool,
+    ) -> bool {
+        if !self.run_accepts_tools(generation) {
+            return false;
+        }
+        let key = (generation, id.into());
+        let Some(pending) = self.pending_cursor_requests.get(&key) else {
+            return false;
+        };
+        let Some(response) = pending.request.response(accepted, &pending.selections) else {
+            return false;
+        };
+        let mut pending = self
+            .pending_cursor_requests
+            .remove(&key)
+            .expect("validated pending request");
+        if let Some(sender) = pending.response_tx.take() {
+            let _ = sender.send(Ok(response));
         }
         true
     }
@@ -3873,6 +4024,7 @@ impl AiWorkspaceEntity {
     fn reject_all_tool_approvals(&mut self) {
         self.tool_approval_previews.clear();
         self.pending_user_questions.clear();
+        self.pending_cursor_requests.clear();
         for (_, sender) in self.pending_tool_approvals.drain() {
             let _ = sender.send(false);
         }
@@ -4336,6 +4488,16 @@ impl AiWorkspaceEntity {
             crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
         );
         for delivery in drain.items {
+            if self
+                .acp_agent_epochs
+                .get(&delivery.agent_id)
+                .copied()
+                .unwrap_or_default()
+                != delivery.epoch
+            {
+                continue;
+            }
+            self.acp_probe_tasks.remove(&delivery.agent_id);
             self.acp_agent_probe_pending.remove(&delivery.agent_id);
             self.acp_agent_probe_intents
                 .push_back(AiAcpAgentProbeIntent {
@@ -4389,6 +4551,17 @@ impl AiWorkspaceEntity {
             crate::workspace::delivery::USER_ACTION_DELIVERY_BUDGET,
         );
         for delivery in drain.items {
+            if self
+                .acp_agent_epochs
+                .get(&delivery.agent_id)
+                .copied()
+                .unwrap_or_default()
+                != delivery.epoch
+            {
+                continue;
+            }
+            self.acp_discovery_tasks
+                .remove(&(delivery.conversation_id.clone(), delivery.agent_id.clone()));
             self.acp_model_discovery_pending
                 .remove(&(delivery.conversation_id.clone(), delivery.agent_id.clone()));
             self.acp_model_discovery_intents
@@ -5386,10 +5559,55 @@ pub(in crate::workspace) mod entity_tests {
         }
     }
 
+    #[gpui::test]
+    fn acp_plugin_change_discards_old_probe_results_and_cancels_owned_probes(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = test_runtime();
+        let entity = cx.new(|cx| {
+            AiWorkspaceEntity::new(runtime.clone(), oxideterm_ai::AiProviderKeyStore::new(), cx)
+        });
+        let task = runtime.spawn(std::future::pending::<()>());
+        entity.update(cx, |entity, cx| {
+            entity
+                .acp_probe_tasks
+                .insert("agent".into(), task.abort_handle());
+            entity.acp_agent_probe_pending.insert("agent".into());
+            entity
+                .acp_agent_probe_tx
+                .send(AiAcpAgentProbeDelivery {
+                    epoch: 0,
+                    agent_id: "agent".into(),
+                    result: ai_acp_probe_error_result("initialize"),
+                })
+                .unwrap();
+            entity.invalidate_acp_agent_metadata("agent");
+            entity
+                .acp_agent_probe_tx
+                .send(AiAcpAgentProbeDelivery {
+                    epoch: 1,
+                    agent_id: "agent".into(),
+                    result: ai_acp_probe_error_result("config"),
+                })
+                .unwrap();
+            entity.drain_acp_agent_probe_results(cx);
+            let intents = entity.take_acp_agent_probe_intents();
+            assert_eq!(
+                intents
+                    .iter()
+                    .map(|intent| (intent.agent_id.as_str(), intent.last_error_kind.as_deref()))
+                    .collect::<Vec<_>>(),
+                [("agent", Some("config"))]
+            );
+        });
+        assert!(runtime.block_on(task).unwrap_err().is_cancelled());
+    }
+
     fn test_acp_agent(agent_id: &str) -> oxideterm_settings::AcpAgentConfig {
         oxideterm_settings::AcpAgentConfig {
             id: agent_id.to_string(),
             display_name: "Test Agent".to_string(),
+            plugin_id: None,
             command: "test-agent".to_string(),
             args: Vec::new(),
             env: std::collections::BTreeMap::new(),
@@ -6681,6 +6899,56 @@ pub(in crate::workspace) mod entity_tests {
         assert!(
             held.upgrade().is_none(),
             "scrolling away must release uncached body ownership"
+        );
+    }
+
+    #[gpui::test]
+    fn cursor_answers_require_submission_and_stopping_cancels_only_its_run(
+        cx: &mut TestAppContext,
+    ) {
+        let runtime = test_runtime();
+        let entity = cx
+            .new(|cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx));
+        let (first_tx, mut first_rx) = tokio::sync::oneshot::channel();
+        let (second_tx, mut second_rx) = tokio::sync::oneshot::channel();
+        entity.update(cx, |ai, _| {
+            ai.create_conversation("first".into(), None, 1, None);
+            ai.create_conversation("second".into(), None, 2, None);
+            let first = ai.begin_chat_stream("first".into(), "reply-first".into()).0;
+            let second = ai.begin_chat_stream("second".into(), "reply-second".into()).0;
+            for (generation, conversation, sender) in [(first, "first", first_tx), (second, "second", second_tx)] {
+                let request = serde_json::from_value(serde_json::json!({
+                    "toolCallId":"same-call", "questions":[
+                        {"id":"mode","prompt":"Which mode?","options":[{"id":"a","label":"Agent"},{"id":"p","label":"Plan"}]},
+                        {"id":"features","prompt":"Which features?","options":[{"id":"x","label":"One"},{"id":"y","label":"Two"}],"allowMultiple":true}
+                    ]
+                })).unwrap();
+                ai.pending_cursor_requests.insert((generation, "same-call".into()), AiPendingCursorRequest {
+                    conversation_id: conversation.into(), assistant_id: format!("reply-{conversation}"),
+                    request: oxideterm_ai::CursorRequest::Questions(request), selections: vec![vec![],vec![]], response_tx: Some(sender),
+                });
+            }
+            ai.cancel_chat_stream_for("first");
+            assert!(!ai.resolve_cursor_request(first, "same-call", true));
+            assert!(!ai.resolve_cursor_request(second, "same-call", true));
+            ai.select_cursor_option(second, "same-call", 0, 0);
+            ai.select_cursor_option(second, "same-call", 0, 1);
+            ai.select_cursor_option(second, "same-call", 1, 0);
+            ai.select_cursor_option(second, "same-call", 1, 1);
+            assert_eq!(ai.pending_cursor_requests[&(second, "same-call".into())].selections, [vec!["p"],vec!["x","y"]]);
+            assert!(matches!(second_rx.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty)));
+            assert!(ai.resolve_cursor_request(second, "same-call", true));
+            assert!(!ai.resolve_cursor_request(second, "same-call", true));
+        });
+        assert_eq!(
+            first_rx.try_recv().unwrap().unwrap(),
+            serde_json::json!({"outcome":{"outcome":"cancelled"}})
+        );
+        assert_eq!(
+            second_rx.try_recv().unwrap().unwrap(),
+            serde_json::json!({"outcome":{"outcome":"answered","answers":[
+                {"questionId":"mode","selectedOptionIds":["p"]}, {"questionId":"features","selectedOptionIds":["x","y"]}
+            ]}})
         );
     }
 

@@ -96,7 +96,6 @@ actions!(
 );
 
 fn main() {
-    oxideterm_acp_adapter::run_from_env_if_requested();
     let native_launch_args = native_launch_args().unwrap_or_else(|error| {
         eprintln!("failed to read native connection launch argument: {error}");
         std::process::exit(2);

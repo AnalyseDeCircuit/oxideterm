@@ -382,7 +382,7 @@ fn domain_mapping_and_recovery_restore_interrupted_writes_then_keep_committed_va
     let cleanup = connections
         .commit_prepared_saved_connections_snapshot(prepared)
         .unwrap();
-    let mut next = local.clone();
+    let mut next = local;
     next.effective = desired;
     journal.commit(&store, &next, Some(cleanup), None).unwrap();
     drop(journal);

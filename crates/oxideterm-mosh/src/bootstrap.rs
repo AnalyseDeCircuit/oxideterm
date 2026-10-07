@@ -5,11 +5,12 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use fernomade_crypto::SessionKey;
+use base64::Engine;
 use oxideterm_ssh::{
     ConnectionConsumer, ManagedKeyResolver, SshConfig, SshConnectionRegistry, SshPromptHandler,
     SshSecretCommandOutput, SshTransportClient, SshTransportError,
 };
+use zeroize::Zeroizing;
 
 /// Default remote bootstrap executable used when no saved Mosh profile is involved.
 pub const DEFAULT_MOSH_SERVER_EXECUTABLE: &str = "mosh-server";
@@ -20,7 +21,38 @@ const DEFAULT_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BOOTSTRAP_OUTPUT_BYTES: usize = 64 * 1024;
 const MOSH_CONNECT_PREFIX: &[u8] = b"MOSH CONNECT ";
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+/// The host checks the bootstrap key shape; only the plugin performs encryption.
+pub struct MoshSessionKey(Zeroizing<String>);
+
+impl MoshSessionKey {
+    pub fn decode(value: &str) -> Result<Self, MoshBootstrapError> {
+        let mut encoded = Zeroizing::new(value.to_owned());
+        while !encoded.len().is_multiple_of(4) {
+            encoded.push('=');
+        }
+        let decoded = Zeroizing::new(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded.as_bytes())
+                .map_err(|_| MoshBootstrapError::InvalidSessionKey)?,
+        );
+        if decoded.len() != 16 {
+            return Err(MoshBootstrapError::InvalidSessionKey);
+        }
+        Ok(Self(encoded))
+    }
+
+    pub(crate) fn into_encoded(self) -> Zeroizing<String> {
+        self.0
+    }
+}
+
+impl fmt::Debug for MoshSessionKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("MoshSessionKey([REDACTED])")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum MoshIpFamily {
     #[default]
     Auto,
@@ -119,7 +151,7 @@ pub struct MoshBootstrapResult {
     pub remote_host: String,
     pub remote_port: u16,
     pub ip_family: MoshIpFamily,
-    pub key: SessionKey,
+    pub key: MoshSessionKey,
 }
 
 impl fmt::Debug for MoshBootstrapResult {
@@ -265,7 +297,7 @@ fn shell_quote(value: &str) -> String {
 
 fn parse_server_output(
     output: &SshSecretCommandOutput,
-) -> Result<(u16, SessionKey), MoshBootstrapError> {
+) -> Result<(u16, MoshSessionKey), MoshBootstrapError> {
     if output.truncated {
         return Err(MoshBootstrapError::OutputTruncated);
     }
@@ -294,7 +326,7 @@ fn parse_server_output(
     };
     let key_text =
         std::str::from_utf8(key_text).map_err(|_| MoshBootstrapError::InvalidSessionKey)?;
-    let key = SessionKey::decode(key_text).map_err(|_| MoshBootstrapError::InvalidSessionKey)?;
+    let key = MoshSessionKey::decode(key_text)?;
     Ok((port, key))
 }
 
@@ -396,7 +428,7 @@ mod tests {
 
         let (port, key) = parse_server_output(&output).expect("response must parse");
         assert_eq!(port, 60_001);
-        assert_eq!(format!("{key:?}"), "SessionKey([REDACTED])");
+        assert_eq!(format!("{key:?}"), "MoshSessionKey([REDACTED])");
     }
 
     #[test]
@@ -425,6 +457,18 @@ mod tests {
             parse_server_output(&malformed_then_valid),
             Err(MoshBootstrapError::InvalidServerResponse)
         ));
+        for key in [
+            "not-base64",
+            "AQ==",
+            "AQIDBAUGBwgJCgsMDQ4P",
+            "AQIDBAUGBwgJCgsMDQ4PEBE",
+        ] {
+            let invalid_key = output(format!("MOSH CONNECT 60001 {key}\n").as_bytes(), b"");
+            assert!(matches!(
+                parse_server_output(&invalid_key),
+                Err(MoshBootstrapError::InvalidSessionKey)
+            ));
+        }
     }
 
     #[test]
@@ -433,7 +477,7 @@ mod tests {
             remote_host: "example.test".to_string(),
             remote_port: 60_001,
             ip_family: MoshIpFamily::Auto,
-            key: SessionKey::decode(SYNTHETIC_KEY).expect("key must decode"),
+            key: MoshSessionKey::decode(SYNTHETIC_KEY).expect("key must decode"),
         };
         let debug = format!("{result:?}");
         assert!(!debug.contains(SYNTHETIC_KEY));

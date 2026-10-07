@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "接続する前に Mosh プラグインをインストールまたは有効にしてください。",
+    "ready": "Mosh プラグインはインストール済みで有効です。"
+  },
   "file_preview": {
     "entry_file_offset": "エントリーポイントのファイル位置",
     "subject": "主体",
@@ -254,6 +258,9 @@
     "shortcut_count": "件のショートカット"
   },
   "plugin": {
+    "install_queued": "待機中 · {{position}} 番目",
+    "installing_named": "{{name}} をインストール中",
+    "install_queue_count": "{{count}} 件が待機中",
     "jump_to_page": "ページ指定",
     "total_pages": "全 {{pages}} ページ",
     "jump_page": "移動",
@@ -261,6 +268,9 @@
     "marketplace_sources": "ホストソース",
     "marketplace_workspace": "ワークスペース",
     "marketplace_utilities": "ユーティリティ",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "プラグインをインストールして有効にすると、エージェント設定が自動で作成されます。起動コマンドの入力は不要です。作業ディレクトリ、追加の引数、環境変数は任意で、空欄なら既定の設定を使用します。ローカルのプログラムを利用するプラグインでは、対応する公式コマンドラインツールをインストールし、プラグインの説明に従ってログインしてください。",
+    "marketplace_remote_connections": "リモート接続",
     "apply_page_size": "適用",
     "invalid_page_size": "有効な正の整数を入力してください",
     "page_range": "{{total}} 件中 {{start}}–{{end}} 件",
@@ -937,6 +947,10 @@
     "update_available": "更新あり",
     "install_error": "インストール失敗",
     "search_placeholder": "プラグインを検索...",
+    "marketplace_sort": "並び順：{{order}}",
+    "marketplace_sort_name": "名前",
+    "marketplace_sort_updated": "更新が新しい順",
+    "marketplace_sort_newest": "追加が新しい順",
     "marketplace_title": "OxideTerm 公式プラグインマーケット",
     "marketplace_description": "OxideTerm 公式カタログのプラグインを検索、インストール、更新できます。",
     "marketplace_repository": "カタログリポジトリ",
@@ -999,6 +1013,12 @@
     "tab_not_available": "プラグインタブビューは利用できません",
     "tab_crashed": "プラグインタブがクラッシュしました",
     "detail_author": "作者",
+    "license_label": "ライセンス：{{license}}",
+    "install_required": "{{name}} プラグインがインストールされていません。プラグインマーケットからインストールして、もう一度お試しください。",
+    "enable_required": "インストール済みの {{name}} プラグインは現在利用できません。プラグインマネージャーで有効化または更新して、もう一度お試しください。",
+    "license_not_declared": "未指定",
+    "view_license": "ライセンスを表示",
+    "third_party_licenses": "サードパーティのライセンス",
     "registry_capabilities": "機能: {{capabilities}}",
     "reload_success": "{{name}} を再スキャンしました。",
     "enable_success": "{{name}} を有効化しました。",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "RDP プレビュー",
     "vnc_preview_title": "VNC プレビュー",
     "provider_missing": "リモートデスクトッププロバイダーを利用できません。",
+    "plugin_ready": "リモートデスクトップのプラグインはインストール済みで有効です。",
+    "plugin_required": "接続する前にリモートデスクトップのプラグインをインストールまたは有効にしてください。",
+    "manage_plugin": "プラグインを管理",
     "session_missing": "リモートデスクトップセッションを利用できません。",
     "reconnect": "再接続",
     "resize_fixed": "サーバー固定サイズ",

@@ -151,7 +151,7 @@ impl ApprovalStore {
         }
         let projection = ApprovalProjection {
             approval_ref: ApprovalRef::new(),
-            client_ref: client_ref.clone(),
+            client_ref,
             tool_name: call.tool_name().to_owned(),
             target: call.target_summary(),
             status: ApprovalStatus::Pending,

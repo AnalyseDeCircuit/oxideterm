@@ -1,6 +1,6 @@
 use super::helpers::{
     WELCOME_PAGE_PADDING, WelcomeRecentConnection, WelcomeRecentKind, WelcomeRecentTarget,
-    effective_shortcut_label, welcome_layout_is_stacked, welcome_recent_connections,
+    effective_shortcut_label, welcome_layout_is_compact, welcome_recent_connections,
 };
 use super::*;
 
@@ -963,7 +963,7 @@ impl WorkspaceApp {
         const WELCOME_CONTENT_MAX_WIDTH: f32 = 920.0;
 
         let theme = self.tokens.ui;
-        let stacked = welcome_layout_is_stacked(available_width);
+        let compact = welcome_layout_is_compact(available_width);
         div()
             .size_full()
             // Match both sidebars at the top-level content layer. Fixed tab
@@ -1000,7 +1000,7 @@ impl WorkspaceApp {
                                     .items_start()
                                     .gap(px(28.0))
                                     .child(self.render_welcome_header())
-                                    .child(self.render_welcome_workbench(stacked, cx))
+                                    .child(self.render_welcome_workbench(compact, cx))
                                     .child(self.render_welcome_shortcuts()),
                             ),
                     ),
@@ -1145,9 +1145,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_welcome_workbench(&self, stacked: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn render_welcome_workbench(&self, compact: bool, cx: &mut Context<Self>) -> AnyElement {
         welcome_workbench_layout(
-            stacked,
+            compact,
             self.render_welcome_recent_connections(cx),
             self.render_welcome_guidance(cx),
         )
@@ -1334,7 +1334,7 @@ impl WorkspaceApp {
         div()
             .flex()
             .flex_col()
-            .gap(px(6.0))
+            .gap(px(12.0))
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_base))
@@ -1342,45 +1342,52 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text))
                     .child(self.i18n.t("layout.empty.get_started")),
             )
-            // Keep destinations compact; their descriptions remain available through tooltips.
-            .child(self.render_welcome_tool_row(
-                LucideIcon::Plus,
-                "layout.empty.new_connection",
-                "layout.empty.new_connection_hint",
-                WelcomeToolAction::NewConnection,
-                cx,
-            ))
-            .child(self.render_welcome_tool_row(
-                LucideIcon::Terminal,
-                "layout.empty.new_local_terminal",
-                "layout.empty.new_local_terminal_hint",
-                WelcomeToolAction::LocalTerminal,
-                cx,
-            ))
-            .child(self.render_welcome_tool_row(
-                LucideIcon::Download,
-                "layout.empty.import_connections",
-                "layout.empty.import_connections_hint",
-                WelcomeToolAction::ImportConnections,
-                cx,
-            ))
-            .child(self.render_welcome_tool_row(
-                LucideIcon::LayoutList,
-                "layout.empty.open_session_manager",
-                "layout.empty.open_session_manager_hint",
-                WelcomeToolAction::SessionManager,
-                cx,
-            ))
-            .child(self.render_welcome_tool_row(
-                LucideIcon::Cloud,
-                "plugin.cloud_sync.panel_title",
-                "layout.empty.cloud_sync_hint",
-                WelcomeToolAction::CloudSync,
-                cx,
-            ))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.two))
+                    .child(self.render_welcome_tool_button(
+                        LucideIcon::Plus,
+                        "layout.empty.new_connection",
+                        "layout.empty.new_connection_hint",
+                        WelcomeToolAction::NewConnection,
+                        cx,
+                    ))
+                    .child(self.render_welcome_tool_button(
+                        LucideIcon::Terminal,
+                        "layout.empty.new_local_terminal",
+                        "layout.empty.new_local_terminal_hint",
+                        WelcomeToolAction::LocalTerminal,
+                        cx,
+                    ))
+                    .child(self.render_welcome_tool_button(
+                        LucideIcon::Download,
+                        "layout.empty.import_connections",
+                        "layout.empty.import_connections_hint",
+                        WelcomeToolAction::ImportConnections,
+                        cx,
+                    ))
+                    .child(self.render_welcome_tool_button(
+                        LucideIcon::LayoutList,
+                        "layout.empty.open_session_manager",
+                        "layout.empty.open_session_manager_hint",
+                        WelcomeToolAction::SessionManager,
+                        cx,
+                    ))
+                    .child(self.render_welcome_tool_button(
+                        LucideIcon::Cloud,
+                        "plugin.cloud_sync.panel_title",
+                        "layout.empty.cloud_sync_hint",
+                        WelcomeToolAction::CloudSync,
+                        cx,
+                    )),
+            )
     }
 
-    fn render_welcome_tool_row(
+    fn render_welcome_tool_button(
         &self,
         icon: LucideIcon,
         title_key: &str,
@@ -1390,53 +1397,30 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let tooltip_id = format!("welcome-action-{title_key}");
-        div()
-            .id(tooltip_id.clone())
-            .w_full()
-            .min_h(px(self.tokens.metrics.ui_button_sm_height))
-            .min_w_0()
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .px(px(6.0))
-            .py(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .cursor_pointer()
-            .hover(move |row| row.bg(rgb(theme.bg_hover)))
-            .child(Self::render_lucide_icon(icon, 17.0, rgb(theme.accent)))
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(theme.accent))
-                    .child(self.i18n.t(title_key)),
-            )
-            .on_mouse_move(cx.listener({
+        let primary = matches!(action, WelcomeToolAction::NewConnection);
+        self.workspace_toolbar_action_button(
+            self.i18n.t(title_key),
+            Some(Self::render_lucide_icon(
+                icon,
+                16.0,
+                rgb(if primary { theme.bg } else { theme.text }),
+            )),
+            oxideterm_gpui_ui::button::ToolbarButtonOptions {
+                button: oxideterm_gpui_ui::button::ButtonOptions {
+                    variant: if primary {
+                        oxideterm_gpui_ui::button::ButtonVariant::Default
+                    } else {
+                        oxideterm_gpui_ui::button::ButtonVariant::Outline
+                    },
+                    size: oxideterm_gpui_ui::button::ButtonSize::Default,
+                    ..Default::default()
+                },
+                hover_background: primary.then(|| rgb(theme.text_muted)),
+                ..Default::default()
+            },
+            cx.listener({
                 let tooltip_id = tooltip_id.clone();
-                let description = self.i18n.t(description_key);
-                move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        tooltip_id.clone(),
-                        description.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                }
-            }))
-            .on_hover(cx.listener({
-                let tooltip_id = tooltip_id.clone();
-                move |this, hovered: &bool, _window, cx| {
-                    if !*hovered {
-                        this.clear_workspace_tooltip(&tooltip_id, cx);
-                    }
-                }
-            }))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
+                move |this, _event, window, cx| {
                     this.clear_workspace_tooltip(&tooltip_id, cx);
                     match action {
                         WelcomeToolAction::NewConnection => {
@@ -1454,9 +1438,30 @@ impl WorkspaceApp {
                         WelcomeToolAction::CloudSync => this.open_cloud_sync_tab(window, cx),
                     }
                     cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+                }
+            }),
+        )
+        .id(tooltip_id.clone())
+        .flex_none()
+        .on_mouse_move(cx.listener({
+            let tooltip_id = tooltip_id.clone();
+            let description = self.i18n.t(description_key);
+            move |this, event: &MouseMoveEvent, _window, cx| {
+                this.queue_workspace_tooltip(
+                    tooltip_id.clone(),
+                    description.clone(),
+                    f32::from(event.position.x) + 12.0,
+                    f32::from(event.position.y) + 16.0,
+                    cx,
+                );
+            }
+        }))
+        .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+            if !*hovered {
+                this.clear_workspace_tooltip(&tooltip_id, cx);
+            }
+        }))
+        .into_any_element()
     }
 
     fn welcome_recent_icon(&self, kind: WelcomeRecentKind) -> LucideIcon {
@@ -1558,32 +1563,16 @@ impl WorkspaceApp {
     }
 }
 
-fn welcome_workbench_layout(stacked: bool, recent: gpui::Div, guidance: gpui::Div) -> gpui::Div {
-    let recent = recent
-        .min_w(px(360.0))
-        .flex_1()
-        .flex_basis(px(540.0))
-        .when(stacked, |surface| {
-            surface.w_full().max_w_full().min_w(px(0.0)).flex_none()
-        });
-    let guidance = guidance
-        .min_w(px(260.0))
-        .max_w(px(344.0))
-        .flex_1()
-        .flex_basis(px(300.0))
-        .when(stacked, |surface| {
-            surface.w_full().max_w_full().min_w(px(0.0)).flex_none()
-        });
+fn welcome_workbench_layout(compact: bool, recent: gpui::Div, guidance: gpui::Div) -> gpui::Div {
     div()
         .w_full()
+        .min_w_0()
         .flex()
-        .flex_row()
+        .flex_col()
         .items_start()
-        .justify_center()
-        .gap(px(40.0))
-        .when(stacked, |workbench| workbench.flex_col().gap(px(28.0)))
-        .child(guidance)
-        .child(recent)
+        .gap(px(if compact { 24.0 } else { 28.0 }))
+        .child(guidance.w_full().min_w_0().flex_none())
+        .child(recent.w_full().min_w_0().flex_none())
 }
 
 #[cfg(test)]
@@ -1596,7 +1585,7 @@ mod welcome_layout_tests {
         fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().size_full().px(px(WELCOME_PAGE_PADDING)).child(
                 welcome_workbench_layout(
-                    welcome_layout_is_stacked(f32::from(window.viewport_size().width)),
+                    welcome_layout_is_compact(f32::from(window.viewport_size().width)),
                     div()
                         .child(div().h(px(100.0)))
                         .debug_selector(|| "recent".into()),
@@ -1613,9 +1602,8 @@ mod welcome_layout_tests {
     #[gpui::test]
     fn welcome_sections_resize_without_stretching(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| WelcomeLayout);
-        // Exercise both sides of the breakpoint, the previous accidental-wrap range,
-        // and the reverse resize direction used while dragging either sidebar.
-        for (width, stacked) in [
+        // Exercise both density modes and reverse resizing while keeping the action row above recents.
+        for (width, compact) in [
             (1000.0, false),
             (900.0, false),
             (870.0, false),
@@ -1632,21 +1620,15 @@ mod welcome_layout_tests {
             let guidance = cx.debug_bounds("guidance").unwrap();
             assert_eq!(recent.size.height, px(100.0), "width={width}");
             assert_eq!(guidance.size.height, px(120.0), "width={width}");
-            if stacked {
-                assert_eq!(recent.origin.x, frame.origin.x, "width={width}");
-                assert_eq!(guidance.origin.x, frame.origin.x, "width={width}");
-                assert_eq!(recent.size.width, frame.size.width, "width={width}");
-                assert_eq!(guidance.size.width, frame.size.width, "width={width}");
-                assert!(recent.origin.y >= guidance.bottom(), "width={width}");
-            } else {
-                assert_eq!(
-                    recent.origin.y, guidance.origin.y,
-                    "sections unexpectedly wrapped at width={width}"
-                );
-                assert_eq!(guidance.origin.x, frame.origin.x, "width={width}");
-                assert!(guidance.right() < recent.origin.x, "width={width}");
-                assert!(recent.right() <= frame.right(), "width={width}");
-            }
+            assert_eq!(recent.origin.x, frame.origin.x, "width={width}");
+            assert_eq!(guidance.origin.x, frame.origin.x, "width={width}");
+            assert_eq!(recent.size.width, frame.size.width, "width={width}");
+            assert_eq!(guidance.size.width, frame.size.width, "width={width}");
+            assert_eq!(
+                recent.origin.y - guidance.bottom(),
+                px(if compact { 24.0 } else { 28.0 }),
+                "width={width}"
+            );
         }
     }
 }

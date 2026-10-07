@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Cài đặt hoặc bật plugin Mosh trước khi kết nối.",
+    "ready": "Plugin Mosh đã được cài đặt và bật."
+  },
   "file_preview": {
     "entry_file_offset": "Vị trí điểm vào trong tệp",
     "subject": "Chủ thể",
@@ -254,6 +258,9 @@
     "shortcut_count": "phím tắt"
   },
   "plugin": {
+    "install_queued": "Đang chờ · vị trí {{position}}",
+    "installing_named": "Đang cài đặt {{name}}",
+    "install_queue_count": "{{count}} mục đang chờ",
     "jump_to_page": "Đến trang",
     "total_pages": "trong {{pages}} trang",
     "jump_page": "Đến",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Nguồn máy chủ",
     "marketplace_workspace": "Không gian làm việc",
     "marketplace_utilities": "Công cụ tiện ích",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "Cài đặt và bật plugin sẽ tự động tạo cấu hình tác nhân; bạn không cần nhập lệnh khởi chạy. Thư mục làm việc, tham số bổ sung và biến môi trường là tùy chọn; để trống để dùng cấu hình mặc định. Plugin sử dụng chương trình cục bộ cần công cụ dòng lệnh chính thức tương ứng; hãy làm theo hướng dẫn của plugin để cài đặt và đăng nhập.",
+    "marketplace_remote_connections": "Kết nối từ xa",
     "apply_page_size": "Áp dụng",
     "invalid_page_size": "Nhập một số nguyên dương hợp lệ",
     "page_range": "{{start}}–{{end}} trong {{total}} tiện ích",
@@ -937,6 +947,10 @@
     "update_available": "Có cập nhật",
     "install_error": "Cài đặt thất bại",
     "search_placeholder": "Tìm kiếm plugin...",
+    "marketplace_sort": "Sắp xếp: {{order}}",
+    "marketplace_sort_name": "Tên",
+    "marketplace_sort_updated": "Cập nhật gần đây",
+    "marketplace_sort_newest": "Mới được thêm",
     "marketplace_title": "Chợ plugin chính thức",
     "marketplace_description": "Duyệt, cài đặt và cập nhật plugin trong danh mục chính thức của OxideTerm.",
     "marketplace_repository": "Kho danh mục",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Chế độ xem tab plugin không khả dụng",
     "tab_crashed": "Tab plugin đã gặp lỗi",
     "detail_author": "Tác giả",
+    "license_label": "Giấy phép: {{license}}",
+    "install_required": "Plugin {{name}} chưa được cài đặt. Hãy cài đặt từ chợ plugin rồi thử lại.",
+    "enable_required": "Plugin {{name}} đã cài đặt hiện không khả dụng. Hãy bật hoặc cập nhật plugin trong trình quản lý plugin rồi thử lại.",
+    "license_not_declared": "Chưa khai báo",
+    "view_license": "Xem giấy phép",
+    "third_party_licenses": "Giấy phép bên thứ ba",
     "registry_capabilities": "Khả năng: {{capabilities}}",
     "reload_success": "{{name}} đã quét lại.",
     "enable_success": "{{name}} đã bật.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "Xem trước RDP",
     "vnc_preview_title": "Xem trước VNC",
     "provider_missing": "Trình cung cấp máy tính từ xa không khả dụng.",
+    "plugin_ready": "Tiện ích máy tính từ xa đã được cài đặt và bật.",
+    "plugin_required": "Cài đặt hoặc bật tiện ích máy tính từ xa trước khi kết nối.",
+    "manage_plugin": "Quản lý tiện ích",
     "session_missing": "Phiên máy tính từ xa không khả dụng.",
     "reconnect": "Kết nối lại",
     "resize_fixed": "Kích thước do máy chủ cố định",

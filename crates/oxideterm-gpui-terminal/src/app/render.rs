@@ -12,9 +12,8 @@ use oxideterm_gpui_ui::button::{
 use oxideterm_gpui_ui::confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 use oxideterm_gpui_ui::context_menu::{
     ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
-    context_menu_event_boundary, context_menu_item, context_menu_item_height_estimate,
-    context_menu_item_with_shortcut, context_menu_separator,
-    context_menu_separator_height_estimate,
+    context_menu_event_boundary, context_menu_item, context_menu_item_with_shortcut,
+    context_menu_separator,
 };
 use oxideterm_gpui_ui::menu::menu_content;
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
@@ -42,10 +41,6 @@ use crate::terminal_view::*;
 const MAX_SNAPSHOT_DEFER_DURATION: std::time::Duration = std::time::Duration::from_millis(32);
 
 const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
-const TERMINAL_CONTEXT_MENU_ACTION_COUNT: f32 = 13.0;
-const TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT: f32 = 3.0;
-const SERIAL_TRANSFER_MENU_ACTION_COUNT: f32 = 6.0;
-const TERMINAL_CONTEXT_MENU_MARGIN: f32 = 8.0;
 const TERMINAL_CONTROL_ROW_HEIGHT: f32 = 34.0;
 const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
 // Keep diagnostic chrome away from the prompt and command text at the left edge.
@@ -183,25 +178,6 @@ fn external_paths_for_local_terminal(paths: &[PathBuf]) -> Option<String> {
     }
     input.push(' ');
     Some(input)
-}
-
-fn clamp_terminal_context_menu_position(
-    pointer_x: f32,
-    pointer_y: f32,
-    viewport_width: f32,
-    viewport_height: f32,
-    menu_width: f32,
-    menu_height: f32,
-    margin: f32,
-) -> (f32, f32) {
-    // Context menus are top-layer window overlays, so collision must use the
-    // window viewport instead of the terminal pane that opened the menu.
-    let max_x = (viewport_width - menu_width - margin).max(margin);
-    let max_y = (viewport_height - menu_height - margin).max(margin);
-    (
-        pointer_x.max(margin).min(max_x),
-        pointer_y.max(margin).min(max_y),
-    )
 }
 
 const TERMINAL_VISUAL_BELL_OVERLAY_ALPHA: u8 = 0x66;
@@ -615,7 +591,7 @@ impl Render for TerminalPane {
                 pane.child(self.render_modem_progress_overlay(transfer, cx))
             })
             .when_some(self.context_menu.clone(), |pane, menu| {
-                pane.child(self.render_terminal_context_menu(menu, window, cx))
+                pane.child(self.render_terminal_context_menu(menu, cx))
             })
             .when_some(autosuggest_overlay, |pane, overlay| pane.child(overlay))
             .when(self.preferences.show_performance_overlay, |pane| {
@@ -1925,10 +1901,12 @@ impl TerminalPane {
     fn render_terminal_context_menu(
         &self,
         menu: TerminalContextMenu,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (left, top) = self.clamped_terminal_context_menu_window_position(&menu, window);
+        let origin = self.bounds.map(|bounds| bounds.origin).unwrap_or_default();
+        // Preserve the pointer as the anchor. GPUI fits the measured menu to the
+        // window; pre-clamping an estimated height makes it flip a second time.
+        let position = origin + point(px(menu.x), px(menu.y));
         let copy_label = self.preferences.command_selection_labels.copy.clone();
         let copy_command_label = self
             .preferences
@@ -2173,7 +2151,8 @@ impl TerminalPane {
                         cx,
                     )),
             )
-        };
+        }
+        .debug_selector(|| "terminal-context-menu".into());
 
         deferred(
             context_menu_backdrop()
@@ -2195,7 +2174,7 @@ impl TerminalPane {
                 .child(
                     anchored()
                         .anchor(Anchor::TopLeft)
-                        .position(point(px(left), px(top)))
+                        .position(position)
                         .position_mode(AnchoredPositionMode::Window)
                         .child(oxideterm_gpui_ui::motion::fade(
                             tokens,
@@ -2437,44 +2416,6 @@ impl TerminalPane {
             },
             cx,
         )
-    }
-
-    fn clamped_terminal_context_menu_window_position(
-        &self,
-        menu: &TerminalContextMenu,
-        window: &Window,
-    ) -> (f32, f32) {
-        let viewport = window.viewport_size();
-        let origin = self
-            .bounds
-            .map(|bounds| bounds.origin)
-            .unwrap_or_else(|| point(px(0.0), px(0.0)));
-        let menu_height = if menu.serial_transfer_menu {
-            self.theme.tokens.metrics.ui_menu_padding * 2.0
-                + SERIAL_TRANSFER_MENU_ACTION_COUNT
-                    * context_menu_item_height_estimate(&self.theme.tokens)
-        } else {
-            self.terminal_context_menu_height_estimate()
-        };
-        clamp_terminal_context_menu_position(
-            f32::from(origin.x) + menu.x,
-            f32::from(origin.y) + menu.y,
-            f32::from(viewport.width),
-            f32::from(viewport.height),
-            TERMINAL_CONTEXT_MENU_WIDTH,
-            menu_height,
-            TERMINAL_CONTEXT_MENU_MARGIN,
-        )
-    }
-
-    fn terminal_context_menu_height_estimate(&self) -> f32 {
-        let tokens = &self.theme.tokens;
-        // Context menu rendering is token-driven; positioning uses the same
-        // Radix-mapped padding and shared line box as the rendered rows.
-        tokens.metrics.ui_menu_padding * 2.0
-            + (TERMINAL_CONTEXT_MENU_ACTION_COUNT + self.plugin_text_actions.len() as f32)
-                * context_menu_item_height_estimate(tokens)
-            + TERMINAL_CONTEXT_MENU_SEPARATOR_COUNT * context_menu_separator_height_estimate(tokens)
     }
 
     fn copy_selection_from_context_menu(&mut self, cx: &mut Context<Self>) {
@@ -2793,6 +2734,95 @@ mod tests {
 
     struct ControlBarTestView {
         pane: gpui::Entity<super::TerminalPane>,
+    }
+
+    struct ContextMenuTestView {
+        pane: gpui::Entity<super::TerminalPane>,
+    }
+
+    impl gpui::Render for ContextMenuTestView {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::prelude::*;
+            let menu = self.pane.update(cx, |pane, cx| {
+                pane.context_menu
+                    .clone()
+                    .map(|menu| pane.render_terminal_context_menu(menu, cx))
+            });
+            gpui::div().size_full().relative().children(menu)
+        }
+    }
+
+    #[gpui::test]
+    fn context_menu_flips_at_the_pointer_using_its_rendered_size(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let pane = cx.new(|cx| {
+                super::TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .unwrap()
+            });
+            cx.observe(&pane, |_, _, cx| cx.notify()).detach();
+            ContextMenuTestView { pane }
+        });
+        cx.simulate_resize(gpui::size(gpui::px(800.0), gpui::px(1000.0)));
+        let pane = cx.update(|_, cx| view.read(cx).pane.clone());
+        for scale in [1.0, 1.5, 2.0] {
+            cx.simulate_scale_factor_change(scale);
+            for (serial_transfer_menu, plugin_action) in
+                [(false, false), (false, true), (true, false)]
+            {
+                for (x, y) in [(100.0, 980.0), (760.0, 980.0), (100.0, 100.0)] {
+                    let pointer = gpui::point(gpui::px(x), gpui::px(y));
+                    pane.update(cx, |pane, cx| {
+                        pane.bounds = Some(gpui::Bounds::new(
+                            gpui::point(gpui::px(40.0), gpui::px(30.0)),
+                            gpui::size(gpui::px(740.0), gpui::px(950.0)),
+                        ));
+                        pane.plugin_text_actions = if plugin_action {
+                            vec![super::super::TerminalPluginTextAction {
+                                plugin_id: "test.tools".into(),
+                                tab_id: "tools".into(),
+                                control_id: "text".into(),
+                                label: "Process selection".into(),
+                            }]
+                        } else {
+                            Vec::new()
+                        };
+                        pane.open_terminal_context_menu(
+                            &gpui::MouseDownEvent {
+                                position: pointer,
+                                button: gpui::MouseButton::Right,
+                                ..Default::default()
+                            },
+                            cx,
+                        );
+                        pane.context_menu.as_mut().unwrap().serial_transfer_menu =
+                            serial_transfer_menu;
+                    });
+                    cx.update(|window, cx| window.draw(cx).clear(cx));
+                    let bounds = cx.debug_bounds("terminal-context-menu").unwrap();
+                    let anchor = gpui::point(
+                        if x > 400.0 {
+                            bounds.right()
+                        } else {
+                            bounds.left()
+                        },
+                        if y > 500.0 {
+                            bounds.bottom()
+                        } else {
+                            bounds.top()
+                        },
+                    );
+                    assert!(
+                        f32::from(anchor.x - pointer.x).abs() <= 1.0
+                            && f32::from(anchor.y - pointer.y).abs() <= 1.0,
+                        "menu {bounds:?} must stay at {pointer:?}; scale={scale}, serial={serial_transfer_menu}, plugin={plugin_action}",
+                    );
+                }
+            }
+        }
     }
 
     impl gpui::Render for ControlBarTestView {

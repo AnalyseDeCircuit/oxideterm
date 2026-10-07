@@ -155,6 +155,10 @@ pub(crate) fn openai_chat_messages(
     let mut system_parts = Vec::new();
     let mut non_system = Vec::new();
     for message in messages {
+        if crate::runtime_context::is_runtime_context_message(message) {
+            non_system.push(message);
+            continue;
+        }
         match message.role {
             AiChatRole::System if !message.content.is_empty() => {
                 system_parts.push(message.content.clone());
@@ -199,6 +203,11 @@ fn openai_message_value(
     index: usize,
     last_user_index: usize,
 ) -> Value {
+    // Keep current application data out of the cacheable system prefix without
+    // making it a new user turn for DeepSeek reasoning replay.
+    if crate::runtime_context::is_runtime_context_message(message) {
+        return serde_json::json!({"role": "user", "content": message.content});
+    }
     match message.role {
         AiChatRole::User => serde_json::json!({
             "role": "user",
@@ -396,6 +405,97 @@ mod tests {
             );
             assert_eq!(body["tools"][0]["function"]["name"], "run_command");
         }
+    }
+
+    #[test]
+    fn runtime_context_preserves_the_provider_prefix_and_tool_round() {
+        let first_context = serde_json::json!({"runtimeContext": {
+            "protocolVersion": 2, "snapshotId": "snap_first", "observedAtMs": 100,
+            "liveHandles": [{"handleId": "rt_first"}]
+        }})
+        .to_string();
+        let second_context = serde_json::json!({"runtimeContext": {
+            "protocolVersion": 2, "snapshotId": "snap_second", "observedAtMs": 200,
+            "liveHandles": [{"handleId": "rt_second"}]
+        }})
+        .to_string();
+        let first: Vec<AiChatMessage> = serde_json::from_value(serde_json::json!([
+            {"id":"base-system","role":"system","content":"Stable policies","timestamp_ms":0},
+            {"id":"user","role":"user","content":"Inspect the shell","timestamp_ms":1},
+            {"id":"assistant","role":"assistant","content":"","timestamp_ms":2,
+             "thinking_content":"Inspect the current shell",
+             "tool_calls":[{"id":"call-1","name":"run_command","arguments":"{}"}]},
+            {"id":"result","role":"tool","content":"{\"output\":\"safe\"}","timestamp_ms":3,"tool_call_id":"call-1"},
+            {"id":"runtime-context-v2","role":"system","content":first_context,"timestamp_ms":4}
+        ])).unwrap();
+        let mut second = first.clone();
+        second.last_mut().unwrap().content = second_context.clone();
+
+        for provider in ["deepseek", "openai", "ollama"] {
+            let config = config(provider, "auto");
+            let first_wire = openai_chat_body(&config, &first);
+            let second_wire = openai_chat_body(&config, &second);
+            assert_eq!(
+                first_wire["messages"][0],
+                serde_json::json!({"role":"system","content":"Stable policies"})
+            );
+            assert_eq!(
+                first_wire["messages"].as_array().unwrap()[..4],
+                second_wire["messages"].as_array().unwrap()[..4]
+            );
+            assert_eq!(
+                first_wire["messages"][2]["reasoning_content"],
+                "Inspect the current shell"
+            );
+            assert_eq!(first_wire["messages"][2]["tool_calls"][0]["id"], "call-1");
+            assert_eq!(first_wire["messages"][3]["tool_call_id"], "call-1");
+            assert_eq!(
+                first_wire["messages"][4],
+                serde_json::json!({"role":"user","content":first_context})
+            );
+            assert_eq!(second_wire["messages"][4]["content"], second_context);
+        }
+
+        let (first_system, first_wire) = super::super::anthropic::anthropic_chat_messages(&first);
+        let (second_system, second_wire) =
+            super::super::anthropic::anthropic_chat_messages(&second);
+        assert_eq!(first_system.as_deref(), Some("Stable policies"));
+        assert_eq!(second_system, first_system);
+        assert_eq!(first_wire[..2], second_wire[..2]);
+        assert_eq!(
+            first_wire[2]["content"][0],
+            serde_json::json!({
+                "type":"tool_result","tool_use_id":"call-1","content":"{\"output\":\"safe\"}"
+            })
+        );
+        assert_eq!(first_wire[2]["content"][1]["text"], first_context);
+        assert_eq!(second_wire[2]["content"][1]["text"], second_context);
+
+        let (first_system, first_wire) = super::super::gemini::gemini_chat_contents(&first);
+        let (second_system, second_wire) = super::super::gemini::gemini_chat_contents(&second);
+        assert_eq!(first_system.as_deref(), Some("Stable policies"));
+        assert_eq!(second_system, first_system);
+        assert_eq!(first_wire[..2], second_wire[..2]);
+        assert_eq!(
+            first_wire[2]["parts"][0],
+            serde_json::json!({
+                "functionResponse":{"name":"run_command","response":{"output":"safe"}}
+            })
+        );
+        assert_eq!(first_wire[2]["parts"][1]["text"], first_context);
+        assert_eq!(second_wire[2]["parts"][1]["text"], second_context);
+
+        let config = config("openai", "auto");
+        let first_wire = super::super::responses_payload::responses_body(&config, &first);
+        let second_wire = super::super::responses_payload::responses_body(&config, &second);
+        assert_eq!(
+            first_wire["input"].as_array().unwrap()[..4],
+            second_wire["input"].as_array().unwrap()[..4]
+        );
+        assert_eq!(first_wire["input"][2]["type"], "function_call");
+        assert_eq!(first_wire["input"][3]["call_id"], "call-1");
+        assert_eq!(first_wire["input"][4]["content"], first_context);
+        assert_eq!(second_wire["input"][4]["content"], second_context);
     }
 
     #[test]

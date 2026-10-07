@@ -300,6 +300,8 @@ pub struct TextEditorView {
     on_modified_word_click: Option<ModifiedWordClickCallback>,
     save_status: EditorSaveStatus,
     language: Option<LanguageId>,
+    language_path: Option<std::path::PathBuf>,
+    language_fallback: Option<LanguageId>,
     plugin_grammar: Option<Arc<oxideterm_editor_syntax::PluginGrammar>>,
     _language_subscription: gpui::Subscription,
     language_notice_tokens: ThemeTokens,
@@ -369,9 +371,20 @@ impl TextEditorView {
         let buffer = TextBuffer::new(text);
         let language_subscription =
             cx.observe_global::<crate::EditorLanguagePlugins>(|this, cx| {
-                let next = this.language.and_then(|id| {
+                let detected = this.language_path.as_deref().map(|path| {
+                    this.buffer
+                        .with_text(|source| crate::detect_language(Some(path), source, cx))
+                        .or_else(|| this.language_fallback.clone())
+                });
+                let language_changed = detected
+                    .as_ref()
+                    .is_some_and(|language| *language != this.language);
+                if let Some(language) = detected {
+                    this.language = language;
+                }
+                let next = this.language.as_ref().and_then(|id| {
                     cx.try_global::<crate::EditorLanguagePlugins>()
-                        .and_then(|plugins| plugins.grammars.get(&id))
+                        .and_then(|plugins| plugins.grammars.get(id))
                         .cloned()
                 });
                 let changed = match (&this.plugin_grammar, &next) {
@@ -379,7 +392,7 @@ impl TextEditorView {
                     (None, None) => false,
                     _ => true,
                 };
-                if changed {
+                if language_changed || changed {
                     this.request_syntax(None, true, cx);
                     this.refresh_foldable_ranges();
                 }
@@ -410,6 +423,8 @@ impl TextEditorView {
             syntax_task: None,
             pending_syntax: None,
             language: None,
+            language_path: None,
+            language_fallback: None,
             plugin_grammar: None,
             _language_subscription: language_subscription,
             language_notice_tokens: *tokens,
@@ -717,10 +732,28 @@ impl TextEditorView {
     }
 
     pub fn set_language(&mut self, language: Option<LanguageId>, cx: &mut Context<Self>) {
+        self.language_path = None;
+        self.language_fallback = None;
         self.language = language;
         self.request_syntax(None, true, cx);
         self.refresh_foldable_ranges();
         cx.notify();
+    }
+
+    pub fn set_language_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+        fallback: Option<LanguageId>,
+        cx: &mut Context<Self>,
+    ) {
+        let path = path.as_ref().to_path_buf();
+        let language = self
+            .buffer
+            .with_text(|source| crate::detect_language(Some(&path), source, cx))
+            .or_else(|| fallback.clone());
+        self.set_language(language, cx);
+        self.language_path = Some(path);
+        self.language_fallback = fallback;
     }
 
     pub fn is_large_file(&self) -> bool {
@@ -945,6 +978,7 @@ impl TextEditorView {
         let caret = BufferOffset(range.start.0 + replacement.len());
         let syntax_edit = self
             .language
+            .as_ref()
             .filter(|_| self.syntax_task.is_none() && !self.is_large_file())
             .and_then(|_| SyntaxEdit::from_buffer(&self.buffer, range, &replacement).ok());
         if self
@@ -1704,20 +1738,57 @@ mod tests {
             serde_json::from_slice(&std::fs::read(directory.path().join("plugin.json")).unwrap())
                 .unwrap();
         let declared = &manifest["contributes"]["language"];
+        let language = LanguageId::from_plugin_key("custom-elixir").unwrap();
+        let definition = crate::EditorLanguageDefinition {
+            plugin_id: "com.example.custom-language".into(),
+            definition: oxideterm_plugin_manifest::NativePluginLanguageDefinition {
+                id: "custom-elixir".into(),
+                display_name: Some("Custom Elixir".into()),
+                grammar_name: Some("elixir".into()),
+                extensions: vec!["custom.expr".into()],
+                ..Default::default()
+            },
+        };
         let mut grammar = PluginGrammarSource {
-            language: LanguageId::Elixir,
+            language: language.clone(),
+            grammar_name: "elixir".into(),
             parser: directory.path().join("parser.wasm"),
             highlights: directory.path().join("highlights.scm"),
             parser_sha256: declared["parserSha256"].as_str().unwrap().into(),
             highlights_sha256: declared["highlightsSha256"].as_str().unwrap().into(),
+            injections: Vec::new(),
         };
         let source = "defmodule Demo do\n  def value, do: 42\nend\n";
         let editor =
             cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
         editor.update(cx, |editor, cx| {
-            editor.set_language(Some(LanguageId::Elixir), cx);
+            editor.set_language_from_path("sample.custom.expr", None, cx);
+            assert_eq!(editor.language, None);
             editor.insert_text("# edited\n", cx);
             assert!(editor.syntax.is_none());
+        });
+        cx.update(|cx| {
+            crate::EditorLanguagePlugins::update_languages(Vec::new(), vec![definition.clone()], cx)
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.language, Some(language.clone()));
+            assert!(editor.syntax.is_none());
+            crate::EditorLanguagePlugins::set_labels(
+                "Missing {{language}}".into(),
+                "Failed".into(),
+                "Manage".into(),
+                "Dismiss".into(),
+                cx,
+            );
+            assert!(
+                crate::render_language_plugin_notice(
+                    language.clone(),
+                    &oxideterm_theme::default_tokens(),
+                    cx
+                )
+                .is_some()
+            );
         });
         cx.update(|cx| crate::EditorLanguagePlugins::update(vec![grammar.clone()], cx));
         cx.run_until_parked();
@@ -1751,6 +1822,7 @@ mod tests {
         cx.run_until_parked();
         editor.update(cx, |editor, cx| {
             assert!(editor.syntax.is_none());
+            assert_eq!(editor.language, Some(language.clone()));
             assert_eq!(editor.buffer.text(), format!("# edited\n{source}"));
             editor.undo(cx);
             assert_eq!(editor.buffer.text(), source);
@@ -1759,6 +1831,13 @@ mod tests {
         cx.run_until_parked();
         editor.update(cx, |editor, _| {
             assert!(!editor.syntax.as_ref().unwrap().root_has_error());
+            assert_eq!(editor.buffer.text(), source);
+        });
+        cx.update(|cx| crate::EditorLanguagePlugins::update_languages(Vec::new(), Vec::new(), cx));
+        cx.run_until_parked();
+        editor.update(cx, |editor, _| {
+            assert_eq!(editor.language, None);
+            assert!(editor.syntax.is_none());
             assert_eq!(editor.buffer.text(), source);
         });
     }

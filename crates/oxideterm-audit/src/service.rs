@@ -341,7 +341,7 @@ impl AuditService {
         let (done_tx, done) = std::sync::mpsc::channel();
         let instance_id = client.instance_id.clone();
         let context = crate::AuditContext::new(client.clone(), crate::AuditSource::System);
-        let writer_recording = recording.clone();
+        let writer_recording = recording;
         let tick_pending = Arc::new(AtomicBool::new(false));
         let writer_tick_pending = tick_pending.clone();
         let worker = std::thread::Builder::new()
@@ -366,7 +366,7 @@ impl AuditService {
         let tick_stop = Arc::new(AtomicBool::new(false));
         let stop_tick = tick_stop.clone();
         let ticker_sender = client.recording.sender.clone();
-        let ticker_pending = tick_pending.clone();
+        let ticker_pending = tick_pending;
         let ticker = std::thread::Builder::new()
             .name("audit-recording-tick".into())
             .spawn(move || {
@@ -722,7 +722,7 @@ fn run(
             }
             Request::Query(query, sender) => {
                 let result = match &mut store {
-                    Ok(store) => store.recover_abandoned(&path).and_then(|count| {
+                    Ok(store) => store.recover_abandoned(&path).map(|count| {
                         if count > 0 {
                             health
                                 .lock()
@@ -730,7 +730,6 @@ fn run(
                                 .status
                                 .revision += count as u64;
                         }
-                        Ok(())
                     }),
                     Err(error) => Err(*error),
                 };
@@ -749,7 +748,7 @@ fn run(
             }
             Request::Sessions(query, sender) => {
                 let result = match &mut store {
-                    Ok(store) => store.recover_abandoned(&path).and_then(|count| {
+                    Ok(store) => store.recover_abandoned(&path).map(|count| {
                         if count > 0 {
                             health
                                 .lock()
@@ -757,7 +756,6 @@ fn run(
                                 .status
                                 .revision += count as u64;
                         }
-                        Ok(())
                     }),
                     Err(error) => Err(*error),
                 };
@@ -869,7 +867,8 @@ fn dispatch_read(
         }
     }
     if let Some(reader) = reader {
-        if let Err((request, error)) = reader.send(request) {
+        if let Err(failure) = reader.send(request) {
+            let (request, error) = *failure;
             fail_read(store, health, request, error);
         }
     }

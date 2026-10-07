@@ -454,7 +454,7 @@ pub fn parse_tmux_snapshot(output: &str) -> ResourceTmuxSnapshot {
         }
     }
 
-    sessions.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+    sessions.sort_by_key(|session| session.name.to_lowercase());
     windows.sort_by(|left, right| {
         left.session_id
             .cmp(&right.session_id)

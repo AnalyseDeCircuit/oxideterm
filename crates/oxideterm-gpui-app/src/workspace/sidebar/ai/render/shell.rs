@@ -764,7 +764,11 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut banners = div().flex_none().flex().flex_col();
-        if let Some(percentage) = self.ai_entity.read(cx).chat_ui().model_switch_warning_percentage {
+        let acp_backend_active =
+            self.settings_store.settings().ai.active_backend == AiActiveBackend::Acp;
+        if !acp_backend_active
+            && let Some(percentage) = self.ai_entity.read(cx).chat_ui().model_switch_warning_percentage
+        {
             banners = banners.child(
                 self.render_ai_context_warning_banner(
                     self.i18n
@@ -778,7 +782,11 @@ window.focus(&this.focus_handle, cx);
         }
         if self.ai_context_danger_warning_active(cx) {
             banners = banners.child(self.render_ai_context_warning_banner(
-                self.i18n.t("ai.context.approaching_limit"),
+                self.i18n.t(if acp_backend_active {
+                    "ai.context.acp_approaching_limit"
+                } else {
+                    "ai.context.approaching_limit"
+                }),
                 false,
                 false,
                 cx,
@@ -795,6 +803,8 @@ window.focus(&this.focus_handle, cx);
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let warning_color = self.tokens.ui.warning;
+        let provider_managed_context =
+            self.settings_store.settings().ai.active_backend == AiActiveBackend::Provider;
         div()
             .flex_none()
             .flex()
@@ -830,21 +840,24 @@ window.focus(&this.focus_handle, cx);
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .child(self.render_ai_context_warning_button(
-                        self.i18n.t("ai.context.compact_button"),
-                        LucideIcon::Archive,
-                        self.ai_entity.read(cx).chat_is_loading(),
-                        AiContextWarningAction::Compact(model_switch),
-                        cx,
-                    ))
-                    .when(!model_switch, |actions| {
-                        actions.child(self.render_ai_context_warning_button(
-                            self.i18n.t("ai.context.summarize"),
-                            LucideIcon::Archive,
-                            self.ai_entity.read(cx).chat_is_loading(),
-                            AiContextWarningAction::Summarize,
-                            cx,
-                        ))
+                    .when(provider_managed_context, |actions| {
+                        actions
+                            .child(self.render_ai_context_warning_button(
+                                self.i18n.t("ai.context.compact_button"),
+                                LucideIcon::Archive,
+                                self.ai_entity.read(cx).chat_is_loading(),
+                                AiContextWarningAction::Compact(model_switch),
+                                cx,
+                            ))
+                            .when(!model_switch, |actions| {
+                                actions.child(self.render_ai_context_warning_button(
+                                    self.i18n.t("ai.context.summarize"),
+                                    LucideIcon::Archive,
+                                    self.ai_entity.read(cx).chat_is_loading(),
+                                    AiContextWarningAction::Summarize,
+                                    cx,
+                                ))
+                            })
                     })
                     .child(self.render_ai_context_warning_button(
                         self.i18n.t("ai.chat.new_chat_tooltip"),
@@ -941,16 +954,29 @@ window.focus(&this.focus_handle, cx);
         let Some(conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
             return false;
         };
-        if conversation.messages.len() < 4 {
+        if self.settings_store.settings().ai.active_backend == AiActiveBackend::Provider
+            && conversation.messages.len() < 4
+        {
             return false;
         }
-        let (total_tokens, max_tokens) = self.ai_context_message_usage_counts(cx);
+        let Some((total_tokens, max_tokens)) = self.ai_context_message_usage_counts(cx) else {
+            return false;
+        };
         ai_context_percentage(total_tokens, max_tokens) > AI_CONTEXT_DANGER_PERCENT
     }
 
-    pub(in crate::workspace) fn ai_context_message_usage_counts(&self, cx: &App) -> (usize, usize) {
-        let breakdown = self.ai_context_token_breakdown(cx);
-        (breakdown.total, breakdown.max_tokens)
+    pub(in crate::workspace) fn ai_context_message_usage_counts(
+        &self,
+        cx: &App,
+    ) -> Option<(usize, usize)> {
+        ai_context_counts_for_backend(
+            self.settings_store.settings().ai.active_backend,
+            self.active_ai_acp_usage(cx),
+            || {
+                let breakdown = self.ai_context_token_breakdown(cx);
+                (breakdown.total, breakdown.max_tokens)
+            },
+        )
     }
 
     pub(in crate::workspace) fn render_ai_summarize_confirm_dialog(

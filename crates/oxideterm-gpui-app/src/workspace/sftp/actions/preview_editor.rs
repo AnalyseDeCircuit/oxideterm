@@ -130,6 +130,7 @@ impl WorkspaceApp {
         let editor_language = sftp_editor_language(language.as_deref(), name);
         let syntax_language =
             sftp_editor_language_id(language.as_deref(), preview_path.as_deref(), name, &data);
+        let syntax_path = preview_path.as_deref().unwrap_or(name).to_string();
         let tokens = self.tokens;
         let runtime_settings = self.ide_runtime_settings();
         let context_menu_labels = EditorContextMenuLabels {
@@ -158,7 +159,7 @@ impl WorkspaceApp {
                     runtime_settings.background_active,
                     cx,
                 );
-                editor.set_language(syntax_language, cx);
+                editor.set_language_from_path(syntax_path, syntax_language, cx);
                 editor.set_on_save(Box::new(move |text, _window, cx| {
                     let _ = sftp_entity.update(cx, |sftp, cx| {
                         sftp.save_preview_editor_content(text, cx);

@@ -469,6 +469,8 @@ pub struct PersistedSettings {
     #[serde(default)]
     pub command_palette_mru: Vec<String>,
     #[serde(default)]
+    pub plugin_marketplace_sort: PluginMarketplaceSort,
+    #[serde(default)]
     pub keybindings: KeybindingSettings,
     #[serde(default)]
     pub custom_themes: Map<String, Value>,
@@ -510,6 +512,7 @@ impl Default for PersistedSettings {
             onboarding_disclaimer_accepted: false,
             onboarding_completed: false,
             command_palette_mru: Vec::new(),
+            plugin_marketplace_sort: PluginMarketplaceSort::Name,
             keybindings: KeybindingSettings::default(),
             custom_themes: Map::new(),
             agent_roles: None,

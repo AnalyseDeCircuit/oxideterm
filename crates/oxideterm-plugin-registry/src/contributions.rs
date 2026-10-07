@@ -30,6 +30,28 @@ pub struct NativePluginContributionStore {
 }
 
 impl NativePluginContributionStore {
+    pub(crate) fn copy_runtime_plugin_from(&mut self, source: &Self, plugin_id: &str) {
+        // Manifest indexes can be rebuilt without discarding another plugin's live registrations.
+        macro_rules! copy_rows {
+            ($($field:ident),+ $(,)?) => { $(
+                self.$field.extend(source.$field.iter().filter(|entry| entry.plugin_id == plugin_id).cloned());
+            )+ };
+        }
+        self.cleanup_runtime_plugin_contributions(plugin_id);
+        copy_rows!(
+            runtime_commands,
+            runtime_keybindings,
+            runtime_context_menus,
+            runtime_status_items,
+            runtime_tab_views,
+            runtime_sidebar_panels,
+            runtime_activity_bar_items,
+            runtime_event_subscriptions,
+            runtime_terminal_input_interceptors,
+            runtime_terminal_output_processors,
+        );
+    }
+
     pub(crate) fn from_plugins(plugins: &[NativePluginInfo]) -> Self {
         let mut store = Self::default();
         for plugin in plugins {
@@ -817,6 +839,7 @@ fn native_plugin_contributions_enabled(plugin: &NativePluginInfo) -> bool {
         NativePluginState::ReadyManifestOnly
             | NativePluginState::ReadyWasm
             | NativePluginState::ReadyProcess
+            | NativePluginState::Loading
             | NativePluginState::Active
     )
 }

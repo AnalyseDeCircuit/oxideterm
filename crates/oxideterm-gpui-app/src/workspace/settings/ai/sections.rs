@@ -32,67 +32,79 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let agent_count = settings.ai.acp_agents.len();
-        // The page already owns the glass card. Keep this section structural so
-        // each agent is the only nested card users need to distinguish.
-        let mut section = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(settings_ai_section_heading(
-                        &self.tokens,
-                        self.i18n.t("settings_view.ai.acp_agents"),
-                        self.i18n_count("settings_view.ai.acp_agents_summary", agent_count),
-                    ))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_wrap()
-                            .justify_end()
-                            .gap(px(8.0))
-                            .child(self.ai_acp_agent_add_button(
-                                self.i18n.t("settings_view.ai.acp_agent_add"),
-                                None,
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::ClaudeCode.display_name().to_string(),
-                                Some(AcpAgentPreset::ClaudeCode),
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::Codex.display_name().to_string(),
-                                Some(AcpAgentPreset::Codex),
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::GeminiCli.display_name().to_string(),
-                                Some(AcpAgentPreset::GeminiCli),
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::GithubCopilot.display_name().to_string(),
-                                Some(AcpAgentPreset::GithubCopilot),
-                                cx,
-                            ))
-                            .child(self.ai_acp_agent_add_button(
-                                AcpAgentPreset::OpenCode.display_name().to_string(),
-                                Some(AcpAgentPreset::OpenCode),
-                                cx,
-                            )),
-                    ),
-            );
+        let agent_count = settings
+            .ai
+            .acp_agents
+            .iter()
+            .filter(|agent| agent.plugin_id.is_none())
+            .count();
+        let mut section =
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .flex()
+                .flex_col()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(12.0))
+                        .child(settings_ai_section_heading(
+                            &self.tokens,
+                            self.i18n.t("ai.model_selector.custom_acp_agents"),
+                            self.i18n_count("settings_view.ai.acp_agents_summary", agent_count),
+                        ))
+                        .child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex()
+                                .flex_wrap()
+                                .justify_end()
+                                .gap(px(8.0))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t(
+                                        if self.plugin_manager_state(cx).custom_acp_expanded {
+                                            "plugin.hide_details"
+                                        } else {
+                                            "plugin.show_details"
+                                        },
+                                    ),
+                                    Some(Self::render_lucide_icon(
+                                        LucideIcon::ChevronDown,
+                                        14.0,
+                                        rgb(self.tokens.ui.text_muted),
+                                    )),
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.update_plugin_manager_state(cx, |manager| {
+                                            manager.custom_acp_expanded =
+                                                !manager.custom_acp_expanded;
+                                        });
+                                        cx.notify();
+                                    }),
+                                ))
+                                .child(self.ai_acp_agent_add_button(
+                                    self.i18n.t("settings_view.ai.acp_agent_add"),
+                                    None,
+                                    cx,
+                                )),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .whitespace_normal()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.ai.acp_agents_custom_hint")),
+                );
 
+        if !self.plugin_manager_state(cx).custom_acp_expanded {
+            return section.into_any_element();
+        }
         if agent_count == 0 {
             return section
                 .child(
@@ -106,7 +118,9 @@ impl WorkspaceApp {
         }
 
         for (index, agent) in settings.ai.acp_agents.iter().enumerate() {
-            section = section.child(self.ai_acp_agent_card(index, agent, cx));
+            if agent.plugin_id.is_none() {
+                section = section.child(self.ai_acp_agent_card(index, agent, cx));
+            }
         }
         section.into_any_element()
     }
@@ -124,11 +138,9 @@ impl WorkspaceApp {
         div()
             .w_full()
             .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x73))
-            .bg(rgba((self.tokens.ui.bg_card << 8) | 0x73))
-            .p(px(12.0))
+            .border_t_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .pt(px(12.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
@@ -164,18 +176,20 @@ impl WorkspaceApp {
                             })
                             .child(self.ai_acp_agent_status_badge(agent))
                             .child(self.ai_acp_agent_test_button(index, agent, testing, cx))
-                            .child(self.ai_icon_button(
-                                LucideIcon::Trash2,
-                                testing,
-                                move |this, _event, _window, cx| {
-                                    this.edit_settings(
-                                        |settings| ai_delete_acp_agent(settings, index),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                },
-                                cx,
-                            )),
+                            .when(agent.plugin_id.is_none(), |actions| {
+                                actions.child(self.ai_icon_button(
+                                    LucideIcon::Trash2,
+                                    testing,
+                                    move |this, _event, _window, cx| {
+                                        this.edit_settings(
+                                            |settings| ai_delete_acp_agent(settings, index),
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    },
+                                    cx,
+                                ))
+                            }),
                     ),
             )
             .child(
@@ -194,18 +208,26 @@ impl WorkspaceApp {
                             cx,
                         ),
                     ))
-                    .child(
-                        self.ai_responsive_field(
-                            AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                    .child(self.ai_responsive_field(
+                        AI_ACP_AGENT_FIELD_MIN_WIDTH,
+                        if let Some(plugin_id) = agent.plugin_id.as_ref() {
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(6.0))
+                                .child(self.i18n.t("settings_view.ai.acp_agent_plugin"))
+                                .child(self.ai_readonly_value(plugin_id.clone()))
+                                .into_any_element()
+                        } else {
                             self.ai_labeled_text_input(
                                 "settings_view.ai.acp_agent_command",
                                 SettingsInput::AiAcpAgentCommand(index),
                                 self.i18n
                                     .t("settings_view.ai.acp_agent_command_placeholder"),
                                 cx,
-                            ),
-                        ),
-                    )
+                            )
+                        },
+                    ))
                     .child(self.ai_responsive_field(
                         AI_ACP_AGENT_FIELD_MIN_WIDTH,
                         self.ai_labeled_text_input(
@@ -311,6 +333,9 @@ impl WorkspaceApp {
                     },
                     cx,
                 );
+                this.update_plugin_manager_state(cx, |manager| {
+                    manager.custom_acp_expanded = true;
+                });
                 cx.stop_propagation();
             }),
         )
@@ -450,7 +475,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let Some(agent) = self
+        let Some(mut agent) = self
             .settings_store
             .settings()
             .ai
@@ -462,6 +487,12 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
+        if let Err(message) = self.resolve_ai_acp_plugin(&mut agent, cx) {
+            if !self.show_acp_plugin_requirement(&agent, cx) {
+                self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx);
+            }
+            return;
+        }
         self.ai_entity.update(cx, |ai, _cx| {
             ai.request_acp_agent_probe(agent);
         });

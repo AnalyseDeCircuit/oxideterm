@@ -18,7 +18,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .contributes
         .and_then(|value| value.language)
         .ok_or("Missing language contribution")?;
-    let id = LanguageId::from_plugin_key(&language.id).ok_or("Unknown plugin language")?;
+    language.definition.validate()?;
+    let id =
+        LanguageId::from_plugin_key(&language.definition.id).ok_or("Invalid plugin language")?;
     let parser = directory.join(manifest.runtime.ok_or("Missing runtime")?.entry);
     let highlights = directory.join(language.highlights);
     for (path, checksum) in [
@@ -31,36 +33,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let grammar = PluginGrammar::new(PluginGrammarSource {
         language: id,
+        grammar_name: language
+            .definition
+            .grammar_name
+            .clone()
+            .unwrap_or_else(|| language.definition.id.clone()),
         parser,
         highlights,
         parser_sha256: language.parser_sha256,
         highlights_sha256: language.highlights_sha256,
+        injections: language
+            .injections
+            .into_iter()
+            .map(|injection| {
+                Ok(oxideterm_editor_syntax::PluginGrammarInjectionSource {
+                    query: directory.join(injection.query),
+                    query_sha256: injection.query_sha256,
+                    grammar: Box::new(PluginGrammarSource {
+                        language: LanguageId::from_plugin_key(&injection.id)
+                            .ok_or("Invalid injected language")?,
+                        grammar_name: injection.grammar_name.unwrap_or(injection.id),
+                        parser: directory.join(injection.parser),
+                        highlights: directory.join(injection.highlights),
+                        parser_sha256: injection.parser_sha256,
+                        highlights_sha256: injection.highlights_sha256,
+                        injections: Vec::new(),
+                    }),
+                })
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
     });
     let expectation: serde_json::Value =
         serde_json::from_slice(&fs::read(directory.join("sample.json"))?)?;
     let sample = expectation["source"]
         .as_str()
         .ok_or("Missing source sample")?;
-    let expected_text = expectation["highlight"]["text"]
-        .as_str()
-        .ok_or("Missing expected highlighted text")?;
-    let expected_scope = expectation["highlight"]["scope"]
-        .as_str()
-        .ok_or("Missing expected highlight scope")?;
     let session = SyntaxSession::parse_plugin(&grammar, &sample, None)?;
     if session.root_has_error() {
         return Err("Grammar rejected its source sample".into());
     }
     let spans = session.highlight_spans(&sample);
-    if !spans.iter().any(|span| {
-        format!("{:?}", span.scope) == expected_scope
-            && &sample[span.range.start.0..span.range.end.0] == expected_text
-    }) {
-        return Err(format!("Missing {expected_scope} capture for {expected_text:?}").into());
+    let captures = expectation["highlight"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_else(|| std::slice::from_ref(&expectation["highlight"]));
+    if captures.is_empty() {
+        return Err("Missing expected highlight captures".into());
+    }
+    for capture in captures {
+        let expected_text = capture["text"]
+            .as_str()
+            .ok_or("Missing expected highlighted text")?;
+        let expected_scope = capture["scope"]
+            .as_str()
+            .ok_or("Missing expected highlight scope")?;
+        if !spans.iter().any(|span| {
+            format!("{:?}", span.scope) == expected_scope
+                && &sample[span.range.start.0..span.range.end.0] == expected_text
+                // Native editors paint the first capture covering each byte.
+                // A later matching capture alone does not prove its color is visible.
+                && spans
+                    .iter()
+                    .find(|visible| {
+                        visible.range.start <= span.range.start
+                            && span.range.start < visible.range.end
+                    })
+                    .is_some_and(|visible| {
+                        visible.scope == span.scope && visible.range.end >= span.range.end
+                    })
+        }) {
+            return Err(
+                format!("Missing visible {expected_scope} capture for {expected_text:?}").into(),
+            );
+        }
     }
     println!(
         "Verified {} parser, ABI, queries and highlighting",
-        language.id
+        language.definition.id
     );
     Ok(())
 }

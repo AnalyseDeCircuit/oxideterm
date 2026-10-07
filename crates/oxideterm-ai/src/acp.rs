@@ -43,8 +43,10 @@ use async_process::windows::CommandExt as AsyncProcessCommandExt;
 
 use crate::types::AiStreamEvent;
 
+mod cursor;
 mod handoff;
 mod runtime;
+pub use cursor::{CursorAskQuestion, CursorCreatePlan, CursorRequest, CursorResponseSender};
 pub use handoff::{
     AcpConversationHandoffCursor, AiMessageBackendKind, AiMessageBackendProvenance,
     acp_conversation_handoff_cursor, ai_message_backend_provenance, build_acp_conversation_handoff,
@@ -143,6 +145,10 @@ static ACP_FILE_REVIEW_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 pub enum AcpClientEvent {
     SessionUpdate(SessionNotification),
+    CursorRequest {
+        request: CursorRequest,
+        response_tx: AcpClientResponseSender<serde_json::Value>,
+    },
     RequestPermission {
         request: RequestPermissionRequest,
         response_tx: AcpClientResponseSender<RequestPermissionResponse>,
@@ -216,10 +222,23 @@ impl Drop for AcpTerminalCreateSpec {
 }
 
 impl AcpClientEvent {
+    pub fn tool_call_session(&self) -> Option<(String, String)> {
+        let Self::SessionUpdate(notification) = self else {
+            return None;
+        };
+        let id = match &notification.update {
+            SessionUpdate::ToolCall(call) => &call.tool_call_id,
+            SessionUpdate::ToolCallUpdate(call) => &call.tool_call_id,
+            _ => return None,
+        };
+        Some((id.to_string(), notification.session_id.to_string()))
+    }
+
     /// Returns the owning session without exposing ACP wire DTOs to the app crate.
     pub fn session_id(&self) -> Option<String> {
         let session_id = match self {
             Self::SessionUpdate(notification) => Some(&notification.session_id),
+            Self::CursorRequest { .. } => None,
             Self::RequestPermission { request, .. } => Some(&request.session_id),
             Self::CreateElicitation { request, .. } => match request.scope() {
                 ElicitationScope::Session(scope) => Some(&scope.session_id),
@@ -764,6 +783,10 @@ pub fn next_acp_file_review_id() -> String {
 
 pub fn acp_client_event_to_ai_stream_events(event: AcpClientEvent) -> Vec<AiStreamEvent> {
     match event {
+        AcpClientEvent::CursorRequest { response_tx, .. } => {
+            let _ = response_tx.send(Ok(CursorRequest::cancelled_response()));
+            Vec::new()
+        }
         AcpClientEvent::SessionUpdate(notification) => {
             acp_session_notification_to_ai_stream_events(&notification)
         }
@@ -1275,6 +1298,8 @@ pub async fn with_acp_agent_runtime_events<R>(
 ) -> Result<R, agent_client_protocol::Error> {
     let session_update_tx = event_tx.clone();
     let request_permission_tx = event_tx.clone();
+    let cursor_question_tx = event_tx.clone();
+    let cursor_plan_tx = event_tx.clone();
     let create_elicitation_tx = event_tx.clone();
     let complete_elicitation_tx = event_tx.clone();
     let read_text_file_tx = event_tx.clone();
@@ -1288,6 +1313,32 @@ pub async fn with_acp_agent_runtime_events<R>(
     Client
         .builder()
         .name("OxideTerm")
+        .on_receive_request(
+            async move |request: CursorAskQuestion, responder, _connection| {
+                let response = forward_client_request(&cursor_question_tx, |response_tx| {
+                    AcpClientEvent::CursorRequest {
+                        request: CursorRequest::Questions(request),
+                        response_tx,
+                    }
+                })
+                .await;
+                responder.respond_with_result(response)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
+        .on_receive_request(
+            async move |request: CursorCreatePlan, responder, _connection| {
+                let response = forward_client_request(&cursor_plan_tx, |response_tx| {
+                    AcpClientEvent::CursorRequest {
+                        request: CursorRequest::Plan(request),
+                        response_tx,
+                    }
+                })
+                .await;
+                responder.respond_with_result(response)
+            },
+            agent_client_protocol::on_receive_request!(),
+        )
         .on_receive_notification(
             async move |notification: SessionNotification, _connection| {
                 send_client_event(

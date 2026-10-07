@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Instala o activa el complemento Mosh antes de conectarte.",
+    "ready": "El complemento Mosh está instalado y activado."
+  },
   "file_preview": {
     "entry_file_offset": "Desplazamiento de entrada",
     "subject": "Sujeto",
@@ -254,6 +258,9 @@
     "shortcut_count": "atajos"
   },
   "plugin": {
+    "install_queued": "En espera · posición {{position}}",
+    "installing_named": "Instalando {{name}}",
+    "install_queue_count": "{{count}} en espera",
     "jump_to_page": "Ir a la página",
     "total_pages": "de {{pages}} páginas",
     "jump_page": "Ir",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Fuentes de hosts",
     "marketplace_workspace": "Espacio de trabajo",
     "marketplace_utilities": "Utilidades",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "Al instalar y activar el complemento, la configuración del agente se crea automáticamente; no hace falta indicar un comando de inicio. El directorio de trabajo, los argumentos adicionales y las variables de entorno son opcionales: déjelos vacíos para usar los valores predeterminados. Los complementos que usan un programa local requieren su herramienta oficial de línea de comandos; siga las instrucciones del complemento para instalarla e iniciar sesión.",
+    "marketplace_remote_connections": "Conexiones remotas",
     "apply_page_size": "Aplicar",
     "invalid_page_size": "Introduce un número entero positivo válido",
     "page_range": "{{start}}–{{end}} de {{total}} complementos",
@@ -937,6 +947,10 @@
     "update_available": "Actualización",
     "install_error": "Error de instalación",
     "search_placeholder": "Buscar complementos...",
+    "marketplace_sort": "Orden: {{order}}",
+    "marketplace_sort_name": "Nombre",
+    "marketplace_sort_updated": "Actualizados recientemente",
+    "marketplace_sort_newest": "Añadidos recientemente",
     "marketplace_title": "Mercado oficial de complementos",
     "marketplace_description": "Explore, instale y actualice complementos incluidos en el catálogo oficial de OxideTerm.",
     "marketplace_repository": "Repositorio del catálogo",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Vista de pestaña del plugin no disponible",
     "tab_crashed": "La pestaña del plugin ha fallado",
     "detail_author": "Autor",
+    "license_label": "Licencia: {{license}}",
+    "install_required": "El complemento {{name}} no está instalado. Instálalo desde el mercado de complementos y vuelve a intentarlo.",
+    "enable_required": "El complemento {{name}} instalado no está disponible. Actívalo o actualízalo en el administrador de complementos y vuelve a intentarlo.",
+    "license_not_declared": "Sin declarar",
+    "view_license": "Ver licencia",
+    "third_party_licenses": "Licencias de terceros",
     "registry_capabilities": "Capacidades: {{capabilities}}",
     "reload_success": "{{name}} se volvió a analizar.",
     "enable_success": "{{name}} habilitado.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "Vista previa RDP",
     "vnc_preview_title": "Vista previa VNC",
     "provider_missing": "El proveedor de escritorio remoto no está disponible.",
+    "plugin_ready": "El complemento de escritorio remoto está instalado y activado.",
+    "plugin_required": "Instala o activa el complemento de escritorio remoto antes de conectarte.",
+    "manage_plugin": "Gestionar complemento",
     "session_missing": "La sesión de escritorio remoto no está disponible.",
     "reconnect": "Reconectar",
     "resize_fixed": "Tamaño fijo del servidor",

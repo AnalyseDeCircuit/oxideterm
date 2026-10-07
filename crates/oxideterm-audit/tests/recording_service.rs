@@ -83,7 +83,7 @@ fn policy_toggle_creates_new_segment_without_recording_disabled_output() {
     assert_ne!(list.recordings[0].id, first);
     assert_eq!(list.recordings[1].id, first);
     let filtered = futures::executor::block_on(client.list_recordings_for_session(
-        context.session_id.clone().unwrap(),
+        context.session_id.unwrap(),
         None,
         10,
     ))

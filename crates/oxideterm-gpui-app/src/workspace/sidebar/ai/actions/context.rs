@@ -194,7 +194,7 @@ impl WorkspaceApp {
         }
         if chips.len() < 8 {
             let mut sessions = self.ai_runtime_cli_agent_sessions(&command_records, cx);
-            sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+            sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
             for session in sessions.into_iter().take(3) {
                 chips.push(format!(
                     "- cli_agent: {} is {}{} {}",

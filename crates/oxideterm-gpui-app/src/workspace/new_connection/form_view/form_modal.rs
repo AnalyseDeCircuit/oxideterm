@@ -450,6 +450,9 @@ impl WorkspaceApp {
                                         .flex_col()
                                         .min_w(px(0.0))
                                         .gap(px(self.tokens.metrics.modal_section_gap))
+                                        .when(mosh_mode, |content| {
+                                            content.child(self.render_mosh_plugin_status(cx))
+                                        })
                                         .when(local_terminal_mode, |content| {
                                             content.child(self.render_local_terminal_form_branch(cx))
                                         })

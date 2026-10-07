@@ -50,7 +50,15 @@ fn send_ai_loop_delivery(defer_terminal: bool, sender: &AiStreamDeliverySender, 
 }
 
 const AI_TOOL_CALLS_PER_ROUND_SAFETY_LIMIT: usize = 16;
-const AI_RUNTIME_CONTEXT_MESSAGE_ID: &str = "runtime-context-v2";
+const AI_RUNTIME_CONTEXT_MESSAGE_ID: &str = oxideterm_ai::RUNTIME_CONTEXT_MESSAGE_ID;
+const AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID: &str = "runtime-context-policy";
+const AI_RUNTIME_CONTEXT_INSTRUCTIONS: &str = concat!(
+    "The final application runtime context is the current observation supplied by the application, not a user request. ",
+    "Its snapshotId identifies the observation and observedAtMs is its capture time.\n",
+    "Use stable resource_ref only for durable actions such as connecting a saved connection, reading settings or knowledge, and opening an application surface.\n",
+    "Use handle_id only for the current live terminal, local shell, SFTP session, or IDE workspace.\n",
+    "A stale handle must be rediscovered; never substitute a tab, session, node, or target id.",
+);
 
 async fn execute_ai_chat_tool_loop(
     mut config: AiChatStreamConfig,
@@ -976,6 +984,14 @@ async fn request_ai_runtime_context(
 }
 
 fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content: String) {
+    if !history.iter().any(|message| message.id == AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID) {
+        let mut policy = agent_chat_message(
+            AiChatRole::System,
+            AI_RUNTIME_CONTEXT_INSTRUCTIONS.to_string(),
+        );
+        policy.id = AI_RUNTIME_CONTEXT_POLICY_MESSAGE_ID.to_string();
+        history.insert(0, policy);
+    }
     let message = AiChatMessage {
         id: AI_RUNTIME_CONTEXT_MESSAGE_ID.to_string(),
         role: AiChatRole::System,
@@ -994,14 +1010,10 @@ fn replace_ai_runtime_context_message(history: &mut Vec<AiChatMessage>, content:
         branches: None,
         suggestions: Vec::new(),
     };
-    if let Some(existing) = history
-        .iter_mut()
-        .find(|entry| entry.id == AI_RUNTIME_CONTEXT_MESSAGE_ID)
-    {
-        *existing = message;
-    } else {
-        history.insert(0, message);
-    }
+    // Keep one fresh observation after the completed tool round. Retaining its
+    // internal system role keeps it out of persisted user turns and task selection.
+    history.retain(|entry| entry.id != AI_RUNTIME_CONTEXT_MESSAGE_ID);
+    history.push(message);
 }
 
 

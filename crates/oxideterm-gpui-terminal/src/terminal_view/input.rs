@@ -460,9 +460,9 @@ fn win32_key_sequence(
     };
     // The protocol permits an unknown scan code (0). Never invent a physical
     // key position from a logical key on non-US layouts.
-    let control_state = u8::from(modifiers.alt) * 2
-        | u8::from(modifiers.control) * 8
-        | u8::from(modifiers.shift) * 16;
+    let control_state = (u8::from(modifiers.alt) * 2)
+        | (u8::from(modifiers.control) * 8)
+        | (u8::from(modifiers.shift) * 16);
     let down = u8::from(event_type != KittyKeyEventType::Release);
     Some(Cow::Owned(format!(
         "\x1b[{virtual_key};0;{unicode_char};{down};{control_state};1_"

@@ -109,6 +109,31 @@ impl WorkspaceApp {
         };
 
         let popup = match (active_tab, open_select) {
+            (_, SettingsSelect::PluginMarketplaceSort) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for sort in [
+                    oxideterm_settings::PluginMarketplaceSort::Name,
+                    oxideterm_settings::PluginMarketplaceSort::RecentUpdates,
+                    oxideterm_settings::PluginMarketplaceSort::NewestListings,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.i18n
+                                .t(plugin_manager::plugin_marketplace_sort_label(sort)),
+                            sort == settings.plugin_marketplace_sort,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_settings_select();
+                            this.set_plugin_marketplace_sort(sort, cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::General, SettingsSelect::Language) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for language in language_options() {

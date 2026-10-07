@@ -2838,7 +2838,7 @@ mod tests {
         let staged_reference = created[1].clone();
         target.restore_checkpoint(&original).unwrap();
         target
-            .remove_synced_managed_key_slots(&[staged_reference.clone()])
+            .remove_synced_managed_key_slots(std::slice::from_ref(&staged_reference))
             .unwrap();
         assert!(target.managed_keychain.get(&staged_reference).is_err());
         assert_eq!(
@@ -3547,7 +3547,7 @@ mod tests {
         assert_eq!(source.export_saved_connections_snapshot().unwrap().revision, snapshot.revision);
         assert_eq!(snapshot.local_terminal_profiles, vec![profile.clone()]);
         target.apply_saved_connections_snapshot(snapshot.clone(), SavedConnectionsConflictStrategy::Merge).unwrap();
-        assert_eq!(target.local_terminal_profiles(), &[profile.clone()]);
+        assert_eq!(target.local_terminal_profiles(), std::slice::from_ref(&profile));
         let reloaded = ConnectionStore::load(target.path.clone()).unwrap();
         assert_eq!(reloaded.local_terminal_profiles()[0].cwd.as_deref(), Some("~/work/project"));
         assert_eq!(reloaded.local_terminal_profiles()[0].icon.as_deref(), Some("debian"));

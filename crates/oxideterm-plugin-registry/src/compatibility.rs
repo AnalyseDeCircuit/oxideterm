@@ -36,6 +36,7 @@ pub(crate) fn catalog_cache_path(settings_path: &Path) -> PathBuf {
 
 pub(crate) fn load_catalog_cache(
     settings_path: &Path,
+    installed_ids: &[&str],
 ) -> Result<Option<NativePluginRegistryIndex>, String> {
     let path = catalog_cache_path(settings_path);
     let file = match fs::File::open(path) {
@@ -51,9 +52,16 @@ pub(crate) fn load_catalog_cache(
     if bytes.len() as u64 > registry::NATIVE_PLUGIN_REGISTRY_MAX_BYTES {
         return Err("Plugin catalog cache exceeds size limit".into());
     }
-    let catalog = serde_json::from_slice(&bytes)
+    let mut catalog: NativePluginRegistryIndex = serde_json::from_slice(&bytes)
         .map_err(|error| format!("Invalid plugin catalog cache: {error}"))?;
     registry::validate_native_plugin_registry(&catalog)?;
+    for entry in &mut catalog.plugins {
+        if installed_ids.contains(&entry.id.as_str()) && entry.history_pending() {
+            if let Some(history) = catalog::load_cached_history(settings_path, entry)? {
+                *entry = history;
+            }
+        }
+    }
     Ok(Some(catalog))
 }
 

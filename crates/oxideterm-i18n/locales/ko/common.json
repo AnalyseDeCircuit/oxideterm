@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "연결하기 전에 Mosh 플러그인을 설치하거나 활성화하세요.",
+    "ready": "Mosh 플러그인이 설치되어 활성화되어 있습니다."
+  },
   "file_preview": {
     "entry_file_offset": "진입점 파일 오프셋",
     "subject": "주체",
@@ -254,6 +258,9 @@
     "shortcut_count": "개의 단축키"
   },
   "plugin": {
+    "install_queued": "대기 중 · {{position}}번째",
+    "installing_named": "{{name}} 설치 중",
+    "install_queue_count": "{{count}}개 대기 중",
     "jump_to_page": "페이지 이동",
     "total_pages": "총 {{pages}}페이지",
     "jump_page": "이동",
@@ -261,6 +268,9 @@
     "marketplace_sources": "호스트 소스",
     "marketplace_workspace": "작업 공간",
     "marketplace_utilities": "유틸리티",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "플러그인을 설치하고 활성화하면 에이전트 설정이 자동으로 생성되므로 실행 명령을 입력할 필요가 없습니다. 작업 디렉터리, 추가 인수, 환경 변수는 선택 사항이며, 비워 두면 기본값을 사용합니다. 로컬 프로그램을 사용하는 플러그인은 해당 공식 명령줄 프로그램이 필요합니다. 플러그인 안내에 따라 설치하고 로그인하세요.",
+    "marketplace_remote_connections": "원격 연결",
     "apply_page_size": "적용",
     "invalid_page_size": "올바른 양의 정수를 입력하세요",
     "page_range": "전체 {{total}}개 중 {{start}}–{{end}}개",
@@ -937,6 +947,10 @@
     "update_available": "업데이트 가능",
     "install_error": "설치 실패",
     "search_placeholder": "플러그인 검색...",
+    "marketplace_sort": "정렬: {{order}}",
+    "marketplace_sort_name": "이름",
+    "marketplace_sort_updated": "최근 업데이트",
+    "marketplace_sort_newest": "최근 등록",
     "marketplace_title": "OxideTerm 공식 플러그인 마켓",
     "marketplace_description": "OxideTerm 공식 카탈로그에 등록된 플러그인을 찾아 설치하고 업데이트합니다.",
     "marketplace_repository": "카탈로그 저장소",
@@ -999,6 +1013,12 @@
     "tab_not_available": "플러그인 탭 뷰를 사용할 수 없습니다",
     "tab_crashed": "플러그인 탭이 충돌했습니다",
     "detail_author": "작성자",
+    "license_label": "라이선스: {{license}}",
+    "install_required": "{{name}} 플러그인이 설치되지 않았습니다. 플러그인 마켓에서 설치한 후 다시 시도하세요.",
+    "enable_required": "설치된 {{name}} 플러그인을 사용할 수 없습니다. 플러그인 관리자에서 활성화하거나 업데이트한 후 다시 시도하세요.",
+    "license_not_declared": "명시되지 않음",
+    "view_license": "라이선스 보기",
+    "third_party_licenses": "타사 라이선스",
     "registry_capabilities": "기능: {{capabilities}}",
     "reload_success": "{{name}} 다시 스캔되었습니다.",
     "enable_success": "{{name}} 활성화됨.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "RDP 미리보기",
     "vnc_preview_title": "VNC 미리보기",
     "provider_missing": "원격 데스크톱 제공자를 사용할 수 없습니다.",
+    "plugin_ready": "원격 데스크톱 플러그인이 설치되어 활성화되었습니다.",
+    "plugin_required": "연결하기 전에 원격 데스크톱 플러그인을 설치하거나 활성화하세요.",
+    "manage_plugin": "플러그인 관리",
     "session_missing": "원격 데스크톱 세션을 사용할 수 없습니다.",
     "reconnect": "다시 연결",
     "resize_fixed": "서버 고정 크기",

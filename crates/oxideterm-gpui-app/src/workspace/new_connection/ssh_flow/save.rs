@@ -3432,6 +3432,29 @@ impl WorkspaceApp {
             }
         }
         let tx = self.ssh_worker_sender(cx);
+        if matches!(intent, SshConnectionIntent::Mosh(_))
+            && self.plugin_entity.read(cx).mosh_executable().is_none()
+        {
+            let host = config.host.clone();
+            let port = config.port;
+            let upstream_proxy = config.upstream_proxy.take();
+            let _ = tx.send(SshConnectionWorkerResult::Preflight {
+                config,
+                upstream_proxy,
+                title,
+                intent,
+                host,
+                port,
+                status: HostKeyStatus::Error {
+                    message: self.plugin_requirement_message(
+                        "com.oxideterm.terminal.mosh",
+                        "Mosh",
+                        cx,
+                    ),
+                },
+            });
+            return;
+        }
         let host = config.host.clone();
         let port = config.port;
         let connect_timeout_seconds = config.timeout_secs;

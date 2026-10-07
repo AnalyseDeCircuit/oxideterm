@@ -132,7 +132,7 @@ fn known_limitations() -> Vec<SshCapabilityLimitation> {
             capability: "direct-fido-security-key",
             layer: SshCapabilityLayer::OxideTermIntegration,
             status: SshCapabilityStatus::Partial,
-            note: "Agent-backed security-key signing is the intended path; direct private-key loading is rejected.",
+            note: "Direct ed25519-sk and ecdsa-sk signing requires the enabled FIDO Security Key plugin and a native prompt handler; SSH-agent signing remains available.",
         },
         SshCapabilityLimitation {
             capability: "legacy-ssh-algorithms",

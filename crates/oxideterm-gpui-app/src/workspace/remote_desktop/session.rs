@@ -4,6 +4,33 @@
 use super::*;
 
 impl RemoteDesktopSessionEntity {
+    fn refresh_plugin_provider(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(plugins) = self.plugin_entity.as_ref() else {
+            return true;
+        };
+        let provider = plugins.upgrade().and_then(|plugins| {
+            plugins
+                .read(cx)
+                .remote_desktop_providers()
+                .into_iter()
+                .find(|provider| provider.id == self.provider.id)
+        });
+        if let Some(provider) = provider {
+            self.provider = provider;
+            true
+        } else {
+            self.state.apply_event(RemoteDesktopHelperEvent::Status {
+                status: RemoteDesktopSessionStatus::Disconnected,
+                message: None,
+            });
+            cx.emit(RemoteDesktopSessionEvent::PluginRequired {
+                protocol: self.profile.protocol,
+            });
+            cx.notify();
+            false
+        }
+    }
+
     pub(in crate::workspace) fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
         self.audit_context.clone()
     }
@@ -174,7 +201,7 @@ impl RemoteDesktopSessionEntity {
         self.automatic_reconnect_task = Some(reconnect_task);
     }
 
-    fn shutdown(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
+    pub(super) fn shutdown(&mut self, mut window: Option<&mut Window>, cx: &mut Context<Self>) {
         let had_worker = self.worker.is_some();
         if self.connect_audit.is_some() {
             self.finish_connection_audit(oxideterm_audit::AuditOutcome::Cancelled);
@@ -691,6 +718,9 @@ impl RemoteDesktopSessionEntity {
         if self.worker.is_some() {
             return false;
         }
+        if !self.refresh_plugin_provider(cx) {
+            return false;
+        }
         self.start_connection_audit("desktop_connect", None);
         let profile = self.profile.clone();
         let provider = self.provider.clone();
@@ -744,6 +774,9 @@ impl RemoteDesktopSessionEntity {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.refresh_plugin_provider(cx) {
+            return;
+        }
         self.start_connection_audit("desktop_reconnect", Some(source));
         let (initial_request_size, initial_viewport_size) =
             initial_remote_desktop_sizes_for_session(self);
@@ -1033,7 +1066,8 @@ impl RemoteDesktopSessionEntity {
             let generation = match event {
                 RemoteDesktopSessionEvent::DeliveryReady { generation }
                 | RemoteDesktopSessionEvent::FrameApplyReady { generation } => generation,
-                RemoteDesktopSessionEvent::CredentialsRequired { .. }
+                RemoteDesktopSessionEvent::PluginRequired { .. }
+                | RemoteDesktopSessionEvent::CredentialsRequired { .. }
                 | RemoteDesktopSessionEvent::ClipboardTransferFailed
                 | RemoteDesktopSessionEvent::VncFileTransferCompleted
                 | RemoteDesktopSessionEvent::VncFileTransferFailed(_) => return,
@@ -1095,7 +1129,8 @@ impl RemoteDesktopSessionEntity {
                                 cx.notify();
                             }
                         }
-                        RemoteDesktopSessionEvent::CredentialsRequired { .. }
+                        RemoteDesktopSessionEvent::PluginRequired { .. }
+                        | RemoteDesktopSessionEvent::CredentialsRequired { .. }
                         | RemoteDesktopSessionEvent::ClipboardTransferFailed
                         | RemoteDesktopSessionEvent::VncFileTransferCompleted
                         | RemoteDesktopSessionEvent::VncFileTransferFailed(_) => {}
@@ -1237,6 +1272,10 @@ impl WorkspaceApp {
     ) {
         debug_assert_eq!(session_entity.read(cx).tab_id, tab_id);
         match event {
+            RemoteDesktopSessionEvent::PluginRequired { protocol } => {
+                self.show_missing_remote_desktop_plugin(*protocol, cx);
+                return;
+            }
             RemoteDesktopSessionEvent::CredentialsRequired { generation } => {
                 self.prompt_remote_desktop_credentials(session_entity, *generation, cx);
                 return;
@@ -1712,7 +1751,7 @@ impl WorkspaceApp {
 
         div()
             .flex_none()
-            .h(px(36.0))
+            .h(px(oxideterm_gpui_ui::WORKSPACE_STATUS_BAR_HEIGHT))
             .px(px(14.0))
             .flex()
             .items_center()
@@ -2824,6 +2863,125 @@ mod tests {
             assert_eq!(cx.read(|cx| session.read(cx).state.texture_generation()), 1);
             assert!(!frame_slot.has_queued_frame_events());
         }
+    }
+
+    #[gpui::test]
+    fn remote_desktop_plugin_removal_stops_only_its_sessions_and_blocks_missing_launches(
+        cx: &mut TestAppContext,
+    ) {
+        let window = cx.add_window(|_, _| RemoteDesktopSessionTestRoot);
+        let directory = tempfile::tempdir().unwrap();
+        let registry =
+            plugin_host::NativePluginRegistry::discover(&directory.path().join("settings.json"));
+        let runtime = Arc::new(tokio::runtime::Runtime::new().unwrap());
+        let plugins = cx.new(|cx| {
+            super::super::super::plugin_entity::PluginWorkspaceEntity::new(
+                runtime.clone(),
+                registry,
+                cx,
+            )
+        });
+        let desktops = cx.new(|_| RemoteDesktopWorkspaceEntity::new());
+        let mut sessions = Vec::new();
+        let mut completed = Vec::new();
+        for (index, protocol) in [RemoteDesktopProtocol::Vnc, RemoteDesktopProtocol::Rdp]
+            .into_iter()
+            .enumerate()
+        {
+            let tab_id = TabId(index as u64 + 100);
+            let mut provider = oxideterm_remote_desktop::builtin_provider_manifest(protocol);
+            provider.id = format!("com.oxideterm.remote-desktop.{}", protocol.provider_id());
+            let (request_tx, request_rx) = mpsc::channel();
+            let (completed_tx, completed_rx) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                let mut requests = Vec::new();
+                while let Ok(request) = request_rx.recv() {
+                    let close = matches!(request, RemoteDesktopHelperRequest::Close);
+                    requests.push(request);
+                    if close {
+                        break;
+                    }
+                }
+                completed_tx.send(requests).unwrap();
+            });
+            let session = cx.new(|cx| {
+                let mut session = RemoteDesktopSessionEntity::new(
+                    tab_id,
+                    preview_remote_desktop_profile(protocol),
+                    provider,
+                    Some(RemoteDesktopSecret::from("plugin-session-fixture")),
+                    directory.path().join("certificates.json"),
+                    RemoteDesktopFrameDeliverySlot::new(),
+                    window.into(),
+                );
+                session.plugin_entity = Some(plugins.downgrade());
+                session.worker = Some(RemoteDesktopWorkerOwner::new(request_tx, worker));
+                session.worker_generation = 7;
+                session.install_release_handler(cx);
+                session
+            });
+            desktops.update(cx, |desktops, _| {
+                desktops.insert(tab_id, session.clone(), Vec::new())
+            });
+            sessions.push(session);
+            completed.push(completed_rx);
+        }
+        let vnc_id = cx.read(|cx| sessions[0].read(cx).provider.id.clone());
+        let workers = desktops.update(cx, |desktops, cx| desktops.stop_plugins(Some(&vnc_id), cx));
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(
+            completed[0].recv().unwrap(),
+            vec![
+                RemoteDesktopHelperRequest::ReleaseAllInputs,
+                RemoteDesktopHelperRequest::Close
+            ]
+        );
+        cx.read(|cx| {
+            let vnc = sessions[0].read(cx);
+            assert_eq!(
+                vnc.state.snapshot().status,
+                RemoteDesktopSessionStatus::Disconnected
+            );
+            assert_eq!(vnc.worker_generation, 8);
+            assert!(vnc.password.is_none());
+            assert!(vnc.worker.is_none());
+            assert!(sessions[1].read(cx).worker.is_some());
+            assert!(sessions[1].read(cx).password.is_some());
+        });
+        assert!(completed[1].try_recv().is_err());
+        let events = cx.new(|_| Vec::<RemoteDesktopSessionEvent>::new());
+        let _subscription = events.update(cx, |_, cx| {
+            cx.subscribe(&sessions[0], |events, _session, event, _cx| {
+                events.push(*event)
+            })
+        });
+        sessions[0].update(cx, |session, cx| {
+            assert!(!session.start_worker(RemoteDesktopSize::clamped(200, 120), None, None, cx));
+            assert_eq!(session.worker_generation, 8);
+            assert!(session.worker.is_none());
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert_eq!(
+                events.read(cx).as_slice(),
+                &[RemoteDesktopSessionEvent::PluginRequired {
+                    protocol: RemoteDesktopProtocol::Vnc,
+                }]
+            )
+        });
+        let workers = desktops.update(cx, |desktops, cx| desktops.stop_plugins(None, cx));
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(
+            completed[1].recv().unwrap(),
+            vec![
+                RemoteDesktopHelperRequest::ReleaseAllInputs,
+                RemoteDesktopHelperRequest::Close
+            ]
+        );
     }
 
     #[gpui::test]

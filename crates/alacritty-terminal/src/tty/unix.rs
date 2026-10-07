@@ -130,31 +130,17 @@ impl ShellUser {
         let mut buf = [0; 1024];
         let pw = get_pw_entry(&mut buf);
 
-        let user = match env::var("USER") {
-            Ok(user) => user,
-            Err(_) => match pw {
-                Ok(ref pw) => pw.name.to_owned(),
-                Err(err) => return Err(err),
-            },
-        };
-
-        let home = match env::var("HOME") {
-            Ok(home) => home,
-            Err(_) => match pw {
-                Ok(ref pw) => pw.dir.to_owned(),
-                Err(err) => return Err(err),
-            },
-        };
-
-        let shell = match env::var("SHELL") {
-            Ok(shell) => shell,
-            Err(_) => match pw {
-                Ok(ref pw) => pw.shell.to_owned(),
-                Err(err) => return Err(err),
-            },
-        };
-
-        Ok(Self { user, home, shell })
+        match (env::var("USER"), env::var("HOME"), env::var("SHELL")) {
+            (Ok(user), Ok(home), Ok(shell)) => Ok(Self { user, home, shell }),
+            (user, home, shell) => {
+                let pw = pw?;
+                Ok(Self {
+                    user: user.unwrap_or_else(|_| pw.name.to_owned()),
+                    home: home.unwrap_or_else(|_| pw.dir.to_owned()),
+                    shell: shell.unwrap_or_else(|_| pw.shell.to_owned()),
+                })
+            }
+        }
     }
 }
 

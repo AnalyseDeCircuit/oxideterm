@@ -960,57 +960,27 @@ impl WorkspaceApp {
         let Some(parts) = ai_turn_parts(message) else {
             return body;
         };
-        let mut buffered_tool_parts = Vec::new();
-        let mut buffered_tool_round_id: Option<String> = None;
-        let mut segment_index = 0usize;
-
-        for part in parts {
+        for range in ai_activity_ranges(parts) {
+            let segment_index = range.start;
+            let segment_parts = &parts[range.clone()];
+            let part = &segment_parts[0];
             let part_type = part
                 .get("type")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
-            if matches!(part_type, "tool_call" | "tool_result") {
-                let next_round_id = ai_tool_part_round_id(message, part);
-                if !buffered_tool_parts.is_empty()
-                    && buffered_tool_round_id.as_deref() != next_round_id.as_deref()
-                {
-                    body = body.child(self.render_ai_tool_part_segment(
-                        message,
-                        segment_index,
-                        &buffered_tool_parts,
-                        cx,
-                    ));
-                    buffered_tool_parts.clear();
-                    buffered_tool_round_id = None;
-                    segment_index = segment_index.saturating_add(1);
-                }
-
-                buffered_tool_parts.push(part.clone());
-                if buffered_tool_round_id.is_none() {
-                    buffered_tool_round_id = next_round_id;
-                }
-                continue;
-            }
-
-            if !buffered_tool_parts.is_empty() {
-                body = body.child(self.render_ai_tool_part_segment(
+            if ai_part_is_activity(part) {
+                body = body.child(self.render_ai_activity_segment(
                     message,
                     segment_index,
-                    &buffered_tool_parts,
+                    segment_parts,
+                    message.is_streaming && range.end == parts.len(),
                     cx,
                 ));
-                buffered_tool_parts.clear();
-                buffered_tool_round_id = None;
-                segment_index = segment_index.saturating_add(1);
+                continue;
             }
-
             match part_type {
                 "text" => {
-                    if let Some(text) = part
-                        .get("text")
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|text| !text.trim().is_empty())
-                    {
+                    if let Some(text) = part.get("text").and_then(serde_json::Value::as_str) {
                         let text = ai_visible_suggestion_content(text);
                         if text.trim().is_empty() {
                             continue;
@@ -1020,27 +990,6 @@ impl WorkspaceApp {
                         segment.content = text;
                         segment.tool_calls.clear();
                         body = body.child(self.render_ai_message_content(&segment, viewport, cx));
-                        segment_index = segment_index.saturating_add(1);
-                    }
-                }
-                "thinking" if self.ai_entity.read(cx).agents.detail.is_none() => {
-                    if let Some(text) = part
-                        .get("text")
-                        .and_then(serde_json::Value::as_str)
-                        .filter(|text| !text.trim().is_empty())
-                    {
-                        body = body.child(
-                            self.render_ai_thinking_part(
-                                message,
-                                segment_index,
-                                text,
-                                part.get("streaming")
-                                    .and_then(serde_json::Value::as_bool)
-                                    .unwrap_or(message.is_streaming),
-                                cx,
-                            ),
-                        );
-                        segment_index = segment_index.saturating_add(1);
                     }
                 }
                 "warning" | "error" => {
@@ -1063,12 +1012,11 @@ impl WorkspaceApp {
                                         "ai-turn-warning",
                                         (&message.id, segment_index),
                                     ),
-                                    text.to_string(),
+                                    text.to_owned(),
                                     self.tokens.ui.error,
                                     cx,
                                 )),
                         );
-                        segment_index = segment_index.saturating_add(1);
                     }
                 }
                 "guardrail" => {
@@ -1084,22 +1032,193 @@ impl WorkspaceApp {
                             text,
                             cx,
                         ));
-                        segment_index = segment_index.saturating_add(1);
                     }
                 }
                 _ => {}
             }
         }
-
-        if !buffered_tool_parts.is_empty() {
-            body = body.child(self.render_ai_tool_part_segment(
-                message,
-                segment_index,
-                &buffered_tool_parts,
-                cx,
-            ));
-        }
         body
+    }
+
+    fn render_ai_activity_segment(
+        &self,
+        message: &AiChatMessage,
+        start: usize,
+        parts: &[serde_json::Value],
+        active: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let calls = ai_activity_tool_calls(message, parts);
+        if calls.len() <= 1 {
+            return self
+                .render_ai_activity_steps(message, start, parts, &calls, cx)
+                .into_any_element();
+        }
+        let status = ai_tool_group_status(&calls);
+        let needs_attention = calls.iter().any(|call| {
+            matches!(
+                ai_tool_status_from_value(call.get("status")),
+                AiToolStatus::PendingApproval
+                    | AiToolStatus::PendingSelection
+                    | AiToolStatus::Error
+                    | AiToolStatus::Rejected
+            )
+        });
+        // The transcript height cache tracks disclosures under this owner prefix.
+        let key = format!("{}-thinking-activity-{start}", message.id);
+        let default_expanded =
+            active || self.settings_store.settings().ai.thinking_default_expanded;
+        let expanded = needs_attention
+            || self
+                .ai_entity
+                .read(cx)
+                .chat_ui()
+                .thinking_expansion_state
+                .get(&key)
+                .copied()
+                .unwrap_or(default_expanded);
+        let label = if status == AiToolStatus::Completed {
+            self.i18n
+                .t("ai.tool_use.group_heading")
+                .replace("{{count}}", &calls.len().to_string())
+        } else {
+            self.ai_tool_status_label(status)
+        };
+        let toggle_key = key.clone();
+        let mut header = ai_thinking_header(
+            &self.tokens,
+            label,
+            false,
+            self.render_animated_chevron(
+                (
+                    SharedString::from(format!("ai-activity-chevron-{key}")),
+                    expanded as usize,
+                ),
+                expanded,
+                12.0,
+                rgb(self.tokens.ui.text_muted),
+            ),
+            if matches!(status, AiToolStatus::Running | AiToolStatus::Approved) {
+                self.render_loading_icon(
+                    (
+                        SharedString::from(format!("ai-activity-status-{key}")),
+                        0usize,
+                    ),
+                    12.0,
+                    rgb(self.tokens.ui.text_muted),
+                )
+            } else {
+                Self::render_lucide_icon(
+                    if status == AiToolStatus::Completed {
+                        LucideIcon::ListChecks
+                    } else {
+                        ai_tool_status_icon(status)
+                    },
+                    12.0,
+                    rgb(if needs_attention {
+                        ai_tool_status_color(&self.tokens, status)
+                    } else {
+                        self.tokens.ui.text_muted
+                    }),
+                )
+            },
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, _, cx| {
+                if !needs_attention {
+                    this.toggle_ai_thinking_with_motion(toggle_key.clone(), default_expanded, cx);
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .id(SharedString::from(format!("ai-activity-header-{key}")));
+        if let Some(duration) = ai_tool_group_duration(&calls) {
+            let tokens = self.tokens;
+            let label = self
+                .i18n
+                .t("ai.tool_use.total_duration")
+                .replace("{{duration}}", &duration.to_string());
+            header = header.tooltip(move |_, cx| {
+                oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
+            });
+        }
+        let motion_key = format!("ai:{key}:thinking");
+        let mut group = div()
+            .w_full()
+            .min_w_0()
+            .my(px(self.tokens.spacing.one / 2.0))
+            .child(header);
+        if self.disclosure_motions.retained(&motion_key, expanded) {
+            let steps = self
+                .render_ai_activity_steps(message, start, parts, &calls, cx)
+                .ml(px(self.tokens.spacing.two))
+                .pl(px(self.tokens.spacing.two))
+                .border_l_1()
+                .border_color(rgba((self.tokens.ui.border << 8) | 0x80));
+            group =
+                group.child(
+                    self.disclosure_motions
+                        .render(&motion_key, &self.tokens, steps, None),
+                );
+        }
+        group.into_any_element()
+    }
+
+    fn render_ai_activity_steps(
+        &self,
+        message: &AiChatMessage,
+        start: usize,
+        parts: &[serde_json::Value],
+        calls: &[serde_json::Value],
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let mut steps = div().flex().flex_col().w_full().min_w_0();
+        let mut shown = std::collections::HashSet::new();
+        for (offset, part) in parts.iter().enumerate() {
+            match part.get("type").and_then(serde_json::Value::as_str) {
+                Some("thinking") if self.ai_entity.read(cx).agents.detail.is_none() => {
+                    if let Some(text) = part
+                        .get("text")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|text| !text.trim().is_empty())
+                    {
+                        steps = steps.child(
+                            self.render_ai_thinking_part(
+                                message,
+                                start + offset,
+                                text,
+                                part.get("streaming")
+                                    .and_then(serde_json::Value::as_bool)
+                                    .unwrap_or(message.is_streaming),
+                                cx,
+                            ),
+                        );
+                    }
+                }
+                Some("tool_call" | "tool_result") => {
+                    let Some(id) = ai_tool_part_id(part) else {
+                        continue;
+                    };
+                    if !shown.insert(id) {
+                        continue;
+                    }
+                    if let Some(call) = calls
+                        .iter()
+                        .find(|call| call.get("id").and_then(serde_json::Value::as_str) == Some(id))
+                    {
+                        let mut segment = message.clone();
+                        segment.id = format!("{}-tools-{}", message.id, start + offset);
+                        segment.content.clear();
+                        segment.tool_calls = vec![call.clone()];
+                        steps = steps.child(self.render_ai_tool_calls(&segment, cx));
+                    }
+                }
+                _ => {}
+            }
+        }
+        steps
     }
 
     pub(in crate::workspace) fn render_ai_guardrail_part(
@@ -1285,142 +1404,15 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_ai_tool_part_segment(
-        &self,
-        message: &AiChatMessage,
-        segment_index: usize,
-        parts: &[serde_json::Value],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut values = Vec::new();
-        let mut ids = Vec::<String>::new();
-        for part in parts {
-            let id = part
-                .get("id")
-                .or_else(|| part.get("toolCallId"))
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if id.is_empty() || ids.iter().any(|existing| existing == id) {
-                continue;
-            }
-            ids.push(id.to_string());
-        }
 
-        for id in ids {
-            if let Some(existing) = message.tool_calls.iter().find(|call| {
-                call.get("id")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|existing| existing == id)
-            }) {
-                values.push(existing.clone());
-            } else if let Some(value) = ai_tool_call_value_from_turn_parts(&id, parts) {
-                values.push(value);
-            }
-        }
-
-        let mut segment = message.clone();
-        segment.id = format!("{}-tools-{segment_index}", message.id);
-        segment.content.clear();
-        segment.tool_calls = values;
-        self.render_ai_tool_calls(&segment, cx)
-    }
 
     pub(in crate::workspace) fn render_ai_tool_calls(
         &self,
         message: &AiChatMessage,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut block = ai_tool_block(&self.tokens).when(message.tool_calls.len() > 1, |block| {
-            block.child(ai_tool_heading(
-                &self.tokens,
-                format!(
-                    "{} ({})",
-                    self.i18n.t("ai.tool_use.heading"),
-                    message.tool_calls.len()
-                ),
-            ))
-        });
-        let should_condense = message.tool_calls.len() >= 5;
-        let split_at = if should_condense {
-            message.tool_calls.len().saturating_sub(3)
-        } else {
-            0
-        };
-        let condensed_key = format!("{}:condensed-tools", message.id);
-        let show_condensed = self
-            .ai_entity
-            .read(cx)
-            .chat_ui()
-            .tool_call_expansion_state
-            .contains(&condensed_key);
-        if should_condense {
-            let hidden_count = split_at;
-            let expanded_key = condensed_key;
-            let label = if show_condensed {
-                self.i18n.t("ai.tool_use.condensed_label")
-            } else {
-                self.i18n
-                    .t("ai.tool_use.condensed")
-                    .replace("{{count}}", &hidden_count.to_string())
-            };
-            block = block.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.one))
-                    .rounded(px(self.tokens.radii.md))
-                    .px(px(self.tokens.spacing.two))
-                    .py(px(self.tokens.spacing.one))
-                    .bg(rgba((self.tokens.ui.bg_hover << 8) | 0x33))
-                    .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x66)))
-                    .text_size(px(10.0))
-                    .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x66))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::FileArchive,
-                        12.0,
-                        rgba((self.tokens.ui.text_muted << 8) | 0x80),
-                    ))
-                    .child(div().flex_1().min_w_0().child(
-                        self.render_display_text_with_role_and_alpha(
-                            SelectableTextRole::NonSelectable,
-                            "ai-tool-condensed-label",
-                            label.clone(),
-                            label,
-                            self.tokens.ui.text_muted,
-                            0x66 as f32 / 255.0,
-                            cx,
-                        ),
-                    ))
-                    .child(self.render_animated_chevron(
-                        (
-                            gpui::SharedString::from(format!(
-                                "tool-condensed-chevron-{expanded_key}"
-                            )),
-                            show_condensed as usize,
-                        ),
-                        show_condensed,
-                        12.0,
-                        rgba((self.tokens.ui.text_muted << 8) | 0x80),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.ai_entity.update(cx, |ai, _cx| {
-                                ai.toggle_tool_call_expansion(expanded_key.clone());
-                            });
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
-            );
-        }
-        let calls = message
-            .tool_calls
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| !should_condense || show_condensed || *index >= split_at)
-            .map(|(_, call)| call);
-        for call in calls {
+        let mut block = ai_tool_block(&self.tokens);
+        for call in &message.tool_calls {
             let approval_generation = call
                 .get("approvalGeneration")
                 .and_then(serde_json::Value::as_u64)
@@ -1520,7 +1512,7 @@ impl WorkspaceApp {
                 duration: result
                     .and_then(|value| value.pointer("/meta/durationMs"))
                     .and_then(serde_json::Value::as_u64)
-                    .map(|duration| format!("{duration}ms")),
+                    .map(|duration| format!("{duration} ms")),
                 pending_denied_command: risk == AiToolRisk::Destructive,
                 bypass_approval,
                 bypass_label: self.i18n.t("ai.tool_use.bypass_badge"),
@@ -1561,11 +1553,6 @@ impl WorkspaceApp {
                             rgb(ai_tool_status_color(&self.tokens, status)),
                         )
                     },
-                    Self::render_lucide_icon(
-                        LucideIcon::Wrench,
-                        12.0,
-                        rgba((self.tokens.ui.text_muted << 8) | 0x99),
-                    ),
                     self.render_animated_chevron(
                         (
                             gpui::SharedString::from(format!("tool-call-chevron-{expansion_key}")),
@@ -1586,7 +1573,22 @@ impl WorkspaceApp {
                 ),
             );
 
-            let command_preview = (status == AiToolStatus::PendingApproval)
+            if status != AiToolStatus::Completed {
+                item = item.child(
+                    div()
+                        .pl(px(self.tokens.spacing.two + 18.0))
+                        .pr(px(self.tokens.spacing.two))
+                        .pb(px(self.tokens.spacing.one))
+                        .text_size(px(11.0))
+                        .text_color(rgb(if status == AiToolStatus::Error {
+                            self.tokens.ui.error
+                        } else {
+                            self.tokens.ui.text_muted
+                        }))
+                        .child(view.summary.clone()),
+                );
+            }
+            let command_preview = (risk != AiToolRisk::CredentialSensitive)
                 .then(|| arguments_value.as_ref().and_then(ai_tool_command_preview))
                 .flatten();
             let argument_text = command_preview
@@ -1594,13 +1596,29 @@ impl WorkspaceApp {
                 .map(|(_, parameters)| parameters.clone())
                 .unwrap_or_else(|| pretty_tool_json_or_raw(&arguments));
             let mut details = ai_tool_details(&self.tokens);
+            details = details.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(self.tokens.spacing.one))
+                    .text_size(px(11.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                   .child(view.summary.clone())
+                    .child(view.risk_label.clone())
+                    .children(
+                        view.capability
+                            .clone()
+                            .filter(|capability| capability != &view.risk_label),
+                    ),
+            );
             if let Some((command, _)) = command_preview {
                 let command = Arc::new(command);
                 let label = self.i18n.t("terminal.command_bar.command");
                 let content = self.render_selectable_styled_text_in_group(
                     crate::workspace::selectable_text::selectable_document_group_id(),
                     crate::workspace::selectable_text::selectable_text_id(
-                        "ai-tool-command", &expansion_key,
+                        "ai-tool-command",
+                        &expansion_key,
                     ),
                     0,
                     command.as_str().to_owned().into(),
@@ -1658,8 +1676,8 @@ impl WorkspaceApp {
                 } else {
                     div().child(argument_text).into_any_element()
                 };
-                let parameters_scroll =
-                    self.selectable_text_scroll_handle(format!("ai-tool-parameters:{expansion_key}"));
+                let parameters_scroll = self
+                    .selectable_text_scroll_handle(format!("ai-tool-parameters:{expansion_key}"));
                 details = details.child(
                     div()
                         .child(ai_tool_section_label(
@@ -1771,6 +1789,10 @@ impl WorkspaceApp {
                     ),
                     div(),
                 ));
+            }
+
+            if let Some(prompt) = self.render_cursor_request(approval_generation, &id, cx) {
+                item = item.child(prompt);
             }
 
             if name == "ask_user" {
@@ -2434,7 +2456,77 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_tool_display_name(&self, name: &str) -> String {
+        if name == "cursor/ask_question" { return self.i18n.t("ai.questions.waiting"); }
+        if name == "cursor/create_plan" { return self.i18n.t("ai.tool_use.approval_required"); }
         self.localized_ai_tool_value("tool_names", name)
+    }
+
+    fn render_cursor_request(&self, generation: u64, id: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (request, selections) = {
+            let ai = self.ai_entity.read(cx);
+            let pending = ai.pending_cursor_requests.get(&(generation, id.into()))?;
+            if pending.response_tx.as_ref().is_none_or(|sender| sender.is_closed()) { return None; }
+            (pending.request.clone(), pending.selections.clone())
+        };
+        let mut body = div().w_full().min_w_0().flex().flex_col()
+            .gap(px(self.tokens.spacing.two)).p(px(self.tokens.spacing.three)).text_size(px(12.0));
+        match &request {
+            oxideterm_ai::CursorRequest::Questions(request) => {
+                if let Some(title) = &request.title { body = body.child(title.clone()); }
+                for (question_index, question) in request.questions.iter().enumerate() {
+                    body = body.child(question.prompt.clone());
+                    for (option_index, option) in question.options.iter().enumerate() {
+                        let selected = selections[question_index].contains(&option.id);
+                        let call_id = id.to_owned();
+                        body = body.child(self.agent_control(
+                            format!("cursor-choice-{generation}-{id}-{question_index}-{option_index}"), option.label.clone(),
+                            checkbox(&self.tokens, option.label.clone(), selected),
+                            move |this, _, cx| {
+                                this.ai_entity.update(cx, |ai, _| ai.select_cursor_option(generation, &call_id, question_index, option_index));
+                                cx.notify();
+                            }, cx,
+                        ));
+                    }
+                }
+            }
+            oxideterm_ai::CursorRequest::Plan(request) => {
+                if let Some(name) = &request.name { body = body.child(name.clone()); }
+                if let Some(overview) = &request.overview { body = body.child(overview.clone()); }
+                body = body.child(self.render_selectable_text(
+                    crate::workspace::selectable_text::selectable_text_id("cursor-plan", &format!("{generation}:{id}")),
+                    request.plan.clone(), self.tokens.ui.text, cx,
+                ));
+            }
+        }
+        let ready = request.response(true, &selections).is_some();
+        let is_plan = matches!(&request, oxideterm_ai::CursorRequest::Plan(_));
+        let accept_id = id.to_owned();
+        let reject_id = id.to_owned();
+        let actions = div().flex().flex_wrap().gap(px(8.0))
+            .child(self.workspace_toolbar_action_button(
+                self.i18n.t(if is_plan {"ai.tool_use.approve"} else {"ai.questions.answer"}),
+                None,
+                ToolbarButtonOptions { button: ButtonOptions { disabled: !ready, ..Default::default() }, ..Default::default() },
+                cx.listener(move |this, _, _, cx| { this.resolve_ai_cursor_request(generation, &accept_id, true, cx); }),
+            ))
+            .child(self.agent_button(
+                format!("cursor-reject-{generation}-{id}"),
+                self.i18n.t(if is_plan {"ai.tool_use.reject"} else {"ai.message.cancel"}),
+                move |this, _, cx| { this.resolve_ai_cursor_request(generation, &reject_id, false, cx); }, cx,
+            ));
+        Some(body.child(actions).into_any_element())
+    }
+
+    fn resolve_ai_cursor_request(&mut self, generation: u64, id: &str, accepted: bool, cx: &mut Context<Self>) {
+        let route = self.ai_entity.read(cx).pending_cursor_requests.get(&(generation, id.into()))
+            .map(|pending| (pending.conversation_id.clone(), pending.assistant_id.clone(), pending.request.method()));
+        let Some((conversation, assistant, method)) = route else { return; };
+        if self.ai_entity.update(cx, |ai, _| ai.resolve_cursor_request(generation, id, accepted)) {
+            self.apply_ai_tool_status(generation, &conversation, &assistant, id, method, "{}",
+                if accepted {"completed"} else {"rejected"}, None, Some("read".into()), None,
+                false, None, None, None, cx);
+            cx.notify();
+        }
     }
 
     pub(in crate::workspace) fn ai_tool_risk_label(&self, risk: AiToolRisk) -> String {
@@ -2541,6 +2633,95 @@ pub(in crate::workspace) fn ai_tool_status_from_value(
     }
 }
 
+fn ai_part_is_activity(part: &serde_json::Value) -> bool {
+    matches!(
+        part.get("type").and_then(serde_json::Value::as_str),
+        Some("thinking" | "tool_call" | "tool_result")
+    )
+}
+
+fn ai_activity_ranges(parts: &[serde_json::Value]) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let mut start = 0;
+    while start < parts.len() {
+        let mut end = start + 1;
+        if ai_part_is_activity(&parts[start]) {
+            while end < parts.len() && ai_part_is_activity(&parts[end]) {
+                end += 1;
+            }
+        }
+        ranges.push(start..end);
+        start = end;
+    }
+    ranges
+}
+
+fn ai_tool_part_id(part: &serde_json::Value) -> Option<&str> {
+    if !matches!(
+        part.get("type").and_then(serde_json::Value::as_str),
+        Some("tool_call" | "tool_result")
+    ) {
+        return None;
+    }
+    part.get("id")
+        .or_else(|| part.get("toolCallId"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty())
+}
+
+fn ai_activity_tool_calls(
+    message: &AiChatMessage,
+    parts: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    let mut calls = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for part in parts {
+        let Some(id) = ai_tool_part_id(part) else {
+            continue;
+        };
+        if !seen.insert(id) {
+            continue;
+        }
+        if let Some(call) = message
+            .tool_calls
+            .iter()
+            .find(|call| call.get("id").and_then(serde_json::Value::as_str) == Some(id))
+        {
+            calls.push(call.clone());
+        } else if let Some(call) = ai_tool_call_value_from_turn_parts(id, parts) {
+            calls.push(call);
+        }
+    }
+    calls
+}
+
+fn ai_tool_group_status(calls: &[serde_json::Value]) -> AiToolStatus {
+    [
+        AiToolStatus::PendingApproval,
+        AiToolStatus::PendingSelection,
+        AiToolStatus::Error,
+        AiToolStatus::Running,
+        AiToolStatus::Approved,
+        AiToolStatus::Pending,
+        AiToolStatus::Rejected,
+        AiToolStatus::Completed,
+    ]
+    .into_iter()
+    .find(|status| {
+        calls
+            .iter()
+            .any(|call| ai_tool_status_from_value(call.get("status")) == *status)
+    })
+    .unwrap_or(AiToolStatus::Pending)
+}
+
+fn ai_tool_group_duration(calls: &[serde_json::Value]) -> Option<u64> {
+    // Tool durations can overlap; this is cumulative tool time, not wall-clock latency.
+    calls.iter().try_fold(0u64, |total, call| {
+        total.checked_add(call.pointer("/result/meta/durationMs")?.as_u64()?)
+    })
+}
+
 fn ai_runtime_recovery_message_key(code: &str) -> Option<&'static str> {
     match code {
         "agent_direction_changed" => Some("settings_view.ai.replanning"),
@@ -2614,37 +2795,6 @@ pub(in crate::workspace) fn ai_turn_parts(
         .and_then(serde_json::Value::as_array)
 }
 
-pub(in crate::workspace) fn ai_tool_part_round_id(
-    message: &AiChatMessage,
-    part: &serde_json::Value,
-) -> Option<String> {
-    let tool_call_id = part
-        .get("id")
-        .or_else(|| part.get("toolCallId"))
-        .and_then(serde_json::Value::as_str)?;
-    let rounds = message
-        .turn
-        .as_ref()
-        .and_then(|turn| turn.get("toolRounds"))
-        .and_then(serde_json::Value::as_array)?;
-    rounds.iter().find_map(|round| {
-        let has_tool_call = round
-            .get("toolCalls")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|tool_calls| {
-                tool_calls.iter().any(|tool_call| {
-                    tool_call
-                        .get("id")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|existing| existing == tool_call_id)
-                })
-            });
-        has_tool_call
-            .then(|| round.get("id").and_then(serde_json::Value::as_str))
-            .flatten()
-            .map(str::to_string)
-    })
-}
 
 pub(in crate::workspace) fn ai_tool_call_value_from_turn_parts(
     id: &str,
@@ -2837,6 +2987,81 @@ impl gpui::Render for AiCommandPreview {
 #[cfg(test)]
 mod command_preview_tests {
     use super::*;
+
+    #[test]
+    fn activity_sections_group_rounds_without_crossing_text_or_alerts() {
+        let parts = serde_json::json!([
+            {"type":"thinking", "id":"reasoning", "text":"inspect"},
+            {"type":"tool_call", "id":"a", "name":"list_targets", "argumentsText":"{}"},
+            {"type":"tool_result", "toolCallId":"a", "success":true, "output":"targets"},
+            {"type":"thinking", "text":"execute"},
+            {"type":"tool_call", "id":"b", "name":"run_command", "argumentsText":"{\"command\":\"pwd\"}"},
+            {"type":"tool_result", "toolCallId":"b", "success":false, "output":"failed"},
+            {"type":"thinking", "text":"review"},
+            {"type":"text", "text":"The command failed."},
+            {"type":"thinking", "text":"retry"},
+            {"type":"tool_call", "id":"c", "name":"run_command"},
+            {"type":"warning", "message":"Check the target"},
+            {"type":"tool_result", "toolCallId":"c", "success":true},
+            {"type":"guardrail", "message":"Approval required"}
+        ]);
+        let parts = parts.as_array().unwrap();
+        assert_eq!(
+            ai_activity_ranges(parts),
+            vec![0..7, 7..8, 8..10, 10..11, 11..12, 12..13]
+        );
+        let message: AiChatMessage = serde_json::from_value(serde_json::json!({
+            "id":"assistant", "role":"assistant", "content":"", "timestamp_ms":0,
+            "tool_calls":[{"id":"b", "name":"run_command", "status":"pending_approval", "approvalGeneration":7}]
+        })).unwrap();
+        assert_eq!(
+            ai_activity_tool_calls(&message, &parts[..7]),
+            vec![
+                serde_json::json!({"id":"a", "name":"list_targets", "arguments":"{}", "status":"completed", "result":{"ok":true,"output":"targets"}}),
+                serde_json::json!({"id":"b", "name":"run_command", "status":"pending_approval", "approvalGeneration":7})
+            ]
+        );
+        let replay: AiChatMessage = serde_json::from_value(serde_json::json!({
+            "id":"history", "role":"assistant", "content":"", "timestamp_ms":0
+        }))
+        .unwrap();
+        let calls = ai_activity_tool_calls(&replay, &parts[..7]);
+        assert_eq!(
+            calls[1],
+            serde_json::json!({"id":"b", "name":"run_command", "arguments":"{\"command\":\"pwd\"}", "status":"error", "result":{"ok":false,"output":"failed"}})
+        );
+    }
+
+    #[test]
+    fn tool_group_status_and_duration_cover_mixed_calls() {
+        for (statuses, expected) in [
+            (vec!["completed", "completed"], AiToolStatus::Completed),
+            (vec!["completed", "running"], AiToolStatus::Running),
+            (
+                vec!["completed", "pending_approval", "running"],
+                AiToolStatus::PendingApproval,
+            ),
+            (
+                vec!["completed", "pending_user_selection"],
+                AiToolStatus::PendingSelection,
+            ),
+            (vec!["running", "error", "completed"], AiToolStatus::Error),
+            (vec!["rejected", "completed"], AiToolStatus::Rejected),
+        ] {
+            let calls: Vec<_> = statuses
+                .iter()
+                .map(|status| serde_json::json!({"status":status}))
+                .collect();
+            assert_eq!(ai_tool_group_status(&calls), expected, "{statuses:?}");
+        }
+        let mut calls = vec![
+            serde_json::json!({"result":{"meta":{"durationMs":1}}}),
+            serde_json::json!({"result":{"meta":{"durationMs":535}}}),
+        ];
+        assert_eq!(ai_tool_group_duration(&calls), Some(536));
+        calls.push(serde_json::json!({"status":"running"}));
+        assert_eq!(ai_tool_group_duration(&calls), None);
+    }
 
     struct PreviewHost {
         preview: gpui::Entity<AiCommandPreview>,

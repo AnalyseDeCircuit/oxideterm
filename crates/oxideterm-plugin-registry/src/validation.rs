@@ -49,6 +49,134 @@ pub(crate) fn validate_native_plugin_manifest(
     // Permission declarations cover only sensitive data and side effects; safe
     // redacted host projections remain available without declarations.
     normalize_native_plugin_capabilities(&manifest.permissions.capabilities)?;
+    let helper = manifest
+        .contributes
+        .as_ref()
+        .and_then(|value| value.helper.as_ref());
+    let is_helper = manifest
+        .runtime
+        .as_ref()
+        .is_some_and(|runtime| runtime.kind == NativePluginRuntimeKind::Helper);
+    if is_helper != helper.is_some() {
+        return Err("Helper runtime and protocol metadata must be declared together".into());
+    }
+    if let Some(definition) = helper {
+        if !matches!(
+            (
+                definition.feature.as_str(),
+                definition.protocol.as_str(),
+                definition.protocol_version
+            ),
+            ("acp", "acp", 1)
+                | ("remote-desktop", "oxideterm-remote-desktop", 1)
+                | ("terminal-transport", "oxideterm-mosh", 1)
+                | ("ssh-authentication", "oxideterm-security-key", 1)
+        ) {
+            return Err("Unsupported helper feature, protocol or version".into());
+        }
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.helper = None;
+        if definition.feature == "remote-desktop" {
+            ordinary.remote_desktop = None;
+        }
+        if definition.feature == "terminal-transport" {
+            ordinary.terminal_transport = None;
+        }
+        if ordinary != NativePluginContributes::default() {
+            return Err("Helper processes cannot declare ordinary plugin contributions".into());
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|engines| engines.oxideterm.as_ref())
+            .is_none()
+        {
+            return Err("Helper plugins must declare a host version range".into());
+        }
+    }
+    let runtime_plan = native_runtime_plan_for_manifest(manifest)?;
+    let terminal = manifest
+        .contributes
+        .as_ref()
+        .and_then(|value| value.terminal_transport.as_ref());
+    let is_terminal = runtime_plan
+        .helper_entry("terminal-transport", "oxideterm-mosh", 1)
+        .is_some();
+    if is_terminal != terminal.is_some() {
+        return Err("Terminal transport runtime and provider must be declared together".into());
+    }
+    if let Some(terminal) = terminal {
+        if terminal.protocol != "mosh" || terminal.protocol_version != 1 {
+            return Err("Unsupported terminal transport plugin protocol".into());
+        }
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.terminal_transport = None;
+        ordinary.helper = None;
+        if ordinary != NativePluginContributes::default() {
+            return Err("Terminal transports cannot declare ordinary plugin contributions".into());
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|value| value.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("Terminal transport plugins must declare a host version range".into());
+        }
+    }
+    let desktop = manifest
+        .contributes
+        .as_ref()
+        .and_then(|value| value.remote_desktop.as_ref());
+    let is_desktop = runtime_plan
+        .helper_entry(
+            "remote-desktop",
+            "oxideterm-remote-desktop",
+            oxideterm_remote_desktop::REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION,
+        )
+        .is_some();
+    if is_desktop != desktop.is_some() {
+        return Err("Remote desktop runtime and provider must be declared together".into());
+    }
+    if let Some(desktop) = desktop {
+        if desktop.protocol_version
+            != oxideterm_remote_desktop::REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION
+        {
+            return Err("Unsupported remote desktop plugin protocol version".into());
+        }
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.remote_desktop = None;
+        ordinary.helper = None;
+        if ordinary != NativePluginContributes::default() {
+            return Err(
+                "Remote desktop providers cannot declare ordinary plugin contributions".into(),
+            );
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|value| value.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("Remote desktop plugins must declare a host version range".into());
+        }
+    }
+    if runtime_plan.helper_entry("acp", "acp", 1).is_some() {
+        // ACP owns its stdio stream and cannot serve the ordinary plugin protocol.
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.helper = None;
+        if ordinary != NativePluginContributes::default() {
+            return Err("ACP agents cannot declare ordinary plugin contributions".into());
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|value| value.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("ACP plugins must declare a host version range".into());
+        }
+    }
     if let Some(contributes) = &manifest.contributes {
         validate_native_plugin_contributions(contributes)?;
         if let Some(previews) = &contributes.file_previews {
@@ -89,43 +217,32 @@ pub(crate) fn validate_native_plugin_manifest(
         return Err("Language runtime and language contribution must be declared together".into());
     }
     if let Some(language) = language {
-        if !matches!(
-            language.id.as_str(),
-            "elixir"
-                | "commonlisp"
-                | "swift"
-                | "r"
-                | "scala"
-                | "objc"
-                | "c-sharp"
-                | "perl"
-                | "ruby"
-                | "zig"
-                | "c"
-                | "cpp"
-                | "css"
-                | "go"
-                | "html"
-                | "java"
-                | "javascript"
-                | "php"
-                | "rust"
-                | "tsx"
-                | "typescript"
-                | "nginx"
-                | "hcl"
-                | "proto"
-        ) {
-            return Err("Unsupported plugin language".into());
+        language.definition.validate()?;
+        validate_language_asset(&language.highlights, &language.highlights_sha256)?;
+        validate_language_asset(
+            &manifest.runtime.as_ref().unwrap().entry,
+            &language.parser_sha256,
+        )?;
+        if language.injections.len() > 8 {
+            return Err("Too many embedded language grammars".into());
         }
-        validate_plugin_relative_path(&language.highlights)?;
-        for checksum in [&language.parser_sha256, &language.highlights_sha256] {
-            if checksum.len() != 64
-                || !checksum
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            {
-                return Err("Language assets require lowercase SHA-256 checksums".into());
+        let mut ids = HashSet::new();
+        for injection in &language.injections {
+            NativePluginLanguageDefinition {
+                id: injection.id.clone(),
+                grammar_name: injection.grammar_name.clone(),
+                ..Default::default()
+            }
+            .validate()?;
+            if !ids.insert(&injection.id) {
+                return Err("Duplicate embedded language grammar".into());
+            }
+            for (path, checksum) in [
+                (&injection.parser, &injection.parser_sha256),
+                (&injection.highlights, &injection.highlights_sha256),
+                (&injection.query, &injection.query_sha256),
+            ] {
+                validate_language_asset(path, checksum)?;
             }
         }
         if manifest
@@ -136,6 +253,18 @@ pub(crate) fn validate_native_plugin_manifest(
         {
             return Err("Language plugins must declare a host version range".into());
         }
+    }
+    Ok(())
+}
+
+fn validate_language_asset(path: &str, checksum: &str) -> Result<(), String> {
+    validate_plugin_relative_path(path)?;
+    if checksum.len() != 64
+        || !checksum
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err("Language assets require lowercase SHA-256 checksums".into());
     }
     Ok(())
 }
@@ -431,6 +560,7 @@ pub(crate) fn validate_runtime_entry_exists(
     let entry = match runtime_plan {
         NativePluginRuntimePlan::Wasm { entry }
         | NativePluginRuntimePlan::Process { entry }
+        | NativePluginRuntimePlan::Helper { entry, .. }
         | NativePluginRuntimePlan::Language { entry } => entry,
         NativePluginRuntimePlan::ManifestOnly
         | NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => return Ok(()),
@@ -1122,7 +1252,41 @@ pub fn native_runtime_plan_for_manifest(
             NativePluginRuntimeKind::Process => NativePluginRuntimePlan::Process {
                 entry: runtime.entry.clone(),
             },
+            // Published manifest kinds normalize into the same feature-owned runtime.
+            NativePluginRuntimeKind::Acp => NativePluginRuntimePlan::Helper {
+                entry: runtime.entry.clone(),
+                definition: NativePluginHelperDef {
+                    feature: "acp".into(),
+                    protocol: "acp".into(),
+                    protocol_version: 1,
+                },
+            },
+            NativePluginRuntimeKind::RemoteDesktop => NativePluginRuntimePlan::Helper {
+                entry: runtime.entry.clone(),
+                definition: NativePluginHelperDef {
+                    feature: "remote-desktop".into(),
+                    protocol: "oxideterm-remote-desktop".into(),
+                    protocol_version:
+                        oxideterm_remote_desktop::REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION,
+                },
+            },
+            NativePluginRuntimeKind::TerminalTransport => NativePluginRuntimePlan::Helper {
+                entry: runtime.entry.clone(),
+                definition: NativePluginHelperDef {
+                    feature: "terminal-transport".into(),
+                    protocol: "oxideterm-mosh".into(),
+                    protocol_version: 1,
+                },
+            },
             NativePluginRuntimeKind::ManifestOnly => NativePluginRuntimePlan::ManifestOnly,
+            NativePluginRuntimeKind::Helper => NativePluginRuntimePlan::Helper {
+                entry: runtime.entry.clone(),
+                definition: manifest
+                    .contributes
+                    .as_ref()
+                    .and_then(|contributes| contributes.helper.clone())
+                    .ok_or("Helper runtime requires protocol metadata")?,
+            },
             NativePluginRuntimeKind::Language => NativePluginRuntimePlan::Language {
                 entry: runtime.entry.clone(),
             },
@@ -1160,7 +1324,9 @@ pub fn native_plugin_state_for(
             NativePluginState::ReadyManifestOnly
         }
         NativePluginRuntimePlan::Wasm { .. } => NativePluginState::ReadyWasm,
-        NativePluginRuntimePlan::Process { .. } => NativePluginState::ReadyProcess,
+        NativePluginRuntimePlan::Process { .. } | NativePluginRuntimePlan::Helper { .. } => {
+            NativePluginState::ReadyProcess
+        }
         NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => {
             NativePluginState::UnsupportedLegacyJs
         }
@@ -1196,6 +1362,13 @@ pub fn native_runtime_kind_label(runtime_plan: &NativePluginRuntimePlan) -> &'st
         NativePluginRuntimePlan::Language { .. } => "language",
         NativePluginRuntimePlan::Wasm { .. } => "wasm",
         NativePluginRuntimePlan::Process { .. } => "process",
+        // Permission approvals retain their published feature boundaries after normalization.
+        NativePluginRuntimePlan::Helper { definition, .. } => match definition.feature.as_str() {
+            "acp" => "acp",
+            "remote-desktop" => "remote-desktop",
+            "terminal-transport" => "terminal-transport",
+            _ => "helper",
+        },
         NativePluginRuntimePlan::UnsupportedLegacyJs { .. } => "legacy-js",
     }
 }

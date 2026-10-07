@@ -914,7 +914,7 @@ mod tests {
         let mut remote_values = view.values.clone();
         remote_values.insert(
             SyncField {
-                resource: resource.clone(),
+                resource,
                 group: "name".into(),
             },
             FieldValue::encode(&"Remote name").unwrap(),
@@ -958,7 +958,7 @@ mod tests {
             remote: vec![published],
             upgrade: None,
             observed: vec![id],
-            backend: service.backend.clone(),
+            backend: service.backend,
             settings: CloudSyncSettings::default(),
             secrets: CloudSyncSecrets::default(),
             scope: scope.clone(),

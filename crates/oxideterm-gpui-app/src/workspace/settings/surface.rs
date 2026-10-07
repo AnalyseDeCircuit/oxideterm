@@ -258,13 +258,6 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Agents, 0) => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_acp_agents_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
             (AiSettingsPage::Context, 0) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
@@ -606,9 +599,6 @@ impl WorkspaceApp {
                         self.ai_entity
                             .read(cx)
                             .hash_settings_provider_layout(&mut hasher);
-                    }
-                    (AiSettingsPage::Agents, 2) => {
-                        settings.ai.acp_agents.len().hash(&mut hasher);
                     }
                     (AiSettingsPage::Context, 5) => {
                         settings.ai.providers.len().hash(&mut hasher);

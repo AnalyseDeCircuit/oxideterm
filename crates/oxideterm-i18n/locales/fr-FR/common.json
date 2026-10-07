@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Installez ou activez le plugin Mosh avant de vous connecter.",
+    "ready": "Le plugin Mosh est installé et activé."
+  },
   "file_preview": {
     "entry_file_offset": "Décalage du point d’entrée",
     "subject": "Sujet",
@@ -254,6 +258,9 @@
     "shortcut_count": "raccourcis"
   },
   "plugin": {
+    "install_queued": "En attente · position {{position}}",
+    "installing_named": "Installation de {{name}}",
+    "install_queue_count": "{{count}} en attente",
     "jump_to_page": "Aller à la page",
     "total_pages": "sur {{pages}} pages",
     "jump_page": "Aller",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Sources d’hôtes",
     "marketplace_workspace": "Espace de travail",
     "marketplace_utilities": "Utilitaires",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "L’installation et l’activation du plugin créent automatiquement la configuration de l’agent ; aucune commande de lancement n’est nécessaire. Le répertoire de travail, les arguments supplémentaires et les variables d’environnement sont facultatifs : laissez-les vides pour utiliser les valeurs par défaut. Les plugins utilisant un programme local nécessitent son outil officiel en ligne de commande ; suivez les instructions du plugin pour l’installer et vous connecter.",
+    "marketplace_remote_connections": "Connexions distantes",
     "apply_page_size": "Appliquer",
     "invalid_page_size": "Saisissez un entier positif valide",
     "page_range": "{{start}}–{{end}} sur {{total}} extensions",
@@ -937,6 +947,10 @@
     "update_available": "Mise à jour",
     "install_error": "Échec de l'installation",
     "search_placeholder": "Rechercher des extensions...",
+    "marketplace_sort": "Tri : {{order}}",
+    "marketplace_sort_name": "Nom",
+    "marketplace_sort_updated": "Mises à jour récentes",
+    "marketplace_sort_newest": "Nouveautés",
     "marketplace_title": "Marché officiel des extensions",
     "marketplace_description": "Parcourez, installez et mettez à jour les extensions du catalogue officiel OxideTerm.",
     "marketplace_repository": "Dépôt du catalogue",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Vue d'onglet du plugin non disponible",
     "tab_crashed": "L'onglet du plugin a planté",
     "detail_author": "Auteur",
+    "license_label": "Licence : {{license}}",
+    "install_required": "Le plugin {{name}} n’est pas installé. Installez-le depuis le catalogue de plugins, puis réessayez.",
+    "enable_required": "Le plugin {{name}} installé est indisponible. Activez-le ou mettez-le à jour dans le gestionnaire de plugins, puis réessayez.",
+    "license_not_declared": "Non déclarée",
+    "view_license": "Afficher la licence",
+    "third_party_licenses": "Licences tierces",
     "registry_capabilities": "Capacités : {{capabilities}}",
     "reload_success": "{{name}} a été réanalysé.",
     "enable_success": "{{name}} activé.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "Aperçu RDP",
     "vnc_preview_title": "Aperçu VNC",
     "provider_missing": "Le fournisseur de bureau distant est indisponible.",
+    "plugin_ready": "Le module de bureau à distance est installé et activé.",
+    "plugin_required": "Installez ou activez le module de bureau à distance avant la connexion.",
+    "manage_plugin": "Gérer le module",
     "session_missing": "La session de bureau distant est indisponible.",
     "reconnect": "Reconnecter",
     "resize_fixed": "Taille fixée par le serveur",

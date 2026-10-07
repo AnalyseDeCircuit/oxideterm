@@ -46,6 +46,12 @@ pub struct NativePluginRegistryEntry {
     pub description: Option<String>,
     #[serde(default)]
     pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<crate::NativePluginLanguageDefinition>,
     pub version: String,
     #[serde(default, rename = "minOxideTermVersion", alias = "minOxidetermVersion")]
     pub min_oxideterm_version: Option<String>,
@@ -63,6 +69,10 @@ pub struct NativePluginRegistryEntry {
     pub homepage: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_release_at: Option<String>,
     /// Immutable release packages available for specific host targets.
     #[serde(default)]
     pub packages: Vec<NativePluginRegistryPackage>,
@@ -71,6 +81,22 @@ pub struct NativePluginRegistryEntry {
     /// The top-level release remains readable by clients without history support.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub releases: Vec<NativePluginRegistryRelease>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<NativePluginRegistryHistory>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginRegistryHistory {
+    pub download_url: String,
+    pub checksum: String,
+    pub size: u64,
+}
+
+impl NativePluginRegistryEntry {
+    pub fn history_pending(&self) -> bool {
+        self.history.is_some() && self.releases.is_empty() && self.packages.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]

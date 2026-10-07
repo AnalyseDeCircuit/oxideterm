@@ -1158,9 +1158,13 @@ impl WorkspaceApp {
 
         let legacy_settings_input_visible = settings_tab_visible
             || knowledge_dialog_visible
-            || self
-                .keyboard_content_tab(cx)
-                .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::CloudSync);
+            || self.keyboard_content_tab(cx).is_some_and(|tab| {
+                matches!(
+                    tab.kind,
+                    oxideterm_workspace::TabKind::CloudSync
+                        | oxideterm_workspace::TabKind::PluginManager
+                )
+            });
         if legacy_settings_input_visible && let Some(input) = self.focused_settings_input {
             return Some(WorkspaceImeTarget::Settings(input));
         }

@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "セキュリティキー",
+      "touch_instructions": "セキュリティキーに触れるか、デバイス上で認証を完了してください。",
+      "pin_title": "セキュリティキーの PIN",
+      "pin_instructions": "セキュリティキーの PIN を入力してください。保存されません。",
+      "pin_retry": "PIN が正しくありません。確認してから再試行してください。",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "この SSH キーを使用するには FIDO Security Key プラグインをインストールして有効にしてください。",
+        "cancelled": "セキュリティキー認証をキャンセルしました。",
+        "timeout": "セキュリティキー認証がタイムアウトしました。",
+        "invalid_request": "セキュリティキーの署名リクエストが無効です。",
+        "incompatible": "セキュリティキープラグインのプロトコルに互換性がありません。",
+        "no_device": "FIDO セキュリティキーが見つかりません。デバイスを接続して再試行してください。",
+        "credential_not_found": "接続されたセキュリティキーにこの SSH 認証情報が見つかりません。",
+        "pin_blocked": "PIN がロックされています。製造元の復旧手順に従ってください。",
+        "device_failure": "セキュリティキーの操作に失敗しました。",
+        "invalid_signature": "セキュリティキーの署名を検証できませんでした。"
+      }
+    },
     "form": {
       "title": "新しい接続",
       "subtitle": "ターミナル、SFTP、ポート転送、リモートファイル編集に使う SSH ホストを設定します。",

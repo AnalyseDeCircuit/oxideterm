@@ -26,11 +26,12 @@ pub use oxideterm_plugin_manifest::{
     NativePluginDeclarativeUiColumn, NativePluginDeclarativeUiControl,
     NativePluginDeclarativeUiOption, NativePluginDeclarativeUiSchema,
     NativePluginDeclarativeUiSection, NativePluginDiagnostic, NativePluginGlobalConfig,
-    NativePluginHostMonitorContribution, NativePluginHostMonitorDef,
+    NativePluginHelperDef, NativePluginHostMonitorContribution, NativePluginHostMonitorDef,
     NativePluginHostMonitorOutputDef, NativePluginHostMonitorOutputFormat, NativePluginInfo,
-    NativePluginInstalledInfo, NativePluginManifest, NativePluginPermissions,
-    NativePluginProcessActivationPlan, NativePluginRegistryEntry, NativePluginRegistryIndex,
-    NativePluginRegistryPackage, NativePluginRegistryRelease, NativePluginRuntime,
+    NativePluginInstalledInfo, NativePluginLanguageDefinition, NativePluginManifest,
+    NativePluginPermissions, NativePluginProcessActivationPlan, NativePluginRegistryEntry,
+    NativePluginRegistryHistory, NativePluginRegistryIndex, NativePluginRegistryPackage,
+    NativePluginRegistryRelease, NativePluginRemoteDesktopDef, NativePluginRuntime,
     NativePluginRuntimeActivityBarItemContribution, NativePluginRuntimeCommandContribution,
     NativePluginRuntimeContextMenuContribution, NativePluginRuntimeContextMenuItem,
     NativePluginRuntimeEventSubscriptionContribution, NativePluginRuntimeKeybindingContribution,
@@ -47,6 +48,7 @@ use oxideterm_plugin_protocol::{
     PluginOutboundMessage, PluginRegistration, PluginRegistrationKind, PluginRuntimeLogLevel,
 };
 
+mod catalog;
 mod compatibility;
 mod constants;
 mod contributions;
@@ -85,7 +87,10 @@ pub use permissions::{
     native_plugin_capability_approval_matches, native_plugin_requested_capabilities,
     native_plugin_requires_permission_review, normalize_native_plugin_capabilities,
 };
-pub use registry::{NativePluginRegistry, OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL};
+pub use registry::{
+    NativePluginRegistry, OFFICIAL_NATIVE_PLUGIN_REGISTRY_URL,
+    OFFICIAL_NATIVE_PLUGIN_REGISTRY_V2_URL,
+};
 pub use state_semantics::{
     PLUGIN_ID_CONFLICT_ERROR_PREFIX, native_plugin_conflict_id, native_plugin_error_has_code,
     native_plugin_state_is_active_like, native_plugin_state_is_error_like,
@@ -99,6 +104,14 @@ pub use validation::{
 
 /// Maximum package size accepted by every managed plugin install path.
 pub const NATIVE_PLUGIN_PACKAGE_MAX_BYTES: u64 = PLUGIN_PACKAGE_MAX_BYTES;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NativePluginAcpAgent {
+    pub plugin_id: String,
+    pub name: String,
+    pub version: String,
+    pub command: PathBuf,
+}
 
 // Internal modules intentionally share helper functions through the crate root;
 // that keeps the split mechanical while the public API remains explicit above.

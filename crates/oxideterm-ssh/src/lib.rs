@@ -52,6 +52,9 @@ pub use host_key::{
 };
 pub use monitor::DedicatedNodeResourceSampler;
 pub use oxideterm_connection_monitor::ConnectionPoolMonitorStats;
+pub use oxideterm_security_key::{
+    SECURITY_KEY_PLUGIN_ID, SecurityKeyError, SecurityKeyInteraction, SecurityKeyProvider,
+};
 pub use oxideterm_sftp::{
     DEFAULT_SFTP_CONCURRENT_TRANSFERS, DEFAULT_SFTP_DIRECTORY_PARALLELISM, FileInfo, FileType,
     ListFilter, MAX_SFTP_CONCURRENT_TRANSFERS, MAX_SFTP_DIRECTORY_PARALLELISM, SftpError,

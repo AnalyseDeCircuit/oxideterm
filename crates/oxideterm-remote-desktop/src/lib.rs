@@ -54,10 +54,10 @@ pub use model::{
     RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
 };
 pub use provider::{
-    RemoteDesktopProviderCapabilities, RemoteDesktopProviderEntry, RemoteDesktopProviderError,
-    RemoteDesktopProviderManifest, RemoteDesktopProviderRegistry, RemoteDesktopProviderUi,
-    builtin_preview_provider_manifest, builtin_preview_provider_registry,
-    builtin_provider_manifest, builtin_provider_registry,
+    REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION, RemoteDesktopProviderCapabilities,
+    RemoteDesktopProviderEntry, RemoteDesktopProviderError, RemoteDesktopProviderManifest,
+    RemoteDesktopProviderRegistry, RemoteDesktopProviderUi, builtin_preview_provider_manifest,
+    builtin_preview_provider_registry, builtin_provider_manifest, builtin_provider_registry,
 };
 pub use secret::RemoteDesktopSecret;
 pub use worker::{

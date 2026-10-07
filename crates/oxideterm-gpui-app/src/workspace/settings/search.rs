@@ -607,16 +607,6 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             ],
         ),
         ai_search_entry(
-            AiSettingsPage::Agents,
-            1,
-            "settings_view.ai.acp_agents",
-            &[
-                "settings_view.ai.acp_agents_summary",
-                "settings_view.ai.acp_agent_command",
-                "settings_view.ai.acp_agent_cwd",
-            ],
-        ),
-        ai_search_entry(
             AiSettingsPage::Context,
             1,
             "settings_view.ai.context_controls",

@@ -171,6 +171,11 @@ constant-buffer slot `b1`; leaving `BlurParams` bound makes primitives after a b
 invalid batch offset, so a modal backdrop can appear while its foreground panel is blank. Preserve
 the restoration when changing blur passes or batch submission.
 
+`gpui_windows/build.rs` precompiles the retained `blur_downsample`, `blur`, and
+`blur_composite` vertex/fragment entry points for release builds. Debug builds
+compile these at runtime, so the Windows platform check also checks the release
+backend to catch missing generated shader bindings before packaging.
+
 ### Native window movement, resizing, and ownership
 
 Windows client-decorated windows perform eight-direction outer-frame hit testing instead of

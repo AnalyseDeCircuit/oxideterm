@@ -310,28 +310,39 @@ mod ai_turn_order_tests {
 
     #[test]
     fn second_model_round_replaces_the_previous_runtime_context() {
-        let mut history = vec![test_message(
-            "latest-user",
-            AiChatRole::User,
-            "inspect the active terminal".to_string(),
-        )];
+        let mut history = vec![
+            test_message("base-system", AiChatRole::System, "Stable policies".to_string()),
+            test_message("latest-user", AiChatRole::User, "inspect the active terminal".to_string()),
+        ];
 
         replace_ai_runtime_context_message(
             &mut history,
-            r#"{"runtimeContext":{"snapshotId":"snap_first"}}"#.to_string(),
+            r#"{"runtimeContext":{"snapshotId":"snap_first","observedAtMs":100,"liveHandles":[{"handleId":"rt_first"}]}}"#.to_string(),
         );
-        replace_ai_runtime_context_message(
-            &mut history,
-            r#"{"runtimeContext":{"snapshotId":"snap_second"}}"#.to_string(),
-        );
+        let prefix = history[..history.len() - 1].to_vec();
+        let mut call = test_message("round1-call", AiChatRole::Assistant, "Checking".to_string());
+        call.tool_calls = vec![serde_json::json!({"id":"call-1","name":"run_command","arguments":"{}"})];
+        history.push(call);
+        let mut result = test_message("round1-result", AiChatRole::Tool, "Result".to_string());
+        result.tool_call_id = Some("call-1".to_string());
+        history.push(result);
+        let latest = r#"{"runtimeContext":{"snapshotId":"snap_second","observedAtMs":200,"liveHandles":[{"handleId":"rt_second"}]}}"#;
+        replace_ai_runtime_context_message(&mut history, latest.to_string());
 
-        let runtime_messages = history
-            .iter()
-            .filter(|message| message.id == AI_RUNTIME_CONTEXT_MESSAGE_ID)
-            .collect::<Vec<_>>();
-        assert_eq!(runtime_messages.len(), 1);
-        assert!(runtime_messages[0].content.contains("snap_second"));
-        assert!(!runtime_messages[0].content.contains("snap_first"));
+        assert_eq!(
+            history.iter().map(|message| message.id.as_str()).collect::<Vec<_>>(),
+            vec!["runtime-context-policy", "base-system", "latest-user", "round1-call", "round1-result", "runtime-context-v2"],
+        );
+        assert_eq!(&history[..prefix.len()], prefix.as_slice());
+        assert!(history[0].content.contains("A stale handle must be rediscovered"));
+        let runtime_message = history.last().unwrap();
+        assert_eq!(runtime_message.role, AiChatRole::System);
+        assert_eq!(runtime_message.content, latest);
+        normalize_ai_stream_history_for_provider(&mut history);
+        assert_eq!(
+            history.iter().map(|message| message.id.as_str()).collect::<Vec<_>>(),
+            vec!["latest-user", "round1-call"],
+        );
     }
 
     #[test]
@@ -702,7 +713,7 @@ mod ai_turn_order_tests {
             })),
             summary_ref: Some(serde_json::json!({
                 "kind": "compaction",
-                "transcriptRef": source_ref.clone(),
+                "transcriptRef": source_ref,
             })),
             ..test_message("anchor-1", AiChatRole::System, "summary".to_string())
         };
@@ -714,7 +725,7 @@ mod ai_turn_order_tests {
         summary.summary_ref = Some(serde_json::json!({
             "kind": "conversation",
             "roundId": null,
-            "transcriptRef": source_ref.clone(),
+            "transcriptRef": source_ref,
         }));
         for (scenario, message, expected_content) in [
             (
@@ -1088,9 +1099,7 @@ mod ai_turn_order_tests {
         assert_eq!(rounds.len(), 2);
         assert_eq!(rounds[0]["toolCalls"][0]["id"], "call-1");
         assert_eq!(rounds[1]["toolCalls"][0]["id"], "call-2");
-        let first_round = ai_tool_part_round_id(&message, &parts[0]).expect("first round");
-        let second_round = ai_tool_part_round_id(&message, &parts[2]).expect("second round");
-        assert_ne!(first_round, second_round);
+        assert_ne!(rounds[0]["id"], rounds[1]["id"]);
     }
 
     #[test]
@@ -1139,9 +1148,6 @@ mod ai_turn_order_tests {
                 .map(Vec::len),
             Some(2)
         );
-        let first_round = ai_tool_part_round_id(&message, &parts[0]).expect("first round");
-        let second_round = ai_tool_part_round_id(&message, &parts[1]).expect("second round");
-        assert_eq!(first_round, second_round);
     }
 
 

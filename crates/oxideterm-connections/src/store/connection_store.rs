@@ -3038,15 +3038,13 @@ impl ConnectionStore {
             None,
             None,
         );
-        let audit_result = (|| {
-            self.create_managed_ssh_key(
-                private_key,
-                name,
-                passphrase,
-                ManagedSshKeyOrigin::PastedText,
-                "Managed SSH Key",
-            )
-        })();
+        let audit_result = self.create_managed_ssh_key(
+            private_key,
+            name,
+            passphrase,
+            ManagedSshKeyOrigin::PastedText,
+            "Managed SSH Key",
+        );
         audit.result(&audit_result);
         audit_result
     }
@@ -4080,24 +4078,24 @@ impl ConnectionStore {
         }
         self.data
             .connections
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-        self.data.local_terminal_profiles.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            .sort_by_key(|connection| connection.name.to_lowercase());
+        self.data.local_terminal_profiles.sort_by_key(|profile| profile.name.to_lowercase());
         self.data
             .serial_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+            .sort_by_key(|profile| profile.name.to_lowercase());
         self.data
             .telnet_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+            .sort_by_key(|profile| profile.name.to_lowercase());
         self.data
             .remote_desktop_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+            .sort_by_key(|profile| profile.name.to_lowercase());
         self.data
             .mosh_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+            .sort_by_key(|profile| profile.name.to_lowercase());
         self.data
             .standalone_sftp_profiles
-            .sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
-        self.data.ftp_profiles.sort_by(|left, right| left.name.to_lowercase().cmp(&right.name.to_lowercase()));
+            .sort_by_key(|profile| profile.name.to_lowercase());
+        self.data.ftp_profiles.sort_by_key(|profile| profile.name.to_lowercase());
     }
 
     fn add_connection(&mut self, connection: SavedConnection) {

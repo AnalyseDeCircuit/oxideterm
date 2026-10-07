@@ -13,6 +13,14 @@ Use this channel when you want to test changes before they reach the stable chan
 
 <!-- RELEASE_CHANGELOG -->
 
+## 插件市场兼容说明
+
+插件市场 v1 已冻结，原地址、索引内容和对应安装包持续保留。旧客户端仍可使用冻结目录中的插件，但不会看到后续的新插件和更新；请升级到支持 v2 目录的主程序版本。后续插件、新版本和版本历史仅发布到 v2。
+
+## Plugin marketplace compatibility
+
+The v1 plugin marketplace is frozen. Its original URL, exact contents, and referenced packages remain available. Existing clients can keep using the frozen catalog but will not see subsequent plugins or updates; upgrade to a host version supporting v2 to receive them. All subsequent plugins, releases, and version histories are published only to v2.
+
 ## Beta Notes
 
 - Keep a stable build installed if OxideTerm is business-critical for your daily work.

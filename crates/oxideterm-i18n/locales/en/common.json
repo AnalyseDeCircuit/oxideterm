@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Install or enable the Mosh plugin before connecting.",
+    "ready": "Mosh plugin is installed and enabled."
+  },
   "file_preview": {
     "entry_file_offset": "Entry file offset",
     "subject": "Subject",
@@ -254,6 +258,9 @@
     }
   },
   "plugin": {
+    "install_queued": "Waiting · {{position}}",
+    "installing_named": "Installing {{name}}",
+    "install_queue_count": "{{count}} waiting",
     "jump_to_page": "Go to page",
     "total_pages": "of {{pages}} pages",
     "jump_page": "Go",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Host sources",
     "marketplace_workspace": "Workspace",
     "marketplace_utilities": "Utilities",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "Installing and enabling the plugin creates the agent configuration automatically; no launch command is needed. Working directory, extra arguments, and environment variables are optional; leave them blank to use the defaults. Plugins that use a local program require its official command-line tool; follow the plugin instructions to install it and sign in.",
+    "marketplace_remote_connections": "Remote connections",
     "apply_page_size": "Apply",
     "invalid_page_size": "Enter a valid positive integer",
     "page_range": "{{start}}–{{end}} of {{total}} plugins",
@@ -937,6 +947,10 @@
     "update_available": "Update",
     "install_error": "Install failed",
     "search_placeholder": "Search plugins...",
+    "marketplace_sort": "Sort: {{order}}",
+    "marketplace_sort_name": "Name",
+    "marketplace_sort_updated": "Recently updated",
+    "marketplace_sort_newest": "Newly listed",
     "marketplace_title": "Official Plugin Marketplace",
     "marketplace_description": "Browse, install, and update plugins listed in the official OxideTerm catalog.",
     "marketplace_repository": "Catalog repository",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Plugin tab view not available",
     "tab_crashed": "Plugin tab crashed",
     "detail_author": "Author",
+    "license_label": "License: {{license}}",
+    "install_required": "The {{name}} plugin is not installed. Install it from the plugin marketplace, then retry.",
+    "enable_required": "The installed {{name}} plugin is unavailable. Enable or update it in Plugin Manager, then retry.",
+    "license_not_declared": "Not declared",
+    "view_license": "View license",
+    "third_party_licenses": "Third-party licenses",
     "registry_capabilities": "Capabilities: {{capabilities}}",
     "reload_success": "{{name}} rescanned.",
     "enable_success": "{{name}} enabled.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "RDP Preview",
     "vnc_preview_title": "VNC Preview",
     "provider_missing": "Remote desktop provider is unavailable.",
+    "plugin_ready": "The remote desktop plugin is installed and enabled.",
+    "plugin_required": "Install or enable the remote desktop plugin before connecting.",
+    "manage_plugin": "Manage plugin",
     "session_missing": "Remote desktop session is unavailable.",
     "reconnect": "Reconnect",
     "resize_fixed": "Server fixed size",

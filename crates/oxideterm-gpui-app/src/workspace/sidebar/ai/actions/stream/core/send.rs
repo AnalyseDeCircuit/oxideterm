@@ -71,7 +71,7 @@ impl WorkspaceApp {
         task_system_prompt: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let launch = match self.ai_acp_chat_launch(&config).and_then(|launch| {
+        let launch = match self.ai_acp_chat_launch(&config, cx).and_then(|launch| {
             launch.ok_or_else(|| "ACP launch configuration was not prepared.".to_string())
         }) {
             Ok(launch) => launch,
@@ -79,6 +79,20 @@ impl WorkspaceApp {
                 self.ai_entity.update(cx, |ai, _cx| {
                     ai.set_conversation_loading(&conversation_id, false)
                 });
+                let agent = self
+                    .settings_store
+                    .settings()
+                    .ai
+                    .acp_agents
+                    .iter()
+                    .find(|agent| Some(&agent.id) == config.acp_agent_id.as_ref())
+                    .cloned();
+                if agent
+                    .as_ref()
+                    .is_some_and(|agent| self.show_acp_plugin_requirement(agent, cx))
+                {
+                    return;
+                }
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                     TerminalNoticeVariant::Error,

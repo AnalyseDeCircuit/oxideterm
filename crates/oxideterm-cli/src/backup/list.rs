@@ -94,7 +94,7 @@ pub(super) fn list(args: JsonArgs) -> CliResult<()> {
             ));
         }
     }
-    backups.sort_by(|left, right| right.created_at_ms.cmp(&left.created_at_ms));
+    backups.sort_by_key(|backup| std::cmp::Reverse(backup.created_at_ms));
     let response = BackupListResponse {
         dir: backup_dir.display().to_string(),
         count: backups.len(),

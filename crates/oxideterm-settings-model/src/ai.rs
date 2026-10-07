@@ -140,6 +140,7 @@ struct AcpAgentPresetTemplate {
     display_name: &'static str,
     command: &'static str,
     args: &'static [&'static str],
+    plugin_id: Option<&'static str>,
 }
 
 impl AcpAgentPreset {
@@ -156,14 +157,16 @@ impl AcpAgentPreset {
             Self::ClaudeCode => AcpAgentPresetTemplate {
                 base_id: "claude-code",
                 display_name: "Claude Code",
-                command: "oxideterm-native",
-                args: &["--acp-adapter", "claude-code"],
+                command: "",
+                args: &[],
+                plugin_id: Some("com.oxideterm.acp.claude-code"),
             },
             Self::Codex => AcpAgentPresetTemplate {
                 base_id: "codex",
                 display_name: "Codex",
-                command: "oxideterm-native",
-                args: &["--acp-adapter", "codex"],
+                command: "",
+                args: &[],
+                plugin_id: Some("com.oxideterm.acp.codex"),
             },
             Self::GeminiCli => AcpAgentPresetTemplate {
                 base_id: "gemini-cli",
@@ -171,6 +174,7 @@ impl AcpAgentPreset {
                 command: "gemini",
                 // Gemini CLI exposes its native ACP server over stdio.
                 args: &["--acp"],
+                plugin_id: None,
             },
             Self::GithubCopilot => AcpAgentPresetTemplate {
                 base_id: "github-copilot",
@@ -178,6 +182,7 @@ impl AcpAgentPreset {
                 command: "copilot",
                 // GitHub Copilot CLI exposes a native ACP stdio server.
                 args: &["--acp", "--stdio"],
+                plugin_id: None,
             },
             Self::OpenCode => AcpAgentPresetTemplate {
                 base_id: "opencode",
@@ -185,6 +190,7 @@ impl AcpAgentPreset {
                 command: "opencode",
                 // OpenCode exposes its native ACP server over stdio.
                 args: &["acp"],
+                plugin_id: None,
             },
         }
     }
@@ -584,6 +590,7 @@ pub fn ai_add_acp_agent(settings: &mut PersistedSettings) {
     settings.ai.acp_agents.push(AcpAgentConfig {
         id: format!("acp-agent-{now}"),
         display_name: String::new(),
+        plugin_id: None,
         command: String::new(),
         args: Vec::new(),
         env: BTreeMap::new(),
@@ -602,6 +609,7 @@ pub fn ai_add_acp_agent_preset(settings: &mut PersistedSettings, preset: AcpAgen
     settings.ai.acp_agents.push(AcpAgentConfig {
         id,
         display_name: template.display_name.to_string(),
+        plugin_id: template.plugin_id.map(str::to_string),
         command: template.command.to_string(),
         args: template.args.iter().map(|arg| (*arg).to_string()).collect(),
         env: BTreeMap::new(),
@@ -634,6 +642,46 @@ fn ai_unique_acp_agent_id(settings: &PersistedSettings, base_id: &str) -> String
         }
     }
     unreachable!("unbounded suffix search should always find a free ACP agent id")
+}
+
+pub fn ai_add_acp_plugin_agent(settings: &mut PersistedSettings, plugin_id: &str, name: &str) {
+    if settings
+        .ai
+        .acp_agents
+        .iter()
+        .any(|agent| agent.plugin_id.as_deref() == Some(plugin_id))
+    {
+        return;
+    }
+    // Preserve conversation identity when the built-in OpenCode preset becomes a plugin.
+    if plugin_id == "com.oxideterm.acp.opencode" {
+        let mut migrated = false;
+        for agent in &mut settings.ai.acp_agents {
+            if agent.plugin_id.is_none() && agent.command == "opencode" && agent.args == ["acp"] {
+                agent.plugin_id = Some(plugin_id.into());
+                agent.command.clear();
+                agent.args.clear();
+                migrated = true;
+            }
+        }
+        if migrated {
+            return;
+        }
+    }
+    let id = ai_unique_acp_agent_id(settings, plugin_id);
+    settings.ai.acp_agents.push(AcpAgentConfig {
+        id,
+        display_name: name.into(),
+        plugin_id: Some(plugin_id.into()),
+        command: String::new(),
+        args: Vec::new(),
+        env: Default::default(),
+        cwd: None,
+        enabled: true,
+        auth: Default::default(),
+        capability_policy: Default::default(),
+        status: Default::default(),
+    });
 }
 
 pub fn ai_delete_acp_agent(settings: &mut PersistedSettings, index: usize) {
@@ -844,20 +892,19 @@ mod tests {
 
         let claude = &settings.ai.acp_agents[0];
         assert_eq!(claude.id, "claude-code");
-        assert_eq!(claude.command, "oxideterm-native");
         assert_eq!(
-            claude.args,
-            vec!["--acp-adapter".to_string(), "claude-code".to_string()]
+            claude.plugin_id.as_deref(),
+            Some("com.oxideterm.acp.claude-code")
         );
+        assert_eq!(claude.command, "");
+        assert_eq!(claude.args, Vec::<String>::new());
         assert!(!claude.capability_policy.terminal);
 
         let codex = &settings.ai.acp_agents[1];
         assert_eq!(codex.id, "codex");
-        assert_eq!(codex.command, "oxideterm-native");
-        assert_eq!(
-            codex.args,
-            vec!["--acp-adapter".to_string(), "codex".to_string()]
-        );
+        assert_eq!(codex.plugin_id.as_deref(), Some("com.oxideterm.acp.codex"));
+        assert_eq!(codex.command, "");
+        assert_eq!(codex.args, Vec::<String>::new());
 
         let gemini = &settings.ai.acp_agents[2];
         assert_eq!(gemini.id, "gemini-cli");
@@ -882,6 +929,60 @@ mod tests {
         assert!(opencode.env.is_empty());
 
         assert_eq!(settings.ai.acp_agents[5].id, "codex-2");
+    }
+
+    #[test]
+    fn installed_acp_registration_preserves_custom_agents_and_deduplicates_plugin_bindings() {
+        let mut settings = PersistedSettings::default();
+        ai_add_acp_agent(&mut settings);
+        settings.ai.acp_agents[0].id = "com.example.agent".into();
+        settings.ai.acp_agents[0].command = "custom-command".into();
+        ai_add_acp_plugin_agent(&mut settings, "com.example.agent", "Installed Agent");
+        settings.ai.acp_agents[1].cwd = Some("/my/project".into());
+        settings.ai.acp_agents[1].enabled = false;
+        ai_add_acp_plugin_agent(&mut settings, "com.example.agent", "Renamed Plugin");
+        assert_eq!(
+            settings
+                .ai
+                .acp_agents
+                .iter()
+                .map(|agent| (
+                    agent.id.as_str(),
+                    agent.plugin_id.as_deref(),
+                    agent.command.as_str()
+                ))
+                .collect::<Vec<_>>(),
+            [
+                ("com.example.agent", None, "custom-command"),
+                ("com.example.agent-2", Some("com.example.agent"), ""),
+            ]
+        );
+        assert_eq!(settings.ai.acp_agents[1].display_name, "Installed Agent");
+        assert_eq!(
+            settings.ai.acp_agents[1].cwd.as_deref(),
+            Some("/my/project")
+        );
+        assert!(!settings.ai.acp_agents[1].enabled);
+
+        ai_add_acp_agent_preset(&mut settings, AcpAgentPreset::OpenCode);
+        let index = settings.ai.acp_agents.len() - 1;
+        settings.ai.acp_agents[index].cwd = Some("/work/project".into());
+        settings.ai.acp_agents[index]
+            .capability_policy
+            .fs_read_text_file = true;
+        settings.ai.active_acp_agent_id = Some("opencode".into());
+        ai_add_acp_plugin_agent(&mut settings, "com.oxideterm.acp.opencode", "OpenCode");
+        let migrated = &settings.ai.acp_agents[index];
+        assert_eq!(migrated.id, "opencode");
+        assert_eq!(
+            migrated.plugin_id.as_deref(),
+            Some("com.oxideterm.acp.opencode")
+        );
+        assert_eq!(migrated.command, "");
+        assert_eq!(migrated.args, Vec::<String>::new());
+        assert_eq!(migrated.cwd.as_deref(), Some("/work/project"));
+        assert!(migrated.capability_policy.fs_read_text_file);
+        assert_eq!(settings.ai.active_acp_agent_id.as_deref(), Some("opencode"));
     }
 }
 

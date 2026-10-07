@@ -146,6 +146,15 @@ pub enum SessionSortOrder {
     ConnectedFirst,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginMarketplaceSort {
+    #[default]
+    Name,
+    RecentUpdates,
+    NewestListings,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarUiState {

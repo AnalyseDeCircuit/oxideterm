@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "安全金鑰",
+      "touch_instructions": "請觸碰安全金鑰，或在裝置上完成驗證。",
+      "pin_title": "安全金鑰 PIN",
+      "pin_instructions": "請輸入安全金鑰的 PIN，不會儲存此內容。",
+      "pin_retry": "PIN 錯誤，請核對後再試。",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "請安裝並啟用 FIDO Security Key 外掛以使用此 SSH 金鑰。",
+        "cancelled": "已取消安全金鑰驗證。",
+        "timeout": "安全金鑰驗證逾時。",
+        "invalid_request": "安全金鑰簽章請求無效。",
+        "incompatible": "安全金鑰外掛的協定不相容。",
+        "no_device": "找不到 FIDO 安全金鑰，請連接裝置後重試。",
+        "credential_not_found": "連接的安全金鑰中找不到此 SSH 憑證。",
+        "pin_blocked": "安全金鑰的 PIN 已鎖定，請依裝置廠商的說明復原。",
+        "device_failure": "安全金鑰操作失敗。",
+        "invalid_signature": "無法驗證安全金鑰的簽章。"
+      }
+    },
     "form": {
       "title": "新增連線",
       "subtitle": "設定一台 SSH 主機，用於終端機、SFTP、連接埠轉送與遠端檔案編輯。",

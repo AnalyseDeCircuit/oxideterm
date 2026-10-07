@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "Clé de sécurité",
+      "touch_instructions": "Touchez votre clé de sécurité ou terminez la vérification sur l’appareil.",
+      "pin_title": "Code PIN de la clé de sécurité",
+      "pin_instructions": "Saisissez le code PIN de votre clé de sécurité. Il ne sera pas enregistré.",
+      "pin_retry": "Code PIN incorrect. Vérifiez-le avant de réessayer.",
+      "pin_label": "Code PIN",
+      "errors": {
+        "unavailable": "Installez et activez le module FIDO Security Key pour utiliser cette clé SSH.",
+        "cancelled": "Authentification par clé de sécurité annulée.",
+        "timeout": "L’authentification par clé de sécurité a expiré.",
+        "invalid_request": "Demande de signature par clé de sécurité non valide.",
+        "incompatible": "Le protocole du module de clé de sécurité est incompatible.",
+        "no_device": "Aucune clé FIDO trouvée. Branchez votre appareil et réessayez.",
+        "credential_not_found": "Cet identifiant SSH est introuvable sur la clé de sécurité connectée.",
+        "pin_blocked": "Le code PIN est bloqué. Suivez les instructions de récupération du fabricant.",
+        "device_failure": "L’opération de la clé de sécurité a échoué.",
+        "invalid_signature": "La signature de la clé de sécurité n’a pas pu être vérifiée."
+      }
+    },
     "form": {
       "title": "Nouvelle connexion",
       "subtitle": "Configurez un hôte SSH pour les terminaux, SFTP, les redirections de ports et l’édition de fichiers distants.",

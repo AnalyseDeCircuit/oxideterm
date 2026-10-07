@@ -3,11 +3,11 @@ use oxideterm_connections::ConnectionStore;
 use oxideterm_remote_desktop::RemoteDesktopProtocol;
 
 pub(super) const WELCOME_PAGE_PADDING: f32 = 24.0;
-const WELCOME_WORKBENCH_MIN_ROW_WIDTH: f32 = 800.0;
+const WELCOME_COMPACT_LAYOUT_WIDTH: f32 = 800.0;
 
-/// The breakpoint uses card space, excluding the page gutters.
-pub(super) fn welcome_layout_is_stacked(available_width: f32) -> bool {
-    available_width - 2.0 * WELCOME_PAGE_PADDING < WELCOME_WORKBENCH_MIN_ROW_WIDTH
+/// Compact section spacing follows the usable width after page gutters.
+pub(super) fn welcome_layout_is_compact(available_width: f32) -> bool {
+    available_width - 2.0 * WELCOME_PAGE_PADDING < WELCOME_COMPACT_LAYOUT_WIDTH
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

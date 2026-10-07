@@ -290,6 +290,26 @@ fn migrate_acp_agent_presets(settings: &mut Value, warnings: &mut Vec<String>) {
             .map(|args| args.iter().filter_map(Value::as_str).collect::<Vec<&str>>())
             .unwrap_or_default();
 
+        let bundled_provider = matches!(command, "oxideterm-native" | "oxideterm")
+            .then(|| args.strip_prefix(&["--acp-adapter"]))
+            .flatten();
+        let plugin = match (command, args.as_slice(), bundled_provider) {
+            (_, _, Some(["codex", ..])) | ("codex-acp", [], _) => Some("com.oxideterm.acp.codex"),
+            (_, _, Some(["claude-code", ..]))
+            | ("npx", ["-y", "@agentclientprotocol/claude-agent-acp"], _) => {
+                Some("com.oxideterm.acp.claude-code")
+            }
+            _ => None,
+        };
+        if let Some(plugin_id) = plugin {
+            let remaining_args = json!(bundled_provider.map(|args| &args[1..]).unwrap_or_default());
+            agent.insert("pluginId".into(), json!(plugin_id));
+            agent.insert("command".into(), json!(""));
+            agent.insert("args".into(), remaining_args);
+            migrated += 1;
+            continue;
+        }
+
         let Some((new_command, new_args)) = acp_agent_preset_migration(command, &args) else {
             continue;
         };
@@ -310,10 +330,6 @@ fn acp_agent_preset_migration(
     args: &[&str],
 ) -> Option<(&'static str, Vec<&'static str>)> {
     match (command, args) {
-        ("npx", ["-y", "@agentclientprotocol/claude-agent-acp"]) => {
-            Some(("oxideterm-native", vec!["--acp-adapter", "claude-code"]))
-        }
-        ("codex-acp", []) => Some(("oxideterm-native", vec!["--acp-adapter", "codex"])),
         // Copilot already exposes native ACP over stdio; undo older OxideTerm
         // migrations that wrapped it as a text CLI adapter.
         ("oxideterm-native", ["--acp-adapter", "github-copilot"])
@@ -1367,14 +1383,56 @@ mod tests {
         .expect("sanitize settings");
 
         let agents = sanitized.settings.ai.acp_agents;
-        assert_eq!(agents[0].command, "oxideterm-native");
-        assert_eq!(agents[0].args, vec!["--acp-adapter", "claude-code"]);
-        assert_eq!(agents[1].command, "oxideterm-native");
-        assert_eq!(agents[1].args, vec!["--acp-adapter", "codex"]);
+        assert_eq!(
+            agents[0].plugin_id.as_deref(),
+            Some("com.oxideterm.acp.claude-code")
+        );
+        assert_eq!(agents[0].command, "");
+        assert_eq!(agents[0].args, Vec::<String>::new());
+        assert_eq!(
+            agents[1].plugin_id.as_deref(),
+            Some("com.oxideterm.acp.codex")
+        );
+        assert_eq!(agents[1].command, "");
+        assert_eq!(agents[1].args, Vec::<String>::new());
         assert_eq!(agents[2].command, "custom-acp");
         assert_eq!(agents[2].args, vec!["--stdio"]);
         assert_eq!(agents[3].command, "copilot");
         assert_eq!(agents[3].args, vec!["--acp", "--stdio"]);
+    }
+
+    #[test]
+    fn bundled_acp_migration_preserves_identity_and_user_overrides() {
+        for (provider, plugin_id) in [
+            ("codex", "com.oxideterm.acp.codex"),
+            ("claude-code", "com.oxideterm.acp.claude-code"),
+        ] {
+            let result = sanitize_settings_value(json!({"ai": {
+                "activeAcpAgentId": "my-agent",
+                "acpAgents": [{"id":"my-agent", "displayName":"My Agent", "command":"oxideterm-native",
+                    "args":["--acp-adapter", provider, "--command", "/custom/tool", "--arg", "--verbose"],
+                    "cwd":"/project", "enabled":false,
+                    "capabilityPolicy":{"fsReadTextFile":true, "fsWriteTextFile":false, "terminal":false}}]
+            }})).unwrap();
+            let agent = &result.settings.ai.acp_agents[0];
+            assert_eq!(
+                result.settings.ai.active_acp_agent_id.as_deref(),
+                Some("my-agent")
+            );
+            assert_eq!(
+                (&agent.id, &agent.display_name),
+                (&"my-agent".into(), &"My Agent".into())
+            );
+            assert_eq!(agent.plugin_id.as_deref(), Some(plugin_id));
+            assert_eq!(
+                agent.args,
+                ["--command", "/custom/tool", "--arg", "--verbose"]
+            );
+            assert_eq!(agent.cwd.as_deref(), Some("/project"));
+            assert!(!agent.enabled);
+            assert!(agent.capability_policy.fs_read_text_file);
+            assert!(!agent.capability_policy.fs_write_text_file);
+        }
     }
 
     #[test]

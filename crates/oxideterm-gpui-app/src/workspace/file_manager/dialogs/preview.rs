@@ -1182,10 +1182,9 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(language) = oxideterm_editor_syntax::LanguageId::detect(
-            Some(std::path::Path::new(filename)),
-            content,
-        ) {
+        if oxideterm_gpui_editor::detect_language(Some(std::path::Path::new(filename)), content, cx)
+            .is_some()
+        {
             let existing = self.file_manager.read(cx).preview_editor.clone();
             let editor = existing.unwrap_or_else(|| {
                 let tokens = self.tokens;
@@ -1211,7 +1210,7 @@ impl WorkspaceApp {
                         settings.background_active,
                         cx,
                     );
-                    editor.set_language(Some(language), cx);
+                    editor.set_language_from_path(filename, None, cx);
                     editor
                 });
                 self.file_manager.update(cx, |state, _| {
@@ -1349,9 +1348,10 @@ impl WorkspaceApp {
             .unwrap_or_else(|| file_manager_preview_language_for_name(filename))
             .to_ascii_lowercase();
         let row_count = lines.len() + usize::from(!eof || error.is_some());
-        let notice = oxideterm_editor_syntax::LanguageId::detect(
+        let notice = oxideterm_gpui_editor::detect_language(
             Some(std::path::Path::new(filename)),
             lines.first().map(String::as_str).unwrap_or_default(),
+            cx,
         )
         .and_then(|language| {
             oxideterm_gpui_editor::render_language_plugin_notice(language, &self.tokens, cx)

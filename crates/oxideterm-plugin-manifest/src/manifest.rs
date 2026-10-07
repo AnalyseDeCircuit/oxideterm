@@ -18,6 +18,12 @@ pub struct NativePluginManifest {
     pub description: Option<String>,
     #[serde(default)]
     pub author: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
     #[serde(default)]
     pub main: Option<String>,
     #[serde(default)]
@@ -75,12 +81,22 @@ pub enum NativePluginRuntimeKind {
     Language,
     Wasm,
     Process,
+    Acp,
+    RemoteDesktop,
+    TerminalTransport,
+    Helper,
     ManifestOnly,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
+    #[serde(default)]
+    pub helper: Option<NativePluginHelperDef>,
+    #[serde(default)]
+    pub terminal_transport: Option<NativePluginTerminalTransportDef>,
+    #[serde(default)]
+    pub remote_desktop: Option<NativePluginRemoteDesktopDef>,
     #[serde(default)]
     pub file_previews: Option<Vec<NativePluginFilePreviewDef>>,
     #[serde(default)]
@@ -107,13 +123,54 @@ pub struct NativePluginContributes {
     pub host_monitors: Option<Vec<NativePluginHostMonitorDef>>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginHelperDef {
+    pub feature: String,
+    pub protocol: String,
+    pub protocol_version: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginRemoteDesktopDef {
+    pub protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
+    pub protocol_version: u32,
+    #[serde(default)]
+    pub capabilities: oxideterm_remote_desktop::RemoteDesktopProviderCapabilities,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginTerminalTransportDef {
+    pub protocol: String,
+    pub protocol_version: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginLanguage {
-    pub id: String,
+    #[serde(flatten)]
+    pub definition: crate::NativePluginLanguageDefinition,
     pub highlights: String,
     pub parser_sha256: String,
     pub highlights_sha256: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub injections: Vec<NativePluginInjectedLanguage>,
+}
+
+/// Embedded grammars belong to their parent package, with independently verified assets.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginInjectedLanguage {
+    pub id: String,
+    pub grammar_name: Option<String>,
+    pub parser: String,
+    pub highlights: String,
+    pub query: String,
+    pub parser_sha256: String,
+    pub highlights_sha256: String,
+    pub query_sha256: String,
 }
 
 /// A paginated file renderer invoked through the process plugin protocol.

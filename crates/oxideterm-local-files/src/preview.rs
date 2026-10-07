@@ -6,6 +6,7 @@ use std::{
 use crate::{LocalPreview, LocalPreviewChunk, LocalPreviewMetadata, list_local_archive_contents};
 
 pub const MAX_PREVIEW_SIZE: u64 = 10 * 1024 * 1024;
+const MAX_PDF_PREVIEW_SIZE: u64 = 100 * 1024 * 1024;
 pub const STREAM_PREVIEW_THRESHOLD: u64 = 256 * 1024;
 
 pub fn read_local_preview(path: &str) -> LocalPreview {
@@ -30,18 +31,12 @@ pub fn read_local_preview(path: &str) -> LocalPreview {
         };
     }
     if video_extensions().contains(&ext.as_str()) {
-        if file_size > MAX_PREVIEW_SIZE {
-            return LocalPreview::TooLarge { size: file_size };
-        }
         return LocalPreview::Video {
             path: path.to_string(),
             mime_type: mime_type_for_extension(&ext),
         };
     }
     if audio_extensions().contains(&ext.as_str()) {
-        if file_size > MAX_PREVIEW_SIZE {
-            return LocalPreview::TooLarge { size: file_size };
-        }
         return LocalPreview::Audio {
             path: path.to_string(),
             mime_type: mime_type_for_extension(&ext),
@@ -63,7 +58,12 @@ pub fn read_local_preview(path: &str) -> LocalPreview {
                 file.read_exact(&mut header).is_ok() && &header == b"SQLite format 3\0"
             }));
     if ext == "pdf" || sqlite {
-        if file_size > MAX_PREVIEW_SIZE {
+        let max_size = if sqlite {
+            MAX_PREVIEW_SIZE
+        } else {
+            MAX_PDF_PREVIEW_SIZE
+        };
+        if file_size > max_size {
             return LocalPreview::TooLarge { size: file_size };
         }
         return LocalPreview::Document {
@@ -442,6 +442,17 @@ mod tests {
         assert!(
             matches!(read_local_preview(path.to_str().unwrap()), LocalPreview::Text { content, .. } if content == "unrelated text database")
         );
+        std::fs::write(&path, b"SQLite format 3\0fixture").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(10 * 1024 * 1024 + 1)
+            .unwrap();
+        assert!(matches!(
+            read_local_preview(path.to_str().unwrap()),
+            LocalPreview::TooLarge { size } if size == 10 * 1024 * 1024 + 1
+        ));
     }
 
     #[test]
@@ -449,26 +460,57 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("manual.PDF");
         std::fs::write(&path, b"%PDF-1.4\n").unwrap();
-        match read_local_preview(path.to_str().unwrap()) {
-            LocalPreview::Document {
-                path: asset,
-                mime_type,
-            } => {
-                assert_eq!(asset, path.to_str().unwrap());
-                assert_eq!(mime_type, "application/pdf");
+        for size in [9, 10 * 1024 * 1024 + 1, 100 * 1024 * 1024] {
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_len(size)
+                .unwrap();
+            match read_local_preview(path.to_str().unwrap()) {
+                LocalPreview::Document {
+                    path: asset,
+                    mime_type,
+                } => {
+                    assert_eq!(asset, path.to_str().unwrap());
+                    assert_eq!(mime_type, "application/pdf");
+                }
+                other => panic!("Expected a document asset for {size} bytes, got {other:?}"),
             }
-            other => panic!("Expected a document asset, got {other:?}"),
         }
         std::fs::File::options()
             .write(true)
             .open(&path)
             .unwrap()
-            .set_len(MAX_PREVIEW_SIZE + 1)
+            .set_len(100 * 1024 * 1024 + 1)
             .unwrap();
         assert!(
-            matches!(read_local_preview(path.to_str().unwrap()), LocalPreview::TooLarge { size } if size == MAX_PREVIEW_SIZE + 1)
+            matches!(read_local_preview(path.to_str().unwrap()), LocalPreview::TooLarge { size } if size == 100 * 1024 * 1024 + 1)
         );
         assert!(path.exists());
+    }
+
+    #[test]
+    fn large_local_media_previews_use_the_original_file_path() {
+        let directory = tempfile::tempdir().unwrap();
+        for (name, mime) in [
+            ("recording.mp4", "video/mp4"),
+            ("recording.mp3", "audio/mpeg"),
+        ] {
+            let path = directory.path().join(name);
+            std::fs::File::create(&path)
+                .unwrap()
+                .set_len(1024 * 1024 * 1024)
+                .unwrap();
+            let preview = read_local_preview(path.to_str().unwrap());
+            let (asset, mime_type) = match (name, preview) {
+                ("recording.mp4", LocalPreview::Video { path, mime_type })
+                | ("recording.mp3", LocalPreview::Audio { path, mime_type }) => (path, mime_type),
+                (_, other) => panic!("Expected a media asset for {name}, got {other:?}"),
+            };
+            assert_eq!(Path::new(&asset), path);
+            assert_eq!(mime_type, mime);
+        }
     }
 
     #[test]

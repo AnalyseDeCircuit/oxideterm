@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "Security key",
+      "touch_instructions": "Touch your security key or complete verification on the device.",
+      "pin_title": "Security-key PIN",
+      "pin_instructions": "Enter your security-key PIN. It will not be saved.",
+      "pin_retry": "Incorrect PIN. Check it before trying again.",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "Install and enable the FIDO Security Key plugin to use this SSH key.",
+        "cancelled": "Security-key authentication cancelled.",
+        "timeout": "Security-key authentication timed out.",
+        "invalid_request": "Invalid security-key signing request.",
+        "incompatible": "The security-key plugin protocol is incompatible.",
+        "no_device": "No FIDO security key found. Connect your device and try again.",
+        "credential_not_found": "This SSH credential was not found on the connected security key.",
+        "pin_blocked": "Security-key PIN is blocked. Follow the device vendor’s recovery instructions.",
+        "device_failure": "The security-key operation failed.",
+        "invalid_signature": "The security-key signature could not be verified."
+      }
+    },
     "form": {
       "title": "New Connection",
       "subtitle": "Configure an SSH host for terminals, SFTP, port forwarding, and remote file editing.",

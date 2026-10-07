@@ -834,6 +834,19 @@ impl ConnectionFlowEntity {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn wait_for_security_key_touch(
+        &mut self,
+        flow_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(challenge) = self.keyboard_interactive_challenge.as_mut()
+            && challenge.request.flow_id == flow_id
+        {
+            challenge.external_wait = true;
+            cx.notify();
+        }
+    }
+
     fn schedule_keyboard_interactive_timer(&mut self, generation: u64, cx: &mut Context<Self>) {
         self.keyboard_interactive_timer_task = Some(cx.spawn(async move |connection_flow, cx| {
             loop {
@@ -1323,6 +1336,34 @@ mod tests {
             .expect("prompt response delivery")
             .expect("submitted responses");
         assert_eq!(responses.as_slice(), ["secret"]);
+    }
+
+    #[gpui::test]
+    fn security_key_touch_wait_cannot_submit_and_releases_the_dialog_with_its_waiter(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = cx.new(ConnectionFlowEntity::new);
+        let (response_tx, response_rx) = oneshot::channel();
+        entity.update(cx, |entity, cx| {
+            let mut request = keyboard_interactive_request("fido-touch");
+            request.prompts.clear();
+            assert!(entity.open_keyboard_interactive_challenge(request, response_tx, cx));
+            entity.wait_for_security_key_touch("fido-touch", cx);
+            assert!(matches!(
+                entity.handle_keyboard_interactive_key("enter", false, false, cx),
+                super::KeyboardInteractiveKeyAction::Handled
+            ));
+            assert!(matches!(
+                entity.submit_keyboard_interactive_challenge(cx),
+                super::KeyboardInteractiveSubmitResult::Blocked
+            ));
+            assert!(entity.has_keyboard_interactive_challenge());
+        });
+        drop(response_rx);
+        entity.update(cx, |entity, cx| {
+            entity.clear_inactive_keyboard_interactive_challenge(cx);
+            assert!(!entity.has_keyboard_interactive_challenge());
+        });
     }
 
     #[gpui::test]

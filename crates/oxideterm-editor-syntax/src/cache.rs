@@ -107,6 +107,7 @@ impl HighlightCache {
         // The bundled Rust query has no source_file or cross-root patterns.
         // Other grammars retain full queries until their context rules are verified.
         let partitioned = session.language_id == LanguageId::Rust
+            && session.queries.injections.is_empty()
             && (0..session.queries.highlight.pattern_count()).all(|i| {
                 session.queries.highlight.is_pattern_rooted(i)
                     && !session.queries.highlight.is_pattern_non_local(i)
@@ -295,7 +296,7 @@ mod tests {
                 LanguageId::Rust => "fn sample() { let value = 42; }\n".repeat(34000),
                 _ => "value = 42 # sample\n".repeat(56000),
             };
-            let mut session = crate::grammar_fixture::parse(language, &source).unwrap();
+            let mut session = crate::grammar_fixture::parse(language.clone(), &source).unwrap();
             let mut cache = HighlightCache::default();
             cache.update(&session, &source, None);
             for run in 0..4 {
@@ -337,7 +338,7 @@ mod tests {
             ),
             (LanguageId::Python, "value = \"中文🙂\"\n".repeat(128)),
         ] {
-            let session = crate::grammar_fixture::parse(language, &source).unwrap();
+            let session = crate::grammar_fixture::parse(language.clone(), &source).unwrap();
             let full = session.highlight_spans(&source);
             let mut cache = HighlightCache::default();
             cache.update(&session, &source, None);

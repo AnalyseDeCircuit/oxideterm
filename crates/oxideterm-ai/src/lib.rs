@@ -1,4 +1,5 @@
 mod acp;
+pub use acp::{CursorAskQuestion, CursorCreatePlan, CursorRequest, CursorResponseSender};
 pub mod agent;
 mod application_tools;
 mod chat;
@@ -137,11 +138,11 @@ pub use responses_state::{
     append_responses_round, has_responses_history, responses_round_state, scope_responses_history,
 };
 pub use runtime_context::{
-    RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError, RuntimeContextSnapshot,
-    RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration, RuntimeOwnerKey,
-    RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch, RuntimeRevocationReason,
-    RuntimeValidationError, RuntimeValidationFailure, StableResourceKind, StableResourceRef,
-    ToolSessionId, ValidatedRuntimeHandle,
+    RUNTIME_CONTEXT_MESSAGE_ID, RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError,
+    RuntimeContextSnapshot, RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration,
+    RuntimeOwnerKey, RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch,
+    RuntimeRevocationReason, RuntimeValidationError, RuntimeValidationFailure, StableResourceKind,
+    StableResourceRef, ToolSessionId, ValidatedRuntimeHandle,
 };
 pub use settings::{
     AiProviderKeyDisplayState, AiProviderRefreshKeyPolicy, add_provider_from_template,

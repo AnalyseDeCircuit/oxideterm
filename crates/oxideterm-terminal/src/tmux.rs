@@ -2487,7 +2487,7 @@ mod tests {
         assert!(results.contains(&(
             AuditOutcome::Unknown,
             AuditEvidence::Lifecycle,
-            context.session_id.clone()
+            context.session_id
         )));
     }
 }

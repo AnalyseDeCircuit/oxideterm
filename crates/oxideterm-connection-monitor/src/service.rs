@@ -278,7 +278,7 @@ pub fn parse_service_snapshot(output: &str) -> ResourceServiceSnapshot {
 
     merge_service_enabled_states(&mut services, &enabled_by_id);
     append_unit_file_only_services(&mut services, &enabled_by_id);
-    services.sort_by(|left, right| left.id.to_lowercase().cmp(&right.id.to_lowercase()));
+    services.sort_by_key(|service| service.id.to_lowercase());
     services.dedup_by(|left, right| left.id == right.id);
 
     ResourceServiceSnapshot {

@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Installieren oder aktivieren Sie das Mosh-Plugin vor dem Verbinden.",
+    "ready": "Das Mosh-Plugin ist installiert und aktiviert."
+  },
   "file_preview": {
     "entry_file_offset": "Dateioffset des Einsprungpunkts",
     "subject": "Inhaber",
@@ -254,6 +258,9 @@
     "shortcut_count": "Tastaturkürzel"
   },
   "plugin": {
+    "install_queued": "Wartet · Position {{position}}",
+    "installing_named": "{{name}} wird installiert",
+    "install_queue_count": "{{count}} warten",
     "jump_to_page": "Gehe zu Seite",
     "total_pages": "von {{pages}} Seiten",
     "jump_page": "Los",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Hostquellen",
     "marketplace_workspace": "Arbeitsbereich",
     "marketplace_utilities": "Hilfsprogramme",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "Nach der Installation und Aktivierung wird die Agentenkonfiguration automatisch erstellt; ein Startbefehl ist nicht nötig. Arbeitsverzeichnis, zusätzliche Argumente und Umgebungsvariablen sind optional. Leere Felder verwenden die Standardwerte. Plugins, die ein lokales Programm nutzen, benötigen dessen offizielles Kommandozeilenprogramm. Folgen Sie den Plugin-Anweisungen zur Installation und Anmeldung.",
+    "marketplace_remote_connections": "Remoteverbindungen",
     "apply_page_size": "Anwenden",
     "invalid_page_size": "Geben Sie eine gültige positive ganze Zahl ein",
     "page_range": "{{start}}–{{end}} von {{total}} Plugins",
@@ -937,6 +947,10 @@
     "update_available": "Update verfügbar",
     "install_error": "Installation fehlgeschlagen",
     "search_placeholder": "Plugins suchen...",
+    "marketplace_sort": "Sortierung: {{order}}",
+    "marketplace_sort_name": "Name",
+    "marketplace_sort_updated": "Zuletzt aktualisiert",
+    "marketplace_sort_newest": "Neu im Katalog",
     "marketplace_title": "Offizieller Plugin-Marktplatz",
     "marketplace_description": "Im offiziellen OxideTerm-Katalog gelistete Plugins suchen, installieren und aktualisieren.",
     "marketplace_repository": "Katalog-Repository",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Plugin-Tab-Ansicht nicht verfügbar",
     "tab_crashed": "Plugin-Tab ist abgestürzt",
     "detail_author": "Autor",
+    "license_label": "Lizenz: {{license}}",
+    "install_required": "Das Plugin {{name}} ist nicht installiert. Installieren Sie es aus dem Plugin-Markt und versuchen Sie es erneut.",
+    "enable_required": "Das installierte Plugin {{name}} ist nicht verfügbar. Aktivieren oder aktualisieren Sie es im Plugin-Manager und versuchen Sie es erneut.",
+    "license_not_declared": "Nicht angegeben",
+    "view_license": "Lizenz anzeigen",
+    "third_party_licenses": "Lizenzen von Drittanbietern",
     "registry_capabilities": "Funktionen: {{capabilities}}",
     "reload_success": "{{name}} wurde erneut gescannt.",
     "enable_success": "{{name}} wurde aktiviert.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "RDP-Vorschau",
     "vnc_preview_title": "VNC-Vorschau",
     "provider_missing": "Remote-Desktop-Anbieter ist nicht verfügbar.",
+    "plugin_ready": "Das Remotedesktop-Plugin ist installiert und aktiviert.",
+    "plugin_required": "Installieren oder aktivieren Sie vor der Verbindung das Remotedesktop-Plugin.",
+    "manage_plugin": "Plugin verwalten",
     "session_missing": "Remote-Desktop-Sitzung ist nicht verfügbar.",
     "reconnect": "Neu verbinden",
     "resize_fixed": "Serverseitig feste Größe",

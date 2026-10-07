@@ -143,14 +143,12 @@ impl TextProgressBar {
 
         self.last_update_time = Some(now);
         let file_step = self.file_step.unwrap_or(0);
-        let percentage = if self.file_size == 0 {
-            "100%".to_string()
-        } else {
-            format!(
-                "{}%",
-                (file_step.saturating_mul(100) + self.file_size / 2) / self.file_size
-            )
-        };
+        let percentage = format!(
+            "{}%",
+            (file_step.saturating_mul(100) + self.file_size / 2)
+                .checked_div(self.file_size)
+                .unwrap_or(100)
+        );
         let total = convert_size_to_string(file_step);
         let speed = self.get_speed(now);
         let speed_string = if speed > 0.0 {

@@ -585,7 +585,7 @@ fn ordered_servers(state: &McpRuntimeState) -> Vec<&McpServerState> {
         .iter()
         .filter(|(id, _)| !seen.contains(id.as_str()))
         .collect::<Vec<_>>();
-    remaining.sort_by(|(left, _), (right, _)| left.cmp(right));
+    remaining.sort_by_key(|(id, _)| *id);
     servers.extend(remaining.into_iter().map(|(_, server)| server));
     servers
 }

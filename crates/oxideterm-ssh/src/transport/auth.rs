@@ -315,7 +315,7 @@ fn authentication_failure_message(result: &client::AuthResult) -> String {
 enum PrivateKeyAuthErrorKind {
     MissingPassphrase,
     InvalidPassphrase,
-    UnsupportedHardwareKey,
+    InvalidSecurityKey,
     UnsupportedDsaKey,
     UnsupportedFormat,
     Other,
@@ -358,7 +358,7 @@ fn classify_private_key_decode_error(
     passphrase_supplied: bool,
 ) -> PrivateKeyAuthErrorKind {
     if private_key_text_looks_hardware_key(private_key) {
-        return PrivateKeyAuthErrorKind::UnsupportedHardwareKey;
+        return PrivateKeyAuthErrorKind::InvalidSecurityKey;
     }
     if private_key_text_looks_dsa(private_key) {
         return PrivateKeyAuthErrorKind::UnsupportedDsaKey;
@@ -387,9 +387,7 @@ fn private_key_auth_error_message(kind: PrivateKeyAuthErrorKind, fallback: Strin
     match kind {
         PrivateKeyAuthErrorKind::MissingPassphrase => "SSH key requires a passphrase".to_string(),
         PrivateKeyAuthErrorKind::InvalidPassphrase => "Invalid SSH key passphrase".to_string(),
-        PrivateKeyAuthErrorKind::UnsupportedHardwareKey => {
-            "FIDO/security-key SSH private keys require agent-backed signing and are not supported for direct private-key authentication yet".to_string()
-        }
+        PrivateKeyAuthErrorKind::InvalidSecurityKey => "Invalid FIDO/security-key SSH private key".to_string(),
         PrivateKeyAuthErrorKind::UnsupportedDsaKey => {
             "DSA SSH private keys are deprecated and are not supported for direct private-key authentication".to_string()
         }
@@ -409,19 +407,6 @@ fn private_key_auth_error_is_missing_passphrase(error: &SshTransportError) -> bo
         ))
 }
 
-fn reject_direct_hardware_key(key: &PrivateKey) -> Result<(), SshTransportError> {
-    let algorithm = key.algorithm().to_string();
-    if algorithm.starts_with("sk-") {
-        return Err(SshTransportError::AuthenticationFailed(
-            private_key_auth_error_message(
-                PrivateKeyAuthErrorKind::UnsupportedHardwareKey,
-                String::new(),
-            ),
-        ));
-    }
-    Ok(())
-}
-
 fn decode_private_key_for_auth(
     private_key: &str,
     passphrase: Option<&str>,
@@ -435,7 +420,6 @@ fn decode_private_key_for_auth(
                 error.to_string(),
             ))
         })?;
-    reject_direct_hardware_key(&key)?;
     Ok(key)
 }
 
@@ -528,8 +512,28 @@ async fn authenticate_publickey_best_algo(
     handle: &mut client::Handle<NativeClientHandler>,
     username: &str,
     key: Arc<PrivateKey>,
+    prompt_handler: Option<&dyn SshPromptHandler>,
     audit: &mut AuthenticationAudit,
 ) -> Result<client::AuthResult, SshTransportError> {
+    if matches!(
+        key.key_data(),
+        KeypairData::SkEd25519(_) | KeypairData::SkEcdsaSha2NistP256(_)
+    ) {
+        let public_key = key.public_key().clone();
+        let mut signer = SecurityKeySigner::new(key, prompt_handler).await?;
+        return audit
+            .authenticate(
+                "security-key",
+                Some(public_key.algorithm().as_str()),
+                async {
+                    handle
+                        .authenticate_publickey_with(username, public_key, None, &mut signer)
+                        .await
+                        .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))
+                },
+            )
+            .await;
+    }
     let algorithms = auth_algorithm_attempt_order(
         matches!(key.algorithm(), Algorithm::Rsa { .. }),
         resolve_server_rsa_preference(handle).await,
@@ -570,8 +574,27 @@ async fn authenticate_certificate_best_algo(
     username: &str,
     key: Arc<PrivateKey>,
     cert: Certificate,
+    prompt_handler: Option<&dyn SshPromptHandler>,
     audit: &mut AuthenticationAudit,
 ) -> Result<client::AuthResult, SshTransportError> {
+    if matches!(
+        key.key_data(),
+        KeypairData::SkEd25519(_) | KeypairData::SkEcdsaSha2NistP256(_)
+    ) {
+        let mut signer = SecurityKeySigner::new(key, prompt_handler).await?;
+        return audit
+            .authenticate(
+                "security-key-certificate",
+                Some(cert.algorithm().as_str()),
+                async {
+                    handle
+                        .authenticate_certificate_with(username, cert.clone(), None, &mut signer)
+                        .await
+                        .map_err(|error| SshTransportError::AuthenticationFailed(error.to_string()))
+                },
+            )
+            .await;
+    }
     let algorithms = auth_algorithm_attempt_order(
         matches!(cert.algorithm(), Algorithm::Rsa { .. }),
         resolve_server_rsa_preference(handle).await,

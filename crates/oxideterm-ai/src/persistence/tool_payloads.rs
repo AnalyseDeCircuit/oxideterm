@@ -38,7 +38,7 @@ impl Serialize for CanonicalValue<'_> {
         match self.0 {
             Value::Object(fields) => {
                 let mut fields: Vec<_> = fields.iter().collect();
-                fields.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
+                fields.sort_unstable_by_key(|(key, _)| *key);
                 let mut map = serializer.serialize_map(Some(fields.len()))?;
                 for (key, value) in fields {
                     map.serialize_entry(key, &CanonicalValue(value))?;

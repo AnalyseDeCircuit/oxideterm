@@ -42,7 +42,7 @@ use oxideterm_remote_desktop::{
     RemoteDesktopMouseButton, RemoteDesktopMouseButtonState, RemoteDesktopProtocol,
     RemoteDesktopProviderManifest, RemoteDesktopRemoteFileEntry, RemoteDesktopRemoteFileKind,
     RemoteDesktopSecret, RemoteDesktopSessionStatus, RemoteDesktopSize, RemoteDesktopWheelDelta,
-    builtin_preview_provider_registry, builtin_provider_registry,
+    builtin_preview_provider_registry,
 };
 use oxideterm_workspace::{Tab, TabKind, TabTitleSource};
 use tokio::sync::Notify;
@@ -412,17 +412,22 @@ impl RemoteDesktopWorkerOwner {
     }
 
     fn shutdown(&mut self) {
+        let worker_thread = self.close_and_take_thread();
+        Self::retire_worker_thread(worker_thread);
+    }
+
+    fn close_and_take_thread(&mut self) -> Option<thread::JoinHandle<()>> {
         if let Some(request_tx) = self.request_tx.take() {
             // Session shutdown and helper replacement release input state before
             // asking the helper to exit cooperatively.
             let _ = request_tx.send(RemoteDesktopHelperRequest::ReleaseAllInputs);
             let _ = request_tx.send(RemoteDesktopHelperRequest::Close);
         }
-        self.retire_worker_thread();
+        self.worker_thread.take()
     }
 
-    fn retire_worker_thread(&mut self) {
-        let Some(worker_thread) = self.worker_thread.take() else {
+    fn retire_worker_thread(worker_thread: Option<thread::JoinHandle<()>>) {
+        let Some(worker_thread) = worker_thread else {
             return;
         };
         if worker_thread.is_finished() {
@@ -614,6 +619,7 @@ pub(in crate::workspace) struct RemoteDesktopSessionEntity {
     tab_id: TabId,
     profile: RemoteDesktopConnectionProfile,
     provider: RemoteDesktopProviderManifest,
+    plugin_entity: Option<gpui::WeakEntity<super::plugin_entity::PluginWorkspaceEntity>>,
     password: Option<RemoteDesktopSecret>,
     credential_prompt_task: Option<gpui::Task<()>>,
     credential_prompt_generation: Option<u64>,
@@ -690,6 +696,7 @@ impl RemoteDesktopSessionEntity {
             tab_id,
             profile,
             provider,
+            plugin_entity: None,
             // The tab retains one zeroizing credential owner so a reconnect
             // can answer a fresh certificate-gated authentication request.
             password,
@@ -785,6 +792,7 @@ impl RemoteDesktopSessionEntity {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum RemoteDesktopSessionEvent {
+    PluginRequired { protocol: RemoteDesktopProtocol },
     CredentialsRequired { generation: u64 },
     DeliveryReady { generation: u64 },
     FrameApplyReady { generation: u64 },
@@ -802,6 +810,66 @@ pub(in crate::workspace) struct RemoteDesktopWorkspaceEntity {
 }
 
 impl RemoteDesktopWorkspaceEntity {
+    pub(in crate::workspace) fn stop_plugins(
+        &self,
+        plugin_id: Option<&str>,
+        cx: &mut App,
+    ) -> Vec<thread::JoinHandle<()>> {
+        self.sessions
+            .values()
+            .filter_map(|session| {
+                session.update(cx, |session, cx| {
+                    if session.plugin_entity.is_none()
+                        || plugin_id.is_some_and(|id| id != session.provider.id)
+                    {
+                        return None;
+                    }
+                    // Reap the helper before replacing its executable, including on Windows.
+                    let worker_thread = session
+                        .worker
+                        .as_mut()
+                        .and_then(RemoteDesktopWorkerOwner::close_and_take_thread);
+                    session.shutdown(None, cx);
+                    session.worker_generation =
+                        next_remote_desktop_worker_generation(session.worker_generation);
+                    session.state.apply_event(RemoteDesktopHelperEvent::Status {
+                        status: RemoteDesktopSessionStatus::Disconnected,
+                        message: None,
+                    });
+                    cx.notify();
+                    worker_thread
+                })
+            })
+            .collect()
+    }
+
+    pub(in crate::workspace) fn sync_plugins(
+        &self,
+        providers: &[RemoteDesktopProviderManifest],
+        cx: &mut App,
+    ) {
+        for session in self.sessions.values() {
+            let current = session.read(cx);
+            if current.plugin_entity.is_none()
+                || providers
+                    .iter()
+                    .any(|provider| provider == &current.provider)
+            {
+                continue;
+            }
+            session.update(cx, |session, cx| {
+                session.shutdown(None, cx);
+                session.worker_generation =
+                    next_remote_desktop_worker_generation(session.worker_generation);
+                session.state.apply_event(RemoteDesktopHelperEvent::Status {
+                    status: RemoteDesktopSessionStatus::Disconnected,
+                    message: None,
+                });
+                cx.notify();
+            });
+        }
+    }
+
     pub(in crate::workspace) fn new() -> Self {
         Self {
             sessions: HashMap::new(),

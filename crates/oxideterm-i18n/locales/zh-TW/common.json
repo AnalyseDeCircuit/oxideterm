@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "連線前請安裝或啟用 Mosh 外掛。",
+    "ready": "Mosh 外掛已安裝並啟用。"
+  },
   "file_preview": {
     "entry_file_offset": "進入點檔案偏移",
     "subject": "主體",
@@ -254,6 +258,9 @@
     "shortcut_count": "個快捷鍵"
   },
   "plugin": {
+    "install_queued": "等待中 · 第 {{position}} 項",
+    "installing_named": "正在安裝 {{name}}",
+    "install_queue_count": "{{count}} 項等待安裝",
     "jump_to_page": "頁碼",
     "total_pages": "共 {{pages}} 頁",
     "jump_page": "跳轉",
@@ -261,6 +268,9 @@
     "marketplace_sources": "主機來源",
     "marketplace_workspace": "工作區",
     "marketplace_utilities": "實用工具",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "安裝並啟用後會自動建立代理設定，無須填寫啟動指令。工作目錄、額外參數和環境變數是選用設定，留空即可使用預設設定。使用本機程式的外掛須先安裝對應的官方命令列程式，並依外掛說明登入。",
+    "marketplace_remote_connections": "遠端連線",
     "apply_page_size": "套用",
     "invalid_page_size": "請輸入有效的正整數",
     "page_range": "第 {{start}}–{{end}} 項，共 {{total}} 個外掛",
@@ -937,6 +947,10 @@
     "update_available": "可更新",
     "install_error": "安裝失敗",
     "search_placeholder": "搜尋外掛...",
+    "marketplace_sort": "排序：{{order}}",
+    "marketplace_sort_name": "名稱",
+    "marketplace_sort_updated": "最近更新",
+    "marketplace_sort_newest": "最新上架",
     "marketplace_title": "OxideTerm 官方外掛市集",
     "marketplace_description": "瀏覽、安裝及更新 OxideTerm 官方目錄收錄的外掛。",
     "marketplace_repository": "目錄倉庫",
@@ -999,6 +1013,12 @@
     "tab_not_available": "外掛分頁檢視不可用",
     "tab_crashed": "外掛分頁已崩潰",
     "detail_author": "作者",
+    "license_label": "授權條款：{{license}}",
+    "install_required": "尚未安裝 {{name}} 外掛。請前往外掛市集安裝後重試。",
+    "enable_required": "已安裝的 {{name}} 外掛目前無法使用。請在外掛管理員中啟用或更新後重試。",
+    "license_not_declared": "未聲明",
+    "view_license": "查看授權條款",
+    "third_party_licenses": "第三方授權",
     "registry_capabilities": "能力：{{capabilities}}",
     "reload_success": "{{name}} 已重新掃描。",
     "enable_success": "{{name}} 已啟用。",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "RDP 預覽",
     "vnc_preview_title": "VNC 預覽",
     "provider_missing": "遠端桌面提供器無法使用。",
+    "plugin_ready": "遠端桌面外掛已安裝並啟用。",
+    "plugin_required": "連線前請安裝或啟用遠端桌面外掛。",
+    "manage_plugin": "管理外掛",
     "session_missing": "遠端桌面工作階段無法使用。",
     "reconnect": "重新連線",
     "resize_fixed": "伺服器固定尺寸",

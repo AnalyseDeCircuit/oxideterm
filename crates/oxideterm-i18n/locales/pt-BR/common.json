@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Instale ou ative o plugin Mosh antes de conectar.",
+    "ready": "O plugin Mosh está instalado e ativado."
+  },
   "file_preview": {
     "entry_file_offset": "Deslocamento de entrada no arquivo",
     "subject": "Titular",
@@ -254,6 +258,9 @@
     "shortcut_count": "atalhos"
   },
   "plugin": {
+    "install_queued": "Na fila · posição {{position}}",
+    "installing_named": "Instalando {{name}}",
+    "install_queue_count": "{{count}} na fila",
     "jump_to_page": "Ir para a página",
     "total_pages": "de {{pages}} páginas",
     "jump_page": "Ir",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Fontes de hosts",
     "marketplace_workspace": "Espaço de trabalho",
     "marketplace_utilities": "Utilitários",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "Ao instalar e ativar o plugin, a configuração do agente é criada automaticamente; não é necessário informar um comando de inicialização. O diretório de trabalho, os argumentos extras e as variáveis de ambiente são opcionais: deixe-os em branco para usar os valores padrão. Plugins que usam um programa local precisam da ferramenta oficial de linha de comando; siga as instruções do plugin para instalá-la e entrar na conta.",
+    "marketplace_remote_connections": "Conexões remotas",
     "apply_page_size": "Aplicar",
     "invalid_page_size": "Insira um número inteiro positivo válido",
     "page_range": "{{start}}–{{end}} de {{total}} plugins",
@@ -937,6 +947,10 @@
     "update_available": "Atualização",
     "install_error": "Falha na instalação",
     "search_placeholder": "Buscar plugins...",
+    "marketplace_sort": "Ordem: {{order}}",
+    "marketplace_sort_name": "Nome",
+    "marketplace_sort_updated": "Atualizados recentemente",
+    "marketplace_sort_newest": "Adicionados recentemente",
     "marketplace_title": "Loja oficial de plugins",
     "marketplace_description": "Explore, instale e atualize plugins listados no catálogo oficial do OxideTerm.",
     "marketplace_repository": "Repositório do catálogo",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Visualização da aba do plugin não disponível",
     "tab_crashed": "A aba do plugin travou",
     "detail_author": "Autor",
+    "license_label": "Licença: {{license}}",
+    "install_required": "O plugin {{name}} não está instalado. Instale-o pelo marketplace de plugins e tente novamente.",
+    "enable_required": "O plugin {{name}} instalado está indisponível. Ative ou atualize-o no gerenciador de plugins e tente novamente.",
+    "license_not_declared": "Não declarada",
+    "view_license": "Ver licença",
+    "third_party_licenses": "Licenças de terceiros",
     "registry_capabilities": "Recursos: {{capabilities}}",
     "reload_success": "{{name}} verificado novamente.",
     "enable_success": "{{name}} ativado.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "Prévia RDP",
     "vnc_preview_title": "Prévia VNC",
     "provider_missing": "O provedor de área de trabalho remota está indisponível.",
+    "plugin_ready": "O plugin de área de trabalho remota está instalado e ativado.",
+    "plugin_required": "Instale ou ative o plugin de área de trabalho remota antes de conectar.",
+    "manage_plugin": "Gerenciar plugin",
     "session_missing": "A sessão de área de trabalho remota está indisponível.",
     "reconnect": "Reconectar",
     "resize_fixed": "Tamanho fixado pelo servidor",

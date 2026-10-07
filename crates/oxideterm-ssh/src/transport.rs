@@ -470,6 +470,23 @@ pub enum SshPromptError {
 }
 
 pub trait SshPromptHandler: Send + Sync {
+    fn security_key_provider(
+        &self,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Arc<oxideterm_security_key::SecurityKeyProvider>, String>>
+                + Send
+                + '_,
+        >,
+    > {
+        Box::pin(async { Err(oxideterm_security_key::SecurityKeyError::Unavailable.to_string()) })
+    }
+
+    fn security_key_interaction(
+        &self,
+    ) -> Option<Arc<dyn oxideterm_security_key::SecurityKeyInteraction>> {
+        None
+    }
     /// A successful login may bypass or replace configured credentials; persistence needs this distinction.
     fn authentication_completed(&self, _configured_credentials_confirmed: bool) {}
 
@@ -859,6 +876,7 @@ pub struct SshTransportClient {
 
 include!("transport/connection.rs");
 include!("transport/signers.rs");
+include!("transport/security_key.rs");
 include!("transport/output.rs");
 include!("transport/x11.rs");
 include!("transport/client.rs");

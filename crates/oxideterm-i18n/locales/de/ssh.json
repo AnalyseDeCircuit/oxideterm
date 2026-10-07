@@ -1,5 +1,25 @@
 {
   "ssh": {
+    "fido": {
+      "touch_title": "Sicherheitsschlüssel",
+      "touch_instructions": "Berühren Sie Ihren Sicherheitsschlüssel oder bestätigen Sie die Prüfung am Gerät.",
+      "pin_title": "PIN des Sicherheitsschlüssels",
+      "pin_instructions": "Geben Sie die PIN Ihres Sicherheitsschlüssels ein. Sie wird nicht gespeichert.",
+      "pin_retry": "Falsche PIN. Prüfen Sie sie vor einem erneuten Versuch.",
+      "pin_label": "PIN",
+      "errors": {
+        "unavailable": "Installieren und aktivieren Sie das Plugin FIDO Security Key, um diesen SSH-Schlüssel zu verwenden.",
+        "cancelled": "Authentifizierung mit Sicherheitsschlüssel abgebrochen.",
+        "timeout": "Zeitüberschreitung bei der Authentifizierung mit Sicherheitsschlüssel.",
+        "invalid_request": "Ungültige Signaturanfrage für den Sicherheitsschlüssel.",
+        "incompatible": "Das Protokoll des Sicherheitsschlüssel-Plugins ist inkompatibel.",
+        "no_device": "Kein FIDO-Sicherheitsschlüssel gefunden. Schließen Sie das Gerät an und versuchen Sie es erneut.",
+        "credential_not_found": "Diese SSH-Zugangsdaten wurden auf dem angeschlossenen Sicherheitsschlüssel nicht gefunden.",
+        "pin_blocked": "Die PIN ist gesperrt. Befolgen Sie die Wiederherstellungsanleitung des Geräteherstellers.",
+        "device_failure": "Die Aktion des Sicherheitsschlüssels ist fehlgeschlagen.",
+        "invalid_signature": "Die Signatur des Sicherheitsschlüssels konnte nicht geprüft werden."
+      }
+    },
     "form": {
       "title": "Neue Verbindung",
       "subtitle": "Konfigurieren Sie einen SSH-Host für Terminals, SFTP, Portweiterleitungen und die Bearbeitung entfernter Dateien.",

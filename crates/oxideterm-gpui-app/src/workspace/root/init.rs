@@ -663,6 +663,7 @@ impl WorkspaceApp {
             ),
             ai_entity,
             acp_entity,
+            mosh_plugin_sessions: Arc::new(oxideterm_mosh::MoshPluginSessions::default()),
             skill_registry,
             skill_workspace_root,
             loaded_conversation_skills: HashMap::new(),
@@ -899,6 +900,7 @@ impl WorkspaceApp {
         workspace.refresh_terminal_trigger_runtime(cx);
         workspace.schedule_automatic_native_update_check(cx);
         cx.on_release(|workspace, cx| {
+            workspace.mosh_plugin_sessions.set_available(false);
             workspace.flush_main_window_state(cx);
             workspace.shutdown_terminal_trigger_runtime();
             // Shutdown ordering is security-sensitive: late broker callbacks

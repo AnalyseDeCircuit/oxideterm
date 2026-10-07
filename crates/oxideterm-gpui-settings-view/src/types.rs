@@ -53,6 +53,7 @@ pub trait SettingsSelectAnchorExt {
 impl SettingsSelectAnchorExt for SettingsSelect {
     fn anchor_id(self) -> SelectAnchorId {
         match self {
+            Self::PluginMarketplaceSort => SelectAnchorId::PluginMarketplaceSort,
             Self::Language => SelectAnchorId::SettingsLanguage,
             Self::UpdateChannel => SelectAnchorId::SettingsUpdateChannel,
             Self::UpdateProxyMode => SelectAnchorId::SettingsUpdateProxyMode,

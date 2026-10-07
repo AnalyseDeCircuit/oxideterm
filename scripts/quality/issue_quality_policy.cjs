@@ -226,7 +226,14 @@ function evaluateIssue({ title, body, labels, releasedVersions = [] }) {
   const blockingFindings = [];
   const reviewFindings = [];
 
-  if (meaningfulCharacterCount(title) < 4) {
+  const trimmedTitle = title.trim();
+  const titlePolicy = REQUIRED_SECTIONS.find((policy) =>
+    trimmedTitle.toLowerCase().startsWith(policy.titlePrefix.toLowerCase())
+  );
+  const titleSummary = titlePolicy
+    ? trimmedTitle.slice(titlePolicy.titlePrefix.length)
+    : trimmedTitle;
+  if (meaningfulCharacterCount(titleSummary) < 4) {
     blockingFindings.push({ code: 'title_needs_detail' });
   }
 

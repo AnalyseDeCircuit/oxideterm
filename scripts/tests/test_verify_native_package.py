@@ -56,6 +56,60 @@ class ArtifactNameTests(unittest.TestCase):
                 )
 
 
+class WindowsInstallerTests(unittest.TestCase):
+    def test_installer_checks_runtime_in_normal_and_update_payloads(self) -> None:
+        digest = hashlib.sha256(b"runtime fixture").hexdigest()
+        files = ("conpty.dll", "arm64/OpenConsole.exe")
+        cases = [("valid", None, None)]
+        for root in ("", "install"):
+            for name in files:
+                relative = str(Path(root) / "resources/conpty" / name)
+                cases.extend([
+                    (f"missing {relative}", relative, None),
+                    (f"corrupt {relative}", None, relative),
+                ])
+        for label, missing, corrupt in cases:
+            with self.subTest(case=label):
+                def extract(args):
+                    if args[1] == "l":
+                        return "\n".join(verify_native_package.REQUIRED_DOCUMENTS | {
+                            "VERSION", "oxideterm-native.exe", "oxideterm-update-helper.exe",
+                        })
+                    directory = Path(next(arg[2:] for arg in args if arg.startswith("-o")))
+                    # 7-Zip exposes both NSIS File /r destinations, not just the install branch.
+                    for root in ("", "install"):
+                        (directory / root).mkdir(parents=True, exist_ok=True)
+                        (directory / root / "VERSION").write_text("2.2.1\n")
+                        for name in files:
+                            relative = str(Path(root) / "resources/conpty" / name)
+                            if relative == missing:
+                                continue
+                            file = directory / relative
+                            file.parent.mkdir(parents=True, exist_ok=True)
+                            file.write_bytes(b"corrupt" if relative == corrupt else b"runtime fixture")
+                    return ""
+
+                with (
+                    patch.object(verify_native_package.shutil, "which", return_value="7z"),
+                    patch.object(verify_native_package, "run_checked", side_effect=extract),
+                    patch.object(conpty_runtime, "RUNTIMES", {
+                        "aarch64-pc-windows-msvc": ("arm64", digest, digest),
+                    }),
+                ):
+                    if missing or corrupt:
+                        with self.assertRaisesRegex(
+                            RuntimeError, "must contain" if missing else "SHA-256 mismatch",
+                        ) as error:
+                            verify_native_package.verify_windows_installer(
+                                Path("setup.exe"), "2.2.1", "aarch64-pc-windows-msvc",
+                            )
+                        self.assertIn(Path(missing or corrupt).as_posix(), str(error.exception))
+                    else:
+                        verify_native_package.verify_windows_installer(
+                            Path("setup.exe"), "2.2.1", "aarch64-pc-windows-msvc",
+                        )
+
+
 class PortableArchiveTests(unittest.TestCase):
     def setUp(self) -> None:
         digest = hashlib.sha256(b"data").hexdigest()

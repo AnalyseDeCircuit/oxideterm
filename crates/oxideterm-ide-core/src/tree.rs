@@ -162,8 +162,7 @@ impl FileTreeState {
                 children: directory.children.clone(),
             })
             .collect::<Vec<_>>();
-        directories
-            .sort_by(|left, right| left.location.stable_key().cmp(&right.location.stable_key()));
+        directories.sort_by_key(|directory| directory.location.stable_key());
         FileTreeSnapshot {
             expanded,
             selected: self.selected.clone(),

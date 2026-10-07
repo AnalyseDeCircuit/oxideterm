@@ -114,6 +114,32 @@ impl WorkspaceApp {
                 }
                 AiStreamDeliveryEvent::AcpClientEvent { agent_id, event } => {
                     match event {
+                        oxideterm_ai::AcpClientEvent::CursorRequest { request, response_tx } => {
+                            self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                            if !request.valid() || !self.ai_entity.read(cx).is_chat_stream_generation(delivery.generation) {
+                                let _ = response_tx.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
+                                continue;
+                            }
+                            let id = request.tool_call_id().to_owned();
+                            let method = request.method();
+                            // The complete question/plan stays in transient state, not tool history.
+                            self.apply_ai_tool_status(delivery.generation, &delivery.conversation_id,
+                                &delivery.assistant_id, &id, method, "{}", "waiting_user", None,
+                                Some("read".into()), Some(self.i18n.t("ai.questions.waiting")), false,
+                                None, None, None, cx);
+                            self.notify_ai_agent_attention(&delivery.conversation_id, &delivery.assistant_id, "ai.questions.waiting", cx);
+                            let selections = match &request {
+                                oxideterm_ai::CursorRequest::Questions(request) => vec![Vec::new(); request.questions.len()],
+                                oxideterm_ai::CursorRequest::Plan(_) => Vec::new(),
+                            };
+                            self.ai_entity.update(cx, |ai, _| {
+                                ai.pending_cursor_requests.insert((delivery.generation, id), crate::workspace::ai_state::AiPendingCursorRequest {
+                                    conversation_id: delivery.conversation_id,
+                                    assistant_id: delivery.assistant_id,
+                                    request, selections, response_tx: Some(response_tx),
+                                });
+                            });
+                        }
                         oxideterm_ai::AcpClientEvent::RequestPermission {
                             request,
                             response_tx,

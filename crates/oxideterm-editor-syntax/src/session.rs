@@ -17,11 +17,12 @@ use crate::{
 pub struct SyntaxSession {
     pub(crate) language_id: LanguageId,
     language: Language,
-    parser: Parser,
+    pub(crate) parser: Parser,
     pub(crate) queries: Arc<LanguageQueries>,
     pub(crate) tree: Tree,
     pub(crate) cache_owner: Arc<()>,
     pub(crate) revision: u64,
+    pub(crate) injections: Vec<crate::injections::InjectionSyntax>,
 }
 
 impl SyntaxSession {
@@ -38,7 +39,7 @@ impl SyntaxSession {
         let language = language_id.tree_sitter_language()?;
         let mut parser = Parser::new();
         parser.set_language(&language)?;
-        let queries = LanguageQueries::shared(language_id, &language)?;
+        let queries = LanguageQueries::shared(&language_id, &language)?;
         let tree = crate::work::parse(&mut parser, source, None, work)?;
 
         Ok(Self {
@@ -49,11 +50,12 @@ impl SyntaxSession {
             tree,
             cache_owner: Arc::new(()),
             revision: 0,
+            injections: Vec::new(),
         })
     }
 
     pub fn language_id(&self) -> LanguageId {
-        self.language_id
+        self.language_id.clone()
     }
 
     pub fn parse_plugin(
@@ -61,19 +63,34 @@ impl SyntaxSession {
         source: &str,
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Self, SyntaxError> {
+        Self::parse_plugin_in_ranges(grammar, source, &[], work)
+    }
+
+    pub(crate) fn parse_plugin_in_ranges(
+        grammar: &crate::PluginGrammar,
+        source: &str,
+        ranges: &[tree_sitter::Range],
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<Self, SyntaxError> {
         crate::work::checkpoint(work)?;
         let (mut parser, language, queries) = grammar.parser()?;
+        parser
+            .set_included_ranges(ranges)
+            .map_err(|error| SyntaxError::Plugin(error.to_string()))?;
         crate::work::checkpoint(work)?;
         let tree = crate::work::parse(&mut parser, source, None, work)?;
-        Ok(Self {
-            language_id: grammar.source.language,
+        let mut session = Self {
+            language_id: grammar.source.language.clone(),
             language,
             parser,
             queries,
             tree,
             cache_owner: Arc::new(()),
             revision: 0,
-        })
+            injections: Vec::new(),
+        };
+        session.refresh_injections(source, None, work)?;
+        Ok(session)
     }
 
     pub fn root_has_error(&self) -> bool {
@@ -102,6 +119,7 @@ impl SyntaxSession {
         let tree = crate::work::parse(&mut self.parser, source_after, Some(&self.tree), work)?;
         let old_tree = std::mem::replace(&mut self.tree, tree);
         self.revision += 1;
+        self.refresh_injections(source_after, Some(edit), work)?;
         Ok(SyntaxChange {
             edit,
             owner: self.cache_owner.clone(),
@@ -113,13 +131,19 @@ impl SyntaxSession {
     }
 
     pub fn reparse(&mut self, source: &str) -> Result<(), SyntaxError> {
+        self.reparse_controlled(source, None)
+    }
+
+    pub(crate) fn reparse_controlled(
+        &mut self,
+        source: &str,
+        work: Option<&crate::SyntaxWork>,
+    ) -> Result<(), SyntaxError> {
         self.cache_owner = Arc::new(());
         self.revision = 0;
         self.parser.set_language(&self.language)?;
-        self.tree = self
-            .parser
-            .parse(source, None)
-            .ok_or(SyntaxError::ParseCancelled)?;
+        self.tree = crate::work::parse(&mut self.parser, source, None, work)?;
+        self.refresh_injections(source, None, work)?;
         Ok(())
     }
 
@@ -143,15 +167,19 @@ impl SyntaxSession {
         range: TextRange,
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Vec<HighlightSpan>, SyntaxError> {
-        highlight::highlight_spans(
-            self.language_id,
+        let mut spans = highlight::highlight_spans(
+            &self.language_id,
             &self.tree,
             &self.queries.highlight,
             self.queries.markdown_inline.as_ref(),
             source,
             range.start.0..range.end.0,
             work,
-        )
+        )?;
+        for injection in &self.injections {
+            spans = injection.overlay_highlights(source, range, spans, work)?;
+        }
+        Ok(highlight::normalize_highlight_spans(spans))
     }
 
     pub fn bracket_pairs(&self, source: &str) -> Vec<BracketPair> {
@@ -187,6 +215,7 @@ impl SyntaxSession {
 pub(crate) struct LanguageQueries {
     pub(crate) highlight: Query,
     markdown_inline: Option<Query>,
+    pub(crate) injections: Vec<crate::injections::PluginInjection>,
 }
 
 impl LanguageQueries {
@@ -194,20 +223,21 @@ impl LanguageQueries {
         Ok(Self {
             highlight: Query::new(language, highlights)?,
             markdown_inline: None,
+            injections: Vec::new(),
         })
     }
-    fn shared(language_id: LanguageId, language: &Language) -> Result<Arc<Self>, SyntaxError> {
+    fn shared(language_id: &LanguageId, language: &Language) -> Result<Arc<Self>, SyntaxError> {
         static QUERIES: OnceLock<Mutex<HashMap<LanguageId, Weak<LanguageQueries>>>> =
             OnceLock::new();
         let mut queries = QUERIES
             .get_or_init(Mutex::default)
             .lock()
             .expect("language query cache poisoned");
-        if let Some(existing) = queries.get(&language_id).and_then(Weak::upgrade) {
+        if let Some(existing) = queries.get(language_id).and_then(Weak::upgrade) {
             return Ok(existing);
         }
         let highlight = Query::new(language, language_id.highlight_query())?;
-        let markdown_inline = if language_id == LanguageId::Markdown {
+        let markdown_inline = if language_id == &LanguageId::Markdown {
             let language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
             Some(Query::new(
                 &language,
@@ -219,10 +249,11 @@ impl LanguageQueries {
         let compiled = Arc::new(Self {
             highlight,
             markdown_inline,
+            injections: Vec::new(),
         });
         // Idle languages retain only a weak entry; closing the last document
         // releases the compiled queries along with its syntax state.
-        queries.insert(language_id, Arc::downgrade(&compiled));
+        queries.insert(language_id.clone(), Arc::downgrade(&compiled));
         Ok(compiled)
     }
 }

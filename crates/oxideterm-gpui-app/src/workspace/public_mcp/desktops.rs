@@ -10,7 +10,7 @@ use oxideterm_public_mcp::{
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopClipboardFormat, RemoteDesktopConnectionProfile, RemoteDesktopEndpoint,
-    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSize, builtin_provider_registry,
+    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSize,
 };
 use serde_json::json;
 use zeroize::Zeroizing;
@@ -833,10 +833,7 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed(error));
             return;
         }
-        let provider = match builtin_provider_registry()
-            .ok()
-            .and_then(|registry| registry.get_for_protocol(profile.protocol).cloned())
-        {
+        let provider = match self.remote_desktop_provider(profile.protocol, cx) {
             Some(provider) => provider,
             None => {
                 request.finish(ToolEnvelope::failed(

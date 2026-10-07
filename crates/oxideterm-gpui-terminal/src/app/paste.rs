@@ -145,9 +145,7 @@ impl TerminalPane {
         let width = (f32::from(window.viewport_size().width) - 32.0)
             .max(0.0)
             .min(if editing { 760.0 } else { 480.0 });
-        let height = (f32::from(window.viewport_size().height) - 32.0)
-            .max(0.0)
-            .min(520.0);
+        let height = (f32::from(window.viewport_size().height) - 32.0).clamp(0.0, 520.0);
         let options = ButtonOptions {
             size: ButtonSize::Sm,
             ..Default::default()
