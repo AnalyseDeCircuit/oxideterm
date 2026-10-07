@@ -90,8 +90,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if !spans.iter().any(|span| {
             format!("{:?}", span.scope) == expected_scope
                 && &sample[span.range.start.0..span.range.end.0] == expected_text
+                // Native editors paint the first capture covering each byte.
+                // A later matching capture alone does not prove its color is visible.
+                && spans
+                    .iter()
+                    .find(|visible| {
+                        visible.range.start <= span.range.start
+                            && span.range.start < visible.range.end
+                    })
+                    .is_some_and(|visible| {
+                        visible.scope == span.scope && visible.range.end >= span.range.end
+                    })
         }) {
-            return Err(format!("Missing {expected_scope} capture for {expected_text:?}").into());
+            return Err(
+                format!("Missing visible {expected_scope} capture for {expected_text:?}").into(),
+            );
         }
     }
     println!(
