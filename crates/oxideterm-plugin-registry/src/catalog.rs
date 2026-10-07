@@ -144,6 +144,8 @@ fn decode_history(
     if latest.1.version != summary.version
         || Some(latest.1.effective_engines()) != summary.engines.as_ref()
         || entry.language != summary.language
+        || entry.listed_at != summary.listed_at
+        || entry.latest_release_at != summary.latest_release_at
     {
         return Err("Catalog summary and history differ".into());
     }
@@ -282,6 +284,7 @@ mod tests {
             "id":"com.example.demo", "name":"Demo", "version":"1.0.0",
             "license":"MIT", "licenseUrl":"https://example.com/LICENSE",
             "language":{"id":"custom-lang","displayName":"Custom Language","extensions":["custom.expr"]},
+            "listedAt":"2026-01-01T00:00:00Z", "latestReleaseAt":"2026-10-06T00:00:00Z",
             "engines":{"oxideterm":">=2.0.0"},
             "packages":[{"target":"any", "downloadUrl":"https://example.com/1.zip", "checksum":"a".repeat(64), "size":128}],
             "releases":[
@@ -324,7 +327,14 @@ mod tests {
             ("1.0.0", "https://example.com/1.zip")
         );
         for case in [
-            "checksum", "size", "identity", "version", "engines", "language",
+            "checksum",
+            "size",
+            "identity",
+            "version",
+            "engines",
+            "language",
+            "listedAt",
+            "latestReleaseAt",
         ] {
             let mut invalid = summary.clone();
             match case {
@@ -337,6 +347,10 @@ mod tests {
                 "version" => invalid.version = "1.0.0".into(),
                 "engines" => invalid.engines = None,
                 "language" => invalid.language.as_mut().unwrap().extensions = vec!["wrong".into()],
+                "listedAt" => invalid.listed_at = Some("2026-02-01T00:00:00Z".into()),
+                "latestReleaseAt" => {
+                    invalid.latest_release_at = Some("2026-10-07T00:00:00Z".into())
+                }
                 _ => unreachable!(),
             }
             assert!(decode_history(&invalid, &bytes).is_err(), "{case}");

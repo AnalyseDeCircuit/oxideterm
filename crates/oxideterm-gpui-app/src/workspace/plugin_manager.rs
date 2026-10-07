@@ -521,6 +521,13 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .bg(plugin_manager_root_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
+            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                if this.open_settings_select == Some(SettingsSelect::PluginMarketplaceSort) {
+                    this.close_settings_select();
+                    this.clear_settings_select_anchors();
+                    cx.notify();
+                }
+            }))
             .child(tauri_virtual_list(
                 state,
                 spec,
@@ -1132,7 +1139,7 @@ impl WorkspaceApp {
         };
         let query = query.trim().to_lowercase();
         let plugins = self.plugin_entity.read(cx).registry().plugins();
-        let visible_entries = entries
+        let mut visible_entries = entries
             .into_iter()
             .filter(|entry| {
                 let installed_version = plugins
@@ -1148,6 +1155,8 @@ impl WorkspaceApp {
                 )
             })
             .collect::<Vec<_>>();
+        let sort = self.settings_store.settings().plugin_marketplace_sort;
+        sort_plugin_marketplace_entries(&mut visible_entries, sort);
         let entry_count = visible_entries.len();
         let range = self
             .update_plugin_manager_state(cx, |manager| manager.pagination[1].range(entry_count));
@@ -1165,14 +1174,32 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(14.0))
             .child(
-                self.render_native_plugin_manager_icon_input(
-                    LucideIcon::Search,
-                    SettingsInput::NativePluginMarketplaceSearch,
-                    self.i18n.t("plugin.search_placeholder"),
-                    cx,
-                )
-                .w_full()
-                .flex_none(),
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(self.tokens.spacing.two))
+                    .child(
+                        self.render_native_plugin_manager_icon_input(
+                            LucideIcon::Search,
+                            SettingsInput::NativePluginMarketplaceSearch,
+                            self.i18n.t("plugin.search_placeholder"),
+                            cx,
+                        )
+                        .min_w(px(200.0))
+                        .flex_1(),
+                    )
+                    .child(self.settings_select_control(
+                        SettingsSelect::PluginMarketplaceSort,
+                        self.i18n.t("plugin.marketplace_sort").replace(
+                            "{{order}}",
+                            &self.i18n.t(plugin_marketplace_sort_label(sort)),
+                        ),
+                        false,
+                        Some(self.tokens.metrics.settings_select_width),
+                        cx,
+                    )),
             )
             .child(
                 div()
@@ -1271,6 +1298,15 @@ impl WorkspaceApp {
             "remote-connections" => self.i18n.t("plugin.marketplace_remote_connections"),
             _ => tag.to_string(),
         }
+    }
+
+    pub(in crate::workspace) fn set_plugin_marketplace_sort(
+        &mut self,
+        sort: oxideterm_settings::PluginMarketplaceSort,
+        cx: &mut Context<Self>,
+    ) {
+        self.edit_settings(|settings| settings.plugin_marketplace_sort = sort, cx);
+        self.change_plugin_page(NativePluginManagerTab::Marketplace, 0, None, cx);
     }
 
     pub(in crate::workspace) fn open_mosh_plugin(
@@ -3725,6 +3761,44 @@ fn normalized_optional_string(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
+pub(super) fn plugin_marketplace_sort_label(
+    sort: oxideterm_settings::PluginMarketplaceSort,
+) -> &'static str {
+    match sort {
+        oxideterm_settings::PluginMarketplaceSort::Name => "plugin.marketplace_sort_name",
+        oxideterm_settings::PluginMarketplaceSort::RecentUpdates => {
+            "plugin.marketplace_sort_updated"
+        }
+        oxideterm_settings::PluginMarketplaceSort::NewestListings => {
+            "plugin.marketplace_sort_newest"
+        }
+    }
+}
+
+fn sort_plugin_marketplace_entries(
+    entries: &mut [plugin_host::NativePluginRegistryEntry],
+    sort: oxideterm_settings::PluginMarketplaceSort,
+) {
+    entries.sort_by_cached_key(|entry| {
+        let date = match sort {
+            oxideterm_settings::PluginMarketplaceSort::Name => None,
+            oxideterm_settings::PluginMarketplaceSort::RecentUpdates => {
+                entry.latest_release_at.as_deref()
+            }
+            oxideterm_settings::PluginMarketplaceSort::NewestListings => entry.listed_at.as_deref(),
+        }
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .map(|date| date.timestamp_millis());
+        // Missing publication metadata follows dated entries; editing descriptions
+        // must never stand in for publishing a version or listing a new plugin.
+        (
+            std::cmp::Reverse(date),
+            entry.name.to_lowercase(),
+            entry.id.clone(),
+        )
+    });
+}
+
 fn native_plugin_marketplace_entry_matches(
     entry: &plugin_host::NativePluginRegistryEntry,
     query: &str,
@@ -4332,6 +4406,8 @@ mod tests {
             capabilities_summary,
             homepage: None,
             updated_at: None,
+            listed_at: None,
+            latest_release_at: None,
             packages: Vec::new(),
             engines: None,
             releases: Vec::new(),
@@ -4414,6 +4490,74 @@ mod tests {
 
         let entry = registry_entry_with_capabilities(Some(Vec::new()));
         assert!(native_plugin_registry_capabilities_label(&i18n, &entry).is_none());
+    }
+
+    #[test]
+    fn marketplace_sorting_uses_release_and_listing_dates_before_pagination() {
+        let entries = [
+            (
+                "c",
+                "Beta",
+                Some("2026-10-02T08:00:00Z"),
+                Some("2026-10-02T00:00:00Z"),
+            ),
+            ("d", "Gamma", None, None),
+            (
+                "b",
+                "beta",
+                Some("2026-10-02T10:00:00+02:00"),
+                Some("2026-08-01T00:00:00Z"),
+            ),
+            ("e", "Delta", Some("invalid"), Some("2026-09-30T00:00:00Z")),
+            (
+                "a",
+                "Alpha",
+                Some("2026-10-01T12:00:00Z"),
+                Some("2026-09-01T00:00:00Z"),
+            ),
+        ]
+        .map(|(id, name, released, listed)| {
+            let mut entry = registry_entry_with_capabilities(None);
+            entry.id = id.into();
+            entry.name = name.into();
+            entry.latest_release_at = released.map(str::to_string);
+            entry.listed_at = listed.map(str::to_string);
+            entry.updated_at = Some("2029-01-01T00:00:00Z".into());
+            entry
+        });
+        for (sort, expected) in [
+            (
+                oxideterm_settings::PluginMarketplaceSort::Name,
+                ["a", "b", "c", "e", "d"],
+            ),
+            (
+                oxideterm_settings::PluginMarketplaceSort::RecentUpdates,
+                ["b", "c", "a", "e", "d"],
+            ),
+            (
+                oxideterm_settings::PluginMarketplaceSort::NewestListings,
+                ["c", "e", "a", "b", "d"],
+            ),
+        ] {
+            let mut sorted = entries.clone();
+            sort_plugin_marketplace_entries(&mut sorted, sort);
+            assert_eq!(
+                sorted
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            let mut pagination = PluginPagination::default();
+            pagination.set_page_size(2);
+            assert_eq!(
+                sorted[pagination.range(sorted.len())]
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>(),
+                expected[..2]
+            );
+        }
     }
 
     #[test]

@@ -81,6 +81,7 @@ pub enum SettingsKeybindingScopeFilter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SettingsSelect {
+    PluginMarketplaceSort,
     Language,
     UpdateChannel,
     UpdateProxyMode,

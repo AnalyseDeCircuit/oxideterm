@@ -49,6 +49,7 @@ fn readonly_value_trigger_spec() -> SelectTriggerChromeSpec {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum SelectAnchorId {
+    PluginMarketplaceSort,
     NativePluginControl(u64),
     ActiveSessionSort,
     AuditCategory,

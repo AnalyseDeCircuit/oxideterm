@@ -69,6 +69,10 @@ pub struct NativePluginRegistryEntry {
     pub homepage: Option<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_release_at: Option<String>,
     /// Immutable release packages available for specific host targets.
     #[serde(default)]
     pub packages: Vec<NativePluginRegistryPackage>,
