@@ -143,6 +143,7 @@ fn decode_history(
         .ok_or("Catalog history has no releases")?;
     if latest.1.version != summary.version
         || Some(latest.1.effective_engines()) != summary.engines.as_ref()
+        || entry.language != summary.language
     {
         return Err("Catalog summary and history differ".into());
     }
@@ -280,6 +281,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "id":"com.example.demo", "name":"Demo", "version":"1.0.0",
             "license":"MIT", "licenseUrl":"https://example.com/LICENSE",
+            "language":{"id":"custom-lang","displayName":"Custom Language","extensions":["custom.expr"]},
             "engines":{"oxideterm":">=2.0.0"},
             "packages":[{"target":"any", "downloadUrl":"https://example.com/1.zip", "checksum":"a".repeat(64), "size":128}],
             "releases":[
@@ -321,7 +323,9 @@ mod tests {
             ),
             ("1.0.0", "https://example.com/1.zip")
         );
-        for case in ["checksum", "size", "identity", "version", "engines"] {
+        for case in [
+            "checksum", "size", "identity", "version", "engines", "language",
+        ] {
             let mut invalid = summary.clone();
             match case {
                 "checksum" => {
@@ -332,6 +336,7 @@ mod tests {
                 "identity" => invalid.id = "com.example.other".into(),
                 "version" => invalid.version = "1.0.0".into(),
                 "engines" => invalid.engines = None,
+                "language" => invalid.language.as_mut().unwrap().extensions = vec!["wrong".into()],
                 _ => unreachable!(),
             }
             assert!(decode_history(&invalid, &bytes).is_err(), "{case}");
@@ -358,7 +363,9 @@ mod tests {
         let directory = crate::tests::unique_temp_dir("compact-catalog");
         fs::create_dir_all(&directory).unwrap();
         let settings = directory.join("settings.json");
-        let (summary, bytes) = referenced(history());
+        let mut compatible = history();
+        compatible.releases[1].engines.oxideterm = Some(">=2.0.0".into());
+        let (summary, bytes) = referenced(compatible);
         let file = history_path(&settings, &summary).unwrap();
         fs::create_dir_all(file.parent().unwrap()).unwrap();
         fs::write(&file, &bytes).unwrap();
@@ -374,6 +381,11 @@ mod tests {
         assert_eq!(cached.plugins[0].version, "2.0.0");
         assert!(cached.plugins[0].history_pending());
         assert_eq!(cached.plugins[0].history, summary.history);
+        assert_eq!(cached.plugins[0].language, summary.language);
+        assert_eq!(
+            NativePluginRegistry::discover(&settings).catalog_languages(),
+            &[("com.example.demo".into(), summary.language.clone().unwrap())]
+        );
         let not_installed = load_catalog_cache(&settings, &[]).unwrap().unwrap();
         assert!(not_installed.plugins[0].history_pending());
         let installed = load_catalog_cache(&settings, &["com.example.demo"])

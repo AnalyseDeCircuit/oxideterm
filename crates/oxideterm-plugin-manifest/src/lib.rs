@@ -5,12 +5,14 @@
 
 mod config;
 mod contributions;
+mod language;
 mod manifest;
 mod registry;
 mod runtime;
 
 pub use config::{NativePluginConfigEntry, NativePluginGlobalConfig};
 pub use contributions::*;
+pub use language::NativePluginLanguageDefinition;
 pub use manifest::*;
 pub use registry::*;
 pub use runtime::{NativePluginRuntimePlan, NativePluginState};

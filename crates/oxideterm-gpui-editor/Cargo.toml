@@ -17,6 +17,7 @@ tracing.workspace = true
 serde.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
+oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 unicode-segmentation.workspace = true
 unicode-width.workspace = true

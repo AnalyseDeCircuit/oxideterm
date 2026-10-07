@@ -150,10 +150,27 @@ pub struct NativePluginTerminalTransportDef {
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginLanguage {
-    pub id: String,
+    #[serde(flatten)]
+    pub definition: crate::NativePluginLanguageDefinition,
     pub highlights: String,
     pub parser_sha256: String,
     pub highlights_sha256: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub injections: Vec<NativePluginInjectedLanguage>,
+}
+
+/// Embedded grammars belong to their parent package, with independently verified assets.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginInjectedLanguage {
+    pub id: String,
+    pub grammar_name: Option<String>,
+    pub parser: String,
+    pub highlights: String,
+    pub query: String,
+    pub parser_sha256: String,
+    pub highlights_sha256: String,
+    pub query_sha256: String,
 }
 
 /// A paginated file renderer invoked through the process plugin protocol.

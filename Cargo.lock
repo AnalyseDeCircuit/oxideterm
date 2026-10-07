@@ -7275,6 +7275,7 @@ dependencies = [
  "oxideterm-editor-core",
  "oxideterm-editor-syntax",
  "oxideterm-gpui-ui",
+ "oxideterm-plugin-manifest",
  "oxideterm-theme",
  "serde",
  "serde_json",

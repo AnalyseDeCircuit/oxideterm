@@ -796,7 +796,7 @@ impl WorkspaceApp {
             }))
             .on_action(cx.listener(
                 |this, action: &oxideterm_gpui_editor::ManageLanguagePlugin, window, cx| {
-                    this.open_language_plugin(&action.language, window, cx);
+                    this.open_language_plugin(&action.plugin_id, window, cx);
                 },
             ))
             .on_action(cx.listener(|this, _: &ShellLauncher, _window, cx| {

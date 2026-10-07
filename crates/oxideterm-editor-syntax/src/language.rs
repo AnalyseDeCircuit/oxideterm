@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use tree_sitter::Language;
 
@@ -9,7 +9,7 @@ unsafe extern "C" {
     fn tree_sitter_fish() -> *const tree_sitter::ffi::TSLanguage;
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LanguageId {
     Bash,
     C,
@@ -50,10 +50,11 @@ pub enum LanguageId {
     Yaml,
     Zsh,
     Zig,
+    Plugin(Arc<str>),
 }
 
-/// Keep the IDE language surface explicit so adding or removing grammars is a
-/// conscious product decision instead of an accidental dependency side effect.
+/// Built-ins and legacy plugin IDs retain their published file associations.
+/// New plugin languages are registered from manifests rather than this list.
 pub const SUPPORTED_LANGUAGES: &[LanguageId] = &[
     LanguageId::Bash,
     LanguageId::C,
@@ -160,7 +161,7 @@ impl LanguageId {
             .or_else(|| language_from_shebang(source))
     }
 
-    pub fn plugin_key(self) -> Option<&'static str> {
+    pub fn plugin_key(&self) -> Option<&str> {
         match self {
             Self::C => Some("c"),
             Self::Cpp => Some("cpp"),
@@ -186,18 +187,31 @@ impl LanguageId {
             Self::Perl => Some("perl"),
             Self::Ruby => Some("ruby"),
             Self::Zig => Some("zig"),
+            Self::Plugin(id) => Some(id),
             _ => None,
         }
     }
 
     pub fn from_plugin_key(key: &str) -> Option<Self> {
-        SUPPORTED_LANGUAGES
-            .iter()
-            .copied()
-            .find(|language| language.plugin_key() == Some(key))
+        if key.is_empty()
+            || key.len() > 64
+            || !key.as_bytes()[0].is_ascii_lowercase()
+            || !key
+                .bytes()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, b'_' | b'-'))
+        {
+            return None;
+        }
+        Some(
+            SUPPORTED_LANGUAGES
+                .iter()
+                .cloned()
+                .find(|language| language.plugin_key() == Some(key))
+                .unwrap_or_else(|| Self::Plugin(Arc::from(key))),
+        )
     }
 
-    pub fn plugin_display_name(self) -> Option<&'static str> {
+    pub fn plugin_display_name(&self) -> Option<&str> {
         match self {
             Self::C => Some("C"),
             Self::Cpp => Some("C++"),
@@ -223,11 +237,12 @@ impl LanguageId {
             Self::Perl => Some("Perl"),
             Self::Ruby => Some("Ruby"),
             Self::Zig => Some("Zig"),
+            Self::Plugin(id) => Some(id),
             _ => None,
         }
     }
 
-    pub(crate) fn tree_sitter_language(self) -> Result<Language, crate::SyntaxError> {
+    pub(crate) fn tree_sitter_language(&self) -> Result<Language, crate::SyntaxError> {
         Ok(match self {
             Self::Bash => tree_sitter_bash::LANGUAGE.into(),
             Self::C => return Err(crate::SyntaxError::LanguageUnavailable),
@@ -268,10 +283,11 @@ impl LanguageId {
             Self::Yaml => tree_sitter_yaml::LANGUAGE.into(),
             Self::Zsh => tree_sitter_zsh::LANGUAGE.into(),
             Self::Zig => return Err(crate::SyntaxError::LanguageUnavailable),
+            Self::Plugin(_) => return Err(crate::SyntaxError::LanguageUnavailable),
         })
     }
 
-    pub(crate) fn highlight_query(self) -> &'static str {
+    pub(crate) fn highlight_query(&self) -> &'static str {
         crate::queries::highlight_query_for(self)
     }
 }

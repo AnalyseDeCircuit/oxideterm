@@ -70,12 +70,12 @@ impl TextEditorView {
     ) {
         let generation = self.syntax_generation.fetch_add(1, Ordering::AcqRel) + 1;
         self.highlight_chunk_cache.borrow_mut().clear();
-        self.plugin_grammar = self.language.and_then(|id| {
+        self.plugin_grammar = self.language.as_ref().and_then(|id| {
             cx.try_global::<crate::EditorLanguagePlugins>()
-                .and_then(|plugins| plugins.grammars.get(&id))
+                .and_then(|plugins| plugins.grammars.get(id))
                 .cloned()
         });
-        let Some(language) = self.language.filter(|language| {
+        let Some(language) = self.language.clone().filter(|language| {
             !self.is_large_file()
                 && (language.plugin_key().is_none()
                     || self
@@ -113,7 +113,7 @@ impl TextEditorView {
     ) {
         let generation = request.generation;
         let version = request.version;
-        let language = request.language;
+        let language = request.language.clone();
         let token = self.syntax_generation.clone();
         let text = self.buffer.text_snapshot();
         let background =
@@ -215,7 +215,7 @@ fn compute(
                 state.syntax = Some(if let Some(grammar) = &request.grammar {
                     SyntaxSession::parse_plugin(grammar, text, Some(work))?
                 } else {
-                    SyntaxSession::parse_controlled(request.language, text, Some(work))?
+                    SyntaxSession::parse_controlled(request.language.clone(), text, Some(work))?
                 });
                 None
             };

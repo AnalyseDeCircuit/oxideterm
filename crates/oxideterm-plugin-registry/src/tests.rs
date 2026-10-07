@@ -119,6 +119,7 @@ fn language_packages_validate_assets_and_follow_install_update_disable_uninstall
             .language
             .as_ref()
             .unwrap()
+            .definition
             .id,
         "elixir"
     );
@@ -140,6 +141,10 @@ fn language_packages_validate_assets_and_follow_install_update_disable_uninstall
             if entry.name() == "plugin.json" {
                 let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
                 manifest["version"] = serde_json::json!("0.2.0");
+                manifest["contributes"]["language"]["id"] = serde_json::json!("custom-elixir");
+                manifest["contributes"]["language"]["grammarName"] = serde_json::json!("elixir");
+                manifest["contributes"]["language"]["extensions"] =
+                    serde_json::json!(["custom.ex"]);
                 bytes = serde_json::to_vec(&manifest).unwrap();
             }
             if corrupt && entry.name() == "highlights.scm" {
@@ -166,11 +171,100 @@ fn language_packages_validate_assets_and_follow_install_update_disable_uninstall
             result.unwrap();
             registry = NativePluginRegistry::discover(&settings);
             assert_eq!(registry.plugins()[0].manifest.version, "0.2.0");
+            assert_eq!(
+                registry.plugins()[0].state,
+                NativePluginState::ReadyManifestOnly
+            );
+            let definition = &registry.plugins()[0]
+                .manifest
+                .contributes
+                .as_ref()
+                .unwrap()
+                .language
+                .as_ref()
+                .unwrap()
+                .definition;
+            assert_eq!(definition.id, "custom-elixir");
+            assert_eq!(definition.grammar_name.as_deref(), Some("elixir"));
+            assert_eq!(definition.extensions, ["custom.ex"]);
         }
     }
     registry.uninstall_plugin(id, false).unwrap();
     assert!(!native_plugins_dir(&settings).join(id).exists());
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn embedded_language_assets_are_verified_before_replacing_a_package() {
+    use std::io::Read as _;
+    let directory = unique_temp_dir("embedded-language-assets");
+    let settings = directory.join("settings.json");
+    let package = include_bytes!("../../oxideterm-editor-syntax/tests/fixtures/vue.zip");
+    let id = "com.oxideterm.language.vue";
+    NativePluginRegistry::install_managed_plugin_package(&settings, id, None, package, false)
+        .unwrap();
+    for unsafe_path in [false, true] {
+        let mut source = zip::ZipArchive::new(Cursor::new(package)).unwrap();
+        let mut updated = ZipWriter::new(Cursor::new(Vec::new()));
+        for index in 0..source.len() {
+            let mut entry = source.by_index(index).unwrap();
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes).unwrap();
+            if entry.name() == "plugin.json" {
+                let mut manifest: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                manifest["version"] = serde_json::json!("0.1.1");
+                if unsafe_path {
+                    manifest["contributes"]["language"]["injections"][0]["query"] =
+                        serde_json::json!("../query.scm");
+                }
+                bytes = serde_json::to_vec(&manifest).unwrap();
+            } else if !unsafe_path && entry.name() == "embedded/typescript/injections.scm" {
+                bytes.push(b' ');
+            }
+            updated
+                .start_file(entry.name(), SimpleFileOptions::default())
+                .unwrap();
+            updated.write_all(&bytes).unwrap();
+        }
+        let error = NativePluginRegistry::install_managed_plugin_package(
+            &settings,
+            id,
+            None,
+            &updated.finish().unwrap().into_inner(),
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains(if unsafe_path {
+                "cannot escape"
+            } else {
+                "checksum mismatch"
+            }),
+            "{error}"
+        );
+        let registry = NativePluginRegistry::discover(&settings);
+        let installed = &registry.plugins()[0];
+        assert_eq!(installed.manifest.version, "0.1.0");
+        assert_eq!(installed.state, NativePluginState::ReadyManifestOnly);
+        assert_eq!(
+            std::fs::read(
+                installed
+                    .install_dir
+                    .join("embedded/typescript/injections.scm")
+            )
+            .unwrap(),
+            zip::ZipArchive::new(Cursor::new(package))
+                .unwrap()
+                .by_name("embedded/typescript/injections.scm")
+                .map(|mut file| {
+                    let mut expected = Vec::new();
+                    file.read_to_end(&mut expected).unwrap();
+                    expected
+                })
+                .unwrap()
+        );
+    }
+    std::fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
@@ -583,6 +677,7 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     author: None,
                     license: None,
                     license_url: None,
+                    language: None,
                     version: "1.2.0".to_string(),
                     min_oxideterm_version: None,
                     download_url: "https://example.invalid/demo.zip".to_string(),
@@ -607,6 +702,7 @@ fn plugin_package_install_supports_flat_nested_conflict_and_updates() {
                     author: None,
                     license: None,
                     license_url: None,
+                    language: None,
                     version: "9.0.0".to_string(),
                     min_oxideterm_version: None,
                     download_url: "https://example.invalid/other.zip".to_string(),

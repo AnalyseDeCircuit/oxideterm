@@ -217,43 +217,32 @@ pub(crate) fn validate_native_plugin_manifest(
         return Err("Language runtime and language contribution must be declared together".into());
     }
     if let Some(language) = language {
-        if !matches!(
-            language.id.as_str(),
-            "elixir"
-                | "commonlisp"
-                | "swift"
-                | "r"
-                | "scala"
-                | "objc"
-                | "c-sharp"
-                | "perl"
-                | "ruby"
-                | "zig"
-                | "c"
-                | "cpp"
-                | "css"
-                | "go"
-                | "html"
-                | "java"
-                | "javascript"
-                | "php"
-                | "rust"
-                | "tsx"
-                | "typescript"
-                | "nginx"
-                | "hcl"
-                | "proto"
-        ) {
-            return Err("Unsupported plugin language".into());
+        language.definition.validate()?;
+        validate_language_asset(&language.highlights, &language.highlights_sha256)?;
+        validate_language_asset(
+            &manifest.runtime.as_ref().unwrap().entry,
+            &language.parser_sha256,
+        )?;
+        if language.injections.len() > 8 {
+            return Err("Too many embedded language grammars".into());
         }
-        validate_plugin_relative_path(&language.highlights)?;
-        for checksum in [&language.parser_sha256, &language.highlights_sha256] {
-            if checksum.len() != 64
-                || !checksum
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-            {
-                return Err("Language assets require lowercase SHA-256 checksums".into());
+        let mut ids = HashSet::new();
+        for injection in &language.injections {
+            NativePluginLanguageDefinition {
+                id: injection.id.clone(),
+                grammar_name: injection.grammar_name.clone(),
+                ..Default::default()
+            }
+            .validate()?;
+            if !ids.insert(&injection.id) {
+                return Err("Duplicate embedded language grammar".into());
+            }
+            for (path, checksum) in [
+                (&injection.parser, &injection.parser_sha256),
+                (&injection.highlights, &injection.highlights_sha256),
+                (&injection.query, &injection.query_sha256),
+            ] {
+                validate_language_asset(path, checksum)?;
             }
         }
         if manifest
@@ -264,6 +253,18 @@ pub(crate) fn validate_native_plugin_manifest(
         {
             return Err("Language plugins must declare a host version range".into());
         }
+    }
+    Ok(())
+}
+
+fn validate_language_asset(path: &str, checksum: &str) -> Result<(), String> {
+    validate_plugin_relative_path(path)?;
+    if checksum.len() != 64
+        || !checksum
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err("Language assets require lowercase SHA-256 checksums".into());
     }
     Ok(())
 }

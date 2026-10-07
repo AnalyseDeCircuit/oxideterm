@@ -14,10 +14,19 @@ use tree_sitter::{Language, Parser, WasmStore, wasmtime};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PluginGrammarSource {
     pub language: LanguageId,
+    pub grammar_name: String,
     pub parser: PathBuf,
     pub highlights: PathBuf,
     pub parser_sha256: String,
     pub highlights_sha256: String,
+    pub injections: Vec<PluginGrammarInjectionSource>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PluginGrammarInjectionSource {
+    pub query: PathBuf,
+    pub query_sha256: String,
+    pub grammar: Box<PluginGrammarSource>,
 }
 
 /// One immutable plugin revision; document parsers keep their own execution stores.
@@ -42,7 +51,14 @@ impl PluginGrammar {
     }
 
     pub fn failed(&self) -> bool {
-        self.loaded.get().is_some_and(Result::is_err)
+        self.loaded.get().is_some_and(|loaded| match loaded {
+            Err(_) => true,
+            Ok(grammar) => grammar
+                .queries
+                .injections
+                .iter()
+                .any(|injection| injection.grammar.failed()),
+        })
     }
 
     pub fn source(&self) -> &PluginGrammarSource {
@@ -64,11 +80,7 @@ impl PluginGrammar {
     }
 
     fn load(&self) -> Result<LoadedGrammar, String> {
-        let name = self
-            .source
-            .language
-            .plugin_key()
-            .ok_or("Language is built in")?;
+        let name = &self.source.grammar_name;
         let wasm = read_verified(
             &self.source.parser,
             &self.source.parser_sha256,
@@ -86,10 +98,26 @@ impl PluginGrammar {
         let language = loader
             .load_language(&name.replace('-', "_"), &wasm)
             .map_err(|error| error.to_string())?;
-        let queries = Arc::new(
-            LanguageQueries::for_plugin(&language, &highlights)
-                .map_err(|error| error.to_string())?,
-        );
+        let mut queries = LanguageQueries::for_plugin(&language, &highlights)
+            .map_err(|error| error.to_string())?;
+        for injection in &self.source.injections {
+            let query = String::from_utf8(read_verified(
+                &injection.query,
+                &injection.query_sha256,
+                1024 * 1024,
+            )?)
+            .map_err(|_| "Injection query is not UTF-8")?;
+            let query =
+                tree_sitter::Query::new(&language, &query).map_err(|error| error.to_string())?;
+            if !query.capture_names().contains(&"injection.content") {
+                return Err("Injection query must capture injection.content".into());
+            }
+            queries.injections.push(crate::injections::PluginInjection {
+                query,
+                grammar: Arc::new(PluginGrammar::new(*injection.grammar.clone())),
+            });
+        }
+        let queries = Arc::new(queries);
         Ok(LoadedGrammar {
             engine,
             language,

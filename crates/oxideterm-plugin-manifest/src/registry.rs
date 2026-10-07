@@ -50,6 +50,8 @@ pub struct NativePluginRegistryEntry {
     pub license: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<crate::NativePluginLanguageDefinition>,
     pub version: String,
     #[serde(default, rename = "minOxideTermVersion", alias = "minOxidetermVersion")]
     pub min_oxideterm_version: Option<String>,

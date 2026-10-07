@@ -607,9 +607,19 @@ impl PluginWorkspaceEntity {
     }
 
     fn sync_language_plugins(&self, cx: &mut gpui::App) {
-        let sources = self
-            .registry
-            .plugins()
+        let mut installed = self.registry.plugins().iter().collect::<Vec<_>>();
+        installed.sort_by(|left, right| {
+            let ready = |plugin: &plugin_host::NativePluginInfo| {
+                matches!(
+                    plugin.state,
+                    plugin_host::NativePluginState::ReadyManifestOnly
+                )
+            };
+            ready(right)
+                .cmp(&ready(left))
+                .then_with(|| left.manifest.id.cmp(&right.manifest.id))
+        });
+        let sources = installed
             .iter()
             .filter(|plugin| {
                 matches!(
@@ -619,19 +629,90 @@ impl PluginWorkspaceEntity {
             })
             .filter_map(|plugin| {
                 let language = plugin.manifest.contributes.as_ref()?.language.as_ref()?;
-                let id = oxideterm_editor_syntax::LanguageId::from_plugin_key(&language.id)?;
+                let id =
+                    oxideterm_editor_syntax::LanguageId::from_plugin_key(&language.definition.id)?;
                 Some(oxideterm_editor_syntax::PluginGrammarSource {
                     language: id,
+                    grammar_name: language
+                        .definition
+                        .grammar_name
+                        .clone()
+                        .unwrap_or_else(|| language.definition.id.clone()),
                     parser: plugin
                         .install_dir
                         .join(&plugin.manifest.runtime.as_ref()?.entry),
                     highlights: plugin.install_dir.join(&language.highlights),
                     parser_sha256: language.parser_sha256.clone(),
                     highlights_sha256: language.highlights_sha256.clone(),
+                    injections: language
+                        .injections
+                        .iter()
+                        .map(
+                            |injection| oxideterm_editor_syntax::PluginGrammarInjectionSource {
+                                query: plugin.install_dir.join(&injection.query),
+                                query_sha256: injection.query_sha256.clone(),
+                                grammar: Box::new(oxideterm_editor_syntax::PluginGrammarSource {
+                                    language: oxideterm_editor_syntax::LanguageId::from_plugin_key(
+                                        &injection.id,
+                                    )
+                                    .expect("validated embedded language"),
+                                    grammar_name: injection
+                                        .grammar_name
+                                        .clone()
+                                        .unwrap_or_else(|| injection.id.clone()),
+                                    parser: plugin.install_dir.join(&injection.parser),
+                                    highlights: plugin.install_dir.join(&injection.highlights),
+                                    parser_sha256: injection.parser_sha256.clone(),
+                                    highlights_sha256: injection.highlights_sha256.clone(),
+                                    injections: Vec::new(),
+                                }),
+                            },
+                        )
+                        .collect(),
                 })
             })
             .collect();
-        oxideterm_gpui_editor::EditorLanguagePlugins::update(sources, cx);
+        let mut definitions = installed
+            .iter()
+            .filter_map(|plugin| {
+                let definition = &plugin
+                    .manifest
+                    .contributes
+                    .as_ref()?
+                    .language
+                    .as_ref()?
+                    .definition;
+                Some(oxideterm_gpui_editor::EditorLanguageDefinition {
+                    plugin_id: plugin.manifest.id.clone(),
+                    definition: definition.clone(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let catalog = self
+            .registry
+            .catalog_languages()
+            .iter()
+            .map(|(plugin_id, definition)| (plugin_id.clone(), definition.clone()));
+        let loaded = self
+            .manager_state
+            .marketplace_entries
+            .iter()
+            .filter(|entry| {
+                plugin_host::NativePluginRegistry::registry_entry_supports_current_version(entry)
+            })
+            .filter_map(|entry| {
+                entry
+                    .language
+                    .clone()
+                    .map(|definition| (entry.id.clone(), definition))
+            });
+        definitions.extend(loaded.chain(catalog).map(|(plugin_id, definition)| {
+            oxideterm_gpui_editor::EditorLanguageDefinition {
+                plugin_id,
+                definition,
+            }
+        }));
+        oxideterm_gpui_editor::EditorLanguagePlugins::update_languages(sources, definitions, cx);
     }
 
     pub(in crate::workspace) fn set_plugin_setting_value(
@@ -1483,6 +1564,7 @@ impl PluginWorkspaceEntity {
                             );
                         self.manager_state.catalog_version = registry.version;
                         self.manager_state.marketplace_entries = registry.plugins;
+                        self.sync_language_plugins(cx);
                         self.manager_state.marketplace_load_state =
                             plugin_manager::NativePluginMarketplaceLoadState::Loaded;
                         self.manager_state.operation_status =

@@ -258,7 +258,7 @@ fn builtin_grammars_and_plugin_fixtures_preserve_syntax_features() {
     for (language, source) in samples {
         if language.plugin_key().is_some() {
             assert!(matches!(
-                SyntaxSession::parse(language, source),
+                SyntaxSession::parse(language.clone(), source),
                 Err(crate::SyntaxError::LanguageUnavailable)
             ));
             if !matches!(
@@ -268,7 +268,7 @@ fn builtin_grammars_and_plugin_fixtures_preserve_syntax_features() {
                 continue;
             }
         }
-        let session = crate::grammar_fixture::parse(language, source)
+        let session = crate::grammar_fixture::parse(language.clone(), source)
             .unwrap_or_else(|error| panic!("{language:?} query failed: {error}"));
         let spans = session.highlight_spans(source);
         let expected_scopes: &[SyntaxScope] = match language {
@@ -553,7 +553,7 @@ fn syntax_stage_performance() {
                     _ => source.len() - pattern.len(),
                 } + pattern.find("42").unwrap();
                 let started = Instant::now();
-                let mut session = crate::grammar_fixture::parse(language, &source).unwrap();
+                let mut session = crate::grammar_fixture::parse(language.clone(), &source).unwrap();
                 eprintln!(
                     "SYNTAX_INITIAL language={language:?} bytes={} parse_ms={:.3}",
                     source.len(),
@@ -691,7 +691,7 @@ fn range_queries_follow_boundary_edits_in_sequence() {
         ),
     ] {
         let mut source = initial.to_string();
-        let mut session = crate::grammar_fixture::parse(language, &source).unwrap();
+        let mut session = crate::grammar_fixture::parse(language.clone(), &source).unwrap();
         let mut comment_change: Option<SyntaxChange> = None;
         for (start, end, replacement) in edits {
             let edit = SyntaxEdit::replace(
@@ -732,7 +732,7 @@ fn range_queries_follow_boundary_edits_in_sequence() {
                         .any(|range| range.start.0 <= second && range.end.0 > second)
                 );
             }
-            let fresh = crate::grammar_fixture::parse(language, &source)
+            let fresh = crate::grammar_fixture::parse(language.clone(), &source)
                 .unwrap()
                 .highlight_spans(&source);
             for (offset, ch) in source.char_indices() {
@@ -807,7 +807,7 @@ fn syntax_sessions_memory() {
         let baseline = allocated();
         let mut sessions = Vec::new();
         for _ in 0..16 {
-            sessions.push(crate::grammar_fixture::parse(language, source).unwrap());
+            sessions.push(crate::grammar_fixture::parse(language.clone(), source).unwrap());
         }
         let opened = allocated();
         let expected = sessions[0].highlight_spans(source);

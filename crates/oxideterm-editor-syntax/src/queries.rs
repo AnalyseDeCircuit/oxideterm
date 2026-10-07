@@ -3,7 +3,7 @@
 
 use crate::LanguageId;
 
-pub(crate) fn highlight_query_for(language: LanguageId) -> &'static str {
+pub(crate) fn highlight_query_for(language: &LanguageId) -> &'static str {
     match language {
         LanguageId::Bash => BASH_HIGHLIGHTS_QUERY,
         LanguageId::C => "",
@@ -41,6 +41,7 @@ pub(crate) fn highlight_query_for(language: LanguageId) -> &'static str {
         LanguageId::Yaml => tree_sitter_yaml::HIGHLIGHTS_QUERY,
         LanguageId::Zsh => tree_sitter_zsh::HIGHLIGHT_QUERY,
         LanguageId::Zig => "",
+        LanguageId::Plugin(_) => "",
     }
 }
 

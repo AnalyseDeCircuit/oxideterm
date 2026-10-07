@@ -302,6 +302,7 @@ impl WorkspaceApp {
                 .unwrap_or_default();
             let syntax_language =
                 sftp_editor_language_id(language, preview_path.as_deref(), name, source);
+            let syntax_path = preview_path.as_deref().unwrap_or(name).to_string();
             let context_menu_labels = EditorContextMenuLabels {
                 copy: self.i18n.t("menu.copy"),
                 cut: self.i18n.t("fileManager.cut"),
@@ -324,7 +325,7 @@ impl WorkspaceApp {
                     runtime_settings.background_active,
                     cx,
                 );
-                editor.set_language(syntax_language, cx);
+                editor.set_language_from_path(syntax_path, syntax_language, cx);
                 editor
             });
             self.sftp_view().update(cx, |sftp, cx| {

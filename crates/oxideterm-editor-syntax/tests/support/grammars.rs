@@ -28,11 +28,13 @@ pub(crate) fn grammar(language: LanguageId) -> &'static PluginGrammar {
             .unwrap();
             let declared = &manifest["contributes"]["language"];
             let grammar = PluginGrammar::new(PluginGrammarSource {
+                grammar_name: declared["id"].as_str().unwrap().into(),
                 language,
                 parser: directory.path().join("parser.wasm"),
                 highlights: directory.path().join("highlights.scm"),
                 parser_sha256: declared["parserSha256"].as_str().unwrap().into(),
                 highlights_sha256: declared["highlightsSha256"].as_str().unwrap().into(),
+                injections: Vec::new(),
             });
             (directory, grammar)
         })

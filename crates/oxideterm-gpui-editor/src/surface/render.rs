@@ -237,6 +237,7 @@ impl Render for TextEditorView {
         }
         let Some(language) = self
             .language
+            .clone()
             .filter(|language| language.plugin_key().is_some())
         else {
             return root.into_any_element();

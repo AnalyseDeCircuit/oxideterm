@@ -52,14 +52,38 @@ pub(crate) fn install_native_plugin_package_bytes(
                 .as_ref()
                 .expect("validated language runtime")
                 .entry;
-            for (file, checksum, maximum) in [
-                (parser, &language.parser_sha256, 16 * 1024 * 1024),
+            let mut assets = vec![
+                (parser, &language.parser_sha256, 16 * 1024 * 1024, true),
                 (
                     &language.highlights,
                     &language.highlights_sha256,
                     1024 * 1024,
+                    false,
                 ),
-            ] {
+            ];
+            for injection in &language.injections {
+                assets.extend([
+                    (
+                        &injection.parser,
+                        &injection.parser_sha256,
+                        16 * 1024 * 1024,
+                        true,
+                    ),
+                    (
+                        &injection.highlights,
+                        &injection.highlights_sha256,
+                        1024 * 1024,
+                        false,
+                    ),
+                    (
+                        &injection.query,
+                        &injection.query_sha256,
+                        1024 * 1024,
+                        false,
+                    ),
+                ]);
+            }
+            for (file, checksum, maximum, is_parser) in assets {
                 use std::io::Read as _;
                 let mut bytes = Vec::new();
                 fs::File::open(source_dir.join(file))
@@ -70,7 +94,7 @@ pub(crate) fn install_native_plugin_package_bytes(
                 if bytes.len() as u64 > maximum || native_plugin_sha256_hex(&bytes) != *checksum {
                     return Err("Language asset size or checksum mismatch".into());
                 }
-                if file == parser && !bytes.starts_with(b"\0asm") {
+                if is_parser && !bytes.starts_with(b"\0asm") {
                     return Err("Language parser is not a WebAssembly module".into());
                 }
             }

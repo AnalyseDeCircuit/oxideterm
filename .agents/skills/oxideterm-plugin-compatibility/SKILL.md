@@ -44,6 +44,23 @@ For language extraction, verify the grammar loader, Tree-sitter ABI, and actual
 old-client behavior. A host range cannot replace those checks. Do not assign an
 upper bound to old plugins just because a new plugin or app version was released.
 
+From 2.2.2, language manifests may declare `displayName`, `grammarName`, `extensions`
+and literal `fileNames`. New IDs are dynamic; do not extend the legacy enum or
+file-association tables for them. Published language packages retain their fallback
+associations. Catalog declarations are taken from verified archives and bound to
+v2 histories, with installed manifests preceding compatible catalog hints. New
+declarations require `>=2.2.2`; ordinary query fixes to legacy packages keep their
+existing host range. Keep open-document re-detection, missing-plugin routing and
+offline catalog hints consistent across IDE, local and SFTP previews.
+
+From 2.2.2, a language package may bundle embedded grammars in `injections`.
+Verify each parser, highlight query and parent selector by its declared checksum;
+selectors capture `injection.content`. The document owns each embedded parser,
+its cancellation and disposal. Keep original byte coordinates across edits and
+restrict child highlights to included regions, replacing parent captures there
+so template captures cannot hide script tokens. Bundled grammars are private to
+their parent package and do not register separate file associations.
+
 For ACP agent extraction, keep the ACP client, permission decisions and process
 ownership in the host. Published `acp` manifests remain supported and normalize
 into the common helper plan. New helper manifests declare feature `acp`, protocol

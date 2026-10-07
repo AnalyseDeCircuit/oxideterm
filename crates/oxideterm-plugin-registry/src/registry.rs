@@ -22,6 +22,7 @@ pub struct NativePluginRegistry {
     config: NativePluginGlobalConfig,
     config_path: PathBuf,
     catalog_tags: HashMap<String, Vec<String>>,
+    catalog_languages: Vec<(String, NativePluginLanguageDefinition)>,
 }
 
 impl NativePluginRegistry {
@@ -50,12 +51,24 @@ impl NativePluginRegistry {
             ),
         };
         let mut catalog_tags = HashMap::new();
+        let mut catalog_languages = Vec::new();
         let installed_ids = plugins
             .iter()
             .map(|plugin| plugin.manifest.id.as_str())
             .collect::<Vec<_>>();
         match load_catalog_cache(settings_path, &installed_ids) {
             Ok(Some(catalog)) => {
+                catalog_languages = catalog
+                    .plugins
+                    .iter()
+                    .filter(|entry| Self::registry_entry_supports_current_version(entry))
+                    .filter_map(|entry| {
+                        entry
+                            .language
+                            .clone()
+                            .map(|language| (entry.id.clone(), language))
+                    })
+                    .collect();
                 catalog_tags = catalog
                     .plugins
                     .iter()
@@ -93,11 +106,16 @@ impl NativePluginRegistry {
             config,
             config_path,
             catalog_tags,
+            catalog_languages,
         }
     }
 
     pub fn plugins(&self) -> &[NativePluginInfo] {
         &self.plugins
+    }
+
+    pub fn catalog_languages(&self) -> &[(String, NativePluginLanguageDefinition)] {
+        &self.catalog_languages
     }
 
     pub fn preserve_unchanged_runtimes(&mut self, previous: &Self) {
@@ -1092,6 +1110,9 @@ pub(crate) fn validate_native_plugin_registry(
     }
     let mut plugin_ids = std::collections::HashSet::new();
     for entry in &registry.plugins {
+        if let Some(language) = &entry.language {
+            language.validate()?;
+        }
         if registry.version == 2 && entry.history.is_none() {
             return Err("Catalog v2 entries require history references".into());
         }

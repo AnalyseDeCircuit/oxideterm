@@ -12,7 +12,7 @@ use tree_sitter::{Language, Node, Parser, Query, QueryCursor, StreamingIterator,
 use crate::{HighlightSpan, LanguageId, SyntaxScope};
 
 pub(crate) fn highlight_spans(
-    language_id: LanguageId,
+    language_id: &LanguageId,
     tree: &Tree,
     highlight_query: &Query,
     markdown_inline_query: Option<&Query>,
@@ -67,7 +67,7 @@ pub(crate) fn highlight_spans(
         let Some(scope) = scope_for_capture(capture_name, capture.node.kind()) else {
             continue;
         };
-        let range = if language_id == LanguageId::Markdown {
+        let range = if language_id == &LanguageId::Markdown {
             markdown_delimited_content_range(capture_name, capture.node)
                 .unwrap_or_else(|| capture.node.byte_range())
         } else {
@@ -85,7 +85,7 @@ pub(crate) fn highlight_spans(
         }
     }
 
-    if language_id == LanguageId::Markdown
+    if language_id == &LanguageId::Markdown
         && let Some(inline_query) = markdown_inline_query
     {
         collect_markdown_inline_highlights(
@@ -117,6 +117,8 @@ fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
         return Some(SyntaxScope::String);
     }
     match capture {
+        "tag.attribute" => return Some(SyntaxScope::Attribute),
+        "tag.delimiter" => return Some(SyntaxScope::Punctuation),
         // Tauri loads `@codemirror/lang-markdown`, whose Lezer tags include
         // heading/link/literal punctuation. The native editor maps those
         // Markdown-specific captures onto the existing syntax palette so `.md`
@@ -134,6 +136,7 @@ fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
         "attribute" => Some(SyntaxScope::Attribute),
         "comment" => Some(SyntaxScope::Comment),
         "constant" => Some(SyntaxScope::Constant),
+        "boolean" => Some(SyntaxScope::Constant),
         "function" => Some(SyntaxScope::Function),
         "keyword" => Some(SyntaxScope::Keyword),
         "module" | "namespace" => Some(SyntaxScope::Namespace),
@@ -142,7 +145,7 @@ fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
         "property" | "field" => Some(SyntaxScope::Property),
         "punctuation" => Some(SyntaxScope::Punctuation),
         "string" | "character" => Some(SyntaxScope::String),
-        "type" | "constructor" => Some(SyntaxScope::Type),
+        "type" | "constructor" | "tag" => Some(SyntaxScope::Type),
         "variable" | "parameter" => Some(SyntaxScope::Variable),
         _ => None,
     }
@@ -285,7 +288,7 @@ fn markdown_delimited_content_range(
     (content_start <= content_end).then_some(content_start..content_end)
 }
 
-fn normalize_highlight_spans(mut spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {
+pub(crate) fn normalize_highlight_spans(mut spans: Vec<HighlightSpan>) -> Vec<HighlightSpan> {
     spans.sort_by(|left, right| {
         left.range
             .start

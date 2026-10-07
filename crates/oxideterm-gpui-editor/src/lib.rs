@@ -25,7 +25,10 @@ mod grammar_fixture {
     }
 }
 
-pub use languages::{EditorLanguagePlugins, ManageLanguagePlugin, render_language_plugin_notice};
+pub use languages::{
+    EditorLanguageDefinition, EditorLanguagePlugins, ManageLanguagePlugin, detect_language,
+    render_language_plugin_notice,
+};
 pub use metrics::{EditorAppearance, EditorMetrics};
 pub use settings::EditorSettings;
 pub use surface::{

@@ -367,7 +367,7 @@ impl WorkspaceApp {
 
     pub(super) fn open_language_plugin(
         &mut self,
-        language: &str,
+        plugin_id: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -377,45 +377,7 @@ impl WorkspaceApp {
         ) {
             self.close_file_manager_dialog(cx);
         }
-        let installed = self
-            .plugin_entity
-            .read(cx)
-            .registry()
-            .plugins()
-            .iter()
-            .position(|plugin| {
-                plugin
-                    .manifest
-                    .contributes
-                    .as_ref()
-                    .and_then(|value| value.language.as_ref())
-                    .is_some_and(|value| value.id == language)
-            });
-        self.open_plugin_manager_tab(window, cx);
-        self.update_plugin_manager_state(cx, |manager| {
-            manager.previous_tab = manager.active_tab;
-            manager.active_tab = if installed.is_some() {
-                NativePluginManagerTab::Installed
-            } else {
-                NativePluginManagerTab::Marketplace
-            };
-            manager.marketplace_search_draft = format!("com.oxideterm.language.{language}");
-            manager.marketplace_tag = None;
-            manager.marketplace_updates_only = false;
-            if let Some(index) = installed {
-                manager.installed_tag = None;
-                manager.pagination[0].page = index / manager.pagination[0].page_size;
-            }
-            manager.section_list_state.splice(
-                PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
-                    ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
-                1,
-            );
-        });
-        if installed.is_none() {
-            self.start_native_plugin_marketplace_load(cx);
-        }
-        cx.notify();
+        self.open_required_plugin(plugin_id, window, cx);
     }
 
     pub(super) fn open_remote_desktop_plugin(
@@ -4360,6 +4322,7 @@ mod tests {
             author: None,
             license: None,
             license_url: None,
+            language: None,
             version: "1.2.0".to_string(),
             min_oxideterm_version: None,
             download_url: "https://example.invalid/demo.zip".to_string(),
