@@ -1,0 +1,780 @@
+{
+  "sidebar": {
+    "search": {
+      "title": "Поиск сеансов",
+      "placeholder": "Поиск сеансов…",
+      "empty": "Нет подходящих сеансов"
+    },
+    "sort": {
+      "title": "Сортировка сеансов",
+      "default": "По умолчанию",
+      "name_ascending": "Имя: А–Я",
+      "name_descending": "Имя: Я–А",
+      "connected_first": "Подключённые первыми"
+    },
+    "actions": {
+      "expand": "Развернуть боковую панель",
+      "collapse": "Свернуть боковую панель",
+      "new_local_terminal": "Новый локальный терминал",
+      "open_pylance_guide": "Открыть руководство Pylance"
+    },
+    "panels": {
+      "sessions": "Активные сеансы",
+      "saved": "Сохранённые соединения",
+      "saved_title": "Сохранённые соединения",
+      "sftp": "SFTP",
+      "sftp_sessions": "Сеансы SFTP",
+      "files": "Файловый менеджер",
+      "forwards": "Перенаправление портов",
+      "forwards_title": "Перенаправление портов",
+      "runtime": "Дашборд",
+      "runtime_description": "Мониторинг использования соединений и топологии",
+      "runtime_overview": "Обзор",
+      "connection_pool": "Пул соединений",
+      "connection_matrix": "Матрица соединений",
+      "ai": "OxideSens",
+      "ai_assistant": "OxideSens (скоро)",
+      "settings": "Настройки",
+      "no_saved_connections": "Нет сохранённых соединений",
+      "no_active_sessions": "Нет активных сеансов",
+      "no_connected_sessions": "Нет подключённых сеансов",
+      "import_tooltip": "Импорт из файла .oxide",
+      "export_tooltip": "Экспорт в файл .oxide",
+      "host_tools": "Инструменты хоста",
+      "knowledge": "База знаний",
+      "host_monitor": "Мониторинг",
+      "gpu": "GPU / NPU",
+      "processes": "Процессы",
+      "services": "Службы",
+      "logs": "Журналы",
+      "tmux": "tmux",
+      "docker": "Docker",
+      "tmux_management": "Управление tmux",
+      "docker_management": "Управление Docker",
+      "session_manager": "Диспетчер сеансов",
+      "open_session_manager": "Открыть диспетчер сеансов",
+      "plugins": "Плагины",
+      "activity": "Активность",
+      "event_log": "Аудит",
+      "notifications": "Уведомления и аудит",
+      "saved_connections": "Сохранённые соединения",
+      "forwarding": "Перенаправление портов",
+      "ports": "Порты",
+      "schedules": "Расписания",
+      "filesystems": "Диски",
+      "packages": "Пакеты"
+    },
+    "tooltips": {
+      "settings": "Настройки",
+      "ai_hint": "OxideSens",
+      "switch_tree": "Переключить на вид «Дерево»",
+      "switch_focus": "Переключить на вид «Фокус»",
+      "new_connection": "Новое соединение",
+      "lock_app": "Заблокировать OxideTerm",
+      "setup_app_lock": "Настроить блокировку приложения",
+      "collapse": "Свернуть"
+    },
+    "active_sessions": "Активные сеансы",
+    "active_session_count": "Активных сеансов: {{count}}",
+    "no_sessions": "Нет сеансов",
+    "add_new_connection": "Нажмите +, чтобы добавить новое соединение",
+    "host_gpu": {
+      "count_suffix": "ускорителей",
+      "refresh_interval": "Обновляется каждые 2 секунды",
+      "sampling": "Опрос устройств GPU / NPU…",
+      "unavailable": "На этом хосте не найдено поддерживаемого инструмента мониторинга GPU / NPU.",
+      "unsupported": "Мониторинг GPU / NPU не поддерживается в этой операционной системе.",
+      "no_devices": "Поддерживаемые устройства GPU / NPU не найдены.",
+      "error": "Не удалось выполнить запрос GPU / NPU: {{error}}",
+      "actions": { "refresh": "Обновить данные GPU / NPU" },
+      "summary": { "utilization": "Средняя загрузка", "memory": "Память устройства", "temperature": "Максимальная температура", "power": "Суммарное энергопотребление" },
+      "columns": { "device": "Устройство", "utilization": "Загрузка", "memory": "Память" },
+      "details": { "uuid": "UUID", "driver": "Драйвер", "performance_state": "Производительность", "health": "Состояние", "temperature": "Температура", "power": "Энергопотребление", "fan": "Вентилятор" },
+      "processes": { "title": "Вычислительные процессы", "empty": "Нет вычислительных процессов, использующих это устройство." }
+    },
+    "host_processes": {
+      "search_placeholder": "Поиск процессов…",
+      "count_suffix": "процессов",
+      "sampling": "Опрос процессов…",
+      "empty": "Нет подходящих процессов",
+      "unknown": "Неизвестно",
+      "elapsed": "Время",
+      "filters": {
+        "all": "Все",
+        "running": "Запущенные",
+        "high_cpu": "Высокая загрузка CPU",
+        "high_memory": "Высокий расход памяти"
+      },
+      "sort": {
+        "cpu": "CPU",
+        "memory": "Память",
+        "pid": "PID",
+        "command": "Команда",
+        "user": "Пользователь"
+      },
+      "states": {
+        "running": "Выполняется",
+        "sleeping": "Спит",
+        "waiting": "Ожидает",
+        "stopped": "Остановлен",
+        "zombie": "Зомби",
+        "idle": "Простой",
+        "unknown": "Неизвестно"
+      },
+      "actions": {
+        "column": "Действия",
+        "term": "Завершить",
+        "kill": "Убить",
+        "stop": "Приостановить",
+        "cont": "Продолжить",
+        "renice": "Приоритет",
+        "apply": "Задать",
+        "renice_placeholder": "nice"
+      },
+      "confirm": {
+        "title": "Подтверждение действия с процессом",
+        "cancel": "Отмена",
+        "term_desc": "Отправить TERM процессу PID {{pid}} ({{command}})?",
+        "kill_desc": "Принудительно завершить PID {{pid}} ({{command}}) сигналом KILL. Это действие необратимо.",
+        "stop_desc": "Приостановить PID {{pid}} ({{command}}) сигналом STOP?",
+        "cont_desc": "Продолжить PID {{pid}} ({{command}}) сигналом CONT?",
+        "renice_desc": "Изменить приоритет PID {{pid}} ({{command}})?"
+      },
+      "toast": {
+        "action_already_running": "Действие с процессом уже выполняется.",
+        "invalid_nice": "Введите значение nice от -20 до 19.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "action_failed": "Не удалось выполнить действие с процессом.",
+        "action_succeeded": "Действие с процессом PID {{pid}} выполнено.",
+        "partial_support": "Управление процессами на {{os}} работает частично."
+      }
+    },
+    "host_docker": {
+      "search_placeholder": "Поиск контейнеров…",
+      "count_suffix": "контейнеров",
+      "sampling": "Опрос контейнеров Docker…",
+      "empty": "Нет подходящих контейнеров",
+      "unavailable": "Docker недоступен на этом хосте.",
+      "error": "Не удалось выполнить команду Docker: {{error}}",
+      "columns": {
+        "container": "Контейнер / образ",
+        "image": "Образ",
+        "state": "Состояние",
+        "ports": "Порты"
+      },
+      "states": {
+        "running": "Работает",
+        "exited": "Завершён",
+        "created": "Создан",
+        "paused": "Приостановлен",
+        "restarting": "Перезапускается",
+        "removing": "Удаляется",
+        "dead": "Мёртв",
+        "unknown": "Неизвестно"
+      },
+      "actions": {
+        "refresh": "Обновить контейнеры",
+        "logs": "Просмотреть журналы",
+        "follow_logs": "Следить за журналом",
+        "exec": "Открыть оболочку",
+        "start": "Запустить",
+        "stop": "Остановить",
+        "restart": "Перезапустить"
+      },
+      "exec_title": "Docker: {{name}}",
+      "follow_title": "Журналы Docker: {{name}}",
+      "logs": {
+        "title": "Журнал: {{name}}",
+        "loading": "Загрузка журнала…",
+        "empty": "Нет недавних записей.",
+        "close": "Закрыть журнал"
+      },
+      "confirm": {
+        "title": "Подтверждение действия Docker",
+        "cancel": "Отмена",
+        "start_desc": "Запустить контейнер {{name}} ({{id}})?",
+        "stop_desc": "Остановить контейнер {{name}} ({{id}})? Выполняемая в контейнере работа может быть прервана.",
+        "restart_desc": "Перезапустить контейнер {{name}} ({{id}})? Выполняемая в контейнере работа будет прервана."
+      },
+      "toast": {
+        "action_already_running": "Действие Docker уже выполняется.",
+        "logs_already_running": "Журналы Docker уже загружаются.",
+        "logs_failed": "Не удалось загрузить журналы Docker.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для этого контейнера.",
+        "exec_opened": "Открыта оболочка для {{name}}.",
+        "follow_opened": "Ведётся слежение за журналом {{name}}.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "action_failed": "Не удалось выполнить действие Docker.",
+        "action_succeeded": "Действие Docker для {{name}} выполнено."
+      }
+    },
+    "host_services": {
+      "search_placeholder": "Поиск служб…",
+      "count_suffix": "служб",
+      "sampling": "Опрос служб…",
+      "empty": "Нет подходящих служб",
+      "unavailable": "Менеджер служб недоступен на этом хосте.",
+      "error": "Не удалось выполнить команду управления службами: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Частичная поддержка",
+        "unknown": "Поддержка неизвестна"
+      },
+      "columns": {
+        "service": "Служба",
+        "state": "Состояние",
+        "enabled": "Включена",
+        "pid": "PID",
+        "description": "Описание",
+        "load": "Загрузка",
+        "sub_state": "Подсостояние"
+      },
+      "states": {
+        "running": "Работает",
+        "stopped": "Остановлена",
+        "failed": "Сбой",
+        "activating": "Запускается",
+        "deactivating": "Останавливается",
+        "reloading": "Перезагружается",
+        "unknown": "Неизвестно"
+      },
+      "enabled": {
+        "enabled": "Включена",
+        "disabled": "Выключена",
+        "masked": "Замаскирована",
+        "static": "Статическая",
+        "unknown": "Неизвестно"
+      },
+      "actions": {
+        "refresh": "Обновить службы",
+        "logs": "Просмотреть журналы",
+        "follow_logs": "Следить за журналом",
+        "start": "Запустить",
+        "stop": "Остановить",
+        "restart": "Перезапустить",
+        "reload": "Перечитать конфигурацию",
+        "enable": "Включить",
+        "disable": "Выключить"
+      },
+      "follow_title": "Журнал службы: {{name}}",
+      "logs": {
+        "title": "Журнал: {{name}}",
+        "loading": "Загрузка журнала…",
+        "empty": "Нет недавних записей.",
+        "close": "Закрыть журнал"
+      },
+      "confirm": {
+        "title": "Подтверждение действия со службой",
+        "cancel": "Отмена",
+        "start_desc": "Запустить службу {{id}} ({{name}})?",
+        "stop_desc": "Остановить службу {{id}} ({{name}})? Выполняемая работа может быть прервана.",
+        "restart_desc": "Перезапустить службу {{id}} ({{name}})? Выполняемая работа будет прервана.",
+        "reload_desc": "Перечитать конфигурацию службы {{id}} ({{name}})?",
+        "enable_desc": "Включить службу {{id}} ({{name}}) в автозапуск?",
+        "disable_desc": "Исключить службу {{id}} ({{name}}) из автозапуска?"
+      },
+      "toast": {
+        "action_already_running": "Действие со службой уже выполняется.",
+        "logs_already_running": "Журнал службы уже загружается.",
+        "logs_failed": "Не удалось загрузить журнал службы.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для этой службы.",
+        "follow_opened": "Ведётся слежение за журналом {{name}}.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "action_failed": "Не удалось выполнить действие со службой.",
+        "action_succeeded": "Действие со службой {{name}} выполнено.",
+        "partial_support": "Управление службами на {{os}} работает частично."
+      }
+    },
+    "host_logs": {
+      "search_placeholder": "Поиск журналов…",
+      "count_suffix": "записей",
+      "loading": "Загрузка журнала…",
+      "empty": "Нет подходящих записей",
+      "unavailable": "Журналы хоста недоступны на этом хосте.",
+      "error": "Не удалось выполнить команду чтения журналов: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Частичная поддержка",
+        "unknown": "Поддержка неизвестна"
+      },
+      "presets": {
+        "all": "Все",
+        "errors": "Ошибки",
+        "auth": "SSH/аутентификация",
+        "kernel": "Ядро",
+        "system": "Система"
+      },
+      "columns": {
+        "time": "Время",
+        "level": "Уровень",
+        "source": "Источник",
+        "unit": "Юнит",
+        "message": "Сообщение"
+      },
+      "levels": {
+        "error": "Ошибка",
+        "warning": "Предупреждение",
+        "info": "Инфо",
+        "debug": "Отладка",
+        "unknown": "Неизвестно"
+      },
+      "actions": {
+        "refresh": "Обновить журналы",
+        "follow": "Следить за журналом"
+      },
+      "follow_title": "Журналы хоста: {{preset}}",
+      "toast": {
+        "snapshot_already_running": "Снимок журнала уже создаётся.",
+        "snapshot_loaded": "Загружено записей журнала: {{count}}.",
+        "snapshot_failed": "Не удалось загрузить журналы: {{reason}}",
+        "unavailable": "Журналы хоста недоступны на этом хосте.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для журналов хоста.",
+        "follow_opened": "Ведётся слежение за журналами: {{preset}}.",
+        "partial_support": "Журналы хоста на {{os}} работают частично.",
+        "unknown_error": "Неизвестная ошибка"
+      }
+    },
+    "host_tmux": {
+      "search_placeholder": "Поиск tmux…",
+      "count_suffix": "сеансов",
+      "loading": "Загрузка сеансов tmux…",
+      "empty": "Нет подходящих сеансов tmux",
+      "unavailable": "tmux недоступен на этом хосте.",
+      "error": "Не удалось выполнить команду tmux: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Частичная поддержка",
+        "unknown": "Поддержка неизвестна"
+      },
+      "columns": {
+        "session": "Сеанс",
+        "attached": "Присоединён",
+        "windows": "Окна",
+        "panes": "Панели",
+        "activity": "Активность",
+        "created": "Создан"
+      },
+      "attached": {
+        "yes": "Присоединён",
+        "no": "Отсоединён"
+      },
+      "actions": {
+        "new_session": "Новый сеанс",
+        "refresh": "Обновить tmux",
+        "attach": "Присоединиться",
+        "kill_session": "Завершить сеанс",
+        "rename_session": "Переименовать сеанс",
+        "rename_window": "Переименовать окно",
+        "kill_window": "Завершить окно",
+        "kill_pane": "Завершить панель",
+        "send_command": "Отправить команду"
+      },
+      "active_window": "Активное #{{index}} {{name}}",
+      "no_active_window": "Нет активного окна",
+      "attach_title": "tmux: {{name}}",
+      "new_session_title": "Новый сеанс tmux",
+      "new_session_name": "новый сеанс",
+      "confirm": {
+        "title": "Подтверждение действия tmux",
+        "cancel": "Отмена",
+        "kill_session_desc": "Завершить сеанс tmux {{id}} ({{name}})? Все окна и панели этого сеанса будут закрыты.",
+        "kill_window_desc": "Завершить окно tmux {{target}} в сеансе {{name}}? Все панели этого окна будут закрыты.",
+        "kill_pane_desc": "Завершить панель tmux {{target}} в сеансе {{name}}? Выполняемая в ней команда будет прервана.",
+        "action_desc": "Выполнить действие tmux над {{target}} в сеансе {{name}}?"
+      },
+      "toast": {
+        "snapshot_already_running": "Снимок tmux уже создаётся.",
+        "snapshot_loaded": "Загружено сеансов tmux: {{count}}.",
+        "snapshot_failed": "Не удалось загрузить сеансы tmux: {{reason}}",
+        "unavailable": "tmux недоступен на этом хосте.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для tmux.",
+        "attach_opened": "Присоединение к {{name}}.",
+        "new_session_opened": "Открывается {{name}}.",
+        "action_already_running": "Действие tmux уже выполняется.",
+        "action_failed": "Не удалось выполнить действие tmux.",
+        "action_succeeded": "Действие tmux для {{target}} выполнено.",
+        "unknown_error": "Неизвестная ошибка",
+        "input_required": "Введите значение перед продолжением."
+      },
+      "input": {
+        "rename_session_title": "Переименовать сеанс",
+        "rename_window_title": "Переименовать окно",
+        "send_command_title": "Отправить команду в панель",
+        "rename_session_desc": "Задайте новое имя сеансу {{target}}.",
+        "rename_window_desc": "Задайте новое имя окну {{target}} в сеансе {{name}}.",
+        "send_command_desc": "Отправить одну команду с Enter в панель {{target}} сеанса {{name}}.",
+        "rename_session_placeholder": "Имя сеанса",
+        "rename_window_placeholder": "Имя окна",
+        "send_command_placeholder": "Команда для отправки"
+      }
+    },
+    "host_schedules": {
+      "search_placeholder": "Поиск задач…",
+      "count_suffix": "задач",
+      "loading": "Сканирование расписаний…",
+      "empty": "Нет подходящих запланированных задач",
+      "unavailable": "Инструменты запланированных задач недоступны на этом хосте.",
+      "error": "Не удалось выполнить команду запланированных задач: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Частичная поддержка",
+        "unknown": "Поддержка неизвестна"
+      },
+      "filters": {
+        "all": "Все",
+        "enabled": "Включённые",
+        "disabled": "Выключенные",
+        "systemd": "systemd",
+        "cron": "cron",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "failed": "Со сбоями"
+      },
+      "sources": {
+        "systemd": "systemd",
+        "cron": "cron",
+        "anacron": "anacron",
+        "at": "at",
+        "launchd": "launchd",
+        "windows": "Windows",
+        "unknown": "Неизвестно"
+      },
+      "enabled": {
+        "enabled": "Включена",
+        "disabled": "Выключена",
+        "static": "Статическая",
+        "masked": "Замаскирована",
+        "unknown": "Неизвестно"
+      },
+      "active": {
+        "active": "Активна",
+        "inactive": "Неактивна",
+        "failed": "Сбой",
+        "unknown": "Неизвестно"
+      },
+      "columns": {
+        "task": "Задача",
+        "source": "Источник",
+        "state": "Состояние",
+        "enabled": "Включена",
+        "next": "Следующий",
+        "last": "Последний",
+        "user": "Пользователь",
+        "schedule": "Расписание",
+        "command": "Команда",
+        "result": "Результат",
+        "description": "Описание",
+        "unit": "Юнит"
+      },
+      "actions": {
+        "refresh": "Обновить расписания",
+        "diagnostic": "Открыть диагностический терминал",
+        "logs": "Просмотреть журналы",
+        "follow_logs": "Следить за журналом",
+        "enable": "Включить",
+        "disable": "Выключить",
+        "run_now": "Запустить сейчас"
+      },
+      "diagnostic_title": "Диагностика расписаний",
+      "follow_title": "Журнал расписания: {{name}}",
+      "logs": {
+        "title": "Журнал: {{name}}",
+        "loading": "Загрузка журнала…",
+        "empty": "Нет недавних записей.",
+        "close": "Закрыть журнал"
+      },
+      "confirm": {
+        "title": "Подтверждение действия с запланированной задачей",
+        "cancel": "Отмена",
+        "enable_desc": "Включить запланированную задачу {{name}}? Юнит: {{unit}}.",
+        "disable_desc": "Выключить запланированную задачу {{name}}? Юнит: {{unit}}. Последующие запуски могут прекратиться.",
+        "run_now_desc": "Запустить запланированную задачу {{name}} сейчас? Юнит: {{unit}}."
+      },
+      "toast": {
+        "snapshot_already_running": "Сканирование расписаний уже выполняется.",
+        "snapshot_loaded": "Загружено запланированных задач: {{count}}.",
+        "snapshot_failed": "Не удалось выполнить сканирование задач: {{reason}}",
+        "unavailable": "Инструменты запланированных задач недоступны на этом хосте.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для диагностики.",
+        "diagnostic_opened": "Открыта диагностика расписаний.",
+        "follow_opened": "Ведётся слежение за журналом расписания {{name}}.",
+        "logs_already_running": "Журнал расписания уже загружается.",
+        "logs_failed": "Не удалось загрузить журнал расписания.",
+        "action_already_running": "Действие с запланированной задачей уже выполняется.",
+        "action_failed": "Не удалось выполнить действие с запланированной задачей.",
+        "enable_succeeded": "Задача {{name}} включена.",
+        "disable_succeeded": "Задача {{name}} выключена.",
+        "run_now_started": "Задача {{name}} запущена.",
+        "partial_support": "Поддержка запланированных задач на {{os}} частичная.",
+        "unknown_error": "Неизвестная ошибка запланированных задач."
+      }
+    },
+    "host_ports": {
+      "search_placeholder": "Поиск портов…",
+      "count_suffix": "портов",
+      "loading": "Сканирование портов…",
+      "empty": "Нет подходящих портов",
+      "unavailable": "Инструменты проверки портов недоступны на этом хосте.",
+      "error": "Не удалось выполнить команду проверки портов: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Частичная поддержка",
+        "unknown": "Поддержка неизвестна"
+      },
+      "filters": {
+        "all": "Все",
+        "listening": "Слушающие",
+        "connected": "Подключённые",
+        "tcp": "TCP",
+        "udp": "UDP",
+        "risky": "Высокий риск"
+      },
+      "columns": {
+        "local": "Локальный адрес",
+        "protocol": "Протокол",
+        "state": "Состояние",
+        "pid": "PID",
+        "process": "Процесс",
+        "remote": "Удалённый адрес",
+        "user": "Пользователь",
+        "command": "Команда",
+        "source": "Источник",
+        "inode": "Инода"
+      },
+      "states": {
+        "listening": "Слушает",
+        "established": "Установлено",
+        "open": "Открыт",
+        "time_wait": "Задержка закрытия",
+        "close_wait": "Ожидание закрытия",
+        "unknown": "Неизвестно"
+      },
+      "actions": {
+        "refresh": "Обновить порты",
+        "diagnostic": "Открыть диагностический терминал",
+        "copy_endpoint": "Копировать адрес",
+        "jump_process": "Найти процесс"
+      },
+      "diagnostic_title": "Диагностика портов",
+      "toast": {
+        "snapshot_already_running": "Сканирование портов уже выполняется.",
+        "snapshot_loaded": "Загружено портов: {{count}}.",
+        "snapshot_failed": "Не удалось выполнить сканирование портов: {{reason}}",
+        "unavailable": "Инструменты проверки портов недоступны на этом хосте.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для диагностики.",
+        "diagnostic_opened": "Открыта диагностика портов.",
+        "copied_endpoint": "Скопировано: {{endpoint}}.",
+        "partial_support": "Проверка портов на {{os}} работает частично.",
+        "unknown_error": "Неизвестная ошибка сканирования портов."
+      }
+    },
+    "host_filesystems": {
+      "search_placeholder": "Поиск файловых систем…",
+      "count_suffix": "элементов",
+      "loading": "Сканирование дисков…",
+      "empty": "Нет подходящих записей файловой системы",
+      "unavailable": "Инструменты работы с файловыми системами недоступны на этом хосте.",
+      "error": "Не удалось выполнить команду работы с файловыми системами: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Частичная поддержка",
+        "unknown": "Поддержка неизвестна"
+      },
+      "filters": {
+        "all": "Все",
+        "mounts": "Точки монтирования",
+        "read_only": "Только чтение",
+        "high_usage": "Высокая заполненность",
+        "inode_pressure": "Дефицит инод",
+        "large_items": "Крупные элементы",
+        "blocks": "Блочные устройства",
+        "attention": "Внимание",
+        "inode_hotspots": "Иноды / число файлов"
+      },
+      "columns": {
+        "path": "Путь",
+        "kind": "Тип",
+        "usage": "Заполненность",
+        "inode": "Иноды",
+        "fs": "ФС",
+        "size": "Размер",
+        "read_only": "RO",
+        "device": "Устройство",
+        "used_available": "Занято / доступно",
+        "source": "Источник",
+        "detail": "Подробности",
+        "options": "Опции",
+        "attention": "Внимание"
+      },
+      "kinds": {
+        "mount": "Точка монтирования",
+        "large_dir": "Крупный каталог",
+        "large_file": "Крупный файл",
+        "block": "Блочное устройство",
+        "unknown": "Неизвестно",
+        "inode_dir": "Очаг инод",
+        "count_dir": "Очаг числа файлов"
+      },
+      "read_only": {
+        "yes": "Да",
+        "no": "Нет"
+      },
+      "actions": {
+        "refresh": "Обновить диски",
+        "diagnostic": "Открыть диагностический терминал",
+        "copy_path": "Копировать путь"
+      },
+      "diagnostic_title": "Диагностика дисков",
+      "toast": {
+        "snapshot_already_running": "Сканирование дисков уже выполняется.",
+        "snapshot_loaded": "Загружено записей файловых систем: {{count}}.",
+        "snapshot_failed": "Не удалось выполнить сканирование дисков: {{reason}}",
+        "unavailable": "Инструменты работы с файловыми системами недоступны на этом хосте.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для диагностики.",
+        "diagnostic_opened": "Открыта диагностика дисков.",
+        "copied_path": "Скопировано: {{path}}.",
+        "partial_support": "Проверка файловых систем на {{os}} работает частично.",
+        "unknown_error": "Неизвестная ошибка сканирования файловых систем."
+      },
+      "attention": {
+        "critical_usage": "Критическая заполненность",
+        "high_usage": "Высокая заполненность",
+        "critical_inode": "Критично по инодам",
+        "inode_pressure": "Дефицит инод",
+        "low_free_space": "Мало свободного места",
+        "read_only": "Только чтение",
+        "large_item": "Крупный элемент",
+        "inode_hotspot": "Очаг инод",
+        "file_count_hotspot": "Очаг числа файлов"
+      },
+      "values": {
+        "inode_count": "Инод: {{count}}",
+        "file_count": "Файлов: {{count}}"
+      }
+    },
+    "host_packages": {
+      "search_placeholder": "Поиск пакетов…",
+      "count_suffix": "пакетов",
+      "loading": "Сканирование пакетов…",
+      "empty": "Нет подходящих пакетов",
+      "unavailable": "Инструменты работы с пакетами недоступны на этом хосте.",
+      "error": "Не удалось выполнить команду работы с пакетами: {{error}}",
+      "capability": {
+        "full": "Полная поддержка",
+        "partial": "Поддержка только чтения",
+        "unknown": "Поддержка неизвестна"
+      },
+      "filters": {
+        "all": "Все",
+        "upgradable": "Обновляемые",
+        "installed": "Установленные",
+        "services": "Службы",
+        "apt": "apt",
+        "dnf": "dnf",
+        "yum": "yum",
+        "pacman": "pacman",
+        "brew": "Homebrew"
+      },
+      "columns": {
+        "package": "Пакет",
+        "status": "Статус",
+        "installed": "Установлен",
+        "candidate": "Кандидат",
+        "manager": "Менеджер",
+        "service": "Служба",
+        "arch": "Архитектура",
+        "repository": "Репозиторий",
+        "summary": "Описание",
+        "source": "Источник",
+        "owner_paths": "Пути владельца"
+      },
+      "status": {
+        "upgradable": "Доступно обновление",
+        "installed": "Установлен",
+        "unknown": "Неизвестно"
+      },
+      "actions": {
+        "refresh": "Обновить пакеты",
+        "inspect": "Открыть сведения о пакете",
+        "copy_name": "Копировать имя пакета"
+      },
+      "inspect_title": "Сведения о пакете",
+      "toast": {
+        "snapshot_already_running": "Сканирование пакетов уже выполняется.",
+        "snapshot_loaded": "Загружено пакетов: {{count}}.",
+        "snapshot_failed": "Не удалось выполнить сканирование пакетов: {{reason}}",
+        "unavailable": "Инструменты работы с пакетами недоступны на этом хосте.",
+        "connection_missing": "Выбранное соединение больше недоступно.",
+        "exec_terminal_missing": "Нет доступного активного SSH-терминала для сведений о пакете.",
+        "inspect_unsupported": "Сведения о пакете для {{manager}} пока не поддерживаются.",
+        "inspect_opened": "Открыты сведения о {{name}}.",
+        "copied_name": "Скопировано: {{name}}.",
+        "partial_support": "Просмотр пакетов на {{os}} доступен только для чтения.",
+        "unknown_error": "Неизвестная ошибка сканирования пакетов."
+      }
+    }
+  },
+  "sessions": {
+    "tree": {
+      "no_sessions": "Нет сеансов",
+      "click_to_add": "Нажмите +, чтобы добавить новое соединение",
+      "actions": {
+        "open_session": "Открыть сеанс",
+        "new_terminal": "Новый терминал",
+        "sftp": "SFTP",
+        "port_forwarding": "Перенаправление портов",
+        "disconnect": "Отключить",
+        "reconnect": "Переподключить",
+        "edit_and_reconnect": "Изменить и переподключить",
+        "remove_session": "Удалить сеанс",
+        "cancel_reconnect": "Отменить переподключение",
+        "drill_in": "Переход к следующему узлу",
+        "saved_next_hop": "Использовать сохранённый следующий узел…",
+        "connect": "Подключить",
+        "save_as_connection": "Сохранить как соединение…"
+      }
+    },
+    "focused_list": {
+      "all_servers": "Все серверы",
+      "child": "дочерний",
+      "children": "дочерних",
+      "no_child_nodes": "У этого узла нет дочерних узлов",
+      "no_servers": "Серверов пока нет",
+      "add_by_drilling": "Дочерние узлы можно добавить через переход к следующему серверу",
+      "click_to_add": "Нажмите +, чтобы добавить новое соединение",
+      "terminal": "Терминал №{{number}}",
+      "close_terminal": "Закрыть терминал"
+    },
+    "actions": {
+      "connect": "Подключить",
+      "new_terminal": "Новый терминал",
+      "sftp_explorer": "Проводник SFTP",
+      "port_forwarding": "Перенаправление портов",
+      "disconnect": "Отключить",
+      "reconnect": "Переподключить",
+      "drill_in": "Переход к следующему узлу",
+      "saved_next_hop": "Использовать сохранённый следующий узел…",
+      "save_as_connection": "Сохранить как соединение…"
+    },
+    "saved_next_hop": {
+      "title": "Использовать сохранённое соединение как следующий узел",
+      "description": "Выберите сохранённое соединение, чтобы добавить его под {{host}}.",
+      "empty": "Нет доступных сохранённых соединений.",
+      "cancel": "Отмена",
+      "proxy_chain_badge": "Узлов: {{count}}",
+      "parent_not_ready": "Перед добавлением сохранённого следующего узла подключите родительский узел.",
+      "not_found": "Сохранённое соединение не найдено.",
+      "missing_credentials": "В этом сохранённом соединении не хватает учётных данных для подключения.",
+      "materialize_failed": "Не удалось добавить сохранённое соединение в дерево сеансов."
+    },
+    "breadcrumb": {
+      "back_to_root": "Вернуться к корневому виду",
+      "all_servers": "Все серверы"
+    }
+  }
+}

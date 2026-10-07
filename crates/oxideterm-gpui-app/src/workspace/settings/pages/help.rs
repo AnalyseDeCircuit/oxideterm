@@ -1045,6 +1045,7 @@ impl WorkspaceApp {
             Language::It => "Italiano",
             Language::Ko => "한국어",
             Language::PtBr => "Português (Brasil)",
+            Language::RuRu => "Русский",
             Language::Vi => "Tiếng Việt",
             Language::Ja => "日本語",
             Language::ZhCn => "简体中文",

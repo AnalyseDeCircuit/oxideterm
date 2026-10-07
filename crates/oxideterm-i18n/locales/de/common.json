@@ -80,7 +80,8 @@
     "japanese": "日本語",
     "korean": "한국어",
     "portuguese_brazil": "Português (Brasil)",
-    "vietnamese": "Tiếng Việt"
+    "vietnamese": "Tiếng Việt",
+    "russian": "Русский"
   },
   "markdown": {
     "mermaid_unsupported": "Nicht unterstütztes Mermaid-Diagramm",

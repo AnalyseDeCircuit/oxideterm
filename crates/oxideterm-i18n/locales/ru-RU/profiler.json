@@ -1,0 +1,48 @@
+{
+  "profiler": {
+    "capsule": {
+      "click_expand": "Нажмите, чтобы развернуть",
+      "no_data": "Нет данных",
+      "sampling": "Сбор данных…"
+    },
+    "detail": {
+      "load_avg": "Средняя нагрузка",
+      "cpu_cores": "Ядра CPU",
+      "memory": "Память",
+      "source": "Источник"
+    },
+    "panel": {
+      "no_connection": "Активное подключение не выбрано",
+      "sampling": "Сбор данных…",
+      "no_data": "Данные недоступны",
+      "system_information": "Сведения о системе",
+      "system": "Система",
+      "system_version": "Версия системы",
+      "architecture": "Архитектура",
+      "boot_time": "Время загрузки",
+      "uptime": "Время работы",
+      "cpu": "CPU",
+      "memory": "Память",
+      "disk": "Диск",
+      "gpu": "GPU",
+      "gpu_memory": "Память GPU",
+      "gpus": "GPU",
+      "network": "Сетевой ввод/вывод",
+      "load_avg": "Средняя нагрузка",
+      "rtt": "Задержка RTT",
+      "source": "Источник",
+      "disabled": "Мониторинг отключён",
+      "enable": "Включить сбор данных",
+      "swap": "Подкачка",
+      "mounts": "Точки монтирования",
+      "interfaces": "Интерфейсы",
+      "top_processes": "Топ процессов",
+      "source_full": "Полный",
+      "source_partial": "Частичный",
+      "source_rtt_only": "Только RTT",
+      "source_failed": "Ошибка",
+      "source_unsupported": "Не поддерживается",
+      "retry": "Повторить сбор данных"
+    }
+  }
+}

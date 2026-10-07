@@ -236,6 +236,27 @@ const ZH_TW_PARTS: &[&str] = &[
     include_str!("../locales/zh-TW/graphics.json"),
     include_str!("../locales/zh-TW/ai.json"),
 ];
+const RU_RU_PARTS: &[&str] = &[
+    include_str!("../locales/ru-RU/common.json"),
+    include_str!("../locales/ru-RU/menu.json"),
+    include_str!("../locales/ru-RU/sidebar.json"),
+    include_str!("../locales/ru-RU/settings.json"),
+    include_str!("../locales/ru-RU/settings_view.json"),
+    include_str!("../locales/ru-RU/sessionManager.json"),
+    include_str!("../locales/ru-RU/modals.json"),
+    include_str!("../locales/ru-RU/connections.json"),
+    include_str!("../locales/ru-RU/eventLog.json"),
+    include_str!("../locales/ru-RU/profiler.json"),
+    include_str!("../locales/ru-RU/forwards.json"),
+    include_str!("../locales/ru-RU/sftp.json"),
+    include_str!("../locales/ru-RU/ssh.json"),
+    include_str!("../locales/ru-RU/terminal.json"),
+    include_str!("../locales/ru-RU/mosh.json"),
+    include_str!("../locales/ru-RU/ide.json"),
+    include_str!("../locales/ru-RU/fileManager.json"),
+    include_str!("../locales/ru-RU/graphics.json"),
+    include_str!("../locales/ru-RU/ai.json"),
+];
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Locale {
@@ -247,6 +268,7 @@ pub enum Locale {
     Ja,
     Ko,
     PtBr,
+    RuRu,
     Vi,
     ZhCn,
     ZhTw,
@@ -363,6 +385,7 @@ fn locale_parts(locale: Locale) -> &'static [&'static str] {
         Locale::Ja => JA_PARTS,
         Locale::Ko => KO_PARTS,
         Locale::PtBr => PT_BR_PARTS,
+        Locale::RuRu => RU_RU_PARTS,
         Locale::Vi => VI_PARTS,
         Locale::ZhCn => ZH_CN_PARTS,
         Locale::ZhTw => ZH_TW_PARTS,
@@ -444,6 +467,7 @@ mod tests {
             Locale::Ja,
             Locale::Ko,
             Locale::PtBr,
+            Locale::RuRu,
             Locale::Vi,
             Locale::ZhCn,
             Locale::ZhTw,
@@ -481,6 +505,7 @@ mod tests {
             ("language.japanese", "日本語"),
             ("language.korean", "한국어"),
             ("language.portuguese_brazil", "Português (Brasil)"),
+            ("language.russian", "Русский"),
             ("language.vietnamese", "Tiếng Việt"),
         ];
         let locales = [
@@ -492,6 +517,7 @@ mod tests {
             Locale::Ja,
             Locale::Ko,
             Locale::PtBr,
+            Locale::RuRu,
             Locale::Vi,
             Locale::ZhCn,
             Locale::ZhTw,

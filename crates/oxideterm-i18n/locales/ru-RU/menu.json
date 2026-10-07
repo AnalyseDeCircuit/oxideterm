@@ -1,0 +1,28 @@
+{
+  "menu": {
+    "app": "OxideTerm",
+    "services": "Службы",
+    "new_terminal": "Новый терминал",
+    "close_tab": "Закрыть вкладку",
+    "show_main_window": "Показать главное окно",
+    "hide_main_window": "Скрыть главное окно",
+    "quit": "Выйти из OxideTerm",
+    "edit": "Правка",
+    "cut": "Вырезать",
+    "copy": "Копировать",
+    "paste": "Вставить",
+    "find": "Найти",
+    "find_next": "Найти далее",
+    "find_previous": "Найти ранее",
+    "terminal": "Терминал",
+    "split_horizontal": "Разделить по горизонтали",
+    "split_vertical": "Разделить по вертикали",
+    "close_pane": "Закрыть панель",
+    "window": "Окно",
+    "next_tab": "Следующая вкладка",
+    "previous_tab": "Предыдущая вкладка",
+    "language": "Язык",
+    "settings": "Настройки",
+    "view": "Вид"
+  }
+}

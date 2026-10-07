@@ -579,7 +579,7 @@ pub fn settings_slider_anchor_id(slider: SettingsSlider) -> SelectAnchorId {
     }
 }
 
-pub fn language_options() -> [Language; 11] {
+pub fn language_options() -> [Language; 12] {
     [
         Language::De,
         Language::En,
@@ -588,6 +588,7 @@ pub fn language_options() -> [Language; 11] {
         Language::It,
         Language::Ko,
         Language::PtBr,
+        Language::RuRu,
         Language::Vi,
         Language::Ja,
         Language::ZhCn,

@@ -19,7 +19,7 @@ SSH · Mosh · Telnet · 序列埠 · RDP/VNC · SFTP · 連接埠轉送 · 內�
 [**更新紀錄**](../../.github/release-notes/stable-changelog.md) ·
 [**報告問題**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
 
-[English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
+[English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md) | [Русский](README.ru.md)
 
 </div>
 

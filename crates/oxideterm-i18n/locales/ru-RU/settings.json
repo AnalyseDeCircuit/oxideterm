@@ -1,0 +1,25 @@
+{
+  "settings": {
+    "title": "Настройки",
+    "general": {
+      "title": "Общие",
+      "language": "Язык",
+      "theme": "Тема"
+    },
+    "terminal": {
+      "title": "Терминал",
+      "font_size": "Размер шрифта",
+      "font_family": "Шрифт",
+      "selection_copy": "Копировать при выделении",
+      "paste_protection": "Защита при вставке"
+    },
+    "sidebar_ui": {
+      "title": "Интерфейс боковой панели",
+      "width": "Ширина"
+    },
+    "toast": {
+      "renderer_changed": "Рендерер изменён",
+      "renderer_changed_desc": "Рендерер терминала переключён на {{renderer}}. Новые терминалы будут использовать его; существующие не затронуты."
+    }
+  }
+}

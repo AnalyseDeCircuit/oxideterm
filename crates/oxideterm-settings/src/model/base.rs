@@ -43,6 +43,8 @@ pub enum Language {
     De,
     #[serde(rename = "it")]
     It,
+    #[serde(rename = "ru-RU")]
+    RuRu,
     #[serde(rename = "zh-TW")]
     ZhTw,
 }
@@ -61,6 +63,7 @@ impl Language {
             Self::Ko => "ko",
             Self::De => "de",
             Self::It => "it",
+            Self::RuRu => "ru-RU",
             Self::ZhTw => "zh-TW",
         }
     }

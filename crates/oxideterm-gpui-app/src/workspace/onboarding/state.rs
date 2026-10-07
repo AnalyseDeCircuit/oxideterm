@@ -32,7 +32,7 @@ pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool
     (FontFamily::Custom, "Custom...", false),
 ];
 
-pub(in crate::workspace) const ONBOARDING_LANGUAGES: [(Language, &str); 11] = [
+pub(in crate::workspace) const ONBOARDING_LANGUAGES: [(Language, &str); 12] = [
     (Language::En, "English"),
     (Language::ZhCn, "简体中文"),
     (Language::ZhTw, "繁體中文"),
@@ -43,6 +43,7 @@ pub(in crate::workspace) const ONBOARDING_LANGUAGES: [(Language, &str); 11] = [
     (Language::EsEs, "Español"),
     (Language::It, "Italiano"),
     (Language::PtBr, "Português (BR)"),
+    (Language::RuRu, "Русский"),
     (Language::Vi, "Tiếng Việt"),
 ];
 

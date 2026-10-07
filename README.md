@@ -19,7 +19,7 @@ No account. No subscription. No telemetry. No Electron.
 [**Changelog**](.github/release-notes/stable-changelog.md) ·
 [**Report an issue**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
 
-[English](README.md) | [简体中文](docs/readme/README.zh-Hans.md) | [繁體中文](docs/readme/README.zh-Hant.md) | [日本語](docs/readme/README.ja.md) | [한국어](docs/readme/README.ko.md) | [Français](docs/readme/README.fr.md) | [Deutsch](docs/readme/README.de.md) | [Español](docs/readme/README.es.md) | [Italiano](docs/readme/README.it.md) | [Português](docs/readme/README.pt-BR.md) | [Tiếng Việt](docs/readme/README.vi.md)
+[English](README.md) | [简体中文](docs/readme/README.zh-Hans.md) | [繁體中文](docs/readme/README.zh-Hant.md) | [日本語](docs/readme/README.ja.md) | [한국어](docs/readme/README.ko.md) | [Français](docs/readme/README.fr.md) | [Deutsch](docs/readme/README.de.md) | [Español](docs/readme/README.es.md) | [Italiano](docs/readme/README.it.md) | [Português](docs/readme/README.pt-BR.md) | [Tiếng Việt](docs/readme/README.vi.md) | [Русский](docs/readme/README.ru.md)
 
 </div>
 

@@ -1,0 +1,41 @@
+{
+  "terminal": { "typeMosh": "Mosh" },
+  "modals": { "new_connection": { "transport_mosh": "Mosh" } },
+  "mosh": {
+    "form": {
+      "title": "Новое подключение Mosh",
+      "description": "Открывает терминал UTF-8 с поддержкой роуминга. SSH используется только для запуска mosh-server; инструменты SSH недоступны.",
+      "advanced": "Настройки Mosh",
+      "capability_hint": "Одно подключение открывает один терминал. SFTP, IDE, перенаправление портов и переподключение SSH недоступны.",
+      "jump_route_hint": "Промежуточные хосты используются только для установки SSH-соединения. UDP-хост и порт Mosh должны оставаться напрямую доступными с этого устройства.",
+      "server_executable": "Исполняемый файл mosh-server",
+      "server_executable_required": "Требуется исполняемый файл mosh-server",
+      "udp_host": "Переопределение UDP-хоста",
+      "udp_host_placeholder": "Необязательный публичный хост или IP",
+      "udp_port": "UDP-порт или диапазон",
+      "udp_port_placeholder": "Автоматически, 60001 или 60000:61000",
+      "udp_port_hint": "Оставьте пустым, чтобы mosh-server выбрал UDP-порт.",
+      "invalid_udp_port": "Введите корректный UDP-порт или диапазон по возрастанию",
+      "locale": "Удалённая локаль",
+      "locale_placeholder": "Необязательно, например en_US.UTF-8",
+      "ip_family": "Версия IP",
+      "ip_auto": "Авто",
+      "ipv4": "IPv4",
+      "ipv6": "IPv6",
+      "prediction": "Локальное предсказание",
+      "prediction_adaptive": "Адаптивное",
+      "prediction_always": "Всегда",
+      "prediction_never": "Никогда",
+      "save_failed": "Не удалось сохранить профиль Mosh",
+      "missing_credentials": "Учётные данные Mosh отсутствуют"
+    }
+  },
+  "sessionManager": {
+    "mosh_profiles": {
+      "delete": "Удалить",
+      "delete_failed": "Не удалось удалить профиль Mosh",
+      "confirm_delete": "Удалить профиль Mosh «{{name}}»?",
+      "missing_credentials": "В этом профиле Mosh нет сохранённых учётных данных"
+    }
+  }
+}

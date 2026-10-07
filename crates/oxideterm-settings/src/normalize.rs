@@ -845,7 +845,8 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         &mut settings,
         &["general", "language"],
         &[
-            "zh-CN", "en", "fr-FR", "ja", "es-ES", "pt-BR", "vi", "ko", "de", "it", "zh-TW",
+            "zh-CN", "en", "fr-FR", "ja", "es-ES", "pt-BR", "vi", "ko", "de", "it", "ru-RU",
+            "zh-TW",
         ],
         "zh-CN",
         &mut validation_warnings,
@@ -1035,6 +1036,37 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_ui_language_code_survives_sanitization_while_unknown_codes_reset() {
+        // The allow-list above must mirror every serde name of Language; missing
+        // codes silently flip the UI back to the zh-CN fallback on the next save.
+        for language in [
+            "zh-CN", "en", "fr-FR", "ja", "es-ES", "pt-BR", "vi", "ko", "de", "it", "ru-RU",
+            "zh-TW",
+        ] {
+            let sanitized =
+                sanitize_settings_value(json!({ "general": { "language": language } })).unwrap();
+            assert_eq!(sanitized.settings.general.language.as_str(), language);
+            assert!(
+                !sanitized
+                    .validation_warnings
+                    .iter()
+                    .any(|warning| warning.contains("general.language")),
+                "{language} must not be reset"
+            );
+        }
+
+        let sanitized =
+            sanitize_settings_value(json!({ "general": { "language": "klingon" } })).unwrap();
+        assert_eq!(sanitized.settings.general.language.as_str(), "zh-CN");
+        assert!(
+            sanitized
+                .validation_warnings
+                .iter()
+                .any(|warning| warning.contains("general.language"))
+        );
+    }
 
     #[test]
     fn invalid_terminal_rule_references_are_removed_while_valid_bindings_survive() {

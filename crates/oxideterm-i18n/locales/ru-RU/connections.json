@@ -1,0 +1,75 @@
+{
+  "connections": {
+    "state": {
+      "connecting": "Подключение…",
+      "active": "Активно",
+      "idle": "Простой",
+      "disconnecting": "Отключение…",
+      "disconnected": "Отключено",
+      "error": "Ошибка: {{error}}"
+    },
+    "events": {
+      "connection_lost_reconnecting": "Соединение потеряно — переподключение…",
+      "connection_closed": "Соединение закрыто"
+    },
+    "time": {
+      "just_now": "Только что",
+      "mins_ago": "{{count}} мин назад",
+      "hrs_ago": "{{count}} ч назад"
+    },
+    "panel": {
+      "title": "Фоновые SSH-соединения",
+      "description": "Управление активными SSH-соединениями и настройками поддержания активности",
+      "refresh": "Обновить",
+      "no_connections": "Нет активных SSH-соединений",
+      "no_connections_hint": "Новые соединения появятся здесь",
+      "terminals": "Терминалов: {{count}}",
+      "sftp": "SFTP: {{count}}",
+      "forwards": "Перенаправлений: {{count}}",
+      "created": "Создано: {{time}}",
+      "idle_hint": "Простой — {{keepAlive}}",
+      "keep_alive_enabled": "Поддержание активности",
+      "disconnect_in": "Отключение через {{min}} мин"
+    },
+    "keep_alive": {
+      "enable_tooltip": "Включить поддержание активности (не отключать)",
+      "disable_tooltip": "Отключить поддержание активности (отключение после {{min}} мин простоя)",
+      "legend_enabled": "Поддержание активности: без автоматического отключения",
+      "legend_disabled": "Стандартно: автоматическое отключение после {{min}} мин простоя",
+      "global_never_tooltip": "Глобальный параметр: без тайм-аута"
+    },
+    "monitor": {
+      "title": "Пул соединений",
+      "loading": "Загрузка статистики…",
+      "idle_timeout": "Простой: {{min}} мин",
+      "idle_timeout_never": "Простой: никогда",
+      "capacity": "Ёмкость: {{capacity}}",
+      "active": "Активные",
+      "idle": "Простаивающие",
+      "reconnecting": "Переподключение",
+      "link_down": "Связь отсутствует",
+      "terminals": "Терминалы",
+      "sftp": "SFTP",
+      "forwards": "Перенаправления",
+      "summary": "Всего соединений: {{total}} • Ссылок: {{refs}}",
+      "live": "Реальное время",
+      "overview_pool_usage": "Использование пула",
+      "overview_consumers": "Потребители",
+      "overview_attention": "Требует внимания",
+      "overview_healthy": "Нет переподключающихся или неработающих соединений",
+      "overview_error": "Ошибка",
+      "overview_refresh_interval": "Интервал обновления: {{seconds}} с",
+      "topology_nodes_edges": "Узлы: {{nodes}} • Рёбра: {{edges}}",
+      "topology_roots_children": "Корней: {{roots}} / Потомков: {{children}}"
+    },
+    "status": {
+      "reconnecting_title": "Идёт переподключение",
+      "reconnecting_wait": "Соединение восстанавливается. Подождите и попробуйте снова.",
+      "reconnect_unstable": "Нестабильное соединение",
+      "try_again_later": "Соединение не стабилизировалось. Повторите попытку позже.",
+      "connection_failed": "Не удалось подключиться",
+      "no_connection_id": "После переподключения идентификатор соединения не был назначен."
+    },
+    "failedFetchStats": "Не удалось получить статистику"
+  }
+}

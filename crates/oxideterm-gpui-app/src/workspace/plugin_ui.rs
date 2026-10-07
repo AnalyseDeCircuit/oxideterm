@@ -1999,6 +1999,7 @@ pub(super) fn localize_native_plugin_schema(
         Locale::Ja => "ja",
         Locale::Ko => "ko",
         Locale::PtBr => "pt-BR",
+        Locale::RuRu => "ru-RU",
         Locale::Vi => "vi",
         Locale::ZhCn => "zh-CN",
         Locale::ZhTw => "zh-TW",
