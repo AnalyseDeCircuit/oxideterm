@@ -1037,6 +1037,7 @@
     "welcome": "Bem-vindo ao OxideTerm",
     "subtitle": "Espaço de trabalho nativo para operações remotas",
     "start_exploring": "Começar a explorar",
+    "save_failed": "Não foi possível salvar a configuração inicial. Verifique as permissões da pasta de dados e o arquivo de configurações. Se o arquivo estiver ilegível ou for de uma versão mais recente, restaure um arquivo compatível e reinicie o OxideTerm antes de tentar novamente.",
     "project_intro": "O OxideTerm é um cliente desktop nativo em Rust para operações remotas autorizadas. Sessões de terminal, transferências de arquivos, túneis, dispositivos seriais, áreas de trabalho remotas, sincronização e assistência de IA opcional ficam sob controle local do usuário, sem runtime de navegador embutido.",
     "highlight_performance": "Performance Rust",
     "highlight_performance_desc": "I/O assíncrono, renderização nativa GPUI, protocolo binário zero-copy.",

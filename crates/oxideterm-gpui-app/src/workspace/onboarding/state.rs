@@ -92,6 +92,7 @@ impl OnboardingStep {
 #[derive(Clone)]
 pub(in crate::workspace) struct OnboardingState {
     pub(in crate::workspace) open: bool,
+    pub(in crate::workspace) save_failed: bool,
     pub(in crate::workspace) step: usize,
     pub(in crate::workspace) disclaimer_accepted: bool,
     pub(in crate::workspace) ai_opt_in: bool,
@@ -106,6 +107,7 @@ impl OnboardingState {
     pub(in crate::workspace) fn from_settings(settings: &PersistedSettings) -> Self {
         Self {
             open: !settings.onboarding_completed,
+            save_failed: false,
             step: 0,
             disclaimer_accepted: disclaimer_accepted_from_settings(settings),
             ai_opt_in: settings.ai.enabled,
@@ -119,6 +121,7 @@ impl OnboardingState {
 
     pub(in crate::workspace) fn reset_for_open(&mut self, settings: &PersistedSettings) {
         self.open = true;
+        self.save_failed = false;
         self.step = 0;
         self.disclaimer_accepted = disclaimer_accepted_from_settings(settings);
         self.ai_opt_in = settings.ai.enabled;

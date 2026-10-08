@@ -1131,6 +1131,7 @@
     "welcome": "Willkommen bei OxideTerm",
     "subtitle": "Nativer Arbeitsbereich für Remote-Betrieb",
     "start_exploring": "Los geht's",
+    "save_failed": "Die Einrichtung konnte nicht gespeichert werden. Prüfen Sie die Schreibrechte des Datenverzeichnisses und die Einstellungsdatei. Ist die Datei unlesbar oder aus einer neueren Version, stellen Sie eine kompatible Datei wieder her und starten Sie OxideTerm vor dem nächsten Versuch neu.",
     "project_intro": "OxideTerm ist ein nativer Rust-Desktopclient für autorisierte Remote-Arbeit. Terminalsitzungen, Dateiübertragung, Tunnel, serielle Geräte, Remote-Desktops, Sync und optionale KI-Unterstützung bleiben ohne gebündelte Browser-Laufzeit unter lokaler Benutzerkontrolle.",
     "highlight_performance": "Rust-Performance",
     "highlight_performance_desc": "Asynchrone I/O, natives GPUI-Rendering, Zero-Copy-Binärprotokoll.",

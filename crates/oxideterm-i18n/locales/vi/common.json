@@ -1037,6 +1037,7 @@
     "welcome": "Chào mừng đến với OxideTerm",
     "subtitle": "Không gian gốc cho vận hành từ xa",
     "start_exploring": "Bắt đầu khám phá",
+    "save_failed": "Không thể lưu thiết lập ban đầu. Hãy kiểm tra quyền ghi của thư mục dữ liệu và tệp cài đặt. Nếu tệp không đọc được hoặc được tạo bởi phiên bản mới hơn, hãy khôi phục tệp tương thích rồi khởi động lại OxideTerm trước khi thử lại.",
     "project_intro": "OxideTerm là client desktop Rust native cho vận hành từ xa đã được cho phép. Phiên terminal, truyền tệp, đường hầm, thiết bị serial, desktop từ xa, đồng bộ và hỗ trợ AI tùy chọn đều do người dùng cục bộ kiểm soát, không kèm runtime trình duyệt.",
     "highlight_performance": "Hiệu năng Rust",
     "highlight_performance_desc": "I/O bất đồng bộ, kết xuất GPUI nguyên sinh, giao thức nhị phân zero-copy.",

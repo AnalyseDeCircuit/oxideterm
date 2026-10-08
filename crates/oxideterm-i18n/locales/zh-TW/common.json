@@ -1131,6 +1131,7 @@
     "welcome": "歡迎使用 OxideTerm",
     "subtitle": "面向遠端維運的原生工作台",
     "start_exploring": "開始探索",
+    "save_failed": "無法儲存引導完成狀態。請檢查資料目錄的寫入權限與設定檔；若檔案損壞或來自較新版本，請還原可讀且相容的設定檔，重新啟動 OxideTerm 後再試。",
     "project_intro": "OxideTerm 是用於已授權遠端運維的 Rust 原生桌面用戶端。終端工作階段、檔案傳輸、通道、序列埠裝置、遠端桌面、同步與可選 AI 輔助都由本機使用者控制，不捆綁瀏覽器執行階段。",
     "highlight_performance": "Rust 高效能",
     "highlight_performance_desc": "非同步 I/O、GPUI 原生算繪、零複製二進位協定。",

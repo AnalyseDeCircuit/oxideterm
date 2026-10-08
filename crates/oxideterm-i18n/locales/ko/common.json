@@ -1131,6 +1131,7 @@
     "welcome": "OxideTerm에 오신 것을 환영합니다",
     "subtitle": "원격 운영을 위한 네이티브 작업 공간",
     "start_exploring": "시작하기",
+    "save_failed": "초기 설정을 저장하지 못했습니다. 데이터 폴더의 쓰기 권한과 설정 파일을 확인하세요. 파일을 읽을 수 없거나 더 최신 버전에서 생성된 경우 호환되는 파일을 복원하고 OxideTerm을 다시 시작한 후 재시도하세요.",
     "project_intro": "OxideTerm은 허가된 원격 운영을 위한 Rust 네이티브 데스크톱 클라이언트입니다. 터미널 세션, 파일 전송, 터널, 시리얼 장치, 원격 데스크톱, 동기화, 선택적 AI 지원을 브라우저 런타임 없이 로컬 사용자가 제어합니다.",
     "highlight_performance": "Rust 고성능",
     "highlight_performance_desc": "비동기 I/O, GPUI 네이티브 렌더링, 제로카피 바이너리 프로토콜.",

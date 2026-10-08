@@ -71,6 +71,16 @@ impl WorkspaceApp {
                                 }
                             }),
                     )
+                    .when(self.onboarding.save_failed, |panel| {
+                        panel.child(
+                            div()
+                                .px(px(32.0))
+                                .py(px(8.0))
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .text_color(rgb(theme.error))
+                                .child(self.i18n.t("onboarding.save_failed")),
+                        )
+                    })
                     .child(self.onboarding_footer(can_go_back, can_go_next, next_disabled, cx)),
             )
             .into_any_element()
