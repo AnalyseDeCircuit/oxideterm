@@ -969,7 +969,19 @@
         "inspect_complete": "Đã cập nhật trạng thái tích hợp Shell từ xa.",
         "install_complete": "Đã cài đặt tích hợp Shell từ xa. Hãy mở terminal mới để kích hoạt.",
         "reference_removed": "Đã xóa tham chiếu khởi động; các tệp tích hợp được giữ lại.",
-        "all_removed": "Đã xóa tham chiếu khởi động và các tệp tích hợp OxideTerm."
+        "all_removed": "Đã xóa tham chiếu khởi động và các tệp tích hợp OxideTerm.",
+        "unavailable": "Không thể sử dụng tích hợp Shell từ xa",
+        "terminal_unaffected": "Vẫn có thể sử dụng terminal SSH.",
+        "connection_unavailable": "Kết nối SSH không khả dụng. Hãy kết nối lại trước khi quản lý tích hợp Shell.",
+        "sftp_unavailable": "Không thể mở SFTP để kiểm tra hoặc quản lý các tệp tích hợp. Hãy kiểm tra máy chủ có cho phép SFTP hay không.",
+        "environment_unavailable": "Không thể nhận diện môi trường Shell từ xa. Hãy kết nối lại và thử lại.",
+        "home_unavailable": "Không thể xác định thư mục cá nhân từ xa.",
+        "unsupported_shell": "Shell từ xa này không hỗ trợ tích hợp OxideTerm. Không thể theo dõi thư mục.",
+        "read_failed": "Không thể đọc các tệp tích hợp. Hãy kiểm tra quyền truy cập tệp từ xa.",
+        "invalid_text": "Tệp cấu hình Shell hoặc tệp tích hợp không phải văn bản UTF-8 hợp lệ.",
+        "write_failed": "Không thể ghi các tệp tích hợp hoặc tệp khởi động Shell. Hãy kiểm tra quyền truy cập và dung lượng còn trống.",
+        "remove_failed": "Không thể xóa các tệp tích hợp. Hãy kiểm tra quyền truy cập từ xa.",
+        "installation_incomplete": "Cài đặt tích hợp Shell chưa hoàn tất. Hãy kiểm tra trạng thái trong phần cài đặt."
       },
       "idle_timeout": {
         "title": "Kết nối SSH nền",

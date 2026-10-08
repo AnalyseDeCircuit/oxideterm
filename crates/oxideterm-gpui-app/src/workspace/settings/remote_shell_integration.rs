@@ -47,7 +47,7 @@ pub(in crate::workspace) struct RemoteShellIntegrationCardSnapshot {
 pub(in crate::workspace) enum RemoteShellIntegrationGateOutcome {
     Applied,
     RetryInstall(NodeId),
-    Failed,
+    Failed(RemoteShellIntegrationFailure),
     Stale,
 }
 
@@ -57,7 +57,16 @@ pub(in crate::workspace) enum RemoteShellIntegrationNotice {
     Installed,
     ReferenceRemoved,
     AllRemoved,
-    Failed,
+    CheckFailed(RemoteShellIntegrationFailure),
+    Failed(RemoteShellIntegrationFailure),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum RemoteShellIntegrationFailure {
+    ConnectionUnavailable,
+    SftpUnavailable,
+    Integration(oxideterm_terminal::RemoteShellIntegrationError),
+    InstallationIncomplete,
 }
 
 impl Default for RemoteShellIntegrationRuntimeState {
@@ -153,7 +162,10 @@ impl RemoteShellIntegrationRuntimeState {
         &mut self,
         node_id: NodeId,
         generation: u64,
-        result: std::result::Result<(RemoteShellIntegrationStatus, bool), ()>,
+        result: std::result::Result<
+            (RemoteShellIntegrationStatus, bool),
+            RemoteShellIntegrationFailure,
+        >,
     ) -> RemoteShellIntegrationGateOutcome {
         if self.terminal_checking_nodes.get(&node_id) != Some(&generation) {
             return RemoteShellIntegrationGateOutcome::Stale;
@@ -196,12 +208,14 @@ impl RemoteShellIntegrationRuntimeState {
                 self.node_id = Some(node_id);
                 self.status = Some(status);
                 self.error = true;
-                RemoteShellIntegrationGateOutcome::Failed
+                RemoteShellIntegrationGateOutcome::Failed(
+                    RemoteShellIntegrationFailure::InstallationIncomplete,
+                )
             }
-            Err(_) => {
+            Err(failure) => {
                 self.node_id = Some(node_id);
-                self.error = true;
-                RemoteShellIntegrationGateOutcome::Failed
+                self.error = !failure.is_unsupported_shell();
+                RemoteShellIntegrationGateOutcome::Failed(failure)
             }
         }
     }
@@ -289,7 +303,7 @@ impl RemoteShellIntegrationRuntimeState {
         action: RemoteShellIntegrationAction,
         node_id: NodeId,
         generation: u64,
-        result: std::result::Result<RemoteShellIntegrationStatus, ()>,
+        result: std::result::Result<RemoteShellIntegrationStatus, RemoteShellIntegrationFailure>,
     ) -> Option<RemoteShellIntegrationNotice> {
         if !self
             .maintenance
@@ -329,9 +343,9 @@ impl RemoteShellIntegrationRuntimeState {
                     }
                 })
             }
-            Err(_) => {
-                self.error = true;
-                Some(RemoteShellIntegrationNotice::Failed)
+            Err(failure) => {
+                self.error = !failure.is_unsupported_shell();
+                Some(RemoteShellIntegrationNotice::Failed(failure))
             }
         }
     }
@@ -880,7 +894,32 @@ impl WorkspaceApp {
         notice: RemoteShellIntegrationNotice,
         cx: &mut Context<Self>,
     ) {
-        let (message_key, variant) = match notice {
+        self.push_workspace_notice(notice.terminal_notice(&self.i18n), cx);
+    }
+}
+
+impl RemoteShellIntegrationNotice {
+    fn terminal_notice(self, i18n: &oxideterm_i18n::I18n) -> TerminalNotice {
+        if let Self::CheckFailed(failure) | Self::Failed(failure) = self {
+            return TerminalNotice {
+                title: i18n.t("settings_view.connections.shell_integration.unavailable"),
+                description: Some(i18n.t(failure.message_key())),
+                status_text: (matches!(self, Self::CheckFailed(_))
+                    && failure != RemoteShellIntegrationFailure::ConnectionUnavailable)
+                    .then(|| {
+                        i18n.t("settings_view.connections.shell_integration.terminal_unaffected")
+                    }),
+                progress: None,
+                variant: if failure.is_unsupported_shell() {
+                    TerminalNoticeVariant::Default
+                } else if matches!(self, Self::CheckFailed(_)) {
+                    TerminalNoticeVariant::Warning
+                } else {
+                    TerminalNoticeVariant::Error
+                },
+            };
+        }
+        let (message_key, variant) = match self {
             RemoteShellIntegrationNotice::Inspected => (
                 "settings_view.connections.shell_integration.inspect_complete",
                 TerminalNoticeVariant::Success,
@@ -897,18 +936,142 @@ impl WorkspaceApp {
                 "settings_view.connections.shell_integration.all_removed",
                 TerminalNoticeVariant::Success,
             ),
-            RemoteShellIntegrationNotice::Failed => {
-                ("common.status.error", TerminalNoticeVariant::Error)
-            }
+            RemoteShellIntegrationNotice::CheckFailed(_)
+            | RemoteShellIntegrationNotice::Failed(_) => unreachable!(),
         };
-        // Runtime errors intentionally collapse to a localized category at the UI boundary.
-        self.push_ai_settings_toast(self.i18n.t(message_key), variant, cx);
+        TerminalNotice {
+            title: i18n.t(message_key),
+            description: None,
+            status_text: None,
+            progress: None,
+            variant,
+        }
+    }
+}
+
+impl RemoteShellIntegrationFailure {
+    fn is_unsupported_shell(self) -> bool {
+        matches!(
+            self,
+            Self::Integration(oxideterm_terminal::RemoteShellIntegrationError::UnsupportedShell)
+        )
+    }
+
+    fn message_key(self) -> &'static str {
+        use oxideterm_terminal::RemoteShellIntegrationError;
+        match self {
+            Self::ConnectionUnavailable => {
+                "settings_view.connections.shell_integration.connection_unavailable"
+            }
+            Self::SftpUnavailable => "settings_view.connections.shell_integration.sftp_unavailable",
+            Self::Integration(RemoteShellIntegrationError::EnvironmentUnavailable) => {
+                "settings_view.connections.shell_integration.environment_unavailable"
+            }
+            Self::Integration(RemoteShellIntegrationError::HomeUnavailable) => {
+                "settings_view.connections.shell_integration.home_unavailable"
+            }
+            Self::Integration(RemoteShellIntegrationError::UnsupportedShell) => {
+                "settings_view.connections.shell_integration.unsupported_shell"
+            }
+            Self::Integration(RemoteShellIntegrationError::ReadFailed) => {
+                "settings_view.connections.shell_integration.read_failed"
+            }
+            Self::Integration(RemoteShellIntegrationError::InvalidText) => {
+                "settings_view.connections.shell_integration.invalid_text"
+            }
+            Self::Integration(RemoteShellIntegrationError::WriteFailed) => {
+                "settings_view.connections.shell_integration.write_failed"
+            }
+            Self::Integration(RemoteShellIntegrationError::RemoveFailed) => {
+                "settings_view.connections.shell_integration.remove_failed"
+            }
+            Self::InstallationIncomplete => {
+                "settings_view.connections.shell_integration.installation_incomplete"
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shell_integration_failure_notice_identifies_the_optional_feature() {
+        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
+        let notice = RemoteShellIntegrationNotice::CheckFailed(
+            RemoteShellIntegrationFailure::SftpUnavailable,
+        )
+        .terminal_notice(&i18n);
+        assert_eq!(notice.title, "远程 Shell 集成不可用");
+        assert_eq!(
+            notice.description.as_deref(),
+            Some("无法打开 SFTP，无法检查或管理远端集成文件。请确认服务器允许 SFTP。")
+        );
+        assert_eq!(
+            notice.status_text.as_deref(),
+            Some("SSH 终端仍可正常使用。")
+        );
+        assert_eq!(notice.variant, TerminalNoticeVariant::Warning);
+    }
+
+    #[test]
+    fn shell_integration_gate_preserves_failure_reasons_and_treats_unsupported_shell_as_information()
+     {
+        use oxideterm_terminal::RemoteShellIntegrationError;
+        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
+        for (error, description, variant) in [
+            (
+                RemoteShellIntegrationError::EnvironmentUnavailable,
+                "未能识别远端 Shell 环境。请重新连接后重试。",
+                TerminalNoticeVariant::Warning,
+            ),
+            (
+                RemoteShellIntegrationError::UnsupportedShell,
+                "当前远端 Shell 不支持 OxideTerm 集成，无法启用目录跟踪。",
+                TerminalNoticeVariant::Default,
+            ),
+            (
+                RemoteShellIntegrationError::WriteFailed,
+                "无法写入集成文件或 Shell 启动文件。请检查远端权限和剩余空间。",
+                TerminalNoticeVariant::Warning,
+            ),
+        ] {
+            let mut state = RemoteShellIntegrationRuntimeState::default();
+            state.configure(RemoteShellIntegrationMode::Ask, true);
+            let node_id = NodeId("shared-node".to_string());
+            let generation = state.begin_terminal_gate(&node_id).unwrap();
+            let failure = RemoteShellIntegrationFailure::Integration(error);
+            let RemoteShellIntegrationGateOutcome::Failed(actual) =
+                state.finish_terminal_gate(node_id.clone(), generation, Err(failure))
+            else {
+                panic!("the check must preserve its failure category");
+            };
+            assert_eq!(actual, failure);
+            let notice = RemoteShellIntegrationNotice::CheckFailed(actual).terminal_notice(&i18n);
+            assert_eq!(notice.description.as_deref(), Some(description));
+            assert_eq!(notice.variant, variant);
+            assert_eq!(
+                state.card_snapshot(Some(&node_id)).error,
+                error != RemoteShellIntegrationError::UnsupportedShell
+            );
+        }
+        let notice = RemoteShellIntegrationNotice::Failed(
+            RemoteShellIntegrationFailure::Integration(RemoteShellIntegrationError::WriteFailed),
+        )
+        .terminal_notice(&i18n);
+        assert_eq!(notice.variant, TerminalNoticeVariant::Error);
+        assert_eq!(
+            notice.description.as_deref(),
+            Some("无法写入集成文件或 Shell 启动文件。请检查远端权限和剩余空间。")
+        );
+        assert_eq!(notice.status_text, None);
+        let notice = RemoteShellIntegrationNotice::CheckFailed(
+            RemoteShellIntegrationFailure::ConnectionUnavailable,
+        )
+        .terminal_notice(&i18n);
+        assert_eq!(notice.status_text, None);
+    }
 
     #[test]
     fn only_suppressed_terminal_prompt_disables_future_questions() {
@@ -936,7 +1099,11 @@ mod tests {
         state.cancel_node(&node_id);
 
         assert!(matches!(
-            state.finish_terminal_gate(node_id.clone(), gate_generation, Err(())),
+            state.finish_terminal_gate(
+                node_id.clone(),
+                gate_generation,
+                Err(RemoteShellIntegrationFailure::ConnectionUnavailable)
+            ),
             RemoteShellIntegrationGateOutcome::Stale
         ));
         assert!(

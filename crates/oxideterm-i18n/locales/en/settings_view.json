@@ -969,7 +969,19 @@
         "inspect_complete": "Remote shell integration status updated.",
         "install_complete": "Remote shell integration installed. Open a new terminal to activate it.",
         "reference_removed": "Startup reference removed; integration files were kept.",
-        "all_removed": "Startup reference and OxideTerm integration files removed."
+        "all_removed": "Startup reference and OxideTerm integration files removed.",
+        "unavailable": "Remote Shell integration unavailable",
+        "terminal_unaffected": "SSH terminal use is unaffected.",
+        "connection_unavailable": "The SSH connection is unavailable. Reconnect before managing Shell integration.",
+        "sftp_unavailable": "SFTP could not be opened to inspect or manage integration files. Check that the server permits SFTP.",
+        "environment_unavailable": "The remote Shell environment could not be detected. Reconnect and try again.",
+        "home_unavailable": "The remote home directory could not be determined.",
+        "unsupported_shell": "This remote Shell does not support OxideTerm integration. Directory tracking is unavailable.",
+        "read_failed": "Integration files could not be read. Check remote file permissions.",
+        "invalid_text": "A Shell configuration or integration file is not valid UTF-8.",
+        "write_failed": "Integration files or the Shell startup file could not be written. Check remote permissions and available space.",
+        "remove_failed": "Integration files could not be removed. Check remote permissions.",
+        "installation_incomplete": "Shell integration installation did not complete. Check its status in Settings."
       },
       "idle_timeout": {
         "title": "Background SSH Connections",

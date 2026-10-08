@@ -86,8 +86,8 @@ pub use privilege_prompt::{
 pub use process::{TerminalLifecycle, TerminalProcessInfo, TerminalProcessProbe};
 pub use remote_shell_integration::{
     REMOTE_SHELL_INTEGRATION_RELATIVE_DIR, REMOTE_SHELL_INTEGRATION_VERSION,
-    RemoteShellIntegrationState, RemoteShellIntegrationStatus, RemoteShellKind,
-    inspect_remote_shell_integration, install_remote_shell_integration,
+    RemoteShellIntegrationError, RemoteShellIntegrationState, RemoteShellIntegrationStatus,
+    RemoteShellKind, inspect_remote_shell_integration, install_remote_shell_integration,
     remove_remote_shell_integration,
 };
 pub use search::TerminalSearchSource;
