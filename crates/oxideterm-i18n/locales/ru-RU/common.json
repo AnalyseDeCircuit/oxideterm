@@ -1,4 +1,8 @@
 {
+  "mosh_plugin": {
+    "required": "Установите или включите плагин Mosh перед подключением.",
+    "ready": "Плагин Mosh установлен и включён."
+  },
   "file_preview": {
     "entry_file_offset": "Смещение точки входа в файле",
     "subject": "Субъект",
@@ -254,6 +258,9 @@
     }
   },
   "plugin": {
+    "install_queued": "Ожидание · {{position}}",
+    "installing_named": "Установка {{name}}",
+    "install_queue_count": "В очереди: {{count}}",
     "jump_to_page": "Перейти к странице",
     "total_pages": "из {{pages}}",
     "jump_page": "Перейти",
@@ -261,6 +268,9 @@
     "marketplace_sources": "Источники узла",
     "marketplace_workspace": "Рабочее пространство",
     "marketplace_utilities": "Утилиты",
+    "marketplace_acp": "ACP",
+    "acp_setup_hint": "При установке и включении плагина конфигурация агента создаётся автоматически; команда запуска не нужна. Рабочий каталог, дополнительные аргументы и переменные окружения необязательны — оставьте их пустыми, чтобы использовать значения по умолчанию. Плагинам, использующим локальную программу, требуется её официальный интерфейс командной строки; установите его и войдите по инструкции плагина.",
+    "marketplace_remote_connections": "Удалённые подключения",
     "apply_page_size": "Применить",
     "invalid_page_size": "Введите корректное положительное целое число",
     "page_range": "Плагины {{start}}–{{end}} из {{total}}",
@@ -937,6 +947,10 @@
     "update_available": "Обновить",
     "install_error": "Ошибка установки",
     "search_placeholder": "Поиск плагинов...",
+    "marketplace_sort": "Сортировка: {{order}}",
+    "marketplace_sort_name": "По названию",
+    "marketplace_sort_updated": "Недавно обновлённые",
+    "marketplace_sort_newest": "Новые",
     "marketplace_title": "Официальный маркетплейс плагинов",
     "marketplace_description": "Просмотр, установка и обновление плагинов из официального каталога OxideTerm.",
     "marketplace_repository": "Репозиторий каталога",
@@ -999,6 +1013,12 @@
     "tab_not_available": "Просмотр вкладки плагина недоступен",
     "tab_crashed": "Вкладка плагина аварийно завершилась",
     "detail_author": "Автор",
+    "license_label": "Лицензия: {{license}}",
+    "install_required": "Плагин {{name}} не установлен. Установите его из маркетплейса плагинов, затем повторите попытку.",
+    "enable_required": "Установленный плагин {{name}} недоступен. Включите или обновите его в менеджере плагинов, затем повторите попытку.",
+    "license_not_declared": "Не указана",
+    "view_license": "Просмотреть лицензию",
+    "third_party_licenses": "Сторонние лицензии",
     "registry_capabilities": "Возможности: {{capabilities}}",
     "reload_success": "{{name}} повторно просканирован.",
     "enable_success": "{{name}} включён.",
@@ -1322,6 +1342,9 @@
     "rdp_preview_title": "Предпросмотр RDP",
     "vnc_preview_title": "Предпросмотр VNC",
     "provider_missing": "Поставщик удалённого рабочего стола недоступен.",
+    "plugin_ready": "Плагин удалённого рабочего стола установлен и включён.",
+    "plugin_required": "Установите или включите плагин удалённого рабочего стола перед подключением.",
+    "manage_plugin": "Управлять плагином",
     "session_missing": "Сеанс удалённого рабочего стола недоступен.",
     "reconnect": "Переподключить",
     "resize_fixed": "Фиксированный размер сервера",
