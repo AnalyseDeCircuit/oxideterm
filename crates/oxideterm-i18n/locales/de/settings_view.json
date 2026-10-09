@@ -969,7 +969,19 @@
         "inspect_complete": "Status der Remote-Shell-Integration aktualisiert.",
         "install_complete": "Remote-Shell-Integration installiert. Öffnen Sie zur Aktivierung ein neues Terminal.",
         "reference_removed": "Startverweis entfernt; Integrationsdateien wurden beibehalten.",
-        "all_removed": "Startverweis und OxideTerm-Integrationsdateien wurden entfernt."
+        "all_removed": "Startverweis und OxideTerm-Integrationsdateien wurden entfernt.",
+        "unavailable": "Remote-Shell-Integration nicht verfügbar",
+        "terminal_unaffected": "Das SSH-Terminal kann weiterhin verwendet werden.",
+        "connection_unavailable": "Die SSH-Verbindung ist nicht verfügbar. Stellen Sie sie vor der Verwaltung der Shell-Integration erneut her.",
+        "sftp_unavailable": "SFTP konnte nicht zum Prüfen oder Verwalten der Integrationsdateien geöffnet werden. Prüfen Sie, ob der Server SFTP erlaubt.",
+        "environment_unavailable": "Die Remote-Shell-Umgebung konnte nicht erkannt werden. Verbinden Sie sich erneut und versuchen Sie es noch einmal.",
+        "home_unavailable": "Das entfernte Benutzerverzeichnis konnte nicht ermittelt werden.",
+        "unsupported_shell": "Diese Remote-Shell unterstützt die OxideTerm-Integration nicht. Die Verzeichnisverfolgung ist nicht verfügbar.",
+        "read_failed": "Integrationsdateien konnten nicht gelesen werden. Prüfen Sie die Dateiberechtigungen auf dem Server.",
+        "invalid_text": "Eine Shell-Konfigurations- oder Integrationsdatei enthält keinen gültigen UTF-8-Text.",
+        "write_failed": "Integrationsdateien oder die Shell-Startdatei konnten nicht geschrieben werden. Prüfen Sie Berechtigungen und freien Speicherplatz.",
+        "remove_failed": "Integrationsdateien konnten nicht entfernt werden. Prüfen Sie die Berechtigungen auf dem Server.",
+        "installation_incomplete": "Die Shell-Integration wurde nicht vollständig installiert. Prüfen Sie ihren Status in den Einstellungen."
       },
       "idle_timeout": {
         "title": "SSH-Hintergrundverbindungen",

@@ -969,7 +969,19 @@
         "inspect_complete": "Stato dell’integrazione shell remota aggiornato.",
         "install_complete": "Integrazione shell remota installata. Apri un nuovo terminale per attivarla.",
         "reference_removed": "Riferimento di avvio rimosso; file di integrazione conservati.",
-        "all_removed": "Riferimento di avvio e file di integrazione OxideTerm rimossi."
+        "all_removed": "Riferimento di avvio e file di integrazione OxideTerm rimossi.",
+        "unavailable": "Integrazione Shell remota non disponibile",
+        "terminal_unaffected": "Il terminale SSH resta utilizzabile.",
+        "connection_unavailable": "La connessione SSH non è disponibile. Riconnettersi prima di gestire l’integrazione Shell.",
+        "sftp_unavailable": "Impossibile aprire SFTP per controllare o gestire i file di integrazione. Verificare che il server consenta SFTP.",
+        "environment_unavailable": "Impossibile rilevare l’ambiente Shell remoto. Riconnettersi e riprovare.",
+        "home_unavailable": "Impossibile determinare la cartella personale remota.",
+        "unsupported_shell": "Questa Shell remota non supporta l’integrazione OxideTerm. Il monitoraggio della cartella non è disponibile.",
+        "read_failed": "Impossibile leggere i file di integrazione. Controllare i permessi remoti.",
+        "invalid_text": "Un file di configurazione Shell o di integrazione non contiene testo UTF-8 valido.",
+        "write_failed": "Impossibile scrivere i file di integrazione o il file di avvio Shell. Controllare i permessi e lo spazio disponibile.",
+        "remove_failed": "Impossibile rimuovere i file di integrazione. Controllare i permessi remoti.",
+        "installation_incomplete": "L’installazione dell’integrazione Shell non è stata completata. Controllarne lo stato nelle impostazioni."
       },
       "idle_timeout": {
         "title": "Connessioni SSH in background",

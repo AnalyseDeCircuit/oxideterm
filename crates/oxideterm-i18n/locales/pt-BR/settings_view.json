@@ -969,7 +969,19 @@
         "inspect_complete": "Status da integração de shell remota atualizado.",
         "install_complete": "Integração de shell remota instalada. Abra um novo terminal para ativá-la.",
         "reference_removed": "Referência de inicialização removida; arquivos de integração mantidos.",
-        "all_removed": "Referência de inicialização e arquivos de integração do OxideTerm removidos."
+        "all_removed": "Referência de inicialização e arquivos de integração do OxideTerm removidos.",
+        "unavailable": "Integração Shell remota indisponível",
+        "terminal_unaffected": "O terminal SSH continua utilizável.",
+        "connection_unavailable": "A conexão SSH está indisponível. Reconecte antes de gerenciar a integração Shell.",
+        "sftp_unavailable": "Não foi possível abrir SFTP para verificar ou gerenciar os arquivos de integração. Verifique se o servidor permite SFTP.",
+        "environment_unavailable": "Não foi possível detectar o ambiente Shell remoto. Reconecte e tente novamente.",
+        "home_unavailable": "Não foi possível determinar a pasta pessoal remota.",
+        "unsupported_shell": "Esta Shell remota não suporta a integração do OxideTerm. O acompanhamento de diretório está indisponível.",
+        "read_failed": "Não foi possível ler os arquivos de integração. Verifique as permissões remotas.",
+        "invalid_text": "Um arquivo de configuração Shell ou de integração não contém texto UTF-8 válido.",
+        "write_failed": "Não foi possível gravar os arquivos de integração ou o arquivo de inicialização Shell. Verifique as permissões e o espaço disponível.",
+        "remove_failed": "Não foi possível remover os arquivos de integração. Verifique as permissões remotas.",
+        "installation_incomplete": "A instalação da integração Shell não foi concluída. Verifique seu estado nas configurações."
       },
       "idle_timeout": {
         "title": "Conexões SSH em segundo plano",

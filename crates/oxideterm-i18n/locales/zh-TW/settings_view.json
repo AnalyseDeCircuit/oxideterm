@@ -969,7 +969,19 @@
         "inspect_complete": "已更新遠端 Shell 整合狀態。",
         "install_complete": "遠端 Shell 整合已安裝，請開啟新終端以啟用。",
         "reference_removed": "啟動引用已移除，整合檔案已保留。",
-        "all_removed": "啟動引用與 OxideTerm 整合檔案均已移除。"
+        "all_removed": "啟動引用與 OxideTerm 整合檔案均已移除。",
+        "unavailable": "遠端 Shell 整合無法使用",
+        "terminal_unaffected": "SSH 終端仍可正常使用。",
+        "connection_unavailable": "SSH 連線無法使用。請重新連線後管理 Shell 整合。",
+        "sftp_unavailable": "無法開啟 SFTP，無法檢查或管理遠端整合檔案。請確認伺服器允許 SFTP。",
+        "environment_unavailable": "未能辨識遠端 Shell 環境。請重新連線後再試。",
+        "home_unavailable": "未能確定遠端使用者家目錄。",
+        "unsupported_shell": "目前的遠端 Shell 不支援 OxideTerm 整合，無法啟用目錄追蹤。",
+        "read_failed": "無法讀取整合檔案。請檢查遠端檔案權限。",
+        "invalid_text": "Shell 設定或整合檔案不是有效的 UTF-8 文字。",
+        "write_failed": "無法寫入整合檔案或 Shell 啟動檔案。請檢查遠端權限和剩餘空間。",
+        "remove_failed": "無法移除整合檔案。請檢查遠端權限。",
+        "installation_incomplete": "Shell 整合安裝未完成。請到設定中檢查其狀態。"
       },
       "idle_timeout": {
         "title": "背景 SSH 連線",

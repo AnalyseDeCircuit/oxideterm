@@ -969,7 +969,19 @@
         "inspect_complete": "リモート Shell 統合の状態を更新しました。",
         "install_complete": "リモート Shell 統合をインストールしました。新しいターミナルを開くと有効になります。",
         "reference_removed": "起動参照を削除し、統合ファイルは保持しました。",
-        "all_removed": "起動参照と OxideTerm 統合ファイルを削除しました。"
+        "all_removed": "起動参照と OxideTerm 統合ファイルを削除しました。",
+        "unavailable": "リモート Shell 統合を利用できません",
+        "terminal_unaffected": "SSH ターミナルは引き続き使用できます。",
+        "connection_unavailable": "SSH 接続を利用できません。再接続してから Shell 統合を管理してください。",
+        "sftp_unavailable": "統合ファイルの確認や管理に必要な SFTP を開けませんでした。サーバーで SFTP が許可されているか確認してください。",
+        "environment_unavailable": "リモート Shell 環境を検出できませんでした。再接続してもう一度お試しください。",
+        "home_unavailable": "リモートのホームディレクトリを特定できませんでした。",
+        "unsupported_shell": "このリモート Shell は OxideTerm 統合に対応していません。ディレクトリ追跡は利用できません。",
+        "read_failed": "統合ファイルを読み取れませんでした。リモートのファイル権限を確認してください。",
+        "invalid_text": "Shell 設定ファイルまたは統合ファイルが有効な UTF-8 テキストではありません。",
+        "write_failed": "統合ファイルまたは Shell 起動ファイルに書き込めませんでした。リモートの権限と空き容量を確認してください。",
+        "remove_failed": "統合ファイルを削除できませんでした。リモートの権限を確認してください。",
+        "installation_incomplete": "Shell 統合のインストールが完了しませんでした。設定で状態を確認してください。"
       },
       "idle_timeout": {
         "title": "バックグラウンド SSH 接続",

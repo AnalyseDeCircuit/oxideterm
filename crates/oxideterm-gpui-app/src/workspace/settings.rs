@@ -252,7 +252,7 @@ use pages::settings_keybinding_scope_matches;
 pub(in crate::workspace) use remote_shell_integration::{
     RemoteShellIntegrationAction, RemoteShellIntegrationCardSnapshot,
     RemoteShellIntegrationConfirmSnapshot, RemoteShellIntegrationConfirmSource,
-    RemoteShellIntegrationGateOutcome, RemoteShellIntegrationNotice,
+    RemoteShellIntegrationFailure, RemoteShellIntegrationGateOutcome, RemoteShellIntegrationNotice,
     RemoteShellIntegrationRuntimeState,
 };
 pub(in crate::workspace) use update::{

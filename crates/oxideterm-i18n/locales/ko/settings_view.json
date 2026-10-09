@@ -969,7 +969,19 @@
         "inspect_complete": "원격 Shell 통합 상태를 업데이트했습니다.",
         "install_complete": "원격 Shell 통합을 설치했습니다. 새 터미널을 열어 활성화하세요.",
         "reference_removed": "시작 참조를 제거하고 통합 파일은 유지했습니다.",
-        "all_removed": "시작 참조와 OxideTerm 통합 파일을 제거했습니다."
+        "all_removed": "시작 참조와 OxideTerm 통합 파일을 제거했습니다.",
+        "unavailable": "원격 Shell 통합을 사용할 수 없음",
+        "terminal_unaffected": "SSH 터미널은 계속 사용할 수 있습니다.",
+        "connection_unavailable": "SSH 연결을 사용할 수 없습니다. 다시 연결한 후 Shell 통합을 관리하세요.",
+        "sftp_unavailable": "통합 파일을 확인하거나 관리하기 위한 SFTP를 열 수 없습니다. 서버에서 SFTP를 허용하는지 확인하세요.",
+        "environment_unavailable": "원격 Shell 환경을 감지하지 못했습니다. 다시 연결한 후 재시도하세요.",
+        "home_unavailable": "원격 홈 디렉터리를 확인하지 못했습니다.",
+        "unsupported_shell": "이 원격 Shell은 OxideTerm 통합을 지원하지 않습니다. 디렉터리 추적을 사용할 수 없습니다.",
+        "read_failed": "통합 파일을 읽지 못했습니다. 원격 파일 권한을 확인하세요.",
+        "invalid_text": "Shell 설정 또는 통합 파일이 유효한 UTF-8 텍스트가 아닙니다.",
+        "write_failed": "통합 파일 또는 Shell 시작 파일에 쓰지 못했습니다. 원격 권한과 여유 공간을 확인하세요.",
+        "remove_failed": "통합 파일을 제거하지 못했습니다. 원격 권한을 확인하세요.",
+        "installation_incomplete": "Shell 통합 설치가 완료되지 않았습니다. 설정에서 상태를 확인하세요."
       },
       "idle_timeout": {
         "title": "백그라운드 SSH 연결",

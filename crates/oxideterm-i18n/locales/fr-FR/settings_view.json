@@ -969,7 +969,19 @@
         "inspect_complete": "État de l’intégration du shell distant mis à jour.",
         "install_complete": "Intégration du shell distant installée. Ouvrez un nouveau terminal pour l’activer.",
         "reference_removed": "Référence de démarrage supprimée ; fichiers d’intégration conservés.",
-        "all_removed": "Référence de démarrage et fichiers d’intégration OxideTerm supprimés."
+        "all_removed": "Référence de démarrage et fichiers d’intégration OxideTerm supprimés.",
+        "unavailable": "Intégration Shell distante indisponible",
+        "terminal_unaffected": "Le terminal SSH reste utilisable.",
+        "connection_unavailable": "La connexion SSH est indisponible. Reconnectez-vous avant de gérer l’intégration Shell.",
+        "sftp_unavailable": "Impossible d’ouvrir SFTP pour vérifier ou gérer les fichiers d’intégration. Vérifiez que le serveur autorise SFTP.",
+        "environment_unavailable": "Impossible de détecter l’environnement Shell distant. Reconnectez-vous et réessayez.",
+        "home_unavailable": "Impossible de déterminer le répertoire personnel distant.",
+        "unsupported_shell": "Ce Shell distant ne prend pas en charge l’intégration OxideTerm. Le suivi du répertoire est indisponible.",
+        "read_failed": "Impossible de lire les fichiers d’intégration. Vérifiez les permissions distantes.",
+        "invalid_text": "Un fichier de configuration Shell ou d’intégration ne contient pas de texte UTF-8 valide.",
+        "write_failed": "Impossible d’écrire les fichiers d’intégration ou le fichier de démarrage Shell. Vérifiez les permissions et l’espace disponible.",
+        "remove_failed": "Impossible de supprimer les fichiers d’intégration. Vérifiez les permissions distantes.",
+        "installation_incomplete": "L’installation de l’intégration Shell est incomplète. Vérifiez son état dans les paramètres."
       },
       "idle_timeout": {
         "title": "Connexions SSH en arrière-plan",

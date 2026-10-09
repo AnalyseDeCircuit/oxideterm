@@ -969,7 +969,19 @@
         "inspect_complete": "已更新远程 Shell 集成状态。",
         "install_complete": "远程 Shell 集成已安装，请打开新终端启用。",
         "reference_removed": "启动引用已移除，集成文件予以保留。",
-        "all_removed": "启动引用和 OxideTerm 集成文件均已移除。"
+        "all_removed": "启动引用和 OxideTerm 集成文件均已移除。",
+        "unavailable": "远程 Shell 集成不可用",
+        "terminal_unaffected": "SSH 终端仍可正常使用。",
+        "connection_unavailable": "SSH 连接不可用。请重新连接后管理 Shell 集成。",
+        "sftp_unavailable": "无法打开 SFTP，无法检查或管理远端集成文件。请确认服务器允许 SFTP。",
+        "environment_unavailable": "未能识别远端 Shell 环境。请重新连接后重试。",
+        "home_unavailable": "未能确定远端用户主目录。",
+        "unsupported_shell": "当前远端 Shell 不支持 OxideTerm 集成，无法启用目录跟踪。",
+        "read_failed": "无法读取集成文件。请检查远端文件权限。",
+        "invalid_text": "Shell 配置或集成文件不是有效的 UTF-8 文本。",
+        "write_failed": "无法写入集成文件或 Shell 启动文件。请检查远端权限和剩余空间。",
+        "remove_failed": "无法移除集成文件。请检查远端权限。",
+        "installation_incomplete": "Shell 集成安装未完成。请到设置中检查其状态。"
       },
       "idle_timeout": {
         "title": "后台 SSH 连接",

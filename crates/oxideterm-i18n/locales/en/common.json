@@ -1132,6 +1132,7 @@
     "welcome": "Welcome to OxideTerm",
     "subtitle": "Native workspace for remote operations",
     "start_exploring": "Start Exploring",
+    "save_failed": "Could not save your setup. Check the data directory permissions and the settings file. If the file is unreadable or from a newer version, restore a compatible file and restart OxideTerm before trying again.",
     "project_intro": "OxideTerm is a Rust-native desktop client for authorized remote operations. It keeps terminal sessions, file transfer, tunnels, serial devices, remote desktop, sync, and optional AI assistance under local user control without a bundled browser runtime.",
     "highlight_performance": "Rust Performance",
     "highlight_performance_desc": "Async I/O, GPUI native rendering, zero-copy binary protocol.",
