@@ -45,7 +45,7 @@ fn windows_named_pipe_available(pipe: &str) -> bool {
     use windows::{
         Win32::{
             Foundation::{ERROR_SEM_TIMEOUT, GetLastError},
-            System::Pipes::WaitNamedPipeW,
+            System::Pipes::{NMPWAIT_NOWAIT, WaitNamedPipeW},
         },
         core::PCWSTR,
     };
@@ -54,9 +54,9 @@ fn windows_named_pipe_available(pipe: &str) -> bool {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
-    // A zero-timeout wait is non-blocking. ERROR_SEM_TIMEOUT still proves
-    // the pipe exists but all instances are currently busy.
-    let available = unsafe { WaitNamedPipeW(PCWSTR(pipe.as_ptr()), 0).as_bool() };
+    // Zero selects the server's default timeout and can stall the connection form.
+    // Busy instances still prove the agent exists; this probe must not wait for one.
+    let available = unsafe { WaitNamedPipeW(PCWSTR(pipe.as_ptr()), NMPWAIT_NOWAIT).as_bool() };
     available || unsafe { GetLastError() } == ERROR_SEM_TIMEOUT
 }
 
@@ -215,6 +215,46 @@ mod tests {
         configured_environment_variable, resolve_ssh_agent_endpoint,
         resolve_ssh_agent_forwarding_endpoint,
     };
+
+    #[cfg(windows)]
+    #[test]
+    fn busy_agent_probe_does_not_wait_for_server_default_timeout() {
+        use std::os::windows::io::{FromRawHandle, OwnedHandle};
+        use windows::{
+            Win32::{
+                Storage::FileSystem::PIPE_ACCESS_DUPLEX,
+                System::Pipes::{CreateNamedPipeW, PIPE_TYPE_BYTE, PIPE_WAIT},
+            },
+            core::PCWSTR,
+        };
+        let name = format!(r"\\.\pipe\oxideterm-agent-probe-{}", std::process::id());
+        let wide = name.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+        let handle = unsafe {
+            CreateNamedPipeW(
+                PCWSTR(wide.as_ptr()),
+                PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_WAIT,
+                1,
+                1024,
+                1024,
+                5000,
+                None,
+            )
+        };
+        assert!(!handle.is_invalid());
+        let _server = unsafe { OwnedHandle::from_raw_handle(handle.0) };
+        let _client = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&name)
+            .unwrap();
+        let start = std::time::Instant::now();
+        assert_eq!(super::ssh_agent_available(Some(&name)), Some(true));
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "agent probe waited for the busy pipe"
+        );
+    }
 
     #[test]
     fn identity_agent_environment_selectors_are_parsed_without_a_shell() {

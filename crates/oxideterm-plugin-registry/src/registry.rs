@@ -297,6 +297,36 @@ impl NativePluginRegistry {
         })
     }
 
+    /// UI status uses discovered metadata; executable paths are checked when a connection starts.
+    pub fn enabled_remote_desktop_plugin_ids(
+        &self,
+        protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
+    ) -> impl Iterator<Item = &str> {
+        self.plugins.iter().filter_map(move |plugin| {
+            if !native_plugin_state_is_active_like(plugin.state)
+                || native_plugin_requires_permission_review(
+                    &plugin.manifest,
+                    &plugin.runtime_plan,
+                    &plugin.config,
+                )
+            {
+                return None;
+            }
+            plugin.runtime_plan.helper_entry(
+                "remote-desktop",
+                "oxideterm-remote-desktop",
+                oxideterm_remote_desktop::REMOTE_DESKTOP_PLUGIN_PROTOCOL_VERSION,
+            )?;
+            let definition = plugin
+                .manifest
+                .contributes
+                .as_ref()?
+                .remote_desktop
+                .as_ref()?;
+            (definition.protocol == protocol).then_some(plugin.manifest.id.as_str())
+        })
+    }
+
     /// Protocol helpers use the session-owned binary transport, not plugin messages.
     pub fn remote_desktop_providers(
         &self,

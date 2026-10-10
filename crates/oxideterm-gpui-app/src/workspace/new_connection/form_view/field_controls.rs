@@ -3508,7 +3508,10 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
             .child({
-                let available = self.remote_desktop_provider(protocol, cx).is_some();
+                let available = self
+                    .plugin_entity
+                    .read(cx)
+                    .remote_desktop_plugin_enabled(protocol);
                 div()
                     .flex()
                     .items_center()

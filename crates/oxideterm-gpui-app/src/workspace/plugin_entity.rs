@@ -470,6 +470,21 @@ impl PluginWorkspaceEntity {
         }
     }
 
+    pub(in crate::workspace) fn remote_desktop_plugin_enabled(
+        &self,
+        protocol: oxideterm_remote_desktop::RemoteDesktopProtocol,
+    ) -> bool {
+        !self.compatibility_refresh_pending
+            && !self.release_shutdown_started
+            && self
+                .registry
+                .enabled_remote_desktop_plugin_ids(protocol)
+                .any(|id| {
+                    !self.remote_desktop_install_pending.contains(id)
+                        && !self.remote_desktop_removals.contains(id)
+                })
+    }
+
     pub(in crate::workspace) fn replace_registry(
         &mut self,
         mut registry: plugin_host::NativePluginRegistry,
@@ -2519,6 +2534,7 @@ mod tests {
 
     #[gpui::test]
     fn remote_desktop_updates_and_removal_gate_only_the_target_provider(cx: &mut TestAppContext) {
+        use oxideterm_remote_desktop::RemoteDesktopProtocol::{Rdp, Vnc};
         use sha2::Digest;
         let directory = tempfile::tempdir().unwrap();
         let settings = directory.path().join("settings.json");
@@ -2571,9 +2587,14 @@ mod tests {
             ["com.example.rdp"]
         );
         assert!(runtime.block_on(receiver).unwrap().is_err());
+        cx.read(|cx| {
+            assert!(entity.read(cx).remote_desktop_plugin_enabled(Rdp));
+            assert!(!entity.read(cx).remote_desktop_plugin_enabled(Vnc));
+        });
         entity.update(cx, |entity, cx| {
             entity.finish_managed_package_install(&settings, false, cx)
         });
+        cx.read(|cx| assert!(entity.read(cx).remote_desktop_plugin_enabled(Vnc)));
         assert_eq!(
             cx.read(|cx| entity
                 .read(cx)
@@ -2591,6 +2612,8 @@ mod tests {
             entity
                 .set_plugin_enabled("com.example.vnc", true, cx)
                 .unwrap();
+            assert!(entity.remote_desktop_plugin_enabled(Rdp));
+            assert!(!entity.remote_desktop_plugin_enabled(Vnc));
             assert_eq!(
                 entity
                     .remote_desktop_providers()

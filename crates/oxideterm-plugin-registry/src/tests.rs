@@ -1232,6 +1232,7 @@ fn discovery_classifies_native_wasm_and_process_runtime_states() {
 
 #[test]
 fn remote_desktop_plugins_resolve_only_enabled_compatible_trusted_executables() {
+    use oxideterm_remote_desktop::RemoteDesktopProtocol::{Rdp, Vnc};
     let root = unique_temp_dir("desktop-plugin");
     let settings = root.join("settings.json");
     let directory = native_plugins_dir(&settings).join("vnc");
@@ -1261,7 +1262,25 @@ fn remote_desktop_plugins_resolve_only_enabled_compatible_trusted_executables() 
     write_manifest(&directory, &manifest);
     let mut registry = NativePluginRegistry::discover(&settings);
     assert!(registry.remote_desktop_providers().is_empty());
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Vnc)
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
     registry.set_plugin_enabled(&manifest.id, true).unwrap();
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Vnc)
+            .collect::<Vec<_>>(),
+        [manifest.id.as_str()]
+    );
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Rdp)
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
     assert_eq!(
         registry.remote_desktop_providers(),
         vec![oxideterm_remote_desktop::RemoteDesktopProviderManifest {
@@ -1291,8 +1310,24 @@ fn remote_desktop_plugins_resolve_only_enabled_compatible_trusted_executables() 
         }]
     );
     assert!(registry.process_activation_plans().is_empty());
+    // UI reflects the installed configuration; launch still rejects a missing executable.
+    fs::remove_file(directory.join("bin/helper")).unwrap();
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Vnc)
+            .collect::<Vec<_>>(),
+        [manifest.id.as_str()]
+    );
+    assert!(registry.remote_desktop_providers().is_empty());
+    fs::write(directory.join("bin/helper"), b"fixture").unwrap();
     registry.set_plugin_enabled(&manifest.id, false).unwrap();
     assert!(registry.remote_desktop_providers().is_empty());
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Vnc)
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
     registry.set_plugin_enabled(&manifest.id, true).unwrap();
     manifest
         .contributes
@@ -1305,6 +1340,12 @@ fn remote_desktop_plugins_resolve_only_enabled_compatible_trusted_executables() 
     write_manifest(&directory, &manifest);
     registry = NativePluginRegistry::discover(&settings);
     assert!(registry.remote_desktop_providers().is_empty());
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Vnc)
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
     assert!(
         validate_native_plugin_manifest(&manifest)
             .unwrap_err()
@@ -1316,6 +1357,12 @@ fn remote_desktop_plugins_resolve_only_enabled_compatible_trusted_executables() 
     registry = NativePluginRegistry::discover(&settings);
     assert!(registry.remote_desktop_providers().is_empty());
     assert_eq!(registry.plugins()[0].state, NativePluginState::Error);
+    assert_eq!(
+        registry
+            .enabled_remote_desktop_plugin_ids(Vnc)
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
     fs::remove_dir_all(root).unwrap();
 }
 
