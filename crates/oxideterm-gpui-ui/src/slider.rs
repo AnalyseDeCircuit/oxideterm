@@ -74,7 +74,8 @@ pub fn slider(tokens: &ThemeTokens, view: SliderView) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::slider_pointer_percent;
+    use super::*;
+    use gpui::{InteractiveElement, IntoElement};
 
     #[test]
     fn pointer_percent_tracks_thumb_centers_and_clamps_boundaries() {
@@ -86,5 +87,61 @@ mod tests {
         assert_eq!(slider_pointer_percent(120.0, width, thumb), 1.0);
         assert_eq!(slider_pointer_percent(-20.0, width, thumb), 0.0);
         assert_eq!(slider_pointer_percent(200.0, width, thumb), 1.0);
+    }
+
+    #[gpui::test]
+    fn painted_thumb_centers_match_pointer_values(cx: &mut gpui::TestAppContext) {
+        let window = cx.add_empty_window();
+        let mut tokens = oxideterm_theme::default_tokens();
+        tokens.metrics.ui_slider_thumb_size = 16.0;
+        for (min, max, value, expected) in [
+            (0.0, 100.0, 0.0, 0.0),
+            (0.0, 100.0, 35.0, 0.35),
+            (30.0, 200.0, 100.0, 70.0 / 170.0),
+            (0.0, 100.0, 60.0, 0.6),
+            (0.0, 100.0, 100.0, 1.0),
+        ] {
+            let anchor = std::rc::Rc::new(std::cell::Cell::new(None));
+            let measured = anchor.clone();
+            window.draw(
+                gpui::point(px(10.0), px(20.0)),
+                gpui::size(px(240.0), px(16.0)),
+                |_, _| {
+                    crate::select::select_anchor_probe(
+                        crate::select::SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider,
+                        slider(
+                            &tokens,
+                            SliderView {
+                                min,
+                                max,
+                                value,
+                                disabled: false,
+                            },
+                        )
+                        .id("slider-under-test"),
+                        move |bounds, _, _| measured.set(Some(bounds.bounds)),
+                    )
+                    .into_any_element()
+                },
+            );
+            let bounds = anchor.get().expect("actual slider anchor");
+            let center = window.update(|window, _| {
+                let thumb = window
+                    .painted_quads()
+                    .into_iter()
+                    .find(|quad| quad.border_widths.left.0 > 0.0)
+                    .expect("painted thumb");
+                thumb.bounds.center().x.0 / window.scale_factor()
+            });
+            let clicked = slider_pointer_percent(
+                center - f32::from(bounds.origin.x),
+                f32::from(bounds.size.width),
+                16.0,
+            );
+            assert!(
+                (clicked - expected).abs() < 0.002,
+                "value={value}: rendered center maps to {clicked}, expected {expected}"
+            );
+        }
     }
 }
