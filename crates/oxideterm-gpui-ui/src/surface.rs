@@ -1,4 +1,7 @@
-use gpui::{BoxShadow, Div, Rgba, Styled, div, point, prelude::*, px, rgb, rgba};
+use gpui::{
+    AnyElement, BoxShadow, Corners, Div, Rgba, Styled, canvas, div, point, prelude::*, px, rgb,
+    rgba,
+};
 use oxideterm_theme::ThemeTokens;
 
 const TAURI_CARD_DARK_SHADOW_1_ALPHA: u32 = 0x66; // Tauri --theme-card-shadow rgba(0,0,0,0.4).
@@ -334,7 +337,102 @@ pub fn theme_card_surface(
         has_background_image,
         background_alpha,
     ));
-    theme_card_surface_shadow(surface, tokens)
+    theme_card_surface_shadow(surface, tokens).child(panel_edge_highlight(
+        tokens,
+        if has_background_image {
+            background_alpha as f32 / 255.0
+        } else {
+            1.0
+        },
+        tokens.radii.lg,
+    ))
+}
+
+/// Paint-only chrome adds no hitbox, focus target, animation, or framebuffer sampling.
+pub fn panel_edge_highlight(tokens: &ThemeTokens, opacity: f32, radius: f32) -> AnyElement {
+    let shadows = panel_edge_shadows(tokens, opacity);
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            if bounds.size.width <= px(2.0) || bounds.size.height <= px(2.0) {
+                return;
+            }
+            let inset = gpui::Bounds::new(
+                bounds.origin + point(px(1.0), px(1.0)),
+                bounds.size - gpui::size(px(2.0), px(2.0)),
+            );
+            let reach = shadows
+                .iter()
+                .map(|shadow| {
+                    shadow.blur_radius * 3.0 + shadow.offset.y.abs() + shadow.spread_radius
+                })
+                .fold(px(radius), |a, b| a.max(b));
+            let edge = (reach + px(2.0)).min(inset.size.width.min(inset.size.height) * 0.5);
+            let middle = (inset.size.height - edge * 2.0).max(px(0.0));
+            // Thin chrome must not shade the whole area of large translucent panels every frame.
+            for strip in [
+                gpui::Bounds::new(inset.origin, gpui::size(inset.size.width, edge)),
+                gpui::Bounds::new(
+                    point(inset.left(), inset.bottom() - edge),
+                    gpui::size(inset.size.width, edge),
+                ),
+                gpui::Bounds::new(
+                    point(inset.left(), inset.top() + edge),
+                    gpui::size(edge, middle),
+                ),
+                gpui::Bounds::new(
+                    point(inset.right() - edge, inset.top() + edge),
+                    gpui::size(edge, middle),
+                ),
+            ] {
+                if !strip.is_empty() {
+                    window.with_content_mask(Some(gpui::ContentMask { bounds: strip }), |window| {
+                        window.paint_inset_shadows(
+                            inset,
+                            Corners::all(px((radius - 1.0).max(0.0))),
+                            &shadows,
+                        );
+                    });
+                }
+            }
+        },
+    )
+    .absolute()
+    .inset_0()
+    .into_any_element()
+}
+
+fn panel_edge_shadows(tokens: &ThemeTokens, opacity: f32) -> [BoxShadow; 2] {
+    let transparency = 1.0 - opacity.clamp(0.0, 1.0);
+    let light = color_luma(tokens.ui.bg) >= TAURI_CARD_LIGHT_LUMA_THRESHOLD;
+    [
+        BoxShadow {
+            color: rgb(0xffffff)
+                .alpha(if light {
+                    0.12 + transparency * 0.18
+                } else {
+                    0.035 + transparency * 0.12
+                })
+                .into(),
+            offset: point(px(0.0), px(1.0)),
+            blur_radius: px(2.5),
+            spread_radius: px(0.25),
+            inset: true,
+        },
+        BoxShadow {
+            color: rgb(0)
+                .alpha(if light {
+                    0.035 + transparency * 0.06
+                } else {
+                    0.06 + transparency * 0.09
+                })
+                .into(),
+            offset: point(px(0.0), px(-1.0)),
+            blur_radius: px(3.0),
+            spread_radius: px(0.0),
+            inset: true,
+        },
+    ]
 }
 
 pub fn tauri_glass_surface_shadow(surface: Div, color: u32) -> Div {
@@ -460,6 +558,42 @@ fn color_luma(color: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn edge_highlights_leave_panel_controls_clickable(cx: &mut gpui::TestAppContext) {
+        struct Panel {
+            clicks: usize,
+        }
+        impl gpui::Render for Panel {
+            fn render(
+                &mut self,
+                _: &mut gpui::Window,
+                cx: &mut gpui::Context<Self>,
+            ) -> impl gpui::IntoElement {
+                div()
+                    .relative()
+                    .size_full()
+                    .child(div().id("panel-control").size_full().on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, _, _| this.clicks += 1),
+                    ))
+                    .child(panel_edge_highlight(
+                        &oxideterm_theme::default_tokens(),
+                        0.4,
+                        12.0,
+                    ))
+            }
+        }
+        let (panel, cx) = cx.add_window_view(|_, _| Panel { clicks: 0 });
+        cx.simulate_resize(gpui::size(px(200.0), px(100.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_down(
+            point(px(25.0), px(25.0)),
+            gpui::MouseButton::Left,
+            Default::default(),
+        );
+        panel.read_with(cx, |panel, _| assert_eq!(panel.clicks, 1));
+    }
 
     #[test]
     fn custom_low_contrast_palette_gets_extra_surface_separation() {

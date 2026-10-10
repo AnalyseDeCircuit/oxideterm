@@ -272,6 +272,15 @@ pub fn dialog_content(tokens: &ThemeTokens) -> Div {
         .overflow_hidden()
         .border_1()
         .border_color(rgb(theme.border))
+        .child(crate::surface::panel_edge_highlight(
+            tokens,
+            if backdrop_blur_allowed() {
+                tokens.metrics.panel_vibrancy_alpha
+            } else {
+                1.0
+            },
+            tokens.radii.md,
+        ))
 }
 
 pub fn modal_header(tokens: &ThemeTokens, title: String, subtitle: String) -> AnyElement {

@@ -132,6 +132,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         context_sidebar_frame_chrome(self.ai_entity.read(cx).chat_ui().sidebar_width)
             .child(self.render_context_right_sidebar_region(cx))
+            .child(oxideterm_gpui_ui::surface::panel_edge_highlight(
+                &self.tokens,
+                self.workspace_sidebar_background(self.tokens.ui.bg).a,
+                0.0,
+            ))
             .into_any_element()
     }
 
@@ -439,6 +444,11 @@ impl WorkspaceApp {
                 self.effective_sidebar_panel_section() == SidebarSection::Sessions,
                 |sidebar| sidebar.child(self.render_active_sessions_footer(cx)),
             )
+            .child(oxideterm_gpui_ui::surface::panel_edge_highlight(
+                &self.tokens,
+                self.workspace_sidebar_background(theme.bg).a,
+                0.0,
+            ))
             .into_any_element()
     }
 
