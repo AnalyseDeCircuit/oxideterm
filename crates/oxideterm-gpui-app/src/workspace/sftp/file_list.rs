@@ -53,6 +53,179 @@ impl SftpWorkspaceEntity {
     }
 }
 
+#[cfg(test)]
+mod drag_tests {
+    use super::*;
+    use crate::workspace::window_shell::WorkspaceWindowShell;
+    use gpui::TestAppContext;
+
+    fn file(path: &str) -> SftpFileEntry {
+        SftpFileEntry {
+            name: "drag.txt".into(),
+            path: path.into(),
+            file_type: SftpFileType::File,
+            size_known: true,
+            size: 12,
+            modified: None,
+            permissions: None,
+            owner: None,
+            group: None,
+            is_symlink: false,
+            symlink_target: None,
+        }
+    }
+
+    #[gpui::test]
+    fn cross_pane_drag_reaches_transfer_conflicts_before_workspace_cleanup(
+        cx: &mut TestAppContext,
+    ) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_SFTP_DRAG_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Workspace storage is process-wide; isolate the real workspace in a portable child.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
+        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
+        settings.settings_mut().sftp.conflict_action = oxideterm_settings::ConflictAction::Ask;
+        settings.save().unwrap();
+        // Real workspace workers and drag timers wake the UI from I/O threads.
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_sftp_tab_surface(NodeId::new("drag-fixture"), None, cx);
+            });
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.run_until_parked();
+        let view = workspace.read_with(cx, |workspace, _| workspace.sftp_view().clone());
+        for (source, target, direction, path, release_outside) in [
+            (
+                SftpPane::Local,
+                SftpPane::Remote,
+                Some(SftpTransferDirection::Upload),
+                "/local/drag.txt",
+                false,
+            ),
+            (
+                SftpPane::Remote,
+                SftpPane::Local,
+                Some(SftpTransferDirection::Download),
+                "/remote/drag.txt",
+                false,
+            ),
+            (
+                SftpPane::Local,
+                SftpPane::Local,
+                None,
+                "/local/drag.txt",
+                false,
+            ),
+            (
+                SftpPane::Local,
+                SftpPane::Remote,
+                None,
+                "/local/drag.txt",
+                true,
+            ),
+        ] {
+            view.update(cx, |sftp, cx| {
+                sftp.local_files = vec![file("/local/drag.txt")];
+                sftp.remote_files = vec![file("/remote/drag.txt")];
+                sftp.local_selected.clear();
+                sftp.remote_selected.clear();
+                sftp.local_path = "/local".into();
+                sftp.remote_path = "/remote".into();
+                sftp.remote_loading = false;
+                sftp.remote_load_pending = false;
+                sftp.remote_load_inflight = false;
+                sftp.init_error = None;
+                sftp.dialog = None;
+                sftp.conflict_state = None;
+                cx.notify();
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+            let (start, end) = view.read_with(cx, |sftp, _| {
+                let bounds = |pane| match pane {
+                    SftpPane::Local => sftp.local_file_scroll.0.borrow().base_handle.bounds(),
+                    SftpPane::Remote => sftp.remote_file_scroll.0.borrow().base_handle.bounds(),
+                };
+                let start = bounds(source);
+                assert!(start.size.width > px(0.0) && start.size.height > px(SFTP_ROW_HEIGHT));
+                (
+                    Point::new(start.center().x, start.top() + px(SFTP_ROW_HEIGHT / 2.0)),
+                    bounds(target).center(),
+                )
+            });
+            cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+            cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
+            view.read_with(cx, |sftp, _| {
+                let drag = sftp
+                    .drag_state
+                    .as_ref()
+                    .expect("mouse-down must capture the source row");
+                assert_eq!(drag.names, ["drag.txt"]);
+                assert_eq!(drag.source_pane, source);
+                assert!(drag.active);
+                assert_eq!(sftp.drag_over_pane, Some(target));
+            });
+            let release = if release_outside {
+                Point::new(px(-10.0), px(-10.0))
+            } else {
+                end
+            };
+            cx.simulate_mouse_up(release, MouseButton::Left, gpui::Modifiers::default());
+            view.read_with(cx, |sftp, _| {
+                if let Some(direction) = direction {
+                    let conflicts = sftp
+                        .conflict_state
+                        .as_ref()
+                        .expect("drop must reach the existing transfer flow");
+                    let pending = &conflicts.pending_transfers;
+                    assert_eq!(pending.len(), 1);
+                    assert_eq!(pending[0].name, "drag.txt");
+                    assert_eq!(pending[0].source.path, path);
+                    assert_eq!(pending[0].direction, direction);
+                } else {
+                    assert!(
+                        sftp.conflict_state.is_none(),
+                        "cancelled drops must not transfer"
+                    );
+                    assert!(sftp.transfers.is_empty());
+                }
+                assert!(sftp.drag_state.is_none());
+                assert!(sftp.drag_over_pane.is_none());
+                assert!(sftp.drag_autoscroll_position.is_none());
+            });
+        }
+    }
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn render_sftp_file_list(
         &self,

@@ -777,10 +777,22 @@ impl WorkspaceApp {
                         }
                     });
                 }
+                if phase == gpui::DispatchPhase::Bubble && event.button == MouseButton::Left {
+                    // File lists finish valid drops first. A release outside their hitboxes
+                    // must still retire the SFTP drag, including releases outside the root.
+                    read_only_selection_workspace.update(cx, |this, cx| {
+                        if this.cancel_sftp_drag_capture(cx) {
+                            cx.notify();
+                        }
+                    });
+                }
             })
             .capture_any_mouse_up(cx.listener(|this, event: &MouseUpEvent, window, cx| {
                 if event.button == MouseButton::Left
-                    && this.browser_pointer_capture_owner(cx).is_some()
+                    && this.browser_pointer_capture_owner(cx).is_some_and(|owner| {
+                        // SFTP drop targets consume mouse-up during bubbling, after capture.
+                        owner != browser_behavior::BrowserPointerCaptureOwner::SftpFileDrag
+                    })
                 {
                     this.finish_workspace_pointer_captures(event, window, cx);
                 }
