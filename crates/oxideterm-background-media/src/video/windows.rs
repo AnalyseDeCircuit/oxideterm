@@ -263,11 +263,38 @@ impl VideoDecoder {
         }
     }
 
+    fn refresh_output_format(&mut self) -> Result<(), MediaError> {
+        unsafe {
+            let format = self
+                .reader
+                .GetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32)
+                .map_err(decode_error)?;
+            let size = format.GetUINT64(&MF_MT_FRAME_SIZE).map_err(decode_error)?;
+            let subtype = format.GetGUID(&MF_MT_SUBTYPE).map_err(decode_error)?;
+            let expected = if self.device.is_some() {
+                MFVideoFormat_ARGB32
+            } else {
+                MFVideoFormat_RGB32
+            };
+            // MF can refine stride and color metadata when producing the first sample.
+            // Accept that notification only while the negotiated pixel layout stays supported.
+            if size != (u64::from(self.raw_width) << 32 | u64::from(self.raw_height))
+                || subtype != expected
+            {
+                return Err(MediaError::Unsupported);
+            }
+            if self.device.is_none() {
+                self.stride = default_stride(&format, self.raw_width).map_err(decode_error)?;
+            }
+            Ok(())
+        }
+    }
+
     pub fn next_native(
         &mut self,
         cancelled: &std::sync::atomic::AtomicBool,
     ) -> Result<Option<NativeVideoFrame>, MediaError> {
-        let device = self.device.as_ref().ok_or(MediaError::Unsupported)?;
+        let device = self.device.clone().ok_or(MediaError::Unsupported)?;
         unsafe {
             loop {
                 if cancelled.load(std::sync::atomic::Ordering::Acquire) {
@@ -290,7 +317,7 @@ impl VideoDecoder {
                     return Ok(None);
                 }
                 if flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0 {
-                    return Err(MediaError::Unsupported);
+                    self.refresh_output_format()?;
                 }
                 let Some(sample) = sample else { continue };
                 let buffer = sample.GetBufferByIndex(0).map_err(decode_error)?;
@@ -408,7 +435,7 @@ impl VideoDecoder {
                     return Ok(None);
                 }
                 if flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED.0 as u32 != 0 {
-                    return Err(MediaError::Unsupported);
+                    self.refresh_output_format()?;
                 }
                 let Some(sample) = sample else {
                     continue;

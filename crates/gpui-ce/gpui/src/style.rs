@@ -305,6 +305,9 @@ pub struct Style {
     /// Filters applied to this element's own content and children (CSS `filter`).
     pub filter: Vec<Filter>,
 
+    /// Clip this element's painted subtree to its rounded border box.
+    pub clip_rounded: bool,
+
     /// Filters applied to the content rendered behind this element (CSS `backdrop-filter`).
     pub backdrop_filter: Vec<Filter>,
 
@@ -851,12 +854,18 @@ impl Style {
             }
         };
 
-        if self.filter.is_empty() {
+        if self.filter.is_empty() && !self.clip_rounded {
             paint_box(window, cx);
         } else {
-            window.with_filter_layer(bounds, corner_radii, &self.filter, |window| {
-                paint_box(window, cx);
-            });
+            window.with_filtered_clip_layer(
+                bounds,
+                corner_radii,
+                &self.filter,
+                self.clip_rounded,
+                |window| {
+                    paint_box(window, cx);
+                },
+            );
         }
 
         #[cfg(debug_assertions)]
@@ -910,6 +919,7 @@ impl Default for Style {
             corner_radii: Corners::default(),
             box_shadow: Default::default(),
             filter: Default::default(),
+            clip_rounded: false,
             backdrop_filter: Default::default(),
             text: TextStyleRefinement::default(),
             mouse_cursor: None,

@@ -370,10 +370,10 @@ split-debuginfo = "unpacked"
 opt-level = 1
 
 [profile.dev.package.gpui-pre]
-opt-level = 1
+opt-level = 2
 
 [profile.dev.package.taffy]
-opt-level = 1
+opt-level = 3
 
 # Background previews resize decoded frames continuously, including in development builds.
 [profile.dev.package.image]

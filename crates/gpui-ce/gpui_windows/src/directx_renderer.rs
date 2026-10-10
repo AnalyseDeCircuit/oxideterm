@@ -24,6 +24,9 @@ use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, Sh
 use crate::*;
 use gpui::*;
 
+#[cfg(test)]
+mod tests;
+
 /// The largest blur radius in a scene-space filter chain, in device pixels — used to size the
 /// blur kernel and the dilated region the blur passes are scissored to.
 ///
@@ -70,6 +73,7 @@ pub(crate) struct DirectXRenderer {
     pipelines: DirectXRenderPipelines,
     direct_composition: Option<DirectComposition>,
     font_info: &'static FontInfo,
+    gpu_specs: OnceLock<GpuSpecs>,
 
     width: u32,
     height: u32,
@@ -307,6 +311,7 @@ impl DirectXRenderer {
             pipelines,
             direct_composition,
             font_info: Self::get_font_info(),
+            gpu_specs: OnceLock::new(),
             width: 1,
             height: 1,
             skip_draws: false,
@@ -401,6 +406,7 @@ impl DirectXRenderer {
 
             self.direct_composition.take();
             self.devices.take();
+            self.gpu_specs.take();
         }
 
         let devices = DirectXRendererDevices::new(directx_devices, disable_direct_composition)
@@ -608,7 +614,7 @@ impl DirectXRenderer {
                                 corner_radii_array(boundary.corner_radii),
                                 max_blur_radius(&boundary.filters),
                                 boundary.opacity,
-                                false,
+                                boundary.clip_rounded,
                             )
                         } else {
                             Ok(())
@@ -1176,9 +1182,6 @@ impl DirectXRenderer {
     ) -> Result<()> {
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
-        if sigma <= 0.0 {
-            return Ok(());
-        }
         // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
         // than truncating the kernel — keeps very large radii from clipping. Matches wgpu.
         let ideal_taps = (3.0 * sigma).ceil();
@@ -1211,71 +1214,75 @@ impl DirectXRenderer {
             )
         };
 
-        // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
-        self.dx_blur_pass(
-            &self.pipelines.blur_downsample_vertex,
-            &self.pipelines.blur_downsample_fragment,
-            &self.pipelines.blur_blend_replace,
-            &ping_rtv,
-            source_srv,
-            BlurParams {
-                downsample: 1.0,
-                ..Default::default()
-            },
-            &half_vp,
-            D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-            3,
-            true,
-        )?;
-        self.dx_blur_pass(
-            &self.pipelines.blur_vertex,
-            &self.pipelines.blur_fragment,
-            &self.pipelines.blur_blend_replace,
-            &pong_rtv,
-            &ping_srv,
-            BlurParams {
-                direction: [1.0 / half_w as f32, 0.0],
-                sigma,
-                tap_count,
-                tap_step,
-                ..Default::default()
-            },
-            &half_vp,
-            D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-            3,
-            true,
-        )?;
-        self.dx_blur_pass(
-            &self.pipelines.blur_vertex,
-            &self.pipelines.blur_fragment,
-            &self.pipelines.blur_blend_replace,
-            &ping_rtv,
-            &pong_srv,
-            BlurParams {
-                direction: [0.0, 1.0 / half_h as f32],
-                sigma,
-                tap_count,
-                tap_step,
-                ..Default::default()
-            },
-            &half_vp,
-            D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-            3,
-            true,
-        )?;
-        // Composite the blurred result into the target (preserving its contents).
+        // A clip-only layer samples the original texture without downsampling or blur.
+        if sigma > 0.0 {
+            // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
+            self.dx_blur_pass(
+                &self.pipelines.blur_downsample_vertex,
+                &self.pipelines.blur_downsample_fragment,
+                &self.pipelines.blur_blend_replace,
+                &ping_rtv,
+                source_srv,
+                BlurParams {
+                    downsample: 1.0,
+                    ..Default::default()
+                },
+                &half_vp,
+                D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                3,
+                true,
+            )?;
+            self.dx_blur_pass(
+                &self.pipelines.blur_vertex,
+                &self.pipelines.blur_fragment,
+                &self.pipelines.blur_blend_replace,
+                &pong_rtv,
+                &ping_srv,
+                BlurParams {
+                    direction: [1.0 / half_w as f32, 0.0],
+                    sigma,
+                    tap_count,
+                    tap_step,
+                    ..Default::default()
+                },
+                &half_vp,
+                D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                3,
+                true,
+            )?;
+            self.dx_blur_pass(
+                &self.pipelines.blur_vertex,
+                &self.pipelines.blur_fragment,
+                &self.pipelines.blur_blend_replace,
+                &ping_rtv,
+                &pong_srv,
+                BlurParams {
+                    direction: [0.0, 1.0 / half_h as f32],
+                    sigma,
+                    tap_count,
+                    tap_step,
+                    ..Default::default()
+                },
+                &half_vp,
+                D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+                3,
+                true,
+            )?;
+        }
+        // Composite the result into the target (preserving its contents).
         self.dx_blur_pass(
             &self.pipelines.blur_composite_vertex,
             &self.pipelines.blur_composite_fragment,
             &self.pipelines.blur_blend_composite,
             target_rtv,
-            &ping_srv,
+            if sigma > 0.0 { &ping_srv } else { source_srv },
             BlurParams {
                 bounds: composite_bounds,
                 content_mask,
                 corner_radii,
                 opacity,
                 clip_rounded: if clip_rounded { 1.0 } else { 0.0 },
+                downsample: if sigma > 0.0 { 1.0 } else { 0.0 },
                 ..Default::default()
             },
             &full_vp,
@@ -1321,6 +1328,11 @@ impl DirectXRenderer {
     }
 
     pub(crate) fn gpu_specs(&self) -> Result<GpuSpecs> {
+        // Video surfaces inspect hardware support each frame. Vendor driver
+        // discovery can enumerate displays and must only run once per device.
+        if let Some(specs) = self.gpu_specs.get() {
+            return Ok(specs.clone());
+        }
         let devices = self.devices.as_ref().context("devices missing")?;
         let desc = unsafe { devices.adapter.GetDesc1() }?;
         let is_software_emulated = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32) != 0;
@@ -1342,13 +1354,14 @@ impl DirectXRenderer {
         .context("Failed to get gpu driver info")
         .log_err()
         .unwrap_or("Unknown Driver".to_string());
-        Ok(GpuSpecs {
+        let specs = GpuSpecs {
             is_software_emulated,
             is_virtual_gpu: is_known_virtual_gpu_vendor(desc.VendorId),
             device_name,
             driver_name,
             driver_info: driver_version,
-        })
+        };
+        Ok(self.gpu_specs.get_or_init(|| specs).clone())
     }
 
     pub(crate) fn get_font_info() -> &'static FontInfo {
@@ -2370,7 +2383,7 @@ pub(crate) mod shader_resources {
     #[cfg(debug_assertions)]
     use windows::{
         Win32::Graphics::Direct3D::{
-            Fxc::{D3DCOMPILE_DEBUG, D3DCOMPILE_SKIP_OPTIMIZATION, D3DCompileFromFile},
+            Fxc::{D3DCOMPILE_DEBUG, D3DCOMPILE_OPTIMIZATION_LEVEL3, D3DCompileFromFile},
             ID3DBlob,
         },
         core::{HSTRING, PCSTR},
@@ -2535,7 +2548,9 @@ pub(crate) mod shader_resources {
                 include_handler,
                 entry_point,
                 target_cstr,
-                D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION,
+                // Keep source debug information without running every UI pixel through
+                // unoptimized rounded-border, shadow, and blur shader arithmetic.
+                D3DCOMPILE_DEBUG | D3DCOMPILE_OPTIMIZATION_LEVEL3,
                 0,
                 &mut compile_blob,
                 Some(&mut error_blob),

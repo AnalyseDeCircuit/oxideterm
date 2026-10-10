@@ -1014,7 +1014,7 @@ impl MetalRenderer {
                                     boundary.corner_radii,
                                     max_blur_radius(&boundary.filters),
                                     boundary.opacity,
-                                    false,
+                                    boundary.clip_rounded,
                                 );
                             }
                             current_target = parent;
@@ -1122,9 +1122,6 @@ impl MetalRenderer {
     ) {
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
-        if sigma <= 0.0 {
-            return;
-        }
         // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
         // than truncating the kernel — keeps very large radii from clipping. Matches wgpu.
         let ideal_taps = (3.0 * sigma).ceil();
@@ -1143,56 +1140,58 @@ impl MetalRenderer {
         let half_w = i32::from(half.width) as f32;
         let half_h = i32::from(half.height) as f32;
 
-        // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
-        self.run_metal_blur_pass(
-            command_buffer,
-            &self.blur_downsample_pipeline_state,
-            ping,
-            source,
-            half,
-            BlurUniform {
-                downsample: 1.0,
-                ..Default::default()
-            },
-            false,
-        );
-        self.run_metal_blur_pass(
-            command_buffer,
-            &self.blur_pipeline_state,
-            pong,
-            ping,
-            half,
-            BlurUniform {
-                direction: [1.0 / half_w, 0.0],
-                sigma,
-                tap_count,
-                tap_step,
-                ..Default::default()
-            },
-            false,
-        );
-        self.run_metal_blur_pass(
-            command_buffer,
-            &self.blur_pipeline_state,
-            ping,
-            pong,
-            half,
-            BlurUniform {
-                direction: [0.0, 1.0 / half_h],
-                sigma,
-                tap_count,
-                tap_step,
-                ..Default::default()
-            },
-            false,
-        );
-
-        // Composite the blurred result into the target (preserving its contents).
+        // Clip-only layers preserve full-resolution pixels.
+        if sigma > 0.0 {
+            // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
+            self.run_metal_blur_pass(
+                command_buffer,
+                &self.blur_downsample_pipeline_state,
+                ping,
+                source,
+                half,
+                BlurUniform {
+                    downsample: 1.0,
+                    ..Default::default()
+                },
+                false,
+            );
+            self.run_metal_blur_pass(
+                command_buffer,
+                &self.blur_pipeline_state,
+                pong,
+                ping,
+                half,
+                BlurUniform {
+                    direction: [1.0 / half_w, 0.0],
+                    sigma,
+                    tap_count,
+                    tap_step,
+                    ..Default::default()
+                },
+                false,
+            );
+            self.run_metal_blur_pass(
+                command_buffer,
+                &self.blur_pipeline_state,
+                ping,
+                pong,
+                half,
+                BlurUniform {
+                    direction: [0.0, 1.0 / half_h],
+                    sigma,
+                    tap_count,
+                    tap_step,
+                    ..Default::default()
+                },
+                false,
+            );
+        }
+        // Composite the result into the target (preserving its contents).
         self.run_metal_blur_pass(
             command_buffer,
             &self.blur_composite_pipeline_state,
             target,
-            ping,
+            if sigma > 0.0 { ping } else { source },
             viewport_size,
             BlurUniform {
                 bounds: composite_bounds,
@@ -1200,6 +1199,7 @@ impl MetalRenderer {
                 corner_radii,
                 opacity,
                 clip_rounded: if clip_rounded { 1.0 } else { 0.0 },
+                downsample: if sigma > 0.0 { 1.0 } else { 0.0 },
                 ..Default::default()
             },
             true,
@@ -2191,6 +2191,7 @@ mod tests {
             corner_radii: Default::default(),
             filters: vec![ScaledFilter::Blur(ScaledPixels(3.0))].into(),
             opacity: 1.0,
+            clip_rounded: false,
             is_start: true,
         };
         scene.insert_primitive(boundary.clone());

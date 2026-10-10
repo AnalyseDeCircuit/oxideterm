@@ -96,6 +96,9 @@ impl DirectXAtlas {
     pub(crate) fn finish_gpu_submissions(&self) {
         let mut queries = self.1.lock();
         let lock = self.0.lock();
+        // Native video has no CPU upload completion task to retire presentation leases.
+        // Poll earlier frames on every draw so media admission cannot accumulate indefinitely.
+        poll_queries(&lock.backend.device_context, &mut queries.submitted);
         let pending = std::mem::take(&mut queries.pending);
         for (query, receipt) in pending {
             // The event follows the frame's upload and draw commands on the immediate context.

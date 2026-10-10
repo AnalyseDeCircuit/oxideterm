@@ -4698,6 +4698,17 @@ impl Window {
         filters: &[Filter],
         f: impl FnOnce(&mut Self) -> R,
     ) -> R {
+        self.with_filtered_clip_layer(bounds, corner_radii, filters, false, f)
+    }
+
+    pub(crate) fn with_filtered_clip_layer<R>(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        filters: &[Filter],
+        clip_rounded: bool,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         self.invalidator.debug_assert_paint();
 
         let scale_factor = self.scale_factor();
@@ -4706,7 +4717,7 @@ impl Window {
             .filter(|filter| !filter.is_identity())
             .map(|filter| filter.scale(scale_factor))
             .collect();
-        if filters.is_empty() {
+        if filters.is_empty() && !clip_rounded {
             return f(self);
         }
 
@@ -4724,6 +4735,7 @@ impl Window {
             corner_radii: corner_radii.scale(scale_factor),
             filters,
             opacity: 1.0,
+            clip_rounded,
             is_start: true,
         };
 

@@ -1491,7 +1491,8 @@ fn fs_blur_composite(input: BlurVarying) -> @location(0) vec4<f32> {
     // downsample wrote (anchored at the origin, independent of viewport parity). `2*floor(W/2)` is
     // the source span the half-res texture covers; dividing by it maps screen pixel p to half-res
     // texel p/2 at every window size, so the composite stays put rather than wobbling on resize.
-    let blur_span = 2.0 * floor(globals.viewport_size * 0.5);
+    // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
+    let blur_span = select(globals.viewport_size, 2.0 * floor(globals.viewport_size * 0.5), blur_locals.downsample > 0.5);
     let uv = input.position.xy / blur_span;
     let blurred = textureSampleLevel(t_blur, s_blur, uv, 0.0);
 

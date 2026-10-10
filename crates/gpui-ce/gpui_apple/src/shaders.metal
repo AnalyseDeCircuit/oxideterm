@@ -1461,7 +1461,9 @@ fragment float4 blur_composite_fragment(
   // wrote (anchored at the origin, independent of viewport parity): 2 * the half-res texture size
   // maps screen pixel p to half-res texel p/2 at every window size, so it doesn't wobble on resize.
   float2 half_size = float2(float(source.get_width()), float(source.get_height()));
-  float2 uv = input.position.xy / (2.0 * half_size);
+  // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
+  float source_scale = params.downsample > 0.5 ? 2.0 : 1.0;
+  float2 uv = input.position.xy / (source_scale * half_size);
   float4 blurred = source.sample(s, uv);
   // Backdrop clips to the rounded rect (the panel has a defined shape); content blur bleeds past
   // its bounds like CSS `filter: blur`, so its shape comes from the blurred group's own alpha.

@@ -59,6 +59,13 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Clip the painted subtree to this element's rounded border box.
+    /// Uses an isolated GPU layer; prefer per-primitive radii for simple images.
+    fn clip_rounded(mut self) -> Self {
+        self.style().clip_rounded = Some(true);
+        self
+    }
+
     /// Blur the content rendered behind this element — a frosted-glass effect — like CSS
     /// `backdrop-filter: blur(<radius>)`. Typically paired with a translucent [`Styled::bg`]
     /// so the background tints the blurred backdrop.

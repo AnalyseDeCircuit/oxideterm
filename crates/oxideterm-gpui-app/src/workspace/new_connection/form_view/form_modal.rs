@@ -1,5 +1,8 @@
 use super::*;
 
+#[cfg(test)]
+mod layout_tests;
+
 /// Contains only values needed to build one modal frame after releasing the Entity borrow.
 struct ConnectionFormModalSnapshot {
     transport: NewConnectionTransport,

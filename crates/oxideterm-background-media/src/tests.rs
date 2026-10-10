@@ -246,6 +246,82 @@ fn native_h264_pixels_timestamps_loops_and_cancellation() {
     }
 }
 
+#[cfg(target_os = "windows")]
+#[test]
+#[ignore = "requires a hardware DirectX video device"]
+fn directx_video_frames_preserve_pixels_after_decoder_close() {
+    use windows::Win32::Graphics::{Direct3D::D3D_DRIVER_TYPE_HARDWARE, Direct3D11::*};
+    use windows::core::Interface;
+
+    unsafe {
+        let mut device = None;
+        let mut context = None;
+        D3D11CreateDevice(
+            None,
+            D3D_DRIVER_TYPE_HARDWARE,
+            windows::Win32::Foundation::HMODULE::default(),
+            D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            None,
+            D3D11_SDK_VERSION,
+            Some(&mut device),
+            None,
+            Some(&mut context),
+        )
+        .unwrap();
+        let device = device.unwrap();
+        let context = context.unwrap();
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/red-blue.mp4");
+        let mut stream =
+            MediaStream::spawn_native(path, 7, NativeVideoDevice::DirectX(device.clone())).unwrap();
+        let mut frames = Vec::new();
+        for time in [0, 1000] {
+            let reply = next(&mut stream, Duration::from_millis(time), output(0.0));
+            let MediaReply::Frame { frame, .. } = reply else {
+                if let MediaReply::Error(error) = reply {
+                    panic!("DirectX decoding failed: {error}");
+                }
+                panic!("missing DirectX frame");
+            };
+            assert!(
+                frame.pixels.is_empty(),
+                "native delivery must avoid CPU copies"
+            );
+            assert_eq!(frame.timestamp, Duration::from_millis(time));
+            frames.push(frame);
+        }
+        stream.close();
+        stream.worker.take().unwrap().join().unwrap();
+        for (frame, expected) in frames.iter().zip([[0, 0, 253, 255], [254, 0, 0, 255]]) {
+            let native = frame.native.as_ref().expect("GPU frame");
+            let texture: ID3D11Texture2D = native.view.GetResource().unwrap().cast().unwrap();
+            let mut desc = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut desc);
+            desc.Usage = D3D11_USAGE_STAGING;
+            desc.BindFlags = 0;
+            desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+            desc.MiscFlags = 0;
+            let mut staging = None;
+            device
+                .CreateTexture2D(&desc, None, Some(&mut staging))
+                .unwrap();
+            let staging = staging.unwrap();
+            context.CopyResource(&staging, &texture);
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            context
+                .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+                .unwrap();
+            let pixel: [u8; 4] = std::slice::from_raw_parts(mapped.pData.cast::<u8>(), 4)
+                .try_into()
+                .unwrap();
+            context.Unmap(&staging, 0);
+            for (value, expected) in pixel.into_iter().zip(expected) {
+                assert!(i32::from(value).abs_diff(expected) <= 3, "pixel {pixel:?}");
+            }
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn native_video_delivery_keeps_the_system_buffer_alive_after_decoder_close() {
@@ -395,15 +471,33 @@ fn gif_partial_transparent_frames_restore_previous_canvas_and_normalize_zero_del
 #[test]
 fn consecutive_source_changes_release_completed_worker_budgets() {
     let directory = tempfile::tempdir().unwrap();
-    let path = directory.path().join("switch.gif");
-    animation(&path, 2, Some(Repeat::Infinite));
+    let gif = directory.path().join("switch.gif");
+    animation(&gif, 2, Some(Repeat::Infinite));
+    let webp = directory.path().join("switch.webp");
+    RgbaImage::from_pixel(64, 64, image::Rgba([31, 62, 93, 255]))
+        .save(&webp)
+        .unwrap();
+    let video =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/red-blue.mp4");
+    let sources = [
+        (gif, [0, 0, 255, 255]),
+        (webp, [93, 62, 31, 255]),
+        (video, [0, 0, 253, 255]),
+    ];
     let mut closed = Vec::new();
-    for generation in 0..100 {
+    for generation in 0..120 {
+        let (path, expected) = &sources[generation as usize % sources.len()];
         let mut stream = MediaStream::spawn(path.clone(), generation).unwrap();
         let MediaReply::Frame { frame, .. } = next(&mut stream, Duration::ZERO, output(0.0)) else {
             panic!("missing frame")
         };
         assert_eq!(frame.generation, generation);
+        for (&actual, &expected) in frame.pixels[..4].iter().zip(expected) {
+            assert!(
+                actual.abs_diff(expected) <= 3,
+                "source {path:?} returned the wrong pixels"
+            );
+        }
         drop(frame);
         stream.close();
         closed.push((stream.memory_budget(), stream.worker.take().unwrap()));

@@ -1434,7 +1434,9 @@ float4 blur_composite_fragment(BlurCompositeFragmentInput input): SV_Target {
     // maps screen pixel p to half-res texel p/2 at every window size, so it doesn't wobble on resize.
     uint hw, hh;
     t_sprite.GetDimensions(hw, hh);
-    float2 uv = input.position.xy / (2.0 * float2(hw, hh));
+    // Clip-only groups retain full resolution; blurred groups use the fixed 2:1 grid.
+    float source_scale = blur_downsample > 0.5 ? 2.0 : 1.0;
+    float2 uv = input.position.xy / (source_scale * float2(hw, hh));
     float4 blurred = t_sprite.SampleLevel(s_sprite, uv, 0.0);
     Corners radii;
     radii.top_left = blur_corner_radii.x;

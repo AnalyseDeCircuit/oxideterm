@@ -2433,7 +2433,7 @@ impl WgpuRendererCore {
                                     ],
                                     max_blur_radius(&boundary.filters),
                                     boundary.opacity,
-                                    false,
+                                    boundary.clip_rounded,
                                 );
                                 current_target = parent;
                                 pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2672,9 +2672,6 @@ impl WgpuRendererCore {
     ) {
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
-        if sigma <= 0.0 {
-            return;
-        }
         // Span ±3σ. If that needs more than 32 taps, spread the taps apart (tap_step > 1) rather
         // than truncating the kernel — keeps very large radii from clipping (review #6).
         let ideal_taps = (3.0 * sigma).ceil();
@@ -2703,7 +2700,7 @@ impl WgpuRendererCore {
             .min(hh))
         .max(y0);
         let scissor = [x0, y0, x1 - x0, y1 - y0];
-        if scissor[2] == 0 || scissor[3] == 0 {
+        if sigma > 0.0 && (scissor[2] == 0 || scissor[3] == 0) {
             return;
         }
 
@@ -2719,51 +2716,53 @@ impl WgpuRendererCore {
             }
         };
 
-        // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
-        self.run_blur_pass(
-            encoder,
-            "blur_downsample",
-            &self.resources().pipelines.blur_downsample,
-            &ping,
-            source,
-            BlurParams {
-                downsample: 1.0,
-                ..Default::default()
-            },
-            scissor,
-        );
-        self.run_blur_pass(
-            encoder,
-            "blur_horizontal",
-            &self.resources().pipelines.blur,
-            &pong,
-            &ping,
-            BlurParams {
-                direction: [1.0 / blur_width, 0.0],
-                sigma,
-                tap_count,
-                tap_step,
-                ..Default::default()
-            },
-            scissor,
-        );
-        self.run_blur_pass(
-            encoder,
-            "blur_vertical",
-            &self.resources().pipelines.blur,
-            &ping,
-            &pong,
-            BlurParams {
-                direction: [0.0, 1.0 / blur_height],
-                sigma,
-                tap_count,
-                tap_step,
-                ..Default::default()
-            },
-            scissor,
-        );
-
-        // Composite the blurred result into the target (loads existing content). For content blur
+        // Clip-only layers preserve full-resolution pixels.
+        if sigma > 0.0 {
+            // Downsample source -> ping, then separable gaussian ping -> pong -> ping.
+            self.run_blur_pass(
+                encoder,
+                "blur_downsample",
+                &self.resources().pipelines.blur_downsample,
+                &ping,
+                source,
+                BlurParams {
+                    downsample: 1.0,
+                    ..Default::default()
+                },
+                scissor,
+            );
+            self.run_blur_pass(
+                encoder,
+                "blur_horizontal",
+                &self.resources().pipelines.blur,
+                &pong,
+                &ping,
+                BlurParams {
+                    direction: [1.0 / blur_width, 0.0],
+                    sigma,
+                    tap_count,
+                    tap_step,
+                    ..Default::default()
+                },
+                scissor,
+            );
+            self.run_blur_pass(
+                encoder,
+                "blur_vertical",
+                &self.resources().pipelines.blur,
+                &ping,
+                &pong,
+                BlurParams {
+                    direction: [0.0, 1.0 / blur_height],
+                    sigma,
+                    tap_count,
+                    tap_step,
+                    ..Default::default()
+                },
+                scissor,
+            );
+        }
+        // Composite the result into the target (loads existing content). For content blur
         // the quad covers the dilated region so the blur can fade out past the element box (no
         // sharp clip); for backdrop the quad is the element bounds and the shader clips to the
         // rounded rect.
@@ -2778,9 +2777,11 @@ impl WgpuRendererCore {
             corner_radii,
             opacity,
             clip_rounded: if clip_rounded { 1.0 } else { 0.0 },
+            downsample: if sigma > 0.0 { 1.0 } else { 0.0 },
             ..Default::default()
         };
-        let bind_group = self.make_blur_bind_group(params, &ping);
+        let bind_group =
+            self.make_blur_bind_group(params, if sigma > 0.0 { &ping } else { source });
         let resources = self.resources();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("blur_composite"),
