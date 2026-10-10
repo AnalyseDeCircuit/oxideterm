@@ -359,6 +359,7 @@ impl RemoteDesktopSessionEntity {
                             capabilities.vendor_file_upload == NegotiatedCapabilityStatus::Supported
                         }));
             if files_enabled {
+                self.last_clipboard_files = Some(gpui::hash(&paths));
                 self.send_request(RemoteDesktopHelperRequest::ClipboardFiles {
                     transfer_id: uuid::Uuid::new_v4().to_string(),
                     paths,
@@ -451,6 +452,11 @@ impl WorkspaceApp {
         let Some(button) = remote_desktop_mouse_button_from_gpui(button) else {
             return false;
         };
+        if state == RemoteDesktopMouseButtonState::Pressed
+            && let Some(session) = self.remote_desktop_session_entity(tab_id, cx)
+        {
+            session.update(cx, |session, cx| session.sync_local_file_clipboard(cx));
+        }
         self.handle_remote_desktop_mouse_button(tab_id, position, button, state, cx)
     }
 

@@ -111,6 +111,9 @@ impl RemoteDesktopSessionEntity {
     pub(super) fn bind_window(&mut self, window_handle: AnyWindowHandle) {
         let window_changed = self.window_handle != window_handle;
         self.window_handle = window_handle;
+        if window_changed {
+            self.clipboard_activation = None;
+        }
         if window_changed && let Some(worker_wake) = self.worker_wake.as_ref() {
             // A wake may have targeted the old window during handoff. Store
             // one fresh permit without polling render.
@@ -119,6 +122,7 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn shutdown_worker(&mut self) {
+        self.last_clipboard_files = None;
         self.reset_vnc_file_browser_connection();
         if let Some(mut worker) = self.worker.take() {
             worker.shutdown();
@@ -318,6 +322,7 @@ impl RemoteDesktopSessionEntity {
                         RemoteDesktopHelperEvent::ClipboardFilesReady { paths, .. }
                             if self.profile.session_options.clipboard.files =>
                         {
+                            self.last_clipboard_files = Some(gpui::hash(&paths));
                             self.observe_desktop(
                                 oxideterm_audit::AuditCategory::File,
                                 "desktop_file_transfer",
@@ -518,6 +523,9 @@ impl RemoteDesktopSessionEntity {
                             self.state.apply_event(event);
                             if connection_established {
                                 self.mark_connection_established();
+                                if window.is_window_active() {
+                                    self.sync_local_file_clipboard(cx);
+                                }
                             }
                             let retired_images = self.state.take_retired_images();
                             let retired_textures = self.state.take_retired_textures();
@@ -1161,6 +1169,9 @@ impl RemoteDesktopSessionEntity {
 
     fn set_frame_visibility(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.ui_frame_visible = visible;
+        if !visible {
+            self.clipboard_activation = None;
+        }
         self.apply_frame_visibility(cx);
     }
 
@@ -2513,6 +2524,116 @@ mod tests {
             drop(session);
             cx.cx.run_until_parked();
         }
+    }
+
+    #[gpui::test]
+    fn rdp_activation_announces_files_without_paste_and_does_not_echo_remote_files(
+        cx: &mut TestAppContext,
+    ) {
+        let window = cx.add_empty_window();
+        window.deactivate_window();
+        window.run_until_parked();
+        let (tx, rx) = mpsc::channel();
+        let local_path = PathBuf::from("/tmp/local clipboard file.txt");
+        let session = window.update(|window, cx| {
+            let mut profile = preview_remote_desktop_profile(RemoteDesktopProtocol::Rdp);
+            profile.session_options.clipboard.files = true;
+            let provider = builtin_preview_provider_registry()
+                .unwrap()
+                .get_for_protocol(RemoteDesktopProtocol::Rdp)
+                .unwrap()
+                .clone();
+            let session = cx.new(|_| {
+                let mut session = RemoteDesktopSessionEntity::new(
+                    TabId(71),
+                    profile,
+                    provider,
+                    None,
+                    PathBuf::new(),
+                    RemoteDesktopFrameDeliverySlot::new(),
+                    window.window_handle(),
+                );
+                session.worker = Some(RemoteDesktopWorkerOwner {
+                    request_tx: Some(tx),
+                    worker_thread: None,
+                });
+                session.ui_frame_visible = true;
+                session.state.apply_event(RemoteDesktopHelperEvent::Status {
+                    status: RemoteDesktopSessionStatus::Connected,
+                    message: None,
+                });
+                session
+            });
+            cx.write_to_clipboard(ClipboardItem {
+                entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                    vec![local_path.clone()].into(),
+                ))],
+            });
+            session.update(cx, |session, cx| session.bind_file_clipboard(window, cx));
+            session
+        });
+        assert!(
+            rx.try_recv().is_err(),
+            "an inactive window must not publish local files"
+        );
+        window.update(|window, _| window.activate_window());
+        window.run_until_parked();
+        match rx.try_recv().unwrap() {
+            RemoteDesktopHelperRequest::ClipboardFiles { paths, .. } => {
+                assert_eq!(paths, [local_path])
+            }
+            _ => panic!("activation must advertise files without injecting a paste shortcut"),
+        }
+        window.update(|_, cx| {
+            session.update(cx, |session, cx| session.sync_local_file_clipboard(cx))
+        });
+        assert!(
+            rx.try_recv().is_err(),
+            "the same file selection must not be announced twice"
+        );
+
+        let remote_path = PathBuf::from("/tmp/downloaded remote file.txt");
+        window.update(|window, cx| {
+            session.update(cx, |session, cx| {
+                session
+                    .delivery_tx
+                    .send(RemoteDesktopWorkerDelivery::Event {
+                        tab_id: session.tab_id,
+                        generation: session.worker_generation,
+                        event: RemoteDesktopHelperEvent::ClipboardFilesReady {
+                            transfer_id: "remote-files".into(),
+                            paths: vec![remote_path.clone()],
+                        },
+                    })
+                    .unwrap();
+                session.poll_deliveries(window, cx);
+                assert_eq!(
+                    cx.read_from_clipboard()
+                        .and_then(|item| remote_desktop_clipboard_paths_from_item(&item)),
+                    Some(vec![remote_path])
+                );
+                session.sync_local_file_clipboard(cx);
+            })
+        });
+        assert!(
+            rx.try_recv().is_err(),
+            "downloaded files must not be echoed to their source"
+        );
+        window.update(|_, cx| {
+            session.update(cx, |session, cx| {
+                session.profile.session_options.clipboard.files = false;
+                cx.write_to_clipboard(ClipboardItem {
+                    entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                        vec![PathBuf::from("/tmp/not-shared.txt")].into(),
+                    ))],
+                });
+                session.sync_local_file_clipboard(cx);
+            })
+        });
+        assert!(
+            rx.try_recv().is_err(),
+            "disabled file sharing must block automatic announcements"
+        );
     }
 
     #[gpui::test]

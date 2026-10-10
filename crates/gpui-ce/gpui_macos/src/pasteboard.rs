@@ -169,7 +169,13 @@ impl Pasteboard {
                 [ClipboardEntry::Image(image)] => {
                     self.write_image(image);
                 }
-                [ClipboardEntry::ExternalPaths(_)] => {}
+                entries
+                    if entries
+                        .iter()
+                        .any(|entry| matches!(entry, ClipboardEntry::ExternalPaths(_))) =>
+                {
+                    self.write_file_paths(entries);
+                }
                 _ => {
                     // Agus NB: We're currently only writing string entries to the clipboard when we have more than one.
                     //
@@ -230,6 +236,27 @@ impl Pasteboard {
                 self.inner
                     .setData_forType(metadata_bytes, *self.metadata_type);
             }
+        }
+    }
+
+    fn write_file_paths(&self, entries: &[ClipboardEntry]) {
+        unsafe {
+            let paths: Vec<id> = entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    ClipboardEntry::ExternalPaths(paths) => Some(paths.paths()),
+                    _ => None,
+                })
+                .flatten()
+                .map(|path| ns_string(&path.to_string_lossy()))
+                .collect();
+            // Finder consumes a file-list property, not newline-separated path text.
+            // Declaring the file type removes stale text/image representations.
+            let types = NSArray::arrayWithObjects(nil, &[NSFilenamesPboardType]);
+            self.inner.declareTypes_owner(types, nil);
+            let files = NSArray::arrayWithObjects(nil, &paths);
+            self.inner
+                .setPropertyList_forType(files, NSFilenamesPboardType);
         }
     }
 
@@ -444,6 +471,41 @@ mod tests {
             }
             other => panic!("expected String, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn written_files_are_advertised_as_native_file_paths() {
+        autoreleasepool(|| {
+            let pasteboard = Pasteboard::unique();
+            pasteboard.write(ClipboardItem::new_string("old text".into()));
+            pasteboard.write(ClipboardItem {
+                entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(
+                    [
+                        PathBuf::from("/tmp/first file.txt"),
+                        PathBuf::from("/tmp/中文.png"),
+                    ]
+                    .into(),
+                ))],
+            });
+            unsafe {
+                let files = pasteboard.inner.propertyListForType(NSFilenamesPboardType);
+                assert_ne!(
+                    files, nil,
+                    "Finder needs a file list, not a text representation"
+                );
+                let paths: Vec<_> = files
+                    .iter()
+                    .map(|file| {
+                        CStr::from_ptr(NSString::UTF8String(file))
+                            .to_str()
+                            .unwrap()
+                            .to_owned()
+                    })
+                    .collect();
+                assert_eq!(paths, ["/tmp/first file.txt", "/tmp/中文.png"]);
+                assert_eq!(pasteboard.inner.stringForType(NSPasteboardTypeString), nil);
+            }
+        });
     }
 
     #[test]

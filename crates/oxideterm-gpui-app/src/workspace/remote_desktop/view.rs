@@ -570,6 +570,7 @@ impl WorkspaceApp {
                 .into_any_element();
         };
 
+        session_entity.update(cx, |session, cx| session.bind_file_clipboard(window, cx));
         let session = session_entity.read(cx);
         let geometry = session.geometry.clone();
         let certificate_challenge = session.certificate_challenge.clone();
@@ -589,9 +590,18 @@ impl WorkspaceApp {
             });
         });
         let desktop_surface = div()
+            .id(("remote-desktop-surface", tab_id.0))
             .min_h(px(0.0))
             .flex_1()
             .relative()
+            .on_hover({
+                let session = session_entity.clone();
+                move |hovered, window, cx| {
+                    if *hovered && window.is_window_active() {
+                        session.update(cx, |session, cx| session.sync_local_file_clipboard(cx));
+                    }
+                }
+            })
             .child(remote_desktop_surface_with_geometry(
                 &self.tokens,
                 &session.state,

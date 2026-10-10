@@ -3,6 +3,57 @@
 
 use super::*;
 
+impl RemoteDesktopSessionEntity {
+    pub(super) fn bind_file_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.profile.protocol != RemoteDesktopProtocol::Rdp
+            || !self.profile.session_options.clipboard.files
+            || !self.provider.capabilities.clipboard_files
+            || self.clipboard_activation.is_some()
+        {
+            return;
+        }
+        self.clipboard_activation =
+            Some(cx.observe_window_activation(window, |session, window, cx| {
+                if window.is_window_active() {
+                    session.sync_local_file_clipboard(cx);
+                }
+            }));
+        if window.is_window_active() {
+            self.sync_local_file_clipboard(cx);
+        }
+    }
+
+    pub(super) fn sync_local_file_clipboard(&mut self, cx: &App) {
+        if self.profile.protocol != RemoteDesktopProtocol::Rdp
+            || !self.profile.session_options.clipboard.files
+            || !self.provider.capabilities.clipboard_files
+            || !self.ui_frame_visible
+            || self.worker.is_none()
+            || self.state.snapshot().status != RemoteDesktopSessionStatus::Connected
+        {
+            return;
+        }
+        let paths = cx
+            .read_from_clipboard()
+            .and_then(|item| remote_desktop_clipboard_paths_from_item(&item));
+        let Some(paths) = paths else {
+            self.last_clipboard_files = None;
+            return;
+        };
+        let fingerprint = gpui::hash(&paths);
+        if self.last_clipboard_files == Some(fingerprint) {
+            return;
+        }
+        // Advertise files before the remote context menu opens, without injecting a paste key.
+        // Remember only a digest; remote-origin files use the same marker to prevent echo.
+        self.last_clipboard_files = Some(fingerprint);
+        self.send_request(RemoteDesktopHelperRequest::ClipboardFiles {
+            transfer_id: uuid::Uuid::new_v4().to_string(),
+            paths,
+        });
+    }
+}
+
 pub(super) fn remote_desktop_clipboard_data_from_item(
     item: &ClipboardItem,
 ) -> Option<RemoteDesktopClipboardData> {
