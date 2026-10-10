@@ -104,6 +104,7 @@ pub enum GeneratedBackgroundKind {
     #[default]
     Fog,
     Tide,
+    TideParticles,
     Meteor,
     Particles,
     Caustics,
@@ -242,6 +243,15 @@ impl PersistedSettings {
 #[cfg(test)]
 mod background_tests {
     use super::*;
+
+    #[test]
+    fn tide_particle_combination_uses_a_stable_settings_kind() {
+        let effect: GeneratedBackgroundSettings = serde_json::from_str(r#"{"kind":"tideParticles","strength":0.7,"speed":1.5}"#).unwrap();
+        assert_eq!(effect.kind, GeneratedBackgroundKind::TideParticles);
+        assert_eq!(effect.strength, 0.7);
+        assert_eq!(effect.speed, 1.5);
+        assert_eq!(serde_json::to_value(effect).unwrap()["kind"], "tideParticles");
+    }
 
     #[test]
     fn system_background_switching_preserves_each_source_and_fixed_settings() {

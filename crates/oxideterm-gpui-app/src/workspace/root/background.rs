@@ -275,6 +275,9 @@ pub(in crate::workspace) fn background_preferences_for_style(
                     oxideterm_settings::GeneratedBackgroundKind::Tide => {
                         oxideterm_gpui_background::GeneratedEffectKind::Tide
                     }
+                    oxideterm_settings::GeneratedBackgroundKind::TideParticles => {
+                        oxideterm_gpui_background::GeneratedEffectKind::TideParticles
+                    }
                     oxideterm_settings::GeneratedBackgroundKind::Meteor => {
                         oxideterm_gpui_background::GeneratedEffectKind::Meteor
                     }
@@ -301,6 +304,7 @@ pub(in crate::workspace) fn background_preferences_for_style(
                 roughness: effect.roughness,
                 direction: effect.direction,
                 particle_count: effect.particle_count,
+                preview_viewport: None,
             },
         );
     let path = match (&style.image, effect.is_some()) {

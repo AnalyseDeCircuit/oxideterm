@@ -15,7 +15,9 @@ mod scene;
 pub use scene::{CameraMotion, CameraPreferences, ScenePreferences, note_input_activity};
 
 pub use cache::{BackgroundImageRenderCache, BackgroundImageTargetSize, background_display_target};
-pub use effect::{GeneratedEffectKind, GeneratedEffectPreferences};
+pub use effect::{
+    GeneratedEffectKind, GeneratedEffectPreferences, MAX_EFFECT_DENSITY, MIN_EFFECT_DENSITY,
+};
 pub use layer::{background_image_layer, background_object_fit};
 pub use oxideterm_background_media::{BackgroundFit, PlaybackLimits};
 pub use player::{background_layer, is_streaming_source};

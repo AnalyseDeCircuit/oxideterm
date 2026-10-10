@@ -224,6 +224,13 @@ pub fn settings_appearance_theme_preview(
     let tab = |id: &'static str, label: String, target: ThemePreviewPage| {
         let on_select = on_select.clone();
         oxideterm_gpui_ui::tabs::tabs_trigger(tokens, label, page == target)
+            .when(window_background, |tab| {
+                tab.bg(if page == target {
+                    rgba((ui.bg << 8) | SETTINGS_BG_ACTIVE_SURFACE_ALPHA)
+                } else {
+                    rgba(0x00000000)
+                })
+            })
             .id(id)
             .debug_selector(move || id.into())
             .min_w_0()
@@ -251,8 +258,8 @@ pub fn settings_appearance_theme_preview(
         .rounded(px(tokens.radii.md))
         .border_1()
         .border_color(rgb(ui.border))
-        // GPUI overflow masks are rectangular. Only the outer shell paints the
-        // panel background; the contrasting content owns its bottom-right radius.
+        // Background media and effects share one rounded clip with the preview chrome.
+        .clip_rounded()
         .bg(rgb(ui.bg_panel))
         .text_size(px(tokens.metrics.ui_text_xs))
         .text_color(rgb(ui.text))
@@ -355,6 +362,7 @@ pub fn settings_appearance_theme_preview(
                             |body| {
                                 body.child(
                                     oxideterm_gpui_ui::tabs::tabs_list(tokens)
+                                        .when(window_background, |tabs| tabs.bg(rgba(0x00000000)))
                                         .rounded_none()
                                         .border_b_1()
                                         .border_color(rgb(ui.border))
@@ -422,7 +430,8 @@ fn settings_application_theme_sample(
             tokens.radii.md,
         )))
         .bg(if window_background {
-            rgba((tokens.ui.bg << 8) | (tokens.metrics.panel_vibrancy_alpha * 255.0) as u32)
+            // The composed window layer already supplies the preview's readability tint.
+            rgba(0x00000000)
         } else {
             rgb(tokens.ui.bg)
         })
@@ -524,10 +533,8 @@ fn settings_terminal_theme_sample(
             tokens.radii.md,
         )))
         .bg(if window_background {
-            rgba(
-                (terminal.background << 8)
-                    | (tokens.metrics.terminal_vibrancy_alpha * 255.0) as u32,
-            )
+            // Live terminal panes let the window background provide its own readability tint.
+            rgba(0x00000000)
         } else {
             rgb(terminal.background)
         })
@@ -643,6 +650,7 @@ pub fn settings_theme_editor_preview(
         // preview at its intrinsic height instead of letting flexbox collapse it.
         .flex_none()
         .rounded(px(tokens.radii.sm))
+        .clip_rounded()
         .border_1()
         .border_color(rgb(tokens.ui.border))
         .bg(rgb(terminal.background))
@@ -656,7 +664,7 @@ pub fn settings_theme_editor_preview(
                 .px(px(12.0))
                 .py(px(6.0))
                 .bg(if window_background {
-                    rgba((ui.bg_panel << 8) | (tokens.metrics.panel_vibrancy_alpha * 255.0) as u32)
+                    rgba(0x00000000)
                 } else {
                     rgb(ui.bg_panel)
                 })
@@ -745,7 +753,7 @@ pub fn settings_theme_editor_preview(
                 .border_t_1()
                 .border_color(rgb(ui.border))
                 .bg(if window_background {
-                    rgba((ui.bg << 8) | (tokens.metrics.panel_vibrancy_alpha * 255.0) as u32)
+                    rgba(0x00000000)
                 } else {
                     rgb(ui.bg)
                 })
@@ -1052,6 +1060,10 @@ pub fn settings_background_thumbnail_frame(
     let fallback_bg = tokens.ui.bg_sunken;
     let thumbnail_radius = tokens.radii.md;
     let image = img(image_source)
+        // An absolute image uses the resolved aspect-ratio frame height instead
+        // of contributing its intrinsic height and losing its lower corners to overflow.
+        .absolute()
+        .inset_0()
         .w_full()
         .h_full()
         .object_fit(ObjectFit::Cover)

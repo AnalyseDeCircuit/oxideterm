@@ -218,9 +218,19 @@ pub(crate) fn layer(
 }
 
 impl Scene {
-    fn moving(&self, window: &Window, cx: &App) -> bool {
+    fn supports_parallax(&self) -> bool {
         self.static_image
-            && !cx.reduce_motion()
+            || self.background.effect.is_some_and(|effect| {
+                matches!(
+                    effect.kind,
+                    crate::GeneratedEffectKind::Particles
+                        | crate::GeneratedEffectKind::TideParticles
+                )
+            })
+    }
+
+    fn moving(&self, window: &Window, cx: &App) -> bool {
+        !cx.reduce_motion()
             && window.is_window_active()
             && !self.dragging
             && !self.background.scene.paused
@@ -228,20 +238,27 @@ impl Scene {
 
     fn schedule(&mut self, visible: bool, window: &Window, cx: &mut Context<Self>) {
         let camera_active = self.moving(window, cx)
+            && self.static_image
             && self
                 .background
                 .scene
                 .camera
                 .is_some_and(|camera| camera.amount > 0.0);
-        self.camera_clock.set_running(
-            camera_active && visible && window.is_visible() && !window.is_minimized(),
-            cx.background_executor().now(),
-        );
+        let now = cx.background_executor().now();
+        if self.background.scene.paused {
+            self.camera_clock.pause_for_input(now);
+        } else {
+            self.camera_clock.set_running(
+                camera_active && visible && window.is_visible() && !window.is_minimized(),
+                now,
+            );
+        }
         if !visible || !window.is_visible() || window.is_minimized() || !window.is_window_active() {
             self.timer = None;
             return;
         }
         let parallax_active = self.background.scene.parallax
+            && self.supports_parallax()
             && self.moving(window, cx)
             && ((self.target.0 - self.offset.0).abs() + (self.target.1 - self.offset.1).abs()
                 > 0.01);
@@ -292,7 +309,7 @@ impl Scene {
         cx: &mut Context<Self>,
     ) {
         if (!self.background.scene.parallax && self.background.scene.camera.is_none())
-            || !self.static_image
+            || !self.supports_parallax()
             || cx.reduce_motion()
         {
             return;
@@ -351,7 +368,7 @@ impl Render for Scene {
         }
         self.background.scene.paused =
             self.background.scene.pause_on_input && self.input.read(cx).until.is_some();
-        if !self.background.scene.parallax || cx.reduce_motion() || !self.static_image {
+        if !self.background.scene.parallax || cx.reduce_motion() || !self.supports_parallax() {
             self.offset = (0.0, 0.0);
             self.target = (0.0, 0.0);
         }
@@ -370,7 +387,7 @@ impl Render for Scene {
                 .colors
                 .map(|base| mix_color(base, color, strength * 2.0));
         }
-        let offset = (background.scene.parallax && self.static_image && !cx.reduce_motion())
+        let offset = (background.scene.parallax && self.supports_parallax() && !cx.reduce_motion())
             .then_some(self.offset);
         let camera = background
             .scene
@@ -446,6 +463,7 @@ impl Render for Scene {
             .child(crate::player::composed_layer(
                 background,
                 self.image.clone(),
+                offset.filter(|_| self.static_image),
                 offset,
                 camera,
                 lighting,

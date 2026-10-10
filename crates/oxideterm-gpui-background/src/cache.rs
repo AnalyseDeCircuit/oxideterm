@@ -406,6 +406,7 @@ mod performance_probe {
                 roughness: 0.6,
                 direction: 25.0,
                 particle_count: 12,
+                preview_viewport: None,
             }),
             readability: None,
             limits: Default::default(),

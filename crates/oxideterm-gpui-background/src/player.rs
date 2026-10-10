@@ -1,3 +1,6 @@
+mod surface;
+use surface::media_layer;
+
 use crate::{
     BackgroundFit, BackgroundPreferences, PlaybackLimits, background_image_layer,
     clock::PlaybackClock,
@@ -42,15 +45,6 @@ struct Consumer {
     paused: bool,
 }
 
-struct Surface {
-    key: Option<SourceKey>,
-    background: BackgroundPreferences,
-    consumer: Rc<RefCell<Consumer>>,
-    player: Option<Entity<Player>>,
-    observation: Option<Subscription>,
-    previous: Option<Entity<Player>>,
-}
-
 struct TextureSlot {
     texture: Arc<DynamicTexture>,
     _lease: Arc<GpuLease>,
@@ -81,6 +75,8 @@ struct Player {
     active: bool,
     ended: bool,
     error: Option<MediaError>,
+    resource_retries: u8,
+    resource_retry: Option<Task<()>>,
     decode: Option<Task<()>>,
     timer: Option<Task<()>>,
     completion: Option<Task<()>>,
@@ -121,20 +117,20 @@ pub fn background_layer(
     {
         return crate::scene::layer(background, image, window, cx);
     }
-    composed_layer(background, image, None, None, None, window, cx)
+    composed_layer(background, image, None, None, None, None, window, cx)
 }
 
 pub(crate) fn composed_layer(
     background: BackgroundPreferences,
     image: Option<Arc<RenderImage>>,
     offset: Option<(f32, f32)>,
+    effect_offset: Option<(f32, f32)>,
     camera: Option<crate::scene::CameraTransform>,
     lighting: Option<(u32, f32)>,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     let paused = background.scene.paused;
-    let over_media = !background.path.as_os_str().is_empty() && background.opacity > 0.0;
     let effect = background.effect.filter(|effect| effect.strength > 0.0);
     let readability = background
         .readability
@@ -164,9 +160,19 @@ pub(crate) fn composed_layer(
         .overflow_hidden()
         .child(parallax_layer(media, offset, 1.0))
         .when_some(effect, |layer, effect| {
+            let particles = matches!(
+                effect.kind,
+                crate::GeneratedEffectKind::Particles | crate::GeneratedEffectKind::TideParticles
+            );
             layer.child(parallax_layer(
-                crate::effect::effect_layer(effect, paused, over_media, window, cx),
-                offset,
+                crate::effect::effect_layer(
+                    effect,
+                    paused,
+                    if particles { effect_offset } else { None },
+                    window,
+                    cx,
+                ),
+                if particles { None } else { effect_offset },
                 1.6,
             ))
         })
@@ -199,152 +205,6 @@ fn parallax_layer(layer: AnyElement, offset: Option<(f32, f32)>, depth: f32) -> 
         .into_any_element()
 }
 
-fn media_layer(
-    background: BackgroundPreferences,
-    image: Option<Arc<RenderImage>>,
-    window: &mut Window,
-    cx: &mut App,
-) -> AnyElement {
-    if background.path.as_os_str().is_empty() || background.opacity <= 0.0 {
-        return div().absolute().inset_0().into_any_element();
-    }
-    if !is_streaming_source(&background.path) {
-        return background_image_layer(background, image);
-    }
-    // Retain the view without forwarding every video frame notification to the workspace.
-    let surface = window
-        .use_keyed_state("streaming-background", cx, |_, cx| {
-            cx.new(|_| Surface {
-                key: None,
-                background: background.clone(),
-                consumer: Rc::default(),
-                player: None,
-                observation: None,
-                previous: None,
-            })
-        })
-        .read(cx)
-        .clone();
-    surface.update(cx, |surface, _| surface.background = background);
-    surface.into_any_element()
-}
-
-impl Render for Surface {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let gpu_processing = window
-            .gpu_specs()
-            .is_some_and(|specs| !specs.is_software_emulated);
-        let key = SourceKey {
-            window: window.window_handle().window_id(),
-            path: self.background.path.clone(),
-            // Hardware consumers share the decoded frame; cropping and blur belong to each surface.
-            fit: if gpu_processing {
-                BackgroundFit::Contain
-            } else {
-                self.background.fit
-            },
-            blur: if gpu_processing {
-                0
-            } else {
-                (self.background.blur * 1000.0).round().max(0.0) as u32
-            },
-            limits: self.background.limits,
-            gpu_processing,
-        };
-        if self.key.as_ref() != Some(&key) {
-            if let Some(previous) = self.player.take() {
-                self.consumer.borrow_mut().visible = false;
-                previous.update(cx, |player, _| {
-                    if !player
-                        .consumers
-                        .iter()
-                        .filter_map(Weak::upgrade)
-                        .any(|consumer| consumer.borrow().visible)
-                    {
-                        player.freeze();
-                    }
-                });
-                if previous.read(cx).current.is_some() {
-                    self.previous = Some(previous);
-                }
-            }
-            let existing = cx
-                .default_global::<Players>()
-                .0
-                .get(&key)
-                .and_then(WeakEntity::upgrade);
-            let player = existing.unwrap_or_else(|| {
-                let player = cx.new(|cx| {
-                    Player::new(key.clone(), self.background.on_failure.clone(), window, cx)
-                });
-                let players = &mut cx.default_global::<Players>().0;
-                players.retain(|_, player| player.upgrade().is_some());
-                players.insert(key.clone(), player.downgrade());
-                player
-            });
-            self.consumer = Rc::default();
-            player.update(cx, |player, _| {
-                player.consumers.push(Rc::downgrade(&self.consumer))
-            });
-            self.observation = Some(cx.observe(&player, |_, _, cx| cx.notify()));
-            self.player = Some(player);
-            self.key = Some(key);
-        }
-        let player = self.player.as_ref().expect("registered background").clone();
-        player.update(cx, |player, _| {
-            player.on_failure = self.background.on_failure.clone()
-        });
-        if player.read(cx).current.is_some() {
-            self.previous = None;
-        }
-        let previous = self.previous.clone();
-        let consumer = self.consumer.clone();
-        let paint_consumer = consumer.clone();
-        let opacity = self.background.opacity.clamp(0.0, 1.0);
-        let alignment = self.background.alignment;
-        let fit = self.background.fit;
-        let blur = self.background.blur;
-        let paused = self.background.scene.paused;
-        let paint_player = player.clone();
-        div()
-            .absolute()
-            .inset_0()
-            .overflow_hidden()
-            .opacity(opacity)
-            .child(
-                canvas(
-                    move |bounds, window, cx| {
-                        let scale = window.scale_factor();
-                        *consumer.borrow_mut() = Consumer {
-                            paused,
-                            width: (bounds.size.width.as_f32() * scale).ceil().max(1.0) as u32,
-                            height: (bounds.size.height.as_f32() * scale).ceil().max(1.0) as u32,
-                            visible: opacity > 0.0
-                                && bounds.intersects(&window.content_mask().bounds),
-                        };
-                        player.update(cx, |player, cx| player.sync(window, cx));
-                    },
-                    move |bounds, _, window, cx| {
-                        if !paint_consumer.borrow().visible {
-                            return;
-                        }
-                        if paint_player.read(cx).current.is_none()
-                            && let Some(previous) = &previous
-                        {
-                            previous.update(cx, |player, _| {
-                                player.paint_current(bounds, alignment, fit, blur, window)
-                            });
-                        }
-                        paint_player.update(cx, |player, cx| {
-                            player.paint(bounds, alignment, fit, blur, window, cx)
-                        });
-                    },
-                )
-                .size_full(),
-            )
-    }
-}
-
 impl Player {
     fn new(
         source: SourceKey,
@@ -370,6 +230,8 @@ impl Player {
             active: false,
             ended: false,
             error: None,
+            resource_retries: 0,
+            resource_retry: None,
             decode: None,
             timer: None,
             completion: None,
@@ -515,7 +377,7 @@ impl Player {
             match stream {
                 Ok(stream) => self.stream = Some(stream),
                 Err(error) => {
-                    self.fail(error);
+                    self.fail(error, cx);
                     return;
                 }
             }
@@ -545,10 +407,13 @@ impl Player {
                                 player.ended = true;
                                 player.stream = None;
                             }
-                            Some(MediaReply::Error(error)) => player.fail(error),
-                            None => player.fail(MediaError::Decode(
-                                "background worker stopped before replying".into(),
-                            )),
+                            Some(MediaReply::Error(error)) => player.fail(error, cx),
+                            None => player.fail(
+                                MediaError::Decode(
+                                    "background worker stopped before replying".into(),
+                                ),
+                                cx,
+                            ),
                         }
                         cx.notify();
                     });
@@ -686,6 +551,7 @@ impl Player {
                     }
                     self.native_lease = Some(lease);
                     self.current = Some(frame);
+                    self.resource_retries = 0;
                     self.info = self.candidate_info.take();
                     self.presented_at = self.clock.position(Instant::now());
                     self.renderer_generation = window.renderer_resource_generation();
@@ -707,6 +573,7 @@ impl Player {
             let upload = self.uploading.take().expect("completed upload");
             self.front = upload.slot;
             self.current = Some(upload.frame);
+            self.resource_retries = 0;
             self.native_lease = None;
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             {
@@ -741,7 +608,7 @@ impl Player {
             // Prepare the back texture before its deadline; flip only when its timestamp is due.
             let candidate = self.candidate.take().expect("decoded frame");
             if let Err(error) = self.upload(candidate, window, cx) {
-                self.fail(error);
+                self.fail(error, cx);
             }
         }
         self.paint_current(bounds, alignment, fit, blur, window);
@@ -851,6 +718,7 @@ impl Player {
     }
 
     fn stop(&mut self) {
+        self.resource_retry = None;
         self.stream = None;
         self.decode = None;
         self.timer = None;
@@ -873,6 +741,13 @@ impl Player {
     }
 
     fn freeze(&mut self) {
+        self.resource_retry = None;
+        if matches!(self.error, Some(MediaError::ResourceExhausted)) {
+            // Admission can recover while another source is selected, even after retries ran out.
+            // A returning consumer gets a fresh bounded attempt while the last frame stays visible.
+            self.error = None;
+            self.resource_retries = 0;
+        }
         self.stream = None;
         self.decode = None;
         self.timer = None;
@@ -1070,8 +945,27 @@ impl Player {
         }
     }
 
-    fn fail(&mut self, error: MediaError) {
+    fn fail(&mut self, error: MediaError, cx: &mut Context<Self>) {
         if self.error.is_some() {
+            return;
+        }
+        self.stream = None;
+        self.timer = None;
+        self.clock.set_running(false, Instant::now());
+        if matches!(error, MediaError::ResourceExhausted) && self.resource_retries < 3 {
+            // Cancelled decoders and submitted frames release their budgets asynchronously.
+            // Bound the wait so a source that cannot fit still reports its real failure.
+            let delay = Duration::from_millis(100 << self.resource_retries);
+            self.resource_retries += 1;
+            self.error = Some(error);
+            self.resource_retry = Some(cx.spawn(async move |player, cx| {
+                cx.background_executor().timer(delay).await;
+                let _ = player.update(cx, |player, cx| {
+                    player.resource_retry = None;
+                    player.error = None;
+                    cx.notify();
+                });
+            }));
             return;
         }
         if let Some(handler) = &self.on_failure {
@@ -1088,9 +982,6 @@ impl Player {
             handler(kind);
         }
         self.error = Some(error);
-        self.stream = None;
-        self.timer = None;
-        self.clock.set_running(false, Instant::now());
     }
 
     fn use_cpu_frames(&mut self, error: MediaError) {
@@ -1140,6 +1031,67 @@ impl Player {
 mod tests {
     use super::*;
     use gpui::{point, px, size};
+
+    #[gpui::test]
+    fn resource_pressure_reports_once_per_activation_after_bounded_retries(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let failures = Arc::new(AtomicUsize::new(0));
+        let reported = failures.clone();
+        let window = cx.add_empty_window();
+        let player = window.update(|window, cx| {
+            cx.new(|cx| {
+                Player::new(
+                    SourceKey {
+                        window: window.window_handle().window_id(),
+                        path: "resource-pressure.webp".into(),
+                        fit: BackgroundFit::Cover,
+                        blur: 0,
+                        limits: Default::default(),
+                        gpu_processing: false,
+                    },
+                    Some(Arc::new(move |failure| {
+                        assert!(matches!(
+                            failure,
+                            crate::BackgroundFailure::ResourceExhausted
+                        ));
+                        reported.fetch_add(1, Ordering::SeqCst);
+                    })),
+                    window,
+                    cx,
+                )
+            })
+        });
+        for activation in 1..=2 {
+            for delay in [100, 200, 400] {
+                player.update(&mut *window, |player, cx| {
+                    player.fail(MediaError::ResourceExhausted, cx)
+                });
+                window.run_until_parked();
+                assert_eq!(
+                    failures.load(Ordering::SeqCst),
+                    activation - 1,
+                    "temporary pressure must have time to clear"
+                );
+                window
+                    .executor()
+                    .advance_clock(Duration::from_millis(delay));
+                window.run_until_parked();
+            }
+            for _ in 0..2 {
+                player.update(&mut *window, |player, cx| {
+                    player.fail(MediaError::ResourceExhausted, cx)
+                });
+            }
+            assert_eq!(
+                failures.load(Ordering::SeqCst),
+                activation,
+                "persistent admission failures must be reported, without repeating notices"
+            );
+            player.update(&mut *window, |player, _| player.freeze());
+        }
+    }
 
     #[gpui::test]
     fn uploaded_frames_wait_for_their_deadline_and_paused_restores_do_not(

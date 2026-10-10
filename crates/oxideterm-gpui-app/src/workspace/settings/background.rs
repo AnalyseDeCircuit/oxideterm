@@ -19,7 +19,14 @@ impl WorkspaceApp {
                 1,
                 "bg_parallax",
                 terminal.background_parallax,
-                terminal.background_image.is_some() && !animated,
+                (terminal.background_image.is_some() && !animated)
+                    || terminal.background_effect.as_ref().is_some_and(|effect| {
+                        matches!(
+                            effect.kind,
+                            oxideterm_settings::GeneratedBackgroundKind::Particles
+                                | oxideterm_settings::GeneratedBackgroundKind::TideParticles
+                        )
+                    }),
             ),
             (
                 3,

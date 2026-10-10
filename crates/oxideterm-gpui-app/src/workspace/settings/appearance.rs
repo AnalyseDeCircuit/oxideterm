@@ -531,14 +531,13 @@ impl WorkspaceApp {
         selected: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let icon_path = crate::app_icon::app_icon_variant_resource_path(variant);
         let border_color = if selected {
             self.tokens.ui.accent
         } else {
             self.tokens.ui.border
         };
-        let image = img(icon_path)
-            .size(px(42.0))
+        let image = img(crate::app_icon::app_icon_preview_source(variant))
+            .size(px(crate::app_icon::APP_ICON_PREVIEW_SIZE))
             .object_fit(ObjectFit::Contain)
             .rounded(px(self.tokens.radii.md));
 
@@ -733,6 +732,10 @@ impl WorkspaceApp {
                             "settings_view.terminal.bg_source_tide",
                         ),
                         (
+                            Some(GeneratedBackgroundKind::TideParticles),
+                            "settings_view.terminal.bg_source_tide_particles",
+                        ),
+                        (
                             Some(GeneratedBackgroundKind::Meteor),
                             "settings_view.terminal.bg_source_meteor",
                         ),
@@ -825,6 +828,11 @@ impl WorkspaceApp {
             }
             GeneratedBackgroundKind::Fog => ("bg_fog_size", "bg_fog_concentration", "bg_fog_hint"),
             GeneratedBackgroundKind::Tide => ("bg_tide_width", "bg_fog_brightness", "bg_tide_hint"),
+            GeneratedBackgroundKind::TideParticles => (
+                "bg_tide_particles_size",
+                "bg_fog_brightness",
+                "bg_tide_particles_hint",
+            ),
             GeneratedBackgroundKind::Meteor => {
                 ("bg_meteor_length", "bg_fog_brightness", "bg_meteor_hint")
             }
@@ -909,7 +917,9 @@ impl WorkspaceApp {
                 effect.roughness * 100.0,
                 "%",
             )),
-            GeneratedBackgroundKind::Tide | GeneratedBackgroundKind::Meteor => Some((
+            GeneratedBackgroundKind::Tide
+            | GeneratedBackgroundKind::TideParticles
+            | GeneratedBackgroundKind::Meteor => Some((
                 SettingsSlider::BackgroundEffectDirection,
                 "bg_tide_direction",
                 0.0,
@@ -917,15 +927,9 @@ impl WorkspaceApp {
                 effect.direction,
                 "°",
             )),
-            GeneratedBackgroundKind::Particles => Some((
-                SettingsSlider::BackgroundParticleCount,
-                "bg_particles_count",
-                4.0,
-                24.0,
-                effect.particle_count as f32,
-                "",
-            )),
-            GeneratedBackgroundKind::Fog | GeneratedBackgroundKind::Caustics => None,
+            GeneratedBackgroundKind::Fog
+            | GeneratedBackgroundKind::Caustics
+            | GeneratedBackgroundKind::Particles => None,
         };
         if let Some((slider, key, min, max, value, unit)) = detail {
             rows.push(self.appearance_row(
@@ -938,6 +942,21 @@ impl WorkspaceApp {
                     max,
                     value,
                     unit,
+                    cx,
+                ),
+            ));
+        }
+        if effect.kind != GeneratedBackgroundKind::Mineral {
+            rows.push(self.appearance_row(
+                "settings_view.terminal.bg_field_density",
+                "settings_view.terminal.bg_field_density_hint",
+                self.appearance_slider_value_control(
+                    SettingsSlider::BackgroundParticleCount,
+                    SelectAnchorId::SettingsBackgroundParticleCount,
+                    oxideterm_gpui_background::MIN_EFFECT_DENSITY as f32,
+                    oxideterm_gpui_background::MAX_EFFECT_DENSITY as f32,
+                    effect.particle_count as f32,
+                    "",
                     cx,
                 ),
             ));
@@ -2716,6 +2735,7 @@ mod theme_preview_tests {
 
     struct Preview {
         page: ThemePreviewPage,
+        window_background: bool,
     }
 
     impl Render for Preview {
@@ -2733,8 +2753,14 @@ mod theme_preview_tests {
                 String::new(),
                 &I18n::new(oxideterm_i18n::Locale::En),
                 self.page,
-                None,
-                BackgroundScope::Content,
+                self.window_background.then(|| {
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .bg(rgb(0x406080))
+                        .into_any_element()
+                }),
+                BackgroundScope::Window,
                 move |page, _, cx| {
                     view.update(cx, |view, cx| {
                         view.page = page;
@@ -2752,6 +2778,7 @@ mod theme_preview_tests {
     ) {
         let (view, cx) = cx.add_window_view(|_, _| Preview {
             page: ThemePreviewPage::Terminal,
+            window_background: false,
         });
         cx.simulate_resize(gpui::size(px(800.0), px(500.0)));
         for (control, page, content, background) in [
@@ -2820,6 +2847,88 @@ mod theme_preview_tests {
                     "preview tabs must use the shared filled selection style"
                 );
             });
+        }
+    }
+
+    #[gpui::test]
+    fn window_background_is_visible_through_every_preview_page(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| Preview {
+            page: ThemePreviewPage::Terminal,
+            window_background: true,
+        });
+        cx.simulate_resize(gpui::size(px(800.), px(500.)));
+        for (page, selector) in [
+            (ThemePreviewPage::Terminal, "theme-preview-terminal-sample"),
+            (
+                ThemePreviewPage::Connections,
+                "theme-preview-connections-sample",
+            ),
+            (ThemePreviewPage::Sftp, "theme-preview-sftp-sample"),
+            (
+                ThemePreviewPage::NewConnection,
+                "theme-preview-new-connection-sample",
+            ),
+        ] {
+            view.update(cx, |view, cx| {
+                view.page = page;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let sample = cx.debug_bounds(selector).unwrap();
+            cx.update(|window, _| {
+                let point = sample.bottom_right() - gpui::point(px(24.), px(24.));
+                let point = point.map(|value| value.scale(window.scale_factor()));
+                let covering = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.bounds.contains(&point))
+                    .filter_map(|quad| quad.background.as_solid())
+                    .filter(|color| color.a > 0.)
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    covering.last(),
+                    Some(&gpui::Hsla::from(rgb(0x406080))),
+                    "{page:?} must not tint the already composed window background again"
+                );
+            });
+            if matches!(page, ThemePreviewPage::Terminal | ThemePreviewPage::Sftp) {
+                for (selector, target) in [
+                    ("theme-preview-terminal-tab", ThemePreviewPage::Terminal),
+                    ("theme-preview-sftp-tab", ThemePreviewPage::Sftp),
+                ] {
+                    let bounds = cx.debug_bounds(selector).unwrap();
+                    cx.update(|window, _| {
+                        let point = (bounds.origin + gpui::point(px(20.), bounds.size.height / 2.))
+                            .map(|value| value.scale(window.scale_factor()));
+                        let colors = window
+                            .painted_quads()
+                            .into_iter()
+                            .filter(|quad| quad.bounds.contains(&point))
+                            .filter_map(|quad| quad.background.as_solid())
+                            .filter(|color| color.a > 0.)
+                            .collect::<Vec<_>>();
+                        let background = gpui::Hsla::from(rgb(0x406080));
+                        let background_index = colors
+                            .iter()
+                            .position(|color| *color == background)
+                            .unwrap();
+                        let overlays = &colors[background_index + 1..];
+                        if page == target {
+                            assert_eq!(
+                                overlays,
+                                &[gpui::Hsla::from(rgba(0x10203066))],
+                                "selected tab keeps a translucent highlight"
+                            );
+                        } else {
+                            assert_eq!(
+                                overlays,
+                                &[],
+                                "inactive tab and tab strip must reveal the window background"
+                            );
+                        }
+                    });
+                }
+            }
         }
     }
 

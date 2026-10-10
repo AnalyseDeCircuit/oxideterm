@@ -91,6 +91,10 @@ impl Render for BackgroundPreview {
             return div().into_any_element();
         };
         preferences.scene.preview_hour = self.preview_hour;
+        if let Some(effect) = &mut preferences.effect {
+            let viewport = window.viewport_size();
+            effect.preview_viewport = Some((viewport.width.as_f32(), viewport.height.as_f32()));
+        }
         let target = self.target.unwrap_or_else(|| {
             background_display_target(
                 gpui::size(gpui::px(640.0), gpui::px(360.0)),

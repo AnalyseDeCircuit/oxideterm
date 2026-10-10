@@ -1155,7 +1155,10 @@ impl WorkspaceApp {
                     SettingsSlider::BackgroundEffectSpeed => (0.0, 300.0),
                     SettingsSlider::BackgroundEffectSize => (30.0, 200.0),
                     SettingsSlider::BackgroundEffectDirection => (0.0, 360.0),
-                    SettingsSlider::BackgroundParticleCount => (4.0, 24.0),
+                    SettingsSlider::BackgroundParticleCount => (
+                        oxideterm_gpui_background::MIN_EFFECT_DENSITY as f32,
+                        oxideterm_gpui_background::MAX_EFFECT_DENSITY as f32,
+                    ),
                     _ => (0.0, 100.0),
                 };
                 if let Some(value) = self.settings_slider_value_from_position(
