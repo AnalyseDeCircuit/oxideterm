@@ -90,6 +90,21 @@ fn decode_error(error: windows::core::Error) -> MediaError {
     MediaError::Decode(error.to_string())
 }
 
+fn default_stride(format: &IMFMediaType, width: u32) -> windows::core::Result<i32> {
+    unsafe {
+        match format.GetUINT32(&MF_MT_DEFAULT_STRIDE) {
+            Ok(stride) => Ok(stride as i32),
+            Err(error) if error.code() == MF_E_ATTRIBUTENOTFOUND => {
+                // MF may omit the minimum stride after RGB conversion. IMFMediaBuffer::Lock
+                // exposes contiguous pixels, so the subtype and width define their stride.
+                let subtype = format.GetGUID(&MF_MT_SUBTYPE)?;
+                MFGetStrideForBitmapInfoHeader(subtype.data1, width)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
 impl VideoDecoder {
     pub fn open(
         path: &Path,
@@ -212,9 +227,7 @@ impl VideoDecoder {
             let stride = if device.is_some() {
                 0
             } else {
-                format
-                    .GetUINT32(&MF_MT_DEFAULT_STRIDE)
-                    .map_err(decode_error)? as i32
+                default_stride(&format, raw_width).map_err(decode_error)?
             };
             let rate = native.GetUINT64(&MF_MT_FRAME_RATE).map_err(decode_error)?;
             let numerator = (rate >> 32) as u32;
@@ -459,6 +472,34 @@ impl VideoDecoder {
                     duration,
                 }));
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_output_accepts_missing_stride_and_preserves_explicit_orientation() {
+        let _runtime = MediaFoundation::new().unwrap();
+        unsafe {
+            let format = MFCreateMediaType().unwrap();
+            format
+                .SetGUID(&MF_MT_SUBTYPE, &MFVideoFormat_RGB32)
+                .unwrap();
+            assert_eq!(default_stride(&format, 64).unwrap().unsigned_abs(), 256);
+            for stride in [256_i32, -256_i32] {
+                format
+                    .SetUINT32(&MF_MT_DEFAULT_STRIDE, stride as u32)
+                    .unwrap();
+                assert_eq!(default_stride(&format, 64).unwrap(), stride);
+            }
+            // A malformed attribute is a real error, not an omitted optional value.
+            format
+                .SetGUID(&MF_MT_DEFAULT_STRIDE, &MFVideoFormat_RGB32)
+                .unwrap();
+            assert!(default_stride(&format, 64).is_err());
         }
     }
 }
