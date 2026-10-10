@@ -791,6 +791,7 @@ pub(crate) enum BackgroundTag {
     LinearGradient = 1,
     PatternSlash = 2,
     Checkerboard = 3,
+    ProceduralNoise = 4,
 }
 
 /// A color space for color interpolation.
@@ -849,6 +850,7 @@ impl std::fmt::Debug for Background {
                 "Checkerboard({:?}, {})",
                 self.solid, self.gradient_angle_or_pattern_height
             ),
+            BackgroundTag::ProceduralNoise => write!(f, "ProceduralNoise({:?})", self.kind()),
         }
     }
 }
@@ -889,6 +891,34 @@ pub fn checkerboard(color: impl Into<Hsla>, size: f32) -> Background {
         tag: BackgroundTag::Checkerboard,
         solid: color.into(),
         gradient_angle_or_pattern_height: size,
+        ..Default::default()
+    }
+}
+
+/// Creates a stationary grain field with a slowly moving highlight.
+/// Grain size is in renderer pixels; callers account for their window's scale factor.
+pub fn procedural_noise(
+    colors: [Hsla; 2],
+    grain_size: f32,
+    roughness: f32,
+    phase: f32,
+    sheen: f32,
+) -> Background {
+    // The tagged transfer record has two color/parameter slots. Noise uses their
+    // scalar components for roughness and phase, and the unused solid hue for
+    // sheen. Opacity changes only alpha, preserving these parameters and the GPU layout.
+    Background {
+        tag: BackgroundTag::ProceduralNoise,
+        solid: Hsla {
+            h: sheen.clamp(0.0, 1.0),
+            ..Hsla::default()
+        }
+        .into(),
+        gradient_angle_or_pattern_height: grain_size.max(1.0),
+        colors: [
+            linear_color_stop(colors[0], roughness.clamp(0.0, 1.0)),
+            linear_color_stop(colors[1], phase),
+        ],
         ..Default::default()
     }
 }
@@ -959,6 +989,19 @@ impl LinearColorStop {
 /// What a [`Background`] paints, decoded from its packed representation.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BackgroundKind {
+    /// A two-color grain field with a moving highlight.
+    ProceduralNoise {
+        /// The two field colors.
+        colors: [Hsla; 2],
+        /// The grain size in renderer pixels.
+        grain_size: f32,
+        /// The amount of fine texture, in `0.0..=1.0`.
+        roughness: f32,
+        /// The continuous highlight phase in radians.
+        phase: f32,
+        /// The strength of the moving highlight, in `0.0..=1.0`.
+        sheen: f32,
+    },
     /// A flat color.
     Solid(Hsla),
     /// A linear gradient between two color stops.
@@ -995,6 +1038,7 @@ impl Background {
             BackgroundTag::LinearGradient => 1,
             BackgroundTag::PatternSlash => 2,
             BackgroundTag::Checkerboard => 3,
+            BackgroundTag::ProceduralNoise => 4,
         };
         let color_space = match self.color_space {
             ColorSpace::Srgb => 0,
@@ -1041,6 +1085,13 @@ impl Background {
                 color: self.solid.into(),
                 size: self.gradient_angle_or_pattern_height,
             },
+            BackgroundTag::ProceduralNoise => BackgroundKind::ProceduralNoise {
+                colors: [self.colors[0].color.into(), self.colors[1].color.into()],
+                grain_size: self.gradient_angle_or_pattern_height,
+                roughness: self.colors[0].percentage,
+                phase: self.colors[1].percentage,
+                sheen: self.solid.h,
+            },
         }
     }
 
@@ -1073,7 +1124,9 @@ impl Background {
     pub fn is_transparent(&self) -> bool {
         match self.tag {
             BackgroundTag::Solid => self.solid.a == 0.,
-            BackgroundTag::LinearGradient => self.colors.iter().all(|c| c.color.a == 0.),
+            BackgroundTag::LinearGradient | BackgroundTag::ProceduralNoise => {
+                self.colors.iter().all(|c| c.color.a == 0.)
+            }
             BackgroundTag::PatternSlash => self.solid.a == 0.,
             BackgroundTag::Checkerboard => self.solid.a == 0.,
         }

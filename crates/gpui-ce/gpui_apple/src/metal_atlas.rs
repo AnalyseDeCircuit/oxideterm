@@ -22,16 +22,30 @@ const MAX_ATLAS_SIZE: Size<DevicePixels> = Size {
     height: DevicePixels(16384),
 };
 
-pub struct MetalAtlas(Mutex<AtlasState<MetalAtlasTextures>>);
+pub struct MetalAtlas(
+    Mutex<AtlasState<MetalAtlasTextures>>,
+    Mutex<Vec<gpui::GpuSubmission>>,
+    Mutex<Vec<StreamUpload>>,
+);
+
+struct StreamUpload {
+    texture: AtlasTextureId,
+    bounds: Bounds<DevicePixels>,
+    bytes: Vec<u8>,
+}
 
 impl MetalAtlas {
     pub(crate) fn new(device: Device, is_apple_gpu: bool) -> Self {
-        MetalAtlas(Mutex::new(AtlasState::new(MetalAtlasTextures {
-            device: AssertSend(device),
-            is_apple_gpu,
-            monochrome_textures: Default::default(),
-            polychrome_textures: Default::default(),
-        })))
+        MetalAtlas(
+            Mutex::new(AtlasState::new(MetalAtlasTextures {
+                device: AssertSend(device),
+                is_apple_gpu,
+                monochrome_textures: Default::default(),
+                polychrome_textures: Default::default(),
+            })),
+            Mutex::new(Vec::new()),
+            Mutex::new(Vec::new()),
+        )
     }
 
     /// Returns the GPU texture backing `id`, or `None` once every tile in it
@@ -40,6 +54,62 @@ impl MetalAtlas {
     /// callers must skip those sprites rather than assume the texture exists.
     pub(crate) fn metal_texture(&self, id: AtlasTextureId) -> Option<metal::Texture> {
         Some(self.0.lock().backend.texture(id)?.metal_texture.clone())
+    }
+
+    pub(crate) fn take_gpu_submissions(&self) -> Vec<gpui::GpuSubmission> {
+        std::mem::take(&mut *self.1.lock())
+    }
+
+    pub(crate) fn encode_stream_uploads(&self, command: &metal::CommandBufferRef) {
+        let uploads = std::mem::take(&mut *self.2.lock());
+        if uploads.is_empty() {
+            return;
+        }
+        let lock = self.0.lock();
+        let encoder = command.new_blit_command_encoder();
+        for upload in uploads {
+            let Some(texture) = lock.backend.texture(upload.texture) else {
+                continue;
+            };
+            let width = upload.bounds.size.width.0 as u64;
+            let height = upload.bounds.size.height.0 as u64;
+            let pitch = (width * 4).div_ceil(256) * 256;
+            let buffer = lock
+                .backend
+                .device
+                .new_buffer(pitch * height, metal::MTLResourceOptions::StorageModeShared);
+            // Buffer rows are aligned for discrete Macs as well as Apple Silicon.
+            unsafe {
+                for y in 0..height as usize {
+                    std::ptr::copy_nonoverlapping(
+                        upload.bytes.as_ptr().add(y * width as usize * 4),
+                        buffer.contents().cast::<u8>().add(y * pitch as usize),
+                        width as usize * 4,
+                    );
+                }
+            }
+            encoder.copy_from_buffer_to_texture(
+                &buffer,
+                0,
+                pitch,
+                pitch * height,
+                metal::MTLSize {
+                    width,
+                    height,
+                    depth: 1,
+                },
+                &texture.metal_texture,
+                0,
+                0,
+                metal::MTLOrigin {
+                    x: upload.bounds.origin.x.0 as u64,
+                    y: upload.bounds.origin.y.0 as u64,
+                    z: 0,
+                },
+                metal::MTLBlitOption::None,
+            );
+        }
+        encoder.end_encoding();
     }
 }
 
@@ -51,6 +121,53 @@ struct MetalAtlasTextures {
 }
 
 impl PlatformAtlas for MetalAtlas {
+    fn stream_gpu_staging_bytes(&self, size: Size<DevicePixels>) -> Result<usize> {
+        let width = usize::try_from(size.width.0)?;
+        let height = usize::try_from(size.height.0)?;
+        width
+            .checked_mul(4)
+            .and_then(|row| row.div_ceil(256).checked_mul(256))
+            .and_then(|row| row.checked_mul(height))
+            .context("stream upload size overflow")
+    }
+
+    fn stream_upload_staging_bytes(&self, size: Size<DevicePixels>) -> Result<usize> {
+        let packed = usize::try_from(size.width.0)?
+            .checked_mul(usize::try_from(size.height.0)?)
+            .and_then(|n| n.checked_mul(4))
+            .context("stream upload size overflow")?;
+        packed
+            .checked_add(self.stream_gpu_staging_bytes(size)?)
+            .context("stream upload size overflow")
+    }
+
+    fn update_stream(
+        &self,
+        key: &AtlasKey,
+        bounds: Bounds<DevicePixels>,
+        bytes: &[u8],
+    ) -> Result<()> {
+        let lock = self.0.lock();
+        let tile = lock
+            .tile(key)
+            .context("stream texture was retired before upload")?;
+        self.2.lock().push(StreamUpload {
+            texture: tile.texture_id,
+            bounds: Bounds {
+                origin: tile.bounds.origin + bounds.origin,
+                size: bounds.size,
+            },
+            bytes: bytes.to_vec(),
+        });
+        Ok(())
+    }
+
+    fn gpu_submission(&self) -> Result<gpui::GpuSubmission> {
+        let submission = gpui::GpuSubmission::default();
+        self.1.lock().push(submission.clone());
+        Ok(submission)
+    }
+
     fn get_or_insert_with<'a>(
         &self,
         key: AtlasKey,
@@ -81,7 +198,20 @@ impl PlatformAtlas for MetalAtlas {
     }
 
     fn remove(&self, key: &AtlasKey) {
+        if let Some(tile) = self.0.lock().tile(key) {
+            self.2
+                .lock()
+                .retain(|upload| upload.texture != tile.texture_id);
+        }
         self.0.lock().remove(key);
+    }
+}
+
+impl Drop for MetalAtlas {
+    fn drop(&mut self) {
+        for submission in self.1.get_mut().drain(..) {
+            submission.complete();
+        }
     }
 }
 

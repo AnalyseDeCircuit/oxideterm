@@ -43,6 +43,10 @@ pub enum AppIconVariant {
 pub struct AppearanceSettings {
     pub theme: String,
     #[serde(default)]
+    pub follow_system_appearance: bool,
+    #[serde(default)]
+    pub system_themes: SystemThemeSettings,
+    #[serde(default)]
     pub app_icon: AppIconVariant,
     pub sidebar_collapsed_default: bool,
     pub ui_density: UiDensity,
@@ -65,6 +69,8 @@ impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             theme: DEFAULT_COLOR_THEME.to_string(),
+            follow_system_appearance: false,
+            system_themes: SystemThemeSettings::default(),
             app_icon: AppIconVariant::default(),
             sidebar_collapsed_default: false,
             ui_density: UiDensity::Comfortable,

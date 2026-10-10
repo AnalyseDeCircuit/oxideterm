@@ -103,6 +103,9 @@ impl From<Bounds<ScaledPixels>> for PodBounds {
 struct SurfaceParams {
     bounds: PodBounds,
     content_mask: PodBounds,
+    opacity: f32,
+    rotation: u32,
+    sample_size: [f32; 2],
 }
 
 /// Uniform passed to the blur pipelines. The same struct drives the downsample, separable
@@ -2198,6 +2201,8 @@ impl WgpuRendererCore {
         self.blur_params_slot.set(0);
         let instance_bindings = self.write_instances(scene, &mut instance_offset)?;
         self.prepare_texture_bind_groups(scene);
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let surface_bindings = self.surface_bindings(scene)?;
         let use_offscreen =
             !scene.backdrop_filters.is_empty() || !scene.filter_boundaries.is_empty();
 
@@ -2348,7 +2353,17 @@ impl WgpuRendererCore {
                             &mut pass,
                         )?;
                     }
-                    PrimitiveBatch::Surfaces(_) => {}
+                    PrimitiveBatch::Surfaces(range) => {
+                        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+                        for binding in &surface_bindings[range] {
+                            pass.set_pipeline(&self.resources().pipelines.surfaces);
+                            pass.set_bind_group(0, &self.resources().globals_bind_group, &[]);
+                            pass.set_bind_group(1, binding, &[]);
+                            pass.draw(0..4, 0..1);
+                        }
+                        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+                        let _ = range;
+                    }
                     PrimitiveBatch::BackdropFilters(range) => {
                         // Interrupt the current pass, blur the content painted so far behind
                         // each backdrop's rounded rect, then resume drawing on top.
@@ -2448,10 +2463,95 @@ impl WgpuRendererCore {
             self.blit_to_frame(&mut encoder, scene_color_view, &frame_view);
         }
 
-        Ok(self
+        let submissions = self.atlas.take_gpu_submissions();
+        let index = self
             .resources()
             .queue
-            .submit(std::iter::once(encoder.finish())))
+            .submit(std::iter::once(encoder.finish()));
+        if !submissions.is_empty() {
+            let progress = submissions.clone();
+            let device = self.resources().device.clone();
+            self.resources().queue.on_submitted_work_done(move || {
+                for submission in submissions {
+                    submission.complete();
+                }
+            });
+            // Completion must keep progressing even when the window closes or stops drawing.
+            std::thread::spawn(move || {
+                while progress.iter().any(|submission| !submission.is_complete()) {
+                    if device.poll(wgpu::PollType::Poll).is_err() {
+                        for submission in &progress {
+                            submission.complete();
+                        }
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(8));
+                }
+            });
+        }
+        Ok(index)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    fn surface_bindings(&self, scene: &Scene) -> Result<Vec<wgpu::BindGroup>> {
+        use wgpu::util::DeviceExt;
+        let resources = self.resources();
+        scene
+            .surfaces
+            .iter()
+            .map(|surface| {
+                let view = if let Some(view) = surface.texture.downcast_ref::<wgpu::TextureView>() {
+                    view.clone()
+                } else {
+                    surface
+                        .texture
+                        .downcast_ref::<wgpu::Texture>()
+                        .context("invalid native wgpu surface")?
+                        .create_view(&Default::default())
+                };
+                let params = SurfaceParams {
+                    bounds: surface.bounds.into(),
+                    content_mask: surface.content_mask.bounds.into(),
+                    opacity: surface.opacity,
+                    rotation: surface.rotation,
+                    sample_size: [
+                        surface.sample_size.width.0 as f32,
+                        surface.sample_size.height.0 as f32,
+                    ],
+                };
+                // Each surface needs immutable parameters: multiple previews can share a texture in one pass.
+                let buffer =
+                    resources
+                        .device
+                        .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                            label: Some("native surface parameters"),
+                            contents: bytemuck::bytes_of(&params),
+                            usage: wgpu::BufferUsages::UNIFORM,
+                        });
+                Ok(resources
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("native surface"),
+                        layout: &resources.bind_group_layouts.surfaces,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(
+                                    &resources.surface_sampler,
+                                ),
+                            },
+                        ],
+                    }))
+            })
+            .collect()
     }
 
     fn ensure_blur_textures(&mut self) {
@@ -4378,7 +4478,7 @@ mod tests {
             order, pad, grayscale, opacity, bounds, content_mask, corner_radii, tile
         });
         assert_struct_layout!(&module, SurfaceParams => "SurfaceParams" {
-            bounds, content_mask
+            bounds, content_mask, opacity, rotation, sample_size
         });
         assert_struct_layout!(&module, BlurParams => "BlurParams" {
             bounds, content_mask, corner_radii, direction, sigma, opacity, tap_count, tap_step,

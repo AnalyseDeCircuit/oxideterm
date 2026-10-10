@@ -372,6 +372,8 @@ impl Default for TerminalSessionLogSettings {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
     pub theme: String,
+    #[serde(default)]
+    pub system_themes: SystemThemeSettings,
     pub font_family: FontFamily,
     pub custom_font_family: String,
     #[serde(default)]
@@ -445,6 +447,28 @@ pub struct TerminalSettings {
     pub background_opacity: f64,
     pub background_blur: i64,
     pub background_fit: BackgroundFit,
+    #[serde(default)]
+    pub background_alignment: BackgroundAlignment,
+    #[serde(default)]
+    pub background_effect: Option<GeneratedBackgroundSettings>,
+    #[serde(default)]
+    pub background_readability: f32,
+    #[serde(default)]
+    pub background_pause_on_input: bool,
+    #[serde(default)]
+    pub background_parallax: bool,
+    #[serde(default)]
+    pub background_camera: Option<BackgroundCameraSettings>,
+    #[serde(default)]
+    pub background_day_cycle: bool,
+    #[serde(default)]
+    pub system_backgrounds: SystemBackgroundSettings,
+    #[serde(default)]
+    pub background_max_width: Option<u32>,
+    #[serde(default)]
+    pub background_max_height: Option<u32>,
+    #[serde(default)]
+    pub background_max_fps: Option<u32>,
     #[serde(default)]
     pub background_scope: BackgroundScope,
     pub background_enabled_tabs: Vec<String>,
@@ -541,6 +565,7 @@ impl Default for TerminalSettings {
     fn default() -> Self {
         Self {
             theme: DEFAULT_COLOR_THEME.to_string(),
+            system_themes: SystemThemeSettings::default(),
             font_family: FontFamily::Jetbrains,
             custom_font_family: String::new(),
             cjk_font_family: String::new(),
@@ -585,6 +610,17 @@ impl Default for TerminalSettings {
             background_opacity: DEFAULT_TERMINAL_BACKGROUND_OPACITY,
             background_blur: 0,
             background_fit: BackgroundFit::Cover,
+            background_alignment: BackgroundAlignment::default(),
+            background_effect: None,
+            background_readability: 0.0,
+            background_pause_on_input: false,
+            background_parallax: false,
+            background_camera: None,
+            background_day_cycle: false,
+            system_backgrounds: SystemBackgroundSettings::default(),
+            background_max_width: None,
+            background_max_height: None,
+            background_max_fps: None,
             background_scope: BackgroundScope::Content,
             background_enabled_tabs: vec!["terminal".to_string(), "local_terminal".to_string()],
             semantic_coloring: false,

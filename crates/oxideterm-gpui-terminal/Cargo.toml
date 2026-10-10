@@ -18,6 +18,8 @@ async-channel.workspace = true
 chrono.workspace = true
 futures.workspace = true
 gpui.workspace = true
+oxideterm-background-media = { path = "../oxideterm-background-media" }
+oxideterm-gpui-background = { path = "../oxideterm-gpui-background" }
 image.workspace = true
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }

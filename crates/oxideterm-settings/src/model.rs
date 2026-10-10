@@ -8,6 +8,7 @@ use serde_json::{Map, Value, json};
 // Settings structs are split by settings page/semantic area, but remain
 // included from this module so serde field names and public exports do not move.
 include!("model/base.rs");
+include!("model/background.rs");
 include!("model/highlight.rs");
 include!("model/terminal.rs");
 include!("model/ui_connection.rs");

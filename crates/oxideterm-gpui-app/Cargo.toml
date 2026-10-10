@@ -16,6 +16,8 @@ name = "oxideterm-native"
 path = "src/main.rs"
 
 [dependencies]
+oxideterm-background-media = { path = "../oxideterm-background-media" }
+oxideterm-gpui-background = { path = "../oxideterm-gpui-background" }
 oxideterm-ftp = { path = "../oxideterm-ftp" }
 futures-util.workspace = true
 anyhow.workspace = true

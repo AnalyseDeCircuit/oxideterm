@@ -26,6 +26,7 @@ mod debug_overlay;
 mod element;
 mod elements;
 mod executor;
+mod gpu_submission;
 mod platform_scheduler;
 pub(crate) use platform_scheduler::PlatformScheduler;
 mod geometry;
@@ -115,6 +116,7 @@ pub use geometry::Anchor as Corner;
 pub use geometry::*;
 pub use gestures::*;
 pub use global::*;
+pub use gpu_submission::*;
 pub use gpui_macros::{
     AppContext, IntoElement, Render, VisualContext, bench, property_test, register_action, test,
 };

@@ -850,12 +850,18 @@ fragment float4 path_sprite_fragment(
 struct SurfaceVertexOutput {
   float4 position [[position]];
   float2 texture_position;
+  float opacity;
+  uint bgra [[flat]];
+  float2 sample_size;
   float clip_distance [[clip_distance]][4];
 };
 
 struct SurfaceFragmentInput {
   float4 position [[position]];
   float2 texture_position;
+  float opacity;
+  uint bgra [[flat]];
+  float2 sample_size;
 };
 
 vertex SurfaceVertexOutput surface_vertex(
@@ -875,10 +881,41 @@ vertex SurfaceVertexOutput surface_vertex(
   // We are going to copy the whole texture, so the texture position corresponds
   // to the current vertex of the unit triangle.
   float2 texture_position = unit_vertex;
+  float2 sample_size = float2(surface.sample_size.width, surface.sample_size.height);
+  if (surface.rotation == 90u) {
+    texture_position = float2(unit_vertex.y, 1.0 - unit_vertex.x);
+  } else if (surface.rotation == 180u) {
+    texture_position = 1.0 - unit_vertex;
+  } else if (surface.rotation == 270u) {
+    texture_position = float2(1.0 - unit_vertex.y, unit_vertex.x);
+  }
+  if (surface.rotation == 90u || surface.rotation == 270u) {
+    sample_size = sample_size.yx;
+  }
   return SurfaceVertexOutput{
       device_position,
       texture_position,
+      surface.opacity,
+      surface.bgra,
+      sample_size,
       {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+}
+
+float4 sample_video_surface(texture2d<float> texture, float2 uv, float2 sample_size) {
+  constexpr sampler linear_sampler(mag_filter::linear, min_filter::linear, address::clamp_to_edge);
+  if (all(sample_size >= float2(texture.get_width(), texture.get_height()))) {
+    return texture.sample(linear_sampler, uv);
+  }
+  // Reconstruct the requested output grid on the GPU, including explicit resolution limits.
+  float2 grid = uv * sample_size - 0.5;
+  float2 base = (floor(grid) + 0.5) / sample_size;
+  float2 step = 1.0 / sample_size;
+  float2 fraction = fract(grid);
+  float4 top = mix(texture.sample(linear_sampler, base),
+                   texture.sample(linear_sampler, base + float2(step.x, 0)), fraction.x);
+  float4 bottom = mix(texture.sample(linear_sampler, base + float2(0, step.y)),
+                      texture.sample(linear_sampler, base + step), fraction.x);
+  return mix(top, bottom, fraction.y);
 }
 
 fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
@@ -887,6 +924,11 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
                                  texture2d<float> cb_cr_texture
                                  [[texture(SurfaceInputIndex_CbCrTexture)]]) {
   constexpr sampler texture_sampler(mag_filter::linear, min_filter::linear);
+  if (input.bgra != 0u) {
+    float4 color = sample_video_surface(y_texture, input.texture_position, input.sample_size);
+    color.a *= input.opacity;
+    return color;
+  }
   const float4x4 ycbcrToRGBTransform =
       float4x4(float4(+1.0000f, +1.0000f, +1.0000f, +0.0000f),
                float4(+0.0000f, -0.3441f, +1.7720f, +0.0000f),
@@ -896,7 +938,9 @@ fragment float4 surface_fragment(SurfaceFragmentInput input [[stage_in]],
       y_texture.sample(texture_sampler, input.texture_position).r,
       cb_cr_texture.sample(texture_sampler, input.texture_position).rg, 1.0);
 
-  return ycbcrToRGBTransform * ycbcr;
+  float4 color = ycbcrToRGBTransform * ycbcr;
+  color.a *= input.opacity;
+  return color;
 }
 
 float4 hsla_to_rgba(Hsla hsla) {
@@ -1155,7 +1199,7 @@ GradientColor prepare_fill_color(uint tag, uint color_space, Hsla solid,
   GradientColor out;
   if (tag == 0 || tag == 2 || tag == 3) {
     out.solid = hsla_to_rgba(solid);
-  } else if (tag == 1) {
+  } else if (tag == 1 || tag == 4) {
     out.color0 = hsla_to_rgba(color0);
     out.color1 = hsla_to_rgba(color1);
 
@@ -1175,6 +1219,15 @@ float2x2 rotate2d(float angle) {
     float s = sin(angle);
     float c = cos(angle);
     return float2x2(c, -s, s, c);
+}
+
+float mineral_noise(float2 cell) {
+  uint2 p = uint2(floor(cell));
+  uint h = p.x * 0x9e3779b9u ^ p.y * 0x85ebca6bu;
+  h ^= h >> 16;
+  h *= 0x7feb352du;
+  h ^= h >> 15;
+  return float(h & 0xffffu) / 65535.0;
 }
 
 float4 fill_color(Background background,
@@ -1271,6 +1324,20 @@ float4 fill_color(Background background,
 
         color = solid_color;
         color.a *= saturate(should_be_colored);
+        break;
+    }
+    case 4: {
+        float2 local = position - float2(bounds.origin.x, bounds.origin.y);
+        float2 uv = local / float2(bounds.size.width, bounds.size.height);
+        float grain_size = background.gradient_angle_or_pattern_height;
+        float roughness = background.colors[0].percentage;
+        float phase = background.colors[1].percentage;
+        float grain = mineral_noise(local / grain_size);
+        float field = mineral_noise(local / (grain_size * 12.0));
+        float sheen = pow(sin(uv.x * 3.0 + uv.y * 1.7 + phase) * 0.5 + 0.5, 5.0);
+        float4 mixed = mix(color0, color1, field * 0.7 + grain * 0.3);
+        color = background.color_space == 1 ? oklab_to_srgb(mixed) : mixed;
+        color.a *= min(1.0, 0.08 + grain * roughness * 0.80 + sheen * background.solid.h * 0.38);
         break;
     }
   }

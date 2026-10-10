@@ -88,6 +88,10 @@ pub enum SettingsSelect {
     UpdateProxyProtocol,
     AppearanceTheme,
     AppearanceTerminalTheme,
+    AppearanceThemeLight,
+    AppearanceThemeDark,
+    AppearanceTerminalThemeLight,
+    AppearanceTerminalThemeDark,
     AppearanceDensity,
     AppearanceAnimation,
     AppearanceRenderProfile,
@@ -146,10 +150,34 @@ pub enum SettingsSelect {
 impl SettingsSelect {
     pub fn theme_target(self) -> Option<crate::ThemeTarget> {
         match self {
-            Self::AppearanceTheme => Some(crate::ThemeTarget::Application),
-            Self::AppearanceTerminalTheme => Some(crate::ThemeTarget::Terminal),
+            Self::AppearanceTheme | Self::AppearanceThemeLight | Self::AppearanceThemeDark => {
+                Some(crate::ThemeTarget::Application)
+            }
+            Self::AppearanceTerminalTheme
+            | Self::AppearanceTerminalThemeLight
+            | Self::AppearanceTerminalThemeDark => Some(crate::ThemeTarget::Terminal),
             _ => None,
         }
+    }
+
+    pub fn theme_system_dark(self) -> Option<bool> {
+        match self {
+            Self::AppearanceThemeLight | Self::AppearanceTerminalThemeLight => Some(false),
+            Self::AppearanceThemeDark | Self::AppearanceTerminalThemeDark => Some(true),
+            _ => None,
+        }
+    }
+
+    pub fn selected_theme_id(
+        self,
+        settings: &oxideterm_settings::PersistedSettings,
+    ) -> Option<&str> {
+        let target = self.theme_target()?;
+        Some(match self.theme_system_dark() {
+            Some(true) => &target.system_themes(settings).dark,
+            Some(false) => &target.system_themes(settings).light,
+            None => target.selected_id(settings),
+        })
     }
 }
 
@@ -170,6 +198,11 @@ pub enum SettingsInput {
     IdeFontSize,
     IdeLineHeight,
     AppearanceUiFont,
+    BackgroundMaxWidth,
+    BackgroundMaxHeight,
+    BackgroundMaxFps,
+    BackgroundEffectMaxFps,
+    BackgroundEffectColor(usize),
     LocalDefaultCwd,
     LocalGitBashPath,
     LocalOhMyPoshTheme,
@@ -309,6 +342,17 @@ pub enum SettingsSlider {
     AppearanceWindowOpacity,
     AppearanceBackgroundOpacity,
     AppearanceBackgroundBlur,
+    BackgroundReadability,
+    BackgroundEffectStrength,
+    BackgroundEffectSheen,
+    BackgroundEffectSpeed,
+    BackgroundEffectSize,
+    BackgroundEffectBrightness,
+    BackgroundEffectRoughness,
+    BackgroundEffectDirection,
+    BackgroundParticleCount,
+    BackgroundCameraAmount,
+    BackgroundCameraSpeed,
 }
 
 impl TerminalSettingsPage {
@@ -520,6 +564,16 @@ impl SettingsTab {
 }
 
 impl SettingsInput {
+    pub fn is_background(self) -> bool {
+        matches!(
+            self,
+            Self::BackgroundMaxWidth
+                | Self::BackgroundMaxHeight
+                | Self::BackgroundMaxFps
+                | Self::BackgroundEffectMaxFps
+                | Self::BackgroundEffectColor(_)
+        )
+    }
     pub fn accepts_newline(self) -> bool {
         // Keep multiline behavior beside the input identity so IME handling and
         // render controls cannot drift when new settings fields are added.
@@ -571,6 +625,11 @@ impl SettingsInput {
             Self::IdeFontSize => 3,
             Self::IdeLineHeight => 4,
             Self::AppearanceUiFont => 5,
+            Self::BackgroundMaxWidth => 33_001,
+            Self::BackgroundMaxHeight => 33_002,
+            Self::BackgroundMaxFps => 33_003,
+            Self::BackgroundEffectMaxFps => 33_006,
+            Self::BackgroundEffectColor(index) => 33_004 + index as u64,
             Self::LocalDefaultCwd => 6,
             Self::LocalGitBashPath => 7,
             Self::LocalOhMyPoshTheme => 8,

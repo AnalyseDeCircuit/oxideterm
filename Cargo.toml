@@ -1,5 +1,7 @@
 [workspace]
 members = [
+  "crates/oxideterm-background-media",
+  "crates/oxideterm-gpui-background",
   "crates/fernomade/crypto",
   "crates/fernomade/predict",
   "crates/fernomade/runtime",
@@ -372,3 +374,13 @@ opt-level = 1
 
 [profile.dev.package.taffy]
 opt-level = 1
+
+# Background previews resize decoded frames continuously, including in development builds.
+[profile.dev.package.image]
+opt-level = 2
+
+[profile.dev.package.fast_image_resize]
+opt-level = 2
+
+[profile.dev.package.oxideterm-background-media]
+opt-level = 2

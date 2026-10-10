@@ -177,6 +177,7 @@ impl BlurResources {
 }
 
 struct DirectXRenderPipelines {
+    surfaces: PipelineState<SurfaceParams>,
     shadow_pipeline: PipelineState<Shadow>,
     quad_pipeline: PipelineState<Quad>,
     path_rasterization_pipeline: PipelineState<PathRasterizationSprite>,
@@ -197,6 +198,16 @@ struct DirectXRenderPipelines {
     blur_params_buffer: ID3D11Buffer,
     blur_blend_replace: ID3D11BlendState,
     blur_blend_composite: ID3D11BlendState,
+}
+
+#[derive(Clone, Copy)]
+#[repr(C)]
+struct SurfaceParams {
+    bounds: Bounds<ScaledPixels>,
+    content_mask: ContentMask<ScaledPixels>,
+    opacity: f32,
+    rotation: u32,
+    sample_size: [f32; 2],
 }
 
 struct DirectXGlobalElements {
@@ -444,6 +455,7 @@ impl DirectXRenderer {
             return Ok(());
         }
         self.render(scene, background_appearance)?;
+        self.atlas.finish_gpu_submissions();
         self.present()
     }
 
@@ -1056,7 +1068,45 @@ impl DirectXRenderer {
         if surfaces.is_empty() {
             return Ok(());
         }
+        let devices = self.devices.as_ref().context("devices missing")?;
+        let params: Vec<_> = surfaces
+            .iter()
+            .map(|surface| SurfaceParams {
+                bounds: surface.bounds,
+                content_mask: surface.content_mask,
+                opacity: surface.opacity,
+                rotation: surface.rotation,
+                sample_size: [
+                    surface.sample_size.width.0 as f32,
+                    surface.sample_size.height.0 as f32,
+                ],
+            })
+            .collect();
+        self.pipelines
+            .surfaces
+            .update_buffer(&devices.device, &devices.device_context, &params)?;
+        for (index, surface) in surfaces.iter().enumerate() {
+            let view = surface
+                .texture
+                .downcast_ref::<ID3D11ShaderResourceView>()
+                .context("invalid native DirectX surface")?;
+            self.pipelines.surfaces.draw_range_with_texture(
+                &devices.device_context,
+                &[Some(view.clone())],
+                self.globals
+                    .batch_params_buffer
+                    .as_ref()
+                    .context("batch params missing")?,
+                slice::from_ref(&self.globals.sampler),
+                index as u32,
+                1,
+            )?;
+        }
         Ok(())
+    }
+
+    pub(crate) fn video_device(&self) -> Option<ID3D11Device> {
+        self.devices.as_ref().map(|devices| devices.device.clone())
     }
 
     /// Run a single blur pass: a full-screen (or composite) draw sampling `source_srv` into
@@ -1451,6 +1501,13 @@ impl DirectXRenderPipelines {
             16,
             create_blend_state(device)?,
         )?;
+        let surfaces = PipelineState::new(
+            device,
+            "native_video_surfaces",
+            ShaderModule::Surface,
+            4,
+            create_blend_state(device)?,
+        )?;
 
         let blur_downsample_vertex = create_vertex_shader(
             device,
@@ -1492,6 +1549,7 @@ impl DirectXRenderPipelines {
             mono_sprites,
             subpixel_sprites,
             poly_sprites,
+            surfaces,
             blur_downsample_vertex,
             blur_downsample_fragment,
             blur_vertex,
@@ -2320,6 +2378,7 @@ pub(crate) mod shader_resources {
 
     #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub(crate) enum ShaderModule {
+        Surface,
         Quad,
         Shadow,
         Underline,
@@ -2373,6 +2432,10 @@ pub(crate) mod shader_resources {
         #[cfg(not(debug_assertions))]
         fn from_bytes(module: ShaderModule, target: ShaderTarget) -> Self {
             let bytes = match module {
+                ShaderModule::Surface => match target {
+                    ShaderTarget::Vertex => SURFACE_VERTEX_BYTES,
+                    ShaderTarget::Fragment => SURFACE_FRAGMENT_BYTES,
+                },
                 ShaderModule::Quad => match target {
                     ShaderTarget::Vertex => QUAD_VERTEX_BYTES,
                     ShaderTarget::Fragment => QUAD_FRAGMENT_BYTES,
@@ -2495,10 +2558,20 @@ pub(crate) mod shader_resources {
     #[cfg(not(debug_assertions))]
     include!(concat!(env!("OUT_DIR"), "/shaders_bytes.rs"));
 
+    #[cfg(all(test, debug_assertions))]
+    #[test]
+    fn native_surface_shaders_compile_for_d3d11() {
+        for target in [ShaderTarget::Vertex, ShaderTarget::Fragment] {
+            build_shader_blob(ShaderModule::Surface, target)
+                .expect("native surface shader must compile for shader model 4.1");
+        }
+    }
+
     #[cfg(debug_assertions)]
     impl ShaderModule {
         pub fn as_str(self) -> &'static str {
             match self {
+                ShaderModule::Surface => "surface",
                 ShaderModule::Quad => "quad",
                 ShaderModule::Shadow => "shadow",
                 ShaderModule::Underline => "underline",

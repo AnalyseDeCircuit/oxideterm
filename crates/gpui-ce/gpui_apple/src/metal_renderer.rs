@@ -29,8 +29,9 @@ use objc2::runtime::AnyObject;
 
 use core_foundation::base::TCFType;
 use core_video::{
-    metal_texture::CVMetalTextureGetTexture, metal_texture_cache::CVMetalTextureCache,
-    pixel_buffer::kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+    metal_texture::{CVMetalTexture, CVMetalTextureGetTexture},
+    metal_texture_cache::CVMetalTextureCache,
+    pixel_buffer::{kCVPixelFormatType_32BGRA, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange},
 };
 use foreign_types::{ForeignType, ForeignTypeRef};
 use metal::{
@@ -156,6 +157,7 @@ pub struct MetalRenderer {
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
     sprite_atlas: Arc<MetalAtlas>,
     core_video_texture_cache: core_video::metal_texture_cache::CVMetalTextureCache,
+    video_textures: Vec<CVMetalTexture>,
     path_intermediate_texture: Option<metal::Texture>,
     path_intermediate_msaa_texture: Option<metal::Texture>,
     // Offscreen scene target (the scene is rendered here, then blitted to the drawable, so blur
@@ -465,6 +467,7 @@ impl MetalRenderer {
             instance_buffer_pool,
             sprite_atlas,
             core_video_texture_cache,
+            video_textures: Vec::new(),
             path_intermediate_texture: None,
             path_intermediate_msaa_texture: None,
             scene_color_texture: None,
@@ -687,9 +690,16 @@ impl MetalRenderer {
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
         let instance_buffer = Cell::new(Some(writer.finish()));
+        let submissions = self.sprite_atlas.take_gpu_submissions();
+        let video_textures = std::mem::take(&mut self.video_textures);
         let block = RcBlock::new(move |_: ptr::NonNull<AnyObject>| {
+            // Core Video's wrappers must outlive every GPU read of their pixel buffers.
+            let _ = &video_textures;
             if let Some(instance_buffer) = instance_buffer.take() {
                 instance_buffer_pool.lock().release(instance_buffer);
+            }
+            for submission in &submissions {
+                submission.complete();
             }
         });
         // SAFETY: Both pointee types are opaque views of the same Objective-C block pointer ABI.
@@ -829,6 +839,7 @@ impl MetalRenderer {
     ) -> Result<metal::CommandBuffer> {
         let command_queue = self.command_queue.clone();
         let command_buffer = command_queue.new_command_buffer();
+        self.sprite_atlas.encode_stream_uploads(command_buffer);
         let alpha = if self.opaque { 1. } else { 0. };
 
         // Paths and filters have independent offscreen targets. Keep both absent for ordinary
@@ -1609,9 +1620,10 @@ impl MetalRenderer {
                 DevicePixels::from(surface.image_buffer.get_height() as i32),
             );
 
-            assert_eq!(
-                surface.image_buffer.get_pixel_format(),
-                kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            let bgra = surface.image_buffer.get_pixel_format() == kCVPixelFormatType_32BGRA;
+            assert!(
+                bgra || surface.image_buffer.get_pixel_format()
+                    == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
             );
 
             let y_texture = self
@@ -1619,23 +1631,38 @@ impl MetalRenderer {
                 .create_texture_from_image(
                     surface.image_buffer.as_concrete_TypeRef(),
                     None,
-                    MTLPixelFormat::R8Unorm,
-                    surface.image_buffer.get_width_of_plane(0),
-                    surface.image_buffer.get_height_of_plane(0),
+                    if bgra {
+                        MTLPixelFormat::BGRA8Unorm
+                    } else {
+                        MTLPixelFormat::R8Unorm
+                    },
+                    if bgra {
+                        surface.image_buffer.get_width()
+                    } else {
+                        surface.image_buffer.get_width_of_plane(0)
+                    },
+                    if bgra {
+                        surface.image_buffer.get_height()
+                    } else {
+                        surface.image_buffer.get_height_of_plane(0)
+                    },
                     0,
                 )
                 .unwrap();
-            let cb_cr_texture = self
-                .core_video_texture_cache
-                .create_texture_from_image(
-                    surface.image_buffer.as_concrete_TypeRef(),
-                    None,
-                    MTLPixelFormat::RG8Unorm,
-                    surface.image_buffer.get_width_of_plane(1),
-                    surface.image_buffer.get_height_of_plane(1),
-                    1,
-                )
-                .unwrap();
+            let cb_cr_texture = if bgra {
+                y_texture.clone()
+            } else {
+                self.core_video_texture_cache
+                    .create_texture_from_image(
+                        surface.image_buffer.as_concrete_TypeRef(),
+                        None,
+                        MTLPixelFormat::RG8Unorm,
+                        surface.image_buffer.get_width_of_plane(1),
+                        surface.image_buffer.get_height_of_plane(1),
+                        1,
+                    )
+                    .unwrap()
+            };
 
             command_encoder.set_vertex_bytes(
                 SurfaceInputIndex::TextureSize as u64,
@@ -1659,6 +1686,8 @@ impl MetalRenderer {
                 1,
                 (first_surface + index) as u64,
             );
+            self.video_textures.push(y_texture);
+            self.video_textures.push(cb_cr_texture);
         }
     }
 }
@@ -1857,6 +1886,11 @@ fn write_instances(scene: &Scene, writer: &mut InstanceBufferWriter) -> Result<I
         surfaces: writer.write_iter(scene.surfaces.iter().map(|surface| SurfaceBounds {
             bounds: surface.bounds,
             content_mask: surface.content_mask,
+            opacity: surface.opacity,
+            bgra: u32::from(surface.image_buffer.get_pixel_format() == kCVPixelFormatType_32BGRA),
+            rotation: surface.rotation,
+            pad: 0,
+            sample_size: surface.sample_size,
         }))?,
     })
 }
@@ -2074,16 +2108,186 @@ pub struct PathSprite {
     pub bounds: Bounds<ScaledPixels>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 #[repr(C)]
 pub struct SurfaceBounds {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
+    pub opacity: f32,
+    pub bgra: u32,
+    pub rotation: u32,
+    pub pad: u32,
+    pub sample_size: Size<DevicePixels>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_video_surfaces_preserve_color_opacity_orientation_and_gpu_blur() {
+        use core_foundation::{base::CFType, dictionary::CFDictionary, string::CFString};
+        use core_video::pixel_buffer::CVPixelBuffer;
+        let options = CFDictionary::from_CFType_pairs(&[(
+            CFString::new("IOSurfaceProperties"),
+            CFDictionary::<CFString, CFType>::from_CFType_pairs(&[]).as_CFType(),
+        )]);
+        let buffer = CVPixelBuffer::new(kCVPixelFormatType_32BGRA, 16, 8, Some(&options)).unwrap();
+        assert_eq!(buffer.lock_base_address(0), 0);
+        unsafe {
+            for y in 0..8 {
+                let row = std::slice::from_raw_parts_mut(
+                    buffer
+                        .get_base_address()
+                        .cast::<u8>()
+                        .add(y * buffer.get_bytes_per_row()),
+                    16 * 4,
+                );
+                for (x, pixel) in row.chunks_exact_mut(4).enumerate() {
+                    pixel.copy_from_slice(if x < 8 {
+                        &[0, 0, 255, 255]
+                    } else {
+                        &[255, 0, 0, 255]
+                    });
+                }
+            }
+        }
+        assert_eq!(buffer.unlock_base_address(0), 0);
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
+        renderer.opaque = false;
+        let bounds = Bounds {
+            origin: point(ScaledPixels(0.0), ScaledPixels(0.0)),
+            size: size(ScaledPixels(32.0), ScaledPixels(32.0)),
+        };
+        for rotation in [0, 90] {
+            let mut scene = Scene::default();
+            scene.insert_primitive(PaintSurface {
+                order: 0,
+                bounds,
+                content_mask: ContentMask { bounds },
+                image_buffer: buffer.clone(),
+                opacity: 0.5,
+                rotation,
+                sample_size: size(DevicePixels(8), DevicePixels(4)),
+            });
+            scene.finish();
+            let image = renderer
+                .render_scene_to_image(&scene, size(DevicePixels(32), DevicePixels(32)))
+                .unwrap();
+            let (red, blue) = if rotation == 0 {
+                ((4, 16), (28, 16))
+            } else {
+                ((16, 4), (16, 28))
+            };
+            assert_eq!(image.get_pixel(red.0, red.1).0, [128, 0, 0, 128]);
+            assert_eq!(image.get_pixel(blue.0, blue.1).0, [0, 0, 128, 128]);
+        }
+        let mut scene = Scene::default();
+        let boundary = FilterBoundary {
+            order: 0,
+            bounds,
+            content_mask: ContentMask { bounds },
+            corner_radii: Default::default(),
+            filters: vec![ScaledFilter::Blur(ScaledPixels(3.0))].into(),
+            opacity: 1.0,
+            is_start: true,
+        };
+        scene.insert_primitive(boundary.clone());
+        scene.insert_primitive(PaintSurface {
+            order: 0,
+            bounds,
+            content_mask: ContentMask { bounds },
+            image_buffer: buffer,
+            opacity: 1.0,
+            rotation: 0,
+            sample_size: size(DevicePixels(16), DevicePixels(8)),
+        });
+        scene.insert_primitive(FilterBoundary {
+            is_start: false,
+            ..boundary
+        });
+        scene.finish();
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(32), DevicePixels(32)))
+            .unwrap();
+        let transition = image.get_pixel(14, 16).0;
+        assert!(
+            transition[0] > 120 && transition[2] > 25,
+            "GPU blur must mix the red and blue halves: {transition:?}"
+        );
+    }
+
+    #[test]
+    fn stream_upload_completion_preserves_bgra_alpha_and_clip() {
+        use gpui::{
+            AtlasKey, ContentMask, DynamicTexture, DynamicTextureParams, PlatformAtlas,
+            PolychromeSprite, ScaledPixels,
+        };
+        let pool = Arc::new(Mutex::new(InstanceBufferPool::default()));
+        let mut renderer = MetalRenderer::new_headless(pool);
+        renderer.opaque = false;
+        let atlas = renderer.sprite_atlas.clone();
+        let dimensions = size(DevicePixels(17), DevicePixels(7));
+        let texture = DynamicTexture::new(dimensions);
+        let key: AtlasKey = DynamicTextureParams {
+            texture_id: texture.id,
+        }
+        .into();
+        let initial = [0, 0, 255, 255].repeat(17 * 7);
+        let tile = atlas
+            .get_or_insert_with(key.clone(), &mut || {
+                Ok(Some((dimensions, std::borrow::Cow::Borrowed(&initial))))
+            })
+            .unwrap()
+            .unwrap();
+        let mut scene = Scene::default();
+        scene.insert_primitive(PolychromeSprite {
+            order: 0,
+            pad: 0,
+            grayscale: false.into(),
+            opacity: 1.0,
+            bounds: Bounds {
+                origin: gpui::point(ScaledPixels(2.0), ScaledPixels(1.0)),
+                size: size(ScaledPixels(17.0), ScaledPixels(7.0)),
+            },
+            content_mask: ContentMask {
+                bounds: Bounds {
+                    origin: gpui::point(ScaledPixels(4.0), ScaledPixels(2.0)),
+                    size: size(ScaledPixels(13.0), ScaledPixels(5.0)),
+                },
+            },
+            corner_radii: Default::default(),
+            tile,
+        });
+        scene.finish();
+        let first = atlas.gpu_submission().unwrap();
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(20), DevicePixels(9)))
+            .unwrap();
+        assert_eq!(image.get_pixel(4, 2).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(2, 1).0, [0, 0, 0, 0]);
+        assert!(first.is_complete());
+        atlas
+            .update_stream(
+                &key,
+                Bounds {
+                    origin: Default::default(),
+                    size: dimensions,
+                },
+                &[255, 0, 0, 128].repeat(17 * 7),
+            )
+            .unwrap();
+        let second = atlas.gpu_submission().unwrap();
+        assert!(!second.is_complete());
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(20), DevicePixels(9)))
+            .unwrap();
+        assert_eq!(image.get_pixel(4, 2).0, [0, 0, 128, 128]);
+        assert_eq!(image.get_pixel(2, 1).0, [0, 0, 0, 0]);
+        assert!(second.is_complete());
+        atlas.remove(&key);
+    }
 
     #[test]
     fn intermediate_textures_follow_scene_demand_and_resize() {

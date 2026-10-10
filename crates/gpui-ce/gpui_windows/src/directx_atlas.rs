@@ -2,8 +2,9 @@ use etagere::BucketedAtlasAllocator;
 use parking_lot::Mutex;
 use windows::Win32::Graphics::{
     Direct3D11::{
-        D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT,
-        ID3D11Device, ID3D11DeviceContext, ID3D11ShaderResourceView, ID3D11Texture2D,
+        D3D11_ASYNC_GETDATA_DONOTFLUSH, D3D11_BIND_SHADER_RESOURCE, D3D11_BOX, D3D11_QUERY_DESC,
+        D3D11_QUERY_EVENT, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, ID3D11Device,
+        ID3D11DeviceContext, ID3D11Query, ID3D11ShaderResourceView, ID3D11Texture2D,
     },
     Dxgi::Common::*,
 };
@@ -13,7 +14,16 @@ use gpui::{
     AtlasTile, Bounds, DevicePixels, PlatformAtlas, Point, Size,
 };
 
-pub(crate) struct DirectXAtlas(Mutex<AtlasState<DirectXAtlasTextures>>);
+pub(crate) struct DirectXAtlas(
+    Mutex<AtlasState<DirectXAtlasTextures>>,
+    Mutex<SubmissionQueries>,
+);
+
+#[derive(Default)]
+struct SubmissionQueries {
+    pending: Vec<(ID3D11Query, gpui::GpuSubmission)>,
+    submitted: Vec<(ID3D11Query, gpui::GpuSubmission)>,
+}
 
 struct DirectXAtlasTextures {
     device: ID3D11Device,
@@ -35,14 +45,17 @@ struct DirectXAtlasTexture {
 
 impl DirectXAtlas {
     pub(crate) fn new(device: &ID3D11Device, device_context: &ID3D11DeviceContext) -> Self {
-        DirectXAtlas(Mutex::new(AtlasState::new(DirectXAtlasTextures {
-            device: device.clone(),
-            device_context: device_context.clone(),
-            resource_generation: 0,
-            monochrome_textures: Default::default(),
-            polychrome_textures: Default::default(),
-            subpixel_textures: Default::default(),
-        })))
+        DirectXAtlas(
+            Mutex::new(AtlasState::new(DirectXAtlasTextures {
+                device: device.clone(),
+                device_context: device_context.clone(),
+                resource_generation: 0,
+                monochrome_textures: Default::default(),
+                polychrome_textures: Default::default(),
+                subpixel_textures: Default::default(),
+            })),
+            Mutex::new(SubmissionQueries::default()),
+        )
     }
 
     /// Returns the view backing `id`, or `None` once every tile in it has been
@@ -63,6 +76,12 @@ impl DirectXAtlas {
         device: &ID3D11Device,
         device_context: &ID3D11DeviceContext,
     ) {
+        let mut queries = self.1.lock();
+        let pending = std::mem::take(&mut queries.pending);
+        let submitted = std::mem::take(&mut queries.submitted);
+        for (_, receipt) in pending.into_iter().chain(submitted) {
+            receipt.complete();
+        }
         let mut lock = self.0.lock();
         lock.clear(|textures| {
             textures.device = device.clone();
@@ -73,9 +92,47 @@ impl DirectXAtlas {
             textures.resource_generation = textures.resource_generation.wrapping_add(1);
         });
     }
+
+    pub(crate) fn finish_gpu_submissions(&self) {
+        let mut queries = self.1.lock();
+        let lock = self.0.lock();
+        let pending = std::mem::take(&mut queries.pending);
+        for (query, receipt) in pending {
+            // The event follows the frame's upload and draw commands on the immediate context.
+            unsafe {
+                lock.backend.device_context.End(&query);
+            }
+            queries.submitted.push((query, receipt));
+        }
+    }
 }
 
 impl PlatformAtlas for DirectXAtlas {
+    fn gpu_submission(&self) -> anyhow::Result<gpui::GpuSubmission> {
+        let mut query = None;
+        unsafe {
+            self.0.lock().backend.device.CreateQuery(
+                &D3D11_QUERY_DESC {
+                    Query: D3D11_QUERY_EVENT,
+                    MiscFlags: 0,
+                },
+                Some(&mut query),
+            )?;
+        }
+        let receipt = gpui::GpuSubmission::default();
+        self.1.lock().pending.push((
+            query.ok_or_else(|| anyhow::anyhow!("missing GPU event query"))?,
+            receipt.clone(),
+        ));
+        Ok(receipt)
+    }
+
+    fn poll_gpu_submissions(&self) {
+        let mut queries = self.1.lock();
+        let lock = self.0.lock();
+        poll_queries(&lock.backend.device_context, &mut queries.submitted);
+    }
+
     fn get_or_insert_with<'a>(
         &self,
         key: AtlasKey,
@@ -112,6 +169,58 @@ impl PlatformAtlas for DirectXAtlas {
 
     fn remove(&self, key: &AtlasKey) {
         self.0.lock().remove(key);
+    }
+}
+
+fn poll_queries(
+    context: &ID3D11DeviceContext,
+    queries: &mut Vec<(ID3D11Query, gpui::GpuSubmission)>,
+) {
+    queries.retain(|(query, receipt)| {
+        let mut done = 0u32;
+        let result = unsafe {
+            context.GetData(
+                query,
+                Some((&mut done as *mut u32).cast()),
+                std::mem::size_of::<u32>() as u32,
+                D3D11_ASYNC_GETDATA_DONOTFLUSH.0 as u32,
+            )
+        };
+        if done != 0 || result.is_err() {
+            receipt.complete();
+            false
+        } else {
+            true
+        }
+    });
+}
+
+impl Drop for DirectXAtlas {
+    fn drop(&mut self) {
+        let queries = self.1.get_mut();
+        let context = self.0.get_mut().backend.device_context.clone();
+        for (query, receipt) in queries.pending.drain(..) {
+            unsafe {
+                context.End(&query);
+            }
+            queries.submitted.push((query, receipt));
+        }
+        let mut submitted = std::mem::take(&mut queries.submitted);
+        if submitted.is_empty() {
+            return;
+        }
+        unsafe {
+            context.Flush();
+        }
+        // The renderer has released ownership; only this retirement worker accesses the context.
+        std::thread::spawn(move || {
+            while !submitted.is_empty() {
+                poll_queries(&context, &mut submitted);
+                if !submitted.is_empty() {
+                    std::thread::sleep(std::time::Duration::from_millis(8));
+                }
+            }
+        });
     }
 }
 

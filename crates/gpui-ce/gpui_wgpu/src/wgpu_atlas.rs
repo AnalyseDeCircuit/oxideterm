@@ -20,7 +20,10 @@ fn etagere_point_to_device(point: etagere::Point) -> Point<DevicePixels> {
     }
 }
 
-pub struct WgpuAtlas(Mutex<AtlasState<WgpuAtlasTextures>>);
+pub struct WgpuAtlas(
+    Mutex<AtlasState<WgpuAtlasTextures>>,
+    Mutex<Vec<gpui::GpuSubmission>>,
+);
 
 struct PendingUpload {
     id: AtlasTextureId,
@@ -52,16 +55,19 @@ impl WgpuAtlas {
         color_texture_format: wgpu::TextureFormat,
     ) -> Self {
         let max_texture_size = device.limits().max_texture_dimension_2d;
-        WgpuAtlas(Mutex::new(AtlasState::new(WgpuAtlasTextures {
-            device,
-            queue,
-            max_texture_size,
-            color_texture_format,
-            storage: WgpuAtlasStorage::default(),
-            pending_uploads: Vec::new(),
-            next_texture_generation: 0,
-            resource_generation: 0,
-        })))
+        WgpuAtlas(
+            Mutex::new(AtlasState::new(WgpuAtlasTextures {
+                device,
+                queue,
+                max_texture_size,
+                color_texture_format,
+                storage: WgpuAtlasStorage::default(),
+                pending_uploads: Vec::new(),
+                next_texture_generation: 0,
+                resource_generation: 0,
+            })),
+            Mutex::new(Vec::new()),
+        )
     }
 
     pub fn from_context(context: &WgpuContext) -> Self {
@@ -75,6 +81,10 @@ impl WgpuAtlas {
     pub fn before_frame(&self) {
         let mut lock = self.0.lock();
         lock.backend.flush_uploads();
+    }
+
+    pub(crate) fn take_gpu_submissions(&self) -> Vec<gpui::GpuSubmission> {
+        std::mem::take(&mut *self.1.lock())
     }
 
     /// Returns the view backing `id`, or `None` once every tile in it has been
@@ -116,6 +126,17 @@ impl WgpuAtlas {
 }
 
 impl PlatformAtlas for WgpuAtlas {
+    fn gpu_submission(&self) -> Result<gpui::GpuSubmission> {
+        let submission = gpui::GpuSubmission::default();
+        self.1.lock().push(submission.clone());
+        Ok(submission)
+    }
+
+    fn poll_gpu_submissions(&self) {
+        let device = self.0.lock().backend.device.clone();
+        let _ = device.poll(wgpu::PollType::Poll);
+    }
+
     fn get_or_insert_with<'a>(
         &self,
         key: AtlasKey,

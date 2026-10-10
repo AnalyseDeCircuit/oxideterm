@@ -36,6 +36,21 @@ pub enum ObjectFit {
 }
 
 impl ObjectFit {
+    /// Position the fitted image using fractions of the remaining space.
+    pub fn get_aligned_bounds(
+        &self,
+        bounds: Bounds<Pixels>,
+        image_size: Size<DevicePixels>,
+        position: (f32, f32),
+    ) -> Bounds<Pixels> {
+        let mut image = self.get_bounds(bounds, image_size);
+        image.origin.x =
+            bounds.origin.x + (bounds.size.width - image.size.width) * position.0.clamp(0.0, 1.0);
+        image.origin.y =
+            bounds.origin.y + (bounds.size.height - image.size.height) * position.1.clamp(0.0, 1.0);
+        image
+    }
+
     /// Get the bounds of the image within the given bounds.
     pub fn get_bounds(
         &self,
@@ -798,7 +813,7 @@ impl Style {
                         | BackgroundTag::PatternSlash
                         | BackgroundTag::Checkerboard => color.solid.into(),
 
-                        BackgroundTag::LinearGradient => color
+                        BackgroundTag::LinearGradient | BackgroundTag::ProceduralNoise => color
                             .colors
                             .first()
                             .map(|stop| stop.color.into())

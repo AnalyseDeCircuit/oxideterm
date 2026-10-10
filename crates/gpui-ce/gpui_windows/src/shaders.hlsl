@@ -318,7 +318,7 @@ GradientColor prepare_gradient_color(uint tag, uint color_space, Hsla solid, Lin
     GradientColor output;
     if (tag == 0 || tag == 2 || tag == 3) {
         output.solid = hsla_to_rgba(solid);
-    } else if (tag == 1) {
+    } else if (tag == 1 || tag == 4) {
         output.color0 = hsla_to_rgba(colors[0].color);
         output.color1 = hsla_to_rgba(colors[1].color);
 
@@ -338,6 +338,15 @@ float2x2 rotate2d(float angle) {
     float s = sin(angle);
     float c = cos(angle);
     return float2x2(c, -s, s, c);
+}
+
+float mineral_noise(float2 cell) {
+    uint2 p = (uint2)floor(cell);
+    uint h = p.x * 0x9e3779b9u ^ p.y * 0x85ebca6bu;
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    return float(h & 0xffffu) / 65535.0;
 }
 
 float4 gradient_color(Background background,
@@ -434,6 +443,20 @@ float4 gradient_color(Background background,
 
             color = solid_color;
             color.a *= saturate(should_be_colored);
+            break;
+        }
+        case 4: {
+            float2 local = position - bounds.origin;
+            float2 uv = local / bounds.size;
+            float grain_size = background.gradient_angle_or_pattern_height;
+            float roughness = background.colors[0].percentage;
+            float phase = background.colors[1].percentage;
+            float grain = mineral_noise(local / grain_size);
+            float field = mineral_noise(local / (grain_size * 12.0));
+            float sheen = pow(sin(uv.x * 3.0 + uv.y * 1.7 + phase) * 0.5 + 0.5, 5.0);
+            float4 mixed = lerp(color0, color1, field * 0.7 + grain * 0.3);
+            color = background.color_space == 1 ? oklab_to_srgb(mixed) : mixed;
+            color.a *= min(1.0, 0.08 + grain * roughness * 0.80 + sheen * background.solid.h * 0.38);
             break;
         }
     }
@@ -1220,6 +1243,50 @@ struct PolychromeSprite {
     Corners corner_radii;
     AtlasTile tile;
 };
+
+struct SurfaceParams {
+    Bounds bounds;
+    Bounds content_mask;
+    float opacity;
+    uint rotation;
+    float2 sample_size;
+};
+StructuredBuffer<SurfaceParams> video_surfaces: register(t1);
+
+struct SurfaceOutput {
+    float4 position: SV_Position;
+    float2 uv: TEXCOORD0;
+    nointerpolation uint index: TEXCOORD1;
+    float4 clip_distance: SV_ClipDistance;
+};
+
+SurfaceOutput surface_vertex(uint vertex_id: SV_VertexID, uint instance_id: SV_InstanceID) {
+    uint index = batch_start_index + instance_id;
+    SurfaceParams surface = video_surfaces[index];
+    float2 uv = float2(float(vertex_id & 1u), 0.5 * float(vertex_id & 2u));
+    SurfaceOutput output;
+    output.position = to_device_position(uv, surface.bounds);
+    output.clip_distance = distance_from_clip_rect(uv, surface.bounds, surface.content_mask);
+    if (surface.rotation == 90) uv = float2(uv.y, 1.0 - uv.x);
+    else if (surface.rotation == 180) uv = 1.0 - uv;
+    else if (surface.rotation == 270) uv = float2(1.0 - uv.y, uv.x);
+    output.uv = uv;
+    output.index = index;
+    return output;
+}
+
+float4 surface_fragment(SurfaceOutput input): SV_Target {
+    SurfaceParams surface = video_surfaces[input.index];
+    float2 grid = surface.sample_size;
+    if (surface.rotation == 90 || surface.rotation == 270) grid = grid.yx;
+    float2 position = input.uv * grid - 0.5;
+    float2 base = (floor(position) + 0.5) / grid;
+    float2 step = 1.0 / grid;
+    float2 weight = frac(position);
+    float3 top = lerp(t_sprite.Sample(s_sprite, base).rgb, t_sprite.Sample(s_sprite, base + float2(step.x, 0)).rgb, weight.x);
+    float3 bottom = lerp(t_sprite.Sample(s_sprite, base + float2(0, step.y)).rgb, t_sprite.Sample(s_sprite, base + step).rgb, weight.x);
+    return float4(lerp(top, bottom, weight.y), surface.opacity);
+}
 
 struct PolychromeSpriteVertexOutput {
     nointerpolation uint sprite_id: TEXCOORD0;

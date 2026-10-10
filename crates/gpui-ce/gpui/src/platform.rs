@@ -1092,8 +1092,8 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn gpu_specs(&self) -> Option<GpuSpecs>;
 
     /// Returns the GPU context for this window's renderer.
-    /// The returned `Box` contains `(Arc<wgpu::Device>, Arc<wgpu::Queue>)`.
-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    /// Contains `(Arc<wgpu::Device>, Arc<wgpu::Queue>)` on Linux, or `ID3D11Device` on Windows.
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))]
     fn gpu_context(&self) -> Option<Box<dyn std::any::Any>> {
         None
     }
@@ -1525,6 +1525,29 @@ impl From<DynamicTextureParams> for AtlasKey {
 
 #[expect(missing_docs)]
 pub trait PlatformAtlas {
+    /// Register completion against the next actual renderer submission.
+    fn gpu_submission(&self) -> Result<crate::GpuSubmission> {
+        anyhow::bail!("streaming submissions are not supported by this platform atlas")
+    }
+
+    /// Nonblocking native progress checks, used by platforms with event queries.
+    fn poll_gpu_submissions(&self) {}
+
+    /// Conservative application-owned CPU storage required while uploading one full frame.
+    fn stream_upload_staging_bytes(&self, size: Size<DevicePixels>) -> Result<usize> {
+        let width = usize::try_from(size.width.0)?;
+        let height = usize::try_from(size.height.0)?;
+        width
+            .checked_mul(height)
+            .and_then(|n| n.checked_mul(8))
+            .context("stream upload size overflow")
+    }
+
+    /// Application-owned GPU staging storage, separate from driver-managed upload memory.
+    fn stream_gpu_staging_bytes(&self, _size: Size<DevicePixels>) -> Result<usize> {
+        Ok(0)
+    }
+
     /// The builder runs with the atlas locked and must not re-enter the same atlas.
     fn get_or_insert_with<'a>(
         &self,
@@ -1535,6 +1558,16 @@ pub trait PlatformAtlas {
     /// Updates a device-pixel region relative to the top-left of an existing atlas entry.
     fn update(&self, _key: &AtlasKey, _bounds: Bounds<DevicePixels>, _bytes: &[u8]) -> Result<()> {
         anyhow::bail!("dynamic texture updates are not supported by this platform atlas")
+    }
+
+    /// Stream uploads may be staged into the command buffer instead of modifying an in-use texture.
+    fn update_stream(
+        &self,
+        key: &AtlasKey,
+        bounds: Bounds<DevicePixels>,
+        bytes: &[u8],
+    ) -> Result<()> {
+        self.update(key, bounds, bytes)
     }
 
     /// Returns the generation of the GPU resources backing this atlas.

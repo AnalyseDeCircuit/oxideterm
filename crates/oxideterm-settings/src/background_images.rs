@@ -15,14 +15,14 @@ use anyhow::{Context, Result, anyhow};
 const BACKGROUND_DIRECTORY_NAME: &str = "backgrounds";
 const BACKGROUND_FILE_PREFIX: &str = "background";
 
-/// Returns whether a path uses an image format supported by the GPUI renderer.
+/// Returns whether a path can be imported into the background media gallery.
 pub fn is_supported_background_image(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
         .map(|extension| {
             matches!(
                 extension.to_ascii_lowercase().as_str(),
-                "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp"
+                "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "mp4" | "m4v"
             )
         })
         .unwrap_or(false)

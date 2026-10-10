@@ -20,6 +20,48 @@ pub enum ThemeTarget {
 }
 
 impl ThemeTarget {
+    pub fn system_themes(
+        self,
+        settings: &PersistedSettings,
+    ) -> &oxideterm_settings::SystemThemeSettings {
+        match self {
+            Self::Application => &settings.appearance.system_themes,
+            Self::Terminal => &settings.terminal.system_themes,
+        }
+    }
+
+    pub fn system_themes_mut(
+        self,
+        settings: &mut PersistedSettings,
+    ) -> &mut oxideterm_settings::SystemThemeSettings {
+        match self {
+            Self::Application => &mut settings.appearance.system_themes,
+            Self::Terminal => &mut settings.terminal.system_themes,
+        }
+    }
+
+    pub fn resolved_id(self, settings: &PersistedSettings, dark: bool) -> &str {
+        if !settings.appearance.follow_system_appearance {
+            self.selected_id(settings)
+        } else if dark {
+            &self.system_themes(settings).dark
+        } else {
+            &self.system_themes(settings).light
+        }
+    }
+
+    pub fn apply_for_scheme(
+        self,
+        settings: &mut PersistedSettings,
+        dark: Option<bool>,
+        id: String,
+    ) {
+        match dark {
+            Some(true) => self.system_themes_mut(settings).dark = id,
+            Some(false) => self.system_themes_mut(settings).light = id,
+            None => self.apply(settings, id),
+        }
+    }
     pub fn selected_id(self, settings: &PersistedSettings) -> &str {
         match self {
             Self::Application => &settings.appearance.theme,
@@ -223,11 +265,14 @@ pub const UI_THEME_COLOR_FIELDS: &[ThemeColorField] = &[
 pub enum ThemeEditorSection {
     Terminal,
     Ui,
+    Background,
 }
 
 #[derive(Clone, Debug)]
 pub struct ThemeEditorState {
     pub target: ThemeTarget,
+    pub system_dark: Option<bool>,
+    pub background: oxideterm_settings::BackgroundStyle,
     pub edit_theme_id: Option<String>,
     pub name: String,
     pub duplicate_theme: String,
@@ -268,6 +313,8 @@ pub fn theme_editor_from_settings(
 
     ThemeEditorState {
         target,
+        system_dark: None,
+        background: settings.terminal.background_style(),
         edit_theme_id,
         name,
         duplicate_theme,
@@ -306,10 +353,15 @@ pub fn save_theme_editor_snapshot_to_settings(
     });
     let terminal = editor_terminal_theme(&editor.terminal_colors);
     let ui = editor_ui_colors(&editor.ui_colors);
+    let mut value = custom_theme_json(&name, terminal, ui);
+    value["background"] = serde_json::to_value(&editor.background).ok()?;
+    settings.custom_themes.insert(theme_id.clone(), value);
+    editor
+        .target
+        .apply_for_scheme(settings, editor.system_dark, theme_id);
     settings
-        .custom_themes
-        .insert(theme_id.clone(), custom_theme_json(&name, terminal, ui));
-    editor.target.apply(settings, theme_id);
+        .terminal
+        .set_background_for_scheme(editor.system_dark, editor.background.clone());
     Some(name)
 }
 
@@ -327,6 +379,13 @@ pub fn delete_custom_theme_from_settings(
                     .unwrap_or("azurite")
                     .to_string(),
             );
+        }
+        let system = target.system_themes_mut(settings);
+        if system.light == theme_id {
+            system.light = "paper-oxide".into();
+        }
+        if system.dark == theme_id {
+            system.dark = "magnetite".into();
         }
     }
 }
@@ -349,14 +408,20 @@ pub fn custom_theme_display_name(settings: &PersistedSettings, id: &str) -> Stri
 }
 
 pub fn theme_tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
-    let mut tokens = ThemeTokens::from_builtin(theme_by_id(&settings.appearance.theme));
-    tokens.ui = theme_ui_colors(settings, &settings.appearance.theme);
+    theme_tokens_for_system(settings, false)
+}
+
+pub fn theme_tokens_for_system(settings: &PersistedSettings, dark: bool) -> ThemeTokens {
+    let application_id = ThemeTarget::Application.resolved_id(settings, dark);
+    let terminal_id = ThemeTarget::Terminal.resolved_id(settings, dark);
+    let mut tokens = ThemeTokens::from_builtin(theme_by_id(application_id));
+    tokens.ui = theme_ui_colors(settings, application_id);
     tokens.terminal = settings
         .custom_themes
-        .get(&settings.terminal.theme)
+        .get(terminal_id)
         .and_then(|theme| theme.get("terminalColors"))
         .and_then(terminal_theme_from_value)
-        .unwrap_or_else(|| theme_by_id(&settings.terminal.theme).terminal);
+        .unwrap_or_else(|| theme_by_id(terminal_id).terminal);
     // Mixed palettes need separate surface and terminal contrast profiles.
     tokens.refresh_palette_metrics();
     tokens
@@ -774,6 +839,102 @@ fn current_millis() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn system_scheme_switches_both_themes_and_background_together() {
+        let mut settings = PersistedSettings::default();
+        settings.appearance.theme = "github-dark".into();
+        settings.terminal.theme = "monokai".into();
+        settings.appearance.system_themes.light = "code-light".into();
+        settings.appearance.system_themes.dark = "dracula".into();
+        settings.terminal.system_themes.light = "solarized-light".into();
+        settings.terminal.system_themes.dark = "tokyo-night".into();
+        settings.terminal.background_image = Some("fixed.png".into());
+        for (dark, image) in [(false, "day.png"), (true, "night.png")] {
+            settings.terminal.set_background_for_scheme(
+                Some(dark),
+                oxideterm_settings::BackgroundStyle {
+                    image: Some(image.into()),
+                    ..Default::default()
+                },
+            );
+        }
+        for (follow, dark, ui, terminal, image) in [
+            (false, false, 0x0d1117, 0x272822, "fixed.png"),
+            (false, true, 0x0d1117, 0x272822, "fixed.png"),
+            (true, false, 0xffffff, 0xfdf6e3, "day.png"),
+            (true, true, 0x282a36, 0x1a1b26, "night.png"),
+        ] {
+            settings.appearance.follow_system_appearance = follow;
+            let tokens = theme_tokens_for_system(&settings, dark);
+            assert_eq!(
+                (tokens.ui.bg, tokens.terminal.background),
+                (ui, terminal),
+                "follow={follow} dark={dark}"
+            );
+            assert_eq!(
+                settings.resolved_background(dark).image.as_deref(),
+                Some(image)
+            );
+        }
+        assert_eq!(settings.appearance.theme, "github-dark");
+        assert_eq!(settings.terminal.theme, "monokai");
+    }
+
+    #[test]
+    fn saving_a_dark_theme_draft_preserves_the_light_and_fixed_selections() {
+        let mut settings = PersistedSettings::default();
+        settings.terminal.theme = "monokai".into();
+        settings.appearance.follow_system_appearance = true;
+        let mut editor =
+            theme_editor_from_settings(&settings, ThemeTarget::Terminal, None, "Night".into());
+        editor.system_dark = Some(true);
+        editor.background.image = Some("night.png".into());
+        editor.background.opacity = 0.42;
+        editor.background.alignment = oxideterm_settings::BackgroundAlignment::BottomRight;
+        editor.background.pause_on_input = true;
+        editor.background.parallax = true;
+        editor.background.day_cycle = true;
+        editor.background.camera = Some(oxideterm_settings::BackgroundCameraSettings {
+            motion: oxideterm_settings::BackgroundCameraMotion::ZoomOut,
+            amount: 0.75,
+            speed: 0.5,
+        });
+        save_theme_editor_snapshot_to_settings(&mut settings, &editor).unwrap();
+        assert_eq!(settings.terminal.theme, "monokai");
+        assert_eq!(settings.terminal.system_themes.light, "paper-oxide");
+        assert_eq!(settings.terminal.system_themes.dark, "custom:night");
+        assert!(settings.appearance.follow_system_appearance);
+        let background = settings.terminal.background_for_scheme(Some(true));
+        assert_eq!(background.image.as_deref(), Some("night.png"));
+        assert_eq!(background.opacity, 0.42);
+        assert!(background.pause_on_input && background.parallax && background.day_cycle);
+        let light = settings.terminal.background_for_scheme(Some(false));
+        assert!(!light.pause_on_input && !light.parallax && !light.day_cycle);
+        assert_eq!(light.camera, None);
+        assert_eq!(
+            background.camera.unwrap().motion,
+            oxideterm_settings::BackgroundCameraMotion::ZoomOut
+        );
+        assert_eq!(
+            background.alignment,
+            oxideterm_settings::BackgroundAlignment::BottomRight
+        );
+        assert_eq!(
+            settings.custom_themes["custom:night"]["background"]["image"],
+            "night.png"
+        );
+        for key in ["pauseOnInput", "parallax", "dayCycle"] {
+            assert_eq!(
+                settings.custom_themes["custom:night"]["background"][key],
+                true
+            );
+        }
+        assert_eq!(
+            settings.custom_themes["custom:night"]["background"]["camera"],
+            serde_json::json!({"motion": "zoomOut", "amount": 0.75, "speed": 0.5})
+        );
+    }
 
     #[test]
     fn parse_color_hex_accepts_hex_and_rgb_forms() {

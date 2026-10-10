@@ -102,6 +102,7 @@ pub struct RenderImage {
     /// The scale factor of this image on render.
     pub(crate) scale_factor: f32,
     data: SmallVec<[Frame; 1]>,
+    retained: Vec<Box<dyn std::any::Any + Send + Sync>>,
 }
 
 impl PartialEq for RenderImage {
@@ -121,7 +122,14 @@ impl RenderImage {
             id: ImageId(NEXT_ID.fetch_add(1, SeqCst)),
             scale_factor: 1.0,
             data: data.into(),
+            retained: Vec::new(),
         }
+    }
+
+    /// Retain a memory lease for as long as this image's pixels are owned by any consumer.
+    pub fn retaining(mut self, resource: impl std::any::Any + Send + Sync) -> Self {
+        self.retained.push(Box::new(resource));
+        self
     }
 
     /// Convert this image into a byte slice.

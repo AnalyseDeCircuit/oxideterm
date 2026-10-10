@@ -407,7 +407,7 @@ fn prepare_gradient_color(tag: u32, color_space: u32,
 
     if (tag == 0u || tag == 2u || tag == 3u) {
         result.solid = hsla_to_rgba(solid);
-    } else if (tag == 1u) {
+    } else if (tag == 1u || tag == 4u) {
         // The hsla_to_rgba is returns a linear sRGB color
         result.color0 = hsla_to_rgba(colors[0].color);
         result.color1 = hsla_to_rgba(colors[1].color);
@@ -426,6 +426,15 @@ fn prepare_gradient_color(tag: u32, color_space: u32,
     }
 
     return result;
+}
+
+fn mineral_noise(cell: vec2<f32>) -> f32 {
+    let p = vec2<u32>(floor(cell));
+    var h = p.x * 0x9e3779b9u ^ p.y * 0x85ebca6bu;
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    return f32(h & 0xffffu) / 65535.0;
 }
 
 fn gradient_color(background: Background, position: vec2<f32>, bounds: Bounds,
@@ -508,6 +517,23 @@ fn gradient_color(background: Background, position: vec2<f32>, bounds: Bounds,
 
             background_color = solid_color;
             background_color.a *= saturate(should_be_colored);
+        }
+        case 4u: {
+            let local = position - bounds.origin;
+            let uv = local / bounds.size;
+            let grain_size = background.gradient_angle_or_pattern_height;
+            let roughness = background.colors[0].percentage;
+            let phase = background.colors[1].percentage;
+            let grain = mineral_noise(local / grain_size);
+            let field = mineral_noise(local / (grain_size * 12.0));
+            let sheen = pow(sin(uv.x * 3.0 + uv.y * 1.7 + phase) * 0.5 + 0.5, 5.0);
+            let mixed = mix(color0, color1, field * 0.7 + grain * 0.3);
+            if (background.color_space == 1u) {
+                background_color = oklab_to_linear_srgb(mixed);
+            } else {
+                background_color = srgba_to_linear(mixed);
+            }
+            background_color.a *= min(1.0, 0.08 + grain * roughness * 0.80 + sheen * background.solid.h * 0.38);
         }
     }
 
@@ -1310,6 +1336,9 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
 struct SurfaceParams {
     bounds: Bounds,
     content_mask: Bounds,
+    opacity: f32,
+    rotation: u32,
+    sample_size: vec2<f32>,
 }
 
 @group(1) @binding(0) var<uniform> surface_locals: SurfaceParams;
@@ -1329,6 +1358,9 @@ fn vs_surface(@builtin(vertex_index) vertex_id: u32) -> SurfaceVarying {
     var out = SurfaceVarying();
     out.position = to_device_position(unit_vertex, surface_locals.bounds);
     out.texture_position = unit_vertex;
+    if (surface_locals.rotation == 90u) { out.texture_position = vec2<f32>(unit_vertex.y, 1.0 - unit_vertex.x); }
+    else if (surface_locals.rotation == 180u) { out.texture_position = 1.0 - unit_vertex; }
+    else if (surface_locals.rotation == 270u) { out.texture_position = vec2<f32>(1.0 - unit_vertex.y, unit_vertex.x); }
     out.clip_distances = distance_from_clip_rect(unit_vertex, surface_locals.bounds, surface_locals.content_mask);
     return out;
 }
@@ -1339,7 +1371,15 @@ fn fs_surface(input: SurfaceVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
 
-    return textureSampleLevel(t_surface, s_surface, input.texture_position, 0.0);
+    var grid = surface_locals.sample_size;
+    if (surface_locals.rotation == 90u || surface_locals.rotation == 270u) { grid = grid.yx; }
+    let position = input.texture_position * grid - 0.5;
+    let base = (floor(position) + 0.5) / grid;
+    let step = 1.0 / grid;
+    let weight = fract(position);
+    let top = mix(textureSampleLevel(t_surface, s_surface, base, 0.0), textureSampleLevel(t_surface, s_surface, base + vec2<f32>(step.x, 0.0), 0.0), weight.x);
+    let bottom = mix(textureSampleLevel(t_surface, s_surface, base + vec2<f32>(0.0, step.y), 0.0), textureSampleLevel(t_surface, s_surface, base + step, 0.0), weight.x);
+    return blend_color(mix(top, bottom, weight.y), surface_locals.opacity);
 }
 
 // --- blur --- //

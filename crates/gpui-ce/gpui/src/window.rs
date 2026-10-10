@@ -5416,6 +5416,52 @@ impl Window {
         self.sprite_atlas.update(&key, bounds, bytes)
     }
 
+    /// Upload a full streaming frame and track the actual renderer submission.
+    pub fn update_stream_texture(
+        &mut self,
+        data: &DynamicTexture,
+        bytes: &[u8],
+    ) -> Result<crate::GpuSubmission> {
+        let bounds = Bounds {
+            origin: Point::default(),
+            size: data.size(),
+        };
+        validate_dynamic_texture_update(data.size(), bounds, bytes)?;
+        let key: crate::AtlasKey = DynamicTextureParams {
+            texture_id: data.id,
+        }
+        .into();
+        let mut created = false;
+        self.sprite_atlas
+            .get_or_insert_with(key.clone(), &mut || {
+                created = true;
+                Ok(Some((data.size(), Cow::Borrowed(bytes))))
+            })?
+            .context("stream texture allocation returned no tile")?;
+        if !created {
+            self.sprite_atlas.update_stream(&key, bounds, bytes)?;
+        }
+        self.sprite_atlas.gpu_submission()
+    }
+
+    /// Advances native completion queries without blocking or requesting a repaint.
+    pub fn poll_gpu_submissions(&self) {
+        self.sprite_atlas.poll_gpu_submissions();
+    }
+
+    /// CPU and GPU staging admission required before a stream upload allocates storage.
+    pub fn stream_texture_staging_bytes(&self, size: Size<DevicePixels>) -> Result<(usize, usize)> {
+        Ok((
+            self.sprite_atlas.stream_upload_staging_bytes(size)?,
+            self.sprite_atlas.stream_gpu_staging_bytes(size)?,
+        ))
+    }
+
+    /// Track retained resources through the submission that presents this frame.
+    pub fn stream_presentation(&self) -> Result<crate::GpuSubmission> {
+        self.sprite_atlas.gpu_submission()
+    }
+
     /// Paints a dynamic texture into the next frame as one polychrome sprite.
     pub fn paint_dynamic_texture(
         &mut self,
@@ -5462,6 +5508,22 @@ impl Window {
     /// This method should only be called as part of the paint phase of element drawing.
     #[cfg(target_os = "macos")]
     pub fn paint_surface(&mut self, bounds: Bounds<Pixels>, image_buffer: CVPixelBuffer) {
+        let sample_size = size(
+            DevicePixels(image_buffer.get_width() as i32),
+            DevicePixels(image_buffer.get_height() as i32),
+        );
+        self.paint_video_surface(bounds, image_buffer, 0, sample_size);
+    }
+
+    /// Paint a retained native video buffer with clockwise orientation and element opacity.
+    #[cfg(target_os = "macos")]
+    pub fn paint_video_surface(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        image_buffer: CVPixelBuffer,
+        rotation: u32,
+        sample_size: Size<DevicePixels>,
+    ) {
         use crate::PaintSurface;
 
         self.invalidator.debug_assert_paint();
@@ -5473,6 +5535,9 @@ impl Window {
             bounds,
             content_mask,
             image_buffer,
+            opacity: self.element_opacity(),
+            rotation,
+            sample_size,
         });
     }
 
@@ -5485,6 +5550,19 @@ impl Window {
         bounds: Bounds<Pixels>,
         texture: std::sync::Arc<dyn std::any::Any + Send + Sync>,
         texture_size: Size<DevicePixels>,
+    ) {
+        self.paint_video_texture(bounds, texture, texture_size, 0, texture_size);
+    }
+
+    /// Paint a native renderer texture while retaining its owner in the scene.
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))]
+    pub fn paint_video_texture(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        texture: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+        texture_size: Size<DevicePixels>,
+        rotation: u32,
+        sample_size: Size<DevicePixels>,
     ) {
         use crate::PaintSurface;
 
@@ -5499,6 +5577,9 @@ impl Window {
             content_mask,
             texture,
             texture_size,
+            opacity: self.element_opacity(),
+            rotation,
+            sample_size,
         });
     }
 
@@ -7255,8 +7336,8 @@ impl Window {
     }
 
     /// Returns the GPU context (device + queue) if available.
-    /// The returned `Box` contains `(Arc<wgpu::Device>, Arc<wgpu::Queue>)`.
-    #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+    /// Contains `(Arc<wgpu::Device>, Arc<wgpu::Queue>)` on Linux, or `ID3D11Device` on Windows.
+    #[cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))]
     pub fn gpu_context(&self) -> Option<Box<dyn std::any::Any>> {
         self.platform_window.gpu_context()
     }

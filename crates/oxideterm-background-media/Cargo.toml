@@ -1,0 +1,39 @@
+[package]
+name = "oxideterm-background-media"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-channel.workspace = true
+image.workspace = true
+image-webp = "0.2.4"
+fast_image_resize = { version = "6.0", features = ["image", "only_u8x4"] }
+thiserror.workspace = true
+log.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"
+objc2-av-foundation = { version = "0.3.2", features = ["objc2-core-media"] }
+objc2-core-media = { version = "0.3.2", features = ["objc2-core-video"] }
+objc2-core-video = "0.3.2"
+objc2-core-foundation = "0.3.2"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.24.5"
+gstreamer-app = "0.24.5"
+gstreamer-allocators = "0.24.5"
+libc.workspace = true
+gstreamer-video = { version = "0.24.5", features = ["v1_20"] }
+
+[dev-dependencies]
+gif = "0.14.2"
+futures.workspace = true
+tempfile = "3.23"

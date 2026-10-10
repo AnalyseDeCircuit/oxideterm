@@ -1168,6 +1168,14 @@ impl PlatformWindow for WindowsWindow {
         self.state.renderer.borrow().gpu_specs().log_err()
     }
 
+    fn gpu_context(&self) -> Option<Box<dyn std::any::Any>> {
+        self.state
+            .renderer
+            .borrow()
+            .video_device()
+            .map(|device| Box::new(device) as Box<dyn std::any::Any>)
+    }
+
     fn update_ime_position(&self, bounds: Bounds<Pixels>) {
         let scale_factor = self.state.scale_factor.get();
         let caret_position = POINT {

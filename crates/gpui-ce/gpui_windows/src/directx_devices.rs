@@ -15,7 +15,7 @@ use windows::Win32::{
         },
         Dxgi::{
             CreateDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG, DXGI_CREATE_FACTORY_FLAGS,
-            IDXGIAdapter1, IDXGIFactory6,
+            DXGI_ERROR_NOT_FOUND, IDXGIAdapter1, IDXGIFactory6,
         },
     },
 };
@@ -113,7 +113,11 @@ fn get_adapter(
     D3D_FEATURE_LEVEL,
 )> {
     for adapter_index in 0.. {
-        let adapter: IDXGIAdapter1 = unsafe { dxgi_factory.EnumAdapters(adapter_index)?.cast()? };
+        let adapter: IDXGIAdapter1 = match unsafe { dxgi_factory.EnumAdapters(adapter_index) } {
+            Ok(adapter) => adapter.cast()?,
+            Err(error) if error.code() == DXGI_ERROR_NOT_FOUND => break,
+            Err(error) => return Err(error.into()),
+        };
         if let Ok(desc) = unsafe { adapter.GetDesc1() } {
             let gpu_name = String::from_utf16_lossy(&desc.Description)
                 .trim_matches(char::from(0))
@@ -136,7 +140,24 @@ fn get_adapter(
         }
     }
 
-    unreachable!()
+    // Hardware initialization can fail even when adapters are enumerated (remote sessions or drivers).
+    let adapter: IDXGIAdapter1 = unsafe { dxgi_factory.EnumWarpAdapter()? };
+    let mut context = None;
+    let mut feature_level = D3D_FEATURE_LEVEL::default();
+    let device = get_device(
+        &adapter,
+        Some(&mut context),
+        Some(&mut feature_level),
+        debug_layer_available,
+    )
+    .context("Creating WARP software renderer")?;
+    log::info!("Using WARP software renderer");
+    Ok((
+        adapter,
+        device,
+        context.context("WARP device context is missing")?,
+        feature_level,
+    ))
 }
 
 #[inline]

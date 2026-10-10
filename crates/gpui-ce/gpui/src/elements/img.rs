@@ -129,6 +129,7 @@ where
 pub struct ImageStyle {
     grayscale: bool,
     object_fit: ObjectFit,
+    object_position: (f32, f32),
     loading: Option<Box<dyn Fn() -> AnyElement>>,
     fallback: Option<Box<dyn Fn() -> AnyElement>>,
 }
@@ -138,6 +139,7 @@ impl Default for ImageStyle {
         Self {
             grayscale: false,
             object_fit: ObjectFit::Contain,
+            object_position: (0.5, 0.5),
             loading: None,
             fallback: None,
         }
@@ -146,6 +148,11 @@ impl Default for ImageStyle {
 
 /// Style an image element.
 pub trait StyledImage: Sized {
+    /// Position the fitted image from the top-left (0, 0) to bottom-right (1, 1).
+    fn object_position(mut self, position: (f32, f32)) -> Self {
+        self.image_style().object_position = position;
+        self
+    }
     /// Get a mutable [ImageStyle] from the element.
     fn image_style(&mut self) -> &mut ImageStyle;
 
@@ -487,10 +494,11 @@ impl Element for Img {
                     if data.frame_count() == 0 {
                         return;
                     }
-                    let new_bounds = self
-                        .style
-                        .object_fit
-                        .get_bounds(bounds, data.size(layout_state.frame_index));
+                    let new_bounds = self.style.object_fit.get_aligned_bounds(
+                        bounds,
+                        data.size(layout_state.frame_index),
+                        self.style.object_position,
+                    );
                     let corner_radii = style.corner_radii.to_pixels(window.rem_size());
                     window
                         .paint_image(
@@ -864,38 +872,42 @@ mod tests {
                 .bounds
         });
 
-        window.draw(point(px(10.), px(20.)), size(px(100.), px(100.)), |_, _| {
-            img(ImageSource::Render(image))
-                .size_full()
-                .object_fit(ObjectFit::Cover)
-                .into_any_element()
-        });
+        for (position, crop_x) in [(0.0, 0), (0.5, 50), (1.0, 100)] {
+            window.draw(point(px(10.), px(20.)), size(px(100.), px(100.)), |_, _| {
+                img(ImageSource::Render(image.clone()))
+                    .size_full()
+                    .object_fit(ObjectFit::Cover)
+                    .object_position((position, 0.5))
+                    .into_any_element()
+            });
 
-        let (rendered_bounds, rendered_tile_bounds, scale_factor) = window.update(|window, _| {
-            let sprite = window
-                .rendered_frame
-                .scene
-                .polychrome_sprites
-                .last()
-                .expect("cover image should paint a sprite");
-            (sprite.bounds, sprite.tile.bounds, window.scale_factor())
-        });
-        assert_eq!(
-            rendered_bounds,
-            Bounds {
-                origin: point(px(10.).scale(scale_factor), px(20.).scale(scale_factor)),
-                size: size(px(100.).scale(scale_factor), px(100.).scale(scale_factor)),
-            }
-        );
-        assert_eq!(
-            (
-                rendered_tile_bounds.origin.x.0 - full_tile_bounds.origin.x.0,
-                rendered_tile_bounds.origin.y.0 - full_tile_bounds.origin.y.0,
-                rendered_tile_bounds.size.width.0,
-                rendered_tile_bounds.size.height.0,
-            ),
-            (50, 0, 100, 100),
-        );
+            let (rendered_bounds, rendered_tile_bounds, scale_factor) =
+                window.update(|window, _| {
+                    let sprite = window
+                        .rendered_frame
+                        .scene
+                        .polychrome_sprites
+                        .last()
+                        .expect("cover image should paint a sprite");
+                    (sprite.bounds, sprite.tile.bounds, window.scale_factor())
+                });
+            assert_eq!(
+                rendered_bounds,
+                Bounds {
+                    origin: point(px(10.).scale(scale_factor), px(20.).scale(scale_factor)),
+                    size: size(px(100.).scale(scale_factor), px(100.).scale(scale_factor)),
+                }
+            );
+            assert_eq!(
+                (
+                    rendered_tile_bounds.origin.x.0 - full_tile_bounds.origin.x.0,
+                    rendered_tile_bounds.origin.y.0 - full_tile_bounds.origin.y.0,
+                    rendered_tile_bounds.size.width.0,
+                    rendered_tile_bounds.size.height.0,
+                ),
+                (crop_x, 0, 100, 100),
+            );
+        }
     }
 
     #[gpui::test]
