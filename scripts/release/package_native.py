@@ -1575,6 +1575,30 @@ def copy_linux_appimage_kerberos_libraries(binary: Path, appdir: Path) -> None:
         shutil.copy2(path, library_dir / name)
 
 
+def linux_gstreamer_plugin_scanner() -> Path:
+    scanner_dir = subprocess.run(
+        [require_tool("pkg-config"), "--variable=pluginscannerdir", "gstreamer-1.0"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    scanner = Path(scanner_dir) / "gst-plugin-scanner"
+    if scanner_dir and scanner.is_file():
+        return scanner
+
+    # Ubuntu's multiarch helper directory can differ from the path in GStreamer's .pc file.
+    # Query the installed package instead of guessing an architecture-specific lib directory.
+    listing = subprocess.run(
+        [require_tool("dpkg-query"), "-L", "libgstreamer1.0-0"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    scanners = {
+        Path(line) for line in listing.splitlines()
+        if Path(line).name == "gst-plugin-scanner" and Path(line).is_file()
+    }
+    if len(scanners) != 1:
+        raise RuntimeError("GStreamer plugin scanner could not be uniquely located in libgstreamer1.0-0")
+    return scanners.pop()
+
+
 def copy_linux_appimage_media_runtime(binary: Path, appdir: Path) -> None:
     """Bundle the selected GStreamer plugins, scanner and their complete ELF closure."""
     inspect = require_tool("gst-inspect-1.0")
@@ -1590,13 +1614,7 @@ def copy_linux_appimage_media_runtime(binary: Path, appdir: Path) -> None:
             raise RuntimeError(f"GStreamer factory {factory} does not expose one plugin file")
         plugin_files.add(Path(filenames[0]).resolve())
 
-    scanner_dir = subprocess.run(
-        [require_tool("pkg-config"), "--variable=pluginscannerdir", "gstreamer-1.0"],
-        check=True, capture_output=True, text=True,
-    ).stdout.strip()
-    scanner = Path(scanner_dir) / "gst-plugin-scanner"
-    if not scanner_dir or not scanner.is_file():
-        raise RuntimeError("GStreamer plugin scanner was not found in its configured directory")
+    scanner = linux_gstreamer_plugin_scanner()
     plugin_dir = appdir / "usr" / "lib" / "gstreamer-1.0"
     plugin_dir.mkdir(parents=True, exist_ok=True)
     scanner_destination = appdir / "usr" / "libexec" / "gst-plugin-scanner"

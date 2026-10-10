@@ -616,6 +616,34 @@ class PlatformSigningTests(unittest.TestCase):
 
 
 class LinuxPackagingTests(unittest.TestCase):
+    def test_plugin_scanner_uses_installed_package_when_configured_path_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            configured = root / "libexec" / "gstreamer-1.0"
+            installed = root / "lib" / "aarch64-linux-gnu" / "gstreamer1.0" / "gstreamer-1.0" / "gst-plugin-scanner"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"packaged scanner")
+            for configured_dir in (str(configured), ""):
+                with (
+                    self.subTest(configured_dir=configured_dir),
+                    patch.object(package_native, "require_tool", side_effect=lambda name: name),
+                    patch.object(package_native.subprocess, "run", side_effect=[
+                        subprocess.CompletedProcess([], 0, stdout=configured_dir),
+                        subprocess.CompletedProcess([], 0, stdout=f"{root}\n{installed}\n"),
+                    ]),
+                ):
+                    self.assertEqual(package_native.linux_gstreamer_plugin_scanner(), installed)
+            configured.mkdir(parents=True)
+            configured_scanner = configured / "gst-plugin-scanner"
+            configured_scanner.write_bytes(b"configured scanner")
+            with (
+                patch.object(package_native, "require_tool", side_effect=lambda name: name),
+                patch.object(package_native.subprocess, "run", return_value=
+                    subprocess.CompletedProcess([], 0, stdout=str(configured))) as run,
+            ):
+                self.assertEqual(package_native.linux_gstreamer_plugin_scanner(), configured_scanner)
+                self.assertEqual(run.call_count, 1)
+
     def test_missing_elf_dependencies_stop_packaging(self) -> None:
         result = subprocess.CompletedProcess(
             ["ldd"], 0, stdout="libgstvideo-1.0.so.0 => not found\n", stderr=""
