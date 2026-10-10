@@ -283,6 +283,7 @@ impl WorkspaceApp {
         self.edit_settings(
             |settings| {
                 settings.appearance.theme = theme_id.clone();
+                settings.appearance.follow_system_appearance = false;
                 settings.terminal.theme = theme_id;
             },
             cx,

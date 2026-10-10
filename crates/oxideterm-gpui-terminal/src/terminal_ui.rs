@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
@@ -805,21 +805,9 @@ pub struct TerminalHighlightRuleSetOverride {
     pub rules: Arc<[TerminalHighlightRule]>,
 }
 
-#[derive(Clone, Debug)]
-pub struct TerminalBackgroundPreferences {
-    pub path: PathBuf,
-    pub opacity: f32,
-    pub blur: f32,
-    pub fit: TerminalBackgroundFit,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub enum TerminalBackgroundFit {
-    Cover,
-    Contain,
-    Fill,
-    Tile,
-}
+pub use oxideterm_gpui_background::{
+    BackgroundFit as TerminalBackgroundFit, BackgroundPreferences as TerminalBackgroundPreferences,
+};
 
 #[derive(Clone)]
 pub(crate) struct TerminalUiSettings {

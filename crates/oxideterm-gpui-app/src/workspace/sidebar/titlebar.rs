@@ -258,7 +258,7 @@ impl WorkspaceApp {
             .items_center()
             .bg(self.workspace_chrome_background(titlebar_bg))
             .border_b_1()
-            .border_color(rgb(titlebar_border))
+            .border_color(self.workspace_divider_color(titlebar_border, 0xff))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(text_color))
             .when(cfg!(target_os = "linux"), |bar| {

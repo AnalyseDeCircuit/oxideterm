@@ -60,6 +60,14 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::UpdateProxyProtocol => SelectAnchorId::SettingsUpdateProxyProtocol,
             Self::AppearanceTheme => SelectAnchorId::SettingsAppearanceTheme,
             Self::AppearanceTerminalTheme => SelectAnchorId::SettingsAppearanceTerminalTheme,
+            Self::AppearanceThemeLight => SelectAnchorId::SettingsAppearanceThemeLight,
+            Self::AppearanceThemeDark => SelectAnchorId::SettingsAppearanceThemeDark,
+            Self::AppearanceTerminalThemeLight => {
+                SelectAnchorId::SettingsAppearanceTerminalThemeLight
+            }
+            Self::AppearanceTerminalThemeDark => {
+                SelectAnchorId::SettingsAppearanceTerminalThemeDark
+            }
             Self::AppearanceDensity => SelectAnchorId::SettingsAppearanceDensity,
             Self::AppearanceAnimation => SelectAnchorId::SettingsAppearanceAnimation,
             Self::AppearanceRenderProfile => SelectAnchorId::SettingsAppearanceRenderProfile,

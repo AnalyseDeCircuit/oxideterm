@@ -576,6 +576,25 @@ pub fn settings_slider_anchor_id(slider: SettingsSlider) -> SelectAnchorId {
         SettingsSlider::AppearanceBackgroundBlur => {
             SelectAnchorId::SettingsAppearanceBackgroundBlurSlider
         }
+        SettingsSlider::BackgroundEffectSpeed => SelectAnchorId::SettingsBackgroundEffectSpeed,
+        SettingsSlider::BackgroundReadability => SelectAnchorId::SettingsBackgroundReadability,
+        SettingsSlider::BackgroundEffectStrength => {
+            SelectAnchorId::SettingsBackgroundEffectStrength
+        }
+        SettingsSlider::BackgroundEffectSheen => SelectAnchorId::SettingsBackgroundEffectSheen,
+        SettingsSlider::BackgroundEffectSize => SelectAnchorId::SettingsBackgroundEffectSize,
+        SettingsSlider::BackgroundEffectBrightness => {
+            SelectAnchorId::SettingsBackgroundEffectBrightness
+        }
+        SettingsSlider::BackgroundEffectRoughness => {
+            SelectAnchorId::SettingsBackgroundEffectRoughness
+        }
+        SettingsSlider::BackgroundEffectDirection => {
+            SelectAnchorId::SettingsBackgroundEffectDirection
+        }
+        SettingsSlider::BackgroundParticleCount => SelectAnchorId::SettingsBackgroundParticleCount,
+        SettingsSlider::BackgroundCameraAmount => SelectAnchorId::SettingsBackgroundCameraAmount,
+        SettingsSlider::BackgroundCameraSpeed => SelectAnchorId::SettingsBackgroundCameraSpeed,
     }
 }
 

@@ -154,6 +154,7 @@ const TERMINAL_AUTOSUGGEST_MAX_CANDIDATES: usize = 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
+    InputActivity,
     Exited {
         exit_code: Option<i32>,
     },
@@ -1955,6 +1956,25 @@ impl TerminalPane {
         cx.notify();
     }
 
+    pub fn set_appearance(
+        &mut self,
+        theme: TerminalUiTheme,
+        background: Option<TerminalBackgroundPreferences>,
+        transparent_background: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let palette = theme.palette();
+        if self.preferences.theme.palette() != palette {
+            self.terminal.lock().set_palette(palette);
+            self.snapshot_dirty = true;
+        }
+        self.theme = theme.clone();
+        self.preferences.theme = theme;
+        self.preferences.background = background;
+        self.preferences.transparent_background = transparent_background;
+        cx.notify();
+    }
+
     pub fn with_preference_overrides(
         mut self,
         preference_overrides: TerminalUiPreferenceOverrides,
@@ -2520,6 +2540,7 @@ impl TerminalPane {
         };
         if result.is_ok() {
             self.restore_live_output_after_user_input();
+            cx.emit(TerminalPaneEvent::InputActivity);
             if privilege_observation == PrivilegeInputObservation::SecretEntry {
                 self.input_tracker.reset();
             } else if let Some(text) = trackable_single_line_paste {
@@ -3947,6 +3968,8 @@ impl TerminalPane {
     }
 
     fn observe_user_input(&mut self, source: &'static str, bytes: &[u8], cx: &mut Context<Self>) {
+        // Only activity crosses into background rendering; input contents stay pane-owned.
+        cx.emit(TerminalPaneEvent::InputActivity);
         let now = Instant::now();
         if self.observe_privilege_input(source, bytes, now, cx)
             == PrivilegeInputObservation::SecretEntry
@@ -4131,6 +4154,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         self.marked_text = (!text.is_empty()).then(|| text.to_string());
+        cx.emit(TerminalPaneEvent::InputActivity);
         self.marked_text_caret_utf16 = selected_range_utf16.map(|range| range.end);
         // Composition edits are typing; keep the caret solid like other key input.
         self.reset_cursor_blink();
@@ -5190,39 +5214,46 @@ mod tests {
                 .unwrap()
             })
         });
-        let light = TerminalUiTheme::from_tokens(oxideterm_theme::ThemeTokens::from_builtin(
-            oxideterm_theme::theme_by_id("solarized-light"),
-        ));
-        pane.update(cx, |pane, cx| {
-            let settled = {
-                let mut terminal = pane.terminal.lock();
-                // The cursor row is always damaged, so leave it below the colored row.
-                terminal.feed_recording_output(b"\x1b[41mAB\x1b[0m\r\n");
-                let first = terminal.snapshot_incremental(&terminal.snapshot());
-                terminal.snapshot_incremental(&first)
-            };
-            pane.snapshot = settled;
-            pane.snapshot_dirty = false;
+        for appearance_only in [false, true] {
+            let light = TerminalUiTheme::from_tokens(oxideterm_theme::ThemeTokens::from_builtin(
+                oxideterm_theme::theme_by_id("solarized-light"),
+            ));
+            pane.update(cx, |pane, cx| {
+                pane.set_appearance(TerminalUiTheme::default(), None, false, cx);
+                let settled = {
+                    let mut terminal = pane.terminal.lock();
+                    // The cursor row is always damaged, so leave it below the colored row.
+                    terminal.feed_recording_output(b"\x1b[41mAB\x1b[0m\r\n");
+                    let first = terminal.snapshot_incremental(&terminal.snapshot());
+                    terminal.snapshot_incremental(&first)
+                };
+                pane.snapshot = settled;
+                pane.snapshot_dirty = false;
 
-            let mut preferences = pane.preferences.clone();
-            preferences.theme = light.clone();
-            pane.set_preferences(preferences, cx);
+                let mut preferences = pane.preferences.clone();
+                preferences.theme = light.clone();
+                if appearance_only {
+                    pane.set_appearance(light.clone(), None, false, cx);
+                } else {
+                    pane.set_preferences(preferences, cx);
+                }
 
-            assert!(pane.snapshot_dirty);
-            let (next, _, _) = pane
-                .terminal
-                .lock()
-                .try_render_snapshot(&pane.snapshot, false)
-                .unwrap();
-            let row = &next.lines[0].cells;
-            assert_eq!(
-                (row[0].bg, row[2].bg),
-                (
-                    terminal_color_from_hex(light.tokens.terminal.red),
-                    terminal_color_from_hex(light.background),
-                )
-            );
-        });
+                assert!(pane.snapshot_dirty);
+                let (next, _, _) = pane
+                    .terminal
+                    .lock()
+                    .try_render_snapshot(&pane.snapshot, false)
+                    .unwrap();
+                let row = &next.lines[0].cells;
+                assert_eq!(
+                    (row[0].bg, row[2].bg),
+                    (
+                        terminal_color_from_hex(light.tokens.terminal.red),
+                        terminal_color_from_hex(light.background),
+                    )
+                );
+            });
+        }
     }
 
     #[gpui::test]

@@ -151,7 +151,7 @@ impl WorkspaceApp {
                     .w(px(self.tokens.metrics.divider_width))
                     .h(px(self.tokens.metrics.divider_height))
                     .mb(px(self.tokens.metrics.activity_icon_gap))
-                    .bg(rgb(theme.divider)),
+                    .bg(self.workspace_divider_color(theme.divider, 0xff)),
             );
         }
         for panel in plugin_sidebar_panels
@@ -174,7 +174,7 @@ impl WorkspaceApp {
             div()
                 .w(px(self.tokens.metrics.divider_width))
                 .h(px(self.tokens.metrics.divider_height))
-                .bg(rgb(theme.divider)),
+                .bg(self.workspace_divider_color(theme.divider, 0xff)),
         );
         for panel in plugin_sidebar_panels
             .into_iter()

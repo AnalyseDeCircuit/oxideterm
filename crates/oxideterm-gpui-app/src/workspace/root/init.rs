@@ -37,7 +37,10 @@ impl WorkspaceApp {
             // A background-gallery failure must not prevent the workspace from opening.
             eprintln!("failed to install built-in workspace backgrounds: {error}");
         }
-        let version_migration = VersionMigrationState::from_settings_path(settings_store.path())?;
+        let version_migration = VersionMigrationState::from_settings_path(
+            settings_store.path(),
+            settings_store.settings().onboarding_completed,
+        )?;
         let audit = audit::AuditState::new(settings_store.path().with_file_name("audit.sqlite3"));
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));
@@ -98,7 +101,11 @@ impl WorkspaceApp {
             });
         let skill_registry = std::sync::Arc::new(parking_lot::RwLock::new(skill_registry));
         let local_shells = scan_shells();
-        let tokens = tokens_from_settings(&settings);
+        let system_dark = matches!(
+            window.appearance(),
+            gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
+        );
+        let tokens = tokens_from_settings(&settings, system_dark);
         let initial_viewport_width = current_window_size(window).0;
         let initial_sidebar_width = sidebar::clamp_responsive_sidebar_width(
             settings.sidebar_ui.width as f32,
@@ -837,6 +844,12 @@ impl WorkspaceApp {
             _cloud_sync_subscription: cloud_sync_subscription,
             i18n,
             tokens,
+            system_dark,
+            appearance_edit_dark: settings
+                .appearance
+                .follow_system_appearance
+                .then_some(system_dark),
+            active_background: settings.resolved_background(system_dark),
             detected_graphics,
             render_profile_override,
             render_policy,
@@ -1190,7 +1203,12 @@ impl WorkspaceApp {
             terminal_encoding: session_terminal_encoding(terminal.terminal_encoding),
             show_performance_overlay: terminal.show_fps_overlay,
             render_policy: self.render_policy,
-            background: self.terminal_background_preferences(background_key),
+            background: self.terminal_background_preferences(background_key).map(
+                |mut background| {
+                    background.on_failure = Some(self.background_failure_handler(cx));
+                    background
+                },
+            ),
             transparent_background: self.window_background_preferences().is_some(),
             paste_labels: TerminalPasteLabels {
                 edit: self.i18n.t("terminal.paste.edit"),
@@ -1428,10 +1446,10 @@ impl WorkspaceApp {
         &self,
         background_key: &str,
     ) -> Option<TerminalBackgroundPreferences> {
-        let terminal = &self.settings_store.settings().terminal;
+        let terminal = &self.active_background;
         if !background_scope_includes_content(
-            terminal.background_scope,
-            &terminal.background_enabled_tabs,
+            terminal.scope,
+            &terminal.enabled_tabs,
             background_key,
         ) {
             return None;
@@ -1442,9 +1460,7 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn window_background_preferences(
         &self,
     ) -> Option<TerminalBackgroundPreferences> {
-        if !background_scope_includes_window(
-            self.settings_store.settings().terminal.background_scope,
-        ) {
+        if !background_scope_includes_window(self.active_background.scope) {
             return None;
         }
         self.background_image_preferences()
@@ -1458,8 +1474,26 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn workspace_chrome_divider(&self) -> Rgba {
-        // Long workspace seams need less contrast than control outlines.
-        rgba((self.tokens.ui.border << 8) | 0x66)
+        self.workspace_divider_color(self.tokens.ui.border, 0x66)
+    }
+
+    pub(in crate::workspace) fn workspace_divider_color(
+        &self,
+        color: u32,
+        opaque_alpha: u32,
+    ) -> Rgba {
+        let appearance = &self.settings_store.settings().appearance;
+        let background = &self.active_background;
+        let translucent = appearance.window_opacity < 1.0
+            || appearance.frosted_glass != FrostedGlassMode::Off
+            || (background.enabled && (background.image.is_some() || background.effect.is_some()));
+        // Decorative seams should not cut through translucent surfaces like control outlines.
+        let alpha = if translucent {
+            opaque_alpha.min(0x26)
+        } else {
+            opaque_alpha
+        };
+        rgba((color << 8) | alpha)
     }
 
     pub(in crate::workspace) fn workspace_chrome_background(&self, color: u32) -> Rgba {
@@ -1487,25 +1521,36 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn background_failure_handler(
+        &self,
+        cx: &App,
+    ) -> Arc<dyn Fn(oxideterm_gpui_background::BackgroundFailure) + Send + Sync> {
+        let tx = self.overlay.read(cx).notice_sender();
+        let i18n = self.i18n.clone();
+        Arc::new(move |failure| {
+            let key = match failure {
+                oxideterm_gpui_background::BackgroundFailure::Unsupported => "bg_unsupported",
+                oxideterm_gpui_background::BackgroundFailure::Decode => "bg_decode_failed",
+                oxideterm_gpui_background::BackgroundFailure::ResourceExhausted => {
+                    "bg_resource_exhausted"
+                }
+                oxideterm_gpui_background::BackgroundFailure::InvalidOutput => "bg_limits_hint",
+            };
+            let _ = tx.send(TerminalNotice {
+                title: i18n.t(&format!("settings_view.terminal.{key}")),
+                description: None,
+                status_text: None,
+                progress: None,
+                variant: TerminalNoticeVariant::Error,
+            });
+        })
+    }
+
     fn background_image_preferences(&self) -> Option<TerminalBackgroundPreferences> {
         if !self.render_policy.allow_background_images {
             return None;
         }
-        let terminal = &self.settings_store.settings().terminal;
-        if !terminal.background_enabled {
-            return None;
-        }
-        let path = PathBuf::from(terminal.background_image.as_deref()?);
-        // Keep render-time background checks off the filesystem hot path.
-        // GPUI image fallback and the blurred-image loader already handle
-        // missing files; doing path.exists() here made settings pages with many
-        // translucent cards stat the same image repeatedly while scrolling.
-        Some(TerminalBackgroundPreferences {
-            path,
-            opacity: terminal.background_opacity.clamp(0.0, 1.0) as f32,
-            blur: terminal.background_blur.clamp(0, 20) as f32,
-            fit: terminal_background_fit(terminal.background_fit),
-        })
+        background_preferences_for_style(&self.active_background, &self.tokens)
     }
 }
 

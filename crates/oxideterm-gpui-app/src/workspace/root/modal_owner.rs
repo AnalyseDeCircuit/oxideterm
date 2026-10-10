@@ -262,6 +262,7 @@ impl ActiveWindowModalOwner {
                 | Self::OxideExport { .. }
                 | Self::CommandPalette
                 | Self::AppLockDialog
+                | Self::Onboarding
         )
     }
 

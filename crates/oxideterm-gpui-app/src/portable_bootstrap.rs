@@ -123,7 +123,13 @@ impl PortableBootstrapWindow {
         Self {
             status,
             i18n: I18n::new(locale_from_settings(settings.general.language)),
-            tokens: portable_bootstrap_tokens_from_settings(&settings),
+            tokens: portable_bootstrap_tokens_from_settings(
+                &settings,
+                matches!(
+                    window.appearance(),
+                    gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
+                ),
+            ),
             focus_handle,
             active_input: PortableBootstrapInput::Password,
             password: Zeroizing::new(String::new()),

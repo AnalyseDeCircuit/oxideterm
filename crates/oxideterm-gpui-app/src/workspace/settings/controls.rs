@@ -134,7 +134,7 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::General, SettingsSelect::Language) => {
+            (_, SettingsSelect::Language) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for language in language_options() {
                     let label = self.language_label(language);
@@ -268,9 +268,13 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (
-                SettingsTab::Appearance,
-                select
-                @ (SettingsSelect::AppearanceTheme | SettingsSelect::AppearanceTerminalTheme),
+                _,
+                select @ (SettingsSelect::AppearanceTheme
+                | SettingsSelect::AppearanceTerminalTheme
+                | SettingsSelect::AppearanceThemeLight
+                | SettingsSelect::AppearanceThemeDark
+                | SettingsSelect::AppearanceTerminalThemeLight
+                | SettingsSelect::AppearanceTerminalThemeDark),
             ) => {
                 let target = select.theme_target().expect("theme selector");
                 let mut popup = select_panel_overlay_popup_with_max_height(
@@ -293,7 +297,7 @@ impl WorkspaceApp {
                             let row = oxideterm_gpui_ui::select::select_option_highlighted(
                                 &self.tokens,
                                 "",
-                                theme_id == target.selected_id(settings),
+                                Some(theme_id.as_str()) == select.selected_theme_id(settings),
                                 self.settings_theme_preview.as_deref() == Some(theme_id.as_str()),
                             )
                             .h_auto()
@@ -346,7 +350,13 @@ impl WorkspaceApp {
                                 cx.listener(move |this, _, _, cx| {
                                     this.close_settings_select();
                                     this.edit_settings(
-                                        |settings| target.apply(settings, theme_id.clone()),
+                                        |settings| {
+                                            target.apply_for_scheme(
+                                                settings,
+                                                select.theme_system_dark(),
+                                                theme_id.clone(),
+                                            )
+                                        },
                                         cx,
                                     );
                                     cx.stop_propagation();
@@ -504,10 +514,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.background_fit = fit,
-                                cx,
-                            );
+                            this.edit_background_style(|style| style.fit = fit, cx);
                             cx.stop_propagation();
                         }),
                     ));
@@ -2177,8 +2184,7 @@ impl WorkspaceApp {
             return;
         }
         self.settings_theme_preview = None;
-        if let Some(target) = select_id.theme_target() {
-            let selected = target.selected_id(self.settings_store.settings());
+        if let Some(selected) = select_id.selected_theme_id(self.settings_store.settings()) {
             self.settings_theme_preview = Some(selected.to_string());
             self.settings_theme_scroll = ScrollHandle::new();
             if let Some(row) = appearance_theme_entries(self.settings_store.settings())
@@ -2204,6 +2210,9 @@ impl WorkspaceApp {
         else {
             return false;
         };
+        let system_dark = self
+            .open_settings_select
+            .and_then(SettingsSelect::theme_system_dark);
         if event.keystroke.modifiers.platform
             || event.keystroke.modifiers.control
             || event.keystroke.modifiers.alt
@@ -2219,7 +2228,10 @@ impl WorkspaceApp {
             "enter" | "space" | " " => {
                 if let Some(id) = self.settings_theme_preview.clone() {
                     self.close_settings_select();
-                    self.edit_settings(|settings| target.apply(settings, id), cx);
+                    self.edit_settings(
+                        |settings| target.apply_for_scheme(settings, system_dark, id),
+                        cx,
+                    );
                 }
                 true
             }

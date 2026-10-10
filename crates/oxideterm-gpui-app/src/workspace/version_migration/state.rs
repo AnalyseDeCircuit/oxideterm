@@ -23,9 +23,16 @@ pub(in crate::workspace) struct VersionMigrationState {
 impl VersionMigrationState {
     pub(in crate::workspace) fn from_settings_path(
         settings_path: &std::path::Path,
+        onboarding_completed: bool,
     ) -> anyhow::Result<Self> {
+        let pending = crate::migration_snapshot::pre_2_0_migration_notice_pending(settings_path)?;
+        if pending && !onboarding_completed {
+            // A partial first launch can already have a backup. New users learn
+            // the current app through onboarding, including on later launches.
+            crate::migration_snapshot::acknowledge_pre_2_0_migration_notice(settings_path)?;
+        }
         Ok(Self {
-            open: crate::migration_snapshot::pre_2_0_migration_notice_pending(settings_path)?,
+            open: pending && onboarding_completed,
             step: 0,
             error: None,
             scroll_handle: ScrollHandle::new(),

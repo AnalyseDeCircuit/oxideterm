@@ -62,6 +62,10 @@ pub enum SelectAnchorId {
     SettingsUpdateChannel,
     SettingsAppearanceTheme,
     SettingsAppearanceTerminalTheme,
+    SettingsAppearanceThemeLight,
+    SettingsAppearanceThemeDark,
+    SettingsAppearanceTerminalThemeLight,
+    SettingsAppearanceTerminalThemeDark,
     SettingsAppearanceDensity,
     SettingsAppearanceUiFontSizeSlider,
     SettingsAppearanceBorderRadiusSlider,
@@ -73,7 +77,18 @@ pub enum SelectAnchorId {
     SettingsAppearanceFrostedGlass,
     SettingsAppearanceBackgroundOpacitySlider,
     SettingsAppearanceBackgroundBlurSlider,
+    SettingsBackgroundReadability,
+    SettingsBackgroundEffectStrength,
+    SettingsBackgroundEffectSheen,
     SettingsAppearanceBackgroundFit,
+    SettingsBackgroundEffectSpeed,
+    SettingsBackgroundEffectSize,
+    SettingsBackgroundEffectBrightness,
+    SettingsBackgroundEffectRoughness,
+    SettingsBackgroundEffectDirection,
+    SettingsBackgroundParticleCount,
+    SettingsBackgroundCameraAmount,
+    SettingsBackgroundCameraSpeed,
     SettingsCustomThemeDuplicate,
     SettingsUpdateProxyMode,
     SettingsUpdateProxyProtocol,
@@ -197,6 +212,10 @@ impl SelectAnchorId {
                 | Self::SettingsUpdateProxyProtocol
                 | Self::SettingsAppearanceTheme
                 | Self::SettingsAppearanceTerminalTheme
+                | Self::SettingsAppearanceThemeLight
+                | Self::SettingsAppearanceThemeDark
+                | Self::SettingsAppearanceTerminalThemeLight
+                | Self::SettingsAppearanceTerminalThemeDark
                 | Self::SettingsAppearanceDensity
                 | Self::SettingsAppearanceAnimation
                 | Self::SettingsAppearanceRenderProfile

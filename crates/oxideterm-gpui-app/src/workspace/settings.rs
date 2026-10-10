@@ -196,6 +196,7 @@ pub(in crate::workspace) const APPEARANCE_UI_FONT_SIZE_MAX: f32 = 20.0;
 
 mod ai_page;
 mod appearance;
+mod background;
 mod cards;
 mod cli_companion;
 mod connections_page;

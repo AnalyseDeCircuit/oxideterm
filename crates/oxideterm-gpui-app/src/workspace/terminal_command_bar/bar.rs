@@ -114,7 +114,7 @@ impl WorkspaceApp {
             .relative()
             .flex_none()
             .border_t_1()
-            .border_color(rgba((theme.border << 8) | COMMAND_BAR_BORDER_ALPHA))
+            .border_color(self.workspace_divider_color(theme.border, COMMAND_BAR_BORDER_ALPHA))
             .bg(command_bar_background)
             .px(px(12.0))
             .py(px(4.0))

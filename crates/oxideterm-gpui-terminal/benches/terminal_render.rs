@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use gpui::{BenchAppContext, Entity, VisualContext};
+use gpui::{AppContext, BenchAppContext, Entity, VisualContext};
 use oxideterm_gpui_terminal::{TerminalPane, TerminalPlaybackUpdateTimings, TerminalUiPreferences};
 
 const BENCHMARK_COLS: usize = 120;
@@ -298,6 +298,222 @@ fn terminal_warm_cache_redraw_frame(cx: &mut BenchAppContext<'_, '_>) {
     );
 }
 
+fn benchmark_generated_background(
+    cx: &mut BenchAppContext<'_, '_>,
+    kind: oxideterm_gpui_background::GeneratedEffectKind,
+) {
+    benchmark_background(cx, Some(kind), None, false, &format!("{kind:?}"));
+}
+
+fn benchmark_background(
+    cx: &mut BenchAppContext<'_, '_>,
+    kind: Option<oxideterm_gpui_background::GeneratedEffectKind>,
+    media: Option<std::path::PathBuf>,
+    reading_overlay: bool,
+    preview_name: &str,
+) {
+    let terminal = benchmark_terminal(cx, false);
+    let composed = media.is_some();
+    let video = media
+        .as_ref()
+        .is_some_and(|path| path.extension().is_some_and(|extension| extension == "mp4"));
+    terminal.update(cx, |terminal, cx| {
+        let theme = TerminalUiPreferences::default().theme;
+        let effect = kind.map(
+            |kind| oxideterm_gpui_background::GeneratedEffectPreferences {
+                kind,
+                strength: if composed { 0.35 } else { 0.65 },
+                sheen: if composed { 0.0 } else { 1.0 },
+                max_fps: None,
+                colors: [0x8db7d8, 0x80cabc],
+                speed: 1.0,
+                size: 1.0,
+                brightness: 0.6,
+                roughness: 0.6,
+                direction: 25.0,
+                particle_count: 12,
+            },
+        );
+        let readability = reading_overlay.then_some(oxideterm_gpui_background::ReadingOverlay {
+            color: theme.background,
+            opacity: 0.18,
+        });
+        terminal.set_appearance(
+            theme,
+            Some(oxideterm_gpui_background::BackgroundPreferences {
+                path: media.unwrap_or_default(),
+                opacity: 0.65,
+                blur: 0.0,
+                fit: oxideterm_gpui_background::BackgroundFit::Cover,
+                alignment: (0.5, 0.5),
+                limits: Default::default(),
+                on_failure: None,
+                scene: Default::default(),
+                readability,
+                effect,
+            }),
+            false,
+            cx,
+        );
+    });
+    cx.settle();
+    if composed {
+        let started = Instant::now();
+        let (window, mut app) = cx.update(|cx| {
+            (
+                cx.windows()
+                    .last()
+                    .copied()
+                    .expect("media benchmark window"),
+                cx.to_async(),
+            )
+        });
+        cx.run_until(|| {
+            let visible = app
+                .update_window(window, |_, window, _| {
+                    media_frame_visible(
+                        &window.render_to_image().expect("capture media startup"),
+                        video,
+                    )
+                })
+                .unwrap();
+            if visible {
+                Some(())
+            } else {
+                assert!(
+                    started.elapsed() < Duration::from_secs(5),
+                    "native media first frame did not appear"
+                );
+                None
+            }
+        });
+    }
+    cx.bench_renderer(terminal, |_, _, cx| cx.notify());
+    let directory = std::env::var_os("OXIDE_BACKGROUND_PREVIEW_DIRECTORY");
+    if directory.is_some() || composed {
+        cx.update(|cx| {
+            let window = cx
+                .windows()
+                .last()
+                .copied()
+                .expect("background benchmark window");
+            let image = cx
+                .update_window(window, |_, window, _| window.render_to_image())
+                .unwrap()
+                .expect("capture native background renderer");
+            if composed {
+                assert!(
+                    media_frame_visible(&image, video),
+                    "media must remain visible beneath overlays"
+                );
+            }
+            if let Some(directory) = directory {
+                image
+                    .save(std::path::PathBuf::from(directory).join(format!("{preview_name}.png")))
+                    .expect("save background preview");
+            }
+        });
+    }
+}
+
+fn media_frame_visible(image: &image::RgbaImage, video: bool) -> bool {
+    let x = if video {
+        image.width() * 4 / 5
+    } else {
+        image.width() * 19 / 20
+    };
+    let pixel = image.get_pixel(x, image.height() / 2);
+    let red = u16::from(pixel[0]);
+    let blue = u16::from(pixel[2]);
+    if video {
+        // The fixture alternates red and blue; either color proves media survived composition.
+        (red > 80 && red > blue * 2) || (blue > 80 && blue > red * 2)
+    } else {
+        // The bundled image has an orange right edge; the effects alone cannot produce it.
+        red > 70 && red * 10 > blue * 13
+    }
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_mineral_background(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_generated_background(cx, oxideterm_gpui_background::GeneratedEffectKind::Mineral);
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_fog_background(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_generated_background(cx, oxideterm_gpui_background::GeneratedEffectKind::Fog);
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_tide_background(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_generated_background(cx, oxideterm_gpui_background::GeneratedEffectKind::Tide);
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_meteor_background(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_generated_background(cx, oxideterm_gpui_background::GeneratedEffectKind::Meteor);
+}
+
+fn benchmark_image_background(
+    cx: &mut BenchAppContext<'_, '_>,
+    kind: Option<oxideterm_gpui_background::GeneratedEffectKind>,
+) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../oxideterm-gpui-app/resources/backgrounds/oxide-ambient-v1.png");
+    let name = kind.map_or_else(|| "Image".into(), |kind| format!("Image-{kind:?}"));
+    benchmark_background(cx, kind, Some(path), kind.is_some(), &name);
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_image_background(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_image_background(cx, None);
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_image_mineral_overlay(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_image_background(
+        cx,
+        Some(oxideterm_gpui_background::GeneratedEffectKind::Mineral),
+    );
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_image_fog_overlay(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_image_background(
+        cx,
+        Some(oxideterm_gpui_background::GeneratedEffectKind::Fog),
+    );
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_image_tide_overlay(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_image_background(
+        cx,
+        Some(oxideterm_gpui_background::GeneratedEffectKind::Tide),
+    );
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_image_meteor_overlay(cx: &mut BenchAppContext<'_, '_>) {
+    benchmark_image_background(
+        cx,
+        Some(oxideterm_gpui_background::GeneratedEffectKind::Meteor),
+    );
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_video_fog_overlay(cx: &mut BenchAppContext<'_, '_>) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../oxideterm-background-media/tests/fixtures/red-blue.mp4");
+    benchmark_background(
+        cx,
+        Some(oxideterm_gpui_background::GeneratedEffectKind::Fog),
+        Some(path),
+        true,
+        "Video-Fog",
+    );
+}
+
 fn benchmark_grid_size(
     cx: &BenchAppContext<'_, '_>,
     terminal: &Entity<TerminalPane>,
@@ -396,6 +612,16 @@ gpui::bench_group!(
     terminal_semantic_output_disabled,
     terminal_semantic_output_enabled,
     terminal_warm_cache_redraw_frame,
+    terminal_mineral_background,
+    terminal_fog_background,
+    terminal_tide_background,
+    terminal_meteor_background,
+    terminal_image_background,
+    terminal_image_mineral_overlay,
+    terminal_image_fog_overlay,
+    terminal_image_tide_overlay,
+    terminal_image_meteor_overlay,
+    terminal_video_fog_overlay,
     terminal_box_drawing_redraw_frame,
     terminal_playback_output_frame,
     terminal_playback_output_pipeline,

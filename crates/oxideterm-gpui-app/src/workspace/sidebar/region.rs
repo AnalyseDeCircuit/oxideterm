@@ -37,6 +37,7 @@ pub(in crate::workspace) fn sidebar_resize_hotzone_chrome(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(element_id)
+        .group(element_id)
         .absolute()
         .w(px(SIDEBAR_RESIZE_HOTZONE_WIDTH))
         .cursor_col_resize()
@@ -54,7 +55,8 @@ pub(in crate::workspace) fn sidebar_resize_hotzone_chrome(
                 .w(px(SIDEBAR_RESIZE_DIVIDER_WIDTH))
                 // Keep the resize cursor when the pointer lands on the painted line itself.
                 .cursor_col_resize()
-                .bg(line_color),
+                .bg(line_color)
+                .group_hover(element_id, move |style| style.bg(line_color.alpha(1.0))),
         )
 }
 
@@ -281,7 +283,7 @@ impl WorkspaceApp {
             if self.sidebar_resizing {
                 rgb(theme.accent)
             } else {
-                rgba(0x00000000)
+                rgba(theme.border << 8)
             },
             true,
         )

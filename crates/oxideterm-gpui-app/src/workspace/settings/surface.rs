@@ -476,9 +476,47 @@ impl WorkspaceApp {
                 settings.sftp.speed_limit_enabled.hash(&mut hasher);
             }
             SettingsTab::Appearance => {
-                // App icon selection only changes paint state. Keeping it out
-                // of the height signature prevents scroll anchoring from
-                // jumping when the icon picker updates its selected badge.
+                let section = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
+                if matches!(section, 0 | 3) {
+                    settings
+                        .appearance
+                        .follow_system_appearance
+                        .hash(&mut hasher);
+                    let dark = self.appearance_edit_scheme().unwrap_or(self.system_dark);
+                    let style = settings.resolved_background(dark);
+                    (style.enabled && style.day_cycle).hash(&mut hasher);
+                    if style.day_cycle {
+                        (style.image.is_some() || style.effect.is_some()).hash(&mut hasher);
+                        (self.settings_workspace.read(cx).theme_preview_page as u8)
+                            .hash(&mut hasher);
+                        style.enabled_tabs.hash(&mut hasher);
+                        (style.scope == BackgroundScope::Window).hash(&mut hasher);
+                    }
+                }
+                if section == 0 {
+                    let dark = self.appearance_edit_scheme().unwrap_or(self.system_dark);
+                    for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
+                        is_custom_theme_id(target.resolved_id(settings, dark)).hash(&mut hasher);
+                    }
+                } else if section == 3 {
+                    // Source and effect capabilities add rows; paint-only adjustments keep scroll anchoring stable.
+                    let style = settings.resolved_background(
+                        self.appearance_edit_scheme().unwrap_or(self.system_dark),
+                    );
+                    style.image.is_some().hash(&mut hasher);
+                    style.parallax.hash(&mut hasher);
+                    style.camera.is_some().hash(&mut hasher);
+                    style
+                        .effect
+                        .as_ref()
+                        .map(|effect| (effect.kind as u8, effect.has_motion()))
+                        .hash(&mut hasher);
+                    (style.scope == BackgroundScope::Content).hash(&mut hasher);
+                    self.settings_workspace
+                        .read(cx)
+                        .background_media_has_animation(style.image.as_deref())
+                        .hash(&mut hasher);
+                }
             }
             SettingsTab::Network => {
                 self.settings_workspace
@@ -1262,7 +1300,12 @@ impl WorkspaceApp {
         oxideterm_desktop_presence::set_keep_running_on_close(
             settings.general.minimize_to_tray_on_close,
         );
-        self.tokens = tokens_from_settings(&settings);
+        self.appearance_edit_dark = settings
+            .appearance
+            .follow_system_appearance
+            .then(|| self.appearance_edit_dark.unwrap_or(self.system_dark));
+        self.tokens = tokens_from_settings(&settings, self.system_dark);
+        self.active_background = settings.resolved_background(self.system_dark);
         self.render_policy = compute_render_policy(
             self.render_profile_override
                 .unwrap_or(settings.appearance.render_profile),
@@ -1474,12 +1517,15 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
-        if previous_settings.appearance.theme != settings.appearance.theme {
+        let previous_theme =
+            ThemeTarget::Application.resolved_id(previous_settings, self.system_dark);
+        let theme = ThemeTarget::Application.resolved_id(settings, self.system_dark);
+        if previous_theme != theme {
             self.emit_native_plugin_event_to_subscribers(
                 plugin_host::NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT,
                 serde_json::json!({
                     "theme": crate::workspace::plugin_lifecycle::native_plugin_theme_snapshot(
-                        &settings.appearance.theme
+                        theme
                     ),
                 }),
                 cx,

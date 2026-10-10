@@ -233,6 +233,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match event {
+            TerminalPaneEvent::InputActivity => {
+                oxideterm_gpui_background::note_input_activity(window_handle.window_id(), cx);
+            }
             TerminalPaneEvent::Exited { .. } => {
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
@@ -1261,7 +1264,10 @@ impl WorkspaceApp {
                         let line_color = if active_drag {
                             rgba((self.tokens.ui.accent << 8) | SPLIT_HANDLE_ACTIVE_LINE_ALPHA)
                         } else {
-                            rgba((self.tokens.ui.divider << 8) | SPLIT_HANDLE_LINE_ALPHA)
+                            self.workspace_divider_color(
+                                self.tokens.ui.divider,
+                                SPLIT_HANDLE_LINE_ALPHA,
+                            )
                         };
                         let line_width = if active_drag {
                             SPLIT_HANDLE_ACTIVE_LINE_WIDTH

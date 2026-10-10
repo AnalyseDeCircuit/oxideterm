@@ -1,29 +1,14 @@
 use super::*;
 
-pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 9;
-pub(in crate::workspace) const ONBOARDING_WIDTH: f32 = 800.0; // Tauri DialogContent sm:max-w-[800px].
-pub(in crate::workspace) const ONBOARDING_MAX_HEIGHT: f32 = 720.0;
-pub(in crate::workspace) const ONBOARDING_PROGRESS_ICON_SIZE: f32 = 28.0; // Tauri progress buttons w-7 h-7.
+pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 5;
+pub(in crate::workspace) const ONBOARDING_STEPS_MOTION_ID: &str = "onboarding-steps";
+pub(in crate::workspace) const ONBOARDING_ANIMATION_MOTION_ID: &str = "onboarding-animation";
 pub(in crate::workspace) const ONBOARDING_ICON_SIZE: f32 = 16.0;
 pub(in crate::workspace) const ONBOARDING_STEP_ICON_SLOT: f32 = 28.0;
-pub(in crate::workspace) const ONBOARDING_THEME_CARD_HEIGHT: f32 = 104.0;
-pub(in crate::workspace) const ONBOARDING_THEME_PREVIEW_HEIGHT: f32 = 72.0;
 pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x0d; // Tauri accent/5.
 pub(in crate::workspace) const ONBOARDING_ACCENT_BORDER_ALPHA: u32 = 0x33; // Tauri accent/20.
-pub(in crate::workspace) const ONBOARDING_ACCENT_STRONG_BORDER_ALPHA: u32 = 0x66; // Tauri accent/40.
 pub(in crate::workspace) const ONBOARDING_CARD_ALPHA: u32 = 0xcc; // Browser panels sit over the dialog backdrop but stay readable.
 pub(in crate::workspace) const ONBOARDING_DISABLED_OPACITY: f32 = 0.45;
-
-pub(in crate::workspace) const ONBOARDING_THEME_IDS: [&str; 8] = [
-    "default",
-    "oxide",
-    "dracula",
-    "nord",
-    "catppuccin-mocha",
-    "tokyo-night",
-    "paper-oxide",
-    "rose-pine",
-];
 
 pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool); 4] = [
     (FontFamily::Jetbrains, "JetBrains Mono NF (Subset)", true),
@@ -32,30 +17,12 @@ pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool
     (FontFamily::Custom, "Custom...", false),
 ];
 
-pub(in crate::workspace) const ONBOARDING_LANGUAGES: [(Language, &str); 11] = [
-    (Language::En, "English"),
-    (Language::ZhCn, "简体中文"),
-    (Language::ZhTw, "繁體中文"),
-    (Language::Ja, "日本語"),
-    (Language::Ko, "한국어"),
-    (Language::FrFr, "Français"),
-    (Language::De, "Deutsch"),
-    (Language::EsEs, "Español"),
-    (Language::It, "Italiano"),
-    (Language::PtBr, "Português (BR)"),
-    (Language::Vi, "Tiếng Việt"),
-];
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum OnboardingStep {
     Welcome,
-    Disclaimer,
     Appearance,
     Workflow,
-    Features,
-    AiIntro,
-    AiSetup,
-    CliCompanion,
+    Tools,
     QuickStart,
 }
 
@@ -63,28 +30,20 @@ impl OnboardingStep {
     pub(in crate::workspace) fn from_index(index: usize) -> Self {
         match index {
             0 => Self::Welcome,
-            1 => Self::Disclaimer,
-            2 => Self::Appearance,
-            3 => Self::Workflow,
-            4 => Self::Features,
-            5 => Self::AiIntro,
-            6 => Self::AiSetup,
-            7 => Self::CliCompanion,
+            1 => Self::Appearance,
+            2 => Self::Workflow,
+            3 => Self::Tools,
             _ => Self::QuickStart,
         }
     }
 
-    pub(in crate::workspace) fn icon(self) -> LucideIcon {
+    pub(in crate::workspace) fn title_key(self) -> &'static str {
         match self {
-            Self::Welcome => LucideIcon::Home,
-            Self::Disclaimer => LucideIcon::FileText,
-            Self::Appearance => LucideIcon::Monitor,
-            Self::Workflow => LucideIcon::Network,
-            Self::Features => LucideIcon::Shield,
-            Self::AiIntro => LucideIcon::Sparkles,
-            Self::AiSetup => LucideIcon::Settings,
-            Self::CliCompanion => LucideIcon::Terminal,
-            Self::QuickStart => LucideIcon::Rocket,
+            Self::Welcome => "onboarding.step_welcome",
+            Self::Appearance => "onboarding.step_appearance",
+            Self::Workflow => "onboarding.step_workflow",
+            Self::Tools => "onboarding.step_tools",
+            Self::QuickStart => "onboarding.step_start",
         }
     }
 }

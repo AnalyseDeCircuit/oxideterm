@@ -1403,7 +1403,11 @@ impl WorkspaceApp {
             Some(Self::render_lucide_icon(
                 icon,
                 16.0,
-                rgb(if primary { theme.bg } else { theme.text }),
+                rgb(if primary {
+                    theme.accent_text
+                } else {
+                    theme.text
+                }),
             )),
             oxideterm_gpui_ui::button::ToolbarButtonOptions {
                 button: oxideterm_gpui_ui::button::ButtonOptions {
@@ -1415,7 +1419,9 @@ impl WorkspaceApp {
                     size: oxideterm_gpui_ui::button::ButtonSize::Default,
                     ..Default::default()
                 },
-                hover_background: primary.then(|| rgb(theme.text_muted)),
+                background: primary.then(|| rgb(theme.accent)),
+                text_color: primary.then(|| rgb(theme.accent_text)),
+                hover_background: primary.then(|| rgb(theme.accent_hover)),
                 ..Default::default()
             },
             cx.listener({

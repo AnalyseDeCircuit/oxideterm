@@ -331,6 +331,7 @@ impl WorkspaceWindowBackgroundEntity {
 
 /// Tracks values already applied to one native window.
 pub(in crate::workspace) struct WorkspaceWindowNativeStyle {
+    appearance_subscription: Option<Subscription>,
     applied_vibrancy_mode: Option<NativeVibrancyMode>,
     applied_window_opacity: Option<f32>,
 }
@@ -338,6 +339,7 @@ pub(in crate::workspace) struct WorkspaceWindowNativeStyle {
 impl WorkspaceWindowNativeStyle {
     pub(in crate::workspace) fn unapplied() -> Self {
         Self {
+            appearance_subscription: None,
             applied_vibrancy_mode: None,
             applied_window_opacity: None,
         }
@@ -349,6 +351,15 @@ impl WorkspaceWindowNativeStyle {
         window: &mut Window,
         cx: &mut Context<Owner>,
     ) {
+        if self.appearance_subscription.is_none() {
+            let session = session.downgrade();
+            self.appearance_subscription =
+                Some(window.observe_window_appearance(move |window, cx| {
+                    let _ = session.update(cx, |session, cx| {
+                        session.sync_system_appearance(window.appearance(), cx)
+                    });
+                }));
+        }
         let (vibrancy_mode, window_opacity) = session.read_with(cx, |session, _cx| {
             (
                 effective_vibrancy_mode(session.settings_store.settings(), &session.render_policy),

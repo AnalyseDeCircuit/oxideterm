@@ -93,8 +93,8 @@ pub(in crate::workspace) fn settings_language_from_locale(locale: Locale) -> Lan
     }
 }
 
-pub(crate) fn tokens_from_settings(settings: &PersistedSettings) -> ThemeTokens {
-    let mut tokens = oxideterm_settings_model::theme_tokens_from_settings(settings);
+pub(crate) fn tokens_from_settings(settings: &PersistedSettings, system_dark: bool) -> ThemeTokens {
+    let mut tokens = oxideterm_settings_model::theme_tokens_for_system(settings, system_dark);
     let radius = settings.appearance.border_radius as f32;
     tokens.radii = UiRadii {
         xs: (radius - 4.0).max(0.0),

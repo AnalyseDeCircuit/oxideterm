@@ -2,53 +2,6 @@ use super::*;
 use oxideterm_gpui_ui::{ActionSlotRowOptions, action_slot_row, checkbox};
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn onboarding_appearance_option(
-        &self,
-        label: String,
-        selected: bool,
-        action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // Animation options persist through the shared settings path and use
-        // the same selected treatment as the existing theme and font controls.
-        div()
-            .min_w(px(0.0))
-            .px(px(12.0))
-            .py(px(9.0))
-            .flex()
-            .items_center()
-            .justify_center()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(if selected {
-                rgb(self.tokens.ui.accent)
-            } else {
-                rgb(self.tokens.ui.border)
-            })
-            .bg(if selected {
-                rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
-            } else {
-                rgb(self.tokens.ui.bg_card)
-            })
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(if selected {
-                rgb(self.tokens.ui.accent)
-            } else {
-                rgb(self.tokens.ui.text)
-            })
-            .cursor(CursorStyle::PointingHand)
-            .child(label)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    action(this, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn onboarding_step_heading(
         &self,
         icon: LucideIcon,
@@ -164,11 +117,6 @@ impl WorkspaceApp {
         badge: Option<&str>,
         highlight: bool,
     ) -> AnyElement {
-        let border = if highlight {
-            rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_STRONG_BORDER_ALPHA)
-        } else {
-            rgb(self.tokens.ui.border)
-        };
         let trailing = badge
             .map(|badge| {
                 div()
@@ -208,12 +156,10 @@ impl WorkspaceApp {
         div()
             .p(px(14.0))
             .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(border)
-            .bg(if highlight {
-                rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
-            } else {
-                rgb(self.tokens.ui.bg_card)
+            .when(highlight, |card| {
+                card.bg(rgba(
+                    (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA,
+                ))
             })
             .child(action_slot_row(
                 &self.tokens,
@@ -234,55 +180,49 @@ impl WorkspaceApp {
         number: usize,
         icon: LucideIcon,
         key: &str,
-        has_line: bool,
     ) -> AnyElement {
         div()
-            .relative()
+            .min_w(px(0.0))
             .flex()
-            .items_start()
+            .flex_col()
             .gap(px(12.0))
-            .when(has_line, |row| {
-                row.child(
-                    div()
-                        .absolute()
-                        .left(px(13.0))
-                        .top(px(28.0))
-                        .w(px(1.0))
-                        .h(px(44.0))
-                        .bg(rgb(self.tokens.ui.border)),
-                )
-            })
             .child(
                 div()
-                    .relative()
-                    .mt(px(6.0))
-                    .size(px(28.0))
-                    .rounded_full()
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA,
-                    ))
-                    .bg(rgba(
-                        (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA,
-                    ))
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .text_size(px(11.0))
-                    .font_weight(gpui::FontWeight::BOLD)
-                    .text_color(rgb(self.tokens.ui.accent))
-                    .child(number.to_string()),
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .bg(rgba(
+                                (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA,
+                            ))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.accent))
+                            .child(number.to_string()),
+                    )
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        16.0,
+                        rgb(self.tokens.ui.text_muted),
+                    )),
             )
             .child(
                 div()
-                    .flex_1()
-                    .pb(px(16.0))
-                    .child(self.onboarding_info_card_with_text(
-                        Some((icon, self.tokens.ui.accent)),
-                        self.i18n.t(&format!("onboarding.{key}")),
-                        self.i18n.t(&format!("onboarding.{key}_desc")),
-                        false,
-                    )),
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(self.i18n.t(&format!("onboarding.{key}"))),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
             )
             .into_any_element()
     }
@@ -448,16 +388,10 @@ impl WorkspaceApp {
             .gap(px(10.0))
             .p(px(14.0))
             .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(if accent {
-                rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
-            } else {
-                rgb(self.tokens.ui.border)
-            })
-            .bg(if accent {
-                rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
-            } else {
-                rgba((self.tokens.ui.bg_card << 8) | ONBOARDING_CARD_ALPHA)
+            .when(accent, |card| {
+                card.bg(rgba(
+                    (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA,
+                ))
             })
             .when_some(icon, |card, (icon, color)| {
                 card.child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
@@ -581,26 +515,4 @@ pub(in crate::workspace) fn platform_cmd(suffix: &str) -> String {
     } else {
         format!("Ctrl+{suffix}")
     }
-}
-
-pub(in crate::workspace) fn traffic_dot(color: u32) -> AnyElement {
-    div()
-        .size(px(8.0))
-        .rounded_full()
-        .bg(rgb(color))
-        .into_any_element()
-}
-
-pub(in crate::workspace) fn format_theme_label(theme_id: &str) -> String {
-    theme_id
-        .split('-')
-        .map(|part| {
-            let mut chars = part.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => String::new(),
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }

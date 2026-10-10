@@ -458,6 +458,7 @@ impl AssetSource for NativeAssets {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
         let svg = match path {
+            "icons/oxide-mark.svg" => include_str!("../resources/icons/oxide-mark.svg"),
             "window-controls/minimize.svg" => WINDOW_CONTROL_MINIMIZE,
             "window-controls/maximize.svg" => WINDOW_CONTROL_MAXIMIZE,
             "window-controls/restore.svg" => WINDOW_CONTROL_RESTORE,

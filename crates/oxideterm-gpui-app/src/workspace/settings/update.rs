@@ -732,11 +732,19 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
-            SettingsWorkspaceEvent::BackgroundBlurCommitReady(value) => {
+            SettingsWorkspaceEvent::BackgroundBlurCommitReady(system_dark, value) => {
                 let value = *value;
-                if self.settings_store.settings().terminal.background_blur != value {
-                    self.edit_settings(|settings| settings.terminal.background_blur = value, cx);
-                }
+                let system_dark = *system_dark;
+                self.edit_settings(
+                    |settings| {
+                        let mut style = settings.terminal.background_for_scheme(system_dark);
+                        style.blur = value;
+                        settings
+                            .terminal
+                            .set_background_for_scheme(system_dark, style);
+                    },
+                    cx,
+                );
             }
             SettingsWorkspaceEvent::BackgroundGalleryOperationReady => {
                 let results = settings.update(cx, |settings, _cx| {
@@ -744,21 +752,66 @@ impl WorkspaceApp {
                 });
                 for result in results {
                     match result {
-                        BackgroundGalleryOperationResult::Updated(active_path) => {
-                            if self.settings_store.settings().terminal.background_image
-                                != active_path
-                            {
-                                self.edit_settings(
-                                    move |settings| {
-                                        settings.terminal.background_image = active_path
-                                    },
-                                    cx,
-                                );
-                            }
+                        BackgroundGalleryOperationResult::Updated(system_dark, active_path) => {
+                            let gallery = settings.read(cx).background_images_snapshot();
+                            let settings_path = self.settings_store.path().to_path_buf();
+                            self.edit_settings(
+                                move |settings| {
+                                    let mut style =
+                                        settings.terminal.background_for_scheme(system_dark);
+                                    style.image = active_path;
+                                    settings
+                                        .terminal
+                                        .set_background_for_scheme(system_dark, style);
+                                    // Gallery deletion removes references in both system modes.
+                                    let keep = |path: &str| {
+                                        !oxideterm_settings::is_managed_background_image(
+                                            &settings_path,
+                                            Path::new(path),
+                                        ) || gallery.iter().any(|image| image == path)
+                                    };
+                                    if settings
+                                        .terminal
+                                        .background_image
+                                        .as_deref()
+                                        .is_some_and(|path| !keep(path))
+                                    {
+                                        settings.terminal.background_image = None;
+                                    }
+                                    for style in [
+                                        &mut settings.terminal.system_backgrounds.light,
+                                        &mut settings.terminal.system_backgrounds.dark,
+                                    ]
+                                    .into_iter()
+                                    .flatten()
+                                    {
+                                        if style.image.as_deref().is_some_and(|path| !keep(path)) {
+                                            style.image = None;
+                                        }
+                                    }
+                                },
+                                cx,
+                            );
                         }
                         BackgroundGalleryOperationResult::Failed => {
                             self.send_settings_notice(
                                 self.i18n.t("settings_view.terminal.bg_operation_failed"),
+                                TerminalNoticeVariant::Error,
+                                cx,
+                            );
+                        }
+                        BackgroundGalleryOperationResult::MediaFailed(failure) => {
+                            let key = match failure {
+                                oxideterm_gpui_background::BackgroundFailure::Unsupported => {
+                                    "bg_unsupported"
+                                }
+                                oxideterm_gpui_background::BackgroundFailure::ResourceExhausted => {
+                                    "bg_resource_exhausted"
+                                }
+                                _ => "bg_decode_failed",
+                            };
+                            self.send_settings_notice(
+                                self.i18n.t(&format!("settings_view.terminal.{key}")),
                                 TerminalNoticeVariant::Error,
                                 cx,
                             );
@@ -774,6 +827,7 @@ impl WorkspaceApp {
                     match result {
                         ThemeImportResult::Imported {
                             target,
+                            system_dark,
                             theme_id,
                             name,
                             value,
@@ -784,7 +838,11 @@ impl WorkspaceApp {
                             self.edit_settings(
                                 move |settings| {
                                     settings.custom_themes.insert(theme_id, value);
-                                    target.apply(settings, selected_theme_id);
+                                    target.apply_for_scheme(
+                                        settings,
+                                        system_dark,
+                                        selected_theme_id,
+                                    );
                                 },
                                 cx,
                             );

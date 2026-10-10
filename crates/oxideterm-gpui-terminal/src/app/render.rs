@@ -3,8 +3,7 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, ClipboardItem, Context, ExternalPaths,
     FocusHandle, Focusable, FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, Render, RenderImage, SharedString, StyledImage, Window, anchored, deferred, div,
-    point, prelude::*, px, rgb, rgba,
+    Render, SharedString, Window, anchored, deferred, div, point, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::button::{
     ButtonRadius, ContextChipOptions, IconButtonOptions, context_chip, icon_button,
@@ -355,8 +354,14 @@ impl Render for TerminalPane {
         let background_layer = background.as_ref().map(|background| {
             terminal_background_layer(
                 background.clone(),
-                self.background_image_cache
-                    .render_background_image(background, background_display),
+                if oxideterm_gpui_background::is_streaming_source(&background.path) {
+                    None
+                } else {
+                    self.background_image_cache
+                        .render_background_image(background, background_display)
+                },
+                window,
+                cx,
             )
         });
         self.ensure_background_image_completion_poll(cx);
@@ -2676,57 +2681,102 @@ impl TerminalPane {
     }
 }
 
-fn terminal_background_layer(
-    background: TerminalBackgroundPreferences,
-    image: Option<Arc<RenderImage>>,
-) -> AnyElement {
-    let image = if background.fit == TerminalBackgroundFit::Tile && background.blur <= 0.01 {
-        gpui::img(background.path.clone()).with_fallback(|| div().size_full().into_any_element())
-    } else if let Some(image) = image {
-        gpui::img(image)
-    } else {
-        return div()
-            .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
-            .into_any_element();
-    };
-
-    div()
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .bottom_0()
-        .overflow_hidden()
-        .child(
-            image
-                .size_full()
-                .object_fit(terminal_background_object_fit(background.fit))
-                .opacity(background.opacity.clamp(0.0, 1.0)),
-        )
-        .into_any_element()
-}
-
-fn terminal_background_object_fit(fit: TerminalBackgroundFit) -> ObjectFit {
-    match fit {
-        TerminalBackgroundFit::Cover => ObjectFit::Cover,
-        TerminalBackgroundFit::Contain => ObjectFit::Contain,
-        TerminalBackgroundFit::Fill => ObjectFit::Fill,
-        TerminalBackgroundFit::Tile => ObjectFit::None,
-    }
-}
+use oxideterm_gpui_background::background_layer as terminal_background_layer;
 
 #[cfg(test)]
 mod tests {
-    use gpui::AppContext;
+    use gpui::{AppContext, IntoElement};
     use std::path::PathBuf;
 
     use oxideterm_terminal::TerminalCursorShape;
 
     use super::{external_paths_for_local_terminal, terminal_cursor_shape_for_render};
+
+    struct BackgroundTestView {
+        background: crate::TerminalBackgroundPreferences,
+        image: std::sync::Arc<gpui::RenderImage>,
+    }
+
+    impl gpui::Render for BackgroundTestView {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            _: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            oxideterm_gpui_background::background_image_layer(
+                self.background.clone(),
+                Some(self.image.clone()),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn terminal_background_animation_plays_and_pauses(cx: &mut gpui::TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, _| window.activate_window());
+        cx.run_until_parked();
+        assert!(cx.update(|window, _| window.is_window_active()));
+        let image = std::sync::Arc::new(gpui::RenderImage::new(vec![
+            image::Frame::new(image::RgbaImage::from_pixel(
+                1,
+                1,
+                image::Rgba([0, 0, 255, 255]),
+            )),
+            image::Frame::new(image::RgbaImage::from_pixel(
+                1,
+                1,
+                image::Rgba([255, 0, 0, 255]),
+            )),
+        ]));
+        let background = crate::TerminalBackgroundPreferences {
+            path: "animation.gif".into(),
+            opacity: 1.0,
+            blur: 0.0,
+            fit: crate::TerminalBackgroundFit::Cover,
+            alignment: (0.5, 0.5),
+            effect: None,
+            readability: None,
+            limits: Default::default(),
+            scene: Default::default(),
+            on_failure: None,
+        };
+        let view = cx.update(|_, cx| {
+            cx.new(|_| BackgroundTestView {
+                background,
+                image: image.clone(),
+            })
+        });
+        for expected_all_frames in [false, true] {
+            cx.draw(
+                gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                gpui::size(gpui::px(64.0), gpui::px(64.0)),
+                |_, _| view.clone().into_any_element(),
+            );
+            assert_eq!(
+                cx.update(|window, _| window.has_image_atlas_entry(&image)),
+                expected_all_frames
+            );
+        }
+        for reduce_motion in [true, false] {
+            if !reduce_motion {
+                cx.deactivate_window();
+            }
+            cx.update(|window, cx| {
+                cx.set_reduce_motion(reduce_motion);
+                window.drop_image(image.clone()).unwrap();
+            });
+            for _ in 0..2 {
+                cx.draw(
+                    gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                    gpui::size(gpui::px(64.0), gpui::px(64.0)),
+                    |_, _| view.clone().into_any_element(),
+                );
+                // Both frames reached the atlas while playing; a paused
+                // animation must keep painting only its current frame.
+                assert!(!cx.update(|window, _| window.has_image_atlas_entry(&image)));
+            }
+        }
+    }
 
     struct AutosuggestTestView {
         pane: gpui::Entity<super::TerminalPane>,

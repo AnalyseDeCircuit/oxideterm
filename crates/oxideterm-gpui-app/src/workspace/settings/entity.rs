@@ -1,11 +1,11 @@
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
-use gpui::{Context, EventEmitter, KeyDownEvent, Task, Timer};
+use gpui::{AppContext, Context, Entity, EventEmitter, KeyDownEvent, Task, Timer};
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
     PrivilegeCredentialKind,
@@ -220,13 +220,15 @@ pub(in crate::workspace) enum DataDirectoryOperationResult {
 }
 
 pub(in crate::workspace) enum BackgroundGalleryOperationResult {
-    Updated(Option<String>),
+    Updated(Option<bool>, Option<String>),
     Failed,
+    MediaFailed(oxideterm_gpui_background::BackgroundFailure),
 }
 
 pub(in crate::workspace) enum ThemeImportResult {
     Imported {
         target: ThemeTarget,
+        system_dark: Option<bool>,
         theme_id: String,
         name: String,
         value: serde_json::Value,
@@ -304,12 +306,13 @@ fn background_gallery_strings(settings_path: &Path) -> anyhow::Result<Vec<String
 }
 
 fn is_theme_editor_input(input: SettingsInput) -> bool {
-    matches!(
-        input,
-        SettingsInput::CustomThemeName
-            | SettingsInput::CustomThemeTerminalColor(_)
-            | SettingsInput::CustomThemeUiColor(_)
-    )
+    input.is_background()
+        || matches!(
+            input,
+            SettingsInput::CustomThemeName
+                | SettingsInput::CustomThemeTerminalColor(_)
+                | SettingsInput::CustomThemeUiColor(_)
+        )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -375,6 +378,9 @@ pub(in crate::workspace) enum SettingsNavigationDraftAction {
 
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
+    pub(super) theme_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
+    pub(super) background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
+    pub(super) editor_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
     route: SettingsRouteState,
     pub(super) theme_preview_page: oxideterm_gpui_settings_view::ThemePreviewPage,
     external_store_watch: Option<ExternalStoreWatch>,
@@ -445,10 +451,14 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     data_directory_confirm_exit_task: Option<Task<()>>,
     data_directory_results: VecDeque<DataDirectoryOperationResult>,
     background_blur_preview: Option<i64>,
+    background_blur_system_dark: Option<bool>,
     background_blur_commit_generation: u64,
     background_blur_commit_task: Option<Task<()>>,
     background_images: Arc<[String]>,
+    background_media_info: HashMap<PathBuf, Result<bool, oxideterm_background_media::MediaError>>,
+    background_media_info_tasks: HashMap<PathBuf, Task<()>>,
     background_gallery_task: Option<Task<()>>,
+    background_gallery_system_dark: Option<bool>,
     background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
     theme_import_task: Option<Task<()>>,
     theme_import_results: VecDeque<ThemeImportResult>,
@@ -510,7 +520,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     RequestQuitAfterNativeUpdate,
     DataDirectoryConfirmOpened,
     DataDirectoryOperationReady,
-    BackgroundBlurCommitReady(i64),
+    BackgroundBlurCommitReady(Option<bool>, i64),
     BackgroundGalleryOperationReady,
     ThemeImportReady,
     ThemeEditorOperationReady,
@@ -527,8 +537,21 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
 impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
 
 impl SettingsWorkspaceEntity {
+    pub(super) fn edit_theme_editor_background(
+        &mut self,
+        edit: impl FnOnce(&mut oxideterm_settings::BackgroundStyle),
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(editor) = self.theme_editor.as_mut() {
+            edit(&mut Arc::make_mut(editor).background);
+            cx.notify();
+        }
+    }
     pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            theme_background_preview: cx.new(oxideterm_gpui_background::BackgroundPreview::new),
+            background_preview: cx.new(oxideterm_gpui_background::BackgroundPreview::new),
+            editor_background_preview: cx.new(oxideterm_gpui_background::BackgroundPreview::new),
             route: SettingsRouteState::default(),
             theme_preview_page: Default::default(),
             external_store_watch: None,
@@ -599,10 +622,14 @@ impl SettingsWorkspaceEntity {
             data_directory_confirm_exit_task: None,
             data_directory_results: VecDeque::new(),
             background_blur_preview: None,
+            background_blur_system_dark: None,
             background_blur_commit_generation: 0,
             background_blur_commit_task: None,
             background_images: Arc::from([]),
+            background_media_info: HashMap::new(),
+            background_media_info_tasks: HashMap::new(),
             background_gallery_task: None,
+            background_gallery_system_dark: None,
             background_gallery_results: VecDeque::new(),
             theme_import_task: None,
             theme_import_results: VecDeque::new(),
@@ -1317,24 +1344,41 @@ impl SettingsWorkspaceEntity {
         std::mem::take(&mut self.data_directory_results)
     }
 
-    pub(in crate::workspace) fn background_blur_preview(&self) -> Option<i64> {
-        self.background_blur_preview
+    pub(in crate::workspace) fn background_blur_preview(
+        &self,
+        system_dark: Option<bool>,
+    ) -> Option<i64> {
+        (self.background_blur_system_dark == system_dark)
+            .then_some(self.background_blur_preview)
+            .flatten()
+    }
+
+    pub(in crate::workspace) fn finish_background_blur_drag(&mut self, cx: &mut Context<Self>) {
+        self.background_blur_commit_task = None;
+        self.finish_background_blur_commit(self.background_blur_commit_generation, cx);
     }
 
     pub(in crate::workspace) fn update_background_blur_preview(
         &mut self,
         persisted_value: i64,
         preview_value: i64,
+        system_dark: Option<bool>,
         delay: Duration,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.background_blur_preview == Some(preview_value)
+            && self.background_blur_system_dark == system_dark
             || (self.background_blur_preview.is_none() && persisted_value == preview_value)
         {
             return false;
         }
 
+        if self.background_blur_preview.is_some() && self.background_blur_system_dark != system_dark
+        {
+            self.finish_background_blur_drag(cx);
+        }
         self.background_blur_preview = Some(preview_value);
+        self.background_blur_system_dark = system_dark;
         self.background_blur_commit_generation =
             self.background_blur_commit_generation.wrapping_add(1);
         let generation = self.background_blur_commit_generation;
@@ -1365,12 +1409,53 @@ impl SettingsWorkspaceEntity {
         let Some(value) = self.background_blur_preview.take() else {
             return;
         };
-        cx.emit(SettingsWorkspaceEvent::BackgroundBlurCommitReady(value));
+        cx.emit(SettingsWorkspaceEvent::BackgroundBlurCommitReady(
+            self.background_blur_system_dark,
+            value,
+        ));
         cx.notify();
     }
 
     pub(in crate::workspace) fn initialize_background_gallery(&mut self, images: Vec<String>) {
         self.background_images = Arc::from(images);
+    }
+
+    pub(super) fn background_media_is_animated(
+        &mut self,
+        path: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(path) = path.map(PathBuf::from) else {
+            return false;
+        };
+        if let Some(info) = self.background_media_info.get(&path) {
+            return matches!(info, Ok(true));
+        }
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            self.background_media_info_tasks.entry(path)
+        {
+            let inspect_path = entry.key().clone();
+            // The settings entity owns these short metadata requests, shared by both previews.
+            let task = cx.spawn(async move |settings, cx| {
+                let read_path = inspect_path.clone();
+                let result = cx
+                    .background_executor()
+                    .spawn(async move { oxideterm_background_media::is_animated_media(&read_path) })
+                    .await;
+                let _ = settings.update(cx, |settings, cx| {
+                    settings.background_media_info_tasks.remove(&inspect_path);
+                    settings.background_media_info.insert(inspect_path, result);
+                    cx.notify();
+                });
+            });
+            entry.insert(task);
+        }
+        false
+    }
+
+    pub(super) fn background_media_has_animation(&self, path: Option<&str>) -> bool {
+        path.and_then(|path| self.background_media_info.get(Path::new(path)))
+            .is_some_and(|info| matches!(info, Ok(true)))
     }
 
     pub(in crate::workspace) fn background_images_snapshot(&self) -> Arc<[String]> {
@@ -1382,12 +1467,14 @@ impl SettingsWorkspaceEntity {
         selection: impl std::future::Future<Output = Option<Vec<PathBuf>>> + 'static,
         settings_path: PathBuf,
         current_path: Option<PathBuf>,
+        system_dark: Option<bool>,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.background_gallery_task.is_some() {
             return false;
         }
+        self.background_gallery_system_dark = system_dark;
 
         self.background_gallery_task = Some(cx.spawn(async move |settings, cx| {
             let Some(paths) = selection.await else {
@@ -1397,10 +1484,7 @@ impl SettingsWorkspaceEntity {
                 });
                 return;
             };
-            let source_paths = paths
-                .into_iter()
-                .filter(|path| oxideterm_settings::is_supported_background_image(path))
-                .collect::<Vec<_>>();
+            let source_paths = paths;
             if source_paths.is_empty() {
                 let _ = settings.update(cx, |settings, cx| {
                     settings.background_gallery_task = None;
@@ -1408,6 +1492,50 @@ impl SettingsWorkspaceEntity {
                 });
                 return;
             }
+
+            let validation = runtime
+                .spawn_blocking(move || {
+                    for path in &source_paths {
+                        if !oxideterm_settings::is_supported_background_image(path) {
+                            return Err(oxideterm_background_media::MediaError::Unsupported);
+                        }
+                        oxideterm_background_media::decode_poster(
+                            path,
+                            oxideterm_background_media::OutputParams {
+                                width: 256,
+                                height: 144,
+                                fit: oxideterm_background_media::BackgroundFit::Cover,
+                                blur: 0.0,
+                                limits: Default::default(),
+                            },
+                        )?;
+                    }
+                    Ok(source_paths)
+                })
+                .await;
+            let source_paths = match validation {
+                Ok(Ok(paths)) => paths,
+                result => {
+                    let failure = match result {
+                        Ok(Err(oxideterm_background_media::MediaError::Unsupported)) => {
+                            oxideterm_gpui_background::BackgroundFailure::Unsupported
+                        }
+                        Ok(Err(oxideterm_background_media::MediaError::ResourceExhausted)) => {
+                            oxideterm_gpui_background::BackgroundFailure::ResourceExhausted
+                        }
+                        _ => oxideterm_gpui_background::BackgroundFailure::Decode,
+                    };
+                    let _ = settings.update(cx, |settings, cx| {
+                        settings.background_gallery_task = None;
+                        settings
+                            .background_gallery_results
+                            .push_back(BackgroundGalleryOperationResult::MediaFailed(failure));
+                        cx.emit(SettingsWorkspaceEvent::BackgroundGalleryOperationReady);
+                        cx.notify();
+                    });
+                    return;
+                }
+            };
 
             let result = runtime
                 .spawn_blocking(move || -> anyhow::Result<(Vec<String>, Option<String>)> {
@@ -1462,6 +1590,7 @@ impl SettingsWorkspaceEntity {
         settings_path: PathBuf,
         image_path: String,
         current_path: Option<String>,
+        system_dark: Option<bool>,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -1473,6 +1602,7 @@ impl SettingsWorkspaceEntity {
         {
             return false;
         }
+        self.background_gallery_system_dark = system_dark;
 
         if !oxideterm_settings::is_managed_background_image(&settings_path, Path::new(&image_path))
         {
@@ -1518,12 +1648,14 @@ impl SettingsWorkspaceEntity {
         &mut self,
         settings_path: PathBuf,
         current_path: Option<String>,
+        system_dark: Option<bool>,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.background_gallery_task.is_some() {
             return false;
         }
+        self.background_gallery_system_dark = system_dark;
 
         self.background_gallery_task = Some(cx.spawn(async move |settings, cx| {
             let result = runtime
@@ -1564,8 +1696,12 @@ impl SettingsWorkspaceEntity {
         match result {
             Ok((gallery, active_path)) => {
                 self.background_images = Arc::from(gallery);
-                self.background_gallery_results
-                    .push_back(BackgroundGalleryOperationResult::Updated(active_path));
+                self.background_gallery_results.push_back(
+                    BackgroundGalleryOperationResult::Updated(
+                        self.background_gallery_system_dark,
+                        active_path,
+                    ),
+                );
             }
             Err(()) => self
                 .background_gallery_results
@@ -1584,6 +1720,7 @@ impl SettingsWorkspaceEntity {
     pub(in crate::workspace) fn start_theme_import(
         &mut self,
         target: ThemeTarget,
+        system_dark: Option<bool>,
         selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
@@ -1620,6 +1757,7 @@ impl SettingsWorkspaceEntity {
                             .theme_import_results
                             .push_back(ThemeImportResult::Imported {
                                 target,
+                                system_dark,
                                 theme_id,
                                 name,
                                 value,
@@ -1812,6 +1950,8 @@ impl SettingsWorkspaceEntity {
             .take()
             .unwrap_or(ThemeEditorExitAction::Cancel);
         let editor = self.theme_editor.take();
+        self.editor_background_preview
+            .update(cx, |preview, cx| preview.set_preferences(None, cx));
         if self
             .settings_focused_input
             .is_some_and(is_theme_editor_input)
@@ -2369,7 +2509,7 @@ mod tests {
 
     use super::{
         ExternalStoreWatch, KeybindingFileOperationResult, LaunchAtLoginError,
-        SettingsWorkspaceEntity,
+        SettingsWorkspaceEntity, ThemeEditorOperationResult,
     };
 
     struct DropSignal(Arc<AtomicBool>);
@@ -2788,5 +2928,59 @@ mod tests {
                 Some("Second")
             );
         });
+    }
+
+    #[gpui::test]
+    fn theme_editor_background_cancel_discards_draft_and_save_delivers_it(cx: &mut TestAppContext) {
+        let entity = cx.new(SettingsWorkspaceEntity::new);
+        for save in [false, true] {
+            entity.update(cx, |entity, cx| {
+                entity.open_theme_editor(
+                    theme_editor_from_settings(
+                        &PersistedSettings::default(),
+                        ThemeTarget::Terminal,
+                        None,
+                        "Mine".into(),
+                    ),
+                    cx,
+                );
+                entity.edit_theme_editor_background(
+                    |background| {
+                        background.image = Some("draft.webp".into());
+                        background.opacity = 0.37;
+                        background.alignment = oxideterm_settings::BackgroundAlignment::TopRight;
+                    },
+                    cx,
+                );
+                entity.settings_focused_input =
+                    Some(oxideterm_gpui_settings_view::SettingsInput::BackgroundEffectColor(0));
+                if save {
+                    entity.save_theme_editor(Duration::ZERO, cx);
+                } else {
+                    entity.cancel_theme_editor(Duration::ZERO, cx);
+                }
+                let mut results = entity.take_theme_editor_results();
+                if save {
+                    let Some(ThemeEditorOperationResult::Save(editor)) = results.pop_front() else {
+                        panic!("save must deliver the complete appearance draft");
+                    };
+                    assert_eq!(editor.background.image.as_deref(), Some("draft.webp"));
+                    assert_eq!(editor.background.opacity, 0.37);
+                    assert_eq!(
+                        editor.background.alignment,
+                        oxideterm_settings::BackgroundAlignment::TopRight
+                    );
+                }
+                assert!(
+                    results.is_empty(),
+                    "cancel must emit no persistence operation, and save must emit exactly one"
+                );
+                assert!(!entity.theme_editor_open());
+                assert!(
+                    entity.settings_focused_input.is_none(),
+                    "closing the editor must release its background input focus"
+                );
+            });
+        }
     }
 }

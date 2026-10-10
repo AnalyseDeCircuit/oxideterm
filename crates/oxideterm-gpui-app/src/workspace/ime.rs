@@ -1087,7 +1087,7 @@ impl WorkspaceApp {
         // window's WorkspaceImeElement decides which native window receives the shared draft.
         let knowledge_dialog_visible = self.ai_entity.read(cx).knowledge_create_dialog_open()
             || self.ai_entity.read(cx).knowledge_document_dialog_open();
-        if settings_tab_visible
+        if (settings_tab_visible || self.onboarding.open)
             && let Some(input) = self
                 .settings_workspace
                 .read(cx)
@@ -1157,6 +1157,7 @@ impl WorkspaceApp {
         }
 
         let legacy_settings_input_visible = settings_tab_visible
+            || self.onboarding.open
             || knowledge_dialog_visible
             || self.keyboard_content_tab(cx).is_some_and(|tab| {
                 matches!(
