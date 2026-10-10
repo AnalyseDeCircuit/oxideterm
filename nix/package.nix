@@ -41,12 +41,14 @@ let
   target = stdenv.hostPlatform.rust.rustcTarget;
   gstPluginsBase = gst_all_1.gst-plugins-base;
   gstPluginsGood = gst_all_1.gst-plugins-good;
+  gstPluginsBad = gst_all_1.gst-plugins-bad;
   gstLibav = gst_all_1.gst-libav;
   gstreamer = gst_all_1.gstreamer;
   gstPlugins = [
     gstreamer
     gstPluginsBase
     gstPluginsGood
+    gstPluginsBad
     gstLibav
   ];
   runtimeLibs = [
@@ -56,6 +58,7 @@ let
     freetype
     gstPluginsBase
     gstPluginsGood
+    gstPluginsBad
     gstLibav
     gstreamer
     krb5

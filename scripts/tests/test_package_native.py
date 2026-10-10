@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import codecs
+import os
 import plistlib
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from unittest.mock import call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "release"))
 
 import package_native
+import verify_background_package
 
 
 class RuntimeResourceTests(unittest.TestCase):
@@ -614,6 +616,57 @@ class PlatformSigningTests(unittest.TestCase):
 
 
 class LinuxPackagingTests(unittest.TestCase):
+    def test_missing_elf_dependencies_stop_packaging(self) -> None:
+        result = subprocess.CompletedProcess(
+            ["ldd"], 0, stdout="libgstvideo-1.0.so.0 => not found\n", stderr=""
+        )
+        with patch.object(package_native.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "libgstvideo-1.0.so.0"):
+                package_native.linux_dynamic_libraries(Path("oxideterm-native"))
+
+    @unittest.skipUnless(
+        sys.platform == "linux" and shutil.which("gst-inspect-1.0") and shutil.which("dpkg-query"),
+        "Ubuntu GStreamer packaging tools are required",
+    )
+    def test_appimage_plugins_load_from_bundled_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            appdir = Path(directory)
+            package_native.copy_linux_appimage_media_runtime(Path("/bin/true"), appdir)
+            environment = {
+                **os.environ,
+                "LC_ALL": "C",
+                "LD_LIBRARY_PATH": str(appdir / "usr/lib"),
+                "GST_PLUGIN_PATH": "",
+                "GST_PLUGIN_PATH_1_0": "",
+                "GST_PLUGIN_SYSTEM_PATH": str(appdir / "usr/lib/gstreamer-1.0"),
+                "GST_PLUGIN_SYSTEM_PATH_1_0": str(appdir / "usr/lib/gstreamer-1.0"),
+                "GST_PLUGIN_SCANNER": str(appdir / "usr/libexec/gst-plugin-scanner"),
+                "GST_PLUGIN_SCANNER_1_0": str(appdir / "usr/libexec/gst-plugin-scanner"),
+                "GST_REGISTRY_1_0": str(appdir / "registry.bin"),
+            }
+            for factory in ("avdec_h264", "qtdemux", "appsink", "videoflip", "audioconvert"):
+                result = subprocess.run(
+                    ["gst-inspect-1.0", factory], env=environment,
+                    check=True, capture_output=True, text=True,
+                )
+                self.assertIn(str(appdir / "usr/lib/gstreamer-1.0"), result.stdout)
+            license_dir = appdir / "usr/share/doc/gstreamer-runtime"
+            self.assertIn("GStreamer", (license_dir / "gstreamer1.0-libav.copyright").read_text())
+            self.assertIn("GNU", (license_dir / "common-licenses/LGPL-2.1").read_text())
+
+    def test_package_probe_checks_pixels_timing_and_loop_restart(self) -> None:
+        colors = [[0, 0, 253, 255]] * 25 + [[254, 0, 0, 255]] * 25 + [[0, 0, 253, 255]] * 6
+        frames = [[i + 1, i * 40, 40, 64, 48, *color] for i, color in enumerate(colors)]
+        def output(rows):
+            return "\n".join(" ".join(map(str, row)) for row in rows)
+        verify_background_package.verify_frames(output(frames))
+        for row, column, replacement in ((50, 1, 0), (25, 5, 0), (0, 3, 16), (0, 8, 0)):
+            with self.subTest(row=row, column=column):
+                broken = [frame.copy() for frame in frames]
+                broken[row][column] = replacement
+                with self.assertRaises(RuntimeError):
+                    verify_background_package.verify_frames(output(broken))
+
     def test_dynamic_graphics_loaders_are_declared_as_recommendations(self) -> None:
         # Vulkan and EGL are loaded with dlopen, so ELF dependency discovery
         # cannot add these runtime packages automatically.
@@ -742,6 +795,11 @@ class LinuxPackagingTests(unittest.TestCase):
             )
             for package_name in package_native.LINUX_RPM_GRAPHICS_RECOMMENDS:
                 self.assertIn(package_name, recommendations)
+            dependencies = subprocess.check_output(
+                ["rpm", "-qp", "--requires", str(artifact)], text=True,
+            ).splitlines()
+            self.assertIn("gstreamer1-plugin-openh264", dependencies)
+            self.assertIn("openh264", dependencies)
 
     def test_dpkg_shlibdeps_output_requires_dependency_expression(self) -> None:
         dependencies = package_native.parse_dpkg_shlibdeps_output(

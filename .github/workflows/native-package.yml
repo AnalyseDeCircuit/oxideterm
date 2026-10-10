@@ -344,6 +344,21 @@ jobs:
           --version ${{ needs.validate-release-request.outputs.raw_version }}
           --dist dist
 
+      - name: Build background decoding probe
+        if: runner.os == 'Linux'
+        run: cargo build --release -p oxideterm-background-media --example media_probe --target ${{ matrix.target }} --locked
+
+      - name: Verify packaged background decoder in clean Linux environments
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for package in dist/*.AppImage dist/*.deb dist/*.rpm; do
+            python scripts/release/verify_background_package.py \
+              --package "$package" \
+              --probe "target/${{ matrix.target }}/release/examples/media_probe" \
+              --fixture crates/oxideterm-background-media/tests/fixtures/red-blue.mp4
+          done
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

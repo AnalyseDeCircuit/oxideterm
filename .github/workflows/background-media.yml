@@ -1,0 +1,71 @@
+name: Background Media
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/oxideterm-background-media/**'
+      - 'crates/oxideterm-gpui-background/**'
+      - 'crates/gpui-ce/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/workflows/background-media.yml'
+  pull_request:
+    paths:
+      - 'crates/oxideterm-background-media/**'
+      - 'crates/oxideterm-gpui-background/**'
+      - 'crates/gpui-ce/**'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - '.github/workflows/background-media.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: background-media-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Decode and playback (${{ matrix.platform }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: macos-arm64, runner: macos-14 }
+          - { platform: macos-x64, runner: macos-15-intel }
+          - { platform: windows-x64, runner: windows-latest }
+          - { platform: windows-arm64, runner: windows-11-arm }
+          - { platform: linux-x64, runner: ubuntu-22.04 }
+          - { platform: linux-arm64, runner: ubuntu-22.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.97.0
+      - uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          key: background-media-${{ matrix.platform }}
+          cache-on-failure: false
+      - name: Install Linux decoding dependencies
+        if: runner.os == 'Linux'
+        run: bash scripts/ci/install-linux-deps.sh
+      - name: Test actual native decoder
+        run: cargo test -p oxideterm-background-media --locked
+      - name: Check Linux media packaging helpers
+        if: runner.os == 'Linux'
+        run: python -m unittest scripts.tests.test_package_native.LinuxPackagingTests
+      - name: Test shared background UI
+        run: cargo test -p oxideterm-gpui-background --locked
+      - name: Verify actual Metal uploads
+        if: runner.os == 'macOS'
+        run: cargo test -p gpui-pre-apple --features test-support stream_upload_completion --locked
+      - name: Compile Windows native surface shaders
+        if: runner.os == 'Windows'
+        run: cargo test -p gpui-pre-windows native_surface_shaders_compile_for_d3d11 --locked
+      - name: Check Linux GPU completion
+        if: runner.os == 'Linux'
+        run: cargo check -p gpui-pre-wgpu --locked
