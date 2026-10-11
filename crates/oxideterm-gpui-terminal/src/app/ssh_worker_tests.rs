@@ -395,8 +395,15 @@ fn ssh_worker_output_reaches_a_painted_pane_without_followup_output(cx: &mut Tes
     });
     let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(10)).unwrap();
     let started = Instant::now();
+    let (continue_output_tx, continue_output_rx) = tokio::sync::oneshot::channel();
     let producer = peer.runtime.spawn(async move {
-        for _ in 0..512 {
+        sender
+            .data(channel, "SSH output 中文 🦀\r\n".as_bytes().repeat(128))
+            .await
+            .unwrap();
+        // Hold the final output until the pane has accepted input on the real channel.
+        continue_output_rx.await.unwrap();
+        for _ in 1..512 {
             sender
                 .data(channel, "SSH output 中文 🦀\r\n".as_bytes().repeat(128))
                 .await
@@ -409,7 +416,7 @@ fn ssh_worker_output_reaches_a_painted_pane_without_followup_output(cx: &mut Tes
         Instant::now()
     });
     let activity = pane.read_with(cx, |pane, _| pane.terminal.lock().activity_receiver());
-    let mut sent_input = false;
+    let mut continue_output = Some(continue_output_tx);
     loop {
         // GPUI's deterministic test harness disables external wakes to its
         // local executor. Bridge the real backend signal into the normal tick.
@@ -422,12 +429,6 @@ fn ssh_worker_output_reaches_a_painted_pane_without_followup_output(cx: &mut Tes
             pane.update(cx, |pane, cx| pane.tick(cx));
         }
         cx.run_until_parked();
-        if !sent_input && started.elapsed() >= Duration::from_millis(10) {
-            pane.update(cx, |pane, cx| {
-                pane.send_command_sender_text_chunk("paint-input", cx);
-            });
-            sent_input = true;
-        }
         cx.draw(
             point(px(0.0), px(0.0)),
             size(
@@ -436,6 +437,19 @@ fn ssh_worker_output_reaches_a_painted_pane_without_followup_output(cx: &mut Tes
             ),
             |_, _| pane.clone().into_element(),
         );
+        if continue_output.is_some()
+            && pane.read_with(cx, |pane, _| {
+                pane.snapshot
+                    .lines
+                    .iter()
+                    .any(|row| row.text().starts_with("SSH output "))
+            })
+        {
+            pane.update(cx, |pane, cx| {
+                assert!(pane.send_command_sender_text_chunk("paint-input", cx));
+            });
+            continue_output.take().unwrap().send(()).unwrap();
+        }
         let visible = pane.read_with(cx, |pane, _| {
             pane.snapshot
                 .lines
