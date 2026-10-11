@@ -9,6 +9,11 @@ impl gpui::Global for HistoryQuit {}
 
 /// All explicit exit paths leave the UI running while the database acknowledges its final changes.
 pub(crate) fn request_app_quit(cx: &mut App) {
+    // Quit can originate inside a workspace update; release its lease before reading it.
+    cx.defer(start_app_quit);
+}
+
+fn start_app_quit(cx: &mut App) {
     if !cx.has_global::<HistoryQuit>() {
         cx.set_global(HistoryQuit::default());
     }
@@ -159,6 +164,60 @@ impl WorkspaceApp {
                 }
             }
             ai.persist_chat_state();
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn quit_requested_from_workspace_update_finishes_without_reentry(cx: &mut TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_HISTORY_QUIT_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Workspace storage is process-wide; isolate it from the user's installation.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
+        let mut store = SettingsStore::load_from_path(&settings_path).unwrap();
+        store.settings_mut().ssh_config.auto_load_hosts = false;
+        store.save().unwrap();
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.run_until_parked();
+
+        // Update completion requests quit while the workspace entity is still leased.
+        workspace.update(cx, |workspace, cx| workspace.request_application_quit(cx));
+        let task = cx.update(|_, cx| cx.global_mut::<HistoryQuit>().task.take().unwrap());
+        cx.foreground_executor().block_test(task);
+        workspace.read_with(cx, |workspace, cx| {
+            assert!(workspace.ai_entity.read(cx).history.quitting);
         });
     }
 }
