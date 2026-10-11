@@ -56,7 +56,10 @@ fn activate_client_titlebar_control(
                 window.zoom_window();
             }
         }
-        gpui::WindowControlArea::Close => window.request_close(cx),
+        gpui::WindowControlArea::Close => {
+            // The close guard updates the same workspace leased by the button listener.
+            window.defer(cx, |window, cx| window.request_close(cx));
+        }
         gpui::WindowControlArea::Drag => {}
     }
 }
@@ -410,6 +413,65 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::Cell, rc::Rc};
+
+    struct CloseGuardView {
+        allow_close: bool,
+        requests: Rc<Cell<usize>>,
+    }
+
+    impl gpui::Render for CloseGuardView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full()
+        }
+    }
+
+    #[gpui::test]
+    fn client_close_waits_for_owner_update_and_honors_the_close_guard(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let requests = Rc::new(Cell::new(0));
+        let view_requests = requests.clone();
+        let handle = cx.add_window(move |window, cx| {
+            let owner: gpui::Entity<CloseGuardView> = cx.entity();
+            window.on_window_should_close(cx, move |_, cx| {
+                owner.update(cx, |owner, _| {
+                    owner.requests.set(owner.requests.get() + 1);
+                    owner.allow_close
+                })
+            });
+            CloseGuardView {
+                allow_close: false,
+                requests: view_requests,
+            }
+        });
+        handle
+            .update(cx, |_, window, cx| {
+                activate_client_titlebar_control(gpui::WindowControlArea::Close, window, cx);
+                assert_eq!(
+                    requests.get(),
+                    0,
+                    "close guard must run after the owner update"
+                );
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(requests.get(), 1);
+        handle
+            .update(cx, |owner, window, cx| {
+                owner.allow_close = true;
+                activate_client_titlebar_control(gpui::WindowControlArea::Close, window, cx);
+                assert_eq!(requests.get(), 1);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert_eq!(requests.get(), 2);
+        assert!(cx.read(|cx| {
+            cx.windows()
+                .iter()
+                .all(|window| window.window_id() != handle.window_id())
+        }));
+    }
 
     #[test]
     fn window_control_capabilities_filter_optional_buttons_only() {
