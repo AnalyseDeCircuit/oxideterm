@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "reconnect_hint": "Session déconnectée · Appuyez sur Entrée pour vous reconnecter",
     "control_bar": {
       "show_controls": "Afficher les commandes",
       "hide_controls": "Masquer les commandes"

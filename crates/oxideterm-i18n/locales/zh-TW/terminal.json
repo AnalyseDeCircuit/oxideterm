@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "reconnect_hint": "工作階段已中斷 · 按 Enter 重新連線",
     "control_bar": {
       "show_controls": "展開操作列",
       "hide_controls": "收起操作列"

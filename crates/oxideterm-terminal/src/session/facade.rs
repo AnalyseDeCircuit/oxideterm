@@ -57,6 +57,10 @@ impl TelnetSessionConfig {
 }
 
 impl TerminalSession {
+    pub fn reconnect_ssh(&mut self, config: SshSessionConfig) -> Result<()> {
+        self.backend.reconnect_ssh(config)
+    }
+
     pub fn local_default(cols: usize, rows: usize) -> Result<Self> {
         Self::local_with_graphics_options(cols, rows, GraphicsOptions::default())
     }

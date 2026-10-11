@@ -8,6 +8,119 @@ use gpui::{
 mod ssh_peer;
 
 #[gpui::test]
+fn exited_ssh_pane_requests_reconnect_only_for_enter_and_resumes_in_place(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config = SshSessionConfig::from(peer.config.take().unwrap())
+        .with_runtime(peer.runtime.clone())
+        .with_registry(
+            peer.registry.clone(),
+            oxideterm_ssh::ConnectionConsumer::Terminal("ui-reconnect".into()),
+        );
+    let (pane, cx) = cx.add_window_view(move |window, cx| {
+        TerminalPane::new_ssh_with_preferences(config, TerminalUiPreferences::default(), window, cx)
+            .unwrap()
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    peer.runtime
+        .block_on(sender.data(channel, b"original output\r\n".to_vec()))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pane.read_with(cx, |pane, _| {
+        pane.terminal
+            .lock()
+            .buffer_text()
+            .contains("original output")
+    }) {
+        assert!(Instant::now() < deadline, "initial output missing");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let connection_id = pane.read_with(cx, |pane, _| {
+        pane.terminal
+            .lock()
+            .ssh_connection_handle()
+            .unwrap()
+            .connection_id()
+            .to_string()
+    });
+    peer.runtime.block_on(sender.close(channel)).unwrap();
+    while pane.read_with(cx, |pane, _| pane.lifecycle().is_running()) {
+        assert!(Instant::now() < deadline, "shell did not exit");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    pane.update(cx, |pane, cx| {
+        pane.tick(cx);
+        assert!(pane.can_reconnect_ssh());
+        pane.set_current_working_directory_from_terminal_action("/old-session".into(), cx);
+        for (key, expected) in [
+            ("shift-enter", None),
+            ("enter", Some(TerminalContextAction::Reconnect)),
+        ] {
+            pane.handle_key(
+                &gpui::KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse(key).unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                cx,
+            );
+            assert_eq!(pane.take_context_action_request(), expected, "{key}");
+        }
+        pane.set_ssh_reconnect_pending(true, cx);
+        pane.handle_key(
+            &gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("enter").unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            },
+            cx,
+        );
+        assert_eq!(pane.take_context_action_request(), None);
+        pane.reconnect_ssh(
+            SshSessionConfig::for_existing_connection(connection_id, "fixture", 22, "parser-test")
+                .with_runtime(peer.runtime.clone())
+                .with_registry(
+                    peer.registry.clone(),
+                    oxideterm_ssh::ConnectionConsumer::Terminal("ui-reconnect".into()),
+                ),
+            cx,
+        )
+        .unwrap();
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    peer.runtime
+        .block_on(sender.data(channel, b"restored output\r\n".to_vec()))
+        .unwrap();
+    while !pane.read_with(cx, |pane, _| {
+        pane.terminal
+            .lock()
+            .buffer_text()
+            .contains("restored output")
+    }) {
+        assert!(Instant::now() < deadline, "restored output missing");
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    pane.update(cx, |pane, cx| {
+        pane.tick(cx);
+        assert!(!pane.can_reconnect_ssh());
+        assert!(!pane.ssh_reconnect_pending());
+        assert_eq!(pane.current_working_directory(), None);
+        assert!(
+            pane.terminal
+                .lock()
+                .buffer_text()
+                .contains("original output")
+        );
+        assert!(pane.send_text("continued input", cx));
+    });
+    assert_eq!(
+        peer.input.recv_timeout(Duration::from_secs(5)).unwrap().0,
+        b"continued input"
+    );
+    pane.update(cx, |pane, _| pane.shutdown());
+    peer.stop();
+}
+
+#[gpui::test]
 fn confirmed_clipboard_paste_sends_one_bracketed_text_block(cx: &mut TestAppContext) {
     let mut peer = ssh_peer::SshPeer::new();
     let config =

@@ -576,6 +576,47 @@ impl Render for TerminalPane {
             .when(self.is_serial_transport(), |pane| {
                 pane.child(self.render_serial_control_bar(cx))
             })
+            .when(
+                self.can_reconnect_ssh() || self.ssh_reconnect_pending(),
+                |pane| {
+                    pane.child(
+                        div()
+                            .absolute()
+                            .bottom_3()
+                            .right_3()
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(self.render_terminal_toolbar_status(
+                                self.preferences.reconnect_hint.clone(),
+                            ))
+                            .child(
+                                self.render_terminal_toolbar_action(
+                                    if self.ssh_reconnect_pending() {
+                                        self.preferences.reconnecting_label.clone()
+                                    } else {
+                                        self.preferences.reconnect_label.clone()
+                                    },
+                                    !self.ssh_reconnect_pending(),
+                                    true,
+                                )
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(|this, _, _window, cx| {
+                                        if this.can_reconnect_ssh() {
+                                            this.request_context_action(
+                                                TerminalContextAction::Reconnect,
+                                                false,
+                                                cx,
+                                            );
+                                        }
+                                        cx.stop_propagation();
+                                    }),
+                                ),
+                            ),
+                    )
+                },
+            )
             .when_some(tmux_state, |pane, state| {
                 pane.child(self.render_tmux_control_bar(&state, cx))
             })
@@ -2440,7 +2481,7 @@ impl TerminalPane {
         self.request_context_action(super::TerminalContextAction::PluginTextTool, false, cx);
     }
 
-    fn request_context_action(
+    pub(super) fn request_context_action(
         &mut self,
         action: TerminalContextAction,
         requires_selection: bool,

@@ -102,6 +102,113 @@ fn wait_until(mut ready: impl FnMut() -> bool) {
 }
 
 #[test]
+fn closed_shell_reconnect_preserves_output_and_shared_transport_after_failure() {
+    let mut fixture = Fixture::new();
+    let connection = fixture.terminal.ssh_connection_handle().unwrap();
+    let connection_id = connection.connection_id().to_string();
+    let _runtime_guard = fixture.runtime.enter();
+    let mut forward = fixture
+        .runtime
+        .block_on(connection.open_direct_tcpip("echo.test", 9000, "127.0.0.1", 0))
+        .unwrap();
+    fixture.send(b"previous output\r\n\x1b[?1049h\x1b[?2004h\x1b[?1000h");
+    wait_until(|| fixture.terminal.mode().contains(TermMode::ALT_SCREEN));
+    fixture
+        .runtime
+        .block_on(fixture.peer.eof(fixture.channel))
+        .unwrap();
+    fixture
+        .runtime
+        .block_on(fixture.peer.close(fixture.channel))
+        .unwrap();
+    wait_until(|| !fixture.terminal.lifecycle().is_running());
+    fixture
+        .terminal
+        .reconnect_ssh(
+            SshSessionConfig::for_existing_connection(
+                "missing-connection",
+                "fixture",
+                22,
+                "parser-test",
+            )
+            .with_registry(
+                fixture.registry.clone(),
+                ConnectionConsumer::Terminal("fixture".into()),
+            )
+            .with_runtime(fixture.runtime.clone()),
+        )
+        .unwrap();
+    fixture.barrier();
+    wait_until(|| {
+        fixture
+            .terminal
+            .take_events()
+            .iter()
+            .any(|event| matches!(event, TerminalEvent::StartupFailed))
+    });
+    assert!(fixture.terminal.buffer_text().contains("previous output"));
+    assert!(
+        !fixture
+            .terminal
+            .mode()
+            .intersects(TermMode::ALT_SCREEN | TermMode::BRACKETED_PASTE | TermMode::MOUSE_MODE)
+    );
+    fixture
+        .terminal
+        .reconnect_ssh(
+            SshSessionConfig::for_existing_connection(&connection_id, "fixture", 22, "parser-test")
+                .with_deferred_pty(true)
+                .with_registry(
+                    fixture.registry.clone(),
+                    ConnectionConsumer::Terminal("fixture".into()),
+                )
+                .with_runtime(fixture.runtime.clone()),
+        )
+        .unwrap();
+    fixture
+        .terminal
+        .resize_with_cell_size(TerminalResize::new(100, 30, 0, 0))
+        .unwrap();
+    let (peer, channel) = fixture
+        .server
+        .ready
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap();
+    fixture.peer = peer;
+    fixture.channel = channel;
+    wait_until(|| fixture.terminal.is_interactive());
+    fixture.send(b"\x1b[Hnew output\r\n");
+    wait_until(|| fixture.terminal.buffer_text().contains("new output"));
+    assert!(fixture.terminal.buffer_text().contains("previous output"));
+    assert_eq!(
+        fixture
+            .terminal
+            .ssh_connection_handle()
+            .unwrap()
+            .connection_id(),
+        connection_id
+    );
+    fixture.terminal.write_text("new input").unwrap();
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"new input"
+    );
+    fixture.runtime.block_on(async {
+        forward.write_all(b"still shared").await.unwrap();
+        let mut reply = [0; 12];
+        tokio::time::timeout(Duration::from_secs(5), forward.read_exact(&mut reply))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&reply, b"still shared");
+    });
+}
+
+#[test]
 fn ssh_parses_and_sends_replies_without_ui_drains() {
     let mut fixture = Fixture::new();
     fixture.send(b"abc\x1b[6n");

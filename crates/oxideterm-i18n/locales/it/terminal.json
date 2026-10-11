@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "reconnect_hint": "Sessione disconnessa · Premi Invio per riconnetterti",
     "control_bar": {
       "show_controls": "Mostra controlli",
       "hide_controls": "Nascondi controlli"

@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "reconnect_hint": "Session disconnected · Press Enter to reconnect",
     "control_bar": {
       "show_controls": "Show controls",
       "hide_controls": "Hide controls"

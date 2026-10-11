@@ -137,6 +137,9 @@ pub trait TerminalSessionBackend: Send {
     fn activity_receiver(&self) -> TerminalActivityReceiver;
     fn take_events(&mut self) -> Vec<TerminalEvent>;
     fn write_input(&mut self, bytes: &[u8]) -> Result<()>;
+    fn reconnect_ssh(&mut self, _config: SshSessionConfig) -> Result<()> {
+        bail!("Only SSH terminals support this reconnect operation")
+    }
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()>;
     fn write_text(&mut self, text: &str) -> Result<()>;
     fn paste_text(&mut self, text: &str) -> Result<()>;

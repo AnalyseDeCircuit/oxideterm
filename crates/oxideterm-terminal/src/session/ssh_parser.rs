@@ -150,6 +150,31 @@ impl SshParser {
         }
     }
 
+    pub(super) fn restart_transport(&mut self, policy: Option<TrzszTransferPolicy>) {
+        self.interrupt_trzsz_transfer();
+        self.interrupt_modem_transfer();
+        self.retire_transport();
+        self.trzsz_consumer = None;
+        self.set_trzsz_policy(policy);
+        self.parser = Processor::new();
+        self.utf8_guard = Default::default();
+        self.output_decoder = TerminalOutputDecoder::new(self.encoding);
+        self.input_encoder = TerminalInputEncoder::new(self.encoding);
+        self.magic_scan = MagicScanWindow::default();
+        self.encoding_detector = EncodingMismatchDetector::new(self.encoding);
+        self.graphics_ingress.reset_stream();
+        if let Some(controller) = &mut self.tmux_controller {
+            controller.restart_transport();
+        }
+        if let Some(triggers) = &mut self.trigger_stream {
+            triggers.reset_stream();
+        }
+        self.privilege_prompt = TerminalPrivilegePromptStream::default();
+        self.shell_integration = TerminalShellIntegration::default();
+        self.transport_running = true;
+        self.term.lock().reset_session_preserving_history();
+    }
+
     pub(super) fn set_recording_context(
         &mut self,
         context: Option<&oxideterm_audit::AuditContext>,

@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "reconnect_hint": "세션 연결이 끊어졌습니다 · Enter 키로 다시 연결",
     "control_bar": {
       "show_controls": "조작 메뉴 펼치기",
       "hide_controls": "조작 메뉴 접기"

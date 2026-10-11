@@ -886,10 +886,9 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn remount_public_mcp_terminal_session(
+    pub(in crate::workspace) fn stop_public_mcp_recordings_for_session(
         &mut self,
-        old_session_id: TerminalSessionId,
-        new_session_id: TerminalSessionId,
+        session_id: TerminalSessionId,
         cx: &mut Context<Self>,
     ) {
         let terminal_refs = self
@@ -897,17 +896,13 @@ impl WorkspaceApp {
             .terminals
             .iter()
             .filter_map(|(terminal_ref, record)| {
-                (record.session_id == old_session_id)
+                (record.session_id == session_id)
                     .then_some((terminal_ref.clone(), record.client_ref.clone()))
             })
             .collect::<Vec<_>>();
         for (terminal_ref, client_ref) in terminal_refs {
-            // Recorders belong to the old pane, while the public terminal handle
-            // follows the replacement session created for the same NodeRouter node.
+            // The public handle stays stable; recordings end at the old shell boundary.
             self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
-            if let Some(record) = self.public_mcp.terminals.get_mut(&terminal_ref) {
-                record.session_id = new_session_id;
-            }
         }
     }
 

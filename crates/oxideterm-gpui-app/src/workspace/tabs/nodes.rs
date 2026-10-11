@@ -290,6 +290,20 @@ impl WorkspaceApp {
                     error,
                     action,
                 } => {
+                    for session_id in self
+                        .workspace_runtime
+                        .read(cx)
+                        .ssh_terminal_session_ids_for_node(&node_id)
+                    {
+                        if let Some(location) = self.tab_host.read(cx).terminal_location(session_id)
+                            && let Some(pane) = self
+                                .tab_host
+                                .read(cx)
+                                .terminal_pane_for_target(location.pane_id, session_id)
+                        {
+                            pane.update(cx, |pane, cx| pane.set_ssh_reconnect_pending(false, cx));
+                        }
+                    }
                     let active_reconnect_job = !matches!(
                         &action,
                         runtime_entity::ReconnectFailureAction::InitialConnect
@@ -940,51 +954,8 @@ impl WorkspaceApp {
                 continue;
             };
             let old_session_id = TerminalSessionId(raw_old_session_id);
-            let Some(location) = self.tab_host.read(cx).terminal_location(old_session_id) else {
-                continue;
-            };
-            let tab_id = location.tab_id;
-            let old_pane_id = location.pane_id;
-            let allow_dedicated_connection = remounted > 0;
-            let Ok((new_pane_id, new_session_id)) = self
-                .create_ssh_terminal_pane_for_existing_node(
-                    node_id,
-                    None,
-                    allow_dedicated_connection,
-                    window,
-                    cx,
-                )
-            else {
-                continue;
-            };
-
-            let replaced = self.tab_host.update(cx, |tab_host, _| {
-                tab_host.replace_terminal_session(
-                    tab_id,
-                    old_session_id,
-                    old_pane_id,
-                    new_pane_id,
-                    new_session_id,
-                )
-            });
-            if let Some(replaced_pane_id) = replaced {
-                self.terminal.update(cx, |terminal, _| {
-                    terminal
-                        .sync_groups_mut()
-                        .remount(replaced_pane_id, new_pane_id);
-                });
-                self.remount_public_mcp_terminal_session(old_session_id, new_session_id, cx);
-                if let Some(pane) = self.remove_terminal_pane(&replaced_pane_id, cx) {
-                    let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-                }
-                self.bind_terminal_location(tab_id, new_pane_id, new_session_id, cx);
-                self.unregister_ssh_terminal_session(old_session_id, cx);
+            if self.reconnect_ssh_terminal_session(old_session_id, node_id, cx) {
                 remounted += 1;
-            } else {
-                if let Some(pane) = self.remove_terminal_pane(&new_pane_id, cx) {
-                    let _ = pane.update(cx, |pane, _cx| pane.shutdown());
-                }
-                self.unregister_ssh_terminal_session(new_session_id, cx);
             }
         }
         if remounted > 0 {

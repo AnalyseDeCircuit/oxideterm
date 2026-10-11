@@ -1,5 +1,6 @@
 {
   "terminal": {
+    "reconnect_hint": "会话已断开 · 按回车重新连接",
     "control_bar": {
       "show_controls": "展开操作栏",
       "hide_controls": "收起操作栏"

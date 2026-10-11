@@ -1154,6 +1154,9 @@ impl WorkspaceApp {
         );
         TerminalUiPreferences {
             processing_failed_message: self.i18n.t("terminal.processing_failed"),
+            reconnect_label: self.i18n.t("sessions.actions.reconnect"),
+            reconnect_hint: self.i18n.t("terminal.reconnect_hint"),
+            reconnecting_label: self.i18n.t("connections.monitor.reconnecting"),
             font_family: terminal
                 .font_family
                 .terminal_family_name(&terminal.custom_font_family),

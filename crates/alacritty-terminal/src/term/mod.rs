@@ -703,6 +703,29 @@ impl<T> Term<T> {
         &mut self.grid
     }
 
+    /// Start a new shell's modes without erasing the preceding session's output.
+    pub fn reset_session_preserving_history(&mut self)
+    where
+        T: EventListener,
+    {
+        if self.mode.contains(TermMode::ALT_SCREEN) {
+            self.swap_alt();
+        }
+        let empty = Grid::new(self.screen_lines(), self.columns(), 0);
+        let mut grid = mem::replace(&mut self.grid, empty);
+        self.reset_state();
+        grid.cursor.template = Cell::default();
+        grid.cursor.charsets = Default::default();
+        grid.cursor.input_needs_wrap = false;
+        grid.saved_cursor = grid.cursor.clone();
+        self.grid = grid;
+        // Login screens may move to the origin before drawing. Archive the old viewport first.
+        self.grid.clear_viewport();
+        self.grid.cursor.point = Point::default();
+        self.grid.saved_cursor = self.grid.cursor.clone();
+        self.mark_fully_damaged();
+    }
+
     /// Resize terminal to new dimensions.
     pub fn resize<S: Dimensions>(&mut self, size: S) {
         let old_cols = self.columns();

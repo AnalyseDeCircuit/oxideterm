@@ -71,6 +71,12 @@ fn terminal_image_data_from_decoded(
 }
 
 impl GraphicsIngress {
+    /// Incomplete escapes and chunked uploads belong to the preceding shell.
+    pub fn reset_stream(&mut self) {
+        self.state = ParserState::Ground;
+        self.kitty_chunks.clear();
+    }
+
     pub fn new(options: GraphicsOptions) -> Self {
         Self {
             options,

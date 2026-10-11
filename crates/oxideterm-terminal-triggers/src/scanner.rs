@@ -124,6 +124,11 @@ pub struct TerminalTriggerStream {
 }
 
 impl TerminalTriggerStream {
+    /// A new shell keeps the rules but cannot complete matches from the old stream.
+    pub fn reset_stream(&mut self) {
+        *self = Self::new(self.rules.clone());
+    }
+
     pub fn new(rules: Arc<CompiledTriggerSet>) -> Self {
         let trigger_count = rules.len();
         Self {

@@ -878,6 +878,11 @@ pub(crate) struct TmuxController {
 }
 
 impl TmuxController {
+    pub(crate) fn restart_transport(&mut self) {
+        self.leave(&mut TmuxAdvance::new());
+        self.stream = ControlStream::new();
+    }
+
     pub(crate) fn register_written_reply(&self, reply: ReplyTag) {
         self.display.register_written_reply(reply);
     }

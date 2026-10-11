@@ -685,25 +685,6 @@ impl WorkspaceTabHostEntity {
             .is_some_and(|root_pane| root_pane.reset_group_sizes(group_id))
     }
 
-    pub(in crate::workspace) fn replace_terminal_session(
-        &mut self,
-        tab_id: TabId,
-        old_session_id: TerminalSessionId,
-        old_pane_id: PaneId,
-        new_pane_id: PaneId,
-        new_session_id: TerminalSessionId,
-    ) -> Option<PaneId> {
-        let tab = self.tab_mut_by_id(tab_id)?;
-        let replaced_pane_id =
-            tab.root_pane
-                .as_mut()?
-                .replace_session(old_session_id, new_pane_id, new_session_id)?;
-        if tab.active_pane_id == Some(old_pane_id) {
-            tab.active_pane_id = Some(new_pane_id);
-        }
-        Some(replaced_pane_id)
-    }
-
     pub(in crate::workspace) fn sync_tab_titles(
         &mut self,
         mut title_for_key: impl FnMut(&'static str) -> String,
@@ -1629,67 +1610,6 @@ mod tests {
         assert_eq!(removed.mount_cleanup.reason, TabMountCloseReason::TabClosed);
         assert_eq!(tab_host.active_tab_id(), Some(first));
         assert!(tab_host.tab_by_id(second).is_none());
-    }
-
-    #[test]
-    fn reconnect_replacement_preserves_the_sibling_split_session() {
-        let mut tab_host = WorkspaceTabHostEntity::new();
-        let tab_id = TabId(1);
-        let first_pane = PaneId(1);
-        let first_session = TerminalSessionId(1);
-        let second_pane = PaneId(2);
-        let second_session = TerminalSessionId(2);
-        tab_host.insert_and_select_main_tab(test_tab(
-            tab_id,
-            Some(PaneNode::leaf(first_pane, first_session)),
-        ));
-        assert!(tab_host.split_pane(
-            tab_id,
-            first_pane,
-            PaneId(3),
-            SplitDirection::Horizontal,
-            second_pane,
-            second_session,
-        ));
-        assert_eq!(
-            tab_host.active_tab().unwrap().active_pane_id,
-            Some(second_pane)
-        );
-        assert!(tab_host.set_active_pane(Some(tab_id), first_pane));
-
-        let replacement_pane = PaneId(4);
-        let replacement_session = TerminalSessionId(4);
-        assert_eq!(
-            tab_host.replace_terminal_session(
-                tab_id,
-                first_session,
-                first_pane,
-                replacement_pane,
-                replacement_session,
-            ),
-            Some(first_pane)
-        );
-
-        let tab = tab_host.active_tab().expect("split terminal tab");
-        let root = tab.root_pane.as_ref().expect("split pane tree");
-        assert_eq!(root.pane_count(), 2);
-        assert_eq!(
-            root.session_id_for_pane(replacement_pane),
-            Some(replacement_session)
-        );
-        assert_eq!(root.session_id_for_pane(second_pane), Some(second_session));
-        assert_eq!(tab.active_pane_id, Some(replacement_pane));
-
-        assert_eq!(
-            tab_host.close_pane(tab_id, second_pane),
-            Some(replacement_pane)
-        );
-        let tab = tab_host.active_tab().unwrap();
-        assert_eq!(tab.active_pane_id, Some(replacement_pane));
-        assert_eq!(
-            tab.root_pane,
-            Some(PaneNode::leaf(replacement_pane, replacement_session))
-        );
     }
 
     #[test]

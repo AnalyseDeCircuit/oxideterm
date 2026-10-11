@@ -88,6 +88,7 @@ pub enum TerminalEvent {
     Wakeup,
     BlinkChanged(bool),
     ChildExited(Option<i32>),
+    SessionRestarted,
     // Failed startup must remain visible instead of triggering normal exit auto-close.
     StartupFailed,
     ProcessingFailed,
