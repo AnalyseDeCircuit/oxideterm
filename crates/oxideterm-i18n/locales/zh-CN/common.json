@@ -448,6 +448,7 @@
         "object_prefix": "对象前缀",
         "s3_bucket": "Bucket",
         "s3_region": "Region",
+        "s3_url_style": "URL 风格",
         "git_repository": "仓库",
         "git_branch": "分支",
         "token": "Bearer Token",
@@ -484,6 +485,10 @@
         "bearer": "Bearer",
         "basic": "Basic",
         "none": "不鉴权"
+      },
+      "s3_url_style": {
+        "path": "路径风格",
+        "virtual_hosted": "虚拟主机风格"
       },
       "conflict": {
         "merge": "合并",

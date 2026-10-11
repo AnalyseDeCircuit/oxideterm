@@ -456,6 +456,7 @@
         "object_prefix": "오브젝트 접두사",
         "s3_bucket": "Bucket",
         "s3_region": "Region",
+        "s3_url_style": "URL 스타일",
         "git_repository": "저장소",
         "git_branch": "브랜치",
         "token": "Bearer Token",
@@ -492,6 +493,10 @@
         "bearer": "Bearer",
         "basic": "Basic",
         "none": "인증 없음"
+      },
+      "s3_url_style": {
+        "path": "경로 스타일",
+        "virtual_hosted": "가상 호스트 스타일"
       },
       "conflict": {
         "merge": "병합",

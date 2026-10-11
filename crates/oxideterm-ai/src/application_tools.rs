@@ -244,6 +244,7 @@ pub(crate) fn extended_application_tool_definitions() -> Vec<AiToolDefinition> {
                     "namespace": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
                     "s3_bucket": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
                     "s3_region": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
+                    "s3_url_style": { "type": "string", "enum": ["path", "virtual-hosted"] },
                     "git_repository": { "type": "string", "maxLength": MAX_URL_CHARS },
                     "git_branch": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
                     "github_oauth_client_id": { "type": "string", "maxLength": MAX_IDENTIFIER_CHARS },
@@ -456,6 +457,7 @@ fn validate_configure_cloud_sync(
             "namespace",
             "s3_bucket",
             "s3_region",
+            "s3_url_style",
             "git_repository",
             "git_branch",
             "github_oauth_client_id",
@@ -486,6 +488,7 @@ fn validate_configure_cloud_sync(
         ],
     )?;
     optional_enum(object, "auth_mode", &["bearer", "basic", "none"])?;
+    optional_enum(object, "s3_url_style", &["path", "virtual-hosted"])?;
     optional_string_allow_empty(object, "endpoint", MAX_URL_CHARS)?;
     for field in [
         "namespace",

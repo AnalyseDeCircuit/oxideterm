@@ -20,6 +20,7 @@ use oxideterm_gpui_settings_view::SettingsInput;
 pub enum CloudSyncConfigRow {
     BackendSelect,
     AuthModeSelect,
+    S3UrlStyleSelect,
     Text(CloudSyncTextFieldSpec),
     Secret(CloudSyncSecretFieldSpec),
     AutoUploadToggle,
@@ -123,6 +124,7 @@ pub fn cloud_sync_config_rows(
                 input: SettingsInput::CloudSyncS3Region,
                 placeholder_key: "plugin.cloud_sync.placeholders.s3_region",
             }),
+            CloudSyncConfigRow::S3UrlStyleSelect,
         ]);
     }
     if backend_uses_token(backend, auth_mode) {

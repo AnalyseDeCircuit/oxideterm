@@ -4,7 +4,8 @@
 //! Cloud Sync panel view state that is independent from WorkspaceApp.
 
 use oxideterm_cloud_sync::{
-    AuthMode, BackendType, CloudSyncSettings, ConflictStrategy, secrets::backend_uses_auth_mode,
+    AuthMode, BackendType, CloudSyncSettings, ConflictStrategy, S3UrlStyle,
+    secrets::backend_uses_auth_mode, secrets::backend_uses_s3_credentials,
 };
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -36,6 +37,7 @@ pub enum CloudSyncSection {
 pub enum CloudSyncSelect {
     Backend,
     AuthMode,
+    S3UrlStyle,
     ConflictStrategy,
 }
 
@@ -44,6 +46,7 @@ pub enum CloudSyncSelectAction {
     LocalFile,
     Backend(BackendType),
     AuthMode(AuthMode),
+    S3UrlStyle(S3UrlStyle),
     ConflictStrategy(ConflictStrategy),
 }
 
@@ -67,6 +70,8 @@ pub enum CloudSyncSelectLabelKey {
     AuthBearer,
     AuthBasic,
     AuthNone,
+    S3UrlStylePath,
+    S3UrlStyleVirtualHosted,
     ConflictMerge,
     ConflictReplace,
     ConflictSkip,
@@ -129,6 +134,20 @@ pub fn cloud_sync_select_options(
             action: CloudSyncSelectAction::AuthMode(auth_mode),
         })
         .collect(),
+        CloudSyncSelect::S3UrlStyle => [
+            (S3UrlStyle::Path, CloudSyncSelectLabelKey::S3UrlStylePath),
+            (
+                S3UrlStyle::VirtualHosted,
+                CloudSyncSelectLabelKey::S3UrlStyleVirtualHosted,
+            ),
+        ]
+        .into_iter()
+        .map(|(style, label_key)| CloudSyncSelectOptionSpec {
+            label_key,
+            selected: settings.s3_url_style == style,
+            action: CloudSyncSelectAction::S3UrlStyle(style),
+        })
+        .collect(),
         CloudSyncSelect::ConflictStrategy => [
             (
                 ConflictStrategy::Merge,
@@ -171,6 +190,9 @@ pub fn cloud_sync_focusable_selects(settings: &CloudSyncSettings) -> Vec<CloudSy
     let mut selects = vec![CloudSyncSelect::Backend];
     if backend_uses_auth_mode(&settings.backend_type) {
         selects.push(CloudSyncSelect::AuthMode);
+    }
+    if backend_uses_s3_credentials(&settings.backend_type) {
+        selects.push(CloudSyncSelect::S3UrlStyle);
     }
     selects.push(CloudSyncSelect::ConflictStrategy);
     selects
@@ -368,4 +390,63 @@ pub fn close_cloud_sync_select_on_container_scroll(
     *focused_select = Some(closing_select);
     *highlighted_option = None;
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn s3_url_style_options_report_the_configured_style() {
+        let mut settings = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            ..CloudSyncSettings::default()
+        };
+        let options = cloud_sync_select_options(&settings, CloudSyncSelect::S3UrlStyle);
+
+        assert_eq!(
+            options
+                .iter()
+                .map(|option| option.action.clone())
+                .collect::<Vec<_>>(),
+            [
+                CloudSyncSelectAction::S3UrlStyle(S3UrlStyle::Path),
+                CloudSyncSelectAction::S3UrlStyle(S3UrlStyle::VirtualHosted),
+            ]
+        );
+        assert_eq!(
+            options
+                .iter()
+                .filter(|option| option.selected)
+                .count(),
+            1,
+            "exactly one URL style must be selected"
+        );
+        assert_eq!(
+            cloud_sync_selected_option_index(&settings, CloudSyncSelect::S3UrlStyle),
+            0
+        );
+
+        settings.s3_url_style = S3UrlStyle::VirtualHosted;
+        assert_eq!(
+            cloud_sync_selected_option_index(&settings, CloudSyncSelect::S3UrlStyle),
+            1
+        );
+    }
+
+    #[test]
+    fn only_s3_backends_focus_the_url_style_select() {
+        let s3 = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            ..CloudSyncSettings::default()
+        };
+        let webdav = CloudSyncSettings {
+            backend_type: BackendType::Webdav,
+            auth_mode: AuthMode::Bearer,
+            ..CloudSyncSettings::default()
+        };
+
+        assert!(cloud_sync_focusable_selects(&s3).contains(&CloudSyncSelect::S3UrlStyle));
+        assert!(!cloud_sync_focusable_selects(&webdav).contains(&CloudSyncSelect::S3UrlStyle));
+    }
 }

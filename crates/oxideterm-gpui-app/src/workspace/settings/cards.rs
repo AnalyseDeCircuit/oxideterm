@@ -592,6 +592,9 @@ impl WorkspaceApp {
                     Some(crate::workspace::cloud_sync::CloudSyncSelect::AuthMode),
                     SelectAnchorId::CloudSyncAuthMode
                 ) | (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::S3UrlStyle),
+                    SelectAnchorId::CloudSyncS3UrlStyle
+                ) | (
                     Some(crate::workspace::cloud_sync::CloudSyncSelect::ConflictStrategy),
                     SelectAnchorId::CloudSyncConflictStrategy
                 )

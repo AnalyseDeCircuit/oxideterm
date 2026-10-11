@@ -456,6 +456,7 @@
         "object_prefix": "Préfixe d'objet",
         "s3_bucket": "Bucket",
         "s3_region": "Région",
+        "s3_url_style": "Style d'URL",
         "git_repository": "Dépôt",
         "git_branch": "Branche",
         "token": "Jeton Bearer",
@@ -492,6 +493,10 @@
         "bearer": "Bearer",
         "basic": "Basic",
         "none": "Aucune"
+      },
+      "s3_url_style": {
+        "path": "Style chemin",
+        "virtual_hosted": "Style hôte virtuel"
       },
       "conflict": {
         "merge": "Fusionner",

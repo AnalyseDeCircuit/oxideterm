@@ -5,7 +5,7 @@ use chrono::Utc;
 use gpui::prelude::*;
 use gpui::{Div, EventEmitter, FontWeight, Rgba, Task, Timer, point};
 use oxideterm_cloud_sync::{
-    AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy,
+    AuthMode, BackendType, CloudSyncSettings, CloudSyncStatus, ConflictStrategy, S3UrlStyle,
     OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, normalize_sync_scope,
     operation::{
         ApplyLegacyPreviewOutcome, ApplyStructuredPreviewOutcome, LegacyPreview, UploadOutcome,
@@ -395,6 +395,7 @@ impl CloudSyncWorkspaceEntity {
                 "namespace": settings.namespace,
                 "s3Bucket": settings.s3_bucket,
                 "s3Region": settings.s3_region,
+                "s3UrlStyle": settings.s3_url_style,
                 "gitRepository": cloud_sync_location_for_ai(&settings.git_repository),
                 "gitBranch": settings.git_branch,
                 "githubOauthClientId": settings.github_oauth_client_id,

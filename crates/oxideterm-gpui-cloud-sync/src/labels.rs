@@ -418,6 +418,10 @@ pub fn cloud_sync_select_label_key(label: CloudSyncSelectLabelKey) -> &'static s
         CloudSyncSelectLabelKey::AuthBearer => "plugin.cloud_sync.auth.bearer",
         CloudSyncSelectLabelKey::AuthBasic => "plugin.cloud_sync.auth.basic",
         CloudSyncSelectLabelKey::AuthNone => "plugin.cloud_sync.auth.none",
+        CloudSyncSelectLabelKey::S3UrlStylePath => "plugin.cloud_sync.s3_url_style.path",
+        CloudSyncSelectLabelKey::S3UrlStyleVirtualHosted => {
+            "plugin.cloud_sync.s3_url_style.virtual_hosted"
+        }
         CloudSyncSelectLabelKey::ConflictMerge => "plugin.cloud_sync.conflict.merge",
         CloudSyncSelectLabelKey::ConflictReplace => "plugin.cloud_sync.conflict.replace",
         CloudSyncSelectLabelKey::ConflictSkip => "plugin.cloud_sync.conflict.skip",

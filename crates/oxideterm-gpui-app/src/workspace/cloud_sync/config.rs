@@ -3,6 +3,17 @@
 
 use super::*;
 
+/// Projects the editable draft onto the fields select options depend on.
+fn cloud_sync_form_settings(form: &CloudSyncFormDraft) -> CloudSyncSettings {
+    CloudSyncSettings {
+        backend_type: form.backend_type.clone(),
+        auth_mode: form.auth_mode.clone(),
+        s3_url_style: form.s3_url_style.clone(),
+        default_conflict_strategy: form.default_conflict_strategy.clone(),
+        ..CloudSyncSettings::default()
+    }
+}
+
 impl CloudSyncPageRenderer {
     pub(super) fn render_cloud_sync_config_connection_card(&self, cx: &mut App) -> AnyElement {
         let (config_rows, auto_upload_enabled, busy) = {
@@ -30,6 +41,7 @@ impl CloudSyncPageRenderer {
             connection_rows.push(match row {
                 CloudSyncConfigRow::BackendSelect => self.render_backend_select(cx),
                 CloudSyncConfigRow::AuthModeSelect => self.render_auth_mode_select(cx),
+                CloudSyncConfigRow::S3UrlStyleSelect => self.render_s3_url_style_select(cx),
                 CloudSyncConfigRow::Text(field) => self.render_text_field(
                     field.label_key,
                     field.input,
@@ -462,6 +474,21 @@ impl CloudSyncPageRenderer {
         )
     }
 
+    fn render_s3_url_style_select(&self, cx: &mut App) -> AnyElement {
+        let current = match self.cloud_sync.read(cx).view.form.s3_url_style {
+            S3UrlStyle::Path => self.i18n.t("plugin.cloud_sync.s3_url_style.path"),
+            S3UrlStyle::VirtualHosted => {
+                self.i18n.t("plugin.cloud_sync.s3_url_style.virtual_hosted")
+            }
+        };
+        self.render_select_field(
+            "plugin.cloud_sync.settings.s3_url_style",
+            CloudSyncSelect::S3UrlStyle,
+            current,
+            cx,
+        )
+    }
+
     fn render_conflict_select(&self, cx: &mut App) -> AnyElement {
         let current = match self.cloud_sync.read(cx).view.form.default_conflict_strategy {
             ConflictStrategy::Merge => self.i18n.t("plugin.cloud_sync.conflict.merge"),
@@ -479,12 +506,7 @@ impl CloudSyncPageRenderer {
 
     fn selected_option_index(&self, select: CloudSyncSelect, cx: &App) -> usize {
         let cloud_sync = self.cloud_sync.read(cx);
-        let settings = CloudSyncSettings {
-            backend_type: cloud_sync.view.form.backend_type.clone(),
-            auth_mode: cloud_sync.view.form.auth_mode.clone(),
-            default_conflict_strategy: cloud_sync.view.form.default_conflict_strategy.clone(),
-            ..CloudSyncSettings::default()
-        };
+        let settings = cloud_sync_form_settings(&cloud_sync.view.form);
         if select == CloudSyncSelect::Backend && self.cloud_sync.read(cx).view.local_file_mode {
             cloud_sync_select_option_specs(&settings, select).len()
         } else {
@@ -593,6 +615,7 @@ impl CloudSyncPageRenderer {
         match select {
             CloudSyncSelect::Backend => SelectAnchorId::CloudSyncBackend,
             CloudSyncSelect::AuthMode => SelectAnchorId::CloudSyncAuthMode,
+            CloudSyncSelect::S3UrlStyle => SelectAnchorId::CloudSyncS3UrlStyle,
             CloudSyncSelect::ConflictStrategy => SelectAnchorId::CloudSyncConflictStrategy,
         }
     }
@@ -665,18 +688,7 @@ impl WorkspaceApp {
         select: CloudSyncSelect,
         cx: &App,
     ) -> Vec<CloudSyncSelectOption> {
-        let settings = CloudSyncSettings {
-            backend_type: self.cloud_sync.read(cx).view.form.backend_type.clone(),
-            auth_mode: self.cloud_sync.read(cx).view.form.auth_mode.clone(),
-            default_conflict_strategy: self
-                .cloud_sync
-                .read(cx)
-                .view
-                .form
-                .default_conflict_strategy
-                .clone(),
-            ..CloudSyncSettings::default()
-        };
+        let settings = cloud_sync_form_settings(&self.cloud_sync.read(cx).view.form);
         let local_file = self.cloud_sync.read(cx).view.local_file_mode;
         let mut options: Vec<_> = cloud_sync_select_option_specs(&settings, select)
             .into_iter()
@@ -701,18 +713,7 @@ impl WorkspaceApp {
         select: CloudSyncSelect,
         cx: &App,
     ) -> usize {
-        let settings = CloudSyncSettings {
-            backend_type: self.cloud_sync.read(cx).view.form.backend_type.clone(),
-            auth_mode: self.cloud_sync.read(cx).view.form.auth_mode.clone(),
-            default_conflict_strategy: self
-                .cloud_sync
-                .read(cx)
-                .view
-                .form
-                .default_conflict_strategy
-                .clone(),
-            ..CloudSyncSettings::default()
-        };
+        let settings = cloud_sync_form_settings(&self.cloud_sync.read(cx).view.form);
         if select == CloudSyncSelect::Backend && self.cloud_sync.read(cx).view.local_file_mode {
             cloud_sync_select_option_specs(&settings, select).len()
         } else {
@@ -721,18 +722,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn cloud_sync_focusable_selects(&self, cx: &App) -> Vec<CloudSyncSelect> {
-        let settings = CloudSyncSettings {
-            backend_type: self.cloud_sync.read(cx).view.form.backend_type.clone(),
-            auth_mode: self.cloud_sync.read(cx).view.form.auth_mode.clone(),
-            default_conflict_strategy: self
-                .cloud_sync
-                .read(cx)
-                .view
-                .form
-                .default_conflict_strategy
-                .clone(),
-            ..CloudSyncSettings::default()
-        };
+        let settings = cloud_sync_form_settings(&self.cloud_sync.read(cx).view.form);
         if self.cloud_sync.read(cx).view.active_tab != CloudSyncTab::Configure {
             vec![]
         } else if self.cloud_sync.read(cx).view.local_file_mode {
@@ -746,6 +736,7 @@ impl WorkspaceApp {
         match select {
             CloudSyncSelect::Backend => SelectAnchorId::CloudSyncBackend,
             CloudSyncSelect::AuthMode => SelectAnchorId::CloudSyncAuthMode,
+            CloudSyncSelect::S3UrlStyle => SelectAnchorId::CloudSyncS3UrlStyle,
             CloudSyncSelect::ConflictStrategy => SelectAnchorId::CloudSyncConflictStrategy,
         }
     }
@@ -814,6 +805,10 @@ impl WorkspaceApp {
             CloudSyncSelectAction::AuthMode(auth_mode) => {
                 cloud_sync.view.form.auth_mode = auth_mode;
                 CloudSyncSelect::AuthMode
+            }
+            CloudSyncSelectAction::S3UrlStyle(style) => {
+                cloud_sync.view.form.s3_url_style = style;
+                CloudSyncSelect::S3UrlStyle
             }
             CloudSyncSelectAction::ConflictStrategy(strategy) => {
                 cloud_sync.view.form.default_conflict_strategy = strategy;

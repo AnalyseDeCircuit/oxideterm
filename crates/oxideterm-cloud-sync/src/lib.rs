@@ -149,6 +149,20 @@ pub enum AuthMode {
     None,
 }
 
+/// How an S3 bucket is addressed in request URLs.
+///
+/// Path style keeps the bucket as the first path segment, which is what R2,
+/// MinIO, and AWS accept. Providers such as Tencent Cloud COS reject path-style
+/// domains for buckets created after 2024-01-01 and require the bucket as a
+/// subdomain of the service endpoint.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum S3UrlStyle {
+    #[default]
+    Path,
+    VirtualHosted,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CloudSyncSettings {
@@ -168,6 +182,8 @@ pub struct CloudSyncSettings {
     pub s3_bucket: String,
     #[serde(default = "default_s3_region")]
     pub s3_region: String,
+    #[serde(default)]
+    pub s3_url_style: S3UrlStyle,
     #[serde(default)]
     pub git_repository: String,
     #[serde(default = "default_git_branch")]
@@ -228,6 +244,7 @@ impl Default for CloudSyncSettings {
             namespace: default_namespace(),
             s3_bucket: String::new(),
             s3_region: default_s3_region(),
+            s3_url_style: S3UrlStyle::default(),
             git_repository: String::new(),
             git_branch: default_git_branch(),
             github_oauth_client_id: String::new(),

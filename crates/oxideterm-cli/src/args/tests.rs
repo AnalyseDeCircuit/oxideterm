@@ -795,6 +795,8 @@ fn parses_cloud_sync_backend_configurations() {
         "oxideterm",
         "--s3-region",
         "us-east-1",
+        "--s3-url-style",
+        "virtual-hosted",
         "--dry-run",
     ]);
     match cli.command {
@@ -804,6 +806,10 @@ fn parses_cloud_sync_backend_configurations() {
                     CloudSyncBackendConfigureAction::Configure(args) => {
                         assert_eq!(args.s3_bucket.as_deref(), Some("oxideterm"));
                         assert_eq!(args.s3_region.as_deref(), Some("us-east-1"));
+                        assert_eq!(
+                            args.s3_url_style,
+                            Some(CloudSyncS3UrlStyleArg::VirtualHosted)
+                        );
                         assert!(args.write.dry_run);
                     }
                 },

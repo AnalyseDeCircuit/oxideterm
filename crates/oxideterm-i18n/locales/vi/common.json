@@ -456,6 +456,7 @@
         "object_prefix": "Tiền tố đối tượng",
         "s3_bucket": "Bucket",
         "s3_region": "Khu vực",
+        "s3_url_style": "Kiểu URL",
         "git_repository": "Kho lưu trữ",
         "git_branch": "Branch",
         "token": "Token Bearer",
@@ -492,6 +493,10 @@
         "bearer": "Bearer",
         "basic": "Basic",
         "none": "Không"
+      },
+      "s3_url_style": {
+        "path": "Kiểu đường dẫn",
+        "virtual_hosted": "Kiểu host ảo"
       },
       "conflict": {
         "merge": "Gộp",

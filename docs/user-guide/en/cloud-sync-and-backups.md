@@ -25,12 +25,14 @@ The fields depend on the backend:
 | Backend | Location to use on both devices |
 | --- | --- |
 | WebDAV | Endpoint and namespace |
-| S3 Compatible | Service endpoint, bucket, region, and object prefix |
+| S3 Compatible | Service endpoint, bucket, region, object prefix, and URL style |
 | Git Repository | Repository, branch, and namespace |
 | GitHub Gist | The same Gist ID and namespace; an empty ID can create a private Gist on first publication |
 | Dropbox | Account and folder path |
 | OneDrive / Google Drive | Account and configured sync folder or namespace |
 | HTTP JSON | A server implementing OxideTerm's current sync protocol, endpoint, and namespace |
+
+For S3 backends, **URL style** controls how the bucket appears in requests. Keep **Path style** for AWS S3, Cloudflare R2, MinIO, and similar services, where the bucket is the first path segment. Choose **Virtual-hosted style** for providers that address the bucket as a subdomain of the service endpoint, such as Tencent Cloud COS. COS rejects path-style requests for buckets created after 2024-01-01 with `403 PathStyleDomainForbidden`, so those buckets need virtual-hosted style. Use the same style and the same endpoint on every device; changing only the endpoint region changes the destination.
 
 Enter passwords and tokens in the dedicated credential fields. With sensitive sync disabled, connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded. Enable **Sync sensitive credentials** only for the selected data you intend to share; the app asks for confirmation.
 

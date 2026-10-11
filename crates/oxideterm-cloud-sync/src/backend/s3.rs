@@ -18,7 +18,7 @@ use super::{
     execute_cloud_request, insert_header, normalize_remote_metadata, response_to_object,
     response_write_result, trim_slashes,
 };
-use crate::{CloudSyncSettings, OXIDE_CONTENT_TYPE, secrets::CloudSyncSecrets};
+use crate::{CloudSyncSettings, OXIDE_CONTENT_TYPE, S3UrlStyle, secrets::CloudSyncSecrets};
 
 type HmacSha256 = Hmac<Sha256>;
 mod publications;
@@ -264,7 +264,12 @@ pub(super) fn s3_paths(config: &CloudSyncSettings) -> crate::SnapshotObjectPaths
 }
 
 pub(super) fn s3_blob_url(config: &CloudSyncSettings, blob_key: &str) -> Result<Url> {
-    join_s3_object_url(&config.endpoint, &config.s3_bucket, blob_key)
+    join_s3_object_url(
+        &config.endpoint,
+        &config.s3_bucket,
+        blob_key,
+        &config.s3_url_style,
+    )
 }
 
 fn validate_s3_config(config: &CloudSyncSettings, secrets: &CloudSyncSecrets) -> Result<()> {
@@ -303,6 +308,7 @@ fn s3_metadata_url(config: &CloudSyncSettings) -> Result<Url> {
         &config.endpoint,
         &config.s3_bucket,
         &s3_paths(config).metadata_key,
+        &config.s3_url_style,
     )
 }
 
@@ -314,26 +320,54 @@ fn s3_object_url(config: &CloudSyncSettings, relative_path: &str) -> Result<Url>
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
         .join("/");
-    join_s3_object_url(&config.endpoint, &config.s3_bucket, &key)
+    join_s3_object_url(
+        &config.endpoint,
+        &config.s3_bucket,
+        &key,
+        &config.s3_url_style,
+    )
 }
 
 fn s3_revision_blob_key(config: &CloudSyncSettings, revision: &str) -> String {
     crate::s3_revision_blob_key(&config.namespace, revision)
 }
 
-fn join_s3_object_url(endpoint: &str, bucket: &str, key: &str) -> Result<Url> {
+fn join_s3_object_url(
+    endpoint: &str,
+    bucket: &str,
+    key: &str,
+    style: &S3UrlStyle,
+) -> Result<Url> {
     let mut url = Url::parse(endpoint).context("missing_endpoint: invalid S3 endpoint")?;
     let base_path = trim_slashes(url.path());
     let encoded_key = encode_path_segments(key);
-    let path = [
-        base_path.as_str(),
-        encode_component(bucket).as_str(),
-        encoded_key.as_str(),
-    ]
-    .into_iter()
-    .filter(|part| !part.is_empty())
-    .collect::<Vec<_>>()
-    .join("/");
+    let path = match style {
+        S3UrlStyle::Path => [
+            base_path.as_str(),
+            encode_component(bucket).as_str(),
+            encoded_key.as_str(),
+        ]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("/"),
+        S3UrlStyle::VirtualHosted => {
+            // The bucket becomes a subdomain label, so the request path only
+            // carries the endpoint's own base path and the object key.
+            let endpoint_host = url
+                .host_str()
+                .context("missing_endpoint: S3 endpoint has no host")?
+                .to_string();
+            let bucket_host = format!("{bucket}.{endpoint_host}");
+            url.set_host(Some(&bucket_host))
+                .context("invalid_s3_bucket: bucket and endpoint do not form a valid host")?;
+            [base_path.as_str(), encoded_key.as_str()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join("/")
+        }
+    };
     url.set_path(&format!("/{path}"));
     Ok(url)
 }
@@ -486,7 +520,7 @@ fn s3_host_header(url: &Url) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BackendType;
+    use crate::{BackendType, S3UrlStyle};
 
     #[test]
     fn builds_s3_object_urls_like_cloud_sync_plugin() {
@@ -507,6 +541,69 @@ mod tests {
                 .unwrap()
                 .as_str(),
             "https://s3.example.test/root/oxide%20bucket/team/default/structured/connections/rev%201.json"
+        );
+    }
+
+    #[test]
+    fn virtual_hosted_style_moves_the_bucket_into_the_host() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            endpoint: "https://cos.ap-beijing.myqcloud.com".to_string(),
+            s3_bucket: "oxide-1250000000".to_string(),
+            namespace: "team/default".to_string(),
+            s3_url_style: S3UrlStyle::VirtualHosted,
+            ..CloudSyncSettings::default()
+        };
+
+        assert_eq!(
+            s3_metadata_url(&settings).unwrap().as_str(),
+            "https://oxide-1250000000.cos.ap-beijing.myqcloud.com/team/default/latest.json"
+        );
+        assert_eq!(
+            s3_object_url(&settings, "structured/connections/rev 1.json")
+                .unwrap()
+                .as_str(),
+            "https://oxide-1250000000.cos.ap-beijing.myqcloud.com/team/default/structured/connections/rev%201.json"
+        );
+    }
+
+    #[test]
+    fn virtual_hosted_style_preserves_the_endpoint_base_path_and_port() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            endpoint: "https://s3.example.test:8443/root/".to_string(),
+            s3_bucket: "oxide".to_string(),
+            namespace: "team".to_string(),
+            s3_url_style: S3UrlStyle::VirtualHosted,
+            ..CloudSyncSettings::default()
+        };
+
+        assert_eq!(
+            s3_metadata_url(&settings).unwrap().as_str(),
+            "https://oxide.s3.example.test:8443/root/team/latest.json"
+        );
+    }
+
+    #[test]
+    fn virtual_hosted_style_codes_a_bucket_that_cannot_be_a_host_label() {
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            endpoint: "https://cos.ap-beijing.myqcloud.com".to_string(),
+            // Path style silently percent-encodes this into the object key, so
+            // only virtual-hosted style reports that the name is unusable.
+            s3_bucket: "oxide bucket".to_string(),
+            namespace: "team".to_string(),
+            s3_url_style: S3UrlStyle::VirtualHosted,
+            ..CloudSyncSettings::default()
+        };
+
+        let error = s3_metadata_url(&settings)
+            .expect_err("a bucket containing a space cannot be a hostname label")
+            .to_string();
+
+        assert!(
+            error.starts_with("invalid_s3_bucket:"),
+            "expected a coded error, got: {error}"
         );
     }
 }

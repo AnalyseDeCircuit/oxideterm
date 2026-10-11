@@ -5,7 +5,8 @@
 
 use oxideterm_cloud_sync::{
     AuthMode, BackendType, CloudSyncSettings, ConflictStrategy, OXIDE_APP_SETTINGS_SECTION_IDS,
-    RawSyncScope, get_syncable_plugin_ids, secret_keys, secrets::CloudSyncKeychainSecretProvider,
+    RawSyncScope, S3UrlStyle, get_syncable_plugin_ids, secret_keys,
+    secrets::CloudSyncKeychainSecretProvider,
 };
 use oxideterm_settings_model::{CloudSyncFormDraft, CloudSyncSecretDraftHandoff};
 
@@ -72,6 +73,7 @@ pub fn cloud_sync_settings_from_form(form: &CloudSyncFormDraft) -> (CloudSyncSet
             }
         },
         s3_bucket: form.s3_bucket.trim().to_string(),
+        s3_url_style: form.s3_url_style.clone(),
         s3_region: {
             let region = form.s3_region.trim();
             if region.is_empty() {
@@ -151,6 +153,10 @@ pub fn apply_cloud_sync_configuration_patch(
             updated_fields.push(field.to_string());
         }
     }
+    if let Some(value) = object.get("s3_url_style").and_then(serde_json::Value::as_str) {
+        settings.s3_url_style = cloud_sync_s3_url_style_from_id(value)?;
+        updated_fields.push("s3_url_style".to_string());
+    }
     if let Some(value) = object
         .get("auto_upload_enabled")
         .and_then(serde_json::Value::as_bool)
@@ -211,6 +217,14 @@ fn cloud_sync_conflict_strategy_from_id(value: &str) -> Result<ConflictStrategy,
         "skip" => Ok(ConflictStrategy::Skip),
         "rename" => Ok(ConflictStrategy::Rename),
         _ => Err("Unsupported Cloud Sync conflict strategy.".to_string()),
+    }
+}
+
+fn cloud_sync_s3_url_style_from_id(value: &str) -> Result<S3UrlStyle, String> {
+    match value {
+        "path" => Ok(S3UrlStyle::Path),
+        "virtual-hosted" => Ok(S3UrlStyle::VirtualHosted),
+        _ => Err("Unsupported Cloud Sync S3 URL style.".to_string()),
     }
 }
 
@@ -390,6 +404,17 @@ mod tests {
     }
 
     #[test]
+    fn settings_from_form_keeps_the_s3_url_style_selection() {
+        let mut form = CloudSyncFormDraft::from_settings(&CloudSyncSettings::default());
+        form.backend_type = BackendType::S3;
+        form.s3_url_style = S3UrlStyle::VirtualHosted;
+
+        let (settings, _) = cloud_sync_settings_from_form(&form);
+
+        assert_eq!(settings.s3_url_style, S3UrlStyle::VirtualHosted);
+    }
+
+    #[test]
     fn configuration_patch_updates_requested_fields_and_preserves_others() {
         let mut settings = CloudSyncSettings::default();
         settings.namespace = "existing".to_string();
@@ -435,6 +460,36 @@ mod tests {
         assert_eq!(
             result.expect_err("embedded credentials must be rejected"),
             "Cloud Sync locations cannot contain embedded credentials."
+        );
+    }
+
+    #[test]
+    fn configuration_patch_applies_the_s3_url_style() {
+        let mut settings = CloudSyncSettings::default();
+        settings.backend_type = BackendType::S3;
+
+        let (patched, _, fields) = apply_cloud_sync_configuration_patch(
+            &settings,
+            &RawSyncScope::default(),
+            &serde_json::json!({ "s3_url_style": "virtual-hosted" }),
+        )
+        .expect("valid S3 URL style patch");
+
+        assert_eq!(patched.s3_url_style, S3UrlStyle::VirtualHosted);
+        assert!(fields.contains(&"s3_url_style".to_string()));
+    }
+
+    #[test]
+    fn configuration_patch_rejects_unknown_s3_url_style() {
+        let result = apply_cloud_sync_configuration_patch(
+            &CloudSyncSettings::default(),
+            &RawSyncScope::default(),
+            &serde_json::json!({ "s3_url_style": "subdomain" }),
+        );
+
+        assert_eq!(
+            result.expect_err("unknown URL style must be rejected"),
+            "Unsupported Cloud Sync S3 URL style."
         );
     }
 

@@ -1216,6 +1216,69 @@ mod tests {
         assert_eq!(requests[2].url.path(), format!("/team/sync-v3/{writer}/"));
     }
 
+    #[tokio::test]
+    async fn s3_virtual_hosted_style_addresses_the_bucket_as_a_subdomain() {
+        let writer = uuid::Uuid::from_u128(21);
+        let digest = "c".repeat(64);
+        let listing = format!(
+            "<?xml version='1.0' encoding='utf-8' ?><ListBucketResult><IsTruncated>false</IsTruncated><Contents><Key>oxide/sync-v3/{writer}/7-{digest}.oxide</Key></Contents></ListBucketResult>"
+        );
+        let executor = Arc::new(FakeHttpExecutor::new([HttpResponseSnapshot::new(
+            StatusCode::OK,
+            HeaderMap::new(),
+            listing.into_bytes(),
+        )]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let config = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            endpoint: "https://cos.ap-beijing.myqcloud.com".to_string(),
+            namespace: "oxide".to_string(),
+            s3_bucket: "oxide-1250000000".to_string(),
+            s3_region: "ap-beijing".to_string(),
+            s3_url_style: crate::S3UrlStyle::VirtualHosted,
+            ..CloudSyncSettings::default()
+        };
+        let secrets = CloudSyncSecrets {
+            access_key_id: Some(Zeroizing::new("AKIAIOSFODNN7EXAMPLE".to_string())),
+            secret_access_key: Some(Zeroizing::new(
+                "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".to_string(),
+            )),
+            ..CloudSyncSecrets::default()
+        };
+
+        let publications = backend
+            .list_publications(&config, &secrets)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            publications.iter().map(|id| id.path()).collect::<Vec<_>>(),
+            [format!("sync-v3/{writer}/7-{digest}.oxide")]
+        );
+        let requests = executor.requests();
+        let request = &requests[0];
+        let expected_host = "oxide-1250000000.cos.ap-beijing.myqcloud.com";
+        assert_eq!(requests.len(), 1);
+        assert_eq!(request.url.host_str(), Some(expected_host));
+        // Path style would put the bucket here and COS rejects it with 403.
+        assert_eq!(request.url.path(), "/");
+        assert!(
+            request
+                .url
+                .query_pairs()
+                .any(|(key, value)| key == "prefix" && value == "oxide/sync-v3/")
+        );
+        let authorization = request
+            .headers
+            .get(AUTHORIZATION)
+            .expect("S3 requests must be signed");
+        assert!(authorization.is_sensitive());
+        assert!(
+            authorization.to_str().unwrap().contains("SignedHeaders="),
+            "S3 signature must describe the signed header set"
+        );
+    }
+
     #[derive(Clone)]
     struct FakeHttpExecutor {
         state: Arc<Mutex<FakeHttpState>>,

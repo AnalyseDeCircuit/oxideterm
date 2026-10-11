@@ -181,6 +181,7 @@ pub enum SelectAnchorId {
     SettingsConnectionImportDuplicateStrategy,
     CloudSyncBackend,
     CloudSyncAuthMode,
+    CloudSyncS3UrlStyle,
     CloudSyncConflictStrategy,
     IdeAgentStatus,
     IdeFileEncoding,
@@ -314,7 +315,10 @@ impl SelectAnchorId {
         // immediately instead of waiting for a second prepaint cycle.
         matches!(
             self,
-            Self::CloudSyncBackend | Self::CloudSyncAuthMode | Self::CloudSyncConflictStrategy
+            Self::CloudSyncBackend
+                | Self::CloudSyncAuthMode
+                | Self::CloudSyncS3UrlStyle
+                | Self::CloudSyncConflictStrategy
         )
     }
 }

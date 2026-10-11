@@ -19,7 +19,12 @@ impl CloudSyncBackend {
         let mut seen = std::collections::BTreeSet::new();
         let mut files = Vec::new();
         loop {
-            let mut url = join_s3_object_url(&config.endpoint, &config.s3_bucket, "")?;
+            let mut url = join_s3_object_url(
+                &config.endpoint,
+                &config.s3_bucket,
+                "",
+                &config.s3_url_style,
+            )?;
             url.query_pairs_mut()
                 .append_pair("list-type", "2")
                 .append_pair("prefix", &prefix);

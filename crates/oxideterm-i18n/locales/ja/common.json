@@ -456,6 +456,7 @@
         "object_prefix": "オブジェクトプレフィックス",
         "s3_bucket": "Bucket",
         "s3_region": "Region",
+        "s3_url_style": "URL スタイル",
         "git_repository": "リポジトリ",
         "git_branch": "ブランチ",
         "token": "Bearer Token",
@@ -492,6 +493,10 @@
         "bearer": "Bearer",
         "basic": "Basic",
         "none": "認証なし"
+      },
+      "s3_url_style": {
+        "path": "パススタイル",
+        "virtual_hosted": "仮想ホストスタイル"
       },
       "conflict": {
         "merge": "マージ",

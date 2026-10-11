@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 
 use oxideterm_cloud_sync::{
-    AuthMode, BackendType, CloudSyncSettings, ConflictStrategy,
+    AuthMode, BackendType, CloudSyncSettings, ConflictStrategy, S3UrlStyle,
     state::{
         CloudSyncHistoryEntry, CloudSyncPersistedState, CloudSyncRollbackBackup,
         CloudSyncStateStore,
@@ -16,7 +16,7 @@ use crate::{
     args::{
         CloudSyncAction, CloudSyncAuthModeArg, CloudSyncBackendAction, CloudSyncBackendArg,
         CloudSyncBackendConfigureAction, CloudSyncCommand, CloudSyncConfigureArgs,
-        CloudSyncConflictStrategy, CloudSyncHistoryArgs, JsonArgs,
+        CloudSyncConflictStrategy, CloudSyncHistoryArgs, CloudSyncS3UrlStyleArg, JsonArgs,
     },
     cloud_sync_preview, cloud_sync_secrets, cloud_sync_state, cloud_sync_write,
     error::{CliResult, runtime_error},
@@ -280,6 +280,12 @@ fn apply_configure_args(settings: &mut CloudSyncSettings, args: &CloudSyncConfig
     assign_optional_string(&mut settings.namespace, &args.namespace);
     assign_optional_string(&mut settings.s3_bucket, &args.s3_bucket);
     assign_optional_string(&mut settings.s3_region, &args.s3_region);
+    if let Some(style) = args.s3_url_style {
+        settings.s3_url_style = match style {
+            CloudSyncS3UrlStyleArg::Path => S3UrlStyle::Path,
+            CloudSyncS3UrlStyleArg::VirtualHosted => S3UrlStyle::VirtualHosted,
+        };
+    }
     assign_optional_string(&mut settings.git_repository, &args.git_repository);
     assign_optional_string(&mut settings.git_branch, &args.git_branch);
     assign_optional_string(
@@ -377,6 +383,12 @@ fn cloud_sync_configure_changes(
         "s3Region",
         before.s3_region.clone(),
         after.s3_region.clone(),
+    );
+    push_configure_change(
+        &mut changes,
+        "s3UrlStyle",
+        serialized_field(&before.s3_url_style),
+        serialized_field(&after.s3_url_style),
     );
     push_configure_change(
         &mut changes,

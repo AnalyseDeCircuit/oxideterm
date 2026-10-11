@@ -448,6 +448,7 @@
         "object_prefix": "Object Prefix",
         "s3_bucket": "Bucket",
         "s3_region": "Region",
+        "s3_url_style": "URL style",
         "git_repository": "Repository",
         "git_branch": "Branch",
         "token": "Bearer Token",
@@ -484,6 +485,10 @@
         "bearer": "Bearer",
         "basic": "Basic",
         "none": "None"
+      },
+      "s3_url_style": {
+        "path": "Path style",
+        "virtual_hosted": "Virtual-hosted style"
       },
       "conflict": {
         "merge": "Merge",

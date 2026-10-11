@@ -9,7 +9,7 @@ use crate::{
     args::{
         BatchAction, BatchApplyArgs, BatchCommand, CloudSyncAction, CloudSyncAuthModeArg,
         CloudSyncBackendArg, CloudSyncCommand, CloudSyncConfigureArgs, CloudSyncConflictStrategy,
-        ConnectionsApplyStrategy, WriteArgs,
+        CloudSyncS3UrlStyleArg, ConnectionsApplyStrategy, WriteArgs,
     },
     cloud_sync, connections,
     error::{CliError, CliResult},
@@ -54,6 +54,7 @@ struct BatchCloudSyncConfigure {
     namespace: Option<String>,
     s3_bucket: Option<String>,
     s3_region: Option<String>,
+    s3_url_style: Option<String>,
     git_repository: Option<String>,
     git_branch: Option<String>,
     github_oauth_client_id: Option<String>,
@@ -181,6 +182,11 @@ fn cloud_sync_configure_args(
         namespace: configure.namespace,
         s3_bucket: configure.s3_bucket,
         s3_region: configure.s3_region,
+        s3_url_style: configure
+            .s3_url_style
+            .as_deref()
+            .map(|value| parse_cloud_sync_s3_url_style(value, json))
+            .transpose()?,
         git_repository: configure.git_repository,
         git_branch: configure.git_branch,
         github_oauth_client_id: configure.github_oauth_client_id,
@@ -234,6 +240,14 @@ fn parse_cloud_sync_conflict_strategy(
             value,
             json,
         )),
+    }
+}
+
+fn parse_cloud_sync_s3_url_style(value: &str, json: bool) -> CliResult<CloudSyncS3UrlStyleArg> {
+    match value {
+        "path" => Ok(CloudSyncS3UrlStyleArg::Path),
+        "virtual-hosted" => Ok(CloudSyncS3UrlStyleArg::VirtualHosted),
+        _ => Err(invalid_cloud_sync_value("s3UrlStyle", value, json)),
     }
 }
 

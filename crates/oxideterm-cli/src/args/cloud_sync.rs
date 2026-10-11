@@ -77,6 +77,12 @@ pub struct CloudSyncConfigureArgs {
     pub s3_bucket: Option<String>,
     #[arg(long, help = "S3 region")]
     pub s3_region: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        help = "How the S3 bucket is addressed: path or virtual-hosted"
+    )]
+    pub s3_url_style: Option<CloudSyncS3UrlStyleArg>,
     #[arg(long, help = "Git repository URL")]
     pub git_repository: Option<String>,
     #[arg(long, help = "Git branch")]
@@ -147,6 +153,13 @@ pub enum CloudSyncAuthModeArg {
     Bearer,
     Basic,
     None,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum CloudSyncS3UrlStyleArg {
+    Path,
+    VirtualHosted,
 }
 
 #[derive(Debug, Args)]

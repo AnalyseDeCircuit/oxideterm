@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use oxideterm_cloud_sync::{AuthMode, BackendType, CloudSyncSettings, ConflictStrategy};
+use oxideterm_cloud_sync::{AuthMode, BackendType, CloudSyncSettings, ConflictStrategy, S3UrlStyle};
 use zeroize::{Zeroize, Zeroizing};
 
 use crate::SettingsInput;
@@ -20,6 +20,7 @@ pub struct CloudSyncFormDraft {
     pub namespace: String,
     pub s3_bucket: String,
     pub s3_region: String,
+    pub s3_url_style: S3UrlStyle,
     pub git_repository: String,
     pub git_branch: String,
     pub github_oauth_client_id: String,
@@ -74,6 +75,7 @@ impl fmt::Debug for CloudSyncFormDraft {
             .field("namespace", &self.namespace)
             .field("s3_bucket", &self.s3_bucket)
             .field("s3_region", &self.s3_region)
+            .field("s3_url_style", &self.s3_url_style)
             .field("git_repository", &self.git_repository)
             .field("git_branch", &self.git_branch)
             .field("github_oauth_client_id", &self.github_oauth_client_id)
@@ -118,6 +120,7 @@ impl CloudSyncFormDraft {
             namespace: settings.namespace.clone(),
             s3_bucket: settings.s3_bucket.clone(),
             s3_region: settings.s3_region.clone(),
+            s3_url_style: settings.s3_url_style.clone(),
             git_repository: settings.git_repository.clone(),
             git_branch: settings.git_branch.clone(),
             github_oauth_client_id: settings.github_oauth_client_id.clone(),
@@ -168,6 +171,9 @@ impl CloudSyncFormDraft {
         apply_changed_string!(namespace);
         apply_changed_string!(s3_bucket);
         apply_changed_string!(s3_region);
+        if previous.s3_url_style != current.s3_url_style {
+            self.s3_url_style = current.s3_url_style.clone();
+        }
         apply_changed_string!(git_repository);
         apply_changed_string!(git_branch);
         apply_changed_string!(github_oauth_client_id);
@@ -458,6 +464,18 @@ mod tests {
         assert_eq!(draft.namespace, "unsaved-namespace");
         assert_eq!(draft.token, "token-secret");
         assert!(draft.token_touched);
+    }
+
+    #[test]
+    fn s3_url_style_round_trips_through_the_form_draft() {
+        let mut settings = CloudSyncSettings::default();
+        settings.s3_url_style = S3UrlStyle::VirtualHosted;
+
+        let mut draft = CloudSyncFormDraft::from_settings(&settings);
+        assert_eq!(draft.s3_url_style, S3UrlStyle::VirtualHosted);
+
+        draft.apply_changed_non_secret_settings(&CloudSyncSettings::default(), &settings);
+        assert_eq!(draft.s3_url_style, S3UrlStyle::VirtualHosted);
     }
 
     #[test]
