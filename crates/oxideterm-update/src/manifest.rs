@@ -149,6 +149,48 @@ mod tests {
     }
 
     #[test]
+    fn portable_markers_preserve_the_running_package_shape() {
+        let manifest = matrix_manifest();
+        for (os, arch, executable, expected_url) in [
+            (
+                "macos",
+                "aarch64",
+                "/apps/OxideTerm.app/Contents/MacOS/oxideterm-native",
+                "https://example.invalid/mac-app.zip",
+            ),
+            (
+                "linux",
+                "x86_64",
+                "/apps/OxideTerm.AppImage",
+                "https://example.invalid/linux.AppImage",
+            ),
+            (
+                "macos",
+                "aarch64",
+                "/apps/oxideterm-native",
+                "https://example.invalid/mac-portable.tar.gz",
+            ),
+            (
+                "windows",
+                "x86_64",
+                "C:/apps/oxideterm-native.exe",
+                "https://example.invalid/windows-portable.zip",
+            ),
+            (
+                "linux",
+                "x86_64",
+                "/apps/oxideterm-native",
+                "https://example.invalid/linux-portable.tar.gz",
+            ),
+        ] {
+            let target = PlatformTarget::new(os, arch);
+            let flavor = InstallFlavor::infer(&target, std::path::Path::new(executable), true);
+            let package = manifest.select_package("1.0.0", &target, flavor).unwrap();
+            assert_eq!(package.url, expected_url, "{executable}");
+        }
+    }
+
+    #[test]
     fn does_not_cross_fallback_between_install_flavors() {
         let manifest = NativeUpdateManifest {
             version: "2.0.0".to_string(),

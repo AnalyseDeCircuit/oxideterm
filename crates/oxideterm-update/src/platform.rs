@@ -17,11 +17,20 @@ pub enum InstallFlavor {
 }
 
 impl InstallFlavor {
-    // Portable markers take precedence because they define storage and package
-    // behavior independently from the executable's platform-specific shape.
+    // Portable storage does not change the launch entry point of an app bundle or AppImage.
     pub fn infer(target: &PlatformTarget, current_exe: &Path, portable: bool) -> Self {
         if portable {
-            return Self::Portable;
+            return match target.os() {
+                "macos"
+                    if current_exe.ancestors().any(|path| {
+                        path.extension().and_then(|extension| extension.to_str()) == Some("app")
+                    }) =>
+                {
+                    Self::MacApp
+                }
+                "linux" if path_is_appimage(current_exe) => Self::LinuxAppImage,
+                _ => Self::Portable,
+            };
         }
 
         match target.os() {
@@ -170,7 +179,7 @@ mod tests {
         assert_eq!(
             InstallFlavor::infer(
                 &PlatformTarget::new("macos", "aarch64"),
-                Path::new("/Applications/OxideTerm.app/Contents/MacOS/oxideterm-native"),
+                Path::new("/apps/oxideterm-native"),
                 true,
             ),
             InstallFlavor::Portable
