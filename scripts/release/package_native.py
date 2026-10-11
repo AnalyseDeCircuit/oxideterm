@@ -1292,6 +1292,8 @@ update_install:
   IfFileExists "$DESKTOP\\{identity.app_name}.lnk" 0 legacy_shortcuts_done
   CreateShortcut "$DESKTOP\\{identity.app_name}.lnk" "$INSTDIR\\{binary.name}" "" "$INSTDIR\\resources\\icons\\icon.ico"
 legacy_shortcuts_done:
+  ; In-app updates launch the helper from the app with its process id.
+  StrCmp $IsLegacyUpgrade "1" 0 install_done
   Exec '"$INSTDIR\\{UPDATE_HELPER_DIR}\\{UPDATE_HELPER_BIN}.exe" --install-dir "$INSTDIR" --app-exe "$INSTDIR\\{binary.name}" --launch'
 
 install_done:

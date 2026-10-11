@@ -214,6 +214,12 @@ class WindowsInstallerScriptTests(unittest.TestCase):
         self.assertNotIn('$LOCALAPPDATA\\OxideTerm\\oxideterm.exe', script)
         update_install = script.split("update_install:\n", 1)[1].split("install_done:\n", 1)[0]
         self.assertNotIn("Call EnsureApplicationClosed", update_install)
+        helper_launch = update_install.split("legacy_shortcuts_done:\n", 1)[1]
+        self.assertIn('StrCmp $IsLegacyUpgrade "1" 0 install_done', helper_launch)
+        self.assertLess(
+            helper_launch.index('StrCmp $IsLegacyUpgrade "1" 0 install_done'),
+            helper_launch.index("Exec "),
+        )
 
     def test_installer_and_installed_application_use_the_application_icon(self) -> None:
         icon_path = Path(r"C:\icons\icon.ico")
