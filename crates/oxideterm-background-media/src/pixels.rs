@@ -119,8 +119,15 @@ impl Processor {
         let _blur_scratch = budget.reserve(if output.blur > 0.01 { bytes * 4 } else { 0 })?;
         let image = if resizing {
             if self.scratch.is_none() {
-                // Retained SIMD work buffers include alpha and convolution intermediates.
-                self.scratch = Some(budget.reserve(pixel_bytes(shape.0.0, shape.0.1)? * 3)?);
+                // Opaque video skips the full-size alpha buffer. U8x4 convolution runs
+                // vertically first, retaining source-width × output-height pixels.
+                let scratch_bytes = if bgra {
+                    let coefficients = (shape.0.0 as usize + shape.0.1 as usize) * 128;
+                    pixel_bytes(shape.0.0, dimensions.1)? + coefficients + 4
+                } else {
+                    pixel_bytes(shape.0.0, shape.0.1)? * 3
+                };
+                self.scratch = Some(budget.reserve(scratch_bytes)?);
             }
             let image = DynamicImage::ImageRgba8(image.into_rgba8());
             let mut target = fast_image_resize::images::Image::from_slice_u8(

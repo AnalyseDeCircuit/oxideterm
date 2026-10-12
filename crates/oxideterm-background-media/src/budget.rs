@@ -3,7 +3,8 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-const CPU_BYTES: usize = 256 * 1024 * 1024;
+// A 4K background and one serialized gallery decode can retain separate codec pools.
+const CPU_BYTES: usize = 512 * 1024 * 1024;
 const PLAYER_BYTES: usize = 192 * 1024 * 1024;
 static RESERVED: AtomicUsize = AtomicUsize::new(0);
 
