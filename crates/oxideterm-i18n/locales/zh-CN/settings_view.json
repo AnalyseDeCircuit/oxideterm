@@ -439,6 +439,7 @@
       "bg_enabled_hint": "关闭后隐藏素材与特效，保留已添加的素材。",
       "bg_gallery": "素材库",
       "bg_add": "添加素材",
+      "bg_get_more": "获取更多背景",
       "bg_clear_all": "清空全部",
       "bg_active": "当前",
       "bg_label": "应用背景",

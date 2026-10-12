@@ -30,20 +30,6 @@ const BUNDLED_WORKSPACE_BACKGROUNDS: &[BundledWorkspaceBackground] = &[
             "/resources/backgrounds/oxide-verdant-v1.webp"
         )),
     },
-    BundledWorkspaceBackground {
-        file_name: "oxide-dawn-mist-v1.mp4",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/resources/backgrounds/oxide-dawn-mist-v1.mp4"
-        )),
-    },
-    BundledWorkspaceBackground {
-        file_name: "oxide-night-flow-v1.mp4",
-        bytes: include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/resources/backgrounds/oxide-night-flow-v1.mp4"
-        )),
-    },
 ];
 
 pub(in crate::workspace) fn ensure_bundled_workspace_backgrounds(

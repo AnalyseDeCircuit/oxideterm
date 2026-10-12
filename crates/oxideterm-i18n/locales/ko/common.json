@@ -270,6 +270,8 @@
     "marketplace_acp": "ACP",
     "acp_setup_hint": "플러그인을 설치하고 활성화하면 에이전트 설정이 자동으로 생성되므로 실행 명령을 입력할 필요가 없습니다. 작업 디렉터리, 추가 인수, 환경 변수는 선택 사항이며, 비워 두면 기본값을 사용합니다. 로컬 프로그램을 사용하는 플러그인은 해당 공식 명령줄 프로그램이 필요합니다. 플러그인 안내에 따라 설치하고 로그인하세요.",
     "marketplace_remote_connections": "원격 연결",
+    "marketplace_backgrounds": "배경 자료",
+    "background_pack_hint": "자료가 외관 자료 라이브러리에 추가됩니다. 팩을 제거해도 가져온 자료는 유지됩니다.",
     "apply_page_size": "적용",
     "invalid_page_size": "올바른 양의 정수를 입력하세요",
     "page_range": "전체 {{total}}개 중 {{start}}–{{end}}개",

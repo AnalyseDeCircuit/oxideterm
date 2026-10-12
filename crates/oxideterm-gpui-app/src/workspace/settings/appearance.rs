@@ -2434,14 +2434,23 @@ impl WorkspaceApp {
             .items_center()
             .gap(px(8.0))
             .when(!editor_open, |actions| {
-                actions.child(self.appearance_action_button(
-                    LucideIcon::Plus,
-                    self.i18n.t("settings_view.terminal.bg_add"),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.pick_background_image(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
+                actions
+                    .child(self.appearance_action_button(
+                        LucideIcon::Download,
+                        self.i18n.t("settings_view.terminal.bg_get_more"),
+                        cx.listener(|this, _event, window, cx| {
+                            this.open_background_plugin_marketplace(window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(self.appearance_action_button(
+                        LucideIcon::Plus,
+                        self.i18n.t("settings_view.terminal.bg_add"),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.pick_background_image(cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
             })
             .when(has_removable_gallery_images, |actions| {
                 actions.child(

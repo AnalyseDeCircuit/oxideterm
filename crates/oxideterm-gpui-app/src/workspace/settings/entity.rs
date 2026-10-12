@@ -458,6 +458,7 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     background_media_info: HashMap<PathBuf, Result<bool, oxideterm_background_media::MediaError>>,
     background_media_info_tasks: HashMap<PathBuf, Task<()>>,
     background_gallery_task: Option<Task<()>>,
+    background_pack_images_pending: Vec<PathBuf>,
     background_gallery_system_dark: Option<bool>,
     background_gallery_results: VecDeque<BackgroundGalleryOperationResult>,
     theme_import_task: Option<Task<()>>,
@@ -629,6 +630,7 @@ impl SettingsWorkspaceEntity {
             background_media_info: HashMap::new(),
             background_media_info_tasks: HashMap::new(),
             background_gallery_task: None,
+            background_pack_images_pending: Vec::new(),
             background_gallery_system_dark: None,
             background_gallery_results: VecDeque::new(),
             theme_import_task: None,
@@ -1462,6 +1464,29 @@ impl SettingsWorkspaceEntity {
         Arc::clone(&self.background_images)
     }
 
+    pub(in crate::workspace) fn add_background_pack_images(
+        &mut self,
+        paths: &[PathBuf],
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        if self.background_gallery_task.is_some() {
+            self.background_pack_images_pending.extend_from_slice(paths);
+        }
+        let mut gallery = self.background_images.to_vec();
+        for path in paths {
+            let path = path.to_string_lossy().into_owned();
+            if !gallery.contains(&path) {
+                gallery.insert(0, path);
+            }
+        }
+        self.background_images = Arc::from(gallery);
+        // Installing media changes only the gallery, never either appearance's selection.
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn start_background_image_import(
         &mut self,
         selection: impl std::future::Future<Output = Option<Vec<PathBuf>>> + 'static,
@@ -1480,6 +1505,7 @@ impl SettingsWorkspaceEntity {
             let Some(paths) = selection.await else {
                 let _ = settings.update(cx, |settings, cx| {
                     settings.background_gallery_task = None;
+                    settings.background_pack_images_pending.clear();
                     cx.notify();
                 });
                 return;
@@ -1488,6 +1514,7 @@ impl SettingsWorkspaceEntity {
             if source_paths.is_empty() {
                 let _ = settings.update(cx, |settings, cx| {
                     settings.background_gallery_task = None;
+                    settings.background_pack_images_pending.clear();
                     cx.notify();
                 });
                 return;
@@ -1527,6 +1554,7 @@ impl SettingsWorkspaceEntity {
                     };
                     let _ = settings.update(cx, |settings, cx| {
                         settings.background_gallery_task = None;
+                        settings.background_pack_images_pending.clear();
                         settings
                             .background_gallery_results
                             .push_back(BackgroundGalleryOperationResult::MediaFailed(failure));
@@ -1694,7 +1722,16 @@ impl SettingsWorkspaceEntity {
         cx: &mut Context<Self>,
     ) {
         match result {
-            Ok((gallery, active_path)) => {
+            Ok((mut gallery, active_path)) => {
+                // A gallery worker may have listed files before the package install completed.
+                for path in std::mem::take(&mut self.background_pack_images_pending) {
+                    if path.is_file() {
+                        let path = path.to_string_lossy().into_owned();
+                        if !gallery.contains(&path) {
+                            gallery.insert(0, path);
+                        }
+                    }
+                }
                 self.background_images = Arc::from(gallery);
                 self.background_gallery_results.push_back(
                     BackgroundGalleryOperationResult::Updated(
@@ -1703,9 +1740,11 @@ impl SettingsWorkspaceEntity {
                     ),
                 );
             }
-            Err(()) => self
-                .background_gallery_results
-                .push_back(BackgroundGalleryOperationResult::Failed),
+            Err(()) => {
+                self.background_pack_images_pending.clear();
+                self.background_gallery_results
+                    .push_back(BackgroundGalleryOperationResult::Failed);
+            }
         }
         cx.emit(SettingsWorkspaceEvent::BackgroundGalleryOperationReady);
         cx.notify();
@@ -2933,6 +2972,9 @@ mod tests {
     #[gpui::test]
     fn theme_editor_background_cancel_discards_draft_and_save_delivers_it(cx: &mut TestAppContext) {
         let entity = cx.new(SettingsWorkspaceEntity::new);
+        entity.update(cx, |entity, _| {
+            entity.initialize_background_gallery(vec!["existing.webp".into()])
+        });
         for save in [false, true] {
             entity.update(cx, |entity, cx| {
                 entity.open_theme_editor(
@@ -2951,6 +2993,16 @@ mod tests {
                         background.alignment = oxideterm_settings::BackgroundAlignment::TopRight;
                     },
                     cx,
+                );
+                entity.add_background_pack_images(&[PathBuf::from("installed.mp4")], cx);
+                entity.add_background_pack_images(&[PathBuf::from("installed.mp4")], cx);
+                assert_eq!(
+                    &*entity.background_images_snapshot(),
+                    ["installed.mp4", "existing.webp"]
+                );
+                assert_eq!(
+                    entity.theme_editor().unwrap().background.image.as_deref(),
+                    Some("draft.webp")
                 );
                 entity.settings_focused_input =
                     Some(oxideterm_gpui_settings_view::SettingsInput::BackgroundEffectColor(0));

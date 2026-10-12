@@ -1434,13 +1434,21 @@ impl PluginWorkspaceEntity {
         &mut self,
         settings_path: &std::path::Path,
         i18n: &I18n,
-        cx: &mut gpui::App,
-    ) -> bool {
+        cx: &mut App,
+    ) -> (bool, Vec<PathBuf>) {
         let mut bootstrap_runtime = false;
+        let mut imported_backgrounds = Vec::new();
         while let Some(delivery) = self.manager_deliveries.pop_front() {
+            if let plugin_manager::NativePluginManagerDelivery::Install {
+                outcome: plugin_manager::NativePluginInstallOutcome::Installed(result),
+                ..
+            } = &delivery
+            {
+                imported_backgrounds.extend_from_slice(&result.imported_backgrounds);
+            }
             bootstrap_runtime |= self.apply_manager_delivery(delivery, settings_path, i18n, cx);
         }
-        bootstrap_runtime
+        (bootstrap_runtime, imported_backgrounds)
     }
 
     fn apply_manager_delivery(
@@ -1448,7 +1456,7 @@ impl PluginWorkspaceEntity {
         delivery: plugin_manager::NativePluginManagerDelivery,
         settings_path: &std::path::Path,
         i18n: &I18n,
-        cx: &mut gpui::App,
+        cx: &mut App,
     ) -> bool {
         match delivery {
             plugin_manager::NativePluginManagerDelivery::CatalogHistories { expected, results } => {
@@ -2790,7 +2798,11 @@ mod tests {
         entity.update(cx, |entity, _cx| {
             assert!(!entity.manager_operation_in_flight());
             let i18n = I18n::new(Locale::En);
-            assert!(!entity.apply_manager_deliveries(std::path::Path::new(""), &i18n, _cx));
+            assert!(
+                !entity
+                    .apply_manager_deliveries(std::path::Path::new(""), &i18n, _cx)
+                    .0
+            );
             assert!(entity.manager_deliveries.is_empty());
             assert!(matches!(
                 entity.manager_state().operation_status,
@@ -2807,11 +2819,11 @@ mod tests {
         cx.run_until_parked();
         entity.update(cx, |entity, _cx| {
             // Offline completion must release startup so cached compatible plugins can activate.
-            assert!(entity.apply_manager_deliveries(
-                std::path::Path::new(""),
-                &I18n::new(Locale::En),
-                _cx
-            ));
+            assert!(
+                entity
+                    .apply_manager_deliveries(std::path::Path::new(""), &I18n::new(Locale::En), _cx)
+                    .0
+            );
             assert!(!entity.compatibility_refresh_pending);
             assert!(!entity.manager_operation_in_flight());
             assert!(matches!(

@@ -270,6 +270,8 @@
     "marketplace_acp": "ACP",
     "acp_setup_hint": "Installing and enabling the plugin creates the agent configuration automatically; no launch command is needed. Working directory, extra arguments, and environment variables are optional; leave them blank to use the defaults. Plugins that use a local program require its official command-line tool; follow the plugin instructions to install it and sign in.",
     "marketplace_remote_connections": "Remote connections",
+    "marketplace_backgrounds": "Backgrounds",
+    "background_pack_hint": "Media is added to the appearance library. Uninstalling the pack keeps imported media.",
     "apply_page_size": "Apply",
     "invalid_page_size": "Enter a valid positive integer",
     "page_range": "{{start}}–{{end}} of {{total}} plugins",

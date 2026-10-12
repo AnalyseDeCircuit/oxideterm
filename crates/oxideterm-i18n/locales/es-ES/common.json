@@ -270,6 +270,8 @@
     "marketplace_acp": "ACP",
     "acp_setup_hint": "Al instalar y activar el complemento, la configuración del agente se crea automáticamente; no hace falta indicar un comando de inicio. El directorio de trabajo, los argumentos adicionales y las variables de entorno son opcionales: déjelos vacíos para usar los valores predeterminados. Los complementos que usan un programa local requieren su herramienta oficial de línea de comandos; siga las instrucciones del complemento para instalarla e iniciar sesión.",
     "marketplace_remote_connections": "Conexiones remotas",
+    "marketplace_backgrounds": "Fondos",
+    "background_pack_hint": "El contenido se añade a la biblioteca de apariencia. Desinstalar el paquete conserva el contenido importado.",
     "apply_page_size": "Aplicar",
     "invalid_page_size": "Introduce un número entero positivo válido",
     "page_range": "{{start}}–{{end}} de {{total}} complementos",

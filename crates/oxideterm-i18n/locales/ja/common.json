@@ -270,6 +270,8 @@
     "marketplace_acp": "ACP",
     "acp_setup_hint": "プラグインをインストールして有効にすると、エージェント設定が自動で作成されます。起動コマンドの入力は不要です。作業ディレクトリ、追加の引数、環境変数は任意で、空欄なら既定の設定を使用します。ローカルのプログラムを利用するプラグインでは、対応する公式コマンドラインツールをインストールし、プラグインの説明に従ってログインしてください。",
     "marketplace_remote_connections": "リモート接続",
+    "marketplace_backgrounds": "背景素材",
+    "background_pack_hint": "素材は外観の素材ライブラリに追加されます。パックを削除しても、取り込んだ素材は残ります。",
     "apply_page_size": "適用",
     "invalid_page_size": "有効な正の整数を入力してください",
     "page_range": "{{total}} 件中 {{start}}–{{end}} 件",

@@ -178,6 +178,11 @@ impl WorkspaceApp {
             }
         };
         let installed = result.is_ok();
+        if let Ok(result) = &result {
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.add_background_pack_images(&result.imported_backgrounds, cx);
+            });
+        }
         self.plugin_entity.update(cx, |plugins, _cx| {
             plugins.finish_managed_package_install(settings_path, installed, _cx);
         });
