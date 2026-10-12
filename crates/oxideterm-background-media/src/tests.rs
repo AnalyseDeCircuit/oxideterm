@@ -358,6 +358,24 @@ fn native_video_delivery_keeps_the_system_buffer_alive_after_decoder_close() {
         ),
         (64, 48)
     );
+    let original = unsafe {
+        assert_eq!(
+            CVPixelBufferLockBaseAddress(&native.buffer, CVPixelBufferLockFlags::ReadOnly),
+            0
+        );
+        let pixel =
+            std::slice::from_raw_parts(CVPixelBufferGetBaseAddress(&native.buffer).cast::<u8>(), 4);
+        let original = [pixel[0], pixel[1], pixel[2], pixel[3]];
+        CVPixelBufferUnlockBaseAddress(&native.buffer, CVPixelBufferLockFlags::ReadOnly);
+        original
+    };
+    // H.264 color conversion can round differently across system decoders.
+    for (value, expected) in original.into_iter().zip([0, 0, 253, 255]) {
+        assert!(
+            i32::from(value).abs_diff(expected) <= 3,
+            "pixel {original:?}"
+        );
+    }
     stream.close();
     stream.worker.take().unwrap().join().unwrap();
     unsafe {
@@ -369,7 +387,7 @@ fn native_video_delivery_keeps_the_system_buffer_alive_after_decoder_close() {
             std::slice::from_raw_parts(CVPixelBufferGetBaseAddress(&native.buffer).cast::<u8>(), 4);
         let actual = [pixel[0], pixel[1], pixel[2], pixel[3]];
         CVPixelBufferUnlockBaseAddress(&native.buffer, CVPixelBufferLockFlags::ReadOnly);
-        assert_eq!(actual, [0, 0, 253, 255]);
+        assert_eq!(actual, original);
     }
 }
 

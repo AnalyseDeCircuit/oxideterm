@@ -750,7 +750,8 @@ class LinuxPackagingTests(unittest.TestCase):
                 icon_path.parent.mkdir(parents=True, exist_ok=True)
                 icon_path.write_bytes(b"synthetic icon")
 
-            target = "x86_64-unknown-linux-gnu"
+            target = package_native.host_triple()
+            label = package_native.target_label(target)
             for relative_path in (
                 Path("cli-bin") / target / "oxideterm",
                 Path("helpers") / target / "oxideterm-rdp-helper",
@@ -803,11 +804,11 @@ class LinuxPackagingTests(unittest.TestCase):
                     binary,
                     target,
                     "2.0.0",
-                    "linux_x64",
+                    label,
                     identity,
                 )
 
-            artifact = dist_dir / "OxideTerm_2.0.0_linux_x64.rpm"
+            artifact = dist_dir / f"OxideTerm_2.0.0_{label}.rpm"
             self.assertTrue(artifact.is_file())
             package_listing = subprocess.check_output(
                 ["rpm", "-qpl", str(artifact)],
