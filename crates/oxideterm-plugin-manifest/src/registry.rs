@@ -151,6 +151,9 @@ pub struct NativePluginUrlInstallResult {
     pub manifest: NativePluginManifest,
     pub checksum: String,
     pub replaced_existing: bool,
+    /// Installation delivery only; local paths are not part of the public package response.
+    #[serde(skip)]
+    pub imported_backgrounds: Vec<PathBuf>,
 }
 
 #[allow(dead_code)]

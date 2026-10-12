@@ -193,6 +193,68 @@ pub fn import_background_images(
     Ok(imported_paths)
 }
 
+/// Imports versioned pack media without replacing existing gallery files.
+pub fn import_background_pack(
+    settings_path: &Path,
+    pack_key: &str,
+    source_paths: &[PathBuf],
+) -> Result<Vec<PathBuf>> {
+    let directory = background_images_directory(settings_path);
+    let mut destinations = Vec::with_capacity(source_paths.len());
+    for source in source_paths {
+        if !source.is_file() || !is_supported_background_image(source) {
+            return Err(anyhow!("invalid background pack media"));
+        }
+        let name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow!("invalid background pack filename"))?;
+        let name = format!("pack-{pack_key}-{name}");
+        let path = Path::new(&name);
+        if path.components().count() != 1
+            || !matches!(path.components().next(), Some(Component::Normal(_)))
+        {
+            return Err(anyhow!("invalid background pack identity"));
+        }
+        destinations.push(directory.join(name));
+    }
+
+    let mut imported = Vec::new();
+    let mut created = Vec::new();
+    for (source, destination) in source_paths.iter().zip(destinations) {
+        let existed = destination.is_file();
+        let result = if existed {
+            Ok(destination.clone())
+        } else {
+            fs::read(source)
+                .context("failed to read background pack media")
+                .and_then(|bytes| {
+                    ensure_bundled_background_image(
+                        settings_path,
+                        destination.file_name().unwrap().to_str().unwrap(),
+                        &bytes,
+                    )
+                })
+        };
+        match result {
+            Ok(path) => {
+                if !existed {
+                    created.push(path.clone());
+                }
+                imported.push(path);
+            }
+            Err(error) => {
+                // The gallery owns these copies; a failed batch cannot leave partial imports.
+                for path in created {
+                    let _ = fs::remove_file(path);
+                }
+                return Err(error);
+            }
+        }
+    }
+    Ok(imported)
+}
+
 /// Deletes one managed image while refusing paths outside the gallery directory.
 pub fn remove_background_image(settings_path: &Path, image_path: &Path) -> Result<()> {
     if !image_path.exists() {

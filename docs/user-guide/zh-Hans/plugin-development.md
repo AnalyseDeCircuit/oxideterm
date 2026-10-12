@@ -693,6 +693,26 @@ flowchart TB
 
 支持的设置类型是 `string`、`number`、`boolean` 和 `select`。`select` 设置必须提供 `options`，选项值必须是字符串或数字。
 
+## 背景素材包
+
+背景素材包复用现有安装器，只声明 `contributes.backgrounds`，列出素材相对于包根目录的路径：
+
+```json
+{
+  "id": "com.example.backgrounds",
+  "name": "背景素材",
+  "version": "1.0.0",
+  "engines": { "oxideterm": ">2.2.2" },
+  "tags": ["backgrounds"],
+  "contributes": { "backgrounds": ["assets/day.mp4", "assets/night.mp4"] }
+}
+```
+
+素材包不声明运行入口、权限或其他插件功能。已发布的 2.2.2 尚不支持此功能，需要后续包含背景素材包支持的主程序。
+安装时，素材复制到当前设置文件旁的 `backgrounds` 目录，便携版跟随自己的配置目录。
+安装不改变浅色或深色外观当前选择的背景；同版本重装复用已有副本，新版本添加独立素材。
+卸载素材包会保留已导入的文件，用户可以在外观素材库中删除。
+
 ## 编辑器语言插件
 
 主程序保留 15 个内置语法条目：Bash、Zsh、Fish、PowerShell、JSON、YAML、TOML、Markdown、
@@ -1245,6 +1265,7 @@ interface NativePluginRuntime {
 }
 
 interface NativePluginContributes {
+  backgrounds?: string[];
   language?: {
     id: 'elixir' | 'commonlisp' | 'swift' | 'r' | 'scala' | 'objc';
     highlights: string;

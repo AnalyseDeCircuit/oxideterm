@@ -42,6 +42,17 @@ pub(crate) fn install_native_plugin_package_bytes(
         validate_native_plugin_id(&manifest.id)
             .map_err(|error| format!("Invalid plugin ID in manifest: {error}"))?;
         validate_native_plugin_manifest(&manifest)?;
+        let background_sources = manifest
+            .contributes
+            .as_ref()
+            .and_then(|value| value.backgrounds.as_ref())
+            .into_iter()
+            .flatten()
+            .map(|path| source_dir.join(path))
+            .collect::<Vec<_>>();
+        if background_sources.iter().any(|path| !path.is_file()) {
+            return Err("Background pack media is missing".into());
+        }
         if let Some(language) = manifest
             .contributes
             .as_ref()
@@ -130,12 +141,7 @@ pub(crate) fn install_native_plugin_package_bytes(
         // Install uses staging + backup under the plugin directory so the final
         // rename is same-filesystem and rollback can restore the previous copy.
         match fs::rename(&source_dir, &dest_dir) {
-            Ok(()) => {
-                if backup_dir.exists() {
-                    fs::remove_dir_all(&backup_dir)
-                        .map_err(|error| format!("Failed to remove plugin backup: {error}"))?;
-                }
-            }
+            Ok(()) => {}
             Err(error) => {
                 if backup_dir.exists() {
                     fs::rename(&backup_dir, &dest_dir).map_err(|restore_error| {
@@ -148,10 +154,47 @@ pub(crate) fn install_native_plugin_package_bytes(
             }
         }
 
+        // Gallery copies remain user-owned after package removal and keep active videos stable.
+        let background_sources = manifest
+            .contributes
+            .as_ref()
+            .and_then(|value| value.backgrounds.as_ref())
+            .into_iter()
+            .flatten()
+            .map(|path| dest_dir.join(path))
+            .collect::<Vec<_>>();
+        let imported_backgrounds = if background_sources.is_empty() {
+            Vec::new()
+        } else {
+            match oxideterm_settings::import_background_pack(
+                settings_path,
+                &format!("{}-{}", manifest.id, manifest.version),
+                &background_sources,
+            ) {
+                Ok(paths) => paths,
+                Err(error) => {
+                    fs::remove_dir_all(&dest_dir).map_err(|rollback| {
+                        format!("{error}; package rollback failed: {rollback}")
+                    })?;
+                    if backup_dir.exists() {
+                        fs::rename(&backup_dir, &dest_dir).map_err(|rollback| {
+                            format!("{error}; package rollback failed: {rollback}")
+                        })?;
+                    }
+                    return Err(error.to_string());
+                }
+            }
+        };
+        if backup_dir.exists() {
+            fs::remove_dir_all(&backup_dir)
+                .map_err(|error| format!("Failed to remove plugin backup: {error}"))?;
+        }
+
         Ok(NativePluginUrlInstallResult {
             manifest,
             checksum: actual_checksum,
             replaced_existing,
+            imported_backgrounds,
         })
     })();
 

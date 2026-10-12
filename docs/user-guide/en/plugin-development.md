@@ -693,6 +693,29 @@ Manifest-only plugins are useful for static metadata, declared settings, AI tool
 
 Supported setting types are `string`, `number`, `boolean`, and `select`. A `select` setting must provide `options`, and option values must be strings or numbers.
 
+## Background Material Packs
+
+Background packs use the same installer and declare only
+`contributes.backgrounds`, an array of package-relative media paths. For example:
+
+```json
+{
+  "id": "com.example.backgrounds",
+  "name": "Backgrounds",
+  "version": "1.0.0",
+  "engines": { "oxideterm": ">2.2.2" },
+  "tags": ["backgrounds"],
+  "contributes": { "backgrounds": ["assets/day.mp4", "assets/night.mp4"] }
+}
+```
+
+Omit `runtime`, `main`, capabilities, and other contributions. Background packs
+require a subsequent host release containing this feature; 2.2.2 does not support
+them. Installation copies media into `backgrounds` beside the active settings
+file, including portable profiles, without changing either appearance's selection.
+Reinstalling a version reuses its copies. New versions add separate media; uninstalling
+keeps imported files for the user to manage in the appearance library.
+
 ## Editor Language Plugins
 
 The host keeps 15 grammar entries built in: Bash, Zsh, Fish, PowerShell, JSON,
@@ -1275,6 +1298,7 @@ interface NativePluginRuntime {
 }
 
 interface NativePluginContributes {
+  backgrounds?: string[];
   language?: {
     id: 'elixir' | 'commonlisp' | 'swift' | 'r' | 'scala' | 'objc';
     highlights: string;

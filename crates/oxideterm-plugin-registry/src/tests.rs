@@ -102,6 +102,176 @@ fn plugin_paths_cannot_escape_install_directory() {
 }
 
 #[test]
+fn background_pack_install_update_and_uninstall_preserve_gallery_ownership() {
+    let directory = unique_temp_dir("background-pack");
+    let settings = directory.join("portable-profile/settings.json");
+    fs::create_dir_all(settings.parent().unwrap()).unwrap();
+    fs::write(&settings, "appearance remains unchanged").unwrap();
+    let id = "com.example.backgrounds";
+    let make_package = |version: &str, include_night: bool| {
+        let mut entries = vec![
+            (
+                "plugin.json",
+                serde_json::json!({
+                    "id": id, "name": "Backgrounds", "version": version,
+                    "engines": {"oxideterm": ">=2.2.2"},
+                    "contributes": {"backgrounds": ["assets/dawn.mp4", "assets/night.mp4"]}
+                })
+                .to_string(),
+            ),
+            ("assets/dawn.mp4", format!("dawn {version}")),
+        ];
+        if include_night {
+            entries.push(("assets/night.mp4", format!("night {version}")));
+        }
+        plugin_package(&entries)
+    };
+    let install = |version: &str, include_night: bool, overwrite: bool| {
+        NativePluginRegistry::install_managed_plugin_package(
+            &settings,
+            id,
+            None,
+            &make_package(version, include_night),
+            overwrite,
+        )
+    };
+    let gallery = settings.parent().unwrap().join("backgrounds");
+    let initial = install("1.0.0", true, false).unwrap();
+    let initial_paths = [
+        gallery.join("pack-com.example.backgrounds-1.0.0-dawn.mp4"),
+        gallery.join("pack-com.example.backgrounds-1.0.0-night.mp4"),
+    ];
+    assert_eq!(initial.imported_backgrounds, initial_paths);
+    assert_eq!(fs::read(&initial_paths[0]).unwrap(), b"dawn 1.0.0");
+    assert_eq!(fs::read(&initial_paths[1]).unwrap(), b"night 1.0.0");
+    fs::write(&initial_paths[0], b"user-owned copy").unwrap();
+    assert_eq!(
+        install("1.0.0", true, true).unwrap().imported_backgrounds,
+        initial_paths
+    );
+    assert_eq!(fs::read(&initial_paths[0]).unwrap(), b"user-owned copy");
+    assert_eq!(
+        oxideterm_settings::list_background_images(&settings)
+            .unwrap()
+            .len(),
+        2
+    );
+
+    let installed_directory = native_plugins_dir(&settings).join(id);
+    let original_manifest = fs::read(installed_directory.join("plugin.json")).unwrap();
+    assert!(
+        install("2.0.0", false, true)
+            .unwrap_err()
+            .contains("missing")
+    );
+    assert_eq!(
+        fs::read(installed_directory.join("plugin.json")).unwrap(),
+        original_manifest
+    );
+
+    // A failed gallery copy must restore the old package and remove only new batch files.
+    let blocked = gallery.join("pack-com.example.backgrounds-2.0.0-night.mp4");
+    fs::create_dir(&blocked).unwrap();
+    install("2.0.0", true, true).unwrap_err();
+    assert_eq!(
+        fs::read(installed_directory.join("plugin.json")).unwrap(),
+        original_manifest
+    );
+    assert!(
+        !gallery
+            .join("pack-com.example.backgrounds-2.0.0-dawn.mp4")
+            .exists()
+    );
+    assert_eq!(fs::read(&initial_paths[0]).unwrap(), b"user-owned copy");
+    fs::remove_dir(&blocked).unwrap();
+
+    let updated = install("2.0.0", true, true).unwrap();
+    assert_eq!(
+        fs::read(&updated.imported_backgrounds[0]).unwrap(),
+        b"dawn 2.0.0"
+    );
+    assert_eq!(
+        fs::read(&updated.imported_backgrounds[1]).unwrap(),
+        b"night 2.0.0"
+    );
+    let mut registry = NativePluginRegistry::discover(&settings);
+    assert_eq!(
+        registry.plugins()[0].runtime_plan,
+        NativePluginRuntimePlan::ManifestOnly
+    );
+    registry.uninstall_plugin(id, true).unwrap();
+    assert!(!installed_directory.exists());
+    assert_eq!(fs::read(&initial_paths[0]).unwrap(), b"user-owned copy");
+    assert_eq!(fs::read(&initial_paths[1]).unwrap(), b"night 1.0.0");
+    assert_eq!(
+        fs::read(&updated.imported_backgrounds[0]).unwrap(),
+        b"dawn 2.0.0"
+    );
+    assert_eq!(
+        fs::read(&updated.imported_backgrounds[1]).unwrap(),
+        b"night 2.0.0"
+    );
+    assert_eq!(
+        fs::read_to_string(&settings).unwrap(),
+        "appearance remains unchanged"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn background_pack_validation_rejects_unsafe_paths_and_executable_contributions() {
+    let valid = serde_json::json!({
+        "id": "com.example.backgrounds", "name": "Backgrounds", "version": "1.0.0",
+        "engines": {"oxideterm": ">=2.2.2"},
+        "contributes": {"backgrounds": ["assets/dawn.mp4"]}
+    });
+    for (field, value) in [
+        (
+            "/contributes/backgrounds",
+            serde_json::json!(["../dawn.mp4"]),
+        ),
+        (
+            "/contributes/backgrounds",
+            serde_json::json!(["C:/dawn.mp4"]),
+        ),
+        (
+            "/contributes/backgrounds",
+            serde_json::json!(["assets/dawn.exe"]),
+        ),
+        (
+            "/contributes/backgrounds",
+            serde_json::json!(["a/dawn.mp4", "b/DAWN.MP4"]),
+        ),
+        ("/contributes/backgrounds", serde_json::json!([])),
+        ("/engines", serde_json::Value::Null),
+        ("/version", serde_json::json!("../version")),
+    ] {
+        let mut manifest = valid.clone();
+        *manifest.pointer_mut(field).unwrap() = value;
+        let parsed = serde_json::from_value(manifest.clone()).unwrap();
+        assert!(
+            validate_native_plugin_manifest(&parsed).is_err(),
+            "{manifest}"
+        );
+    }
+    for extra in [
+        serde_json::json!({"runtime": {"kind": "process", "entry": "bin/plugin"}}),
+        serde_json::json!({"permissions": {"capabilities": ["sessions.read"]}}),
+        serde_json::json!({"contributes": {"backgrounds": ["assets/dawn.mp4"], "apiCommands": ["run"]}}),
+    ] {
+        let mut manifest = valid.clone();
+        for (key, value) in extra.as_object().unwrap() {
+            manifest[key] = value.clone();
+        }
+        let parsed = serde_json::from_value(manifest.clone()).unwrap();
+        assert!(
+            validate_native_plugin_manifest(&parsed).is_err(),
+            "{manifest}"
+        );
+    }
+}
+
+#[test]
 fn language_packages_validate_assets_and_follow_install_update_disable_uninstall() {
     let directory = unique_temp_dir("language-package");
     let settings = directory.join("settings.json");
@@ -2779,6 +2949,7 @@ fn write_manifest(plugin_dir: &Path, manifest: &NativePluginManifest) {
 
 fn sample_contributes() -> NativePluginContributes {
     NativePluginContributes {
+        backgrounds: None,
         helper: None,
         terminal_transport: None,
         file_previews: None,

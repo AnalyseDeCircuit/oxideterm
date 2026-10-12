@@ -10,8 +10,8 @@ mod store;
 
 pub use background_images::{
     background_images_directory, clear_background_images, ensure_bundled_background_image,
-    import_background_images, is_managed_background_image, is_supported_background_image,
-    list_background_images, remove_background_image,
+    import_background_images, import_background_pack, is_managed_background_image,
+    is_supported_background_image, list_background_images, remove_background_image,
 };
 pub use model::*;
 pub use normalize::{SanitizedSettings, sanitize_settings_value};

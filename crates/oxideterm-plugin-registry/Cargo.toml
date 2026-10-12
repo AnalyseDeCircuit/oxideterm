@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-settings = { path = "../oxideterm-settings" }
 futures-util.workspace = true
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }

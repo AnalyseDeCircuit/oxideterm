@@ -91,6 +91,9 @@ pub enum NativePluginRuntimeKind {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
+    /// Package-relative media imported into the user's background gallery on installation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backgrounds: Option<Vec<String>>,
     #[serde(default)]
     pub helper: Option<NativePluginHelperDef>,
     #[serde(default)]

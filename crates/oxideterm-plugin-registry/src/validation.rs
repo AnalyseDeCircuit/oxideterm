@@ -95,6 +95,46 @@ pub(crate) fn validate_native_plugin_manifest(
         }
     }
     let runtime_plan = native_runtime_plan_for_manifest(manifest)?;
+    if let Some(backgrounds) = manifest
+        .contributes
+        .as_ref()
+        .and_then(|value| value.backgrounds.as_ref())
+    {
+        let mut ordinary = manifest.contributes.clone().unwrap_or_default();
+        ordinary.backgrounds = None;
+        if manifest.runtime.is_some()
+            || manifest.main.is_some()
+            || !manifest.permissions.capabilities.is_empty()
+            || ordinary != NativePluginContributes::default()
+            || backgrounds.is_empty()
+            || manifest
+                .engines
+                .as_ref()
+                .and_then(|engines| engines.oxideterm.as_deref())
+                .is_none()
+        {
+            return Err("Background packs must contain only media declarations".into());
+        }
+        semver::Version::parse(&manifest.version)
+            .map_err(|_| "Background pack version must be semantic")?;
+        let mut names = HashSet::new();
+        for background in backgrounds {
+            validate_plugin_relative_path(background)?;
+            let path = Path::new(background);
+            if background.contains(['\\', ':'])
+                || path
+                    .components()
+                    .any(|component| !matches!(component, std::path::Component::Normal(_)))
+                || !oxideterm_settings::is_supported_background_image(path)
+                || !names.insert(
+                    path.file_name()
+                        .map(|name| name.to_string_lossy().to_ascii_lowercase()),
+                )
+            {
+                return Err("Background pack media must have supported, distinct filenames".into());
+            }
+        }
+    }
     let terminal = manifest
         .contributes
         .as_ref()
