@@ -120,7 +120,7 @@ pub fn finish_causal_sync_state(
         state.last_upload_at = Some(now);
     }
     state.remote_format = Some("oxide-sync-v3".into());
-    state.remote_exists = outcome.publication.is_some();
+    state.remote_exists = outcome.downloaded || outcome.publication.is_some();
     state.last_known_remote_revision = outcome.publication.as_ref().map(|id| id.path());
     state.remote_device_id = outcome.publication.as_ref().map(|id| id.writer.to_string());
     state.remote_updated_at = state.last_upload_at.clone();
@@ -212,7 +212,7 @@ pub fn finish_causal_sync_state(
     state.local_dirty = !outcome.conflicts.is_empty() || outcome.publication_pending;
     state.local_dirty_sections = None;
     state.append_history(CloudSyncHistoryEntry::new(
-        "sync",
+        if outcome.downloaded { "pull" } else { "sync" },
         summary,
         !outcome.cleanup_pending,
         state.last_error.clone(),

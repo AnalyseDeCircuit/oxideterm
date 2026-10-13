@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
-use oxideterm_cloud_sync::operation::{PreparedSync, SyncOutcome};
+use oxideterm_cloud_sync::operation::{PreparedSync, SyncDirection, SyncOutcome};
 
 impl WorkspaceApp {
     pub(super) fn start_cloud_sync_password_change(&mut self, cx: &mut Context<Self>) {
@@ -55,6 +55,15 @@ impl WorkspaceApp {
         automatic: bool,
         cx: &mut Context<Self>,
     ) {
+        self.start_causal_sync_with_direction(automatic, SyncDirection::Merge, cx);
+    }
+
+    pub(super) fn start_causal_sync_with_direction(
+        &mut self,
+        automatic: bool,
+        direction: SyncDirection,
+        cx: &mut Context<Self>,
+    ) {
         if self.cloud_sync.read(cx).operation_in_flight() {
             return;
         }
@@ -103,15 +112,27 @@ impl WorkspaceApp {
                 scope,
                 Default::default(),
                 automatic,
+                direction,
             ));
     }
 
     pub(super) fn receive_causal_plan(
         &mut self,
-        prepared: PreparedSync,
+        mut prepared: PreparedSync,
         automatic: bool,
         cx: &mut Context<Self>,
     ) {
+        let changing_password = self
+            .cloud_sync
+            .read(cx)
+            .controller
+            .password_change
+            .is_some();
+        if !changing_password && !prepared.has_remote() {
+            prepared.set_direction(SyncDirection::Upload);
+        } else if !changing_password && prepared.first_sync() {
+            prepared.set_direction(SyncDirection::Download);
+        }
         let summary = match prepared.summary() {
             Ok(summary) => summary,
             Err(error) => {
@@ -119,7 +140,8 @@ impl WorkspaceApp {
                 return;
             }
         };
-        let apply_now = automatic && summary.conflicts.is_empty();
+        let apply_now =
+            automatic && (!summary.first_sync || changing_password) && summary.conflicts.is_empty();
         let previews = match prepared.conflict_previews() {
             Ok(previews) => previews,
             Err(error) => {
@@ -154,6 +176,53 @@ impl WorkspaceApp {
         }
     }
 
+    pub(super) fn choose_cloud_sync_direction(
+        &mut self,
+        direction: SyncDirection,
+        cx: &mut Context<Self>,
+    ) {
+        let result = self
+            .cloud_sync
+            .update(cx, |cloud_sync, cx| -> anyhow::Result<()> {
+                if cloud_sync.operation_in_flight() {
+                    return Ok(());
+                }
+                if cloud_sync.controller.password_change.is_some() {
+                    return Ok(());
+                }
+                if cloud_sync
+                    .view
+                    .causal_summary
+                    .as_ref()
+                    .is_some_and(|summary| summary.direction == direction)
+                {
+                    return Ok(());
+                }
+                let Some(prepared) = cloud_sync.controller.causal_pending.as_mut() else {
+                    return Ok(());
+                };
+                prepared.set_direction(direction);
+                cloud_sync.view.causal_summary = Some(prepared.summary()?);
+                cloud_sync.view.causal_conflicts = prepared.conflict_previews()?;
+                cloud_sync.view.causal_choices.clear();
+                cloud_sync.controller.store.state_mut().status = if cloud_sync
+                    .view
+                    .causal_summary
+                    .as_ref()
+                    .is_some_and(|summary| !summary.conflicts.is_empty())
+                {
+                    CloudSyncStatus::Conflict
+                } else {
+                    CloudSyncStatus::RemoteUpdate
+                };
+                cx.notify();
+                Ok(())
+            });
+        if let Err(error) = result {
+            self.finish_cloud_sync_error("sync", error.to_string(), cx);
+        }
+    }
+
     pub(in crate::workspace) fn apply_causal_sync(&mut self, cx: &mut Context<Self>) {
         let pending = self.cloud_sync.update(cx, |cloud_sync, _| {
             cloud_sync.controller.causal_pending.take()
@@ -168,6 +237,10 @@ impl WorkspaceApp {
                 state.view.causal_choices.clone(),
             )
         };
+        let direction = summary
+            .as_ref()
+            .map(|summary| summary.direction)
+            .unwrap_or_default();
         if let Some(summary) = summary {
             for (index, candidate) in choices {
                 if let Some(conflict) = summary.conflicts.get(index)
@@ -196,7 +269,12 @@ impl WorkspaceApp {
             cloud_sync.view.causal_summary = None;
             cloud_sync.view.causal_choices.clear();
             cloud_sync.view.causal_conflicts.clear();
-            cloud_sync.controller.store.state_mut().status = CloudSyncStatus::Uploading;
+            cloud_sync.controller.store.state_mut().status = if direction == SyncDirection::Download
+            {
+                CloudSyncStatus::RemoteUpdate
+            } else {
+                CloudSyncStatus::Uploading
+            };
             cloud_sync.begin_delivery("sync", cx)
         });
         let (password, hints) = self.cloud_sync.update(cx, |cloud_sync, _| {
@@ -280,6 +358,14 @@ impl WorkspaceApp {
             return;
         }
         self.refresh_cloud_sync_local_dirty_state(cx);
+        if outcome.downloaded {
+            self.push_cloud_sync_toast(
+                self.i18n.t("plugin.cloud_sync.toast.pull_success_title"),
+                None,
+                TerminalNoticeVariant::Success,
+                cx,
+            );
+        }
     }
 
     pub(super) fn cancel_causal_sync(&mut self, cx: &mut Context<Self>) {
@@ -300,10 +386,46 @@ impl CloudSyncPageRenderer {
         summary: &oxideterm_cloud_sync::operation::SyncPlanSummary,
         previews: &[oxideterm_cloud_sync::operation::SyncConflictPreview],
         choices: &std::collections::BTreeMap<usize, usize>,
+        changing_password: bool,
         busy: bool,
         cx: &mut App,
     ) -> AnyElement {
         let mut body = Vec::new();
+        let mut directions = div().flex().flex_wrap().gap(px(8.0));
+        for (direction, key) in [
+            (SyncDirection::Download, "plugin.cloud_sync.causal.download"),
+            (SyncDirection::Merge, "plugin.cloud_sync.causal.merge"),
+            (SyncDirection::Upload, "plugin.cloud_sync.causal.upload"),
+        ] {
+            directions = directions.child(self.render_cloud_sync_action_button(
+                key,
+                if summary.direction == direction {
+                    ButtonVariant::Default
+                } else {
+                    ButtonVariant::Outline
+                },
+                busy || (direction != SyncDirection::Upload && !summary.has_remote),
+                self.intent_listener(CloudSyncUiIntent::ChooseDirection(direction)),
+            ));
+        }
+        if !changing_password {
+            body.push(directions.into_any_element());
+        }
+        let hint_key = match summary.direction {
+            SyncDirection::Download => "plugin.cloud_sync.causal.download_hint",
+            SyncDirection::Merge => "plugin.cloud_sync.causal.merge_hint",
+            SyncDirection::Upload => "plugin.cloud_sync.causal.upload_hint",
+        };
+        body.push(
+            div()
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t(if changing_password {
+                    "plugin.cloud_sync.causal.change_password_description"
+                } else {
+                    hint_key
+                }))
+                .into_any_element(),
+        );
         for (index, conflict) in summary.conflicts.iter().enumerate() {
             let preview = previews.get(index);
             let title = div()
@@ -382,12 +504,23 @@ impl CloudSyncPageRenderer {
         let actions = div()
             .flex()
             .gap(px(8.0))
-            .child(self.render_cloud_sync_action_button(
-                "plugin.cloud_sync.causal.apply",
-                ButtonVariant::Default,
-                busy,
-                self.intent_listener(CloudSyncUiIntent::ApplyCausal),
-            ))
+            .child(
+                self.render_cloud_sync_action_button(
+                    match summary.direction {
+                        SyncDirection::Download => "plugin.cloud_sync.causal.apply_download",
+                        SyncDirection::Merge => "plugin.cloud_sync.causal.apply",
+                        SyncDirection::Upload => "plugin.cloud_sync.causal.apply_upload",
+                    },
+                    ButtonVariant::Default,
+                    busy || (summary.direction == SyncDirection::Download
+                        && summary
+                            .conflicts
+                            .iter()
+                            .enumerate()
+                            .any(|(index, _)| !choices.contains_key(&index))),
+                    self.intent_listener(CloudSyncUiIntent::ApplyCausal),
+                ),
+            )
             .child(self.render_cloud_sync_action_button(
                 "plugin.cloud_sync.actions.cancel_preview",
                 ButtonVariant::Outline,
@@ -406,7 +539,11 @@ impl CloudSyncPageRenderer {
                 summary.changed_fields.to_string(),
                 cx,
             )],
-            if summary.upgrading {
+            if !summary.has_remote {
+                Some(self.i18n.t("plugin.cloud_sync.causal.remote_empty"))
+            } else if summary.first_sync && !changing_password {
+                Some(self.i18n.t("plugin.cloud_sync.causal.first_hint"))
+            } else if summary.upgrading {
                 Some(self.i18n.t("plugin.cloud_sync.causal.upgrade"))
             } else if !summary.conflicts.is_empty() {
                 Some(self.i18n.t("plugin.cloud_sync.causal.conflict_hint"))

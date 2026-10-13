@@ -540,6 +540,18 @@ impl WorkspaceApp {
     ) {
         match intent {
             CloudSyncUiIntent::ApplyCausal => self.apply_causal_sync(cx),
+            CloudSyncUiIntent::ViewRemote => {
+                if self.persist_cloud_sync_configuration(false, cx) {
+                    self.start_causal_sync_with_direction(
+                        false,
+                        oxideterm_cloud_sync::operation::SyncDirection::Download,
+                        cx,
+                    );
+                }
+            }
+            CloudSyncUiIntent::ChooseDirection(direction) => {
+                self.choose_cloud_sync_direction(*direction, cx)
+            }
             CloudSyncUiIntent::CancelCausal => self.cancel_causal_sync(cx),
             CloudSyncUiIntent::ChooseCausal {
                 conflict,

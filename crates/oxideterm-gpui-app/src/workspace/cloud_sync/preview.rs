@@ -92,6 +92,7 @@ impl CloudSyncPageRenderer {
                     summary,
                     &cloud_sync.view.causal_conflicts,
                     &cloud_sync.view.causal_choices,
+                    cloud_sync.controller.password_change.is_some(),
                     busy,
                     cx,
                 );

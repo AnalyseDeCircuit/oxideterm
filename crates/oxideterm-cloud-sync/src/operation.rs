@@ -288,7 +288,7 @@ mod upload_plan;
 pub use merge::*;
 use selection::*;
 pub use synchronize::{
-    AppliedSync, PreparedSync, SyncConflictPreview, SyncOutcome, SyncPlanSummary,
+    AppliedSync, PreparedSync, SyncConflictPreview, SyncDirection, SyncOutcome, SyncPlanSummary,
 };
 
 #[cfg(test)]

@@ -86,10 +86,11 @@ pub async fn deliver_causal_sync(
     scope: oxideterm_cloud_sync::SyncScope,
     filter: oxideterm_cloud_sync::operation::StructuredUploadItemFilter,
     automatic: bool,
+    direction: oxideterm_cloud_sync::operation::SyncDirection,
 ) {
     let mut provider = CloudSyncKeychainSecretProvider::new(hints);
     let result = service
-        .prepare_sync(
+        .prepare_sync_with_direction(
             &mut connections,
             &forwards,
             &mut settings_store,
@@ -97,8 +98,14 @@ pub async fn deliver_causal_sync(
             &mut provider,
             scope,
             filter,
+            // The GUI offers directional previews, so it needs the complete remote view.
+            oxideterm_cloud_sync::operation::SyncDirection::Download,
         )
         .await
+        .map(|mut prepared| {
+            prepared.set_direction(direction);
+            prepared
+        })
         .map_err(|error| error.to_string());
     let _ = tx.send(CloudSyncDelivery::CausalPrepared {
         action: CloudSyncActionResult {

@@ -257,6 +257,35 @@ impl SyncReplica {
             .collect()
     }
 
+    /// Explicit directional synchronization replaces only the user's selected fields.
+    pub(crate) fn replace_fields(
+        &mut self,
+        values: &SyncValues,
+        fields: &BTreeSet<SyncField>,
+    ) -> Result<()> {
+        for field in fields {
+            if field.is_presence() {
+                let present = values
+                    .get(field)
+                    .map(|value| value.decode::<bool>())
+                    .transpose()?
+                    .unwrap_or(false);
+                self.write(field, Some(&FieldValue::encode(&present)?))?;
+            } else if values.contains_key(&SyncField::presence(field.resource.clone())) {
+                self.write(field, values.get(field))?;
+            }
+        }
+        self.document.commit();
+        Ok(())
+    }
+
+    pub(crate) fn fields(&self) -> Result<BTreeSet<SyncField>> {
+        self.document
+            .keys(ROOT)
+            .map(|key| SyncField::from_key(&key))
+            .collect()
+    }
+
     fn write(&mut self, field: &SyncField, value: Option<&FieldValue>) -> Result<()> {
         let scalar = if let Some(value) = value {
             let digest = value.digest();

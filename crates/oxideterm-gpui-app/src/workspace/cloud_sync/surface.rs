@@ -742,7 +742,11 @@ impl CloudSyncPageRenderer {
                                 ))
                             })
                             .child(self.render_cloud_sync_toolbar_button(
-                                LucideIcon::Upload,
+                                if local_file {
+                                    LucideIcon::Upload
+                                } else {
+                                    LucideIcon::RefreshCw
+                                },
                                 if local_file {
                                     "plugin.cloud_sync.actions.export_local"
                                 } else {
@@ -752,6 +756,15 @@ impl CloudSyncPageRenderer {
                                 busy,
                                 self.intent_listener(CloudSyncUiIntent::StartUploadPreview),
                             ))
+                            .when(!local_file, |toolbar| {
+                                toolbar.child(self.render_cloud_sync_toolbar_button(
+                                    LucideIcon::Download,
+                                    "plugin.cloud_sync.causal.view_remote",
+                                    CloudSyncActionTone::Muted,
+                                    busy,
+                                    self.intent_listener(CloudSyncUiIntent::ViewRemote),
+                                ))
+                            })
                             .when(local_file, |toolbar| {
                                 toolbar.child(self.render_cloud_sync_toolbar_button(
                                     LucideIcon::Download,

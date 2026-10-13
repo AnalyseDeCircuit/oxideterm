@@ -24,6 +24,8 @@ pub fn cloud_sync_error_code(error: &str) -> Option<&str> {
     }
     match code {
         "operation_in_progress"
+        | "sync_remote_empty"
+        | "sync_download_conflicts"
         | "missing_endpoint"
         | "missing_namespace"
         | "missing_backend_token"

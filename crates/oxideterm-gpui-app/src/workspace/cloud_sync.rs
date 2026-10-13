@@ -317,6 +317,8 @@ pub(super) enum CloudSyncUiIntent {
     StartMicrosoftOauth,
     StartGoogleOauth,
     StartUploadPreview,
+    ViewRemote,
+    ChooseDirection(oxideterm_cloud_sync::operation::SyncDirection),
     PullPreview,
     RestoreLatestBackup,
     SaveConfiguration,
@@ -539,6 +541,9 @@ impl CloudSyncWorkspaceEntity {
             summary.changed_fields.hash(&mut preview);
             summary.conflicts.len().hash(&mut preview);
             summary.upgrading.hash(&mut preview);
+            summary.direction.hash(&mut preview);
+            summary.first_sync.hash(&mut preview);
+            summary.has_remote.hash(&mut preview);
             self.view.causal_choices.hash(&mut preview);
         }
         signature ^ u64::from(self.view.local_file_mode) ^ preview.finish()

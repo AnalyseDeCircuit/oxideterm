@@ -337,6 +337,12 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         "missing_sync_password" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.missing_sync_password")
         }
+        "sync_remote_empty" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.remote_empty")
+        }
+        "sync_download_conflicts" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.conflict_hint")
+        }
         "operation_in_progress" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.errors.operation_in_progress")
         }

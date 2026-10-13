@@ -66,6 +66,7 @@ impl AppliedSync {
         outcome.published = false;
         outcome.publication_pending = true;
         let next = AppliedSync {
+            direction: SyncDirection::Merge,
             _permit: self._permit,
             store,
             local,
@@ -217,6 +218,7 @@ mod tests {
             let original_writer = local.writer;
             let service = CloudSyncOperationService::new();
             let applied = AppliedSync {
+                direction: super::SyncDirection::Merge,
                 _permit: service
                     .guard
                     .begin(CloudSyncOperationKind::Upload, false)
@@ -234,6 +236,7 @@ mod tests {
                     switched_settings: None,
                     applied: true,
                     published: false,
+                    downloaded: false,
                     publication_pending: true,
                     recovered: false,
                     cleanup_pending: false,
