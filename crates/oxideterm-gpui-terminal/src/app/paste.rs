@@ -327,17 +327,26 @@ impl TerminalPane {
                     })),
                 ),
         );
-        let content = overlay_content_boundary(content)
-            .on_key_up(|_, _, cx| cx.stop_propagation())
-            .on_key_down(cx.listener(move |pane, event: &KeyDownEvent, window, cx| {
-                if event.keystroke.key == "escape" {
-                    pane.close_paste_editor(window, cx);
-                    window.prevent_default();
-                }
-                // Printable keys must still reach the platform IME; only stop bubbling
-                // to the terminal after the editor has handled this event.
-                cx.stop_propagation();
-            }));
+        let content =
+            overlay_content_boundary(content)
+                .on_key_up(|_, _, cx| cx.stop_propagation())
+                .on_key_down(cx.listener(move |pane, event: &KeyDownEvent, window, cx| {
+                    if event.keystroke.key == "escape" {
+                        pane.close_paste_editor(window, cx);
+                        window.prevent_default();
+                    } else if pane.paste_editor_focused(window, cx)
+                        && !event.keystroke.modifiers.control
+                        && !event.keystroke.modifiers.platform
+                        && event.keystroke.key_char.as_deref().is_some_and(|text| {
+                            !text.is_empty() && !text.chars().any(char::is_control)
+                        })
+                    {
+                        // X11 and Wayland commit characters only after an unhandled keydown.
+                        // The focused editor owns text input; the terminal skips keys while editing.
+                        return;
+                    }
+                    cx.stop_propagation();
+                }));
         gpui::deferred(
             gpui::anchored()
                 .anchor(gpui::Anchor::TopLeft)
@@ -474,6 +483,31 @@ mod tests {
                 "\r\necho one\r\n"
             );
         });
+        cx.simulate_input("你a");
+        pane.read_with(cx, |pane, cx| {
+            assert_eq!(
+                pane.edited_paste_text(cx).unwrap().as_str(),
+                "\r\n你aecho one\r\n"
+            );
+        });
+        cx.simulate_keystrokes("backspace");
+        pane.read_with(cx, |pane, cx| {
+            assert_eq!(
+                pane.edited_paste_text(cx).unwrap().as_str(),
+                "\r\n你echo one\r\n"
+            );
+        });
+        pane.update(cx, |pane, cx| {
+            pane.handle_focus_change(false, cx);
+            assert!(!pane.handle_unfocused_key(
+                &KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("x").unwrap().with_simulated_ime(),
+                    is_held: false,
+                    prefer_character_input: false,
+                },
+                cx,
+            ));
+        });
         assert!(delivered.borrow().is_empty(), "editing must not send input");
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let submit = cx.debug_bounds("paste-submit").unwrap().center();
@@ -484,7 +518,7 @@ mod tests {
                 (TerminalBroadcastInputKind::Protocol, b"\x1b[2~".to_vec()),
                 (
                     TerminalBroadcastInputKind::Paste,
-                    b"\r\necho one\r\n".to_vec()
+                    "\r\n你echo one\r\n".as_bytes().to_vec()
                 ),
             ]
         );
