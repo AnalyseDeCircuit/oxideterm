@@ -584,7 +584,7 @@ impl WorkspaceRuntimeEntity {
         if let Some(pending) = self
             .pending_ssh_terminal_opens
             .iter_mut()
-            .find(|pending| pending.node_id == *node_id)
+            .find(|pending| pending.node_id == *node_id && pending.reconnect_session_id.is_none())
         {
             // Only newly materialized direct roots are removed after failure.
             pending.cleanup_node_id = Some(cleanup_node_id);
@@ -597,7 +597,7 @@ impl WorkspaceRuntimeEntity {
     ) -> Option<NodeId> {
         self.pending_ssh_terminal_opens
             .iter()
-            .find(|pending| pending.node_id == *node_id)
+            .find(|pending| pending.node_id == *node_id && pending.reconnect_session_id.is_none())
             .and_then(|pending| pending.cleanup_node_id.clone())
     }
 
@@ -3774,6 +3774,54 @@ mod tests {
                 Some("saved-a")
             );
             assert!(entity.take_runtime_effects(cx).is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn cleanup_marker_stays_on_the_plain_open_when_a_reconnect_queues_first(
+        cx: &mut TestAppContext,
+    ) {
+        let entity = test_runtime_entity(cx);
+        let node_id = NodeId::new("node-a");
+        let session_id = TerminalSessionId(7);
+        let cleanup_node_id = NodeId::new("temp-root");
+        entity.update(cx, |entity, cx| {
+            entity.register_ssh_terminal_session(session_id, node_id.clone());
+            // The pane reconnect queues before the saved-connection open, so a
+            // node-only lookup would stamp the cleanup marker onto the reconnect.
+            entity.queue_ssh_terminal_open(
+                PendingSshTerminalOpen {
+                    node_id: node_id.clone(),
+                    reconnect_session_id: Some(session_id),
+                    post_connect_command: None,
+                    mark_used_connection_id: None,
+                    save_after_open: None,
+                    cleanup_node_id: None,
+                    title: String::new(),
+                },
+                cx,
+            );
+            entity.queue_ssh_terminal_open(
+                PendingSshTerminalOpen {
+                    node_id: node_id.clone(),
+                    reconnect_session_id: None,
+                    post_connect_command: None,
+                    mark_used_connection_id: None,
+                    save_after_open: None,
+                    cleanup_node_id: None,
+                    title: "Restored".to_string(),
+                },
+                cx,
+            );
+            entity.mark_pending_ssh_terminal_open_cleanup(&node_id, cleanup_node_id.clone());
+
+            // Closing the pane drops its queued reconnect; the marker has to survive
+            // on the plain open so a failed dial still removes the temporary root.
+            entity.unregister_ssh_terminal_session(session_id);
+            assert_eq!(
+                entity.pending_ssh_terminal_open_cleanup_for_node(&node_id),
+                Some(cleanup_node_id)
+            );
         });
     }
 
