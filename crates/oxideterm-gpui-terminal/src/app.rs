@@ -1700,6 +1700,18 @@ impl TerminalPane {
         self.command_history.clone()
     }
 
+    pub fn set_command_history(
+        &mut self,
+        history: SharedTerminalCommandHistory,
+        cx: &mut Context<Self>,
+    ) {
+        self.preferences.command_history = history.clone();
+        self.command_history = history;
+        self.autosuggest_selected_index = None;
+        self.autosuggest_dismissed_query = None;
+        cx.notify();
+    }
+
     fn history_input_available(&self, mode: TermMode) -> bool {
         let prompt_available = match &self.serial_session_config {
             Some(config) => {
