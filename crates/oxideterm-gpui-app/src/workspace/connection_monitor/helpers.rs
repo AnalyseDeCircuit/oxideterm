@@ -4,6 +4,16 @@ use oxideterm_topology::TopologyViewStatus;
 
 use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
 
+pub(super) fn host_tools_row_id(
+    kind: &'static str,
+    connection_id: &str,
+    resource_id: impl Into<SharedString>,
+) -> gpui::ElementId {
+    // Native tooltip state belongs to a resource, even when rows reorder or hosts switch.
+    let connection = gpui::ElementId::from((gpui::ElementId::from(kind), connection_id.to_owned()));
+    (connection, resource_id).into()
+}
+
 pub(super) fn host_tools_tooltip_icon_button(
     tokens: &ThemeTokens,
     icon: LucideIcon,

@@ -534,6 +534,11 @@ impl HostToolsEntity {
         let last = host_schedule_blank_dash(&entry.last_run);
 
         div()
+            .id(host_tools_row_id(
+                "host-schedule-row",
+                connection_id,
+                entry.id.clone(),
+            ))
             .w_full()
             .min_w_0()
             .border_b_1()

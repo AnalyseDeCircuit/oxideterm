@@ -800,6 +800,11 @@ impl HostToolsEntity {
         let state_color = service_state_color(&service.active_state, theme.text_muted);
 
         div()
+            .id(host_tools_row_id(
+                "host-service-row",
+                connection_id,
+                service.id.clone(),
+            ))
             .w_full()
             .min_w_0()
             .border_b_1()

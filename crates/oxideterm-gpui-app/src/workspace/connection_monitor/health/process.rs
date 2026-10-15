@@ -547,6 +547,11 @@ impl HostToolsEntity {
         });
 
         div()
+            .id(host_tools_row_id(
+                "host-process-row",
+                connection_id,
+                process.pid.clone(),
+            ))
             .w_full()
             .min_w_0()
             .border_b_1()

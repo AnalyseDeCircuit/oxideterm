@@ -813,6 +813,11 @@ impl HostToolsEntity {
         let session_id = session.id.clone();
 
         div()
+            .id(host_tools_row_id(
+                "host-tmux-row",
+                connection_id,
+                session.id.clone(),
+            ))
             .w_full()
             .min_w_0()
             .border_b_1()
@@ -1343,6 +1348,7 @@ impl HostToolsEntity {
         let expanded = self.ui.host_tmux_expanded_window_id.as_deref() == Some(window.id.as_str());
         let window_id = window.id.clone();
         div()
+            .id((gpui::ElementId::from("host-tmux-window"), window.id.clone()))
             .mt_1()
             .rounded(px(tokens.radii.md))
             .border_1()
@@ -1440,6 +1446,7 @@ impl HostToolsEntity {
     ) -> AnyElement {
         let theme = tokens.ui;
         div()
+            .id((gpui::ElementId::from("host-tmux-pane"), pane.id.clone()))
             .px_2()
             .py_1()
             .flex()
