@@ -159,7 +159,8 @@ impl WorkspaceApp {
     pub(super) fn start_audit_delivery(&mut self, cx: &mut Context<Self>) {
         self.audit.observer = Some(cx.spawn(async move |weak, cx| {
             loop {
-                Timer::after(Duration::from_secs(1)).await;
+                // Keep foreground wakeups on GPUI's scheduler, including its test clock.
+                cx.background_executor().timer(Duration::from_secs(1)).await;
                 if weak
                     .update(cx, |this, cx| {
                         let Some(client) = &this.audit.client else {
