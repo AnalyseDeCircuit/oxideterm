@@ -410,25 +410,25 @@ fn export_privilege_credentials(
         return Ok(Vec::new());
     }
 
-    conn.privilege_credentials
-        .iter()
-        .map(|credential| {
-            let secret = if credential.keychain_id.is_some() {
-                store
-                    .get_privilege_credential_secret(&conn.id, &credential.id)
-                    .ok()
-                    .map(SecretString::into_zeroizing)
-            } else {
-                None
-            };
+    let owners = [conn.id.clone(), crate::SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string()]
+        .into_iter().collect();
+    store.export_privilege_sync_records(&owners)?
+        .into_iter()
+        .map(|record| {
+            let credential = record.metadata;
             Ok(EncryptedPrivilegeCredential {
-                id: credential.id.clone(),
+                // A connection archive carries a scoped copy, never a new global default on import.
+                id: if credential.connection_id == crate::SSH_COMMON_PRIVILEGE_SCOPE_ID {
+                    format!("ssh-common:{}", credential.id)
+                } else {
+                    credential.id.clone()
+                },
                 connection_id: conn.id.clone(),
                 label: credential.label.clone(),
                 kind: credential.kind,
                 username_hint: credential.username_hint.clone(),
                 prompt_patterns: credential.prompt_patterns.clone(),
-                secret,
+                secret: record.secret.map(SecretString::into_zeroizing),
                 enabled: credential.enabled,
                 require_click_to_send: credential.require_click_to_send,
                 created_at: credential.created_at,

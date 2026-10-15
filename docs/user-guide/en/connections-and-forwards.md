@@ -125,6 +125,14 @@ Use `Save serial profile` and `Profile name` when the same device settings shoul
 
 Serial terminals do not provide SFTP, port forwarding, ProxyJump, SSH host-key verification, SSH Agent, remote IDE, or SSH connection-pool behavior. Serial split panes are disabled because a serial device is normally an exclusive writer.
 
+## Privilege Credentials
+
+In Settings → Credentials, use **SSH common** to save sudo, su, or custom-prompt credentials for your SSH sessions. Connection-specific matches take priority; local terminals have a separate scope.
+
+When a password prompt has one matching credential, press Enter at the inline hint to fill it. With several matches, Enter opens a chooser showing each credential's name, type, and source. Use arrow keys and Enter, click an entry, or press Esc to cancel. Starting manual input or changing the terminal closes the chooser.
+
+Full connection sync includes the common scope when sensitive-credential sync is enabled; selecting only some connections leaves that shared scope unchanged. An encrypted connection export with passwords includes scoped copies of common credentials. Importing that package attaches the copies to the imported connections without creating a global default.
+
 ## Port Forwards
 
 Use the forwarding UI to create and manage local, remote, and dynamic forwards.

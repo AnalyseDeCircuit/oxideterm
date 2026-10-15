@@ -973,4 +973,69 @@ mod tests {
             BTreeSet::new()
         );
     }
+
+    #[test]
+    fn ssh_common_privilege_sync_stays_out_of_partial_or_nonsecret_selections() {
+        let mut view = ConfigurationView::empty();
+        let common = SyncResource {
+            kind: ResourceKind::PrivilegeCredential,
+            id: serde_json::to_string(&(
+                oxideterm_connections::SSH_COMMON_PRIVILEGE_SCOPE_ID,
+                "common",
+            ))
+            .unwrap(),
+        };
+        let specific = SyncResource {
+            kind: ResourceKind::PrivilegeCredential,
+            id: serde_json::to_string(&("conn-1", "specific")).unwrap(),
+        };
+        for resource in [&common, &specific] {
+            view.insert_secret(
+                resource.kind,
+                &resource.id,
+                &serde_json::json!({"label": "Synthetic credential"}),
+            )
+            .unwrap();
+        }
+        let mut scope = SyncScope {
+            sync_connections: true,
+            sync_sensitive_credentials: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            view.selected(
+                std::iter::empty(),
+                &scope,
+                &StructuredUploadItemFilter::default()
+            ),
+            [common.clone(), specific.clone()].into_iter().collect()
+        );
+        let partial = StructuredUploadItemFilter {
+            connection_ids: Some(["conn-1".to_string()].into_iter().collect()),
+            ..Default::default()
+        };
+        assert_eq!(
+            view.selected(std::iter::empty(), &scope, &partial),
+            [specific].into_iter().collect()
+        );
+        scope.sync_sensitive_credentials = false;
+        assert!(
+            view.selected(
+                std::iter::empty(),
+                &scope,
+                &StructuredUploadItemFilter::default()
+            )
+            .is_empty()
+        );
+        scope.sync_sensitive_credentials = true;
+        scope.sync_connections = false;
+        assert!(
+            view.selected(
+                std::iter::empty(),
+                &scope,
+                &StructuredUploadItemFilter::default()
+            )
+            .is_empty()
+        );
+    }
 }

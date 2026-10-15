@@ -675,9 +675,15 @@ impl PreparedSync {
                         &self.scope,
                         &self.filter,
                     );
+                    let mut privilege_owners = selection.connection_ids.clone();
+                    if self.scope.sync_connections && self.filter.connection_ids.is_none() {
+                        privilege_owners.insert(
+                            oxideterm_connections::SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string(),
+                        );
+                    }
                     let stale = connections.prepare_privilege_sync(
                         privileges,
-                        &selection.connection_ids,
+                        &privilege_owners,
                         |reference| journal.record_privilege_creation(&self.store, reference),
                     )?;
                     journal.defer_privilege_cleanup(stale);

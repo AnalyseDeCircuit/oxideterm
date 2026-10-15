@@ -946,6 +946,29 @@ mod tests {
             })
             .unwrap();
 
+        source
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: crate::SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
+                credential_id: Some("shared-sudo".into()),
+                label: "Shared sudo".into(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("common-secret")),
+                enabled: false,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        assert!(
+            export_privilege_credentials(
+                &source,
+                source.get("conn-1").unwrap(),
+                &OxideExportOptions::default()
+            )
+            .unwrap()
+            .is_empty()
+        );
+
         let bytes = export_connections_to_oxide(
             &source,
             &["conn-1".to_string()],
@@ -973,7 +996,25 @@ mod tests {
             .find(|connection| connection.name == "Prod")
             .unwrap();
 
-        assert_eq!(imported.privilege_credentials.len(), 1);
+        assert_eq!(
+            imported
+                .privilege_credentials
+                .iter()
+                .map(|credential| credential.id.as_str())
+                .collect::<Vec<_>>(),
+            ["sudo-prod", "ssh-common:shared-sudo"]
+        );
+        let owners = [imported.id.clone()].into_iter().collect();
+        let common = target.export_privilege_sync_records(&owners).unwrap().into_iter()
+            .find(|record| record.metadata.id == "ssh-common:shared-sudo").unwrap();
+        assert!(!common.metadata.enabled);
+        assert_eq!(common.secret.unwrap(), "common-secret");
+        assert!(
+            target
+                .list_privilege_credentials(crate::SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             target
                 .get_privilege_credential_secret(&imported.id, "sudo-prod")

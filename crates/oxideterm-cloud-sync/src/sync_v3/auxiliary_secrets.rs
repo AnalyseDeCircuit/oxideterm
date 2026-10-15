@@ -21,11 +21,14 @@ pub(crate) fn collect(
         return Ok(());
     }
     let selected = view.selected(std::iter::empty(), scope, filter);
-    let owners = selected
+    let mut owners: std::collections::BTreeSet<String> = selected
         .iter()
         .filter(|resource| resource.kind == ResourceKind::Connection)
         .map(|resource| resource.id.clone())
         .collect();
+    if scope.sync_connections && filter.connection_ids.is_none() {
+        owners.insert(oxideterm_connections::SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string());
+    }
     for record in connections.export_privilege_sync_records(&owners)? {
         let id = serde_json::to_string(&(&record.metadata.connection_id, &record.metadata.id))?;
         view.insert_secret(ResourceKind::PrivilegeCredential, &id, &record)?;
