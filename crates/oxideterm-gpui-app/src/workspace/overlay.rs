@@ -1925,6 +1925,8 @@ mod tests {
         settings.settings_mut().ssh_config.auto_load_hosts = false;
         settings.settings_mut().onboarding_completed = true;
         settings.save().unwrap();
+        // The full workspace owns real background workers and filesystem watches.
+        cx.executor().allow_parking();
         let (shell, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
             WorkspaceWindowShell::new(workspace, window, cx)
