@@ -1588,16 +1588,14 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target_fields = self.terminal_command_context(cx).target_fields();
-        let protocol = self
+        let target = self
             .active_pane_id(cx)
-            .and_then(|pane_id| self.quick_command_context_for_pane(pane_id, cx))
-            .map(|context| context.protocol);
+            .and_then(|pane_id| self.quick_command_context_for_pane(pane_id, cx));
         let (categories, commands) = self
             .terminal
             .read(cx)
             .quick_commands
-            .quick_bar_snapshot(&target_fields, protocol);
+            .quick_bar_snapshot(target.as_ref());
         if commands.is_empty() {
             return div().into_any_element();
         }

@@ -122,8 +122,7 @@ pub fn prepare_quick_command(
     let mut prepared_targets = Vec::new();
     let mut unavailable_targets = Vec::new();
     for target in targets {
-        let target_fields = quick_command_target_match_fields(target);
-        if !quick_command_available_for_target(command, target.protocol, &target_fields) {
+        if !quick_command_available_for_target(command, target) {
             unavailable_targets.push(target.label.clone());
             continue;
         }
@@ -633,6 +632,7 @@ mod tests {
             availability: QuickCommandAvailability {
                 protocols: vec![QuickCommandTargetProtocol::Ssh],
                 host_patterns: Vec::new(),
+                ..QuickCommandAvailability::default()
             },
             confirmation: QuickCommandConfirmationPolicy::Inherit,
             sort_order: 0,
@@ -669,9 +669,9 @@ mod tests {
 
     #[test]
     fn preparation_matches_the_same_target_identity_fields_it_executes() {
-        let command = QuickCommand {
-            id: "alice-only".to_string(),
-            name: "Alice only".to_string(),
+        let mut command = QuickCommand {
+            id: "device-command".to_string(),
+            name: "Device command".to_string(),
             command: "whoami".to_string(),
             category: "custom".to_string(),
             description: None,
@@ -679,27 +679,103 @@ mod tests {
             availability: QuickCommandAvailability {
                 protocols: vec![QuickCommandTargetProtocol::Ssh],
                 host_patterns: vec!["alice@*.example.com".to_string()],
+                ..QuickCommandAvailability::default()
             },
             confirmation: QuickCommandConfirmationPolicy::Inherit,
             sort_order: 0,
             created_at: 1,
             updated_at: 1,
         };
-        let target = QuickCommandTargetContext {
-            target_id: "ssh".to_string(),
-            label: "Production".to_string(),
-            protocol: QuickCommandTargetProtocol::Ssh,
-            values: QuickCommandContextValues {
-                host: Some(Zeroizing::new("api.example.com".to_string())),
-                username: Some(Zeroizing::new("alice".to_string())),
-                ..QuickCommandContextValues::default()
+        let targets = [
+            (
+                "db",
+                "Terminal",
+                "jump.test",
+                "asset-db",
+                "prod-db",
+                QuickCommandTargetProtocol::Ssh,
+            ),
+            (
+                "cache",
+                "prod-db",
+                "jump.test",
+                "asset-cache",
+                "prod-cache",
+                QuickCommandTargetProtocol::Ssh,
+            ),
+            (
+                "other",
+                "Other",
+                "prod-db",
+                "deploy",
+                "development",
+                QuickCommandTargetProtocol::Ssh,
+            ),
+            (
+                "telnet",
+                "Device",
+                "jump.test",
+                "asset-db",
+                "prod-db",
+                QuickCommandTargetProtocol::Telnet,
+            ),
+        ]
+        .map(
+            |(id, label, host, user, connection, protocol)| QuickCommandTargetContext {
+                target_id: id.into(),
+                label: label.into(),
+                protocol,
+                values: QuickCommandContextValues {
+                    host: Some(Zeroizing::new(host.into())),
+                    username: Some(Zeroizing::new(user.into())),
+                    connection: Some(Zeroizing::new(connection.into())),
+                    ..QuickCommandContextValues::default()
+                },
             },
-        };
-
-        let prepared = prepare_quick_command(&command, &[target], &BTreeMap::new()).unwrap();
-
-        assert_eq!(prepared.targets.len(), 1);
-        assert!(prepared.unavailable_targets.is_empty());
+        );
+        use crate::QuickCommandMatchField::{All, ConnectionName, Host};
+        for (field, pattern, expected) in [
+            (ConnectionName, "prod-db", vec!["db"]),
+            (Host, "jump.test", vec!["db", "cache"]),
+            (Host, "prod-db", vec!["other"]),
+            (All, "prod-db", vec!["db", "cache", "other"]),
+            (All, "asset-db@jump.test", vec!["db"]),
+        ] {
+            command.availability.match_field = field;
+            command.availability.host_patterns = vec![pattern.into()];
+            for target in &targets {
+                let visible = crate::visible_quick_commands(
+                    std::slice::from_ref(&command),
+                    "custom",
+                    "",
+                    Some(target),
+                );
+                let expected_commands = if expected.contains(&target.target_id.as_str()) {
+                    vec!["device-command"]
+                } else {
+                    vec![]
+                };
+                assert_eq!(
+                    visible
+                        .iter()
+                        .map(|command| command.id.as_str())
+                        .collect::<Vec<_>>(),
+                    expected_commands,
+                    "{field:?} {pattern} {}",
+                    target.target_id
+                );
+            }
+            let prepared = prepare_quick_command(&command, &targets, &BTreeMap::new()).unwrap();
+            assert_eq!(
+                prepared
+                    .targets
+                    .iter()
+                    .map(|target| target.target_id.as_str())
+                    .collect::<Vec<_>>(),
+                expected,
+                "{field:?} {pattern}"
+            );
+        }
     }
 
     #[test]

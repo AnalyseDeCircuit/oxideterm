@@ -25,8 +25,8 @@ pub use editing::{
 pub use model::{
     QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability, QuickCommandCategory,
     QuickCommandConfirmationPolicy, QuickCommandIcon, QuickCommandImportResult,
-    QuickCommandImportStrategy, QuickCommandParameter, QuickCommandParameterKind,
-    QuickCommandTargetProtocol, QuickCommandsSnapshot,
+    QuickCommandImportStrategy, QuickCommandMatchField, QuickCommandParameter,
+    QuickCommandParameterKind, QuickCommandTargetProtocol, QuickCommandsSnapshot,
 };
 pub use risk::{QuickCommandRisk, classify_command_risk};
 pub use snapshot::{decode_snapshot_json, encode_snapshot_json};

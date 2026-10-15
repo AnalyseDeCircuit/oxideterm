@@ -66,6 +66,17 @@ pub struct QuickCommandAvailability {
     pub protocols: Vec<QuickCommandTargetProtocol>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_patterns: Vec<String>,
+    #[serde(default)]
+    pub match_field: QuickCommandMatchField,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickCommandMatchField {
+    #[default]
+    All,
+    Host,
+    ConnectionName,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
