@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "Đã chấp nhận chuyển tiếp X11",
+      "accepted_description": "Máy chủ SSH đã chấp nhận chuyển tiếp X11 cho cửa sổ dòng lệnh này. Máy chủ cấp giá trị DISPLAY từ xa.",
+      "unavailable": "Không thể dùng chuyển tiếp X11",
+      "local_display_unavailable": "Không tìm thấy địa chỉ hiển thị cục bộ hợp lệ. Hãy khởi động máy chủ X cục bộ và đặt DISPLAY trước khi mở OxideTerm.",
+      "local_authorization_unavailable": "Không thể chuẩn bị xác thực X11 cục bộ. Hãy kiểm tra XAUTHORITY, tệp xác thực và khả năng sử dụng xauth.",
+      "server_rejected": "Máy chủ SSH đã từ chối chuyển tiếp X11. Hãy kiểm tra chính sách chuyển tiếp và việc cài đặt xauth trên máy chủ.",
+      "request_timed_out": "Máy chủ SSH không phản hồi yêu cầu chuyển tiếp X11 đúng hạn.",
+      "channel_unavailable": "Kênh SSH không thể hoàn tất thương lượng chuyển tiếp X11.",
+      "windows_requirement": "Windows cần một máy chủ X cục bộ đang chạy. Đặt DISPLAY thành địa chỉ của máy chủ đó trước khi mở OxideTerm. Máy chủ SSH cấp DISPLAY từ xa riêng biệt."
+    },
     "fido": {
       "touch_title": "Khóa bảo mật",
       "touch_instructions": "Chạm vào khóa bảo mật hoặc hoàn tất xác minh trên thiết bị.",

@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "X11 전달이 승인됨",
+      "accepted_description": "SSH 서버가 이 터미널의 X11 전달을 승인했습니다. 원격 DISPLAY는 서버가 할당합니다.",
+      "unavailable": "X11 전달을 사용할 수 없음",
+      "local_display_unavailable": "유효한 로컬 표시 주소를 찾지 못했습니다. 로컬 X 서버를 시작하고 DISPLAY를 설정한 후 OxideTerm을 시작하세요.",
+      "local_authorization_unavailable": "로컬 X11 인증을 준비하지 못했습니다. XAUTHORITY, 인증 파일 및 xauth 사용 가능 여부를 확인하세요.",
+      "server_rejected": "SSH 서버가 X11 전달을 거부했습니다. 서버의 전달 정책과 xauth 설치 여부를 확인하세요.",
+      "request_timed_out": "SSH 서버가 X11 전달 요청에 제시간에 응답하지 않았습니다.",
+      "channel_unavailable": "SSH 채널에서 X11 전달 협상을 완료하지 못했습니다.",
+      "windows_requirement": "Windows에는 실행 중인 로컬 X 서버가 필요합니다. DISPLAY를 해당 주소로 설정한 후 OxideTerm을 시작하세요. 원격 DISPLAY는 SSH 서버가 별도로 할당합니다."
+    },
     "fido": {
       "touch_title": "보안 키",
       "touch_instructions": "보안 키를 터치하거나 기기에서 인증을 완료하세요.",

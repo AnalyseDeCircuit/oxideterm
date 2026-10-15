@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "X11 転送が承認されました",
+      "accepted_description": "SSH サーバーがこの端末の X11 転送を承認しました。リモートの DISPLAY はサーバーが割り当てます。",
+      "unavailable": "X11 転送を利用できません",
+      "local_display_unavailable": "有効なローカル表示先が見つかりません。ローカル X サーバーを起動して DISPLAY を設定してから、OxideTerm を起動してください。",
+      "local_authorization_unavailable": "ローカル X11 認証を準備できません。XAUTHORITY、認証ファイル、xauth が利用可能か確認してください。",
+      "server_rejected": "SSH サーバーが X11 転送を拒否しました。サーバーの転送設定と xauth のインストールを確認してください。",
+      "request_timed_out": "SSH サーバーから X11 転送要求への応答が時間内にありませんでした。",
+      "channel_unavailable": "SSH チャネルで X11 転送のネゴシエーションを完了できませんでした。",
+      "windows_requirement": "Windows ではローカル X サーバーの起動が必要です。DISPLAY にそのアドレスを設定してから OxideTerm を起動してください。リモートの DISPLAY は SSH サーバーが別途割り当てます。"
+    },
     "fido": {
       "touch_title": "セキュリティキー",
       "touch_instructions": "セキュリティキーに触れるか、デバイス上で認証を完了してください。",

@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "Inoltro X11 accettato",
+      "accepted_description": "Il server SSH ha accettato l’inoltro X11 per questo terminale. Il server assegna il DISPLAY remoto.",
+      "unavailable": "Inoltro X11 non disponibile",
+      "local_display_unavailable": "Nessun indirizzo di visualizzazione locale valido trovato. Avvia un server X locale e configura DISPLAY prima di avviare OxideTerm.",
+      "local_authorization_unavailable": "Impossibile preparare l’autorizzazione X11 locale. Controlla XAUTHORITY, il file di autorizzazione e la disponibilità di xauth.",
+      "server_rejected": "Il server SSH ha rifiutato l’inoltro X11. Controlla i criteri di inoltro e l’installazione di xauth sul server.",
+      "request_timed_out": "Il server SSH non ha risposto in tempo alla richiesta di inoltro X11.",
+      "channel_unavailable": "Il canale SSH non ha completato la negoziazione dell’inoltro X11.",
+      "windows_requirement": "Windows richiede un server X locale in esecuzione. Imposta DISPLAY sul suo indirizzo prima di avviare OxideTerm. Il server SSH assegna separatamente il DISPLAY remoto."
+    },
     "fido": {
       "touch_title": "Chiave di sicurezza",
       "touch_instructions": "Tocca la chiave di sicurezza o completa la verifica sul dispositivo.",

@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "Reenvío X11 aceptado",
+      "accepted_description": "El servidor SSH aceptó el reenvío X11 para este terminal. El servidor asigna el DISPLAY remoto.",
+      "unavailable": "Reenvío X11 no disponible",
+      "local_display_unavailable": "No se encontró una dirección de pantalla local válida. Inicia un servidor X local y configura DISPLAY antes de iniciar OxideTerm.",
+      "local_authorization_unavailable": "No se pudo preparar la autorización X11 local. Comprueba XAUTHORITY, el archivo de autorización y la disponibilidad de xauth.",
+      "server_rejected": "El servidor SSH rechazó el reenvío X11. Comprueba su política de reenvío y la instalación de xauth.",
+      "request_timed_out": "El servidor SSH no respondió a tiempo a la solicitud de reenvío X11.",
+      "channel_unavailable": "El canal SSH no pudo completar la negociación del reenvío X11.",
+      "windows_requirement": "Windows necesita un servidor X local en ejecución. Configura DISPLAY con su dirección antes de iniciar OxideTerm. El servidor SSH asigna el DISPLAY remoto por separado."
+    },
     "fido": {
       "touch_title": "Llave de seguridad",
       "touch_instructions": "Toque su llave de seguridad o complete la verificación en el dispositivo.",

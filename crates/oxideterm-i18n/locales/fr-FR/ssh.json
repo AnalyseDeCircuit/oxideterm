@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "Transfert X11 accepté",
+      "accepted_description": "Le serveur SSH a accepté le transfert X11 pour ce terminal. Le serveur attribue la valeur DISPLAY distante.",
+      "unavailable": "Transfert X11 indisponible",
+      "local_display_unavailable": "Aucune adresse d’affichage locale valide n’a été trouvée. Démarrez un serveur X local et configurez DISPLAY avant de lancer OxideTerm.",
+      "local_authorization_unavailable": "Impossible de préparer l’autorisation X11 locale. Vérifiez XAUTHORITY, le fichier d’autorisation et la disponibilité de xauth.",
+      "server_rejected": "Le serveur SSH a refusé le transfert X11. Vérifiez sa politique de transfert et l’installation de xauth.",
+      "request_timed_out": "Le serveur SSH n’a pas répondu à temps à la demande de transfert X11.",
+      "channel_unavailable": "Le canal SSH n’a pas pu terminer la négociation du transfert X11.",
+      "windows_requirement": "Windows nécessite un serveur X local en cours d’exécution. Définissez DISPLAY sur son adresse avant de lancer OxideTerm. Le serveur SSH attribue séparément la valeur DISPLAY distante."
+    },
     "fido": {
       "touch_title": "Clé de sécurité",
       "touch_instructions": "Touchez votre clé de sécurité ou terminez la vérification sur l’appareil.",

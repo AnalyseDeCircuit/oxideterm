@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "X11 forwarding accepted",
+      "accepted_description": "The SSH server accepted X11 forwarding for this terminal. The remote DISPLAY is assigned by the server.",
+      "unavailable": "X11 forwarding unavailable",
+      "local_display_unavailable": "No valid local display address was found. Start a local X server and configure DISPLAY before starting OxideTerm.",
+      "local_authorization_unavailable": "Local X11 authorization could not be prepared. Check XAUTHORITY, the authorization file and xauth availability.",
+      "server_rejected": "The SSH server rejected X11 forwarding. Check the server forwarding policy and xauth installation.",
+      "request_timed_out": "The SSH server did not respond to the X11 forwarding request in time.",
+      "channel_unavailable": "The SSH channel could not complete X11 forwarding negotiation.",
+      "windows_requirement": "Windows requires a running local X server. Set DISPLAY to its address before starting OxideTerm. The remote DISPLAY is assigned separately by the SSH server."
+    },
     "fido": {
       "touch_title": "Security key",
       "touch_instructions": "Touch your security key or complete verification on the device.",

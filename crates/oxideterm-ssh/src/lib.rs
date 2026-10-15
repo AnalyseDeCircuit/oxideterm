@@ -88,6 +88,7 @@ pub use transport::{
     SshOutputCancellation, SshOutputChunk, SshPasswordPrompt, SshPasswordResponse, SshPromptError,
     SshPromptHandler, SshPtyHandle, SshSecretCommandOutput, SshShellChannel, SshTransportClient,
     SshTransportCommand, SshTransportError, X11ForwardHandler, X11ForwardedChannel,
+    X11ForwardingFailure, X11ForwardingStatus,
 };
 pub use upstream_proxy::{
     UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyError, UpstreamProxyProtocol,

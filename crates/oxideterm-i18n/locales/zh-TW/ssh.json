@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "X11 轉送已獲伺服器接受",
+      "accepted_description": "SSH 伺服器已接受目前終端的 X11 轉送請求。遠端 DISPLAY 由伺服器分配。",
+      "unavailable": "X11 轉送無法使用",
+      "local_display_unavailable": "找不到有效的本機顯示位址。請先啟動本機 X 伺服器並設定 DISPLAY，再啟動 OxideTerm。",
+      "local_authorization_unavailable": "無法準備本機 X11 授權。請檢查 XAUTHORITY、授權檔案及 xauth 是否可用。",
+      "server_rejected": "SSH 伺服器拒絕了 X11 轉送。請檢查伺服器轉送原則及是否已安裝 xauth。",
+      "request_timed_out": "SSH 伺服器未在期限內回應 X11 轉送請求。",
+      "channel_unavailable": "SSH 通道未能完成 X11 轉送協商。",
+      "windows_requirement": "Windows 需要執行本機 X 伺服器。請先將 DISPLAY 設為其位址，再啟動 OxideTerm。遠端 DISPLAY 由 SSH 伺服器另外分配。"
+    },
     "fido": {
       "touch_title": "安全金鑰",
       "touch_instructions": "請觸碰安全金鑰，或在裝置上完成驗證。",

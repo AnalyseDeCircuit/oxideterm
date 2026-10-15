@@ -18,7 +18,8 @@ use oxideterm_sftp::{
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ProxyHopConfig, SshConfig,
     SshConnectionRegistry, SshTransportClient, SshTransportCommand, UpstreamProxyAuth,
-    UpstreamProxyConfig, UpstreamProxyProtocol, upstream_proxy_from_env,
+    UpstreamProxyConfig, UpstreamProxyProtocol, X11ForwardPolicy, X11ForwardingFailure,
+    X11ForwardingStatus, upstream_proxy_from_env,
 };
 use rand10::{RngExt, SeedableRng};
 use tokio::{
@@ -86,6 +87,89 @@ async fn local_sshd_upstream_proxy_e2e_matrix() {
         no_proxy_count,
         "matching no_proxy rules must bypass the upstream proxy"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[ignore = "requires local sshd, ssh-keygen and xauth; run with --test-threads=1"]
+async fn local_sshd_x11_reports_fallback_and_server_assigned_display() {
+    let rejected = SshdFixture::start();
+    let accepted = SshdFixture::with_x11(10, true);
+    let authority = accepted.dir.join("local.authority");
+    let xauth = if PathBuf::from("/opt/X11/bin/xauth").is_file() {
+        "/opt/X11/bin/xauth"
+    } else {
+        "/usr/bin/xauth"
+    };
+    run(Command::new(xauth).arg("-f").arg(&authority).args([
+        "add",
+        "192.0.2.1:77",
+        "MIT-MAGIC-COOKIE-1",
+        "0123456789abcdef0123456789abcdef",
+    ]));
+    let _authority = EnvVarGuard::set("XAUTHORITY", authority.display().to_string());
+    for (server, display, expected) in [
+        (
+            &accepted,
+            "invalid",
+            X11ForwardingStatus::Unavailable(X11ForwardingFailure::LocalDisplayUnavailable),
+        ),
+        (
+            &rejected,
+            "192.0.2.1:77",
+            X11ForwardingStatus::Unavailable(X11ForwardingFailure::ServerRejected),
+        ),
+        (&accepted, "192.0.2.1:77", X11ForwardingStatus::Accepted),
+    ] {
+        let _display = EnvVarGuard::set("DISPLAY", display.into());
+        let mut config = target_config(server);
+        config.x11_forwarding = Some(X11ForwardPolicy::trusted());
+        let mut terminal = SshTransportClient::new(config)
+            .connect_shell()
+            .await
+            .unwrap();
+        terminal
+            .command_tx
+            .send(SshTransportCommand::Data(
+                b"printf '\\n%s%s%s\\n' '__X11_' 'DISPLAY__=' \"$DISPLAY\"; printf '\\n%s%s\\n' '__SSH_' 'READY__'\n"
+                    .to_vec(),
+            ))
+            .await
+            .unwrap();
+        let remote_display = tokio::time::timeout(Duration::from_secs(10), async {
+            let mut output = Vec::new();
+            loop {
+                match terminal.output_rx.try_recv() {
+                    Ok(chunk) => output.extend_from_slice(&chunk),
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                    Err(error) => panic!("X11 fallback closed the regular shell: {error}"),
+                }
+                let text = String::from_utf8_lossy(&output);
+                if text.contains("__SSH_READY__")
+                    && let Some((_, suffix)) = text.split_once("__X11_DISPLAY__=")
+                {
+                    break suffix.lines().next().unwrap_or_default().trim().to_string();
+                }
+            }
+        })
+        .await
+        .expect("regular shell must run with or without X11");
+        assert_eq!(terminal.take_x11_forwarding_status(), Some(expected));
+        assert_eq!(terminal.take_x11_forwarding_status(), None);
+        if expected == X11ForwardingStatus::Accepted {
+            let (host, display) = remote_display
+                .split_once(':')
+                .expect("server display address");
+            assert_eq!(host, "localhost");
+            let (number, screen) = display.split_once('.').unwrap();
+            assert!(number.parse::<u16>().unwrap() >= 1000);
+            assert_eq!(screen, "0");
+        } else {
+            assert_eq!(remote_display, "");
+        }
+    }
 }
 
 #[tokio::test]
@@ -479,6 +563,10 @@ impl SshdFixture {
     }
 
     fn with_max_sessions(max_sessions: usize) -> Self {
+        Self::with_x11(max_sessions, false)
+    }
+
+    fn with_x11(max_sessions: usize, x11: bool) -> Self {
         let sshd = "/usr/sbin/sshd";
         let ssh_keygen = "ssh-keygen";
         assert!(
@@ -517,6 +605,20 @@ impl SshdFixture {
             .expect("write authorized keys");
         set_private_permissions(&dir, &client_key, &host_key, &authorized_keys);
 
+        let x11_config = if x11 {
+            let xauth = if PathBuf::from("/opt/X11/bin/xauth").is_file() {
+                "/opt/X11/bin/xauth"
+            } else {
+                "/usr/bin/xauth"
+            };
+            // Both client and server authority files remain inside the fixture.
+            format!(
+                "X11Forwarding yes\nX11DisplayOffset 1000\nXAuthLocation {xauth}\nPermitUserRC no\nSetEnv XAUTHORITY={}\n",
+                dir.join("remote.authority").display()
+            )
+        } else {
+            "X11Forwarding no\n".to_string()
+        };
         let config = format!(
             "\
 Port {port}
@@ -536,6 +638,7 @@ MaxSessions {max_sessions}
 PermitRootLogin no
 AllowUsers {username}
 LogLevel VERBOSE
+{x11_config}
 ",
             host_key = host_key.display(),
             pid_path = pid_path.display(),

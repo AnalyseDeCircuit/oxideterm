@@ -14,6 +14,22 @@ const X11_CHANNEL_READ_BUFFER_BYTES: usize = 32 * 1024;
 const X11_CHANNEL_LIMIT: usize = 32;
 const X11_SETUP_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Contains categories only; display paths and authorization cookies stay transport-owned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum X11ForwardingFailure {
+    LocalDisplayUnavailable,
+    LocalAuthorizationUnavailable,
+    ServerRejected,
+    RequestTimedOut,
+    ChannelUnavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum X11ForwardingStatus {
+    Accepted,
+    Unavailable(X11ForwardingFailure),
+}
+
 #[derive(Clone)]
 struct X11ForwardDispatcher {
     state: Arc<Mutex<X11ForwardDispatcherState>>,
@@ -254,10 +270,18 @@ fn prune_expired_x11_routes(state: &mut X11ForwardDispatcherState) {
 
 async fn prepare_x11_material(
     policy: X11ForwardPolicy,
-) -> Result<X11PreparedForwarding, SshTransportError> {
+) -> Result<X11PreparedForwarding, X11ForwardingFailure> {
     prepare_x11_forwarding(policy)
         .await
-        .map_err(|error| SshTransportError::Channel(error.to_string()))
+        .map_err(|error| match error {
+            oxideterm_x11_forwarding::X11ForwardingError::EmptyDisplay
+            | oxideterm_x11_forwarding::X11ForwardingError::MissingDisplay
+            | oxideterm_x11_forwarding::X11ForwardingError::InvalidDisplay(_)
+            | oxideterm_x11_forwarding::X11ForwardingError::DisplayPortOutOfRange(_) => {
+                X11ForwardingFailure::LocalDisplayUnavailable
+            }
+            _ => X11ForwardingFailure::LocalAuthorizationUnavailable,
+        })
 }
 
 fn register_x11_route(

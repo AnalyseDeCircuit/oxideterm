@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "X11 转发已获服务器接受",
+      "accepted_description": "SSH 服务器已接受当前终端的 X11 转发请求。远端 DISPLAY 由服务器分配。",
+      "unavailable": "X11 转发不可用",
+      "local_display_unavailable": "未找到有效的本地显示地址。请先启动本地 X 服务器并配置 DISPLAY，再启动 OxideTerm。",
+      "local_authorization_unavailable": "无法准备本地 X11 授权。请检查 XAUTHORITY、授权文件和 xauth 是否可用。",
+      "server_rejected": "SSH 服务器拒绝了 X11 转发。请检查服务器转发策略及 xauth 是否已安装。",
+      "request_timed_out": "SSH 服务器未在规定时间内回应 X11 转发请求。",
+      "channel_unavailable": "SSH 通道未能完成 X11 转发协商。",
+      "windows_requirement": "Windows 需要运行本地 X 服务器。请先将 DISPLAY 设置为其地址，再启动 OxideTerm。远端 DISPLAY 由 SSH 服务器单独分配。"
+    },
     "fido": {
       "touch_title": "安全密钥",
       "touch_instructions": "请触摸安全密钥，或在设备上完成验证。",

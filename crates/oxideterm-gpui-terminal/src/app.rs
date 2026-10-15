@@ -155,6 +155,7 @@ const TERMINAL_AUTOSUGGEST_MAX_CANDIDATES: usize = 8;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
     InputActivity,
+    X11ForwardingStatus(oxideterm_ssh::X11ForwardingStatus),
     Exited {
         exit_code: Option<i32>,
     },
@@ -3705,6 +3706,10 @@ impl TerminalPane {
                     None,
                     TerminalNoticeVariant::Error,
                 );
+                TerminalEventEffect::notify()
+            }
+            TerminalEvent::X11ForwardingStatus(status) => {
+                cx.emit(TerminalPaneEvent::X11ForwardingStatus(status));
                 TerminalEventEffect::notify()
             }
             TerminalEvent::StartupFailed => {

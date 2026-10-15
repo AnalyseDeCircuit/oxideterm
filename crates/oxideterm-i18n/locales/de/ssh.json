@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "X11-Weiterleitung akzeptiert",
+      "accepted_description": "Der SSH-Server hat die X11-Weiterleitung für dieses Terminal akzeptiert. Der Server weist den entfernten DISPLAY-Wert zu.",
+      "unavailable": "X11-Weiterleitung nicht verfügbar",
+      "local_display_unavailable": "Keine gültige lokale Anzeigeadresse gefunden. Starten Sie einen lokalen X-Server und konfigurieren Sie DISPLAY, bevor Sie OxideTerm starten.",
+      "local_authorization_unavailable": "Die lokale X11-Autorisierung konnte nicht vorbereitet werden. Prüfen Sie XAUTHORITY, die Autorisierungsdatei und die Verfügbarkeit von xauth.",
+      "server_rejected": "Der SSH-Server hat die X11-Weiterleitung abgelehnt. Prüfen Sie die Weiterleitungsrichtlinie und die xauth-Installation auf dem Server.",
+      "request_timed_out": "Der SSH-Server hat nicht rechtzeitig auf die X11-Weiterleitungsanfrage geantwortet.",
+      "channel_unavailable": "Der SSH-Kanal konnte die X11-Weiterleitung nicht aushandeln.",
+      "windows_requirement": "Windows benötigt einen laufenden lokalen X-Server. Setzen Sie DISPLAY vor dem Start von OxideTerm auf dessen Adresse. Der SSH-Server weist den entfernten DISPLAY-Wert separat zu."
+    },
     "fido": {
       "touch_title": "Sicherheitsschlüssel",
       "touch_instructions": "Berühren Sie Ihren Sicherheitsschlüssel oder bestätigen Sie die Prüfung am Gerät.",

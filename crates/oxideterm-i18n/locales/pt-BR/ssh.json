@@ -1,5 +1,16 @@
 {
   "ssh": {
+    "x11": {
+      "accepted": "Encaminhamento X11 aceito",
+      "accepted_description": "O servidor SSH aceitou o encaminhamento X11 para este terminal. O servidor atribui o DISPLAY remoto.",
+      "unavailable": "Encaminhamento X11 indisponível",
+      "local_display_unavailable": "Nenhum endereço de exibição local válido foi encontrado. Inicie um servidor X local e configure DISPLAY antes de iniciar o OxideTerm.",
+      "local_authorization_unavailable": "Não foi possível preparar a autorização X11 local. Verifique XAUTHORITY, o arquivo de autorização e a disponibilidade de xauth.",
+      "server_rejected": "O servidor SSH rejeitou o encaminhamento X11. Verifique a política de encaminhamento e a instalação do xauth no servidor.",
+      "request_timed_out": "O servidor SSH não respondeu a tempo à solicitação de encaminhamento X11.",
+      "channel_unavailable": "O canal SSH não conseguiu concluir a negociação do encaminhamento X11.",
+      "windows_requirement": "O Windows precisa de um servidor X local em execução. Defina DISPLAY com o endereço dele antes de iniciar o OxideTerm. O servidor SSH atribui o DISPLAY remoto separadamente."
+    },
     "fido": {
       "touch_title": "Chave de segurança",
       "touch_instructions": "Toque na chave de segurança ou conclua a verificação no dispositivo.",

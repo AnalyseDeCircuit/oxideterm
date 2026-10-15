@@ -393,6 +393,16 @@ impl SshPtyCore {
     ) -> TerminalDrainReport {
         let started = Instant::now();
         let mut report = TerminalDrainReport::default();
+        if let Some(status) = self
+            .handle
+            .as_ref()
+            .and_then(SshPtyHandle::take_x11_forwarding_status)
+        {
+            self.parser_state
+                .pending_events
+                .push(TerminalEvent::X11ForwardingStatus(status));
+            report.mark_changed();
+        }
         loop {
             // The parser has already consumed this suffix. Retry persistence
             // before reading more transport bytes or marking EOF as complete.

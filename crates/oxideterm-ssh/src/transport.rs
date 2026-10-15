@@ -522,6 +522,7 @@ pub struct SshPtyHandle {
     pub output_rx: SshOutputReceiver,
     auth_banners: AuthBannerSink,
     shell_started: Arc<AtomicBool>,
+    x11_status: Arc<parking_lot::Mutex<Option<X11ForwardingStatus>>>,
     ssh_connection: Option<SshConnectionHandle>,
     registry_release: Option<(SshConnectionRegistry, String, ConnectionConsumer)>,
 }
@@ -840,6 +841,10 @@ impl SshShellChannel {
 }
 
 impl SshPtyHandle {
+    pub fn take_x11_forwarding_status(&self) -> Option<X11ForwardingStatus> {
+        self.x11_status.lock().take()
+    }
+
     pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
         self.audit.clone()
     }
