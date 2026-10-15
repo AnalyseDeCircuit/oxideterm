@@ -1,4 +1,5 @@
 use super::super::*;
+use oxideterm_terminal::TerminalSessionKind;
 
 impl WorkspaceApp {
     const WORKSPACE_ASYNC_RUNTIME_WORKER_THREADS: usize = 2;
@@ -999,17 +1000,26 @@ impl WorkspaceApp {
             })
             .unwrap_or(("local_terminal", None, TabKind::LocalTerminal));
         let mut preferences = self.terminal_preferences_for_background_key(key, cx);
+        if let Some(history) = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .get(&pane_id)
+            .map(|pane| pane.read(cx))
+            .filter(|pane| {
+                matches!(
+                    pane.session_kind(),
+                    TerminalSessionKind::Telnet
+                        | TerminalSessionKind::Serial
+                        | TerminalSessionKind::Mosh
+                )
+            })
+            .map(|pane| pane.command_history())
+        {
+            preferences.command_history = history;
+            return preferences;
+        }
         preferences.command_history = match kind {
-            TabKind::LocalTerminal
-                if session_id.is_some_and(|id| self.serial_terminal_configs.contains_key(&id)) =>
-            {
-                self.tab_host
-                    .read(cx)
-                    .panes()
-                    .get(&pane_id)
-                    .map(|pane| pane.read(cx).command_history())
-                    .unwrap_or_default()
-            }
             TabKind::LocalTerminal => self.local_terminal_command_history.clone(),
             TabKind::SshTerminal => session_id
                 .and_then(|session_id| {

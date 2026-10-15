@@ -1709,6 +1709,13 @@ impl TerminalPane {
                     // respecting them so input to a running command is not treated as a prompt.
                     && (!self.shell_integration_status.detected || self.autosuggest_prompt_active)
             }
+            None if matches!(
+                self.session_kind,
+                TerminalSessionKind::Telnet | TerminalSessionKind::Mosh
+            ) =>
+            {
+                !self.shell_integration_status.detected || self.autosuggest_prompt_active
+            }
             None => self.autosuggest_prompt_active,
         };
         prompt_available
@@ -1726,7 +1733,12 @@ impl TerminalPane {
             .get(self.snapshot.cursor_row)
             .is_some_and(|row| row.active_input);
         if !self.preferences.autosuggest_enabled
-            || (!self.autosuggest_prompt_active && !self.is_serial_transport())
+            || (!self.autosuggest_prompt_active
+                && !self.is_serial_transport()
+                && !matches!(
+                    self.session_kind,
+                    TerminalSessionKind::Telnet | TerminalSessionKind::Mosh
+                ))
             || self.marked_text.is_some()
             || self.tmux_prompt.is_some()
             || self.pending_paste.is_some()
@@ -5676,98 +5688,119 @@ mod tests {
     }
 
     #[gpui::test]
-    fn serial_text_history_does_not_require_shell_integration(cx: &mut TestAppContext) {
+    fn console_text_history_does_not_require_shell_integration(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
-        let pane = cx.update(|window, cx| {
-            cx.new(|cx| {
-                TerminalPane::new_recording_playback(
-                    DEFAULT_COLS,
-                    DEFAULT_ROWS,
-                    TerminalUiPreferences::default(),
-                    window,
-                    cx,
-                )
-                .unwrap()
-                .with_serial_session_config(SerialSessionConfig {
-                    port_path: "test-serial-console".into(),
-                    baud_rate: 115_200,
-                    data_bits: 8,
-                    stop_bits: 1,
-                    parity: oxideterm_terminal::SerialParity::None,
-                    flow_control: oxideterm_terminal::SerialFlowControl::None,
-                    runtime_options: SerialRuntimeOptions::default(),
+        for session_kind in [
+            TerminalSessionKind::Serial,
+            TerminalSessionKind::Telnet,
+            TerminalSessionKind::Mosh,
+        ] {
+            let pane = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    let pane = TerminalPane::new_recording_playback(
+                        DEFAULT_COLS,
+                        DEFAULT_ROWS,
+                        TerminalUiPreferences::default(),
+                        window,
+                        cx,
+                    )
+                    .unwrap();
+                    if session_kind != TerminalSessionKind::Serial {
+                        return pane;
+                    }
+                    pane.with_serial_session_config(SerialSessionConfig {
+                        port_path: "test-serial-console".into(),
+                        baud_rate: 115_200,
+                        data_bits: 8,
+                        stop_bits: 1,
+                        parity: oxideterm_terminal::SerialParity::None,
+                        flow_control: oxideterm_terminal::SerialFlowControl::None,
+                        runtime_options: SerialRuntimeOptions::default(),
+                    })
                 })
-            })
-        });
-        pane.update(cx, |pane, cx| {
-            pane.test_accepts_input = true;
-            pane.terminal.lock().feed_recording_output(b"device> ");
-            pane.tick(cx);
-            assert!(pane.send_command_line("show interfaces", cx));
-            assert!(pane.send_command_line("show version", cx));
-            pane.send_user_protocol_bytes(b"show inter", cx);
-            assert_eq!(
-                pane.terminal_autosuggest_candidates()
-                    .into_iter()
-                    .map(|candidate| candidate.command)
-                    .collect::<Vec<_>>(),
-                ["show interfaces"]
-            );
-            assert!(pane.fill_terminal_autosuggest_command("show interfaces", false, cx));
-            assert_eq!(pane.input_tracker.state().value, "show interfaces");
-            pane.send_user_protocol_bytes(b"\r", cx);
+            });
+            pane.update(cx, |pane, cx| {
+                pane.test_accepts_input = true;
+                pane.session_kind = session_kind;
+                pane.terminal.lock().feed_recording_output(b"device> ");
+                pane.tick(cx);
+                assert!(pane.send_command_line("show interfaces", cx));
+                assert!(pane.send_command_line("show version", cx));
+                pane.send_user_protocol_bytes(b"show inter", cx);
+                assert_eq!(
+                    pane.terminal_autosuggest_candidates()
+                        .into_iter()
+                        .map(|candidate| candidate.command)
+                        .collect::<Vec<_>>(),
+                    ["show interfaces"],
+                    "{session_kind:?}"
+                );
+                assert!(pane.fill_terminal_autosuggest_command("show interfaces", false, cx));
+                assert_eq!(pane.input_tracker.state().value, "show interfaces");
+                pane.send_user_protocol_bytes(b"\r", cx);
 
-            for (display_mode, send_mode) in [
-                (SerialDisplayMode::Hex, SerialSendMode::Text),
-                (SerialDisplayMode::Mixed, SerialSendMode::Text),
-                (SerialDisplayMode::Text, SerialSendMode::Hex),
-            ] {
-                let options = &mut pane.serial_session_config.as_mut().unwrap().runtime_options;
-                options.display_mode = display_mode;
-                options.send_mode = send_mode;
-                pane.send_user_protocol_bytes(b"show", cx);
-                assert!(pane.terminal_autosuggest_candidates().is_empty());
-                pane.send_user_protocol_bytes(b" opaque data\r", cx);
-            }
-            pane.serial_session_config.as_mut().unwrap().runtime_options =
-                SerialRuntimeOptions::default();
-            pane.send_user_protocol_bytes(b"show", cx);
-            pane.privilege_prompt_tracker.observe_terminal_prompt_event(
-                oxideterm_terminal::TerminalPrivilegePromptEvent::Visible {
-                    prompt: oxideterm_terminal::detect_terminal_privilege_prompt("Password:")
-                        .unwrap(),
-                    retry: false,
-                },
-                Instant::now(),
-            );
-            assert!(pane.terminal_autosuggest_candidates().is_empty());
-            pane.send_user_protocol_bytes(b"test-private-answer", cx);
-            pane.send_user_protocol_bytes(b"\r", cx);
-            assert!(pane.send_command_line("show routes", cx));
-            pane.send_user_protocol_bytes(b"show rout", cx);
-            assert_eq!(
-                pane.terminal_autosuggest_candidates()
-                    .into_iter()
-                    .map(|candidate| candidate.command)
-                    .collect::<Vec<_>>(),
-                ["show routes"]
-            );
-            pane.terminal.lock().feed_recording_output(b"\x1b[?1049h");
-            pane.send_user_protocol_bytes(b"show tui input\r", cx);
-            assert!(pane.terminal_autosuggest_candidates().is_empty());
-            assert_eq!(
-                pane.history_command_records()
-                    .into_iter()
-                    .map(|record| record.command)
-                    .collect::<Vec<_>>(),
-                [
-                    "show interfaces",
-                    "show version",
-                    "show interfaces",
-                    "show routes"
+                for (display_mode, send_mode) in [
+                    (SerialDisplayMode::Hex, SerialSendMode::Text),
+                    (SerialDisplayMode::Mixed, SerialSendMode::Text),
+                    (SerialDisplayMode::Text, SerialSendMode::Hex),
                 ]
-            );
-        });
+                .into_iter()
+                .filter(|_| session_kind == TerminalSessionKind::Serial)
+                {
+                    let options = &mut pane.serial_session_config.as_mut().unwrap().runtime_options;
+                    options.display_mode = display_mode;
+                    options.send_mode = send_mode;
+                    pane.send_user_protocol_bytes(b"show", cx);
+                    assert!(pane.terminal_autosuggest_candidates().is_empty());
+                    pane.send_user_protocol_bytes(b" opaque data\r", cx);
+                }
+                if let Some(config) = pane.serial_session_config.as_mut() {
+                    config.runtime_options = SerialRuntimeOptions::default();
+                }
+                pane.send_user_protocol_bytes(b"show", cx);
+                pane.privilege_prompt_tracker.observe_terminal_prompt_event(
+                    oxideterm_terminal::TerminalPrivilegePromptEvent::Visible {
+                        prompt: oxideterm_terminal::detect_terminal_privilege_prompt("Password:")
+                            .unwrap(),
+                        retry: false,
+                    },
+                    Instant::now(),
+                );
+                assert!(pane.terminal_autosuggest_candidates().is_empty());
+                pane.send_user_protocol_bytes(b"test-private-answer", cx);
+                pane.send_user_protocol_bytes(b"\r", cx);
+                assert!(pane.send_command_line("show routes", cx));
+                pane.send_user_protocol_bytes(b"show rout", cx);
+                assert_eq!(
+                    pane.terminal_autosuggest_candidates()
+                        .into_iter()
+                        .map(|candidate| candidate.command)
+                        .collect::<Vec<_>>(),
+                    ["show routes"]
+                );
+                pane.terminal.lock().feed_recording_output(b"\x1b[?1049h");
+                pane.send_user_protocol_bytes(b"show tui input\r", cx);
+                assert!(pane.terminal_autosuggest_candidates().is_empty());
+                pane.terminal
+                    .lock()
+                    .feed_recording_output(b"\x1b[?1049l\x1b]133;C\x07");
+                pane.tick(cx);
+                pane.send_user_protocol_bytes(b"show running-command input\r", cx);
+                assert_eq!(
+                    pane.history_command_records()
+                        .into_iter()
+                        .map(|record| record.command)
+                        .collect::<Vec<_>>(),
+                    [
+                        "show interfaces",
+                        "show version",
+                        "show interfaces",
+                        "show routes"
+                    ],
+                    "{session_kind:?}"
+                );
+            });
+        }
     }
 
     #[gpui::test]
