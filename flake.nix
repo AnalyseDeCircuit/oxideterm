@@ -58,6 +58,33 @@
         system:
         let
           pkgs = pkgsFor system;
+          runtimeLibs = with pkgs; [
+            alsa-lib
+            dbus
+            fontconfig
+            freetype
+            gst_all_1.gst-plugins-base
+            gst_all_1.gst-plugins-good
+            gst_all_1.gst-libav
+            gst_all_1.gstreamer
+            krb5
+            libdrm
+            libGL
+            libunwind
+            libx11
+            libxcb
+            libxcursor
+            libxfixes
+            libxinerama
+            libxkbcommon
+            libxrandr
+            mesa
+            openh264
+            openssl
+            udev
+            vulkan-loader
+            wayland
+          ];
         in
         {
           default = pkgs.mkShell {
@@ -79,32 +106,11 @@
                 rustfmt
                 libclang
               ]
-              ++ (with pkgs; [
-                alsa-lib
-                dbus
-                fontconfig
-                freetype
-                gst_all_1.gst-plugins-base
-                gst_all_1.gst-plugins-good
-                gst_all_1.gst-libav
-                gst_all_1.gstreamer
-                krb5
-                libGL
-                libunwind
-                libx11
-                libxcb
-                libxcursor
-                libxfixes
-                libxinerama
-                libxkbcommon
-                libxrandr
-                openh264
-                openssl
-                udev
-                vulkan-loader
-                wayland
-              ]);
+              ++ runtimeLibs;
             LIBCLANG_PATH = "${pkgs.libclang.lib}/lib";
+            # Expose Nix-provided runtime libraries so the cargo-built binary can
+            # dlopen Vulkan/EGL/GPU drivers when running via `cargo run`.
+            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath runtimeLibs;
           };
         }
       );
