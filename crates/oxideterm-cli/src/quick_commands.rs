@@ -137,6 +137,7 @@ fn create(args: QuickCommandCreateArgs) -> CliResult<i32> {
         availability: QuickCommandAvailability {
             protocols: args.protocol.into_iter().map(core_protocol).collect(),
             host_patterns: args.host_pattern,
+            match_field: Default::default(),
         },
         confirmation: core_confirmation(args.confirmation),
         sort_order: snapshot
