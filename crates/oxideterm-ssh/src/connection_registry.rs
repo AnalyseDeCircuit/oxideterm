@@ -41,7 +41,8 @@ const REMOTE_ENV_TOTAL_TIMEOUT: Duration = Duration::from_secs(8);
 const REMOTE_ENV_PHASE_A_TIMEOUT: Duration = Duration::from_secs(3);
 const REMOTE_ENV_PHASE_B_TIMEOUT: Duration = Duration::from_secs(5);
 const REMOTE_ENV_MAX_OUTPUT_SIZE: usize = 8192;
-const REMOTE_ENV_PHASE_A_CMD: &str = "echo '===DETECT==='; if [ -n \"$PSModulePath\" ]; then echo 'PLATFORM=windows'; else echo \"PLATFORM=$(uname -s 2>/dev/null || echo unknown)\"; fi; echo '===END==='";
+// SSH exec uses the login shell, which may not understand POSIX conditionals.
+const REMOTE_ENV_PHASE_A_CMD: &str = r#"sh -c 'echo "===DETECT==="; if [ -n "$PSModulePath" ]; then echo "PLATFORM=windows"; else echo "PLATFORM=$(uname -s 2>/dev/null || echo unknown)"; fi; echo "===END==="'"#;
 const REMOTE_ENV_PHASE_B_UNIX_CMD: &str = "echo '===ENV==='; uname -s 2>/dev/null; echo '===ARCH==='; uname -m 2>/dev/null; echo '===KERNEL==='; uname -r 2>/dev/null; echo '===SHELL==='; echo $SHELL 2>/dev/null; echo '===HOME==='; echo $HOME 2>/dev/null; echo '===ZDOTDIR==='; echo $ZDOTDIR 2>/dev/null; echo '===XDG_CONFIG_HOME==='; echo $XDG_CONFIG_HOME 2>/dev/null; echo '===DISTRO==='; cat /etc/os-release 2>/dev/null | grep -E '^(PRETTY_NAME|ID)=' | head -2; echo '===END==='";
 const REMOTE_ENV_PHASE_B_WINDOWS_CMD: &str = "echo '===ENV==='; [System.Environment]::OSVersion.VersionString; echo '===ARCH==='; $env:PROCESSOR_ARCHITECTURE; echo '===SHELL==='; \"PowerShell $($PSVersionTable.PSVersion)\"; echo '===HOME==='; $HOME; echo '===ZDOTDIR==='; echo '===XDG_CONFIG_HOME==='; echo '===END==='";
 
@@ -2313,6 +2314,42 @@ mod tests {
         assert_eq!(
             parsed.xdg_config_home.as_deref(),
             Some("/home/alice/.config")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires Fish installed"]
+    fn remote_env_probe_runs_under_fish() {
+        let run = |command: &str| {
+            let output = std::process::Command::new("fish")
+                .args(["--no-config", "-c", command])
+                .env_clear()
+                .env("PATH", std::env::var_os("PATH").unwrap_or_default())
+                .env("SHELL", "/usr/bin/fish")
+                .env("HOME", "/home/fish-test")
+                .env("XDG_CONFIG_HOME", "/home/fish-test/config")
+                .output()
+                .expect("run Fish environment probe");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            String::from_utf8(output.stdout).unwrap()
+        };
+        let platform_output = run(REMOTE_ENV_PHASE_A_CMD);
+        let platform = extract_between(&platform_output, "PLATFORM=", "\n").unwrap();
+        assert!(matches!(
+            platform.as_str(),
+            "Linux" | "Darwin" | "FreeBSD" | "OpenBSD" | "NetBSD"
+        ));
+        let env = parse_remote_unix_env(&run(REMOTE_ENV_PHASE_B_UNIX_CMD), &platform);
+        assert_eq!(env.shell.as_deref(), Some("/usr/bin/fish"));
+        assert_eq!(env.home.as_deref(), Some("/home/fish-test"));
+        assert_eq!(
+            env.xdg_config_home.as_deref(),
+            Some("/home/fish-test/config")
         );
     }
 
