@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "在本機儲存命令歷史",
+      "save_hint": "將完整 SSH 命令儲存在本機未加密檔案中，包括命令參數中的密碼或權杖。啟用後開始儲存。",
+      "retention": "保留天數",
+      "retention_hint": "0 表示永久保留。所有已儲存的 SSH 連線合計最多保留 10,000 筆記錄。",
+      "current": "目前連線",
+      "all": "所有連線",
+      "pause": "暫停記錄目前連線",
+      "resume": "恢復記錄目前連線",
+      "clear_current": "清除目前連線歷史",
+      "clear_all": "清除所有 SSH 歷史",
+      "clear_confirm": "刪除所有連線已儲存及記憶體中的 SSH 命令歷史？此操作不會修改 Shell 本身的歷史檔案。",
+      "clear_confirm_current": "刪除目前連線已儲存及記憶體中的命令歷史？此操作不會修改 Shell 本身的歷史檔案。",
+      "delete": "從歷史中刪除",
+      "empty": "沒有符合的命令",
+      "error": "命令歷史讀取或儲存失敗，最近輸入的命令仍可在記憶體中使用。"
+    },
     "reconnect_hint": "工作階段已中斷 · 按 Enter 重新連線",
     "control_bar": {
       "show_controls": "展開操作列",

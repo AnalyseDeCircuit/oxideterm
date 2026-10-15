@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Salvar histórico neste dispositivo",
+      "save_hint": "Salva comandos SSH completos em um arquivo local sem criptografia, incluindo senhas ou tokens nos argumentos. O salvamento começa ao ativar.",
+      "retention": "Retenção (dias)",
+      "retention_hint": "0 mantém o histórico indefinidamente. Até 10.000 registros são mantidos entre todas as conexões SSH salvas.",
+      "current": "Conexão atual",
+      "all": "Todas as conexões",
+      "pause": "Pausar histórico desta conexão",
+      "resume": "Retomar histórico desta conexão",
+      "clear_current": "Limpar histórico desta conexão",
+      "clear_all": "Limpar todo o histórico SSH",
+      "clear_confirm": "Excluir o histórico SSH salvo e em memória de todas as conexões? Os arquivos de histórico do shell não serão alterados.",
+      "clear_confirm_current": "Excluir o histórico salvo e em memória desta conexão? Os arquivos de histórico do shell não serão alterados.",
+      "delete": "Excluir do histórico",
+      "empty": "Nenhum comando correspondente",
+      "error": "Não foi possível carregar ou salvar o histórico. Os comandos recentes continuam disponíveis na memória."
+    },
     "reconnect_hint": "Sessão desconectada · Pressione Enter para reconectar",
     "control_bar": {
       "show_controls": "Mostrar controles",

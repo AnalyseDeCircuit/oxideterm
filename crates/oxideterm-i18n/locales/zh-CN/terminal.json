@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "在本机保存命令历史",
+      "save_hint": "将完整 SSH 命令保存在本机未加密文件中，包括命令参数中的密码或令牌。开启后开始保存。",
+      "retention": "保留天数",
+      "retention_hint": "0 表示一直保留。所有已保存的 SSH 连接合计最多保留 10,000 条记录。",
+      "current": "当前连接",
+      "all": "全部连接",
+      "pause": "暂停记录当前连接",
+      "resume": "恢复记录当前连接",
+      "clear_current": "清空当前连接历史",
+      "clear_all": "清空全部 SSH 历史",
+      "clear_confirm": "删除所有连接已保存和内存中的 SSH 命令历史？此操作不会修改 Shell 自身的历史文件。",
+      "clear_confirm_current": "删除当前连接已保存和内存中的命令历史？此操作不会修改 Shell 自身的历史文件。",
+      "delete": "从历史中删除",
+      "empty": "没有匹配的命令",
+      "error": "命令历史读取或保存失败，最近输入的命令仍可在内存中使用。"
+    },
     "reconnect_hint": "会话已断开 · 按回车重新连接",
     "control_bar": {
       "show_controls": "展开操作栏",

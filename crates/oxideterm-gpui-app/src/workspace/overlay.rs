@@ -64,6 +64,9 @@ pub(in crate::workspace) enum WorkspaceOverlayIntent {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceOverlayConfirmKind {
     SettingsReset,
+    CommandHistoryClear {
+        all: bool,
+    },
     LegalNotice,
     ThirdPartyNotices,
     NativeUpdateReleaseNotes,
@@ -83,6 +86,7 @@ pub(in crate::workspace) struct WorkspaceOverlayConfirmSnapshot {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceOverlayConfirmEffect {
     ResetSettings,
+    ClearCommandHistory { all: bool },
     DisconnectNode { node_id: NodeId },
 }
 
@@ -96,6 +100,7 @@ pub(in crate::workspace) enum WorkspaceOverlayConfirmKeyAction {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceOverlayConfirmOwnerKind {
     SettingsReset,
+    CommandHistoryClear,
     LegalNotice,
     NativeUpdateReleaseNotes,
     NodeDisconnect,
@@ -378,6 +383,9 @@ impl WorkspaceOverlayEntity {
             .as_ref()
             .map(|confirm| WorkspaceOverlayConfirmOwnerSnapshot {
                 kind: match confirm {
+                    WorkspaceOverlayConfirmKind::CommandHistoryClear { .. } => {
+                        WorkspaceOverlayConfirmOwnerKind::CommandHistoryClear
+                    }
                     WorkspaceOverlayConfirmKind::SettingsReset => {
                         WorkspaceOverlayConfirmOwnerKind::SettingsReset
                     }
@@ -415,6 +423,7 @@ impl WorkspaceOverlayEntity {
         let actions = if matches!(
             confirm,
             WorkspaceOverlayConfirmKind::SettingsReset
+                | WorkspaceOverlayConfirmKind::CommandHistoryClear { .. }
                 | WorkspaceOverlayConfirmKind::NodeDisconnect { .. }
         ) {
             &FULL_ACTIONS[..]
@@ -463,6 +472,9 @@ impl WorkspaceOverlayEntity {
         self.confirm_focused_action = None;
         let effect = if confirmed {
             match confirm {
+                WorkspaceOverlayConfirmKind::CommandHistoryClear { all } => {
+                    Some(WorkspaceOverlayConfirmEffect::ClearCommandHistory { all: *all })
+                }
                 WorkspaceOverlayConfirmKind::SettingsReset => {
                     Some(WorkspaceOverlayConfirmEffect::ResetSettings)
                 }

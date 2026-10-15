@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Save command history on this device",
+      "save_hint": "Save complete SSH commands in an unencrypted local file, including any passwords or tokens in command arguments. Saving starts when enabled.",
+      "retention": "Retention (days)",
+      "retention_hint": "0 keeps history indefinitely. Up to 10,000 entries are stored across saved SSH connections.",
+      "current": "Current connection",
+      "all": "All connections",
+      "pause": "Pause history for this connection",
+      "resume": "Resume history for this connection",
+      "clear_current": "Clear this connection's history",
+      "clear_all": "Clear all SSH history",
+      "clear_confirm": "Delete saved and in-memory SSH history for all connections? This does not change shell history files.",
+      "clear_confirm_current": "Delete this connection's saved and in-memory history? This does not change shell history files.",
+      "delete": "Delete from history",
+      "empty": "No matching commands",
+      "error": "Command history could not be loaded or saved. Recent commands remain available in memory."
+    },
     "reconnect_hint": "Session disconnected · Press Enter to reconnect",
     "control_bar": {
       "show_controls": "Show controls",

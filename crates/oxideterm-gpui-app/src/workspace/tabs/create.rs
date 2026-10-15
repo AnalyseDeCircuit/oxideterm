@@ -1451,12 +1451,10 @@ impl WorkspaceApp {
         let preference_overrides = self.terminal_preference_overrides_for_ssh_node(node_id);
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
-        // Node-scoped history survives terminal pane replacement but never crosses SSH nodes.
-        preferences.command_history = self
-            .ssh_terminal_command_histories
-            .entry(node_id.clone())
-            .or_default()
-            .clone();
+        // Saved connections retain history across node recreation; temporary nodes stay isolated.
+        preferences.command_history = self.ssh_command_history(node_id).unwrap_or_default();
+        self.ssh_terminal_command_histories
+            .insert(node_id.clone(), preferences.command_history.clone());
         preference_overrides.apply_to(&mut preferences);
         let consumer = ConnectionConsumer::Terminal(session_id.0.to_string());
         let session_config = if dedicated_new_terminal_connection {
@@ -1525,11 +1523,9 @@ impl WorkspaceApp {
         let preference_overrides = self.terminal_preference_overrides_for_ssh_node(node_id);
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::SshTerminal, cx);
-        preferences.command_history = self
-            .ssh_terminal_command_histories
-            .entry(node_id.clone())
-            .or_default()
-            .clone();
+        preferences.command_history = self.ssh_command_history(node_id).unwrap_or_default();
+        self.ssh_terminal_command_histories
+            .insert(node_id.clone(), preferences.command_history.clone());
         preference_overrides.apply_to(&mut preferences);
         self.register_existing_ssh_terminal_session(node_id, session_id, cx)?;
         let shared_session = TerminalPane::ssh_shared_session(session_config, &preferences);

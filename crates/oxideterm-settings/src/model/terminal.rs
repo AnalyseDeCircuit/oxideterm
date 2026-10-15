@@ -46,6 +46,10 @@ pub struct TerminalAutosuggestSettings {
     #[serde(default = "default_terminal_autosuggest_enabled")]
     pub enabled: bool,
     pub local_shell_history: bool,
+    #[serde(default)]
+    pub save_history: bool,
+    #[serde(default = "default_history_retention_days")]
+    pub history_retention_days: u32,
     #[serde(flatten)]
     pub extra: ExtraFields,
 }
@@ -55,6 +59,8 @@ impl Default for TerminalAutosuggestSettings {
         Self {
             enabled: default_terminal_autosuggest_enabled(),
             local_shell_history: true,
+            save_history: false,
+            history_retention_days: default_history_retention_days(),
             extra: ExtraFields::new(),
         }
     }
@@ -62,6 +68,10 @@ impl Default for TerminalAutosuggestSettings {
 
 fn default_terminal_autosuggest_enabled() -> bool {
     true
+}
+
+fn default_history_retention_days() -> u32 {
+    90
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -719,6 +729,8 @@ mod tests {
         let disabled: TerminalAutosuggestSettings =
             serde_json::from_str(r#"{"enabled":false,"localShellHistory":true}"#).unwrap();
         assert!(!disabled.enabled);
+        assert!(!disabled.save_history);
+        assert_eq!(disabled.history_retention_days, 90);
         assert_eq!(settings.background_scope, BackgroundScope::Content);
         assert_eq!(
             settings.backspace_sequence,

@@ -395,6 +395,12 @@ impl TerminalCommandSenderEntity {
         changed
     }
 
+    pub(super) fn show_compact_history(&mut self, cx: &mut Context<Self>) {
+        self.compact_suggestions_open = true;
+        self.compact_suggestion_highlighted = None;
+        cx.notify();
+    }
+
     pub(super) fn active_compact_draft(&self) -> Option<&str> {
         self.document(self.active_document_id)
             .map(|document| document.compact_draft.as_str())

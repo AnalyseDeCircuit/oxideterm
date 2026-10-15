@@ -1696,6 +1696,10 @@ impl TerminalPane {
         self.command_history.records()
     }
 
+    pub fn command_history(&self) -> SharedTerminalCommandHistory {
+        self.command_history.clone()
+    }
+
     fn terminal_autosuggest_candidates(&self) -> Vec<TerminalAutosuggestCandidate> {
         let cursor_row_is_active_input = self
             .snapshot
@@ -2616,11 +2620,20 @@ impl TerminalPane {
         if command.trim().is_empty() {
             return false;
         }
-        let mut input = command.replace("\r\n", "\r").replace('\n', "\r");
+        let mut input = Zeroizing::new(command.replace("\r\n", "\r").replace('\n', "\r"));
         input.push('\r');
-        self.observe_privilege_input("command-line", input.as_bytes(), Instant::now(), cx);
-        self.observe_autosuggest_input_bytes(input.as_bytes(), cx);
-        self.send_text(&input, cx)
+        if !self.send_text(&input, cx) {
+            return false;
+        }
+        if self.observe_privilege_input("command-line", input.as_bytes(), Instant::now(), cx)
+            != PrivilegeInputObservation::SecretEntry
+        {
+            self.observe_autosuggest_input_bytes(input.as_bytes(), cx);
+        } else {
+            self.input_tracker.reset();
+            self.autosuggest_prompt_active = false;
+        }
+        true
     }
 
     pub fn send_command_line_with_mark(
@@ -2820,6 +2833,18 @@ impl TerminalPane {
             self.observe_privilege_input("command-sender-text", &bytes, Instant::now(), cx);
         let at_shell_prompt = self.shell_integration_status.detected
             && self.shell_integration_status.state == ShellIntegrationLifecycleState::Prompt;
+        let text_history_input = std::str::from_utf8(&bytes).is_ok()
+            && !self
+                .terminal
+                .lock()
+                .serial_runtime_options()
+                .is_some_and(|options| options.send_mode == SerialSendMode::Hex);
+        if privilege != PrivilegeInputObservation::SecretEntry && text_history_input {
+            self.observe_autosuggest_input_bytes(&bytes, cx);
+        } else {
+            self.input_tracker.reset();
+            self.autosuggest_prompt_active = false;
+        }
         if whole_line && privilege != PrivilegeInputObservation::SecretEntry && at_shell_prompt {
             let command = std::str::from_utf8(&bytes)
                 .ok()
@@ -5560,6 +5585,59 @@ mod tests {
             assert_eq!(
                 pane.command_marks[0].detection_source,
                 TerminalCommandMarkDetectionSource::Broadcast
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn command_submission_keeps_verbatim_history_and_excludes_password_answers(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.autosuggest_prompt_active = true;
+            assert!(pane.send_command_line("printf 'a  b'", cx));
+            pane.autosuggest_prompt_active = true;
+            pane.privilege_prompt_tracker.observe_terminal_prompt_event(
+                oxideterm_terminal::TerminalPrivilegePromptEvent::Visible {
+                    prompt: oxideterm_terminal::detect_terminal_privilege_prompt(
+                        "[sudo] password for deploy:",
+                    )
+                    .unwrap(),
+                    retry: false,
+                },
+                Instant::now(),
+            );
+            assert!(pane.send_command_line("test-private-answer", cx));
+            assert_eq!(
+                pane.history_command_records()
+                    .iter()
+                    .map(|record| record.command.as_str())
+                    .collect::<Vec<_>>(),
+                ["printf 'a  b'"]
+            );
+            pane.test_accepts_input = false;
+            pane.autosuggest_prompt_active = true;
+            assert!(!pane.send_command_line("unsent command", cx));
+            assert_eq!(
+                pane.history_command_records()
+                    .iter()
+                    .map(|record| record.command.as_str())
+                    .collect::<Vec<_>>(),
+                ["printf 'a  b'"]
             );
         });
     }

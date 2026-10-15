@@ -1073,6 +1073,45 @@ impl WorkspaceApp {
                         set_autosuggest_local_history,
                         cx,
                     ),
+                    self.card_separator(),
+                    self.bool_row(
+                        "terminal.history.save",
+                        "terminal.history.save_hint",
+                        settings.terminal.autosuggest.save_history,
+                        set_save_command_history,
+                        cx,
+                    ),
+                    self.number_row(
+                        "terminal.history.retention",
+                        "terminal.history.retention_hint",
+                        SettingsInput::CommandHistoryRetention,
+                        i64::from(settings.terminal.autosuggest.history_retention_days),
+                        cx,
+                    ),
+                    self.workspace_toolbar_action_button(
+                        self.i18n.t("terminal.history.clear_all"),
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                            ..Default::default()
+                        },
+                        cx.listener(|this, _, _, cx| {
+                            this.open_command_history_clear_confirm(true, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .into_any_element(),
+                    div()
+                        .text_color(rgb(self.tokens.ui.error))
+                        .when(self.terminal_history_store.failed(), |row| {
+                            row.child(self.i18n.t("terminal.history.error"))
+                        })
+                        .into_any_element(),
                 ],
             ),
             (TerminalSettingsPage::CommandBar, 1) => self.settings_card(

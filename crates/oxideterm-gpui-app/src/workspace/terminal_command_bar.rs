@@ -35,6 +35,7 @@ mod bar;
 mod context;
 mod git;
 mod highlight;
+mod history;
 mod privilege;
 mod sender;
 

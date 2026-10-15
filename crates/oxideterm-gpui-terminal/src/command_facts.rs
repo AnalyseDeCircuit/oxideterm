@@ -10,6 +10,10 @@ use oxideterm_terminal::{
     TerminalCommandMarkDetectionSource, terminal_autosuggest_fuzzy_score,
 };
 use parking_lot::Mutex;
+use zeroize::Zeroize;
+
+mod persistence;
+pub use persistence::TerminalHistoryStore;
 
 use crate::terminal_ui::MAX_HIGHLIGHT_PATTERN_LENGTH;
 
@@ -90,6 +94,23 @@ pub struct SharedTerminalCommandHistory {
 #[derive(Default)]
 struct TerminalCommandHistoryState {
     records: Vec<TerminalAutosuggestCommandRecord>,
+    persistence: Option<persistence::HistoryBinding>,
+    persistent_ids: std::collections::HashSet<String>,
+    removed_before_restore: std::collections::HashSet<String>,
+    restore_cleared: bool,
+    restored: bool,
+    paused: bool,
+}
+
+impl Drop for TerminalCommandHistoryState {
+    fn drop(&mut self) {
+        for record in &mut self.records {
+            record.command.zeroize();
+        }
+        for mut command in self.removed_before_restore.drain() {
+            command.zeroize();
+        }
+    }
 }
 
 impl SharedTerminalCommandHistory {
@@ -111,14 +132,15 @@ impl SharedTerminalCommandHistory {
                 }
             })
             .collect::<Vec<_>>();
-        let mut state = TerminalCommandHistoryState { records };
+        let mut state = TerminalCommandHistoryState::default();
+        state.records = records;
         trim_autosuggest_records(&mut state.records);
         Self {
             state: Arc::new(Mutex::new(state)),
         }
     }
 
-    pub(crate) fn records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
+    pub fn records(&self) -> Vec<TerminalAutosuggestCommandRecord> {
         self.state.lock().records.clone()
     }
 
@@ -145,24 +167,89 @@ impl SharedTerminalCommandHistory {
         }
         let now = now_millis();
         let mut state = self.state.lock();
+        if state.paused {
+            return false;
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let binding = state.persistence.clone();
+        if binding.as_ref().is_some_and(|binding| binding.enabled()) {
+            state.persistent_ids.insert(id.clone());
+        }
         state.records.push(TerminalAutosuggestCommandRecord {
-            command_id: format!("runtime-autosuggest-{now}"),
+            command_id: id,
             command: command.to_string(),
             started_at: now,
             finished_at: now,
         });
         trim_autosuggest_records(&mut state.records);
+        if state.persistent_ids.len() > MAX_AUTOSUGGEST_RECORDS {
+            let retained = state
+                .records
+                .iter()
+                .map(|record| record.command_id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            state.persistent_ids.retain(|id| retained.contains(id));
+        }
+        drop(state);
+        if let Some(binding) = binding.filter(|binding| binding.enabled()) {
+            binding.changed();
+        }
         true
     }
 
-    pub(crate) fn remove(&self, command: &str) -> bool {
+    pub fn remove(&self, command: &str) -> bool {
         let mut state = self.state.lock();
         let previous_len = state.records.len();
-        state.records.retain(|record| record.command != command);
-        if state.records.len() == previous_len {
-            return false;
+        let removed_ids = state
+            .records
+            .iter()
+            .filter(|record| record.command == command)
+            .map(|record| record.command_id.clone())
+            .collect::<Vec<_>>();
+        state.records.retain_mut(|record| {
+            if record.command == command {
+                record.command.zeroize();
+                false
+            } else {
+                true
+            }
+        });
+        for id in removed_ids {
+            state.persistent_ids.remove(&id);
         }
-        true
+        if !state.restored {
+            state.removed_before_restore.insert(command.to_owned());
+        }
+        let binding = state.persistence.clone();
+        let changed = state.records.len() != previous_len;
+        drop(state);
+        if let Some(binding) = binding {
+            binding.changed();
+        }
+        changed
+    }
+
+    pub fn clear(&self) {
+        let mut state = self.state.lock();
+        for record in &mut state.records {
+            record.command.zeroize();
+        }
+        state.records.clear();
+        state.persistent_ids.clear();
+        state.restore_cleared = true;
+        let binding = state.persistence.clone();
+        drop(state);
+        if let Some(binding) = binding {
+            binding.changed();
+        }
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.state.lock().paused
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        self.state.lock().paused = paused;
     }
 }
 
@@ -683,6 +770,9 @@ fn autosuggest_candidates_for_records(
 fn trim_autosuggest_records(records: &mut Vec<TerminalAutosuggestCommandRecord>) {
     if records.len() > MAX_AUTOSUGGEST_RECORDS {
         let overflow = records.len() - MAX_AUTOSUGGEST_RECORDS;
+        for record in &mut records[..overflow] {
+            record.command.zeroize();
+        }
         records.drain(0..overflow);
     }
 }

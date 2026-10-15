@@ -1210,7 +1210,11 @@ impl WorkspaceApp {
             )
             .when(
                 overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
-                    matches!(&snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset)
+                    matches!(
+                        &snapshot.kind,
+                        WorkspaceOverlayConfirmKind::SettingsReset
+                            | WorkspaceOverlayConfirmKind::CommandHistoryClear { .. }
+                    )
                 }),
                 |root| root.child(self.render_settings_reset_confirm_dialog(cx)),
             )

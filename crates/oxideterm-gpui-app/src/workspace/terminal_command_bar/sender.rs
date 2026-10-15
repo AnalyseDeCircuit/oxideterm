@@ -262,7 +262,7 @@ impl WorkspaceApp {
                     | TERMINAL_SENDER_COMPACT_BORDER_ALPHA,
             ))
             .bg(background)
-            .when(!suggestions.is_empty(), |row| {
+            .when(focused && suggestions_open, |row| {
                 row.child(self.render_terminal_command_sender_suggestions(
                     &suggestions,
                     suggestion_highlighted,
@@ -313,6 +313,20 @@ impl WorkspaceApp {
                             .child(compact_input),
                     ),
             )
+            .child(self.command_history_icon_button(
+                LucideIcon::History,
+                14.0,
+                "terminal.command_bar.group_history",
+                cx.listener(|this, _, window, cx| {
+                    this.terminal_command_sender.update(cx, |sender, cx| {
+                        sender.set_compact_focused(true, cx);
+                        sender.show_compact_history(cx);
+                    });
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                }),
+                cx,
+            ))
             .when(quick_commands_enabled, |row| {
                 row.child(
                     div()
@@ -1404,18 +1418,17 @@ impl WorkspaceApp {
                 true
             }
             "enter" if !modifiers.platform && !modifiers.shift && !modifiers.alt => {
-                let sender_id = if suggestions_open {
+                if suggestions_open {
                     let suggestions =
                         self.terminal_command_sender_compact_history_suggestions(&document, cx);
-                    suggestion_highlighted
-                        .and_then(|index| suggestions.get(index))
-                        .map(|suggestion| {
-                            self.accept_terminal_command_sender_suggestion(suggestion, cx)
-                        })
-                        .unwrap_or(document.id)
-                } else {
-                    document.id
-                };
+                    if let Some(suggestion) =
+                        suggestion_highlighted.and_then(|index| suggestions.get(index))
+                    {
+                        self.accept_terminal_command_sender_suggestion(suggestion, cx);
+                        return true;
+                    }
+                }
+                let sender_id = document.id;
                 if self.start_terminal_command_sender(sender_id, cx) {
                     self.terminal_command_sender.update(cx, |sender, cx| {
                         sender.clear_compact_text(sender_id, cx);
