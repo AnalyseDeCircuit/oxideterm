@@ -2203,6 +2203,13 @@ impl GraphicsWorkspaceEntity {
             self.reset_vnc_viewer(true);
             return;
         };
+        // A failed or closed viewer stays disconnected until an explicit reconnect.
+        if !matches!(
+            self.status,
+            GraphicsStatus::Starting | GraphicsStatus::Active
+        ) {
+            return;
+        }
         if self.vnc_session_id.as_deref() == Some(session.id.as_str()) && self.vnc_input.is_some() {
             return;
         }
@@ -2561,10 +2568,13 @@ mod delivery_tests {
             })
         ));
         cx.run_until_parked();
-        graphics.read_with(cx, |graphics, _cx| {
+        graphics.update(cx, |graphics, _cx| {
+            // Rendering the surface again must not launch another localhost connection.
+            graphics.ensure_vnc_worker();
             assert_eq!(graphics.status, GraphicsStatus::Error);
             assert_eq!(graphics.error.as_deref(), Some("test disconnect"));
             assert!(graphics.session.is_some());
+            assert!(graphics.vnc_input.is_none());
             assert!(graphics.vnc_render_image.is_none());
             assert!(!graphics.worker_delivery.frame_slot.has_pending_frame());
             assert!(!wake.is_stopped());
