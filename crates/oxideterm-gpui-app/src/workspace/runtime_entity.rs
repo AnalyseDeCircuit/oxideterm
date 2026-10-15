@@ -1231,7 +1231,10 @@ impl WorkspaceRuntimeEntity {
         force_install: bool,
     ) -> bool {
         use settings::RemoteShellIntegrationFailure;
-        let Some(generation) = self.remote_shell_integration.begin_terminal_gate(&node_id) else {
+        let Some(generation) = self
+            .remote_shell_integration
+            .begin_terminal_gate(&node_id, force_install)
+        else {
             return false;
         };
         let mode = self.remote_shell_integration.deployment_mode();

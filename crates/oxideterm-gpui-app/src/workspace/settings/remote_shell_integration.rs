@@ -3,11 +3,11 @@ use super::*;
 pub(in crate::workspace) struct RemoteShellIntegrationRuntimeState {
     node_id: Option<NodeId>,
     status: Option<RemoteShellIntegrationStatus>,
-    error: bool,
+    failure: Option<RemoteShellIntegrationFailure>,
     confirm_node_id: Option<NodeId>,
     confirm_source: Option<RemoteShellIntegrationConfirmSource>,
     terminal_ready_nodes: HashSet<NodeId>,
-    terminal_checking_nodes: HashMap<NodeId, u64>,
+    terminal_checking_nodes: HashMap<NodeId, (u64, bool)>,
     terminal_prompt_nodes: VecDeque<NodeId>,
     suppress_future_terminal_prompts: bool,
     mode: RemoteShellIntegrationMode,
@@ -40,7 +40,7 @@ pub(in crate::workspace) struct RemoteShellIntegrationConfirmSnapshot {
 #[derive(Clone)]
 pub(in crate::workspace) struct RemoteShellIntegrationCardSnapshot {
     pub(in crate::workspace) status: Option<RemoteShellIntegrationStatus>,
-    pub(in crate::workspace) error: bool,
+    pub(in crate::workspace) failure: Option<RemoteShellIntegrationFailure>,
     pub(in crate::workspace) pending: bool,
 }
 
@@ -74,7 +74,7 @@ impl Default for RemoteShellIntegrationRuntimeState {
         Self {
             node_id: None,
             status: None,
-            error: false,
+            failure: None,
             confirm_node_id: None,
             confirm_source: None,
             terminal_ready_nodes: HashSet::new(),
@@ -133,7 +133,7 @@ impl RemoteShellIntegrationRuntimeState {
         if self.node_id.as_ref() == Some(node_id) {
             self.node_id = None;
             self.status = None;
-            self.error = false;
+            self.failure = None;
         }
         if self
             .maintenance
@@ -144,7 +144,11 @@ impl RemoteShellIntegrationRuntimeState {
         }
     }
 
-    pub(in crate::workspace) fn begin_terminal_gate(&mut self, node_id: &NodeId) -> Option<u64> {
+    pub(in crate::workspace) fn begin_terminal_gate(
+        &mut self,
+        node_id: &NodeId,
+        force_install: bool,
+    ) -> Option<u64> {
         if !self.awareness_enabled
             || self.mode == RemoteShellIntegrationMode::Disabled
             || self.terminal_ready_nodes.contains(node_id)
@@ -154,7 +158,7 @@ impl RemoteShellIntegrationRuntimeState {
         }
         let generation = self.next_generation();
         self.terminal_checking_nodes
-            .insert(node_id.clone(), generation);
+            .insert(node_id.clone(), (generation, force_install));
         Some(generation)
     }
 
@@ -167,7 +171,12 @@ impl RemoteShellIntegrationRuntimeState {
             RemoteShellIntegrationFailure,
         >,
     ) -> RemoteShellIntegrationGateOutcome {
-        if self.terminal_checking_nodes.get(&node_id) != Some(&generation) {
+        let Some((current_generation, force_install)) =
+            self.terminal_checking_nodes.get(&node_id).copied()
+        else {
+            return RemoteShellIntegrationGateOutcome::Stale;
+        };
+        if current_generation != generation {
             return RemoteShellIntegrationGateOutcome::Stale;
         }
         self.terminal_checking_nodes.remove(&node_id);
@@ -180,13 +189,13 @@ impl RemoteShellIntegrationRuntimeState {
                     .retain(|queued| queued != &node_id);
                 self.node_id = Some(node_id);
                 self.status = Some(status);
-                self.error = false;
+                self.failure = None;
                 RemoteShellIntegrationGateOutcome::Applied
             }
             Ok((status, _)) if self.mode == RemoteShellIntegrationMode::Ask => {
                 self.node_id = Some(node_id.clone());
                 self.status = Some(status);
-                self.error = false;
+                self.failure = None;
                 if !self.terminal_prompt_nodes.contains(&node_id)
                     && self.confirm_node_id.as_ref() != Some(&node_id)
                 {
@@ -198,7 +207,7 @@ impl RemoteShellIntegrationRuntimeState {
             Ok(_) | Err(_)
                 if self.mode == RemoteShellIntegrationMode::Disabled || !self.awareness_enabled =>
             {
-                self.error = false;
+                self.failure = None;
                 RemoteShellIntegrationGateOutcome::Applied
             }
             Ok((_, false)) if self.mode == RemoteShellIntegrationMode::Enabled => {
@@ -207,15 +216,21 @@ impl RemoteShellIntegrationRuntimeState {
             Ok((status, _)) => {
                 self.node_id = Some(node_id);
                 self.status = Some(status);
-                self.error = true;
+                self.failure = Some(RemoteShellIntegrationFailure::InstallationIncomplete);
                 RemoteShellIntegrationGateOutcome::Failed(
                     RemoteShellIntegrationFailure::InstallationIncomplete,
                 )
             }
             Err(failure) => {
                 self.node_id = Some(node_id);
-                self.error = !failure.is_unsupported_shell();
-                RemoteShellIntegrationGateOutcome::Failed(failure)
+                self.status = None;
+                self.failure = Some(failure);
+                if failure.is_unsupported_shell() && !force_install {
+                    // Unsupported optional integration stays visible in Settings without a toast.
+                    RemoteShellIntegrationGateOutcome::Applied
+                } else {
+                    RemoteShellIntegrationGateOutcome::Failed(failure)
+                }
             }
         }
     }
@@ -272,7 +287,7 @@ impl RemoteShellIntegrationRuntimeState {
         let state_matches_node = self.node_id.as_ref() == node_id;
         RemoteShellIntegrationCardSnapshot {
             status: state_matches_node.then(|| self.status.clone()).flatten(),
-            error: state_matches_node && self.error,
+            failure: state_matches_node.then_some(self.failure).flatten(),
             pending: self.pending(),
         }
     }
@@ -291,7 +306,7 @@ impl RemoteShellIntegrationRuntimeState {
         let generation = self.next_generation();
         self.node_id = Some(node_id.clone());
         self.status = status;
-        self.error = false;
+        self.failure = None;
         self.confirm_node_id = None;
         self.confirm_source = None;
         self.maintenance = Some((node_id, generation));
@@ -327,7 +342,7 @@ impl RemoteShellIntegrationRuntimeState {
                     self.terminal_ready_nodes.remove(&node_id);
                 }
                 self.status = Some(status);
-                self.error = false;
+                self.failure = None;
                 Some(match action {
                     RemoteShellIntegrationAction::Inspect => {
                         RemoteShellIntegrationNotice::Inspected
@@ -344,7 +359,7 @@ impl RemoteShellIntegrationRuntimeState {
                 })
             }
             Err(failure) => {
-                self.error = !failure.is_unsupported_shell();
+                self.failure = Some(failure);
                 Some(RemoteShellIntegrationNotice::Failed(failure))
             }
         }
@@ -610,14 +625,7 @@ impl WorkspaceApp {
             .read(cx)
             .remote_shell_integration_card_snapshot(node_id.as_ref());
         let status = state.status;
-        let error = state.error.then(|| {
-            format!(
-                "{}: {}",
-                self.i18n
-                    .t("settings_view.connections.shell_integration.status"),
-                self.i18n.t("common.status.error")
-            )
-        });
+        let failure = state.failure;
         // The backend owns one operation at a time even if the user selects a
         // different host while the previous operation is still completing.
         let pending = state.pending;
@@ -655,17 +663,22 @@ impl WorkspaceApp {
                             status.startup_file,
                         ))
                 })
-                .when_some(error, |content, error| {
+                .when_some(failure, |content, failure| {
+                    let color = if failure.is_unsupported_shell() {
+                        self.tokens.ui.text_muted
+                    } else {
+                        self.tokens.ui.error
+                    };
                     content.child(
                         div()
                             .rounded(px(self.tokens.radii.md))
                             .border_1()
-                            .border_color(rgb(self.tokens.ui.error))
+                            .border_color(rgb(color))
                             .px(px(12.0))
                             .py(px(10.0))
                             .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.error))
-                            .child(error),
+                            .text_color(rgb(color))
+                            .child(self.i18n.t(failure.message_key())),
                     )
                 })
                 .child(
@@ -1016,8 +1029,7 @@ mod tests {
     }
 
     #[test]
-    fn shell_integration_gate_preserves_failure_reasons_and_treats_unsupported_shell_as_information()
-     {
+    fn shell_integration_gate_keeps_unsupported_shell_silent_until_requested() {
         use oxideterm_terminal::RemoteShellIntegrationError;
         let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
         for (error, description, variant) in [
@@ -1037,25 +1049,43 @@ mod tests {
                 TerminalNoticeVariant::Warning,
             ),
         ] {
-            let mut state = RemoteShellIntegrationRuntimeState::default();
-            state.configure(RemoteShellIntegrationMode::Ask, true);
-            let node_id = NodeId("shared-node".to_string());
-            let generation = state.begin_terminal_gate(&node_id).unwrap();
-            let failure = RemoteShellIntegrationFailure::Integration(error);
-            let RemoteShellIntegrationGateOutcome::Failed(actual) =
-                state.finish_terminal_gate(node_id.clone(), generation, Err(failure))
-            else {
-                panic!("the check must preserve its failure category");
-            };
-            assert_eq!(actual, failure);
-            let notice = RemoteShellIntegrationNotice::CheckFailed(actual).terminal_notice(&i18n);
-            assert_eq!(notice.description.as_deref(), Some(description));
-            assert_eq!(notice.variant, variant);
-            assert_eq!(
-                state.card_snapshot(Some(&node_id)).error,
-                error != RemoteShellIntegrationError::UnsupportedShell
-            );
+            for force_install in [false, true] {
+                let mut state = RemoteShellIntegrationRuntimeState::default();
+                state.configure(RemoteShellIntegrationMode::Ask, true);
+                let node_id = NodeId("shared-node".to_string());
+                let generation = state.begin_terminal_gate(&node_id, force_install).unwrap();
+                let failure = RemoteShellIntegrationFailure::Integration(error);
+                let outcome = state.finish_terminal_gate(node_id.clone(), generation, Err(failure));
+                if error == RemoteShellIntegrationError::UnsupportedShell && !force_install {
+                    assert!(matches!(
+                        outcome,
+                        RemoteShellIntegrationGateOutcome::Applied
+                    ));
+                } else {
+                    let RemoteShellIntegrationGateOutcome::Failed(actual) = outcome else {
+                        panic!("requested operations and actual failures must report their reason");
+                    };
+                    assert_eq!(actual, failure);
+                    let notice =
+                        RemoteShellIntegrationNotice::CheckFailed(actual).terminal_notice(&i18n);
+                    assert_eq!(notice.description.as_deref(), Some(description));
+                    assert_eq!(notice.variant, variant);
+                }
+                assert_eq!(state.card_snapshot(Some(&node_id)).failure, Some(failure));
+            }
         }
+        let mut state = RemoteShellIntegrationRuntimeState::default();
+        let node_id = NodeId("manual-inspection".into());
+        let action = RemoteShellIntegrationAction::Inspect;
+        let generation = state.begin_maintenance(action, node_id.clone()).unwrap();
+        let failure = RemoteShellIntegrationFailure::Integration(
+            RemoteShellIntegrationError::UnsupportedShell,
+        );
+        assert!(matches!(
+            state.finish_maintenance(action, node_id.clone(), generation, Err(failure)),
+            Some(RemoteShellIntegrationNotice::Failed(actual)) if actual == failure
+        ));
+        assert_eq!(state.card_snapshot(Some(&node_id)).failure, Some(failure));
         let notice = RemoteShellIntegrationNotice::Failed(
             RemoteShellIntegrationFailure::Integration(RemoteShellIntegrationError::WriteFailed),
         )
@@ -1093,9 +1123,9 @@ mod tests {
         let node_id = NodeId("shared-node".to_string());
 
         let gate_generation = state
-            .begin_terminal_gate(&node_id)
+            .begin_terminal_gate(&node_id, false)
             .expect("the first gate should start");
-        assert!(state.begin_terminal_gate(&node_id).is_none());
+        assert!(state.begin_terminal_gate(&node_id, false).is_none());
         state.cancel_node(&node_id);
 
         assert!(matches!(
@@ -1107,9 +1137,9 @@ mod tests {
             RemoteShellIntegrationGateOutcome::Stale
         ));
         assert!(
-            !state.card_snapshot(Some(&node_id)).error,
+            state.card_snapshot(Some(&node_id)).failure.is_none(),
             "a cancelled completion must not reintroduce an error projection"
         );
-        assert!(state.begin_terminal_gate(&node_id).is_some());
+        assert!(state.begin_terminal_gate(&node_id, false).is_some());
     }
 }
