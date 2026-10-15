@@ -4764,6 +4764,14 @@ impl WorkspaceApp {
                 cx,
             ))
             .when(
+                cfg!(target_os = "windows") && x11_forwarding.enabled,
+                |content| {
+                    content.child(
+                        self.render_connection_hint(self.i18n.t("ssh.x11.windows_requirement")),
+                    )
+                },
+            )
+            .when(
                 x11_forwarding.enabled && !ssh_channel_strategy.requires_dedicated_consumers(),
                 |content| {
                     content.child(form_field(
