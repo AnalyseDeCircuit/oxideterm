@@ -49,12 +49,16 @@ oxideterm connections list
 oxideterm connections search prod --json
 oxideterm connections open prod
 oxideterm connections create --name prod --host example.internal --user deploy --port 22 --dry-run
+oxideterm connections edit prod --totp-credential "Shared MFA" --dry-run
+oxideterm connections edit prod --clear-totp-credential --dry-run
 oxideterm connections rename prod production --yes
 oxideterm connections validate --strict
 oxideterm connections export --format raw-safe --json
 ```
 
 `connections open` resolves an exact saved SSH connection name or id, then opens it through the native application's normal saved-connection flow. The GUI remains responsible for loading credentials, proxy settings, and other connection options.
+
+`connections create` and `connections edit` accept `--totp-credential` with an existing credential's name or ID. Names are matched without case sensitivity; use an ID if several credentials share a name. JSON specs use `totpCredential`, including within `proxyChain` entries, or `clearTotpCredential: true` to remove the target connection's binding. Credential seeds stay in protected storage.
 
 For password or passphrase input, prefer `--password-stdin`, `--password-env`, `--passphrase-stdin`, or `--passphrase-env`. Do not pass secret values directly as shell arguments.
 

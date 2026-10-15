@@ -652,6 +652,8 @@ fn parses_connections_direct_create() {
         "2222",
         "--auth",
         "agent",
+        "--totp-credential",
+        "Shared MFA",
         "--dry-run",
     ]);
     let Command::Connections(ConnectionsCommand {
@@ -665,6 +667,7 @@ fn parses_connections_direct_create() {
     assert_eq!(args.direct.username.as_deref(), Some("deploy"));
     assert_eq!(args.direct.port, Some(2222));
     assert_eq!(args.direct.auth, Some(ConnectionAuthArg::Agent));
+    assert_eq!(args.direct.totp_credential.as_deref(), Some("Shared MFA"));
 }
 
 #[test]

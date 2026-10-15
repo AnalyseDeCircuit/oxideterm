@@ -49,12 +49,16 @@ oxideterm connections list
 oxideterm connections search prod --json
 oxideterm connections open prod
 oxideterm connections create --name prod --host example.internal --user deploy --port 22 --dry-run
+oxideterm connections edit prod --totp-credential "Shared MFA" --dry-run
+oxideterm connections edit prod --clear-totp-credential --dry-run
 oxideterm connections rename prod production --yes
 oxideterm connections validate --strict
 oxideterm connections export --format raw-safe --json
 ```
 
 `connections open` 会按完整名称或 ID 查找已保存的 SSH 连接，再通过原生应用既有的保存连接流程打开。凭据、代理设置和其他连接选项仍由 GUI 负责读取。
+
+`connections create` 和 `connections edit` 支持通过 `--totp-credential` 指定已有验证码凭据的名称或 ID。名称匹配不区分大小写；遇到重名时使用 ID。JSON 规格使用 `totpCredential`，`proxyChain` 中的跳板也可指定；使用 `clearTotpCredential: true` 可移除目标连接的关联。验证码密钥仍保存在受保护的存储中。
 
 密码或密钥口令输入优先使用 `--password-stdin`、`--password-env`、`--passphrase-stdin` 或 `--passphrase-env`。不要把凭据值直接写进 shell 参数。
 

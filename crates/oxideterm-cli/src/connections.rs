@@ -161,7 +161,8 @@ fn open_connection(args: ConnectionOpenArgs) -> CliResult<i32> {
 
 fn create_connection(args: ConnectionCreateArgs) -> CliResult<i32> {
     let spec = read_connection_input(args.spec_path, args.direct, args.write.json)?;
-    let request = connection_request_from_spec(spec, None, args.write.json)?;
+    let store = load_connection_store(args.write.json)?;
+    let request = connection_request_from_spec(spec, None, &store, args.write.json)?;
     let connection_name = request.name.clone();
     let change = ConnectionsChange {
         action: "create",
@@ -194,8 +195,16 @@ fn edit_connection(args: ConnectionEditArgs) -> CliResult<i32> {
             args.write.json,
         )
     })?;
-    let request = connection_request_from_spec(spec, Some(&existing), args.write.json)?;
+    let request = connection_request_from_spec(spec, Some(&existing), &store, args.write.json)?;
     let mut changes = Vec::new();
+    if existing.options.totp_credential_id != request.totp_credential_id {
+        changes.push(ConnectionsChange {
+            action: "editTotpCredential",
+            target: connection.id.clone(),
+            before: existing.options.totp_credential_id.clone(),
+            after: request.totp_credential_id.clone(),
+        });
+    }
     push_connection_field_change(
         &mut changes,
         &connection.id,

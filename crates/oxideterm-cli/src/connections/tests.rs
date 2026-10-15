@@ -5,6 +5,115 @@ use oxideterm_connections::{AuthType, SavedUpstreamProxyPolicy};
 
 use super::*;
 
+#[test]
+fn connection_specs_resolve_and_persist_totp_bindings() {
+    use oxideterm_connections::totp::{DEFAULT_TOTP_PROMPT, TotpParameters};
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("connections.json");
+    let mut store = ConnectionStore::load(&path).unwrap();
+    // CLI selection needs metadata only; seed storage is covered by the store's own tests.
+    let credential_id = "totp-shared".to_string();
+    let mut snapshot = store.export_saved_connections_snapshot().unwrap();
+    snapshot.totp_credentials = serde_json::from_value(serde_json::json!([{
+        "id": credential_id, "name": "Shared MFA", "parameters": TotpParameters::default(),
+        "prompt_pattern": DEFAULT_TOTP_PROMPT, "enabled": true,
+        "updated_at": "2026-10-15T00:00:00Z", "secret_revision": "synthetic-revision"
+    }]))
+    .unwrap();
+    store
+        .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace)
+        .unwrap();
+    let spec = serde_json::from_value(serde_json::json!({
+        "name": "Target", "host": "server.test", "username": "user", "totpCredential": "shared mfa",
+        "proxyChain": [{"host": "jump.test", "username": "jump", "auth": {"type": "agent"}, "totpCredential": credential_id}]
+    })).unwrap();
+    let request = connection_request_from_spec(spec, None, &store, true).unwrap();
+    let owner = store.upsert(request).unwrap().id;
+    let saved = ConnectionStore::load(&path).unwrap();
+    let existing = saved.get(&owner).unwrap();
+    assert_eq!(
+        existing.options.totp_credential_id.as_deref(),
+        Some(credential_id.as_str())
+    );
+    assert_eq!(
+        existing.proxy_chain[0].totp_credential_id.as_deref(),
+        Some(credential_id.as_str())
+    );
+    for (spec, expected) in [
+        (
+            serde_json::json!({"totpCredential": credential_id}),
+            Some(credential_id.as_str()),
+        ),
+        (
+            serde_json::json!({"name": "Renamed"}),
+            Some(credential_id.as_str()),
+        ),
+        (serde_json::json!({"clearTotpCredential": true}), None),
+        (serde_json::json!({"host": "different.test"}), None),
+    ] {
+        let request = connection_request_from_spec(
+            serde_json::from_value(spec).unwrap(),
+            Some(existing),
+            &saved,
+            true,
+        )
+        .unwrap();
+        assert_eq!(request.totp_credential_id.as_deref(), expected);
+        assert_eq!(
+            request.proxy_chain[0].totp_credential_id.as_deref(),
+            Some(credential_id.as_str())
+        );
+    }
+    use clap::Parser;
+    let cli = crate::args::Cli::parse_from([
+        "oxideterm",
+        "connections",
+        "edit",
+        &owner,
+        "--clear-totp-credential",
+    ]);
+    let crate::args::Command::Connections(ConnectionsCommand {
+        action: ConnectionsAction::Edit(args),
+    }) = cli.command
+    else {
+        panic!("expected edit");
+    };
+    let spec = read_connection_input(args.spec_path, args.direct, true).unwrap();
+    let cleared = connection_request_from_spec(spec, Some(existing), &saved, true).unwrap();
+    store.upsert(cleared).unwrap();
+    assert_eq!(
+        ConnectionStore::load(&path)
+            .unwrap()
+            .get(&owner)
+            .unwrap()
+            .options
+            .totp_credential_id,
+        None
+    );
+    let invalid = serde_json::from_value(serde_json::json!({"totpCredential": "missing"})).unwrap();
+    assert_eq!(
+        connection_request_from_spec(invalid, Some(existing), &saved, true)
+            .unwrap_err()
+            .code,
+        "totp_credential_not_found"
+    );
+    let mut snapshot = store.export_saved_connections_snapshot().unwrap();
+    let mut duplicate = snapshot.totp_credentials[0].clone();
+    duplicate.id = "totp-duplicate".into();
+    snapshot.totp_credentials.push(duplicate);
+    store
+        .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Replace)
+        .unwrap();
+    let ambiguous =
+        serde_json::from_value(serde_json::json!({"totpCredential": "Shared MFA"})).unwrap();
+    assert_eq!(
+        connection_request_from_spec(ambiguous, Some(existing), &store, true)
+            .unwrap_err()
+            .code,
+        "totp_credential_ambiguous"
+    );
+}
+
 pub(crate) fn sample_connection(id: &str, name: &str) -> ConnectionInfo {
     ConnectionInfo {
         totp_credential_id: None,

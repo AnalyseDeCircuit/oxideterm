@@ -4,8 +4,8 @@
 use std::{fs, io::Read};
 
 use oxideterm_connections::{
-    SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop, SecretString,
-    SshChannelStrategy,
+    ConnectionStore, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyHop,
+    SecretString, SshChannelStrategy,
 };
 use serde::Deserialize;
 use zeroize::Zeroizing;
@@ -28,6 +28,9 @@ pub(super) struct ConnectionSpec {
     #[serde(default)]
     tags: Option<Vec<String>>,
     auth: Option<ConnectionAuthSpec>,
+    totp_credential: Option<String>,
+    #[serde(default)]
+    clear_totp_credential: bool,
     #[serde(default)]
     proxy_chain: Option<Vec<ConnectionProxyHopSpec>>,
     agent_forwarding: Option<bool>,
@@ -72,6 +75,7 @@ struct ConnectionProxyHopSpec {
     port: u16,
     username: String,
     auth: ConnectionAuthSpec,
+    totp_credential: Option<String>,
     #[serde(default)]
     agent_forwarding: bool,
     #[serde(default)]
@@ -113,6 +117,8 @@ pub(super) fn connection_spec_from_direct_args(
         color: args.color.map(Some),
         tags: (!args.tags.is_empty()).then_some(args.tags),
         auth,
+        totp_credential: args.totp_credential,
+        clear_totp_credential: args.clear_totp_credential,
         proxy_chain: None,
         agent_forwarding: args.agent_forwarding,
         legacy_ssh_compatibility: args.legacy_ssh_compatibility,
@@ -124,8 +130,16 @@ pub(super) fn connection_spec_from_direct_args(
 pub(super) fn connection_request_from_spec(
     spec: ConnectionSpec,
     existing: Option<&SavedConnection>,
+    store: &ConnectionStore,
     json: bool,
 ) -> CliResult<SaveConnectionRequest> {
+    if spec.clear_totp_credential && spec.totp_credential.is_some() {
+        return Err(CliError::new(
+            "connection_spec_invalid",
+            "cannot select and clear a TOTP credential together",
+            json,
+        ));
+    }
     let name = required_or_existing(
         spec.name,
         existing.map(|connection| &connection.name),
@@ -157,20 +171,26 @@ pub(super) fn connection_request_from_spec(
     let proxy_chain = match spec.proxy_chain {
         Some(proxy_chain) => proxy_chain
             .into_iter()
-            .map(|hop| saved_proxy_hop_from_spec(hop, json))
+            .map(|hop| saved_proxy_hop_from_spec(hop, store, json))
             .collect::<CliResult<Vec<_>>>()?,
         None => existing
             .map(|connection| connection.proxy_chain.clone())
             .unwrap_or_default(),
     };
     Ok(SaveConnectionRequest {
-        totp_credential_id: existing
-            .filter(|connection| {
-                connection.host == host
-                    && connection.username == username
-                    && spec.port.is_none_or(|port| port == connection.port)
-            })
-            .and_then(|connection| connection.options.totp_credential_id.clone()),
+        totp_credential_id: if spec.clear_totp_credential {
+            None
+        } else if let Some(query) = spec.totp_credential {
+            Some(resolve_totp_credential(store, &query, json)?)
+        } else {
+            existing
+                .filter(|connection| {
+                    connection.host == host
+                        && connection.username == username
+                        && spec.port.is_none_or(|port| port == connection.port)
+                })
+                .and_then(|connection| connection.options.totp_credential_id.clone())
+        },
         id: existing.map(|connection| connection.id.clone()),
         name,
         group: spec
@@ -330,9 +350,40 @@ fn saved_auth_from_connection_spec(
     })
 }
 
-fn saved_proxy_hop_from_spec(spec: ConnectionProxyHopSpec, json: bool) -> CliResult<SavedProxyHop> {
+fn resolve_totp_credential(store: &ConnectionStore, query: &str, json: bool) -> CliResult<String> {
+    let credentials = store.totp_credentials();
+    if let Some(credential) = credentials.iter().find(|credential| credential.id == query) {
+        return Ok(credential.id.clone());
+    }
+    let mut matches = credentials
+        .iter()
+        .filter(|credential| credential.name.eq_ignore_ascii_case(query));
+    match (matches.next(), matches.next()) {
+        (Some(credential), None) => Ok(credential.id.clone()),
+        (Some(_), Some(_)) => Err(CliError::new(
+            "totp_credential_ambiguous",
+            "multiple TOTP credentials match this name; use a credential id",
+            json,
+        )),
+        _ => Err(CliError::new(
+            "totp_credential_not_found",
+            "TOTP credential was not found",
+            json,
+        )),
+    }
+}
+
+fn saved_proxy_hop_from_spec(
+    spec: ConnectionProxyHopSpec,
+    store: &ConnectionStore,
+    json: bool,
+) -> CliResult<SavedProxyHop> {
     Ok(SavedProxyHop {
-        totp_credential_id: None,
+        totp_credential_id: spec
+            .totp_credential
+            .as_deref()
+            .map(|query| resolve_totp_credential(store, query, json))
+            .transpose()?,
         host: spec.host,
         port: spec.port,
         username: spec.username,
@@ -485,6 +536,8 @@ impl ConnectionDirectArgs {
             || self.color.is_some()
             || !self.tags.is_empty()
             || self.auth.is_some()
+            || self.totp_credential.is_some()
+            || self.clear_totp_credential
             || self.password_stdin
             || self.password_env.is_some()
             || self.save_password.is_some()
