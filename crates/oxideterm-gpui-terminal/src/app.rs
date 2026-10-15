@@ -1700,6 +1700,25 @@ impl TerminalPane {
         self.command_history.clone()
     }
 
+    fn history_input_available(&self, mode: TermMode) -> bool {
+        let prompt_available = match &self.serial_session_config {
+            Some(config) => {
+                config.runtime_options.display_mode == SerialDisplayMode::Text
+                    && config.runtime_options.send_mode == SerialSendMode::Text
+                    // Device consoles usually have no OSC prompt markers. If supplied, keep
+                    // respecting them so input to a running command is not treated as a prompt.
+                    && (!self.shell_integration_status.detected || self.autosuggest_prompt_active)
+            }
+            None => self.autosuggest_prompt_active,
+        };
+        prompt_available
+            && shell_history_input_mode(mode)
+            && !self.modem_prompt_active
+            && self.modem_transfer.is_none()
+            && !self.trzsz_prompt_active
+            && !self.ai_waiting_for_secret()
+    }
+
     fn terminal_autosuggest_candidates(&self) -> Vec<TerminalAutosuggestCandidate> {
         let cursor_row_is_active_input = self
             .snapshot
@@ -1707,7 +1726,7 @@ impl TerminalPane {
             .get(self.snapshot.cursor_row)
             .is_some_and(|row| row.active_input);
         if !self.preferences.autosuggest_enabled
-            || !self.autosuggest_prompt_active
+            || (!self.autosuggest_prompt_active && !self.is_serial_transport())
             || self.marked_text.is_some()
             || self.tmux_prompt.is_some()
             || self.pending_paste.is_some()
@@ -1724,7 +1743,7 @@ impl TerminalPane {
             let terminal = self.terminal.lock();
             (terminal.mode(), terminal.is_interactive())
         };
-        if !shell_history_input_mode(mode)
+        if !self.history_input_available(mode)
             || !self.terminal_accepts_input_with_interactive_state(terminal_interactive)
         {
             return Vec::new();
@@ -2344,6 +2363,17 @@ impl TerminalPane {
                 .map_err(|error| error.to_string())?;
             previous_options
         };
+        if let Some(config) = self.serial_session_config.as_mut() {
+            config.runtime_options = options;
+        }
+        if previous_options.is_some_and(|previous| {
+            previous.display_mode != options.display_mode || previous.send_mode != options.send_mode
+        }) {
+            // A draft reconstructed as text cannot survive an opaque-input mode change.
+            self.input_tracker.reset();
+            self.autosuggest_selected_index = None;
+            self.autosuggest_dismissed_query = None;
+        }
         let changed_input = previous_options
             .filter(|previous| previous.line_ending != options.line_ending)
             .map(|_| options.line_ending);
@@ -4130,10 +4160,14 @@ impl TerminalPane {
             bytes.contains(&b'\n'),
             privilege_input_observation_name(observation)
         ));
-        if observation == PrivilegeInputObservation::SecretEntry
-            && self.clear_privilege_prompt_inline_hint()
-        {
-            cx.notify();
+        if observation == PrivilegeInputObservation::SecretEntry {
+            self.input_tracker.reset();
+            self.autosuggest_prompt_active = false;
+            self.autosuggest_selected_index = None;
+            self.autosuggest_dismissed_query = None;
+            if self.clear_privilege_prompt_inline_hint() {
+                cx.notify();
+            }
         }
         observation
     }
@@ -4143,8 +4177,7 @@ impl TerminalPane {
         bytes: &[u8],
         _cx: &mut Context<Self>,
     ) -> Option<String> {
-        if !self.autosuggest_prompt_active || !shell_history_input_mode(self.terminal.lock().mode())
-        {
+        if !self.history_input_available(self.terminal.lock().mode()) {
             self.input_tracker.reset();
             self.autosuggest_prompt_active = false;
             self.autosuggest_selected_index = None;
@@ -5638,6 +5671,101 @@ mod tests {
                     .map(|record| record.command.as_str())
                     .collect::<Vec<_>>(),
                 ["printf 'a  b'"]
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn serial_text_history_does_not_require_shell_integration(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+                .with_serial_session_config(SerialSessionConfig {
+                    port_path: "test-serial-console".into(),
+                    baud_rate: 115_200,
+                    data_bits: 8,
+                    stop_bits: 1,
+                    parity: oxideterm_terminal::SerialParity::None,
+                    flow_control: oxideterm_terminal::SerialFlowControl::None,
+                    runtime_options: SerialRuntimeOptions::default(),
+                })
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.terminal.lock().feed_recording_output(b"device> ");
+            pane.tick(cx);
+            assert!(pane.send_command_line("show interfaces", cx));
+            assert!(pane.send_command_line("show version", cx));
+            pane.send_user_protocol_bytes(b"show inter", cx);
+            assert_eq!(
+                pane.terminal_autosuggest_candidates()
+                    .into_iter()
+                    .map(|candidate| candidate.command)
+                    .collect::<Vec<_>>(),
+                ["show interfaces"]
+            );
+            assert!(pane.fill_terminal_autosuggest_command("show interfaces", false, cx));
+            assert_eq!(pane.input_tracker.state().value, "show interfaces");
+            pane.send_user_protocol_bytes(b"\r", cx);
+
+            for (display_mode, send_mode) in [
+                (SerialDisplayMode::Hex, SerialSendMode::Text),
+                (SerialDisplayMode::Mixed, SerialSendMode::Text),
+                (SerialDisplayMode::Text, SerialSendMode::Hex),
+            ] {
+                let options = &mut pane.serial_session_config.as_mut().unwrap().runtime_options;
+                options.display_mode = display_mode;
+                options.send_mode = send_mode;
+                pane.send_user_protocol_bytes(b"show", cx);
+                assert!(pane.terminal_autosuggest_candidates().is_empty());
+                pane.send_user_protocol_bytes(b" opaque data\r", cx);
+            }
+            pane.serial_session_config.as_mut().unwrap().runtime_options =
+                SerialRuntimeOptions::default();
+            pane.send_user_protocol_bytes(b"show", cx);
+            pane.privilege_prompt_tracker.observe_terminal_prompt_event(
+                oxideterm_terminal::TerminalPrivilegePromptEvent::Visible {
+                    prompt: oxideterm_terminal::detect_terminal_privilege_prompt("Password:")
+                        .unwrap(),
+                    retry: false,
+                },
+                Instant::now(),
+            );
+            assert!(pane.terminal_autosuggest_candidates().is_empty());
+            pane.send_user_protocol_bytes(b"test-private-answer", cx);
+            pane.send_user_protocol_bytes(b"\r", cx);
+            assert!(pane.send_command_line("show routes", cx));
+            pane.send_user_protocol_bytes(b"show rout", cx);
+            assert_eq!(
+                pane.terminal_autosuggest_candidates()
+                    .into_iter()
+                    .map(|candidate| candidate.command)
+                    .collect::<Vec<_>>(),
+                ["show routes"]
+            );
+            pane.terminal.lock().feed_recording_output(b"\x1b[?1049h");
+            pane.send_user_protocol_bytes(b"show tui input\r", cx);
+            assert!(pane.terminal_autosuggest_candidates().is_empty());
+            assert_eq!(
+                pane.history_command_records()
+                    .into_iter()
+                    .map(|record| record.command)
+                    .collect::<Vec<_>>(),
+                [
+                    "show interfaces",
+                    "show version",
+                    "show interfaces",
+                    "show routes"
+                ]
             );
         });
     }

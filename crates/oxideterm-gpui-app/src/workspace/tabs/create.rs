@@ -661,6 +661,8 @@ impl WorkspaceApp {
         });
         let mut preferences =
             self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        // Device commands must not share the user's local shell history.
+        preferences.command_history = SharedTerminalCommandHistory::default();
         let mut preference_overrides = terminal_preference_overrides(
             terminal_options,
             &self.settings_store.settings().terminal,
