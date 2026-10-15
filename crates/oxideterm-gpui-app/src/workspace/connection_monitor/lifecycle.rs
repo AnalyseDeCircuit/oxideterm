@@ -18,9 +18,10 @@ fn host_tools_visibility(
 impl HostToolsEntity {
     pub(super) fn schedule_lifecycle_refresh(&mut self, cx: &mut Context<Self>) {
         // Pool/topology freshness belongs to Host Tools and stops with the Entity.
+        let executor = cx.background_executor().clone();
         self.lifecycle_refresh_task = Some(cx.spawn(async move |host_tools, cx| {
             loop {
-                Timer::after(MONITOR_POOL_REFRESH_INTERVAL).await;
+                executor.timer(MONITOR_POOL_REFRESH_INTERVAL).await;
                 let should_continue = host_tools
                     .update(cx, |host_tools, cx| {
                         host_tools.refresh_lifecycle_tick(cx);

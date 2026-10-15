@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "コマンド履歴をこの端末に保存",
+      "save_hint": "保存済みの SSH、Telnet、Mosh、シリアル接続のコマンド全体を暗号化されていないローカルファイルに保存します。引数内のパスワードやトークンも含まれます。有効にした時点から保存します。",
+      "retention": "保存期間（日）",
+      "retention_hint": "0 は無期限です。保存済みの接続全体で最大 10,000 件を保存します。",
+      "current": "現在の接続",
+      "all": "すべての接続",
+      "pause": "この接続の履歴記録を一時停止",
+      "resume": "この接続の履歴記録を再開",
+      "clear_current": "この接続の履歴を消去",
+      "clear_all": "保存済みの全接続の履歴を消去",
+      "clear_confirm": "保存済みの全接続について、ファイルおよびメモリ内のコマンド履歴を削除しますか？シェルの履歴ファイルは変更されません。",
+      "clear_confirm_current": "この接続の保存済みおよびメモリ内のコマンド履歴を削除しますか？シェルの履歴ファイルは変更されません。",
+      "delete": "履歴から削除",
+      "empty": "一致するコマンドがありません",
+      "error": "履歴を読み込みまたは保存できませんでした。最近のコマンドはメモリ内で引き続き使用できます。"
+    },
     "reconnect_hint": "セッションが切断されました · Enter キーで再接続",
     "control_bar": {
       "show_controls": "操作欄を表示",
@@ -270,7 +287,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "照合対象",
+      "match_host": "ホストアドレス",
+      "match_connection": "接続名",
+      "match_all": "すべての項目",
+      "match_hint": "空欄は対象を制限しません。* を使用でき、複数の規則はカンマで区切ります。すべての項目にはアドレス、ユーザー名、接続名、端末タイトルが含まれます。",
+      "host_pattern_placeholder": "照合規則（例：prod-*）",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

@@ -14,6 +14,29 @@ impl WorkspaceApp {
         }
 
         let mut entries: HashMap<String, TerminalHistoryEntry> = HashMap::new();
+        let mut origins = HashMap::new();
+        let mut seen_ids = HashSet::new();
+        if self.terminal_history_all_connections {
+            for (_, label, history) in self.terminal_history_store.histories() {
+                for (sequence, record) in history.records().into_iter().enumerate() {
+                    seen_ids.insert(record.command_id.clone());
+                    let origin = origins
+                        .entry(record.command.clone())
+                        .or_insert_with(|| (record.finished_at, label.clone()));
+                    if record.finished_at > origin.0 {
+                        *origin = (record.finished_at, label.clone());
+                    }
+                    put_terminal_history_entry(
+                        &mut entries,
+                        record.command,
+                        TerminalHistorySource::Runtime,
+                        record.finished_at as i64,
+                        true,
+                        sequence,
+                    );
+                }
+            }
+        }
         let tab_host = self.tab_host.read(cx);
         if let Some(pane) = context
             .pane_id
@@ -25,6 +48,13 @@ impl WorkspaceApp {
                 .into_iter()
                 .enumerate()
             {
+                if !seen_ids.insert(record.command_id.clone()) {
+                    continue;
+                }
+                origins.insert(
+                    record.command.clone(),
+                    (record.finished_at, context.target_label.clone()),
+                );
                 put_terminal_history_entry(
                     &mut entries,
                     record.command,
@@ -60,7 +90,10 @@ impl WorkspaceApp {
                     kind: TerminalCommandSuggestionKind::History,
                     label: entry.command.clone(),
                     insert_text: entry.command.clone(),
-                    description: None,
+                    description: self
+                        .terminal_history_all_connections
+                        .then(|| origins.get(&entry.command).map(|(_, label)| label.clone()))
+                        .flatten(),
                     executable: true,
                     replacement: 0..input.len(),
                     group_label_key: "terminal.command_bar.group_history",

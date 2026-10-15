@@ -248,6 +248,7 @@ impl WorkspaceApp {
                             parameters,
                             protocols,
                             host_patterns,
+                            match_field: None,
                             confirmation,
                         });
                 });

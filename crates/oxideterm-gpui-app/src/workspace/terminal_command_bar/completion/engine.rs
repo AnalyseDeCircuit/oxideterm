@@ -13,6 +13,10 @@ impl WorkspaceApp {
             .terminal
             .command_bar
             .smart_completion
+            && !self
+                .terminal_command_sender
+                .read(cx)
+                .compact_suggestions_open()
         {
             return Vec::new();
         }

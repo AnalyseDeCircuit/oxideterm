@@ -1,4 +1,5 @@
 use super::super::*;
+use oxideterm_terminal::TerminalSessionKind;
 
 impl WorkspaceApp {
     const WORKSPACE_ASYNC_RUNTIME_WORKER_THREADS: usize = 2;
@@ -48,6 +49,22 @@ impl WorkspaceApp {
         // process-owned index and never copies the document into credential storage.
         let local_terminal_command_history =
             SharedTerminalCommandHistory::from_commands(load_local_shell_history_commands());
+        let (terminal_history_store, history_updates) = TerminalHistoryStore::new(
+            settings_store
+                .path()
+                .with_file_name("command-history.sqlite"),
+        )?;
+        terminal_history_store.configure(
+            settings.terminal.autosuggest.save_history,
+            settings.terminal.autosuggest.history_retention_days,
+        );
+        let terminal_history_updates = cx.spawn(async move |workspace, cx| {
+            while history_updates.recv().await.is_ok() {
+                if workspace.update(cx, |_, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        });
         let session_log_directory = settings::terminal_session_log_root_directory(
             settings_store.path(),
             settings.terminal.session_log.directory.as_deref(),
@@ -596,6 +613,9 @@ impl WorkspaceApp {
             terminal_command_sender,
             _terminal_command_sender_observation: terminal_command_sender_observation,
             local_terminal_command_history,
+            terminal_history_store,
+            _terminal_history_updates: terminal_history_updates,
+            terminal_history_all_connections: false,
             ssh_terminal_command_histories: HashMap::new(),
             detached_local_terminals: HashMap::new(),
             detached_local_terminal_order: Vec::new(),
@@ -980,6 +1000,25 @@ impl WorkspaceApp {
             })
             .unwrap_or(("local_terminal", None, TabKind::LocalTerminal));
         let mut preferences = self.terminal_preferences_for_background_key(key, cx);
+        if let Some(history) = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .get(&pane_id)
+            .map(|pane| pane.read(cx))
+            .filter(|pane| {
+                matches!(
+                    pane.session_kind(),
+                    TerminalSessionKind::Telnet
+                        | TerminalSessionKind::Serial
+                        | TerminalSessionKind::Mosh
+                )
+            })
+            .map(|pane| pane.command_history())
+        {
+            preferences.command_history = history;
+            return preferences;
+        }
         preferences.command_history = match kind {
             TabKind::LocalTerminal => self.local_terminal_command_history.clone(),
             TabKind::SshTerminal => session_id
@@ -988,7 +1027,7 @@ impl WorkspaceApp {
                         .read(cx)
                         .ssh_terminal_node_id(session_id)
                 })
-                .and_then(|node_id| self.ssh_terminal_command_histories.get(&node_id).cloned())
+                .and_then(|node_id| self.ssh_command_history(&node_id))
                 .unwrap_or_default(),
             _ => SharedTerminalCommandHistory::default(),
         };

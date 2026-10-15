@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "이 기기에 명령 기록 저장",
+      "save_hint": "저장된 SSH, Telnet, Mosh 및 직렬 연결의 전체 명령을 암호화되지 않은 로컬 파일에 저장합니다. 인수에 포함된 암호나 토큰도 저장됩니다. 활성화한 시점부터 저장합니다.",
+      "retention": "보관 기간(일)",
+      "retention_hint": "0은 무기한 보관입니다. 저장된 연결 전체에서 최대 10,000개를 보관합니다.",
+      "current": "현재 연결",
+      "all": "모든 연결",
+      "pause": "현재 연결의 기록 일시 중지",
+      "resume": "현재 연결의 기록 재개",
+      "clear_current": "현재 연결 기록 지우기",
+      "clear_all": "저장된 모든 연결의 기록 지우기",
+      "clear_confirm": "저장된 모든 연결의 파일 및 메모리 내 명령 기록을 삭제할까요? 셸 기록 파일은 변경되지 않습니다.",
+      "clear_confirm_current": "현재 연결의 저장된 명령 기록과 메모리 기록을 삭제할까요? 셸 기록 파일은 변경되지 않습니다.",
+      "delete": "기록에서 삭제",
+      "empty": "일치하는 명령 없음",
+      "error": "명령 기록을 읽거나 저장하지 못했습니다. 최근 명령은 메모리에서 계속 사용할 수 있습니다."
+    },
     "reconnect_hint": "세션 연결이 끊어졌습니다 · Enter 키로 다시 연결",
     "control_bar": {
       "show_controls": "조작 메뉴 펼치기",
@@ -270,7 +287,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "일치 기준",
+      "match_host": "호스트 주소",
+      "match_connection": "연결 이름",
+      "match_all": "모든 필드",
+      "match_hint": "비워 두면 대상을 제한하지 않습니다. *를 사용할 수 있으며 여러 규칙은 쉼표로 구분합니다. 모든 필드에는 주소, 사용자 이름, 연결 이름 및 터미널 제목이 포함됩니다.",
+      "host_pattern_placeholder": "일치 규칙, 예: prod-*",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

@@ -520,6 +520,10 @@ pub fn set_autosuggest_local_history(settings: &mut PersistedSettings, value: bo
     settings.terminal.autosuggest.local_shell_history = value;
 }
 
+pub fn set_save_command_history(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.autosuggest.save_history = value;
+}
+
 pub fn set_command_marks_enabled(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.command_marks.enabled = value;
 }

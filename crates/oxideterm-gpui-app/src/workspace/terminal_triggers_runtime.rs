@@ -292,6 +292,7 @@ impl WorkspaceApp {
         let saved_profile_id = id.clone();
         self.terminal_saved_connection_refs
             .insert(session_id, SavedConnectionRef { kind, id });
+        self.bind_saved_console_command_history(session_id, cx);
         if matches!(
             kind,
             SavedConnectionKind::Mosh | SavedConnectionKind::Telnet | SavedConnectionKind::Serial

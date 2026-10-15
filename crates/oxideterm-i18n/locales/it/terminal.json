@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Salva la cronologia su questo dispositivo",
+      "save_hint": "Salva i comandi completi delle connessioni SSH, Telnet, Mosh e seriali salvate in un file locale non cifrato, comprese password o token negli argomenti. Il salvataggio inizia all’attivazione.",
+      "retention": "Conservazione (giorni)",
+      "retention_hint": "0 conserva la cronologia a tempo indeterminato. Fino a 10.000 voci complessive per le connessioni salvate.",
+      "current": "Connessione attuale",
+      "all": "Tutte le connessioni",
+      "pause": "Sospendi la cronologia di questa connessione",
+      "resume": "Riprendi la cronologia di questa connessione",
+      "clear_current": "Cancella la cronologia di questa connessione",
+      "clear_all": "Cancella la cronologia di tutte le connessioni salvate",
+      "clear_confirm": "Eliminare la cronologia dei comandi salvata e in memoria di tutte le connessioni salvate? I file di cronologia della shell restano invariati.",
+      "clear_confirm_current": "Eliminare la cronologia salvata e in memoria di questa connessione? I file di cronologia della shell restano invariati.",
+      "delete": "Elimina dalla cronologia",
+      "empty": "Nessun comando corrispondente",
+      "error": "Impossibile caricare o salvare la cronologia. I comandi recenti restano disponibili in memoria."
+    },
     "reconnect_hint": "Sessione disconnessa · Premi Invio per riconnetterti",
     "control_bar": {
       "show_controls": "Mostra controlli",
@@ -270,7 +287,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "Corrispondenza per",
+      "match_host": "Indirizzo host",
+      "match_connection": "Nome connessione",
+      "match_all": "Tutti i campi",
+      "match_hint": "Lascia vuoto per qualsiasi destinazione. Usa * e separa le regole con virgole. Tutti i campi include indirizzi, utenti, nomi delle connessioni e titoli dei terminali.",
+      "host_pattern_placeholder": "Schema, ad es. prod-*",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

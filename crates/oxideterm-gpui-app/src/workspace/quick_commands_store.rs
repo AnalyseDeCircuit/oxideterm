@@ -42,14 +42,9 @@ impl QuickCommandsState {
 
     pub(super) fn visible_commands_for_targets(
         &self,
-        target_fields: &[String],
+        target: Option<&oxideterm_quick_commands::QuickCommandTargetContext>,
     ) -> Vec<QuickCommand> {
-        visible_quick_commands(
-            &self.commands,
-            &self.active_category,
-            &self.query,
-            target_fields,
-        )
+        visible_quick_commands(&self.commands, &self.active_category, &self.query, target)
     }
 
     pub(super) fn visible_commands_for_management(&self) -> Vec<QuickCommand> {
@@ -116,6 +111,7 @@ impl QuickCommandsState {
                 })
                 .collect(),
             availability: QuickCommandAvailability {
+                match_field: draft.match_field,
                 protocols: draft.protocols,
                 host_patterns: split_host_patterns(&draft.host_patterns),
             },
@@ -414,7 +410,8 @@ mod quick_command_tests {
             description: Some("root listing".to_string()),
             parameters: None,
             protocols: None,
-            host_patterns: None,
+            host_patterns: Some(vec!["prod-*".into()]),
+            match_field: Some(oxideterm_quick_commands::QuickCommandMatchField::ConnectionName),
             confirmation: None,
         });
 
@@ -423,6 +420,9 @@ mod quick_command_tests {
             command.name == "List root"
                 && command.command == "ls /"
                 && command.description.as_deref() == Some("root listing")
+                && command.availability.match_field
+                    == oxideterm_quick_commands::QuickCommandMatchField::ConnectionName
+                && command.availability.host_patterns == ["prod-*"]
         }));
         let _ = fs::remove_dir_all(settings_path.parent().unwrap());
     }
@@ -473,6 +473,7 @@ mod quick_command_tests {
             parameters: None,
             protocols: None,
             host_patterns: None,
+            match_field: None,
             confirmation: None,
         });
         let mut expected_commands = state.commands.clone();

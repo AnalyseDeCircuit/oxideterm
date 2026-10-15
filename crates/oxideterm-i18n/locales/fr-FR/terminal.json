@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Enregistrer l’historique sur cet appareil",
+      "save_hint": "Enregistre les commandes complètes des connexions SSH, Telnet, Mosh et série enregistrées dans un fichier local non chiffré, y compris les mots de passe ou jetons dans les arguments. L’enregistrement commence à l’activation.",
+      "retention": "Conservation (jours)",
+      "retention_hint": "0 signifie sans limite de durée. Jusqu’à 10 000 entrées sont conservées pour l’ensemble des connexions enregistrées.",
+      "current": "Connexion actuelle",
+      "all": "Toutes les connexions",
+      "pause": "Suspendre l’historique de cette connexion",
+      "resume": "Reprendre l’historique de cette connexion",
+      "clear_current": "Effacer l’historique de cette connexion",
+      "clear_all": "Effacer l’historique de toutes les connexions enregistrées",
+      "clear_confirm": "Supprimer l’historique des commandes enregistré et en mémoire de toutes les connexions enregistrées ? Les fichiers d’historique des shells restent inchangés.",
+      "clear_confirm_current": "Supprimer l’historique enregistré et en mémoire de cette connexion ? Les fichiers d’historique des shells restent inchangés.",
+      "delete": "Supprimer de l’historique",
+      "empty": "Aucune commande correspondante",
+      "error": "Impossible de charger ou d’enregistrer l’historique. Les commandes récentes restent disponibles en mémoire."
+    },
     "reconnect_hint": "Session déconnectée · Appuyez sur Entrée pour vous reconnecter",
     "control_bar": {
       "show_controls": "Afficher les commandes",
@@ -270,7 +287,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "Critère de correspondance",
+      "match_host": "Adresse de l’hôte",
+      "match_connection": "Nom de connexion",
+      "match_all": "Tous les champs",
+      "match_hint": "Laisser vide pour toute cible. Utiliser * et séparer les règles par des virgules. Tous les champs inclut adresses, noms d’utilisateur, noms de connexion et titres des terminaux.",
+      "host_pattern_placeholder": "Motif, par ex. prod-*",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

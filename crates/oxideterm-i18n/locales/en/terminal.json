@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Save command history on this device",
+      "save_hint": "Save complete commands for saved SSH, Telnet, Mosh and serial connections in an unencrypted local file, including passwords or tokens in arguments. Saving starts when enabled.",
+      "retention": "Retention (days)",
+      "retention_hint": "0 keeps history indefinitely. Up to 10,000 entries are stored across saved connections.",
+      "current": "Current connection",
+      "all": "All connections",
+      "pause": "Pause history for this connection",
+      "resume": "Resume history for this connection",
+      "clear_current": "Clear this connection's history",
+      "clear_all": "Clear all saved connection history",
+      "clear_confirm": "Delete saved and in-memory command history for all saved connections? This does not change shell history files.",
+      "clear_confirm_current": "Delete this connection's saved and in-memory history? This does not change shell history files.",
+      "delete": "Delete from history",
+      "empty": "No matching commands",
+      "error": "Command history could not be loaded or saved. Recent commands remain available in memory."
+    },
     "reconnect_hint": "Session disconnected · Press Enter to reconnect",
     "control_bar": {
       "show_controls": "Show controls",
@@ -332,7 +349,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "Match by",
+      "match_host": "Host address",
+      "match_connection": "Connection name",
+      "match_all": "All fields",
+      "match_hint": "Leave empty for any target. Use * and separate rules with commas. All fields includes addresses, usernames, connection names and terminal titles.",
+      "host_pattern_placeholder": "Pattern, e.g. prod-*",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

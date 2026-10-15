@@ -24,6 +24,7 @@ pub use background_cache::{
 pub use command_facts::{
     SharedTerminalCommandHistory, TerminalAiCommandRecord, TerminalAutosuggestCommandRecord,
     TerminalAutosuggestInputState, TerminalCommandFact, TerminalCommandFactStatus,
+    TerminalHistoryStore,
 };
 pub use oxideterm_terminal::TerminalOutputProcessor;
 pub use oxideterm_terminal_recording::{TerminalRecordingState, TerminalRecordingStatus};

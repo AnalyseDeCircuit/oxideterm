@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Befehlsverlauf auf diesem Gerät speichern",
+      "save_hint": "Vollständige Befehle gespeicherter SSH-, Telnet-, Mosh- und serieller Verbindungen werden lokal unverschlüsselt gespeichert, einschließlich Passwörtern oder Tokens in Argumenten. Die Speicherung beginnt mit der Aktivierung.",
+      "retention": "Aufbewahrung (Tage)",
+      "retention_hint": "0 bedeutet unbegrenzt. Für alle gespeicherten Verbindungen werden insgesamt bis zu 10.000 Einträge aufbewahrt.",
+      "current": "Aktuelle Verbindung",
+      "all": "Alle Verbindungen",
+      "pause": "Verlauf für diese Verbindung pausieren",
+      "resume": "Verlauf für diese Verbindung fortsetzen",
+      "clear_current": "Verlauf dieser Verbindung löschen",
+      "clear_all": "Verlauf aller gespeicherten Verbindungen löschen",
+      "clear_confirm": "Gespeicherten Befehlsverlauf und Verlauf im Arbeitsspeicher aller gespeicherten Verbindungen löschen? Die Verlaufsdateien der Shell bleiben unverändert.",
+      "clear_confirm_current": "Gespeicherten Verlauf und Verlauf im Arbeitsspeicher dieser Verbindung löschen? Die Verlaufsdateien der Shell bleiben unverändert.",
+      "delete": "Aus Verlauf löschen",
+      "empty": "Keine passenden Befehle",
+      "error": "Der Befehlsverlauf konnte nicht geladen oder gespeichert werden. Neue Befehle bleiben im Arbeitsspeicher verfügbar."
+    },
     "reconnect_hint": "Sitzung getrennt · Mit Enter erneut verbinden",
     "control_bar": {
       "show_controls": "Bedienelemente anzeigen",
@@ -270,7 +287,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "Abgleichen nach",
+      "match_host": "Hostadresse",
+      "match_connection": "Verbindungsname",
+      "match_all": "Alle Felder",
+      "match_hint": "Leer lassen für alle Ziele. * verwenden und Regeln durch Kommas trennen. Alle Felder umfasst Adressen, Benutzernamen, Verbindungsnamen und Terminaltitel.",
+      "host_pattern_placeholder": "Muster, z. B. prod-*",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

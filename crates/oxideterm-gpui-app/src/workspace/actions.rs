@@ -2082,6 +2082,21 @@ impl WorkspaceApp {
         if pane.is_tmux_control_mode() {
             protocol = QuickCommandTargetProtocol::Tmux;
         }
+        if let Some(node) = self
+            .session_id_for_pane(pane_id, cx)
+            .and_then(|session_id| {
+                self.workspace_runtime
+                    .read(cx)
+                    .ssh_terminal_node_id(session_id)
+            })
+            .and_then(|node_id| self.ssh_nodes.get(&node_id))
+        {
+            // Temporary SSH sessions have endpoint metadata even before the shell reports a cwd.
+            values.host = Some(Zeroizing::new(node.endpoint.host.clone()));
+            values.username = Some(Zeroizing::new(node.endpoint.username.clone()));
+            values.port = Some(node.endpoint.port);
+            values.connection = Some(Zeroizing::new(node.title.clone()));
+        }
         if let Some(saved) = entry
             .as_ref()
             .and_then(|entry| entry.saved_connection.as_ref())

@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "在本機儲存命令歷史",
+      "save_hint": "為已儲存的 SSH、Telnet、Mosh 與序列埠連線儲存完整命令。記錄以明文儲存在本機，包括參數中的密碼或權杖。啟用後開始儲存。",
+      "retention": "保留天數",
+      "retention_hint": "0 表示永久保留。所有已儲存的連線合計最多保留 10,000 筆記錄。",
+      "current": "目前連線",
+      "all": "所有連線",
+      "pause": "暫停記錄目前連線",
+      "resume": "恢復記錄目前連線",
+      "clear_current": "清除目前連線歷史",
+      "clear_all": "清除所有已儲存連線歷史",
+      "clear_confirm": "刪除所有已儲存連線的命令歷史，包括本機檔案及記憶體中的記錄？此操作不會修改 Shell 本身的歷史檔案。",
+      "clear_confirm_current": "刪除目前連線已儲存及記憶體中的命令歷史？此操作不會修改 Shell 本身的歷史檔案。",
+      "delete": "從歷史中刪除",
+      "empty": "沒有符合的命令",
+      "error": "命令歷史讀取或儲存失敗，最近輸入的命令仍可在記憶體中使用。"
+    },
     "reconnect_hint": "工作階段已中斷 · 按 Enter 重新連線",
     "control_bar": {
       "show_controls": "展開操作列",
@@ -270,7 +287,12 @@
       "command_placeholder": "命令",
       "template_hint": "使用 {{param.name}} 或 {{ctx.host}}；加入 |sh 可依 POSIX Shell 規則引用。",
       "description_placeholder": "描述",
-      "host_pattern_placeholder": "主机匹配，如 *.prod",
+      "match_field": "比對依據",
+      "match_host": "主機位址",
+      "match_connection": "連線名稱",
+      "match_all": "所有欄位",
+      "match_hint": "留空表示不限。支援 *，多個規則以逗號分隔。所有欄位包括位址、使用者名稱、連線名稱及終端標題。",
+      "host_pattern_placeholder": "比對規則，例如 prod-*",
       "confirm_title": "执行快捷命令？",
       "confirm_description": "执行：{{command}}",
       "confirm_risky_description": "此命令可能具有破坏性或涉及敏感操作。执行：{{command}}",

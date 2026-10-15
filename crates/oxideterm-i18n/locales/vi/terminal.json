@@ -1,5 +1,22 @@
 {
   "terminal": {
+    "history": {
+      "save": "Lưu lịch sử lệnh trên thiết bị này",
+      "save_hint": "Lưu toàn bộ lệnh của các kết nối SSH, Telnet, Mosh và cổng nối tiếp đã lưu trong tệp cục bộ không mã hóa, gồm cả mật khẩu hoặc mã truy cập trong đối số. Bắt đầu lưu khi bật.",
+      "retention": "Thời gian lưu (ngày)",
+      "retention_hint": "0 là lưu vô thời hạn. Lưu tối đa 10.000 mục cho tất cả kết nối đã lưu.",
+      "current": "Kết nối hiện tại",
+      "all": "Tất cả kết nối",
+      "pause": "Tạm dừng ghi lịch sử kết nối này",
+      "resume": "Tiếp tục ghi lịch sử kết nối này",
+      "clear_current": "Xóa lịch sử kết nối này",
+      "clear_all": "Xóa lịch sử của tất cả kết nối đã lưu",
+      "clear_confirm": "Xóa lịch sử lệnh trong tệp và bộ nhớ của tất cả kết nối đã lưu? Các tệp lịch sử của shell không thay đổi.",
+      "clear_confirm_current": "Xóa lịch sử lệnh đã lưu và trong bộ nhớ của kết nối này? Các tệp lịch sử của shell không thay đổi.",
+      "delete": "Xóa khỏi lịch sử",
+      "empty": "Không có lệnh phù hợp",
+      "error": "Không thể đọc hoặc lưu lịch sử lệnh. Các lệnh gần đây vẫn có trong bộ nhớ."
+    },
     "reconnect_hint": "Phiên đã ngắt kết nối · Nhấn Enter để kết nối lại",
     "control_bar": {
       "show_controls": "Hiện các nút điều khiển",
@@ -270,7 +287,12 @@
       "command_placeholder": "Command",
       "template_hint": "Use {{param.name}} or {{ctx.host}}; add |sh for POSIX shell quoting.",
       "description_placeholder": "Description",
-      "host_pattern_placeholder": "Host pattern, e.g. *.prod",
+      "match_field": "Đối chiếu theo",
+      "match_host": "Địa chỉ máy chủ",
+      "match_connection": "Tên kết nối",
+      "match_all": "Tất cả trường",
+      "match_hint": "Để trống để áp dụng cho mọi đích. Dùng * và phân tách các quy tắc bằng dấu phẩy. Tất cả trường gồm địa chỉ, tên người dùng, tên kết nối và tiêu đề cửa sổ dòng lệnh.",
+      "host_pattern_placeholder": "Mẫu, ví dụ: prod-*",
       "confirm_title": "Run quick command?",
       "confirm_description": "Run: {{command}}",
       "confirm_risky_description": "This command may be destructive or sensitive. Run: {{command}}",

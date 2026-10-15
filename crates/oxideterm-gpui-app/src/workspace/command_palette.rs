@@ -706,6 +706,16 @@ impl WorkspaceApp {
         if matches!(effect, Some(WorkspaceOverlayConfirmEffect::ResetSettings)) {
             self.edit_settings(|settings| *settings = PersistedSettings::default(), cx);
         }
+        if let Some(WorkspaceOverlayConfirmEffect::ClearCommandHistory { all }) = effect {
+            if all {
+                self.terminal_history_store.clear();
+                for history in self.ssh_terminal_command_histories.values() {
+                    history.clear();
+                }
+            } else if let Some(history) = self.active_command_history(cx) {
+                history.clear();
+            }
+        }
         started
     }
 
@@ -716,7 +726,22 @@ impl WorkspaceApp {
         let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
             return div().into_any_element();
         };
-        if !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset) {
+        let clear_history = matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::CommandHistoryClear { .. }
+        );
+        let clear_current = matches!(
+            snapshot.kind,
+            WorkspaceOverlayConfirmKind::CommandHistoryClear { all: false }
+        );
+        let title_key = if clear_current {
+            "terminal.history.clear_current"
+        } else if clear_history {
+            "terminal.history.clear_all"
+        } else {
+            "command_palette.cmd_reset_settings"
+        };
+        if !clear_history && !matches!(snapshot.kind, WorkspaceOverlayConfirmKind::SettingsReset) {
             return div().into_any_element();
         }
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
@@ -725,20 +750,22 @@ impl WorkspaceApp {
             snapshot.phase,
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
-                title: div()
-                    .child(self.i18n.t("command_palette.cmd_reset_settings"))
-                    .into_any_element(),
+                title: div().child(self.i18n.t(title_key)).into_any_element(),
                 description: Some(
                     div()
-                        .child(self.i18n.t("command_palette.confirm_reset_settings"))
+                        .child(self.i18n.t(if clear_current {
+                            "terminal.history.clear_confirm_current"
+                        } else if clear_history {
+                            "terminal.history.clear_confirm"
+                        } else {
+                            "command_palette.confirm_reset_settings"
+                        }))
                         .into_any_element(),
                 ),
                 cancel_label: div()
                     .child(self.i18n.t("common.actions.cancel"))
                     .into_any_element(),
-                confirm_label: div()
-                    .child(self.i18n.t("command_palette.cmd_reset_settings"))
-                    .into_any_element(),
+                confirm_label: div().child(self.i18n.t(title_key)).into_any_element(),
             },
             snapshot.focused_action,
             cx.listener(|this, _event, _window, cx| {

@@ -7524,6 +7524,7 @@ dependencies = [
  "parking_lot",
  "rand 0.10.2",
  "regex",
+ "rusqlite",
  "russh",
  "serde_json",
  "tempfile",

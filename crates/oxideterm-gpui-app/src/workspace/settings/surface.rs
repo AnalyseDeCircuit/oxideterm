@@ -1286,6 +1286,12 @@ impl WorkspaceApp {
         }
         self.i18n
             .set_locale(locale_from_settings(settings.general.language));
+        if previous_settings.terminal.autosuggest != settings.terminal.autosuggest {
+            self.terminal_history_store.configure(
+                settings.terminal.autosuggest.save_history,
+                settings.terminal.autosuggest.history_retention_days,
+            );
+        }
         if previous_settings.general.language != settings.general.language {
             self.refresh_native_plugin_terminal_hooks(cx);
             cx.set_menus(crate::platform::app_menus(settings));

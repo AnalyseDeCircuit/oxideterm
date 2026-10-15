@@ -63,16 +63,6 @@ impl TerminalCommandContext {
             .or_else(|| self.tab_id.map(|tab_id| tab_id.0.to_string()))
             .unwrap_or_default()
     }
-
-    pub(in crate::workspace) fn target_fields(&self) -> Vec<String> {
-        let mut fields = vec![self.target_label.clone()];
-        if let Some(cwd_host) = &self.cwd_host {
-            fields.push(cwd_host.clone());
-        }
-        fields.retain(|field| !field.trim().is_empty());
-        fields.dedup();
-        fields
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]

@@ -8,10 +8,10 @@ use oxideterm_public_mcp::{
 };
 use oxideterm_quick_commands::{
     QuickCommand, QuickCommandConfirmationPolicy, QuickCommandContextValues, QuickCommandDraft,
-    QuickCommandParameter, QuickCommandParameterKind, QuickCommandRisk, QuickCommandTargetContext,
-    QuickCommandTargetProtocol, QuickCommandsSnapshot, classify_command_risk, delete_quick_command,
-    load_snapshot, new_quick_command_id, now_ms, prepare_quick_command, save_snapshot,
-    upsert_quick_command,
+    QuickCommandMatchField, QuickCommandParameter, QuickCommandParameterKind, QuickCommandRisk,
+    QuickCommandTargetContext, QuickCommandTargetProtocol, QuickCommandsSnapshot,
+    classify_command_risk, delete_quick_command, load_snapshot, new_quick_command_id, now_ms,
+    prepare_quick_command, save_snapshot, upsert_quick_command,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -27,6 +27,7 @@ struct QuickCommandSummary {
     description: Option<String>,
     host_pattern: Option<String>,
     host_patterns: Vec<String>,
+    match_field: QuickCommandMatchField,
     protocols: Vec<QuickCommandTargetProtocol>,
     parameter_count: usize,
     confirmation: QuickCommandConfirmationPolicy,
@@ -196,6 +197,7 @@ impl WorkspaceApp {
                         .map(core_quick_command_protocol)
                         .collect()
                 }),
+                match_field: None,
                 host_patterns: args.host_patterns.clone().or_else(|| {
                     args.host_pattern
                         .clone()
@@ -493,6 +495,7 @@ impl super::PublicMcpWorkspaceBridge {
             description: command.description,
             host_pattern: command.availability.host_patterns.first().cloned(),
             host_patterns: command.availability.host_patterns,
+            match_field: command.availability.match_field,
             protocols: command.availability.protocols,
             parameter_count: command.parameters.len(),
             confirmation: command.confirmation,
