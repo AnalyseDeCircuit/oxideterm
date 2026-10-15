@@ -573,6 +573,8 @@
     "typeLocal": "本機",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "按 Enter 選擇提權憑證",
+      "choose_title": "選擇提權憑證",
       "fill": "填入密碼",
       "filling": "填入中...",
       "fill_title": "填入 {{label}}",

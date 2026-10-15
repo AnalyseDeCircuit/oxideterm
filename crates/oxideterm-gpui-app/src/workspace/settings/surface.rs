@@ -585,6 +585,11 @@ impl WorkspaceApp {
             }
             SettingsTab::Privilege => {
                 self.connection_store
+                    .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                    .map(|credentials| credentials.len())
+                    .unwrap_or(0)
+                    .hash(&mut hasher);
+                self.connection_store
                     .totp_credentials()
                     .len()
                     .hash(&mut hasher);

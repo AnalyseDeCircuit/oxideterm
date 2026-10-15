@@ -573,6 +573,8 @@
       "regenerate": "重试"
     },
     "privilege_helper": {
+      "choose_hint": "按 Enter 选择提权凭据",
+      "choose_title": "选择提权凭据",
       "fill": "填充密码",
       "filling": "填充中...",
       "fill_title": "填充 {{label}}",

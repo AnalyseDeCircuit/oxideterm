@@ -573,6 +573,8 @@
       "regenerate": "Retry"
     },
     "privilege_helper": {
+      "choose_hint": "Press Enter to choose a privilege credential",
+      "choose_title": "Choose a privilege credential",
       "fill": "Fill password",
       "filling": "Filling...",
       "fill_title": "Fill {{label}}",

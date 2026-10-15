@@ -468,6 +468,9 @@ impl WorkspaceApp {
                 {
                     window.prevent_default();
                     cx.stop_propagation();
+                } else if this.handle_privilege_credential_picker_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
                 } else if this.handle_terminal_git_branch_picker_key(event, cx) {
                     window.prevent_default();
                     cx.stop_propagation();

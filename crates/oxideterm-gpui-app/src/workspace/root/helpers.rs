@@ -1056,6 +1056,9 @@ impl WorkspaceApp {
         if self.dismiss_terminal_recording_menu() {
             changed = true;
         }
+        if self.dismiss_privilege_credential_picker() {
+            changed = true;
+        }
         if self.dismiss_terminal_highlight_popover() {
             changed = true;
         }

@@ -916,7 +916,25 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn settings_privilege_scope_rows(
         &self,
     ) -> Vec<SettingsPrivilegeScopeRow> {
-        let mut rows = vec![self.settings_local_privilege_scope_row()];
+        let mut rows = vec![
+            self.settings_local_privilege_scope_row(),
+            SettingsPrivilegeScopeRow {
+                id: SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string(),
+                title: self
+                    .i18n
+                    .t("settings_view.privilege_credentials.ssh_common_scope"),
+                subtitle: self
+                    .i18n
+                    .t("settings_view.privilege_credentials.ssh_common_scope_hint"),
+                username_placeholder: String::new(),
+                credential_count: self
+                    .connection_store
+                    .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                    .map(|credentials| credentials.len())
+                    .unwrap_or(0),
+                local: false,
+            },
+        ];
         // Saved SSH connections already own privilege credential metadata in the
         // connection store. Expose those explicit scopes instead of letting the
         // terminal helper infer remote secrets from host/title/runtime matches.

@@ -337,6 +337,25 @@ impl PrivilegePromptTracker {
         self.input_line_reliable = true;
     }
 
+    pub(crate) fn observe_custom_prompt(&mut self, prompt: PrivilegePromptMatch, now: Instant) {
+        if !matches!(prompt, PrivilegePromptMatch::Custom { .. })
+            || self.suppresses_fallback_prompt_detection(now)
+            || self
+                .snapshot(now)
+                .is_some_and(|snapshot| snapshot.prompt == prompt)
+        {
+            return;
+        }
+        // User-authored prompts need the same manual-secret tracking as protocol-classified prompts.
+        self.remember_visible_prompt(
+            prompt,
+            PrivilegePromptConfidence::ExplicitPrompt,
+            None,
+            false,
+            now,
+        );
+    }
+
     pub fn mark_secret_filled(&mut self, now: Instant) {
         let filled = match &self.state {
             PrivilegePromptTrackerState::PromptVisible {
@@ -1370,29 +1389,50 @@ mod tests {
 
     #[test]
     fn tracker_marks_manual_input_at_prompt_as_secret_entry() {
-        let start = Instant::now();
-        let mut tracker = PrivilegePromptTracker::default();
-
-        tracker.observe_user_input_bytes(b"sudo true\r", start);
-        observe_standard_prompt(
-            &mut tracker,
-            "Password:",
-            false,
-            start + Duration::from_millis(10),
-        );
-
-        assert_eq!(
-            tracker.observe_user_input_bytes(b"not-for-history", start + Duration::from_millis(20)),
-            PrivilegeInputObservation::SecretEntry
-        );
-        assert_eq!(tracker.snapshot(start + Duration::from_millis(20)), None);
-        assert!(tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(20)));
-
-        assert_eq!(
-            tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(30)),
-            PrivilegeInputObservation::SecretEntry
-        );
-        assert_eq!(tracker.snapshot(start + Duration::from_millis(30)), None);
+        for custom in [false, true] {
+            let start = Instant::now();
+            let mut tracker = PrivilegePromptTracker::default();
+            if custom {
+                tracker.observe_custom_prompt(
+                    PrivilegePromptMatch::Custom {
+                        credential_id: "shared".into(),
+                        prompt_text: "Enter approval token >".into(),
+                    },
+                    start,
+                );
+            } else {
+                tracker.observe_user_input_bytes(b"sudo true\r", start);
+                observe_standard_prompt(&mut tracker, "Password:", false, start);
+            }
+            let generation = tracker.state_generation();
+            assert_eq!(
+                tracker.observe_user_input_bytes(
+                    b"not-for-history",
+                    start + Duration::from_millis(20)
+                ),
+                PrivilegeInputObservation::SecretEntry
+            );
+            assert_ne!(tracker.state_generation(), generation);
+            assert_eq!(tracker.snapshot(start + Duration::from_millis(20)), None);
+            assert!(
+                tracker.suppresses_fallback_prompt_detection(start + Duration::from_millis(20))
+            );
+            if custom {
+                tracker.observe_custom_prompt(
+                    PrivilegePromptMatch::Custom {
+                        credential_id: "shared".into(),
+                        prompt_text: "Enter approval token >".into(),
+                    },
+                    start + Duration::from_millis(25),
+                );
+                assert_eq!(tracker.snapshot(start + Duration::from_millis(25)), None);
+            }
+            assert_eq!(
+                tracker.observe_user_input_bytes(b"\r", start + Duration::from_millis(30)),
+                PrivilegeInputObservation::SecretEntry
+            );
+            assert_eq!(tracker.snapshot(start + Duration::from_millis(30)), None);
+        }
     }
 
     #[test]

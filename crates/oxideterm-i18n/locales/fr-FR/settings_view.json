@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "Utilisateur local actuel"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH commun",
+      "ssh_common_scope_hint": "Utilisé lorsqu’aucun identifiant propre à la connexion ne correspond. Les terminaux locaux utilisent leurs propres identifiants.",
       "title": "Identifiants d’élévation",
       "description": "Gérer au même endroit les identifiants sudo, su et invites personnalisées pour les shells locaux et les connexions enregistrées.",
       "scopes": "Périmètres d’identifiants",

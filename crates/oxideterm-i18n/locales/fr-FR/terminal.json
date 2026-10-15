@@ -573,6 +573,8 @@
     "typeLocal": "LOCAL",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "Appuyez sur Entrée pour choisir un identifiant d’élévation",
+      "choose_title": "Choisir un identifiant d’élévation",
       "fill": "Remplir le mot de passe",
       "filling": "Remplissage...",
       "fill_title": "Remplir {{label}}",

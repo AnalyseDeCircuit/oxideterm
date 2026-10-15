@@ -41,22 +41,21 @@ impl WorkspaceApp {
                     ));
                     return None;
                 };
-                let Some(connection_id) = self.ssh_privilege_scope_id_for_node(&node_id) else {
-                    log_privilege_prompt_helper(format_args!(
-                        "scope unavailable: ssh node has no saved owner"
-                    ));
-                    return None;
-                };
-                if self.connection_store.get(&connection_id).is_none() {
-                    log_privilege_prompt_helper(format_args!(
-                        "scope unavailable: ssh saved owner is missing from connection store"
-                    ));
-                    return None;
-                }
-                let credentials = self
+                let connection_id = self
+                    .ssh_privilege_scope_id_for_node(&node_id)
+                    .filter(|id| self.connection_store.get(id).is_some())
+                    .unwrap_or_else(|| SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string());
+                let mut credentials = self
                     .connection_store
                     .list_privilege_credentials(&connection_id)
                     .unwrap_or_default();
+                if connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID {
+                    credentials.extend(
+                        self.connection_store
+                            .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                            .unwrap_or_default(),
+                    );
+                }
                 log_privilege_prompt_helper(format_args!(
                     "scope resolved: scope=ssh credentials_count={}",
                     credentials.len()
@@ -187,9 +186,18 @@ impl WorkspaceApp {
         let Some(active_pane) = self.active_pane(cx) else {
             return false;
         };
+        if self.privilege_credential_picker.is_some()
+            && !self.privilege_credential_picker_is_current(cx)
+        {
+            self.dismiss_privilege_credential_picker();
+        }
         let hint = self.active_privilege_prompt_inline_hint(cx);
+        let custom_prompt = self
+            .active_privilege_prompt_state(cx)
+            .map(|state| state.prompt)
+            .filter(|prompt| matches!(prompt, PrivilegePromptMatch::Custom { .. }));
         active_pane.update(cx, |pane, cx| {
-            pane.set_privilege_prompt_inline_hint(hint, cx)
+            pane.set_privilege_prompt_inline_hint(hint, custom_prompt, cx)
         })
     }
 
@@ -199,7 +207,7 @@ impl WorkspaceApp {
             return None;
         };
         let prompt_kind = privilege_prompt_kind_name(&state.prompt);
-        if !privilege_prompt_state_allows_confirmed_fill(&state) {
+        if state.matches.is_empty() {
             log_privilege_prompt_helper(format_args!(
                 "hint suppressed: prompt_kind={} matches_count={}",
                 prompt_kind,
@@ -208,10 +216,15 @@ impl WorkspaceApp {
             return None;
         }
         log_privilege_prompt_helper(format_args!(
-            "hint ready: prompt_kind={} matches_count=1",
-            prompt_kind
+            "hint ready: prompt_kind={} matches_count={}",
+            prompt_kind,
+            state.matches.len()
         ));
-        Some(self.i18n.t("terminal.privilege_helper.inline_fill_hint"))
+        Some(self.i18n.t(if state.matches.len() == 1 {
+            "terminal.privilege_helper.inline_fill_hint"
+        } else {
+            "terminal.privilege_helper.choose_hint"
+        }))
     }
 
     pub(in crate::workspace) fn handle_privilege_prompt_helper_key(
@@ -245,26 +258,7 @@ impl WorkspaceApp {
             log_privilege_prompt_helper(format_args!("root enter: no prompt state"));
             return false;
         };
-        if !privilege_prompt_state_allows_confirmed_fill(&state) {
-            log_privilege_prompt_helper(format_args!(
-                "root enter: ignored match_count={}",
-                state.matches.len()
-            ));
-            return false;
-        };
-        let [matched] = state.matches.as_slice() else {
-            return false;
-        };
-        // The inline hint is the confirmation affordance: Enter is accepted only
-        // when prompt detection produces exactly one scoped credential. Bare
-        // `Password:` prompts therefore work for macOS sudo without guessing
-        // between multiple saved sudo/su candidates.
-        log_privilege_prompt_helper(format_args!(
-            "root enter: filling prompt_kind={}",
-            privilege_prompt_kind_name(&state.prompt)
-        ));
-        self.fill_privilege_prompt_match(matched.clone(), state.prompt, window, cx);
-        true
+        self.confirm_or_choose_privilege_credential(state, window, cx)
     }
 
     pub(in crate::workspace) fn handle_active_privilege_prompt_submit_request(
@@ -288,24 +282,221 @@ impl WorkspaceApp {
             log_privilege_prompt_helper(format_args!("terminal submit request: no prompt state"));
             return false;
         };
-        if !privilege_prompt_state_allows_confirmed_fill(&state) {
-            log_privilege_prompt_helper(format_args!(
-                "terminal submit request: ignored match_count={}",
-                state.matches.len()
-            ));
+        self.confirm_or_choose_privilege_credential(state, window, cx)
+    }
+
+    fn confirm_or_choose_privilege_credential(
+        &mut self,
+        state: PrivilegePromptHelperState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if privilege_prompt_state_allows_confirmed_fill(&state) {
+            self.fill_privilege_prompt_match(state.matches[0].clone(), state.prompt, window, cx);
+        } else if !state.matches.is_empty() {
+            let (Some(pane_id), Some(session_id), Some(pane)) = (
+                self.active_pane_id(cx),
+                self.active_terminal_session_id(cx),
+                self.active_pane(cx),
+            ) else {
+                return false;
+            };
+            self.dismiss_workspace_context_menus(cx);
+            self.selectable_text_scroll_handle("privilege-credential-picker-scroll")
+                .scroll_to_top_of_item(0);
+            self.privilege_credential_picker = Some(PrivilegeCredentialPicker {
+                pane_id,
+                session_id,
+                prompt_generation: pane.read(cx).privilege_prompt_generation(),
+                state,
+                selected: 0,
+            });
+            window.focus(&self.focus_handle, cx);
+            cx.notify();
+        } else {
             return false;
-        };
-        let [matched] = state.matches.as_slice() else {
-            return false;
-        };
-        // TerminalPane captures Enter before it is written as a plain newline;
-        // Workspace still owns the secret lookup and one-shot PTY handoff.
-        log_privilege_prompt_helper(format_args!(
-            "terminal submit request: filling prompt_kind={}",
-            privilege_prompt_kind_name(&state.prompt)
-        ));
-        self.fill_privilege_prompt_match(matched.clone(), state.prompt, window, cx);
+        }
         true
+    }
+
+    pub(in crate::workspace) fn dismiss_privilege_credential_picker(&mut self) -> bool {
+        self.privilege_credential_picker.take().is_some()
+    }
+
+    pub(in crate::workspace) fn privilege_credential_picker_is_current(&self, cx: &App) -> bool {
+        let Some(picker) = &self.privilege_credential_picker else {
+            return false;
+        };
+        let (Some(pane_id), Some(session_id), Some(pane), Some(state)) = (
+            self.active_pane_id(cx),
+            self.active_terminal_session_id(cx),
+            self.active_pane(cx),
+            self.active_privilege_prompt_state(cx),
+        ) else {
+            return false;
+        };
+        picker.is_current(
+            pane_id,
+            session_id,
+            pane.read(cx).privilege_prompt_generation(),
+            &state,
+        )
+    }
+
+    fn choose_privilege_credential(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.privilege_credential_picker_is_current(cx) {
+            self.dismiss_privilege_credential_picker();
+            cx.notify();
+            return;
+        }
+        let Some(picker) = self.privilege_credential_picker.take() else {
+            return;
+        };
+        if let Some(matched) = picker.state.matches.get(index) {
+            self.fill_privilege_prompt_match(matched.clone(), picker.state.prompt, window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn handle_privilege_credential_picker_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.privilege_credential_picker.is_none() {
+            return false;
+        }
+        if !self.privilege_credential_picker_is_current(cx) {
+            self.dismiss_privilege_credential_picker();
+            cx.notify();
+            return false;
+        }
+        let key = event.keystroke.key.as_str();
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.platform || modifiers.control || modifiers.alt || modifiers.shift {
+            self.dismiss_privilege_credential_picker();
+            self.focus_active_pane(window, cx);
+            cx.notify();
+            return false;
+        }
+        match key {
+            "up" | "arrowup" | "down" | "arrowdown" => {
+                let picker = self.privilege_credential_picker.as_mut().unwrap();
+                let count = picker.state.matches.len();
+                picker.selected = if matches!(key, "up" | "arrowup") {
+                    (picker.selected + count - 1) % count
+                } else {
+                    (picker.selected + 1) % count
+                };
+                let selected = picker.selected;
+                self.selectable_text_scroll_handle("privilege-credential-picker-scroll")
+                    .scroll_to_item(selected);
+                cx.notify();
+                true
+            }
+            "enter" => {
+                let index = self.privilege_credential_picker.as_ref().unwrap().selected;
+                self.choose_privilege_credential(index, window, cx);
+                true
+            }
+            "escape" => {
+                self.dismiss_privilege_credential_picker();
+                self.focus_active_pane(window, cx);
+                cx.notify();
+                true
+            }
+            _ => {
+                self.dismiss_privilege_credential_picker();
+                self.focus_active_pane(window, cx);
+                cx.notify();
+                false
+            }
+        }
+    }
+
+    pub(super) fn render_privilege_credential_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(picker) = &self.privilege_credential_picker else {
+            return div().into_any_element();
+        };
+        let scroll = self.selectable_text_scroll_handle("privilege-credential-picker-scroll");
+        let mut rows = div()
+            .id("privilege-credential-picker-scroll")
+            .max_h(px(288.0))
+            .selectable_overflow_y_scroll(&scroll)
+            .flex()
+            .flex_col();
+        for (index, matched) in picker.state.matches.iter().enumerate() {
+            let source = if matched.connection_id == SSH_COMMON_PRIVILEGE_SCOPE_ID {
+                self.i18n
+                    .t("settings_view.privilege_credentials.ssh_common_scope")
+            } else if matched.connection_id == LOCAL_SHELL_PRIVILEGE_CONNECTION_ID {
+                self.i18n
+                    .t("settings_view.privilege_credentials.local_scope")
+            } else {
+                self.connection_store
+                    .get(&matched.connection_id)
+                    .map(|connection| connection.name.clone())
+                    .unwrap_or_default()
+            };
+            let credential = self
+                .connection_store
+                .list_privilege_credentials(&matched.connection_id)
+                .unwrap_or_default()
+                .into_iter()
+                .find(|credential| credential.id == matched.credential_id);
+            let kind = credential
+                .map(|credential| self.settings_privilege_kind_label(credential.kind))
+                .unwrap_or_default();
+            rows = rows.child(
+                oxideterm_gpui_ui::select::select_option(
+                    &self.tokens,
+                    format!("{} · {} · {}", matched.label, kind, source),
+                    index == picker.selected,
+                )
+                .flex_none()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.choose_privilege_credential(index, window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
+        }
+        context_menu_pointer_event_boundary(
+            command_panel(
+                &self.tokens,
+                CommandPanelOptions::new()
+                    .width(460.0)
+                    .max_width_ratio(0.96)
+                    .terminal_owned(),
+            )
+            .absolute()
+            .bottom(px(TERMINAL_COMMAND_TOOLBAR_HEIGHT))
+            .left(px(12.0))
+            .occlude(),
+        )
+        .child(
+            div()
+                .px_3()
+                .py_2()
+                .child(self.i18n.t("terminal.privilege_helper.choose_title")),
+        )
+        .child(
+            div()
+                .id("privilege-credential-picker")
+                .relative()
+                .max_h(px(288.0))
+                .child(rows)
+                .vertical_scrollbar(&scroll),
+        )
+        .into_any_element()
     }
 
     pub(super) fn fill_privilege_prompt_match(
@@ -315,6 +506,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let Some(pane_id) = self.active_pane_id(cx) else {
+            return;
+        };
+        let Some(session_id) = self.active_terminal_session_id(cx) else {
+            return;
+        };
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
+        let generation = pane.read(cx).privilege_prompt_generation();
         log_privilege_prompt_helper(format_args!("fill: loading scoped credential secret"));
         let secret = match self
             .connection_store
@@ -338,11 +539,16 @@ impl WorkspaceApp {
         // GPUI layer. It is zeroized after the PTY write attempt, matching the
         // Tauri click-only secret handoff without involving command history.
         let secret_line = zeroize::Zeroizing::new(format!("{}\n", secret.expose_secret()));
-        let sent = self.active_pane(cx).is_some_and(|pane| {
-            pane.update(cx, |pane, cx| {
-                pane.send_privilege_secret_input_bytes(secret_line.as_bytes(), confirmed_prompt, cx)
-            })
-        });
+        let sent = self.active_pane_id(cx) == Some(pane_id)
+            && self.active_terminal_session_id(cx) == Some(session_id)
+            && pane.update(cx, |pane, cx| {
+                pane.send_privilege_secret_input_bytes(
+                    secret_line.as_bytes(),
+                    confirmed_prompt,
+                    generation,
+                    cx,
+                )
+            });
         log_privilege_prompt_helper(format_args!("fill: write attempted sent={sent}"));
         if !sent {
             self.push_command_palette_toast(

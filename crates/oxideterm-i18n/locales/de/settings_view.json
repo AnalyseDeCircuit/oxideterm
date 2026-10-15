@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "Aktueller lokaler Benutzer"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH allgemein",
+      "ssh_common_scope_hint": "Wird verwendet, wenn keine verbindungsspezifischen Zugangsdaten passen. Lokale Terminals verwenden eigene Zugangsdaten.",
       "title": "Privileg-Anmeldedaten",
       "description": "sudo-, su- und benutzerdefinierte Privileg-Prompt-Anmeldedaten für lokale Shells und gespeicherte Verbindungen zentral verwalten.",
       "scopes": "Anmeldedaten-Bereiche",

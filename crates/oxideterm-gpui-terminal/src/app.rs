@@ -1836,6 +1836,10 @@ impl TerminalPane {
         self.privilege_prompt_tracker.snapshot(Instant::now())
     }
 
+    pub fn privilege_prompt_generation(&self) -> u64 {
+        self.privilege_prompt_tracker.state_generation()
+    }
+
     pub fn privilege_prompt_fallback_suppressed(&self) -> bool {
         self.privilege_prompt_tracker
             .suppresses_fallback_prompt_detection(Instant::now())
@@ -1922,8 +1926,15 @@ impl TerminalPane {
     pub fn set_privilege_prompt_inline_hint(
         &mut self,
         hint: Option<String>,
+        custom_prompt: Option<PrivilegePromptMatch>,
         cx: &mut Context<Self>,
     ) -> bool {
+        if let Some(prompt) = custom_prompt {
+            let generation = self.privilege_prompt_generation();
+            self.privilege_prompt_tracker
+                .observe_custom_prompt(prompt, Instant::now());
+            self.finish_privilege_prompt_tracker_update(generation, cx);
+        }
         if self.privilege_prompt_inline_hint == hint {
             return false;
         }
@@ -2996,9 +3007,13 @@ impl TerminalPane {
         &mut self,
         bytes: &[u8],
         confirmed_prompt: PrivilegePromptMatch,
+        prompt_generation: u64,
         cx: &mut Context<Self>,
     ) -> bool {
-        if bytes.is_empty() || !self.terminal_accepts_input() {
+        if bytes.is_empty()
+            || !self.terminal_accepts_input()
+            || self.privilege_prompt_generation() != prompt_generation
+        {
             return false;
         }
 

@@ -9,7 +9,7 @@ use super::terminal_git::{
     terminal_git_repository_action_label_key,
 };
 use super::*;
-use oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID;
+use oxideterm_connections::{LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, SSH_COMMON_PRIVILEGE_SCOPE_ID};
 use oxideterm_environment::{
     CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource, GitChangedPath,
     GitRepositoryStatus, ProjectSnapshot, ProjectTask, ProjectTaskGroup,
@@ -71,6 +71,29 @@ struct PrivilegePromptHelperState {
     connection_id: String,
     prompt: PrivilegePromptMatch,
     matches: Vec<MatchedPrivilegeCredential>,
+}
+
+pub(super) struct PrivilegeCredentialPicker {
+    pane_id: PaneId,
+    session_id: TerminalSessionId,
+    prompt_generation: u64,
+    state: PrivilegePromptHelperState,
+    selected: usize,
+}
+
+impl PrivilegeCredentialPicker {
+    fn is_current(
+        &self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        generation: u64,
+        state: &PrivilegePromptHelperState,
+    ) -> bool {
+        self.pane_id == pane_id
+            && self.session_id == session_id
+            && self.prompt_generation == generation
+            && self.state == *state
+    }
 }
 
 fn tab_kind_allows_privilege_prompt_helper(tab_kind: &TabKind) -> bool {
@@ -281,7 +304,10 @@ fn privilege_credential_matches_prompt(
                 PrivilegeCredentialKind::SudoPassword => false,
             }
         }
-        PrivilegePromptMatch::Custom { credential_id, .. } => credential.id == *credential_id,
+        PrivilegePromptMatch::Custom { .. } => {
+            credential.kind == PrivilegeCredentialKind::CustomPrompt
+                && privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
+        }
         PrivilegePromptMatch::GenericPassword { .. } => match credential.kind {
             // Bare `Password:` carries no reliable sudo/su identity. Offer only
             // scoped, click-to-send candidates and never infer a command kind.
@@ -401,15 +427,21 @@ fn build_privilege_prompt_helper_state_from_prompt(
     credentials: &[SavedPrivilegeCredential],
     prompt: PrivilegePromptMatch,
 ) -> Option<PrivilegePromptHelperState> {
-    let matches = credentials
+    let mut matches = credentials
         .iter()
         .filter(|credential| privilege_credential_matches_prompt(credential, &prompt))
         .map(|credential| MatchedPrivilegeCredential {
-            connection_id: connection_id.clone(),
+            connection_id: credential.connection_id.clone(),
             credential_id: credential.id.clone(),
             label: credential.label.clone(),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    if matches
+        .iter()
+        .any(|candidate| candidate.connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID)
+    {
+        matches.retain(|candidate| candidate.connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID);
+    }
     Some(PrivilegePromptHelperState {
         connection_id,
         prompt,
@@ -516,6 +548,94 @@ mod privilege_prompt_helper_tests {
     use super::*;
     use chrono::Utc;
 
+    #[test]
+    fn ssh_common_privilege_candidates_preserve_scope_and_specific_priority() {
+        let common = saved_privilege_credential_for_connection(
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+            "shared",
+            PrivilegeCredentialKind::SudoPassword,
+            None,
+        );
+        let specific = saved_privilege_credential_for_connection(
+            "conn-1",
+            "shared",
+            PrivilegeCredentialKind::SudoPassword,
+            Some("deploy"),
+        );
+        let credentials = [common, specific];
+        for (prompt, expected_scope) in [
+            ("[sudo] password for deploy:", "conn-1"),
+            ("[sudo] password for other:", SSH_COMMON_PRIVILEGE_SCOPE_ID),
+        ] {
+            let state =
+                build_privilege_prompt_helper_state("conn-1".into(), &credentials, prompt).unwrap();
+            assert_eq!(
+                state.matches,
+                vec![MatchedPrivilegeCredential {
+                    connection_id: expected_scope.into(),
+                    credential_id: "shared".into(),
+                    label: "shared".into()
+                }]
+            );
+        }
+        let mut first = saved_privilege_credential_for_connection(
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+            "first",
+            PrivilegeCredentialKind::CustomPrompt,
+            None,
+        );
+        first.prompt_patterns = vec!["approval token".into()];
+        let mut second = first.clone();
+        second.id = "second".into();
+        let state = build_privilege_prompt_helper_state(
+            "conn-1".into(),
+            &[first, second],
+            "Enter approval token >",
+        )
+        .unwrap();
+        assert_eq!(
+            state
+                .matches
+                .iter()
+                .map(|candidate| candidate.credential_id.as_str())
+                .collect::<Vec<_>>(),
+            ["first", "second"]
+        );
+        assert!(!privilege_prompt_state_allows_confirmed_fill(&state));
+    }
+
+    #[test]
+    fn privilege_picker_expires_when_target_prompt_or_candidates_change() {
+        let state = build_privilege_prompt_helper_state(
+            "conn-1".into(),
+            &[saved_privilege_credential(
+                "sudo",
+                PrivilegeCredentialKind::SudoPassword,
+                None,
+            )],
+            "Password:",
+        )
+        .unwrap();
+        let picker = PrivilegeCredentialPicker {
+            pane_id: PaneId(1),
+            session_id: TerminalSessionId(2),
+            prompt_generation: 3,
+            state: state.clone(),
+            selected: 0,
+        };
+        assert!(picker.is_current(PaneId(1), TerminalSessionId(2), 3, &state));
+        for (pane, session, generation) in [
+            (PaneId(4), TerminalSessionId(2), 3),
+            (PaneId(1), TerminalSessionId(4), 3),
+            (PaneId(1), TerminalSessionId(2), 4),
+        ] {
+            assert!(!picker.is_current(pane, session, generation, &state));
+        }
+        let mut changed = state;
+        changed.matches.clear();
+        assert!(!picker.is_current(PaneId(1), TerminalSessionId(2), 3, &changed));
+    }
+
     fn saved_privilege_credential_for_connection(
         connection_id: &str,
         id: &str,
@@ -545,6 +665,19 @@ mod privilege_prompt_helper_tests {
         username_hint: Option<&str>,
     ) -> SavedPrivilegeCredential {
         saved_privilege_credential_for_connection("conn-1", id, kind, username_hint)
+    }
+
+    fn local_privilege_credential(
+        id: &str,
+        kind: PrivilegeCredentialKind,
+        username_hint: Option<&str>,
+    ) -> SavedPrivilegeCredential {
+        saved_privilege_credential_for_connection(
+            LOCAL_SHELL_PRIVILEGE_CONNECTION_ID,
+            id,
+            kind,
+            username_hint,
+        )
     }
 
     fn custom_privilege_credential(id: &str, patterns: &[&str]) -> SavedPrivilegeCredential {
@@ -655,8 +788,8 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn generic_password_after_sudo_command_matches_sudo_credentials_only() {
         let credentials = vec![
-            saved_privilege_credential("local-sudo", PrivilegeCredentialKind::SudoPassword, None),
-            saved_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
+            local_privilege_credential("local-sudo", PrivilegeCredentialKind::SudoPassword, None),
+            local_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
         ];
         let state = build_privilege_prompt_helper_state(
             "local-shell:default".to_string(),
@@ -678,12 +811,12 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn generic_password_after_su_command_matches_target_hint() {
         let credentials = vec![
-            saved_privilege_credential(
+            local_privilege_credential(
                 "root-su",
                 PrivilegeCredentialKind::SuPassword,
                 Some("root"),
             ),
-            saved_privilege_credential(
+            local_privilege_credential(
                 "postgres-su",
                 PrivilegeCredentialKind::SuPassword,
                 Some("postgres"),
@@ -708,7 +841,7 @@ mod privilege_prompt_helper_tests {
 
     #[test]
     fn single_generic_password_candidate_allows_confirmed_fill() {
-        let credentials = vec![saved_privilege_credential(
+        let credentials = vec![local_privilege_credential(
             "local-sudo",
             PrivilegeCredentialKind::SudoPassword,
             None,
@@ -730,12 +863,12 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn generic_password_prompt_offers_scoped_click_only_candidates() {
         let credentials = vec![
-            saved_privilege_credential(
+            local_privilege_credential(
                 "local-sudo",
                 PrivilegeCredentialKind::SudoPassword,
                 Some("dominical"),
             ),
-            saved_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
+            local_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
         ];
         let state = build_privilege_prompt_helper_state(
             "local-shell:default".to_string(),

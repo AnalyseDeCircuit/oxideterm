@@ -768,6 +768,7 @@ pub(crate) struct WorkspaceApp {
     _tab_host_subscription: Subscription,
     search: actions::TerminalSearchState,
     terminal_recording_menu_open: bool,
+    privilege_credential_picker: Option<terminal_command_bar::PrivilegeCredentialPicker>,
     terminal_highlight_popover_open: bool,
     // Settings keep the source pane stable while editing session-only trigger overrides.
     terminal_trigger_settings_pane: Option<PaneId>,

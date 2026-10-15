@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "Người dùng cục bộ hiện tại"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH dùng chung",
+      "ssh_common_scope_hint": "Dùng khi không có thông tin xác thực riêng của kết nối phù hợp. Thiết bị đầu cuối cục bộ dùng thông tin xác thực riêng.",
       "title": "Thông tin xác thực đặc quyền",
       "description": "Quản lý tập trung thông tin xác thực sudo, su và lời nhắc đặc quyền tùy chỉnh cho shell cục bộ và kết nối đã lưu.",
       "scopes": "Phạm vi thông tin xác thực",

@@ -573,6 +573,8 @@
     "typeLocal": "LOKAL",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "Enter drücken, um Zugangsdaten zur Rechteerhöhung auszuwählen",
+      "choose_title": "Zugangsdaten zur Rechteerhöhung auswählen",
       "fill": "Passwort einfügen",
       "filling": "Füge ein...",
       "fill_title": "{{label}} einfügen",

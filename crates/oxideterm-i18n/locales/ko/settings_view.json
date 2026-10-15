@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "현재 로컬 사용자"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH 공통",
+      "ssh_common_scope_hint": "일치하는 연결별 자격 증명이 없을 때 사용합니다. 로컬 터미널은 별도의 자격 증명을 사용합니다.",
       "title": "권한 상승 자격 증명",
       "description": "로컬 셸과 저장된 연결의 sudo, su, 사용자 지정 권한 상승 프롬프트 자격 증명을 한곳에서 관리합니다.",
       "scopes": "자격 증명 범위",

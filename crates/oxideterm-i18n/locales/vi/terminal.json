@@ -573,6 +573,8 @@
     "typeLocal": "NỘI BỘ",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "Nhấn Enter để chọn thông tin xác thực nâng quyền",
+      "choose_title": "Chọn thông tin xác thực nâng quyền",
       "fill": "Điền mật khẩu",
       "filling": "Đang điền...",
       "fill_title": "Điền {{label}}",

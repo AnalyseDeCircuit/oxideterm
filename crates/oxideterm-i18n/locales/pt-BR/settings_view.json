@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "Usuário local atual"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH compartilhado",
+      "ssh_common_scope_hint": "Usado quando nenhuma credencial específica da conexão corresponde. Terminais locais usam credenciais próprias.",
       "title": "Credenciais de privilégio",
       "description": "Gerencie em um só lugar credenciais de sudo, su e prompts personalizados para shells locais e conexões salvas.",
       "scopes": "Escopos de credenciais",

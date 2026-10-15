@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "現在のローカルユーザー"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH 共通",
+      "ssh_common_scope_hint": "接続固有の認証情報が一致しない場合に使用します。ローカル端末は個別の認証情報を使用します。",
       "title": "権限昇格資格情報",
       "description": "ローカルシェルと保存済み接続の sudo、su、カスタム権限昇格プロンプト資格情報を一か所で管理します。",
       "scopes": "資格情報スコープ",

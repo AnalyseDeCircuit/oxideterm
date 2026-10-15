@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "目前本機使用者"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH 通用",
+      "ssh_common_scope_hint": "沒有符合的連線專屬憑證時使用。本機終端使用獨立憑證。",
       "title": "提權憑證",
       "description": "集中管理本機 Shell 和已儲存連線的 sudo、su 與自訂提權提示憑證。",
       "scopes": "憑證作用域",

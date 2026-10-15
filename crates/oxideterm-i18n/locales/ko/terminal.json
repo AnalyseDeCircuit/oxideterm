@@ -573,6 +573,8 @@
     "typeLocal": "로컬",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "Enter를 눌러 권한 상승 자격 증명 선택",
+      "choose_title": "권한 상승 자격 증명 선택",
       "fill": "비밀번호 입력",
       "filling": "입력 중...",
       "fill_title": "{{label}} 입력",

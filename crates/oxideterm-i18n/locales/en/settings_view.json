@@ -86,6 +86,8 @@
       "privilege_username_placeholder": "Current local user"
     },
     "privilege_credentials": {
+      "ssh_common_scope": "SSH common",
+      "ssh_common_scope_hint": "Used when no connection-specific credential matches. Local terminals use their own credentials.",
       "title": "Privilege Credentials",
       "description": "Manage sudo, su, and custom privilege prompt credentials for local shells and saved connections in one place.",
       "scopes": "Credential scopes",

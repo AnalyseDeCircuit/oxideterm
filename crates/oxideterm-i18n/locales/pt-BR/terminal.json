@@ -573,6 +573,8 @@
     "typeLocal": "LOCAL",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "Pressione Enter para escolher uma credencial de elevação",
+      "choose_title": "Escolher credencial de elevação",
       "fill": "Preencher senha",
       "filling": "Preenchendo...",
       "fill_title": "Preencher {{label}}",

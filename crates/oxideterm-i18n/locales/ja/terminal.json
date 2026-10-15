@@ -573,6 +573,8 @@
     "typeLocal": "ローカル",
     "typeSsh": "SSH",
     "privilege_helper": {
+      "choose_hint": "Enter を押して権限昇格の認証情報を選択",
+      "choose_title": "権限昇格の認証情報を選択",
       "fill": "パスワード入力",
       "filling": "入力中...",
       "fill_title": "{{label}} を入力",
