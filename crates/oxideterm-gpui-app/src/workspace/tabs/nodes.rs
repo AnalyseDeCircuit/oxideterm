@@ -301,7 +301,12 @@ impl WorkspaceApp {
                                 .read(cx)
                                 .terminal_pane_for_target(location.pane_id, session_id)
                         {
-                            pane.update(cx, |pane, cx| pane.set_ssh_reconnect_pending(false, cx));
+                            // The queued opens for this node are dropped below, so the panes
+                            // still waiting for them must return to a retryable state. A shell
+                            // that already started keeps its StartingShell progress.
+                            pane.update(cx, |pane, cx| {
+                                pane.clear_ssh_reconnect_waiting(cx);
+                            });
                         }
                     }
                     let active_reconnect_job = !matches!(

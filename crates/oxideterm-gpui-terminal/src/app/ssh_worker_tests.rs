@@ -75,6 +75,11 @@ fn exited_ssh_pane_requests_reconnect_only_for_enter_and_resumes_in_place(cx: &m
             cx,
         );
         assert_eq!(pane.take_context_action_request(), None);
+        // A node failure clears the panes that are still waiting for the queued
+        // open, and only those: a reconnect already handed to the shell keeps its
+        // StartingShell state instead of flipping back to a usable button.
+        assert!(pane.clear_ssh_reconnect_waiting(cx));
+        assert!(!pane.ssh_reconnect_pending());
         pane.reconnect_ssh(
             SshSessionConfig::for_existing_connection(connection_id, "fixture", 22, "parser-test")
                 .with_runtime(peer.runtime.clone())
@@ -85,6 +90,9 @@ fn exited_ssh_pane_requests_reconnect_only_for_enter_and_resumes_in_place(cx: &m
             cx,
         )
         .unwrap();
+        assert!(pane.ssh_reconnect_starting());
+        assert!(!pane.clear_ssh_reconnect_waiting(cx));
+        assert!(pane.ssh_reconnect_starting());
     });
     let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
     peer.runtime
