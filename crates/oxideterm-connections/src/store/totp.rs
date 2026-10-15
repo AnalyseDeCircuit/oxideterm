@@ -99,27 +99,113 @@ mod tests {
     }
 
     #[test]
+    fn totp_connection_selection_persists_without_changing_other_credentials() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("connections.json");
+        let mut store = ConnectionStore::load(&path).unwrap();
+        let id = credential(&mut store);
+        let other = credential(&mut store);
+        let keep = connection(&mut store, &id, "Keep");
+        let remove = connection(&mut store, &id, "Remove");
+        let replace = connection(&mut store, &other, "Replace");
+        let untouched = connection(&mut store, &other, "Untouched");
+        let selection = [keep.clone(), replace.clone()].into_iter().collect();
+        store
+            .save_totp_credential_with_connections(
+                Some(&id),
+                "Shared",
+                None,
+                TotpParameters::default(),
+                DEFAULT_TOTP_PROMPT,
+                true,
+                Some(&selection),
+            )
+            .unwrap();
+        let saved = ConnectionStore::load(&path).unwrap();
+        for (connection_id, expected) in [
+            (&keep, Some(id.as_str())),
+            (&remove, None),
+            (&replace, Some(id.as_str())),
+            (&untouched, Some(other.as_str())),
+        ] {
+            assert_eq!(
+                saved
+                    .get(connection_id)
+                    .unwrap()
+                    .options
+                    .totp_credential_id
+                    .as_deref(),
+                expected
+            );
+        }
+        let missing = ["missing-connection".to_string()].into_iter().collect();
+        assert_eq!(
+            store.save_totp_credential_with_connections(
+                Some(&id),
+                "Invalid selection",
+                None,
+                TotpParameters::default(),
+                DEFAULT_TOTP_PROMPT,
+                true,
+                Some(&missing),
+            ),
+            Err(TotpError::Unavailable)
+        );
+        assert_eq!(store.totp_credentials(), saved.totp_credentials());
+        assert_eq!(
+            store
+                .get(&keep)
+                .unwrap()
+                .options
+                .totp_credential_id
+                .as_deref(),
+            Some(id.as_str())
+        );
+    }
+
+    #[test]
     fn totp_failed_save_preserves_previous_metadata_and_seed() {
         let directory = tempfile::tempdir().unwrap();
         let mut store = ConnectionStore::load(directory.path().join("connections.json")).unwrap();
         let id = credential(&mut store);
         let binding = store.totp_binding(Some(&id)).unwrap();
         let previous = store.totp_credentials()[0].clone();
+        let owner = connection(&mut store, &id, "Target");
         let path = store.path.clone();
         store.path = directory.path().to_path_buf();
         assert_eq!(
-            store.save_totp_credential(
+            store.save_totp_credential_with_connections(
                 Some(&id),
                 "Changed",
                 Some(&SecretString::from("JBSWY3DPEHPK3PXP")),
                 TotpParameters::default(),
                 DEFAULT_TOTP_PROMPT,
-                true
+                true,
+                Some(&HashSet::new()),
             ),
             Err(TotpError::SaveFailed)
         );
         store.path = path;
         assert_eq!(store.totp_credentials(), &[previous]);
+        assert_eq!(
+            store
+                .get(&owner)
+                .unwrap()
+                .options
+                .totp_credential_id
+                .as_deref(),
+            Some(id.as_str())
+        );
+        assert_eq!(
+            ConnectionStore::load(&store.path)
+                .unwrap()
+                .get(&owner)
+                .unwrap()
+                .options
+                .totp_credential_id
+                .as_deref(),
+            Some(id.as_str())
+        );
         assert_eq!(binding.resolve().unwrap().1.generate(59).as_str(), "287082");
     }
 
@@ -376,6 +462,29 @@ impl ConnectionStore {
         prompt_pattern: &str,
         enabled: bool,
     ) -> Result<String, TotpError> {
+        self.save_totp_credential_with_connections(
+            id,
+            name,
+            input,
+            parameters,
+            prompt_pattern,
+            enabled,
+            None,
+        )
+    }
+
+    /// Saves the credential and its direct SSH bindings in one metadata transaction.
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_totp_credential_with_connections(
+        &mut self,
+        id: Option<&str>,
+        name: &str,
+        input: Option<&SecretString>,
+        parameters: TotpParameters,
+        prompt_pattern: &str,
+        enabled: bool,
+        connection_ids: Option<&HashSet<String>>,
+    ) -> Result<String, TotpError> {
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,
             "credential_set",
@@ -397,6 +506,9 @@ impl ConnectionStore {
                 })
                 .cloned();
             if id.is_some() && previous.is_none() {
+                return Err(TotpError::Unavailable);
+            }
+            if connection_ids.is_some_and(|ids| ids.iter().any(|id| self.get(id).is_none())) {
                 return Err(TotpError::Unavailable);
             }
             let id = id
@@ -444,6 +556,20 @@ impl ConnectionStore {
                 .totp_credentials
                 .retain(|entry| entry.id != id);
             candidate.data.totp_credentials.push(credential);
+            if let Some(connection_ids) = connection_ids {
+                for connection in &mut candidate.data.connections {
+                    let selected = connection_ids.contains(&connection.id);
+                    let current = connection.options.totp_credential_id.as_deref();
+                    // Unchecking removes only this credential, preserving other bindings and hops.
+                    if selected && current != Some(id.as_str()) {
+                        connection.options.totp_credential_id = Some(id.clone());
+                        connection.updated_at = Some(Utc::now());
+                    } else if !selected && current == Some(id.as_str()) {
+                        connection.options.totp_credential_id = None;
+                        connection.updated_at = Some(Utc::now());
+                    }
+                }
+            }
             if let Some(previous) = &previous
                 && input.is_some()
                 && !previous.secret_reference.is_empty()

@@ -13,6 +13,7 @@ pub(super) struct TotpDraft {
     pub algorithm: TotpAlgorithm,
     pub digits: u8,
     pub enabled: bool,
+    pub connection_ids: HashSet<String>,
 }
 
 impl TotpDraft {
@@ -35,14 +36,27 @@ impl TotpDraft {
                 .unwrap_or_default(),
             digits: credential.map(|entry| entry.parameters.digits).unwrap_or(6),
             enabled: credential.is_none_or(|entry| entry.enabled),
+            connection_ids: HashSet::new(),
         }
     }
 }
 
 impl WorkspaceApp {
     fn edit_totp_credential(&mut self, credential: Option<TotpCredential>, cx: &mut Context<Self>) {
+        let mut draft = TotpDraft::new(credential.as_ref());
+        if let Some(credential) = credential.as_ref() {
+            draft.connection_ids = self
+                .connection_store
+                .connections()
+                .iter()
+                .filter(|connection| {
+                    connection.options.totp_credential_id.as_deref() == Some(&credential.id)
+                })
+                .map(|connection| connection.id.clone())
+                .collect();
+        }
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.totp_draft = Some(TotpDraft::new(credential.as_ref()));
+            settings.totp_draft = Some(draft);
             settings.totp_error = None;
             settings.settings_focused_input = None;
             cx.notify();
@@ -64,7 +78,7 @@ impl WorkspaceApp {
             .parse()
             .map_err(|_| TotpError::InvalidParameters)
             .and_then(|period| {
-                self.connection_store.save_totp_credential(
+                self.connection_store.save_totp_credential_with_connections(
                     draft.id.as_deref(),
                     &draft.name,
                     (!secret.is_empty()).then_some(&secret),
@@ -75,6 +89,7 @@ impl WorkspaceApp {
                     },
                     &draft.pattern,
                     draft.enabled,
+                    Some(&draft.connection_ids),
                 )
             });
         if result.is_ok() {
@@ -91,6 +106,110 @@ impl WorkspaceApp {
         });
         self.clear_ime_selection();
         cx.notify();
+    }
+
+    fn settings_totp_connection_list(
+        &self,
+        credential_id: Option<&str>,
+        connection_ids: &HashSet<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tokens = self.tokens;
+        let scroll = self.selectable_text_scroll_handle("settings-totp-connections-scroll");
+        let mut list = div().w_full().flex().flex_col().gap_1();
+        if self.connection_store.connections().is_empty() {
+            list = list.child(
+                self.settings_privilege_hint(self.i18n.t("sessionManager.table.no_connections")),
+            );
+        }
+        for connection in self.connection_store.connections() {
+            let id = connection.id.clone();
+            let selected = connection_ids.contains(&id);
+            let other = connection
+                .options
+                .totp_credential_id
+                .as_deref()
+                .filter(|id| Some(*id) != credential_id)
+                .map(|id| {
+                    self.connection_store
+                        .totp_credentials()
+                        .iter()
+                        .find(|credential| credential.id == id)
+                        .map(|credential| credential.name.clone())
+                        .unwrap_or_else(|| self.i18n.t("settings_view.totp.unavailable"))
+                });
+            list = list.child(
+                div()
+                    .w_full()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .p_2()
+                    .rounded(px(tokens.radii.sm))
+                    .cursor_pointer()
+                    .hover(move |row| row.bg(rgb(tokens.ui.bg_hover)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, _, cx| {
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                if let Some(draft) = &mut settings.totp_draft {
+                                    if !draft.connection_ids.remove(&id) {
+                                        draft.connection_ids.insert(id.clone());
+                                    }
+                                }
+                                cx.notify();
+                            });
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .child(checkbox(&tokens, String::new(), selected))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().truncate().child(connection.name.clone()))
+                            .child(self.settings_privilege_hint(format!(
+                                "{}@{}:{}",
+                                connection.username, connection.host, connection.port
+                            )))
+                            .when_some(other, |row, name| {
+                                row.child(
+                                    self.settings_privilege_hint(
+                                        self.i18n
+                                            .t("settings_view.totp.replace_binding")
+                                            .replace("{{name}}", &name),
+                                    ),
+                                )
+                            }),
+                    ),
+            );
+        }
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(form_field(
+                &tokens,
+                self.i18n.t("settings_view.totp.connections"),
+                div()
+                    .id("settings-totp-connections")
+                    .relative()
+                    .w_full()
+                    .max_h(px(288.0))
+                    .child(
+                        div()
+                            .id("settings-totp-connections-scroll")
+                            .w_full()
+                            .max_h(px(288.0))
+                            .selectable_overflow_y_scroll(&scroll)
+                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                            .child(list),
+                    )
+                    .vertical_scrollbar(&scroll),
+            ))
+            .child(self.settings_privilege_hint(self.i18n.t("settings_view.totp.connections_hint")))
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn settings_totp_credentials_card(
@@ -171,6 +290,7 @@ impl WorkspaceApp {
             let algorithm = draft.algorithm;
             let digits = draft.digits;
             let enabled = draft.enabled;
+            let connection_ids = draft.connection_ids.clone();
             let mut editor = div()
                 .flex()
                 .flex_col()
@@ -303,6 +423,7 @@ impl WorkspaceApp {
                         .child(checkbox(&tokens, String::new(), enabled))
                         .child(self.i18n.t("settings_view.totp.enabled")),
                 )
+                .child(self.settings_totp_connection_list(id.as_deref(), &connection_ids, cx))
                 .child(
                     div()
                         .flex()

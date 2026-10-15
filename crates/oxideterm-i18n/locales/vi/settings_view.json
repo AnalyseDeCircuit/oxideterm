@@ -5,6 +5,9 @@
       "description": "Quản lý mật khẩu nâng quyền và mã xác minh SSH."
     },
     "totp": {
+      "connections": "Kết nối",
+      "connections_hint": "Chọn các kết nối SSH sẽ dùng thông tin xác thực này. Thay đổi có hiệu lực khi lưu. Cấu hình máy chủ trung gian riêng.",
+      "replace_binding": "Đang dùng {{name}}. Chọn kết nối này sẽ thay thế liên kết khi lưu.",
       "title": "Thông tin xác thực TOTP",
       "description": "Lưu khóa bí mật một lần rồi chọn cho từng máy chủ SSH hoặc máy chủ trung gian.",
       "add": "Thêm thông tin xác thực",

@@ -5,6 +5,9 @@
       "description": "Gérez les mots de passe d’élévation et les codes de vérification SSH."
     },
     "totp": {
+      "connections": "Connexions",
+      "connections_hint": "Sélectionnez les connexions SSH utilisant cet identifiant. Les modifications sont appliquées à l’enregistrement. Configurez les hôtes de rebond séparément.",
+      "replace_binding": "Utilise actuellement {{name}}. Sélectionner cette connexion remplacera cette association à l’enregistrement.",
       "title": "Identifiants TOTP",
       "description": "Enregistrez une clé secrète, puis sélectionnez-la pour chaque hôte SSH ou serveur de rebond.",
       "add": "Ajouter un identifiant",

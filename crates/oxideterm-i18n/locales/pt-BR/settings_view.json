@@ -5,6 +5,9 @@
       "description": "Gerencie senhas de elevação e códigos de verificação SSH."
     },
     "totp": {
+      "connections": "Conexões",
+      "connections_hint": "Selecione as conexões SSH que usarão esta credencial. As alterações são aplicadas ao salvar. Configure os hosts de salto separadamente.",
+      "replace_binding": "Atualmente usa {{name}}. Selecionar esta conexão substituirá a associação ao salvar.",
       "title": "Credenciais TOTP",
       "description": "Salve uma chave secreta e selecione-a para cada host SSH ou servidor de salto.",
       "add": "Adicionar credencial",

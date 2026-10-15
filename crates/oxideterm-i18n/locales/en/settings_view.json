@@ -5,6 +5,9 @@
       "description": "Manage privilege passwords and SSH verification codes."
     },
     "totp": {
+      "connections": "Connections",
+      "connections_hint": "Select SSH connections to use this credential. Changes take effect on save. Configure jump hosts separately.",
+      "replace_binding": "Currently uses {{name}}. Selecting this connection will replace it on save.",
       "title": "TOTP credentials",
       "description": "Save a verification-code seed once and select it for each SSH host or jump host.",
       "add": "Add credential",

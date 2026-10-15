@@ -5,6 +5,9 @@
       "description": "管理提权密码和 SSH 验证码。"
     },
     "totp": {
+      "connections": "关联连接",
+      "connections_hint": "选择使用此凭据的 SSH 连接，保存后生效。跳板凭据单独配置。",
+      "replace_binding": "当前使用 {{name}}，勾选后将在保存时替换。",
       "title": "动态验证码凭据",
       "description": "保存一次验证码种子，在需要的 SSH 主机或跳板中选择使用。",
       "add": "添加凭据",

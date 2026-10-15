@@ -5,6 +5,9 @@
       "description": "管理提權密碼和 SSH 驗證碼。"
     },
     "totp": {
+      "connections": "關聯連線",
+      "connections_hint": "選擇使用此憑證的 SSH 連線，儲存後生效。跳板憑證另行設定。",
+      "replace_binding": "目前使用 {{name}}，勾選後將在儲存時取代。",
       "title": "動態驗證碼憑證",
       "description": "儲存一次驗證碼種子，在需要的 SSH 主機或跳板中選用。",
       "add": "新增憑證",

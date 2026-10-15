@@ -5,6 +5,9 @@
       "description": "Passwörter zur Rechteerhöhung und SSH-Bestätigungscodes verwalten."
     },
     "totp": {
+      "connections": "Verbindungen",
+      "connections_hint": "SSH-Verbindungen für diese Zugangsdaten auswählen. Änderungen werden beim Speichern wirksam. Sprunghosts separat konfigurieren.",
+      "replace_binding": "Verwendet derzeit {{name}}. Die Auswahl ersetzt diese Zuordnung beim Speichern.",
       "title": "TOTP-Zugangsdaten",
       "description": "Einen geheimen Schlüssel speichern und für jeden SSH-Host oder Sprungserver auswählen.",
       "add": "Zugangsdaten hinzufügen",
