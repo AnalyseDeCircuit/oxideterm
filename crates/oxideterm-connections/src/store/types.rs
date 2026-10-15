@@ -3,6 +3,7 @@ use crate::{SecretString, keychain::ConnectionKeychain};
 pub const CONFIG_VERSION: u32 = 1;
 pub const CONNECTION_TOMBSTONE_RETENTION_DAYS: i64 = 30;
 pub const LOCAL_SHELL_PRIVILEGE_CONNECTION_ID: &str = "local-shell:default";
+pub const SSH_COMMON_PRIVILEGE_SCOPE_ID: &str = "ssh:common";
 pub const GLOBAL_UPSTREAM_PROXY_PASSWORD_KEYCHAIN_ID: &str = "oxide_global_upstream_proxy_password";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1956,6 +1957,8 @@ pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub local_privilege_credentials: Vec<SavedPrivilegeCredential>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ssh_common_privilege_credentials: Vec<SavedPrivilegeCredential>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_keychain_cleanup: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_privilege_keychain_cleanup: Vec<String>,
@@ -1985,6 +1988,7 @@ impl Default for ConnectionStoreData {
             standalone_sftp_profiles: Vec::new(),
             remote_desktop_profiles: Vec::new(),
             local_privilege_credentials: Vec::new(),
+            ssh_common_privilege_credentials: Vec::new(),
             pending_keychain_cleanup: Vec::new(),
             pending_privilege_keychain_cleanup: Vec::new(),
         }

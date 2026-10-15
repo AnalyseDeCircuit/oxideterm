@@ -1608,6 +1608,161 @@ mod tests {
     }
 
     #[test]
+    fn ssh_common_privilege_storage_preserves_password_and_metadata_on_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("connections.json");
+        let mut store = ConnectionStore::load(&path).unwrap();
+        let make_request = |secret: &str| SavePrivilegeCredentialRequest {
+            connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
+            credential_id: Some("shared-sudo".into()),
+            label: "Shared sudo".into(),
+            kind: PrivilegeCredentialKind::SudoPassword,
+            username_hint: None,
+            prompt_patterns: Vec::new(),
+            secret: Some(SecretString::from(secret)),
+            enabled: true,
+            require_click_to_send: true,
+        };
+        let original = store
+            .save_privilege_credential(make_request("original-secret"))
+            .unwrap();
+        assert_eq!(
+            ConnectionStore::load(&path)
+                .unwrap()
+                .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                .unwrap(),
+            vec![original.clone()]
+        );
+        assert_eq!(
+            store
+                .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
+                .unwrap(),
+            vec![]
+        );
+        let metadata = fs::read_to_string(&path).unwrap();
+        assert!(!metadata.contains("original-secret"));
+        store.path = directory.path().to_path_buf();
+        assert!(
+            store
+                .save_privilege_credential(make_request("replacement-secret"))
+                .is_err()
+        );
+        assert!(
+            store
+                .delete_privilege_credential(SSH_COMMON_PRIVILEGE_SCOPE_ID, &original.id)
+                .is_err()
+        );
+        assert_eq!(
+            store
+                .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                .unwrap(),
+            vec![original.clone()]
+        );
+        assert_eq!(
+            store
+                .get_privilege_credential_secret(SSH_COMMON_PRIVILEGE_SCOPE_ID, &original.id)
+                .unwrap(),
+            "original-secret"
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), metadata);
+        store.path = path;
+        let updated = store
+            .save_privilege_credential(make_request("replacement-secret"))
+            .unwrap();
+        assert_eq!(
+            store
+                .get_privilege_credential_secret(SSH_COMMON_PRIVILEGE_SCOPE_ID, &updated.id)
+                .unwrap(),
+            "replacement-secret"
+        );
+        assert!(
+            store
+                .privilege_keychain
+                .get(original.keychain_id.as_ref().unwrap())
+                .is_err()
+        );
+        assert!(
+            store
+                .delete_privilege_credential(SSH_COMMON_PRIVILEGE_SCOPE_ID, &updated.id)
+                .unwrap()
+        );
+        assert!(
+            store
+                .privilege_keychain
+                .get(updated.keychain_id.as_ref().unwrap())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn ssh_common_privilege_sync_requires_explicit_scope_and_cleans_actual_secret_slot() {
+        let mut source = load_empty_store("common-privilege-source");
+        source
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
+                credential_id: Some("shared".into()),
+                label: "Shared sudo".into(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("shared-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let owners = [SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string()]
+            .into_iter()
+            .collect();
+        assert!(
+            source
+                .export_privilege_sync_records(&Default::default())
+                .unwrap()
+                .is_empty()
+        );
+        let mut target = load_empty_store("common-privilege-target");
+        target
+            .prepare_privilege_sync(
+                source.export_privilege_sync_records(&owners).unwrap(),
+                &owners,
+                |_| Ok(()),
+            )
+            .unwrap();
+        assert_eq!(
+            target
+                .get_privilege_credential_secret(SSH_COMMON_PRIVILEGE_SCOPE_ID, "shared")
+                .unwrap(),
+            "shared-secret"
+        );
+        let saved = target
+            .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+            .unwrap();
+        target
+            .prepare_privilege_sync(Vec::new(), &Default::default(), |_| Ok(()))
+            .unwrap();
+        assert_eq!(
+            target
+                .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                .unwrap(),
+            saved
+        );
+        assert!(
+            target
+                .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
+                .unwrap()
+                .is_empty()
+        );
+        target
+            .delete_privilege_credential(SSH_COMMON_PRIVILEGE_SCOPE_ID, "shared")
+            .unwrap();
+        assert!(
+            target
+                .privilege_keychain
+                .get(saved[0].keychain_id.as_ref().unwrap())
+                .is_err()
+        );
+    }
+
+    #[test]
     fn privilege_credential_metadata_update_preserves_existing_secret() {
         let mut store = load_empty_store("privilege-metadata-update");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();

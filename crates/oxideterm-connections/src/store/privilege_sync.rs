@@ -17,6 +17,8 @@ impl ConnectionStore {
             .iter()
             .filter(|connection| connection_ids.contains(&connection.id))
             .flat_map(|connection| connection.privilege_credentials.iter())
+            .chain(self.data.ssh_common_privilege_credentials.iter()
+                .filter(|_| connection_ids.contains(SSH_COMMON_PRIVILEGE_SCOPE_ID)))
             .map(|credential| {
                 let secret = if let Some(reference) = &credential.keychain_id {
                     Some(self.privilege_keychain.get(reference)?)
@@ -51,11 +53,7 @@ impl ConnectionStore {
             if !owners.contains(&record.metadata.connection_id) {
                 continue;
             }
-            let owner = self
-                .get(&record.metadata.connection_id)
-                .context("Privilege credential connection is unavailable")?;
-            let old = owner
-                .privilege_credentials
+            let old = self.privilege_credentials_for_scope(&record.metadata.connection_id)?
                 .iter()
                 .find(|credential| credential.id == record.metadata.id);
             let unchanged = if let Some(old) = old {
@@ -89,19 +87,11 @@ impl ConnectionStore {
                 .push(record.metadata);
         }
         let mut stale = Vec::new();
-        for connection in &mut self.data.connections {
-            if !owners.contains(&connection.id) {
-                continue;
-            }
-            stale.extend(
-                connection
-                    .privilege_credentials
-                    .iter()
-                    .filter_map(|credential| credential.keychain_id.as_ref())
-                    .filter(|reference| !retained.contains(*reference))
-                    .cloned(),
-            );
-            connection.privilege_credentials = prepared.remove(&connection.id).unwrap_or_default();
+        for owner in owners {
+            let credentials = self.privilege_credentials_for_scope_mut(owner)?;
+            stale.extend(credentials.iter().filter_map(|credential| credential.keychain_id.as_ref())
+                .filter(|reference| !retained.contains(*reference)).cloned());
+            *credentials = prepared.remove(owner).unwrap_or_default();
         }
         self.save()?;
         Ok(stale)
@@ -115,6 +105,7 @@ impl ConnectionStore {
                 .iter()
                 .flat_map(|connection| &connection.privilege_credentials)
                 .chain(&self.data.local_privilege_credentials)
+                .chain(&self.data.ssh_common_privilege_credentials)
                 .any(|credential| credential.keychain_id.as_ref() == Some(reference))
             {
                 continue;

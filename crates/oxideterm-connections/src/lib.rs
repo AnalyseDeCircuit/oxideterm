@@ -70,4 +70,4 @@ pub use store::{
     TelnetProfilesSyncSnapshot, default_telnet_upstream_proxy, is_profile_credential,
     validate_group_name,
 };
-pub use store::{TotpBinding, TotpResolver};
+pub use store::{SSH_COMMON_PRIVILEGE_SCOPE_ID, TotpBinding, TotpResolver};
