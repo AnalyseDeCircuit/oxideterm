@@ -1419,9 +1419,7 @@ impl HostToolsEntity {
                 succeeded: delivery.result.unwrap_or(false),
             },
         ));
-        // Force the next workspace integration call to rebuild the sampler
-        // instead of treating the existing configuration as already running.
-        self.profiler_registry.stop(&delivery.request.connection_id);
+        // Keep history while sampling the result of the remote action.
         self.request_profiler_refresh(delivery.request.connection_id, cx);
         cx.notify();
     }

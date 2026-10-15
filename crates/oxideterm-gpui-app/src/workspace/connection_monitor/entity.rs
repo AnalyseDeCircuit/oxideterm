@@ -1485,6 +1485,9 @@ impl HostToolsEntity {
         if !self.visibility.sidebar_is_visible() || self.sampling_config.is_empty() {
             return;
         }
+        if self.profiler_registry.request_refresh(&connection_id) {
+            return;
+        }
         let Some(runtime) = self.lifecycle_runtime.clone() else {
             return;
         };

@@ -1147,7 +1147,6 @@ impl HostToolsEntity {
     }
 
     fn refresh_host_docker_snapshot(&mut self, connection_id: String, cx: &mut Context<Self>) {
-        self.profiler_registry().stop(&connection_id);
         self.request_profiler_refresh(connection_id, cx);
     }
 
@@ -1655,8 +1654,7 @@ impl HostToolsEntity {
                 succeeded: delivery.result.unwrap_or(false),
             },
         ));
-        // Force a new Docker sample after the remote state transition.
-        self.profiler_registry.stop(&delivery.request.connection_id);
+        // Sample the remote state transition without clearing the current list.
         self.request_profiler_refresh(delivery.request.connection_id, cx);
         cx.notify();
     }
