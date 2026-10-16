@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "ドラッグして並べ替え",
+    "resizeFavorites": "ドラッグしてお気に入りの幅を変更、ダブルクリックで元に戻す",
     "title": "ファイルマネージャー",
     "local": "ローカル",
     "remote": "リモート",

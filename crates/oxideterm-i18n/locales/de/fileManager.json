@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "Zum Sortieren ziehen",
+    "resizeFavorites": "Ziehen, um die Favoritenleiste anzupassen; Doppelklick zum Zurücksetzen",
     "title": "Dateimanager",
     "local": "Lokal",
     "remote": "Remote",

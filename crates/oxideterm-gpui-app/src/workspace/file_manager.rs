@@ -32,14 +32,20 @@ use oxideterm_preview::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, RodioAudioPreviewBackend,
     font_family_name_from_bytes,
 };
+use oxideterm_settings::{
+    FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH, FILE_MANAGER_SIDEBAR_MAX_WIDTH,
+    FILE_MANAGER_SIDEBAR_MIN_WIDTH,
+};
 
 mod actions;
 mod dialogs;
 mod helpers;
+mod layout;
 mod render;
 
 use self::actions::{open_path_external, reveal_path_external};
 use self::helpers::*;
+use self::layout::FileManagerBookmarksResize;
 use super::sftp::native_video::{SharedSftpNativeVideoSurface, sftp_native_video_element};
 
 pub(in crate::workspace) fn local_file_audit_context(
@@ -78,8 +84,6 @@ const FILE_MANAGER_PREVIEW_CODE_OVERSCAN: usize = 20; // Tauri VirtualTextPrevie
 const FILE_MANAGER_PREVIEW_CODE_WRAP_COLUMNS: usize = 96; // Virtual rows pre-wrap long `whitespace-pre` lines.
 const FILE_MANAGER_PREVIEW_STREAM_CHUNK_SIZE: u64 = 128 * 1024; // Tauri VirtualTextPreview CHUNK_SIZE.
 const FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA: u32 = 0x4d; // Tauri CodeHighlight line-number opacity 30%.
-const FILE_MANAGER_SIDEBAR_WIDTH: f32 = 184.0; // Compact favorites rail keeps file content visually dominant.
-const FILE_MANAGER_SIDEBAR_HIDDEN_WIDTH: f32 = 0.0; // Hidden favorites return all horizontal space to file content.
 const FILE_MANAGER_SIDEBAR_ROW_HEIGHT: f32 = 30.0;
 const FILE_MANAGER_SIDEBAR_SECTION_HEADER_HEIGHT: f32 = 28.0;
 const FILE_MANAGER_SIDEBAR_SECTION_GAP: f32 = 10.0;
@@ -345,6 +349,11 @@ pub(super) struct FileManagerState {
     pub(super) drives: Vec<LocalDrive>,
     pub(super) bookmarks_path: PathBuf,
     pub(super) bookmarks_visible: bool,
+    bookmarks_surface_size: Option<(gpui::WindowId, gpui::Size<Pixels>)>,
+    bookmarks_motion: oxideterm_gpui_ui::motion::SidebarMotion,
+    bookmarks_resize: Option<FileManagerBookmarksResize>,
+    bookmarks_resize_activation: Option<Subscription>,
+    bookmarks_resize_close: Option<Subscription>,
     pub(super) list_scroll: UniformListScrollHandle,
     // Preview payloads can contain large text or archive listings. Share the
     // immutable payload across render snapshots instead of cloning its contents.
@@ -418,6 +427,13 @@ impl Default for FileManagerState {
             drives: local_drives(),
             bookmarks_path: default_file_manager_bookmarks_path(),
             bookmarks_visible: true,
+            bookmarks_surface_size: None,
+            bookmarks_motion: oxideterm_gpui_ui::motion::SidebarMotion::new(
+                FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH as f32,
+            ),
+            bookmarks_resize: None,
+            bookmarks_resize_activation: None,
+            bookmarks_resize_close: None,
             list_scroll: UniformListScrollHandle::new(),
             preview: None,
             preview_plugin: None,

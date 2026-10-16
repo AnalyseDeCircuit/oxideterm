@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "Kéo để sắp xếp lại",
+    "resizeFavorites": "Kéo để đổi chiều rộng mục yêu thích; nhấp đúp để đặt lại",
     "title": "Trình Quản Lý Tệp",
     "local": "Cục bộ",
     "remote": "Từ xa",

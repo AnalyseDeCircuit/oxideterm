@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "Faire glisser pour réorganiser",
+    "resizeFavorites": "Faire glisser pour redimensionner les favoris ; double-cliquer pour rétablir la largeur",
     "title": "Gestionnaire de Fichiers",
     "local": "Local",
     "remote": "Distant",

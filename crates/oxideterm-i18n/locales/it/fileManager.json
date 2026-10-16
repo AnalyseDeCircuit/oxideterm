@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "Trascina per riordinare",
+    "resizeFavorites": "Trascina per ridimensionare i preferiti; fai doppio clic per ripristinare",
     "title": "Gestione File",
     "local": "Locale",
     "remote": "Remoto",

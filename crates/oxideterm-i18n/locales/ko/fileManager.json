@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "드래그하여 순서 변경",
+    "resizeFavorites": "드래그하여 즐겨찾기 너비 조절, 두 번 클릭하여 초기화",
     "title": "파일 관리자",
     "local": "로컬",
     "remote": "원격",

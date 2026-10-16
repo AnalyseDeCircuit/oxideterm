@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "拖曳以調整順序",
+    "resizeFavorites": "拖曳調整收藏欄寬度，按兩下恢復預設",
     "title": "檔案管理器",
     "local": "本機",
     "remote": "遠端",

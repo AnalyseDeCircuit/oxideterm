@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "Drag to reorder",
+    "resizeFavorites": "Drag to resize favorites; double-click to reset",
     "title": "File Manager",
     "local": "Local",
     "remote": "Remote",

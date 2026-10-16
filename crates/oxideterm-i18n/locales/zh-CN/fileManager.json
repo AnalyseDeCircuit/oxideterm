@@ -1,5 +1,7 @@
 {
   "fileManager": {
+    "dragToReorder": "拖动以调整顺序",
+    "resizeFavorites": "拖动调整收藏栏宽度，双击恢复默认",
     "title": "文件管理器",
     "local": "本地",
     "remote": "远程",

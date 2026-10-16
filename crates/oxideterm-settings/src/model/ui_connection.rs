@@ -138,6 +138,14 @@ pub const AI_SIDEBAR_ABSOLUTE_MIN_WIDTH: f32 = 280.0;
 pub const AI_SIDEBAR_ABSOLUTE_MAX_WIDTH: f32 = 500.0;
 pub const AI_SIDEBAR_DEFAULT_WIDTH: i64 = 340;
 
+pub const FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH: i64 = 184;
+pub const FILE_MANAGER_SIDEBAR_MIN_WIDTH: i64 = 160;
+pub const FILE_MANAGER_SIDEBAR_MAX_WIDTH: i64 = 480;
+
+fn default_file_manager_sidebar_width() -> i64 {
+    FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH
+}
+
 fn default_show_app_lock_icon() -> bool {
     true
 }
@@ -175,6 +183,8 @@ pub struct SidebarUiState {
     pub width: i64,
     pub ai_sidebar_collapsed: bool,
     pub ai_sidebar_width: i64,
+    #[serde(default = "default_file_manager_sidebar_width")]
+    pub file_manager_sidebar_width: i64,
     pub zen_mode: bool,
     #[serde(default = "default_show_app_lock_icon")]
     pub show_app_lock_icon: bool,
@@ -193,6 +203,7 @@ impl Default for SidebarUiState {
             width: 300,
             ai_sidebar_collapsed: true,
             ai_sidebar_width: AI_SIDEBAR_DEFAULT_WIDTH,
+            file_manager_sidebar_width: FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH,
             zen_mode: false,
             show_app_lock_icon: true,
             extra: ExtraFields::new(),

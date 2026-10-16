@@ -749,6 +749,12 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
         ("connectionDefaults.port", 22, 1, 65_535),
         ("sidebarUI.width", 300, 200, 600),
         ("sidebarUI.aiSidebarWidth", 340, 280, 500),
+        (
+            "sidebarUI.fileManagerSidebarWidth",
+            FILE_MANAGER_SIDEBAR_DEFAULT_WIDTH,
+            FILE_MANAGER_SIDEBAR_MIN_WIDTH,
+            FILE_MANAGER_SIDEBAR_MAX_WIDTH,
+        ),
         ("sftp.maxConcurrentTransfers", 3, 1, 10),
         ("sftp.directoryParallelism", 4, 1, 16),
         ("sftp.speedLimitKBps", 0, 0, 10_000_000),
@@ -1129,6 +1135,30 @@ mod tests {
     #[test]
     fn saved_display_values_use_supported_defaults_and_bounds() {
         for (input, path, expected, warning) in [
+            (
+                json!({"sidebarUI": {}}),
+                "/sidebarUI/fileManagerSidebarWidth",
+                json!(184),
+                None,
+            ),
+            (
+                json!({"sidebarUI": {"fileManagerSidebarWidth": 300}}),
+                "/sidebarUI/fileManagerSidebarWidth",
+                json!(300),
+                None,
+            ),
+            (
+                json!({"sidebarUI": {"fileManagerSidebarWidth": 999}}),
+                "/sidebarUI/fileManagerSidebarWidth",
+                json!(480),
+                Some("sidebarUI.fileManagerSidebarWidth"),
+            ),
+            (
+                json!({"sidebarUI": {"fileManagerSidebarWidth": 10}}),
+                "/sidebarUI/fileManagerSidebarWidth",
+                json!(160),
+                Some("sidebarUI.fileManagerSidebarWidth"),
+            ),
             (
                 json!({"general": {"updateChannel": "gpui-preview"}}),
                 "/general/updateChannel",
