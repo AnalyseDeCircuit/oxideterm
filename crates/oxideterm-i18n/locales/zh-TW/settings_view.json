@@ -1939,6 +1939,7 @@
         "editor.find": "在檔案中尋找",
         "sftp.selectAll": "選取全部檔案",
         "sftp.editPath": "編輯目錄路徑",
+        "sftp.revealTerminalDirectory": "定位到終端目錄",
         "sftp.open": "開啟目錄",
         "sftp.preview": "預覽檔案",
         "sftp.upload": "上傳選取的檔案",

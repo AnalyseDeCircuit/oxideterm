@@ -1,4 +1,21 @@
 use super::*;
+use oxideterm_environment::CurrentDirectoryScope;
+
+fn sftp_terminal_directory_pane(
+    remote: &SftpRemoteId,
+    active: Option<(CurrentDirectoryScope, PaneId)>,
+    recent: &HashMap<NodeId, PaneId>,
+) -> Option<PaneId> {
+    let SftpRemoteId::Node(node) = remote else {
+        return None;
+    };
+    if let Some((CurrentDirectoryScope::SshNode(active_node), pane)) = active
+        && active_node == node.0
+    {
+        return Some(pane);
+    }
+    recent.get(node).copied()
+}
 
 // Keep scheduling policy independent from GPUI so lifecycle edges remain unit-testable.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -899,6 +916,62 @@ impl WorkspaceApp {
                 result,
             });
         });
+    }
+
+    pub(in crate::workspace::sftp) fn sftp_terminal_directory(&self, cx: &App) -> Option<String> {
+        if !self.terminal_current_directory_awareness_enabled() {
+            return None;
+        }
+        let remote = self.sftp_view().read(cx).current_remote_id.as_ref()?;
+        // A detached browser must not mistake the main window's selected tab for its focus.
+        let active = match self.sftp_surface_id() {
+            SftpSurfaceId::Sidebar => self.active_terminal_cwd_scope_and_pane(cx),
+            SftpSurfaceId::Tab(_) => None,
+        };
+        let pane_id = sftp_terminal_directory_pane(
+            remote,
+            active,
+            &self.terminal.read(cx).last_ssh_terminal_panes,
+        )?;
+        let SftpRemoteId::Node(node) = remote else {
+            return None;
+        };
+        let session = self.session_id_for_pane(pane_id, cx)?;
+        // Recheck the live registration: a closed or replaced pane cannot select another server.
+        if self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session)
+            .as_ref()
+            != Some(node)
+        {
+            return None;
+        }
+        let host = self.tab_host.read(cx);
+        let pane = host.panes().get(&pane_id)?.read(cx);
+        super::super::terminal_cwd::terminal_cwd_snapshot_from_pane(
+            CurrentDirectoryScope::ssh_node(node.0.clone()),
+            pane,
+        )
+        .map(|snapshot| snapshot.path().to_string())
+    }
+
+    pub(in crate::workspace::sftp) fn reveal_sftp_terminal_directory(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(path) = self.sftp_terminal_directory(cx) else {
+            return;
+        };
+        self.sftp_view().update(cx, |sftp, cx| {
+            sftp.clear_input_focus(cx);
+            sftp.dismiss_context_menu(cx);
+            sftp.active_pane = SftpPane::Remote;
+        });
+        self.ime_marked_text = None;
+        self.clear_ime_selection();
+        self.set_sftp_path(SftpPane::Remote, path, cx);
+        cx.notify();
     }
 
     pub(in crate::workspace) fn open_sftp_tab(
@@ -2076,6 +2149,45 @@ fn apply_tauri_transfer_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_directory_target_stays_on_the_file_browsers_server() {
+        let node = NodeId::new("server-a");
+        let recent = HashMap::from([
+            (node.clone(), PaneId(1)),
+            (NodeId::new("server-b"), PaneId(2)),
+        ]);
+        for (remote, active, expected) in [
+            (
+                SftpRemoteId::Node(node.clone()),
+                Some((CurrentDirectoryScope::ssh_node("server-a"), PaneId(3))),
+                Some(PaneId(3)),
+            ),
+            (
+                SftpRemoteId::Node(node.clone()),
+                Some((CurrentDirectoryScope::ssh_node("server-b"), PaneId(4))),
+                Some(PaneId(1)),
+            ),
+            (SftpRemoteId::Node(node.clone()), None, Some(PaneId(1))),
+            (
+                SftpRemoteId::Node(node),
+                Some((CurrentDirectoryScope::Local, PaneId(5))),
+                Some(PaneId(1)),
+            ),
+            (SftpRemoteId::Node(NodeId::new("server-c")), None, None),
+            (
+                SftpRemoteId::Standalone("independent".into()),
+                Some((CurrentDirectoryScope::ssh_node("server-a"), PaneId(3))),
+                None,
+            ),
+        ] {
+            assert_eq!(
+                sftp_terminal_directory_pane(&remote, active.clone(), &recent),
+                expected,
+                "remote={remote:?}, active={active:?}"
+            );
+        }
+    }
 
     struct TestKeys;
 

@@ -256,6 +256,16 @@ impl WorkspaceApp {
                 if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_metadata_context(cx);
                 }
+                if self
+                    .terminal
+                    .read(cx)
+                    .last_ssh_terminal_panes
+                    .values()
+                    .any(|pane| *pane == pane_id)
+                    && (!self.sftp_pages.is_empty() || self.embedded_sftp_node_id.is_some())
+                {
+                    cx.notify();
+                }
             }
             TerminalPaneEvent::RecordingStatusChanged => {
                 if self.active_pane_id(cx) == Some(pane_id) {
@@ -432,7 +442,10 @@ impl WorkspaceApp {
         }
         self.search.remove(*pane_id);
         self.terminal.update(cx, |terminal, _| {
-            terminal.sync_groups_mut().remove(*pane_id)
+            terminal.sync_groups_mut().remove(*pane_id);
+            terminal
+                .last_ssh_terminal_panes
+                .retain(|_, pane| pane != pane_id);
         });
         self.tab_host
             .update(cx, |tab_host, _cx| tab_host.remove_terminal_pane(*pane_id))
@@ -1167,6 +1180,8 @@ impl WorkspaceApp {
                                     this.sync_active_terminal_metadata_context(cx);
                                     this.sync_active_terminal_recording_elapsed_tick(cx);
                                     this.sync_active_privilege_prompt_inline_hint(cx);
+                                } else {
+                                    this.remember_ssh_terminal_pane(pane_id, cx);
                                 }
                                 if let Some(pane) =
                                     this.tab_host.read(cx).panes().get(&pane_id).cloned()

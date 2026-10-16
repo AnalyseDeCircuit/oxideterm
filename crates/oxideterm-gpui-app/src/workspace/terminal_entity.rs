@@ -78,6 +78,7 @@ pub(in crate::workspace) struct WorkspaceTerminalEntity {
     pub(super) cwd_tx: delivery::ActiveDeliverySender<terminal_cwd::TerminalCwdDelivery>,
     pub(super) cwd_rx: std::sync::mpsc::Receiver<terminal_cwd::TerminalCwdDelivery>,
     pub(super) cwd_picker: terminal_cwd::TerminalCwdPickerState,
+    pub(super) last_ssh_terminal_panes: HashMap<NodeId, PaneId>,
     pub(super) cast_player: Option<terminal_cast::TerminalCastPlayerState>,
     pub(super) cast_seek_dragging: bool,
     pub(super) cast_tick_generation: u64,
@@ -157,6 +158,7 @@ impl WorkspaceTerminalEntity {
             cwd_tx,
             cwd_rx,
             cwd_picker: terminal_cwd::TerminalCwdPickerState::default(),
+            last_ssh_terminal_panes: HashMap::new(),
             cast_player: None,
             cast_seek_dragging: false,
             cast_tick_generation: 0,
@@ -801,7 +803,24 @@ impl WorkspaceTerminalEntity {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn remember_ssh_terminal_pane(&mut self, pane: PaneId, cx: &mut App) {
+        let Some(node) = self.session_id_for_pane(pane, cx).and_then(|session| {
+            self.workspace_runtime
+                .read(cx)
+                .ssh_terminal_node_id(session)
+        }) else {
+            return;
+        };
+        self.terminal.update(cx, |terminal, _cx| {
+            // Store only an identity; the file browser never retains a terminal or SSH node.
+            terminal.last_ssh_terminal_panes.insert(node, pane);
+        });
+    }
+
     pub(in crate::workspace) fn sync_active_terminal_metadata_context(&mut self, cx: &mut App) {
+        if let Some(pane) = self.active_pane_id(cx) {
+            self.remember_ssh_terminal_pane(pane, cx);
+        }
         let project_tasks_enabled = self.terminal_project_tasks_enabled();
         let git_key = self.active_terminal_git_key(cx);
         let project_key = project_tasks_enabled

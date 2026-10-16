@@ -135,6 +135,8 @@ Use the file manager for remote browsing, uploads, downloads, previews, and basi
 
 When a connection is unstable, pause large transfers and reconnect before retrying. Saved connection state and transfer state are separate; a failed transfer should not require deleting the connection.
 
+To jump to your terminal's working directory, use **Go to terminal directory** beside the remote SFTP refresh button. The default shortcut is **Command+Shift+G** on macOS or **Ctrl+Shift+G** on Windows and Linux; you can change it in **Settings → Keybindings**. The action uses the active terminal on the same server, or that server's most recently used terminal when the SFTP page is active. It is also available in detached SFTP windows. The button is disabled until a terminal directory is known, and navigating in the terminal does not automatically move the file browser.
+
 ### Transfer files through a terminal
 
 In an SSH terminal, start the matching transfer program on the remote host. OxideTerm recognizes its transfer request and opens the local file or destination picker.

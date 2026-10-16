@@ -106,6 +106,48 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace::sftp) fn render_sftp_terminal_directory_button(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let path = self.sftp_terminal_directory(cx);
+        let mut title = self.i18n.t("sftp.toolbar.reveal_terminal_directory");
+        if let Some(combo) = crate::keybindings::action_definition("sftp.revealTerminalDirectory")
+            .and_then(|definition| {
+                crate::keybindings::effective_combo(
+                    definition,
+                    &self.settings_store.settings().keybindings.overrides,
+                    crate::keybindings::KeybindingSide::current(),
+                )
+            })
+        {
+            title.push_str(&format!(" · {}", crate::keybindings::format_combo(&combo)));
+        }
+        title.push('\n');
+        title.push_str(
+            path.as_deref()
+                .unwrap_or(&self.i18n.t("sftp.toolbar.terminal_directory_unavailable")),
+        );
+        self.workspace_tooltip_icon_button(
+            LucideIcon::FolderInput,
+            SFTP_ICON_SM,
+            rgb(self.tokens.ui.text),
+            IconButtonOptions {
+                disabled: path.is_none(),
+                ..IconButtonOptions::opaque_toolbar(SFTP_TOOL_BUTTON, ButtonRadius::Md)
+            },
+            title,
+            "sftp-terminal-directory",
+            true,
+            self.sftp_listener(cx, |this, _event, window, cx| {
+                this.reveal_sftp_terminal_directory(cx);
+                window.focus(&this.focus_handle, cx);
+                cx.stop_propagation();
+            }),
+            cx.entity(),
+        )
+    }
+
     pub(in crate::workspace::sftp) fn render_sftp_refresh_button(
         &self,
         pane: SftpPane,

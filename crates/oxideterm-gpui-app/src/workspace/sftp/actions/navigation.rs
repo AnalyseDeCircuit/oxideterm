@@ -146,6 +146,7 @@ impl WorkspaceApp {
         let action = [
             ("sftp.selectAll", "selectAll"),
             ("sftp.editPath", "editPath"),
+            ("sftp.revealTerminalDirectory", "revealTerminalDirectory"),
             ("sftp.open", "enter"),
             ("sftp.preview", "space"),
             ("sftp.upload", "right"),
@@ -171,6 +172,10 @@ impl WorkspaceApp {
             }
         });
         match command {
+            "revealTerminalDirectory" => {
+                self.reveal_sftp_terminal_directory(cx);
+                true
+            }
             "selectAll" => {
                 self.select_all_sftp_files(active_pane, cx);
                 self.sftp_view()

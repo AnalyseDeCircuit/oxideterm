@@ -1939,6 +1939,7 @@
         "editor.find": "文件内查找",
         "sftp.selectAll": "选择全部文件",
         "sftp.editPath": "编辑目录路径",
+        "sftp.revealTerminalDirectory": "定位到终端目录",
         "sftp.open": "打开目录",
         "sftp.preview": "预览文件",
         "sftp.upload": "上传选中文件",

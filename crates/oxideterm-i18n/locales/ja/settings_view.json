@@ -1939,6 +1939,7 @@
         "editor.find": "ファイル内を検索",
         "sftp.selectAll": "すべてのファイルを選択",
         "sftp.editPath": "ディレクトリのパスを編集",
+        "sftp.revealTerminalDirectory": "ターミナルのディレクトリへ移動",
         "sftp.open": "ディレクトリを開く",
         "sftp.preview": "ファイルをプレビュー",
         "sftp.upload": "選択したファイルをアップロード",

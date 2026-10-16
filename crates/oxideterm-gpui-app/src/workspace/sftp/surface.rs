@@ -320,6 +320,7 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .child(self.render_sftp_refresh_button(SftpPane::Remote, cx))
+                            .child(self.render_sftp_terminal_directory_button(cx))
                             .child(self.render_sftp_icon_button(
                                 LucideIcon::Upload,
                                 self.i18n.t("sftp.context.upload"),
@@ -1006,6 +1007,15 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_sftp_refresh_button(pane, cx));
+
+        if pane == SftpPane::Remote
+            && matches!(
+                self.sftp_view().read(cx).current_remote_id,
+                Some(SftpRemoteId::Node(_))
+            )
+        {
+            header = header.child(self.render_sftp_terminal_directory_button(cx));
+        }
 
         if selected_count > 0 {
             let label = match transfer_direction {

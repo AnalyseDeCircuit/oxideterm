@@ -1939,6 +1939,7 @@
         "editor.find": "Find in file",
         "sftp.selectAll": "Select all files",
         "sftp.editPath": "Edit directory path",
+        "sftp.revealTerminalDirectory": "Go to terminal directory",
         "sftp.open": "Open directory",
         "sftp.preview": "Preview file",
         "sftp.upload": "Upload selected files",

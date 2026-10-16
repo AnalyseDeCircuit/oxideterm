@@ -1939,6 +1939,7 @@
         "editor.find": "파일 내 검색",
         "sftp.selectAll": "모든 파일 선택",
         "sftp.editPath": "디렉터리 경로 편집",
+        "sftp.revealTerminalDirectory": "터미널 디렉터리로 이동",
         "sftp.open": "디렉터리 열기",
         "sftp.preview": "파일 미리 보기",
         "sftp.upload": "선택한 파일 업로드",

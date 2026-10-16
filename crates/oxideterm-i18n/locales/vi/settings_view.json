@@ -1939,6 +1939,7 @@
         "editor.find": "Tìm trong tệp",
         "sftp.selectAll": "Chọn tất cả tệp",
         "sftp.editPath": "Sửa đường dẫn thư mục",
+        "sftp.revealTerminalDirectory": "Đến thư mục của terminal",
         "sftp.open": "Mở thư mục",
         "sftp.preview": "Xem trước tệp",
         "sftp.upload": "Tải các tệp đã chọn lên",
