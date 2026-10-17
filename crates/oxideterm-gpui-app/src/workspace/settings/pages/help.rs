@@ -29,7 +29,6 @@ pub(in crate::workspace) const HELP_TECH_BADGES: [(&str, u32); 9] = [
     ("IronRDP", 0x6366f1),
 ];
 
-pub(in crate::workspace) const HELP_UPDATE_CHANNEL_SELECT_WIDTH: f32 = 140.0;
 pub(in crate::workspace) const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
 pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BG_ALPHA: f32 = 0.70;
 pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BORDER_ALPHA: f32 = 0.60;
@@ -311,7 +310,7 @@ impl WorkspaceApp {
                 SettingsSelect::UpdateChannel,
                 channel_label,
                 false,
-                Some(HELP_UPDATE_CHANNEL_SELECT_WIDTH),
+                Some(self.tokens.metrics.settings_select_width),
                 cx,
             ),
             cx,
@@ -621,19 +620,7 @@ impl WorkspaceApp {
                 value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
         }
 
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(value_el)
-            .into_any_element()
+        self.setting_row(label_key, "", value_el.max_w_full().into_any_element(), cx)
     }
 
     pub(in crate::workspace) fn help_action_row(

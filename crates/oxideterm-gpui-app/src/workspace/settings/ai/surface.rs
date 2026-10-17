@@ -6,26 +6,11 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(20.0))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .mb(px(16.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("settings_view.ai.general").to_uppercase()),
-            )
-            .child(self.ai_enabled_row(settings.ai.enabled, cx));
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        self.settings_card(
+            "settings_view.ai.general",
+            "",
+            vec![self.ai_enabled_row(settings.ai.enabled, cx)],
+        )
     }
 
     pub(in crate::workspace) fn ai_disabled_settings_card(
@@ -49,18 +34,7 @@ impl WorkspaceApp {
             });
         }
 
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(20.0))
-            .flex()
-            .flex_col()
-            .child(body);
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        self.plain_settings_card(vec![body.into_any_element()])
     }
 
     pub(in crate::workspace) fn ai_enabled_row(
@@ -68,54 +42,27 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .whitespace_nowrap()
-                            .child(self.i18n.t("settings_view.ai.enable")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("settings_view.ai.enable_hint")),
-                    ),
-            )
-            .child(
-                checkbox(&self.tokens, String::new(), enabled)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if !enabled && !this.settings_store.settings().ai.enabled_confirmed {
-                                this.ai_entity.update(cx, |ai, cx| {
-                                    ai.open_ai_enable_confirm(cx);
-                                });
-                                this.reset_standard_confirm_focus();
-                                cx.notify();
-                            } else {
-                                this.edit_settings(
-                                    |settings| set_ai_enabled(settings, !enabled),
-                                    cx,
-                                );
-                            }
-                        }),
-                    )
-                    .into_any_element(),
-            )
-            .into_any_element()
+        self.setting_row(
+            "settings_view.ai.enable",
+            "settings_view.ai.enable_hint",
+            checkbox(&self.tokens, String::new(), enabled)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        if !enabled && !this.settings_store.settings().ai.enabled_confirmed {
+                            this.ai_entity.update(cx, |ai, cx| {
+                                ai.open_ai_enable_confirm(cx);
+                            });
+                            this.reset_standard_confirm_focus();
+                            cx.notify();
+                        } else {
+                            this.edit_settings(|settings| set_ai_enabled(settings, !enabled), cx);
+                        }
+                    }),
+                )
+                .into_any_element(),
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn ai_privacy_settings_card(&self) -> AnyElement {
@@ -127,7 +74,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .p(px(20.0))
+            .p(px(self.tokens.metrics.settings_card_padding))
             .flex()
             .flex_col()
             .gap(px(12.0))

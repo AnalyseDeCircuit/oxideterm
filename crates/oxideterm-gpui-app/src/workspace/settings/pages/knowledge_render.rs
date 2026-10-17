@@ -910,48 +910,31 @@ impl WorkspaceApp {
                         )
                         .child(
                             div()
-                                .grid()
-                                .grid_cols(2)
-                                .gap(px(12.0))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(6.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text_muted))
-                                                .child(self.i18n.t("settings_view.ai.embedding_provider")),
-                                        )
-                                        .child(self.ai_settings_select_control(
-                                            SettingsSelect::AiEmbeddingProvider,
-                                            provider_label,
-                                            224.0,
-                                            cx,
-                                        )),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_col()
-                                        .gap(px(6.0))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .font_weight(gpui::FontWeight::MEDIUM)
-                                                .text_color(rgb(self.tokens.ui.text_muted))
-                                                .child(self.i18n.t("settings_view.ai.embedding_model")),
-                                        )
-                                        .child(self.settings_text_input_control(
+                                .w_full()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(px(self.tokens.metrics.settings_card_gap))
+                                .child(self.select_setting_row(
+                                    "settings_view.ai.embedding_provider",
+                                    "",
+                                    SettingsSelect::AiEmbeddingProvider,
+                                    provider_label,
+                                    self.tokens.metrics.settings_select_width,
+                                    cx,
+                                ))
+                                .child(self.setting_row(
+                                    "settings_view.ai.embedding_model",
+                                    "",
+                                    self.settings_text_input_control(
                                             SettingsInput::AiEmbeddingModel,
                                             model_value,
                                             self.i18n.t("settings_view.ai.embedding_model"),
                                             224.0,
                                             cx,
-                                        )),
-                                ),
+                                    ),
+                                    cx,
+                                )),
                         ),
                 )
             })

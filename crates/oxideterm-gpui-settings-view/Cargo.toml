@@ -18,3 +18,6 @@ oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-theme = { path = "../oxideterm-theme" }
 regex.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }

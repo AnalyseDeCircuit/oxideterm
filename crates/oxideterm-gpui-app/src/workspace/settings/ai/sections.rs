@@ -1,7 +1,6 @@
 use super::*;
 
 pub(in crate::workspace) const AI_ACP_AGENT_TEXTAREA_MIN_H: f32 = 72.0; // Tauri min-h-[72px] for ACP args/env drafts.
-pub(in crate::workspace) const AI_TOOL_NUMBER_INPUT_W: f32 = 96.0; // Tauri w-24.
 pub(in crate::workspace) const AI_ACP_AGENT_FIELD_MIN_WIDTH: f32 = 220.0; // Keep ACP form fields readable on narrow settings panes.
 pub(in crate::workspace) const AI_ACP_AGENT_TEXTAREA_FIELD_MIN_WIDTH: f32 = 240.0; // Multiline command fields need more room than compact selects.
 pub(in crate::workspace) const AI_ACP_AGENT_CAPABILITY_MIN_WIDTH: f32 = 150.0; // Capability checkboxes should wrap as chips, not grid columns.
@@ -1270,7 +1269,12 @@ impl WorkspaceApp {
             self.setting_row(
                 label_key,
                 hint_key,
-                self.number_input(input, value.to_string(), AI_TOOL_NUMBER_INPUT_W, cx),
+                self.number_input(
+                    input,
+                    value.to_string(),
+                    self.tokens.metrics.settings_number_input_width,
+                    cx,
+                ),
                 cx,
             ),
         )

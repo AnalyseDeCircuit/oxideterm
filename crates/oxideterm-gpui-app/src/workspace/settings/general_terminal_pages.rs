@@ -372,28 +372,15 @@ impl WorkspaceApp {
         // TODO(signing): Once every macOS artifact is Developer ID signed and
         // notarized, replace this system-settings handoff with an in-app
         // SMAppService register/unregister toggle and remove the manual copy.
-        let mut description = div()
-            .min_w(px(0.0))
-            .flex_1()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("settings_view.general.launch_at_login")),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(
-                        self.i18n
-                            .t("settings_view.general.launch_at_login_macos_hint"),
-                    ),
-            );
+        let mut description = div().min_w(px(0.0)).flex().flex_col().gap(px(4.0)).child(
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(
+                    self.i18n
+                        .t("settings_view.general.launch_at_login_macos_hint"),
+                ),
+        );
         if let Some(error) = launch_at_login.error {
             let error = match error {
                 LaunchAtLoginError::OperationFailed(error) => error,
@@ -434,18 +421,14 @@ impl WorkspaceApp {
         self.settings_card(
             "settings_view.general.startup",
             "settings_view.general.startup_hint",
-            vec![
+            vec![settings_row(
+                &self.tokens,
                 div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(description)
-                    .child(manage_button)
+                    .child(self.i18n.t("settings_view.general.launch_at_login"))
                     .into_any_element(),
-            ],
+                Some(description.into_any_element()),
+                manage_button.into_any_element(),
+            )],
         )
     }
 
@@ -477,25 +460,12 @@ impl WorkspaceApp {
                     }),
                 ),
             );
-        let mut label = div()
-            .min_w(px(0.0))
-            .flex_1()
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("settings_view.general.launch_at_login")),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.general.launch_at_login_hint")),
-            );
+        let mut label = div().min_w(px(0.0)).flex().flex_col().gap(px(4.0)).child(
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t("settings_view.general.launch_at_login_hint")),
+        );
         if loading {
             label = label.child(
                 div()
@@ -530,18 +500,14 @@ impl WorkspaceApp {
         self.settings_card(
             "settings_view.general.startup",
             "settings_view.general.startup_hint",
-            vec![
+            vec![settings_row(
+                &self.tokens,
                 div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(label)
-                    .child(control)
+                    .child(self.i18n.t("settings_view.general.launch_at_login"))
                     .into_any_element(),
-            ],
+                Some(label.into_any_element()),
+                control.into_any_element(),
+            )],
         )
     }
 
@@ -612,44 +578,20 @@ impl WorkspaceApp {
         setter: fn(&mut PersistedSettings, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(label_key)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(hint_key)),
-                    ),
-            )
-            .child(div().flex_none().child(
-                checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+        self.setting_row(
+            label_key,
+            hint_key,
+            checkbox(&self.tokens, String::new(), checked)
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         this.edit_settings(|settings| setter(settings, !checked), cx);
                         cx.stop_propagation();
                     }),
-                ),
-            ))
-            .into_any_element()
+                )
+                .into_any_element(),
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn settings_data_directory_info(

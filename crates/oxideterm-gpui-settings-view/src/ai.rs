@@ -190,29 +190,13 @@ pub fn settings_ai_context_source_row(
     div()
         .w_full()
         .min_w(px(0.0))
-        .flex()
-        .items_center()
-        .gap(px(12.0))
         .cursor_pointer()
-        .child(checkbox)
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(
-                    div()
-                        .text_size(px(tokens.metrics.ui_text_sm))
-                        .text_color(rgb(tokens.ui.text))
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .text_size(px(tokens.metrics.ui_text_xs))
-                        .text_color(rgb(tokens.ui.text_muted))
-                        .child(hint),
-                ),
-        )
+        .child(crate::settings_row(
+            tokens,
+            div().child(label).into_any_element(),
+            Some(div().child(hint).into_any_element()),
+            checkbox,
+        ))
 }
 
 pub fn settings_ai_textarea_surface(

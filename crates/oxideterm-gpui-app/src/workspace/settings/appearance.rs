@@ -349,7 +349,7 @@ impl WorkspaceApp {
                     self.appearance_select_control(
                         SettingsSelect::AppearanceDensity,
                         density_label(settings.appearance.ui_density, &self.i18n),
-                        self.tokens.metrics.settings_appearance_select_width,
+                        self.tokens.metrics.settings_select_width,
                         cx,
                     ),
                 ),
@@ -419,7 +419,7 @@ impl WorkspaceApp {
                     self.appearance_select_control(
                         SettingsSelect::AppearanceAnimation,
                         animation_label(settings.appearance.animation_speed, &self.i18n),
-                        self.tokens.metrics.settings_appearance_select_width,
+                        self.tokens.metrics.settings_select_width,
                         cx,
                     ),
                 ),
@@ -429,7 +429,7 @@ impl WorkspaceApp {
                     self.appearance_select_control(
                         SettingsSelect::AppearanceRenderProfile,
                         render_profile_label(settings.appearance.render_profile, &self.i18n),
-                        self.tokens.metrics.settings_appearance_select_width,
+                        self.tokens.metrics.settings_select_width,
                         cx,
                     ),
                 ),
@@ -439,7 +439,7 @@ impl WorkspaceApp {
                     self.appearance_select_control(
                         SettingsSelect::AppearanceFrostedGlass,
                         frosted_glass_label(settings.appearance.frosted_glass, &self.i18n),
-                        self.tokens.metrics.settings_appearance_select_width,
+                        self.tokens.metrics.settings_select_width,
                         cx,
                     ),
                 ),

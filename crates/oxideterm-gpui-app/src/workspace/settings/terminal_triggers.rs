@@ -906,41 +906,11 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(8.0))
             .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(3.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(
-                                        self.i18n
-                                            .t("settings_view.terminal.triggers.shell_execution"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(
-                                        self.i18n.t(
-                                            "settings_view.terminal.triggers.shell_execution_hint",
-                                        ),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        checkbox(&self.tokens, String::new(), enabled).on_mouse_down(
+                self.setting_row(
+                    "settings_view.terminal.triggers.shell_execution",
+                    "settings_view.terminal.triggers.shell_execution_hint",
+                    checkbox(&self.tokens, String::new(), enabled)
+                        .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, _window, cx| {
                                 if enabled {
@@ -950,8 +920,10 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }),
-                        ),
-                    ),
+                        )
+                        .into_any_element(),
+                    cx,
+                ),
             );
         if self.terminal_trigger_shell_confirmation_pending && !enabled {
             row = row.child(

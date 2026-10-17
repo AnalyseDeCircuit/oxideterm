@@ -1488,28 +1488,18 @@ impl WorkspaceApp {
         hint_key: &str,
         value_key: &str,
     ) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
-                    .child(self.network_field_label(label_key, hint_key)),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(value_key)),
-            )
-            .into_any_element()
+        settings_appearance_row(
+            &self.tokens,
+            &self.i18n,
+            label_key,
+            hint_key,
+            div()
+                .max_w_full()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(self.i18n.t(value_key))
+                .into_any_element(),
+        )
     }
 
     fn network_route_select_row(
@@ -1520,28 +1510,14 @@ impl WorkspaceApp {
         value: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
-                    .child(self.network_field_label(label_key, hint_key)),
-            )
-            .child(
-                div()
-                    .w(px(240.0))
-                    .max_w_full()
-                    .flex_none()
-                    .child(self.settings_select_control(select_id, value, false, None, cx)),
-            )
-            .into_any_element()
+        self.select_setting_row(
+            label_key,
+            hint_key,
+            select_id,
+            value,
+            self.tokens.metrics.settings_select_width,
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn network_responsive_field(
@@ -1596,38 +1572,7 @@ impl WorkspaceApp {
                 }),
             );
         }
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    // Checkbox rows keep the label as the flexible item so the
-                    // fixed checkbox can wrap inside narrow settings panes.
-                    .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
-                    .grid()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(label_key)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(hint_key)),
-                    ),
-            )
-            .child(div().flex_none().child(control.into_any_element()))
-            .into_any_element()
+        self.setting_row(label_key, hint_key, control.into_any_element(), cx)
     }
 
     pub(in crate::workspace) fn network_select_field(

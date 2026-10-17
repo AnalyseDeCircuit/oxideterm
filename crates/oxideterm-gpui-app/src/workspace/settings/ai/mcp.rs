@@ -1015,31 +1015,22 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_mcp_retry_row(&self, cx: &mut Context<Self>) -> AnyElement {
         let checked = self.ai_entity.read(cx).mcp_retry_enabled();
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t("settings_view.mcp.retry_on_disconnect")),
-            )
-            .child(
-                checkbox(&self.tokens, String::new(), checked)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.ai_entity.update(cx, |ai, cx| {
-                                ai.toggle_mcp_retry(cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .into_any_element(),
-            )
-            .into_any_element()
+        self.setting_row(
+            "settings_view.mcp.retry_on_disconnect",
+            "",
+            checkbox(&self.tokens, String::new(), checked)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.ai_entity.update(cx, |ai, cx| {
+                            ai.toggle_mcp_retry(cx);
+                        });
+                        cx.stop_propagation();
+                    }),
+                )
+                .into_any_element(),
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn close_ai_mcp_add_dialog(&mut self, cx: &mut Context<Self>) {

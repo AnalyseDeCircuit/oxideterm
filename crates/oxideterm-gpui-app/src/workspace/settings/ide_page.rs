@@ -2,8 +2,6 @@ use super::*;
 
 pub(in crate::workspace) const IDE_SETTINGS_CARD_PADDING: f32 = 20.0; // Tauri p-5.
 pub(in crate::workspace) const IDE_SETTINGS_CARD_GAP: f32 = 16.0; // Tauri space-y-4.
-pub(in crate::workspace) const IDE_SETTINGS_INPUT_WIDTH: f32 = 80.0; // Tauri w-20.
-pub(in crate::workspace) const IDE_SETTINGS_AGENT_SELECT_WIDTH: f32 = 160.0; // Tauri w-40.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_SIZE: f32 = 4.0; // Tauri w-1 h-1.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_TOP_MARGIN: f32 = 6.0; // Tauri mt-1.5.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_PRIVACY_BORDER_ALPHA: u8 = 0x33; // Tauri blue-500/20.
@@ -144,7 +142,7 @@ impl WorkspaceApp {
             })
             .child(self.card_separator())
             .child(
-                self.ide_setting_row(
+                self.setting_row(
                     "settings_view.ide.font_weight",
                     "settings_view.ide.font_weight_hint",
                     self.ide_number_input_with_suffix(
@@ -158,11 +156,12 @@ impl WorkspaceApp {
                         None,
                         cx,
                     ),
+                    cx,
                 ),
             )
             .child(self.card_separator())
             .child(
-                self.ide_setting_row(
+                self.setting_row(
                     "settings_view.ide.font_size",
                     "settings_view.ide.font_size_hint",
                     self.ide_number_input_with_suffix(
@@ -176,11 +175,12 @@ impl WorkspaceApp {
                         Some("px"),
                         cx,
                     ),
+                    cx,
                 ),
             )
             .child(self.card_separator())
             .child(
-                self.ide_setting_row(
+                self.setting_row(
                     "settings_view.ide.line_height",
                     "settings_view.ide.line_height_hint",
                     self.ide_number_input_with_suffix(
@@ -194,6 +194,7 @@ impl WorkspaceApp {
                         None,
                         cx,
                     ),
+                    cx,
                 ),
             )
             .into_any_element()
@@ -210,15 +211,13 @@ impl WorkspaceApp {
             .gap(px(IDE_SETTINGS_CARD_GAP))
             .child(self.ide_card_title(self.i18n.t("settings_view.ide.agent_title")))
             .child(self.card_separator())
-            .child(self.ide_setting_row(
+            .child(self.select_setting_row(
                 "settings_view.ide.agent_mode_label",
                 "settings_view.ide.agent_mode_hint",
-                self.ide_select_control(
-                    SettingsSelect::IdeAgentMode,
-                    ide_agent_label(settings.ide.agent_mode, &self.i18n),
-                    IDE_SETTINGS_AGENT_SELECT_WIDTH,
-                    cx,
-                ),
+                SettingsSelect::IdeAgentMode,
+                ide_agent_label(settings.ide.agent_mode, &self.i18n),
+                self.tokens.metrics.settings_select_width,
+                cx,
             ))
             .child(self.ide_card_description(self.i18n.t("settings_view.ide.agent_description")))
             .child(
@@ -359,53 +358,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn ide_label_block(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-    ) -> AnyElement {
-        div()
-            // Tauri flex rows leave this copy column to take the remaining
-            // width. Without flex_1 GPUI can shrink CJK labels to one glyph.
-            .flex_1()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(hint_key)),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ide_setting_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        control: AnyElement,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(16.0))
-            .child(self.ide_label_block(label_key, hint_key))
-            .child(div().flex_none().child(control))
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn ide_number_input_with_suffix(
         &self,
         input: SettingsInput,
@@ -419,7 +371,7 @@ impl WorkspaceApp {
                 input,
                 value,
                 placeholder,
-                IDE_SETTINGS_INPUT_WIDTH,
+                self.tokens.metrics.settings_number_input_width,
                 // Tauri renders IDE typography overrides as number inputs. Keep
                 // their placeholder/value centered like the terminal numeric
                 // controls while ordinary text settings remain start-aligned.
@@ -436,21 +388,6 @@ impl WorkspaceApp {
             );
         }
         control.into_any_element()
-    }
-
-    pub(in crate::workspace) fn ide_select_control(
-        &self,
-        select_id: SettingsSelect,
-        value: String,
-        width: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .relative()
-            .w(px(width))
-            .flex_none()
-            .child(self.settings_select_control(select_id, value, false, Some(width), cx))
-            .into_any_element()
     }
 
     pub(in crate::workspace) fn ide_feature_row(&self, label_key: &str) -> AnyElement {
