@@ -53,11 +53,7 @@
       "usage_unknown": "Utilizzo dei token sconosciuto",
       "message_not_sent": "Impossibile inviare le istruzioni aggiuntive.",
       "supplement": "Istruzioni aggiuntive",
-      "current_conversation": "Conversazione attuale: {{title}}",
-      "scope_hint": "Consenti la delega solo in questa conversazione. Disattivata per impostazione predefinita.",
-      "model_hint": "Le nuove attività ereditano il modello principale, salvo la scelta di un modello configurato.",
-      "no_conversation": "Apri una conversazione per configurarne i sottoagenti.",
-      "concurrency_hint": "Attività simultanee in tutta l’applicazione. Quelle in attesa liberano il proprio posto.",
+      "model_hint": "Le nuove sottoattività di tutte le conversazioni usano questo modello o ereditano quello dell’attività principale.",
       "context": "Contesto e cronologia dell’attività",
       "loading": "Caricamento dei dettagli dell’attività…",
       "load_error": "Impossibile caricare i dettagli dell’attività."

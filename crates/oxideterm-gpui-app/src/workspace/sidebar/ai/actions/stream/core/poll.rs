@@ -41,7 +41,7 @@ impl WorkspaceApp {
                         continue;
                     }
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    self.handle_ai_agent_command(delivery.generation, &delivery.conversation_id, &tool_session_id, call, sender, cx);
+                    self.handle_ai_agent_command(delivery.generation, &tool_session_id, call, sender, cx);
                 }
                 AiStreamDeliveryEvent::HistoryBarrier(sender) => {
                     self.flush_pending_ai_stream_text(&mut pending_text, cx);

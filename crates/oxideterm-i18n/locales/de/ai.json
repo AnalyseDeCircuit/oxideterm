@@ -53,11 +53,7 @@
       "usage_unknown": "Tokenverbrauch unbekannt",
       "message_not_sent": "Zusätzliche Anweisungen konnten nicht gesendet werden.",
       "supplement": "Zusätzliche Anweisungen",
-      "current_conversation": "Aktuelles Gespräch: {{title}}",
-      "scope_hint": "Delegation nur in diesem Gespräch erlauben. Standardmäßig deaktiviert.",
-      "model_hint": "Neue Aufgaben übernehmen das übergeordnete Modell, sofern kein konfiguriertes Modell gewählt wird.",
-      "no_conversation": "Öffnen Sie ein Gespräch, um dessen Unteragenten zu konfigurieren.",
-      "concurrency_hint": "Anwendungsweit gleichzeitig laufende Aufgaben. Wartende Aufgaben geben ihren Platz frei.",
+      "model_hint": "Neue Unteraufgaben in allen Unterhaltungen verwenden dieses Modell oder übernehmen das Modell ihrer übergeordneten Aufgabe.",
       "context": "Aufgabenkontext und Verlauf",
       "loading": "Aufgabendetails werden geladen…",
       "load_error": "Aufgabendetails konnten nicht geladen werden."

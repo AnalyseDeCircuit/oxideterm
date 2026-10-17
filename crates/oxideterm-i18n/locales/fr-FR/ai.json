@@ -53,11 +53,7 @@
       "usage_unknown": "Utilisation des tokens inconnue",
       "message_not_sent": "Impossible d’envoyer les instructions supplémentaires.",
       "supplement": "Instructions supplémentaires",
-      "current_conversation": "Conversation actuelle : {{title}}",
-      "scope_hint": "Autoriser la délégation uniquement dans cette conversation. Désactivée par défaut.",
-      "model_hint": "Les nouvelles tâches héritent du modèle parent, sauf si un modèle configuré est sélectionné.",
-      "no_conversation": "Ouvrez une conversation pour configurer ses sous-agents.",
-      "concurrency_hint": "Tâches simultanées dans toute l’application. Les tâches en attente libèrent leur place.",
+      "model_hint": "Les nouvelles sous-tâches de toutes les conversations utilisent ce modèle ou héritent de celui de leur tâche parente.",
       "context": "Contexte et historique de la tâche",
       "loading": "Chargement des détails de la tâche…",
       "load_error": "Impossible de charger les détails de la tâche."

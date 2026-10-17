@@ -53,11 +53,7 @@
       "usage_unknown": "Token usage unavailable",
       "message_not_sent": "Could not send the additional instructions.",
       "supplement": "Additional instructions",
-      "current_conversation": "Current conversation: {{title}}",
-      "scope_hint": "Allow delegation only in this conversation. Off by default.",
-      "model_hint": "New tasks inherit the parent model unless a configured model is selected.",
-      "no_conversation": "Open a conversation to configure its subagents.",
-      "concurrency_hint": "Application-wide runnable tasks. Waiting tasks release their slot.",
+      "model_hint": "New subtasks in all conversations use this model, or inherit their parent task’s model.",
       "context": "Task context and history",
       "loading": "Loading task details…",
       "load_error": "Could not load task details."

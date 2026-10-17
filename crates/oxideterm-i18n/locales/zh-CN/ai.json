@@ -53,11 +53,7 @@
       "usage_unknown": "Token 用量未知",
       "message_not_sent": "无法发送补充说明。",
       "supplement": "补充说明",
-      "current_conversation": "当前对话：{{title}}",
-      "scope_hint": "仅允许此对话分派子任务，默认关闭。",
-      "model_hint": "新任务默认继承父模型，也可选择已配置的模型。",
-      "no_conversation": "打开一个对话以配置其子代理。",
-      "concurrency_hint": "整个应用可同时运行的子任务数，等待中的任务不占名额。",
+      "model_hint": "所有会话的新子任务使用此默认模型，或继承各自父任务的模型。",
       "context": "任务背景与历史",
       "loading": "正在加载任务详情…",
       "load_error": "无法加载任务详情。"

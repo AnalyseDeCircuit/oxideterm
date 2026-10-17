@@ -53,11 +53,7 @@
       "usage_unknown": "Token 用量未知",
       "message_not_sent": "無法傳送補充說明。",
       "supplement": "補充說明",
-      "current_conversation": "目前對話：{{title}}",
-      "scope_hint": "僅允許此對話分派子任務，預設關閉。",
-      "model_hint": "新任務預設繼承父模型，也可選擇已設定的模型。",
-      "no_conversation": "開啟一個對話以設定其子代理。",
-      "concurrency_hint": "整個應用程式可同時執行的子任務數，等待中的任務不占名額。",
+      "model_hint": "所有對話的新子任務使用此預設模型，或繼承各自父任務的模型。",
       "context": "任務背景與歷史",
       "loading": "正在載入任務詳情…",
       "load_error": "無法載入任務詳情。"

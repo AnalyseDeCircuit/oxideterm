@@ -53,11 +53,7 @@
       "usage_unknown": "Uso de tokens desconocido",
       "message_not_sent": "No se pudieron enviar las instrucciones adicionales.",
       "supplement": "Instrucciones adicionales",
-      "current_conversation": "Conversación actual: {{title}}",
-      "scope_hint": "Permitir delegar solo en esta conversación. Desactivado por defecto.",
-      "model_hint": "Las tareas nuevas heredan el modelo principal salvo que se seleccione uno configurado.",
-      "no_conversation": "Abre una conversación para configurar sus subagentes.",
-      "concurrency_hint": "Tareas simultáneas en toda la aplicación. Las tareas en espera liberan su plaza.",
+      "model_hint": "Las nuevas subtareas de todas las conversaciones usan este modelo o heredan el de su tarea principal.",
       "context": "Contexto e historial de la tarea",
       "loading": "Cargando detalles de la tarea…",
       "load_error": "No se pudieron cargar los detalles de la tarea."

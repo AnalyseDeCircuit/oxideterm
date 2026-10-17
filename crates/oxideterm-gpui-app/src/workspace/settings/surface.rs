@@ -660,19 +660,13 @@ impl WorkspaceApp {
                         settings.ai.tool_use.enabled.hash(&mut hasher);
                         let ai = self.ai_entity.read(cx);
                         ai.agents.settings_model_picker_open.hash(&mut hasher);
-                        ai.conversation_state()
-                            .active_conversation_id
+                        let options = self.global_agent_options();
+                        options.enabled.hash(&mut hasher);
+                        options
+                            .default_model
+                            .as_ref()
+                            .map(|model| (&model.provider_id, &model.model))
                             .hash(&mut hasher);
-                        if let Some(conversation) = ai.conversation_state().active_conversation() {
-                            conversation.title.hash(&mut hasher);
-                            let options = ai.agent_options(&conversation.id);
-                            options.enabled.hash(&mut hasher);
-                            options
-                                .default_model
-                                .as_ref()
-                                .map(|model| (&model.provider_id, &model.model))
-                                .hash(&mut hasher);
-                        }
                         for provider in ai_provider_views(settings) {
                             provider.id.hash(&mut hasher);
                             provider.enabled.hash(&mut hasher);

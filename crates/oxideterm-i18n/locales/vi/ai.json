@@ -53,11 +53,7 @@
       "usage_unknown": "Chưa biết lượng token sử dụng",
       "message_not_sent": "Không thể gửi hướng dẫn bổ sung.",
       "supplement": "Hướng dẫn bổ sung",
-      "current_conversation": "Cuộc trò chuyện hiện tại: {{title}}",
-      "scope_hint": "Chỉ cho phép giao việc trong cuộc trò chuyện này. Mặc định tắt.",
-      "model_hint": "Tác vụ mới kế thừa mô hình cha trừ khi chọn một mô hình đã cấu hình.",
-      "no_conversation": "Mở cuộc trò chuyện để cấu hình tác nhân con.",
-      "concurrency_hint": "Số tác vụ chạy đồng thời trong toàn ứng dụng. Tác vụ đang chờ không chiếm suất.",
+      "model_hint": "Tác vụ phụ mới trong mọi cuộc trò chuyện dùng mô hình này hoặc kế thừa mô hình của tác vụ cha.",
       "context": "Bối cảnh và lịch sử tác vụ",
       "loading": "Đang tải chi tiết tác vụ…",
       "load_error": "Không thể tải chi tiết tác vụ."

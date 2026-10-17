@@ -13,8 +13,7 @@ pub(in crate::workspace) struct AiModelBackendServices {
         HashMap<(String, String), (usize, Option<i64>, String)>,
 }
 use oxideterm_ai::agent::{
-    AgentConversationOptions, AgentGroupId, AgentRecord, AgentResourceCoordinator, AgentRunId,
-    AgentRunRef, AgentRuntime,
+    AgentGroupId, AgentRecord, AgentResourceCoordinator, AgentRunId, AgentRunRef, AgentRuntime,
 };
 
 #[derive(Clone)]
@@ -150,39 +149,6 @@ impl AiWorkspaceEntity {
             .as_ref()
             .is_none_or(|run| self.agents.services.runtime.accepts_messages(run))
     }
-    pub(in crate::workspace) fn agent_options(
-        &self,
-        conversation_id: &str,
-    ) -> AgentConversationOptions {
-        self.conversation_state
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .and_then(|conversation| conversation.session_metadata.as_ref()?.get("subagents"))
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-            .unwrap_or_default()
-    }
-
-    pub(in crate::workspace) fn set_agent_options(
-        &mut self,
-        conversation_id: &str,
-        options: AgentConversationOptions,
-    ) {
-        if let Some(conversation) = self
-            .conversation_state
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)
-        {
-            let metadata = conversation
-                .session_metadata
-                .get_or_insert_with(|| serde_json::json!({}));
-            metadata["subagents"] =
-                serde_json::to_value(options).expect("agent options are serializable");
-        }
-        self.persist_chat_state();
-    }
-
     pub(in crate::workspace) fn agent_run(&self, generation: u64) -> Option<AgentRunRef> {
         self.chat_stream_runs.get(&generation)?.agent.clone()
     }

@@ -71,7 +71,7 @@ pub struct AgentModel {
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct AgentConversationOptions {
+pub struct AgentOptions {
     #[serde(default)]
     pub enabled: bool,
     pub default_model: Option<AgentModel>,
