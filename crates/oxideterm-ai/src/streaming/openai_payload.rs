@@ -14,7 +14,12 @@ pub(crate) fn openai_chat_body(config: &AiChatStreamConfig, messages: &[AiChatMe
     if let Some(tokens) = config.max_response_tokens.filter(|tokens| *tokens > 0)
         && let Some(object) = body.as_object_mut()
     {
-        object.insert("max_tokens".to_string(), serde_json::json!(tokens));
+        let key = if config.provider_type == "mimo" {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        };
+        object.insert(key.to_string(), serde_json::json!(tokens));
     }
     if let Some(object) = body.as_object_mut() {
         apply_reasoning_options(object, config);
@@ -118,7 +123,7 @@ fn apply_reasoning_options(body: &mut serde_json::Map<String, Value>, config: &A
                 serde_json::json!(effort.as_str()),
             );
         }
-        AiReasoningRequestFormat::KimiThinking => {
+        AiReasoningRequestFormat::KimiThinking | AiReasoningRequestFormat::MiMoThinking => {
             if effort == AiReasoningLevel::None {
                 body.insert(
                     "thinking".to_string(),
@@ -239,9 +244,9 @@ fn openai_message_value(
                     "role": "assistant",
                     "content": message.content,
                 });
-                // K3 and K2.7 require preserved thinking across complete
+                // MiMo, K3 and K2.7 require preserved thinking across complete
                 // assistant messages, including turns without tool calls.
-                if kimi_model_requires_preserved_thinking(config)
+                if model_requires_preserved_thinking(config)
                     && let Some(reasoning) = message.thinking_content.as_ref()
                     && let Some(object) = assistant.as_object_mut()
                 {
@@ -286,7 +291,10 @@ fn openai_message_value(
     }
 }
 
-fn kimi_model_requires_preserved_thinking(config: &AiChatStreamConfig) -> bool {
+fn model_requires_preserved_thinking(config: &AiChatStreamConfig) -> bool {
+    if config.provider_type == "mimo" {
+        return true;
+    }
     if config.provider_type != "kimi" {
         return false;
     }
@@ -352,6 +360,8 @@ mod tests {
             ("deepseek", "model", "max", Some("enabled"), Some("max")),
             ("kimi", "kimi-k3", "max", None, Some("max")),
             ("kimi", "kimi-k2.6", "none", Some("disabled"), None),
+            ("mimo", "mimo-v2.6-pro", "none", Some("disabled"), None),
+            ("mimo", "mimo-v2.6-flash", "auto", None, None),
             ("glm", "glm-5.2", "xhigh", Some("enabled"), Some("xhigh")),
             ("glm", "glm-4.7", "none", Some("disabled"), None),
         ] {
@@ -371,6 +381,23 @@ mod tests {
                 "{provider}/{model}/{effort}: reasoning_effort"
             );
         }
+    }
+
+    #[test]
+    fn mimo_preserves_reasoning_and_uses_completion_token_limit() {
+        let mut config = config("mimo", "auto");
+        config.model = "mimo-v2.6-pro".into();
+        config.max_response_tokens = Some(4096);
+        let messages: Vec<AiChatMessage> = serde_json::from_value(serde_json::json!([
+            {"id":"assistant","role":"assistant","content":"Ready","timestamp_ms":0,
+             "thinking_content":"Check the target"},
+            {"id":"user","role":"user","content":"Continue","timestamp_ms":1}
+        ]))
+        .unwrap();
+        let body = openai_chat_body(&config, &messages);
+        assert_eq!(body["max_completion_tokens"], 4096);
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["messages"][0]["reasoning_content"], "Check the target");
     }
 
     #[test]

@@ -224,6 +224,14 @@ pub fn model_image_input(provider: &str, model: &str, setting: AiImageInput) -> 
             Some(false)
         }
         "kimi" if model == "kimi-k2.5" => Some(true),
+        "mimo"
+            if matches!(
+                model.as_str(),
+                "mimo-v2.6-pro" | "mimo-v2.6-flash" | "mimo-v2.6-pro-ultraspeed" | "mimo-v2.5"
+            ) =>
+        {
+            Some(true)
+        }
         "glm"
             if matches!(
                 model.as_str(),
@@ -304,7 +312,26 @@ pub fn estimate_image_tokens(
     } else {
         None
     };
-    let (tokens, known_rule) = if let Some((edge, cap, multiplier)) = patches {
+    let (tokens, known_rule) = if provider == "mimo"
+        && model_image_input(provider, &model, AiImageInput::Auto) == Some(true)
+    {
+        // MiMo rounds to merged 32-pixel patches, with an 8 Ki–8 Mi pixel range.
+        // https://mimo.mi.com/docs/en-US/quick-start/usage-guide/multimodal-understanding/image-understanding
+        let (mut rounded_w, mut rounded_h) = (
+            (w / 32.0).round_ties_even() * 32.0,
+            (h / 32.0).round_ties_even() * 32.0,
+        );
+        if rounded_w * rounded_h > 8_388_608.0 {
+            let scale = (w * h / 8_388_608.0).sqrt();
+            rounded_w = (w / scale / 32.0).floor() * 32.0;
+            rounded_h = (h / scale / 32.0).floor() * 32.0;
+        } else if rounded_w * rounded_h < 8192.0 {
+            let scale = (8192.0 / (w * h)).sqrt();
+            rounded_w = (w * scale / 32.0).ceil() * 32.0;
+            rounded_h = (h * scale / 32.0).ceil() * 32.0;
+        }
+        ((rounded_w * rounded_h / 1024.0) as usize, true)
+    } else if let Some((edge, cap, multiplier)) = patches {
         let scale = (edge / w.max(h)).min(1.0);
         w = (w * scale).floor().max(1.0);
         h = (h * scale).floor().max(1.0);

@@ -165,7 +165,7 @@ fn ai_tool_calls_estimated_tokens(tool_calls: &[serde_json::Value]) -> usize {
 
 fn ai_replayed_reasoning_estimated_tokens(message: &AiChatMessage, provider_type: &str) -> usize {
     let provider_replays_reasoning = !matches!(provider_type, "anthropic" | "gemini")
-        && (!message.tool_calls.is_empty() || provider_type == "kimi");
+        && (!message.tool_calls.is_empty() || matches!(provider_type, "kimi" | "mimo"));
     if !provider_replays_reasoning {
         return 0;
     }

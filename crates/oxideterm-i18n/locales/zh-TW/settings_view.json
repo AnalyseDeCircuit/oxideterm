@@ -1193,6 +1193,7 @@
       "provider_template_deepseek": "DeepSeek",
       "provider_template_kimi": "Kimi",
       "provider_template_glm": "GLM（智譜 AI）",
+      "provider_template_mimo": "MiMo（小米）",
       "provider_template_openai": "OpenAI",
       "provider_template_anthropic": "Anthropic",
       "provider_template_gemini": "Google Gemini",

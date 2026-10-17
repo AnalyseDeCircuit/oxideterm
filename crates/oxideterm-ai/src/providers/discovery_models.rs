@@ -38,7 +38,7 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
                     .map(str::to_string)
             })
             .collect::<Vec<_>>(),
-        "openai_compatible" | "deepseek" | "kimi" | "glm" | "xai" => {
+        "openai_compatible" | "deepseek" | "kimi" | "glm" | "xai" | "mimo" => {
             openai_compatible_model_values(payload)
                 .filter_map(|model| {
                     model
@@ -48,6 +48,9 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
                         .map(str::to_string)
                 })
                 .filter(|model| !model.is_empty())
+                .filter(|model| {
+                    provider_type != "mimo" || (!model.contains("-tts") && !model.contains("-asr"))
+                })
                 .collect::<Vec<_>>()
         }
         "openai" => payload

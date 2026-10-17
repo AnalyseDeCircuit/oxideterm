@@ -38,6 +38,12 @@ pub const AI_PROVIDER_TEMPLATES: &[AiProviderTemplate] = &[
         ],
     },
     AiProviderTemplate {
+        provider_type: "mimo",
+        label_key: "settings_view.ai.provider_template_mimo",
+        base_url: "https://api.xiaomimimo.com/v1",
+        initial_models: &["mimo-v2.6-pro", "mimo-v2.6-flash"],
+    },
+    AiProviderTemplate {
         provider_type: "openai",
         label_key: "settings_view.ai.provider_template_openai",
         base_url: "https://api.openai.com/v1",

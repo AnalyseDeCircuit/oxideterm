@@ -73,6 +73,7 @@ pub enum AiReasoningRequestFormat {
     GeminiThinkingBudget,
     DeepSeek,
     KimiThinking,
+    MiMoThinking,
     GlmEffort,
     GlmThinking,
     Unsupported,
@@ -338,6 +339,26 @@ const CAPABILITY_ROWS: &[CapabilityRow] = &[
         model_match: ModelMatch::Prefix("kimi-k2.5"),
         levels: &[None],
         request_format: AiReasoningRequestFormat::KimiThinking,
+    },
+    // MiMo defaults to thinking; Auto retains that default, None disables it.
+    // https://mimo.mi.com/docs/en-US/quick-start/usage-guide/text-generation/deep-thinking
+    CapabilityRow {
+        provider_type: "mimo",
+        model_match: ModelMatch::Prefix("mimo-v2.6"),
+        levels: &[None],
+        request_format: AiReasoningRequestFormat::MiMoThinking,
+    },
+    CapabilityRow {
+        provider_type: "mimo",
+        model_match: ModelMatch::Exact("mimo-v2.5"),
+        levels: &[None],
+        request_format: AiReasoningRequestFormat::MiMoThinking,
+    },
+    CapabilityRow {
+        provider_type: "mimo",
+        model_match: ModelMatch::Exact("mimo-v2.5-pro"),
+        levels: &[None],
+        request_format: AiReasoningRequestFormat::MiMoThinking,
     },
     // https://docs.bigmodel.cn/cn/guide/capabilities/thinking
     CapabilityRow {

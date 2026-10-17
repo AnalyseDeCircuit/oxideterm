@@ -58,6 +58,55 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
 }
 
 #[test]
+fn mimo_preset_discovers_chat_models_and_budgets_images() {
+    let template = providers::provider_template_by_type("mimo");
+    assert_eq!(template.base_url, "https://api.xiaomimimo.com/v1");
+    assert_eq!(
+        template.initial_models,
+        &["mimo-v2.6-pro", "mimo-v2.6-flash"]
+    );
+    assert_eq!(
+        parse_provider_models(
+            "mimo",
+            &serde_json::json!({"data": [
+                {"id": "mimo-v2.6-pro"}, {"id": "mimo-v2.5-tts"},
+                {"id": "mimo-v2.6-flash"}, {"id": "mimo-v2.5-asr"}
+            ]})
+        ),
+        ["mimo-v2.6-flash", "mimo-v2.6-pro"]
+    );
+    for model in [
+        "mimo-v2.6-pro",
+        "mimo-v2.6-flash",
+        "mimo-v2.6-pro-ultraspeed",
+        "mimo-v2.5",
+    ] {
+        assert_eq!(
+            model_image_input("mimo", model, AiImageInput::Auto),
+            Some(true)
+        );
+        assert_eq!(
+            model_context_window(model, &Default::default(), None, &Default::default()),
+            1_000_000
+        );
+        for (width, height, expected) in [
+            (1024, 1024, 1024),
+            (2000, 2000, 3844),
+            (64, 64, 9),
+            (4096, 4096, 8100),
+        ] {
+            let estimate = estimate_image_tokens("mimo", model, width, height);
+            assert_eq!(estimate.tokens, expected, "{model}: {width}x{height}");
+            assert!(estimate.known_rule);
+        }
+    }
+    assert_eq!(
+        model_image_input("mimo", "unlisted-model", AiImageInput::Auto),
+        None
+    );
+}
+
+#[test]
 fn image_input_serializes_across_all_completion_protocols_and_keeps_image_only_turns() {
     use serde_json::json;
     let image = AiImageAttachment::new(
@@ -79,6 +128,7 @@ fn image_input_serializes_across_all_completion_protocols_and_keeps_image_only_t
         "ollama",
         "kimi",
         "glm",
+        "mimo",
         "xai",
         "custom_vendor",
     ] {

@@ -65,6 +65,10 @@ static MODEL_CONTEXT_WINDOWS: LazyLock<Vec<(Regex, i64)>> = LazyLock::new(|| {
         (r"kimi-k3", 1_000_000),
         (r"kimi-k2\.7-code|kimi-k2\.6|kimi-k2\.5", 256_000),
         (r"moonshot", 128_000),
+        (
+            r"^mimo-v2\.6-(?:pro(?:-ultraspeed)?|flash)$|^mimo-v2\.5(?:-pro)?$",
+            1_000_000,
+        ),
         (r"glm-5\.2", 1_000_000),
         (r"glm-5\.1|glm-5(?:-turbo)?|glm-4\.7|glm-4\.6", 200_000),
         (r"glm-4\.5", 128_000),
