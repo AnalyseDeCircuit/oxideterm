@@ -988,6 +988,34 @@ impl WorkspaceApp {
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(self.i18n.t("settings_view.ai.tool_use_approve_hint"))
                         .into_any_element(),
+                    policy_groups,
+                    settings_ai_policy_warning(
+                        &self.tokens,
+                        self.i18n.t("settings_view.ai.tool_policy_warning"),
+                    ),
+                ],
+            )
+        });
+
+        settings_ai_tool_use_section(
+            settings_ai_icon_heading(
+                Self::render_lucide_icon(LucideIcon::Wrench, 16.0, rgb(self.tokens.ui.text)),
+                self.ai_section_title("settings_view.ai.tool_use"),
+            ),
+            div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(self.tokens.metrics.settings_card_gap))
+                .child(self.bool_row(
+                    "settings_view.ai.tool_use_enabled",
+                    "settings_view.ai.tool_use_enabled_hint",
+                    settings.ai.tool_use.enabled,
+                    set_ai_tool_use_enabled,
+                    cx,
+                ))
+                .child(
                     self.ai_tool_number_input_row(
                         "settings_view.ai.tool_use_max_rounds",
                         "settings_view.ai.tool_use_max_rounds_hint",
@@ -999,31 +1027,11 @@ impl WorkspaceApp {
                             .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS),
                         cx,
                     ),
-                    self.render_ai_agent_concurrency_setting(cx),
-                    policy_groups,
-                    self.ai_disabled_tools_notice(settings, cx),
-                    settings_ai_policy_warning(
-                        &self.tokens,
-                        self.i18n.t("settings_view.ai.tool_policy_warning"),
-                    ),
-                ],
-            )
-        });
-
-        settings_ai_tool_use_section(
-            AI_PROVIDER_MAX_W,
-            settings_ai_icon_heading(
-                Self::render_lucide_icon(LucideIcon::Wrench, 16.0, rgb(self.tokens.ui.text)),
-                self.ai_section_title("settings_view.ai.tool_use"),
-            ),
+                )
+                .child(self.ai_disabled_tools_notice(settings, cx))
+                .into_any_element(),
+            self.card_title("settings_view.ai.tool_auto_approval_title"),
             self.ai_tool_expand_button(cx),
-            self.bool_row(
-                "settings_view.ai.tool_use_enabled",
-                "settings_view.ai.tool_use_enabled_hint",
-                settings.ai.tool_use.enabled,
-                set_ai_tool_use_enabled,
-                cx,
-            ),
             collapsed_summary,
             expanded_body,
         )
@@ -1573,6 +1581,25 @@ impl WorkspaceApp {
                     )
                 })
                 .into_any_element();
+            let disabled = item.key.is_some_and(|key| {
+                self.settings_store
+                    .settings()
+                    .ai
+                    .tool_use
+                    .disabled_tools
+                    .iter()
+                    .any(|name| name == key)
+            });
+            let control = if disabled {
+                self.text_badge(self.i18n.t("common.disabled"), self.tokens.ui.warning)
+            } else if locked {
+                self.text_badge(
+                    self.i18n.t("settings_view.ai.tool_no_confirmation"),
+                    self.tokens.ui.text_muted,
+                )
+            } else {
+                control
+            };
             items.push(settings_ai_tool_policy_item(
                 &self.tokens,
                 self.i18n.t(item.label_key),
@@ -1584,7 +1611,14 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t(group.title_key),
             self.i18n.t(group.description_key),
-            group_control.into_any_element(),
+            if group_state == AiToolPolicyGroupState::Locked {
+                self.text_badge(
+                    self.i18n.t("settings_view.ai.tool_fixed_policy"),
+                    self.tokens.ui.text_muted,
+                )
+            } else {
+                group_control.into_any_element()
+            },
             items,
         )
     }
@@ -1598,11 +1632,36 @@ impl WorkspaceApp {
         if count == 0 {
             return div().into_any_element();
         }
+        let labels = ai_tool_policy_groups(settings)
+            .into_iter()
+            .flat_map(|group| group.items)
+            .filter_map(|item| item.key.map(|key| (key, item.label_key)))
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let tools = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .children(settings.ai.tool_use.disabled_tools.iter().map(|name| {
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(
+                        labels
+                            .get(name.as_str())
+                            .map(|key| self.i18n.t(key))
+                            .unwrap_or_else(|| name.clone()),
+                    )
+            }))
+            .into_any_element();
         settings_ai_disabled_tools_notice(
             &self.tokens,
             self.i18n
                 .t("settings_view.ai.tool_use_disabled_tools_title")
                 .replace("{{count}}", &count.to_string()),
+            self.i18n.t("settings_view.ai.tool_use_disabled_tools_hint"),
+            tools,
             self.workspace_toolbar_action_button(
                 self.i18n
                     .t("settings_view.ai.tool_use_restore_disabled_tools"),

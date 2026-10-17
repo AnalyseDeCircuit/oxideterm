@@ -192,7 +192,7 @@ impl WorkspaceApp {
             .min_w_0()
             .flex()
             .flex_col()
-            .gap(px(self.tokens.spacing.two))
+            .gap(px(self.tokens.metrics.settings_card_gap))
             .child(self.ai_section_title("settings_view.ai.conversation_agents"))
             .child(
                 div()
@@ -200,6 +200,15 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t("settings_view.ai.conversation_agents_hint")),
             );
+        if !self.settings_store.settings().ai.tool_use.enabled {
+            section = section.child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.warning))
+                    .child(self.i18n.t("settings_view.ai.subagents_tools_off")),
+            );
+        }
+        section = section.child(self.card_title("settings_view.ai.subagents_conversation_scope"));
         if let Some((id, title)) = conversation {
             let options = ai.agent_options(&id);
             let picker_open = ai.agents.settings_model_picker_open;
@@ -238,7 +247,7 @@ impl WorkspaceApp {
                 .into_any_element();
             section = section.child(self.setting_row(
                 "ai.agents.allow",
-                "ai.agents.scope_hint",
+                "settings_view.ai.subagents_scope_hint",
                 toggle,
                 cx,
             ));
@@ -274,7 +283,11 @@ impl WorkspaceApp {
                     .child(self.i18n.t("ai.agents.no_conversation")),
             );
         }
-        section.into_any_element()
+        section
+            .child(self.card_separator())
+            .child(self.card_title("settings_view.ai.subagents_global_scope"))
+            .child(self.render_ai_agent_concurrency_setting(cx))
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_ai_agent_concurrency_setting(
@@ -318,7 +331,7 @@ impl WorkspaceApp {
         }
         self.setting_row(
             "ai.agents.concurrency",
-            "ai.agents.concurrency_hint",
+            "settings_view.ai.subagents_global_hint",
             choices.into_any_element(),
             cx,
         )

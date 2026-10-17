@@ -125,10 +125,10 @@ pub fn settings_ai_icon_heading(icon: AnyElement, title: AnyElement) -> AnyEleme
 }
 
 pub fn settings_ai_tool_use_section(
-    _max_width: f32,
     heading: AnyElement,
+    controls: AnyElement,
+    policy_heading: AnyElement,
     expand_button: AnyElement,
-    enabled_row: AnyElement,
     collapsed_summary: Option<AnyElement>,
     expanded_body: Option<AnyElement>,
 ) -> AnyElement {
@@ -140,16 +140,18 @@ pub fn settings_ai_tool_use_section(
         .flex()
         .flex_col()
         .gap(px(16.0))
+        .child(heading)
+        .child(controls)
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .justify_between()
                 .gap(px(12.0))
-                .child(heading)
+                .child(policy_heading)
                 .child(expand_button),
         )
-        .child(enabled_row)
         .children(collapsed_summary)
         .children(expanded_body)
         .into_any_element()
@@ -647,12 +649,9 @@ fn settings_ai_context_source_badge_colors(
 }
 
 pub fn settings_ai_tool_collapsed_summary(tokens: &ThemeTokens, summary: String) -> AnyElement {
-    // Collapsed policy copy mirrors Tauri's left-rule nested summary.
     div()
-        .ml(px(16.0))
-        .pl(px(16.0))
-        .border_l_1()
-        .border_color(rgba((tokens.ui.border << 8) | 0x4d))
+        .w_full()
+        .min_w_0()
         .text_size(px(tokens.metrics.ui_text_xs))
         .text_color(rgb(tokens.ui.text_muted))
         .child(summary)
@@ -664,16 +663,13 @@ pub fn settings_ai_tool_expanded_body(
     enabled: bool,
     children: Vec<AnyElement>,
 ) -> AnyElement {
-    // Expanded policy content is visually nested under the enable switch. The
-    // disabled opacity is display-only; app state still controls interaction.
+    // The disabled opacity is display-only; app state still controls interaction.
     div()
-        .ml(px(16.0))
-        .pl(px(16.0))
-        .border_l_1()
-        .border_color(rgba((tokens.ui.border << 8) | 0x4d))
+        .w_full()
+        .min_w_0()
         .flex()
         .flex_col()
-        .gap(px(20.0))
+        .gap(px(tokens.metrics.settings_card_gap))
         .opacity(if enabled { 1.0 } else { 0.4 })
         .children(children)
         .into_any_element()
@@ -770,6 +766,8 @@ pub fn settings_ai_tool_policy_group(
 pub fn settings_ai_disabled_tools_notice(
     tokens: &ThemeTokens,
     label: String,
+    description: String,
+    tools: AnyElement,
     action: AnyElement,
 ) -> AnyElement {
     // The restore action is caller-provided so the app can clear disabled tools
@@ -780,17 +778,34 @@ pub fn settings_ai_disabled_tools_notice(
         .border_color(rgba((tokens.ui.warning << 8) | 0x33))
         .bg(rgba((tokens.ui.warning << 8) | 0x1a))
         .p(px(12.0))
+        .w_full()
+        .min_w_0()
         .flex()
-        .items_center()
-        .justify_between()
+        .flex_col()
         .gap(px(12.0))
         .child(
             div()
-                .text_size(px(tokens.metrics.ui_text_xs))
-                .text_color(rgb(tokens.ui.warning))
-                .child(label),
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap(px(12.0))
+                .child(
+                    div()
+                        .text_size(px(tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(tokens.ui.warning))
+                        .child(label),
+                )
+                .child(action),
         )
-        .child(action)
+        .child(
+            div()
+                .text_size(px(tokens.metrics.ui_text_xs))
+                .text_color(rgb(tokens.ui.text_muted))
+                .child(description),
+        )
+        .child(tools)
         .into_any_element()
 }
 

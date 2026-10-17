@@ -650,12 +650,14 @@ impl WorkspaceApp {
                             .hash_settings_context_layout(&mut hasher);
                     }
                     (AiSettingsPage::Tools, 2) => {
+                        settings.ai.tool_use.disabled_tools.hash(&mut hasher);
                         self.ai_entity
                             .read(cx)
                             .settings_section_expanded(AiSettingsViewSection::ToolUse)
                             .hash(&mut hasher);
                     }
                     (AiSettingsPage::Tools, 3) => {
+                        settings.ai.tool_use.enabled.hash(&mut hasher);
                         let ai = self.ai_entity.read(cx);
                         ai.agents.settings_model_picker_open.hash(&mut hasher);
                         ai.conversation_state()
