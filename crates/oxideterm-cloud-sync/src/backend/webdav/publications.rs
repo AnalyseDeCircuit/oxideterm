@@ -23,6 +23,26 @@ impl CloudSyncBackend {
             if response.status() == StatusCode::NOT_FOUND {
                 continue;
             }
+            if response.status() == StatusCode::CONFLICT && directory == root {
+                // Some DAV servers return 409 for a missing ancestor. Confirm a
+                // missing collection without creating anything during enumeration.
+                let endpoint = Url::parse(&format!("{}/", trim_trailing_slash(&config.endpoint)))?;
+                let mut parent = root.join("../")?;
+                while parent.path() != endpoint.path() && parent.path().starts_with(endpoint.path())
+                {
+                    match self
+                        .webdav_collection_status(
+                            parent.as_str(),
+                            self.webdav_auth_headers(config, secrets)?,
+                        )
+                        .await?
+                    {
+                        StatusCode::NOT_FOUND => return Ok(Vec::new()),
+                        StatusCode::CONFLICT => parent = parent.join("../")?,
+                        _ => break,
+                    }
+                }
+            }
             if !response.status().is_success() {
                 bail!(
                     "WebDAV cannot enumerate sync snapshots ({})",

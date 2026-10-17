@@ -224,7 +224,18 @@ impl CloudSyncBackend {
         .await
     }
 
-    async fn webdav_collection_exists(&self, url: &str, mut headers: HeaderMap) -> Result<bool> {
+    async fn webdav_collection_exists(&self, url: &str, headers: HeaderMap) -> Result<bool> {
+        Ok(matches!(
+            self.webdav_collection_status(url, headers).await?.as_u16(),
+            200 | 207 | 301 | 405
+        ))
+    }
+
+    async fn webdav_collection_status(
+        &self,
+        url: &str,
+        mut headers: HeaderMap,
+    ) -> Result<StatusCode> {
         insert_header(&mut headers, "Depth", "0")?;
         let response = execute_cloud_request(
             self.client
@@ -232,7 +243,7 @@ impl CloudSyncBackend {
                 .headers(headers),
         )
         .await?;
-        Ok(matches!(response.status().as_u16(), 200 | 207 | 301 | 405))
+        Ok(response.status())
     }
 
     pub(super) async fn download_webdav_snapshot_object(

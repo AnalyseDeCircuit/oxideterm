@@ -1216,6 +1216,161 @@ mod tests {
         assert_eq!(requests[2].url.path(), format!("/team/sync-v3/{writer}/"));
     }
 
+    #[tokio::test]
+    async fn webdav_first_publication_recovers_from_missing_namespace_conflict() {
+        for namespace in ["team", "team/nested"] {
+            let bytes = b"first encrypted publication".to_vec();
+            let pending = crate::sync_v3::PendingPublication {
+                path: format!(
+                    "sync-v3/{}/1-{}.oxide",
+                    uuid::Uuid::from_u128(1),
+                    sha256_hex(&bytes).trim_start_matches("sha256:")
+                ),
+                bytes: bytes.clone(),
+            };
+            let mut statuses = vec![StatusCode::CONFLICT];
+            if namespace.contains('/') {
+                statuses.push(StatusCode::CONFLICT);
+            }
+            statuses.push(StatusCode::NOT_FOUND);
+            let read_count = statuses.len();
+            statuses.push(StatusCode::CONFLICT);
+            statuses.extend(std::iter::repeat_n(
+                StatusCode::CREATED,
+                namespace.split('/').count() + 3,
+            ));
+            let executor = Arc::new(FakeHttpExecutor::new(
+                statuses
+                    .into_iter()
+                    .map(|status| response(status, HeaderMap::new(), Value::Null))
+                    .chain([HttpResponseSnapshot::new(
+                        StatusCode::OK,
+                        HeaderMap::new(),
+                        bytes.clone(),
+                    )]),
+            ));
+            let backend = CloudSyncBackend::with_http_executor(executor.clone());
+            let config = CloudSyncSettings {
+                backend_type: BackendType::Webdav,
+                endpoint: "https://sync.test/dav/".into(),
+                namespace: namespace.into(),
+                auth_mode: crate::AuthMode::None,
+                ..Default::default()
+            };
+            let secrets = CloudSyncSecrets::default();
+            assert_eq!(
+                backend.list_publications(&config, &secrets).await.unwrap(),
+                Vec::new(),
+                "{namespace}"
+            );
+            let requests = executor.requests();
+            let mut expected_reads = vec![(format!("/dav/{namespace}/sync-v3/"), "1")];
+            if namespace.contains('/') {
+                expected_reads.push(("/dav/team/nested".into(), "0"));
+            }
+            expected_reads.push(("/dav/team".into(), "0"));
+            assert_eq!(requests.len(), read_count);
+            for (request, (path, depth)) in requests.iter().zip(expected_reads) {
+                assert_eq!(request.method.as_str(), "PROPFIND");
+                assert_eq!(request.url.path(), path);
+                assert_eq!(request.headers["Depth"], depth);
+            }
+
+            backend
+                .publish_replica(&config, &secrets, &pending)
+                .await
+                .unwrap();
+            let requests = executor.requests();
+            let object_path = format!("/dav/{namespace}/{}", pending.path);
+            let mut expected_writes =
+                vec![("GET", object_path.clone()), ("MKCOL", "/dav/team".into())];
+            if namespace.contains('/') {
+                expected_writes.push(("MKCOL", "/dav/team/nested".into()));
+            }
+            expected_writes.extend([
+                ("MKCOL", format!("/dav/{namespace}/sync-v3")),
+                (
+                    "MKCOL",
+                    format!("/dav/{namespace}/sync-v3/00000000-0000-0000-0000-000000000001"),
+                ),
+                ("PUT", object_path.clone()),
+                ("GET", object_path),
+            ]);
+            assert_eq!(
+                requests[read_count..]
+                    .iter()
+                    .map(|request| (request.method.as_str(), request.url.path().to_string()))
+                    .collect::<Vec<_>>(),
+                expected_writes
+            );
+            match &requests[requests.len() - 2].body {
+                HttpRequestBody::Bytes(body) => {
+                    assert_eq!(body.as_slice(), b"first encrypted publication")
+                }
+                _ => panic!("expected publication bytes"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn webdav_enumeration_does_not_treat_other_conflicts_as_empty() {
+        for (writer_conflict, namespace_status) in [
+            (false, StatusCode::MULTI_STATUS),
+            (false, StatusCode::FORBIDDEN),
+            (false, StatusCode::UNAUTHORIZED),
+            (false, StatusCode::CONFLICT),
+            (true, StatusCode::NOT_FOUND),
+        ] {
+            let mut responses = Vec::new();
+            if writer_conflict {
+                responses.push(HttpResponseSnapshot::new(
+                    StatusCode::MULTI_STATUS,
+                    HeaderMap::new(),
+                    b"<d:multistatus xmlns:d='DAV:'><d:response><d:href>/dav/team/sync-v3/00000000-0000-0000-0000-000000000001/</d:href></d:response></d:multistatus>".to_vec(),
+                ));
+            }
+            responses.extend([
+                response(StatusCode::CONFLICT, HeaderMap::new(), Value::Null),
+                response(namespace_status, HeaderMap::new(), Value::Null),
+            ]);
+            let executor = Arc::new(FakeHttpExecutor::new(responses));
+            let backend = CloudSyncBackend::with_http_executor(executor.clone());
+            let config = CloudSyncSettings {
+                backend_type: BackendType::Webdav,
+                endpoint: "https://sync.test/dav/".into(),
+                namespace: "team".into(),
+                auth_mode: crate::AuthMode::None,
+                ..Default::default()
+            };
+            assert_eq!(
+                backend
+                    .list_publications(&config, &CloudSyncSecrets::default())
+                    .await
+                    .unwrap_err()
+                    .to_string(),
+                "WebDAV cannot enumerate sync snapshots (409)"
+            );
+            assert_eq!(
+                executor
+                    .requests()
+                    .iter()
+                    .map(|request| (request.method.as_str(), request.url.path().to_string()))
+                    .collect::<Vec<_>>(),
+                [
+                    ("PROPFIND", "/dav/team/sync-v3/".into()),
+                    (
+                        "PROPFIND",
+                        if writer_conflict {
+                            "/dav/team/sync-v3/00000000-0000-0000-0000-000000000001/".into()
+                        } else {
+                            "/dav/team".into()
+                        }
+                    ),
+                ]
+            );
+        }
+    }
+
     #[derive(Clone)]
     struct FakeHttpExecutor {
         state: Arc<Mutex<FakeHttpState>>,
