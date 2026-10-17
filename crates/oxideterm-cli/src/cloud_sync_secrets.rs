@@ -129,10 +129,10 @@ fn import(args: CloudSyncSecretsImportArgs) -> CliResult<()> {
             )
         })?;
     let values = imported_secret_values(document, args.json)?;
-    for key in values.keys() {
-        ensure_password_setup(&state, key, true, args.json)?;
-    }
     let mut provider = CloudSyncKeychainSecretProvider::new(state.secret_hints.clone());
+    for (key, value) in &values {
+        ensure_password_setup(&state, key, Some(value.as_str()), &mut provider, args.json)?;
+    }
     for (key, value) in &values {
         validate_secret_key(key, args.json)?;
         let reference = if key == secret_keys::SYNC_PASSWORD && !state.settings.local_file_mode {
@@ -207,7 +207,8 @@ fn write_secret(key: String, value: Option<&str>, json: bool) -> CliResult<()> {
     validate_secret_key(&key, json)?;
     let path = default_cloud_sync_path();
     let mut state = cloud_sync_preview::load_persisted_state(&path, json)?;
-    ensure_password_setup(&state, &key, value.is_some(), json)?;
+    let mut provider = CloudSyncKeychainSecretProvider::new(state.secret_hints.clone());
+    ensure_password_setup(&state, &key, value, &mut provider, json)?;
     if key == secret_keys::SYNC_PASSWORD && value.is_some() && !state.settings.local_file_mode {
         state.settings.sync_password_ref =
             Some(format!("sync-v3-password-{}", uuid::Uuid::new_v4()));
@@ -217,7 +218,6 @@ fn write_secret(key: String, value: Option<&str>, json: bool) -> CliResult<()> {
     } else {
         &key
     };
-    let mut provider = CloudSyncKeychainSecretProvider::new(state.secret_hints.clone());
     // Secret values cross the CLI boundary only through stdin/env/import and are not logged or serialized.
     provider
         .store_secret(actual_key, value)
@@ -237,31 +237,37 @@ fn write_secret(key: String, value: Option<&str>, json: bool) -> CliResult<()> {
 fn ensure_password_setup(
     state: &oxideterm_cloud_sync::state::CloudSyncPersistedState,
     key: &str,
-    writing: bool,
+    value: Option<&str>,
+    provider: &mut CloudSyncKeychainSecretProvider,
     json: bool,
 ) -> CliResult<()> {
-    let initialized = state.remote_exists
-        || oxideterm_cloud_sync::operation::CloudSyncOperationService::has_local_replica(
-            std::path::Path::new(&crate::settings::load_settings_read_only(json)?.path),
-            &state.settings,
-        )
-        .map_err(|error| runtime_error(error, json))?;
+    let Some(password) = value else {
+        return Ok(());
+    };
     let active = state
         .settings
         .sync_password_ref
         .as_deref()
         .unwrap_or(secret_keys::SYNC_PASSWORD);
-    if writing
-        && initialized
-        && key == secret_keys::SYNC_PASSWORD
+    if key == secret_keys::SYNC_PASSWORD
         && !state.settings.local_file_mode
         && state.secret_hints.get(active).copied().unwrap_or(false)
     {
-        return Err(CliError::new(
-            "password_change_required",
-            "Use cloud-sync change-password --yes with the new password on stdin",
-            json,
-        ));
+        let requires_rotation = oxideterm_cloud_sync::operation::CloudSyncOperationService::local_sync_password_requires_rotation(
+            std::path::Path::new(&crate::settings::load_settings_read_only(json)?.path),
+            &state.settings,
+            provider,
+            password,
+        )
+        .map_err(|error| runtime_error(error, json))?
+        .unwrap_or(state.remote_exists);
+        if requires_rotation {
+            return Err(CliError::new(
+                "password_change_required",
+                "Use cloud-sync change-password --yes with the new password on stdin",
+                json,
+            ));
+        }
     }
     Ok(())
 }

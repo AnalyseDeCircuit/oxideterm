@@ -42,6 +42,7 @@ pub fn cloud_sync_error_code(error: &str) -> Option<&str> {
         | "password_change_separate_settings"
         | "password_too_short"
         | "password_change_pending"
+        | "sync_password_mismatch"
         | "github_gist_bad_credentials"
         | "github_gist_missing_scope"
         | "github_gist_rate_limited"

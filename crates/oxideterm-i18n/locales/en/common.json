@@ -288,6 +288,7 @@
     "manager_compatibility_notice": "Native plugins can use a manifest, WASM, or a separate process. Legacy JavaScript plugins from the Tauri version remain available for inspection or removal, but cannot run in the native version.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "The current password does not match the one used for this sync space. Enter and save the original password before changing it. If you have forgotten it, use a new namespace and upload this device's configuration.",
         "protocol_upgrade_required": "Update your sync server to a version that supports the new cloud sync protocol, then synchronize again.",
         "password_change_pending": "A password change is pending. Retry with the same new password.",
         "change_password": "Change sync password",

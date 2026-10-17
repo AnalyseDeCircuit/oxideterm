@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "Abra a aba de plugins para ver o estado native atual.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "A senha atual não corresponde à usada neste espaço de sincronização. Digite e salve a senha original antes de alterá-la. Se você a esqueceu, use um novo namespace e envie a configuração deste dispositivo.",
         "protocol_upgrade_required": "Atualize o servidor de sincronização para uma versão compatível com o novo protocolo de sincronização na nuvem e sincronize novamente.",
         "password_change_pending": "Há uma alteração de senha pendente. Tente novamente com a mesma senha nova.",
         "change_password": "Alterar senha de sincronização",

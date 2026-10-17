@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "Ouvrez l’onglet plugins pour voir l’état native actuel.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "Le mot de passe actuel ne correspond pas à celui de cet espace de synchronisation. Saisissez et enregistrez le mot de passe d’origine avant de le modifier. Si vous l’avez oublié, utilisez un nouvel espace de noms et envoyez la configuration de cet appareil.",
         "protocol_upgrade_required": "Mettez à jour votre serveur de synchronisation vers une version compatible avec le nouveau protocole de synchronisation cloud, puis relancez la synchronisation.",
         "password_change_pending": "Un changement de mot de passe est en attente. Réessayez avec le même nouveau mot de passe.",
         "change_password": "Changer le mot de passe de synchronisation",

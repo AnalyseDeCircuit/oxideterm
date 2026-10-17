@@ -93,13 +93,34 @@ pub struct AppliedSync {
 }
 
 impl CloudSyncOperationService {
-    pub fn has_local_replica(
+    /// None means this device has no replica; the caller can use its remote-state hint.
+    pub fn local_sync_password_requires_rotation(
         settings_path: &std::path::Path,
         settings: &CloudSyncSettings,
-    ) -> Result<bool> {
-        Ok(replica_directory(settings_path, settings)?
+        provider: &mut impl CloudSyncSecretProvider,
+        password: &str,
+    ) -> Result<Option<bool>> {
+        if RecoveryJournal::has_pending(settings_path)? {
+            bail!("sync_cleanup_pending");
+        }
+        let mut exists = replica_directory(settings_path, settings)?
             .join("replica.oxide")
-            .try_exists()?)
+            .try_exists()?;
+        if !exists && settings.backend_type == BackendType::GithubGist {
+            let mut bootstrap = settings.clone();
+            bootstrap.git_repository.clear();
+            exists = replica_directory(settings_path, &bootstrap)?
+                .join("replica.oxide")
+                .try_exists()?;
+        }
+        if !exists {
+            return Ok(None);
+        }
+        let store = open_replica(settings_path, settings, provider)?;
+        store
+            .load()?
+            .map(|local| store.sync_password_requires_rotation(&local, password))
+            .transpose()
     }
     pub async fn prepare_sync(
         &self,
@@ -951,6 +972,135 @@ mod tests {
     use super::*;
     use crate::sync_v3::{FieldValue, ResourceKind, SyncField};
     use oxideterm_connections::SaveLocalTerminalProfileRequest;
+
+    #[tokio::test]
+    async fn first_sync_failure_and_cancel_allow_password_retry_then_staging_requires_rotation() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for status in [
+                "403 Forbidden",
+                "404 Not Found",
+                "404 Not Found",
+                "404 Not Found",
+                "404 Not Found",
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let size = stream.read(&mut buffer).await.unwrap();
+                    assert!(size > 0);
+                    request.extend_from_slice(&buffer[..size]);
+                }
+                let header = String::from_utf8_lossy(&request);
+                assert!(header.starts_with("PROPFIND ") || header.starts_with("GET "));
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+        let directory = std::env::temp_dir().join(format!(
+            "oxide-sync-password-retry-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut connections = ConnectionStore::load(directory.join("connections.json")).unwrap();
+        let forwards = ForwardingRegistry::new_with_store(
+            oxideterm_forwarding::SavedForwardStore::load(directory.join("forwards.json")).unwrap(),
+        );
+        let mut settings_store =
+            SettingsStore::load_from_path(directory.join("settings.json")).unwrap();
+        let settings = CloudSyncSettings {
+            backend_type: BackendType::Webdav,
+            auth_mode: crate::AuthMode::None,
+            endpoint,
+            namespace: "password-retry".into(),
+            ..Default::default()
+        };
+        let service = CloudSyncOperationService::new();
+        let mut provider = crate::sync_v3::tests::Secrets::default();
+        for (attempt, password) in ["first-password", "second-password", "third-password"]
+            .into_iter()
+            .enumerate()
+        {
+            provider
+                .store_secret(secret_keys::SYNC_PASSWORD, Some(password))
+                .unwrap();
+            let result = service
+                .prepare_sync(
+                    &mut connections,
+                    &forwards,
+                    &mut settings_store,
+                    &settings,
+                    &mut provider,
+                    Default::default(),
+                    Default::default(),
+                )
+                .await;
+            if attempt == 0 {
+                assert!(result.unwrap_err().to_string().contains("403"));
+            } else {
+                let prepared = result.unwrap();
+                let summary = prepared.summary().unwrap();
+                assert!(summary.first_sync && !summary.has_remote);
+                drop(prepared);
+            }
+            assert_eq!(
+                CloudSyncOperationService::local_sync_password_requires_rotation(
+                    settings_store.path(),
+                    &settings,
+                    &mut provider,
+                    "replacement-password",
+                )
+                .unwrap(),
+                None,
+                "failed or cancelled preparation must not bind the password"
+            );
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let store = open_replica(settings_store.path(), &settings, &mut provider).unwrap();
+        let mut local = LocalReplica::new();
+        store
+            .bind_sync_password(&mut local, "third-password")
+            .unwrap();
+        store
+            .stage_publication(
+                &mut local,
+                &OxideBatchEncryptionContext::new("third-password").unwrap(),
+            )
+            .unwrap();
+        let pending = local.pending.clone().unwrap();
+        drop(store);
+        for (password, expected) in [("third-password", false), ("replacement-password", true)] {
+            assert_eq!(
+                CloudSyncOperationService::local_sync_password_requires_rotation(
+                    settings_store.path(),
+                    &settings,
+                    &mut provider,
+                    password,
+                )
+                .unwrap(),
+                Some(expected)
+            );
+        }
+        let store = open_replica(settings_store.path(), &settings, &mut provider).unwrap();
+        let persisted = store.load().unwrap().unwrap().pending.unwrap();
+        assert_eq!(persisted.path, pending.path);
+        assert_eq!(persisted.bytes, pending.bytes);
+        drop(store);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn first_sync_directions_keep_cloud_settings_and_local_defaults_distinct() {

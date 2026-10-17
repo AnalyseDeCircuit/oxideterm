@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "Mở tab plugin để xem trạng thái native hiện tại.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "Mật khẩu hiện tại không khớp với mật khẩu đã dùng cho không gian đồng bộ này. Hãy nhập và lưu mật khẩu cũ trước khi đổi. Nếu đã quên mật khẩu cũ, hãy dùng một không gian tên mới rồi tải cấu hình của thiết bị này lên.",
         "protocol_upgrade_required": "Hãy nâng cấp máy chủ đồng bộ lên phiên bản hỗ trợ giao thức đồng bộ đám mây mới, rồi đồng bộ lại.",
         "password_change_pending": "Lần đổi mật khẩu trước chưa hoàn tất. Hãy thử lại bằng mật khẩu mới đã nhập lần trước.",
         "change_password": "Đổi mật khẩu đồng bộ",

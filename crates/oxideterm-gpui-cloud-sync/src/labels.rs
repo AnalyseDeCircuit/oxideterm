@@ -120,6 +120,9 @@ pub fn cloud_sync_error_message_spec(error: &str) -> CloudSyncErrorMessageSpec {
         return CloudSyncErrorMessageSpec::Raw(error.to_string());
     };
     match code {
+        "sync_password_mismatch" => {
+            CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.password_mismatch")
+        }
         "password_change_pending" => {
             CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.password_change_pending")
         }
@@ -558,6 +561,10 @@ mod tests {
     #[test]
     fn maps_errors_to_copy_specs() {
         for (error, expected) in [
+            (
+                "sync_password_mismatch",
+                CloudSyncErrorMessageSpec::Key("plugin.cloud_sync.causal.password_mismatch"),
+            ),
             (
                 "snapshot_too_large: max 2097152 bytes",
                 CloudSyncErrorMessageSpec::SnapshotTooLarge {

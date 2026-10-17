@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "Öffne den Plugin-Tab für den aktuellen native-Status.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "Das aktuelle Passwort stimmt nicht mit dem Passwort dieses Synchronisierungsbereichs überein. Geben Sie das ursprüngliche Passwort ein und speichern Sie es, bevor Sie es ändern. Falls Sie es vergessen haben, verwenden Sie einen neuen Namensraum und laden Sie die Konfiguration dieses Geräts hoch.",
         "protocol_upgrade_required": "Aktualisieren Sie Ihren Synchronisierungsserver auf eine Version, die das neue Cloud-Synchronisierungsprotokoll unterstützt, und synchronisieren Sie erneut.",
         "password_change_pending": "Eine Passwortänderung ist noch offen. Versuchen Sie es mit demselben neuen Passwort erneut.",
         "change_password": "Synchronisierungspasswort ändern",

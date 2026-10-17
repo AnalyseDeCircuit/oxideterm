@@ -109,22 +109,50 @@ pub struct ReplicaStore {
 }
 
 impl ReplicaStore {
-    pub fn bind_sync_password(&self, record: &mut LocalReplica, password: &str) -> Result<()> {
+    fn password_mac(&self, password: &str) -> Result<hmac::Hmac<sha2::Sha256>> {
         use hmac::{Hmac, Mac};
         let mut mac = Hmac::<sha2::Sha256>::new_from_slice(self.key.as_slice())
             .map_err(|_| anyhow::anyhow!("Invalid local sync key"))?;
         mac.update(b"oxide-sync-v3-password");
         mac.update(password.as_bytes());
-        if let Some(tag) = &record.sync_password_tag {
-            mac.verify_slice(tag).map_err(|_| {
-                anyhow::anyhow!("The sync password changed; use a new namespace before publishing")
-            })?;
-        } else {
-            let mut next = record.clone();
-            next.sync_password_tag = Some(mac.finalize().into_bytes().to_vec());
-            self.save(&next)?;
-            *record = next;
+        Ok(mac)
+    }
+
+    pub fn sync_password_requires_rotation(
+        &self,
+        record: &LocalReplica,
+        password: &str,
+    ) -> Result<bool> {
+        use hmac::Mac;
+        // Staged uploads can already exist remotely even if acknowledgement failed.
+        // Downloaded history also belongs to the existing namespace's password.
+        let bound = record.pending.is_some()
+            || record.next_sequence > 1
+            || !record.observed.is_empty()
+            || record.published_document.is_some()
+            || record.legacy_imported
+            || record.pending_password_change.is_some();
+        if !bound {
+            return Ok(false);
         }
+        match &record.sync_password_tag {
+            Some(tag) => Ok(self.password_mac(password)?.verify_slice(tag).is_err()),
+            None => Ok(false),
+        }
+    }
+
+    pub fn bind_sync_password(&self, record: &mut LocalReplica, password: &str) -> Result<()> {
+        use hmac::Mac;
+        if self.sync_password_requires_rotation(record, password)? {
+            bail!("sync_password_mismatch");
+        }
+        // Preparation remains cancellable; apply/staging persists this with the data it protects.
+        record.sync_password_tag = Some(
+            self.password_mac(password)?
+                .finalize()
+                .into_bytes()
+                .to_vec(),
+        );
         Ok(())
     }
 

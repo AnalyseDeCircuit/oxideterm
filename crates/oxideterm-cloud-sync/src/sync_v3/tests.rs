@@ -188,6 +188,53 @@ fn deselection_does_not_delete_and_concurrent_delete_edit_remains_pending() {
 }
 
 #[test]
+fn preparing_sync_does_not_lock_password_and_old_unused_bindings_can_be_replaced() {
+    let path = std::env::temp_dir().join(format!("oxideterm-password-{}", Uuid::new_v4()));
+    let mut secrets = Secrets::default();
+    let store = ReplicaStore::open(&path, &mut secrets).unwrap();
+    let mut record = LocalReplica::new();
+    store
+        .bind_sync_password(&mut record, "first-password")
+        .unwrap();
+    assert!(
+        store.load().unwrap().is_none(),
+        "preparation must not persist a binding"
+    );
+
+    // Released builds saved the binding even when preparation failed or was cancelled.
+    record.effective = values("Local host", "local note");
+    store.save(&record).unwrap();
+    drop(store);
+    let store = ReplicaStore::open(&path, &mut secrets).unwrap();
+    let mut record = store.load().unwrap().unwrap();
+    store
+        .bind_sync_password(&mut record, "replacement-password")
+        .unwrap();
+    store.save(&record).unwrap();
+    let mut reloaded = store.load().unwrap().unwrap();
+    assert_eq!(reloaded.effective, values("Local host", "local note"));
+    store
+        .bind_sync_password(&mut reloaded, "replacement-password")
+        .unwrap();
+
+    for downloaded in [false, true] {
+        let mut imported = reloaded.clone();
+        if downloaded {
+            imported.accept_download();
+        } else {
+            imported.legacy_imported = true;
+        }
+        assert!(
+            store
+                .bind_sync_password(&mut imported, "another-password")
+                .is_err()
+        );
+    }
+    drop(store);
+    std::fs::remove_dir_all(path).unwrap();
+}
+
+#[test]
 fn encrypted_replica_reopens_and_retries_the_exact_pending_publication() {
     use oxideterm_connections::oxide_file::{
         OxideBatchDecryptionContext, OxideBatchEncryptionContext, OxideDocumentKind,
@@ -210,14 +257,13 @@ fn encrypted_replica_reopens_and_retries_the_exact_pending_publication() {
     store
         .bind_sync_password(&mut record, "synthetic-sync-password")
         .unwrap();
+    let context = OxideBatchEncryptionContext::new("synthetic-sync-password").unwrap();
+    store.stage_publication(&mut record, &context).unwrap();
     assert!(
         store
             .bind_sync_password(&mut record, "changed-password")
             .is_err()
     );
-    assert_eq!(store.load().unwrap().unwrap().next_sequence, 1);
-    let context = OxideBatchEncryptionContext::new("synthetic-sync-password").unwrap();
-    store.stage_publication(&mut record, &context).unwrap();
     let pending = record.pending.clone().unwrap();
     let id = PublicationId::parse(&pending.path).unwrap();
     assert_eq!(id.sequence, 1);
@@ -265,6 +311,14 @@ fn encrypted_replica_reopens_and_retries_the_exact_pending_publication() {
         .unwrap();
     assert!(store.load().unwrap().unwrap().pending.is_none());
     assert!(!reloaded.needs_publication());
+    assert!(
+        store
+            .bind_sync_password(&mut reloaded, "changed-password")
+            .is_err()
+    );
+    store
+        .bind_sync_password(&mut reloaded, "synthetic-sync-password")
+        .unwrap();
     drop(store);
     secrets.0.clear();
     assert!(ReplicaStore::open(&path, &mut secrets).is_err());

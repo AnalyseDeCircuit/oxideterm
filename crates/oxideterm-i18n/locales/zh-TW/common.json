@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "開啟外掛標籤頁查看 native 目前狀態。",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "目前密碼與此同步空間已使用的密碼不一致。請填回原密碼並儲存，再變更同步密碼；若已忘記原密碼，請改用新的命名空間，再上傳本機設定。",
         "protocol_upgrade_required": "請將同步伺服器升級至支援新版雲端同步協定的版本，然後重新同步。",
         "password_change_pending": "上次密碼變更尚未完成，請使用上次的新密碼重試。",
         "change_password": "變更同步密碼",

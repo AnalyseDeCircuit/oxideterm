@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "플러그인 탭에서 현재 native 상태를 확인하세요.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "현재 비밀번호가 이 동기화 공간에서 사용한 비밀번호와 다릅니다. 기존 비밀번호를 입력하고 저장한 후 변경하세요. 기존 비밀번호를 잊었다면 새 네임스페이스를 지정하고 이 기기의 설정을 업로드하세요.",
         "protocol_upgrade_required": "동기화 서버를 새 클라우드 동기화 프로토콜을 지원하는 버전으로 업데이트한 후 다시 동기화하세요.",
         "password_change_pending": "비밀번호 변경이 완료되지 않았습니다. 이전에 입력한 새 비밀번호로 다시 시도해 주세요.",
         "change_password": "동기화 비밀번호 변경",

@@ -296,6 +296,7 @@
     "native_sidebar_empty_description": "Abre la pestaña de plugins para ver el estado native actual.",
     "cloud_sync": {
       "causal": {
+        "password_mismatch": "La contraseña actual no coincide con la de este espacio de sincronización. Introduce y guarda la contraseña original antes de cambiarla. Si la has olvidado, utiliza un espacio de nombres nuevo y sube la configuración de este dispositivo.",
         "protocol_upgrade_required": "Actualiza el servidor de sincronización a una versión compatible con el nuevo protocolo de sincronización en la nube y vuelve a sincronizar.",
         "password_change_pending": "Hay un cambio de contraseña pendiente. Reinténtalo con la misma contraseña nueva.",
         "change_password": "Cambiar contraseña de sincronización",
