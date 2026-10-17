@@ -49,6 +49,11 @@ pub fn live_message_view(
                 original_messages: None,
                 original_ref: metadata.original_ref.clone(),
                 original_user_count: metadata.original_user_count,
+                images: metadata
+                    .images
+                    .iter()
+                    .map(crate::AiImageAttachment::preview_only)
+                    .collect(),
             }),
         branches: message
             .branches

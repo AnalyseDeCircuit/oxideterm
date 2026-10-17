@@ -502,6 +502,9 @@ impl WorkspaceApp {
                 );
             }
         }
+        if !oxideterm_ai::message_images(message).is_empty() {
+            body = body.child(self.render_ai_images(oxideterm_ai::message_images(message), false, cx));
+        }
         if editing {
             body = body.child(self.render_ai_message_edit_body(cx));
         } else if has_structured_parts {

@@ -2773,7 +2773,14 @@ impl WorkspaceApp {
         if ime_target_is_read_only(target) {
             return true;
         }
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
+        let item = cx.read_from_clipboard();
+        if target == WorkspaceImeTarget::AiChatInput
+            && let Some(item) = item.as_ref()
+            && self.paste_ai_image(item, cx)
+        {
+            return true;
+        }
+        let Some(text) = item.and_then(|item| item.text()) else {
             return true;
         };
         // Clipboard reads can contain private keys or passphrases. Own both the

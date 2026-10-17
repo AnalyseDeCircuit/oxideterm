@@ -1,5 +1,26 @@
 {
   "ai": {
+    "images": {
+      "count": "{{count}} imágenes",
+      "request_limit": "Las imágenes superan el tamaño máximo de la solicitud. Quita algunas o inicia una conversación nueva.",
+      "add": "Añadir imágenes",
+      "loading": "Leyendo imágenes…",
+      "pasted": "Imagen pegada",
+      "remove": "Quitar",
+      "tokens": "≈{{count}} tokens",
+      "tokens_uncertain": "≈{{count}} tokens · provisional",
+      "auto": "Imágenes: Automático",
+      "enabled": "Imágenes: Compatible",
+      "disabled": "Imágenes: No compatible",
+      "model_unavailable": "La compatibilidad con imágenes es desconocida o no está disponible. Elige un modelo visual o confirma la compatibilidad en los ajustes de imágenes.",
+      "history_prompt": "{{model}} no puede leer las imágenes anteriores. ¿Conservarlas en la conversación y continuar solo con texto?",
+      "continue_text": "Continuar solo con texto",
+      "invalid": "PNG, JPEG o WebP, hasta 10 MB y 40 megapíxeles. Se reducen a un lado máximo de 2000 px antes de enviarlas.",
+      "limit": "Hasta 8 imágenes por mensaje.",
+      "queue_only": "Envía las imágenes como un mensaje nuevo o ponlas en cola para el siguiente turno.",
+      "missing": "No se pudo cargar la imagen guardada.",
+      "settings": "Ajustes de imágenes"
+    },
     "agents": {
       "parent": "Agente principal",
       "runs": "Historial de ejecuciones",

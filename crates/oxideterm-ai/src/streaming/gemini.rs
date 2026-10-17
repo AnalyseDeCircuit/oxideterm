@@ -216,12 +216,18 @@ pub(crate) fn gemini_chat_contents(messages: &[AiChatMessage]) -> (Option<String
                     && last.get("role").and_then(Value::as_str) == Some(role)
                     && let Some(parts) = last.get_mut("parts").and_then(Value::as_array_mut)
                 {
-                    parts.push(serde_json::json!({ "text": message.content }));
+                    parts.extend(
+                        crate::images::image_message_content(message, "gemini")
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .cloned(),
+                    );
                     continue;
                 }
                 contents.push(serde_json::json!({
                     "role": role,
-                    "parts": [{ "text": message.content }],
+                    "parts": crate::images::image_message_content(message, "gemini"),
                 }));
             }
         }
@@ -401,6 +407,8 @@ mod tests {
     fn config(model: &str, effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
             api_protocol: crate::AiApiProtocol::default(),
+            image_input: Default::default(),
+            omit_history_images: false,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("gemini".to_string()),
             acp_agent_id: None,

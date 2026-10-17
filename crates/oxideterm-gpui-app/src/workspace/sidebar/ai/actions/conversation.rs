@@ -192,6 +192,7 @@ impl AiWorkspaceEntity {
             },
         };
         let context = original.context.take();
+        let images = oxideterm_ai::message_images(original).to_vec();
         conversation.messages.truncate(message_index);
         conversation.messages.push(AiChatMessage {
             id: new_user_id.clone(),
@@ -211,6 +212,7 @@ impl AiWorkspaceEntity {
             branches: Some(branches),
             suggestions: Vec::new(),
         });
+        oxideterm_ai::set_message_images(conversation.messages.last_mut()?, images);
         // Editing starts a new turn, so the replacement must carry the backend
         // owner selected for that turn instead of inheriting the removed branch.
         oxideterm_ai::store_ai_message_backend_provenance(conversation, &new_user_id, backend);
@@ -462,6 +464,14 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn steer_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
+        if !self.ai_entity.read(cx).chat_ui().images.is_empty() {
+            self.push_ai_settings_toast(
+                self.i18n.t("ai.images.queue_only"),
+                TerminalNoticeVariant::Warning,
+                cx,
+            );
+            return;
+        }
         let content = self.ai_entity.read(cx).chat_ui().draft.trim().to_string();
         if content.is_empty() {
             return;
@@ -501,7 +511,21 @@ impl WorkspaceApp {
             return;
         }
         let content = self.ai_entity.read(cx).chat_ui().draft.trim().to_string();
-        if content.is_empty() {
+        let images = self.ai_entity.read(cx).chat_ui().images.clone();
+        if images.iter().map(|image| image.bytes).sum::<usize>()
+            > oxideterm_ai::AI_IMAGE_REQUEST_BYTES
+        {
+            self.push_ai_settings_toast(
+                self.i18n.t("ai.images.request_limit"),
+                TerminalNoticeVariant::Warning,
+                cx,
+            );
+            return;
+        }
+        if self.ai_entity.read(cx).chat_ui().image_import.is_some() {
+            return;
+        }
+        if content.is_empty() && images.is_empty() {
             cx.notify();
             return;
         }
@@ -515,6 +539,14 @@ impl WorkspaceApp {
             return;
         }
         let question = self.ai_entity.read(cx).active_user_question();
+        if !images.is_empty() && question.is_some() {
+            self.push_ai_settings_toast(
+                self.i18n.t("ai.images.queue_only"),
+                TerminalNoticeVariant::Warning,
+                cx,
+            );
+            return;
+        }
         if let Some((generation, id)) = question {
             if self.ai_entity.update(cx, |ai, _| {
                 ai.resolve_user_question(generation, &id, zeroize::Zeroizing::new(content))
@@ -561,6 +593,14 @@ impl WorkspaceApp {
                 None
             };
         if let Some(command) = slash_command.filter(|command| command.client_only) {
+            if !images.is_empty() {
+                self.push_ai_settings_toast(
+                    self.i18n.t("ai.images.queue_only"),
+                    TerminalNoticeVariant::Warning,
+                    cx,
+                );
+                return;
+            }
             if self.ai_entity.read(cx).chat_is_loading() {
                 self.push_ai_settings_toast(
                     self.i18n.t("ai.queue.client_command_busy"),
@@ -598,6 +638,21 @@ impl WorkspaceApp {
                 return;
             }
         };
+        if !images.is_empty()
+            && stream_config.execution_backend != AiExecutionBackend::Acp
+            && oxideterm_ai::model_image_input(
+                &stream_config.provider_type,
+                &stream_config.model,
+                stream_config.image_input,
+            ) != Some(true)
+        {
+            self.push_ai_settings_toast(
+                self.i18n.t("ai.images.model_unavailable"),
+                TerminalNoticeVariant::Warning,
+                cx,
+            );
+            return;
+        }
         if let Some(context_block) = context.as_ref() {
             if let Some(mut audit_context) = oxideterm_audit::AuditContext::current_request()
                 .or_else(oxideterm_audit::AuditContext::current)
@@ -681,6 +736,7 @@ impl WorkspaceApp {
             ai.ensure_conversation(id, Some(title), now, None)
         });
         let turn = AiQueuedChatTurn {
+            images,
             id: message.id,
             content: zeroize::Zeroizing::new(message.content),
             context: message.context.map(zeroize::Zeroizing::new),
@@ -723,6 +779,7 @@ impl WorkspaceApp {
         message.id = turn.id.clone();
         message.context = turn.context.as_deref().map(|value| value.to_string());
         message.model = Some(turn.config.model.clone());
+        oxideterm_ai::set_message_images(&mut message, turn.images);
         self.ai_entity.update(cx, |ai, _| {
             ai.begin_sidebar_user_turn(
                 conversation_id.to_owned(),
@@ -778,7 +835,10 @@ impl WorkspaceApp {
         {
             return;
         }
-        if action == "edit" && !self.ai_entity.read(cx).chat_ui().draft.is_empty() {
+        if action == "edit"
+            && (!self.ai_entity.read(cx).chat_ui().draft.is_empty()
+                || !self.ai_entity.read(cx).chat_ui().images.is_empty())
+        {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.queue.draft_not_empty"),
                 TerminalNoticeVariant::Warning,
@@ -787,6 +847,21 @@ impl WorkspaceApp {
             return;
         }
         if action == "send" && self.ai_entity.read(cx).chat_is_loading() {
+            if self
+                .ai_entity
+                .read(cx)
+                .queued_chat_turns
+                .get(conversation)
+                .and_then(|turns| turns.iter().find(|turn| turn.id == id))
+                .is_some_and(|turn| !turn.images.is_empty())
+            {
+                self.push_ai_settings_toast(
+                    self.i18n.t("ai.images.queue_only"),
+                    TerminalNoticeVariant::Warning,
+                    cx,
+                );
+                return;
+            }
             let content = self
                 .ai_entity
                 .read(cx)
@@ -830,6 +905,7 @@ impl WorkspaceApp {
                 "edit" => {
                     let turn = turns.remove(index).expect("located queued message");
                     ai.set_chat_draft(turn.content.to_string());
+                    *ai.chat_images_mut() = turn.images;
                     ai.focus_chat_input();
                 }
                 "remove" => {
@@ -857,7 +933,9 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        if self.ai_entity.read(cx).chat_ui().draft.trim().is_empty() {
+        if self.ai_entity.read(cx).chat_ui().draft.trim().is_empty()
+            && self.ai_entity.read(cx).chat_ui().images.is_empty()
+        {
             self.cancel_ai_chat_stream(cx);
             return;
         }
@@ -902,6 +980,7 @@ impl WorkspaceApp {
             .unwrap_or_else(|| "main".into());
         let context_window = self.ai_active_model_context_window(&stream_config);
         let provider = stream_config.provider_type.clone();
+        let model = stream_config.model.clone();
         let runtime = self.forwarding_runtime.clone();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.ai_entity.update(cx, |ai, _| {
@@ -921,7 +1000,7 @@ impl WorkspaceApp {
             let id = conversation_id.clone();
             let context = runtime
                 .spawn_blocking(move || {
-                    store.model_context(&id, &branch, context_window, &provider)
+                    store.model_context(&id, &branch, context_window, &provider, &model)
                 })
                 .await;
             let _ = weak.update(cx, |this, cx| {

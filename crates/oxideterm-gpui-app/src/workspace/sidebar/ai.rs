@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
+use crate::workspace::ai_state::AiPendingChatStream;
 use crate::workspace::ai_state::{AiChatPopover, AiWorkspaceEntity, AiWorkspaceVisibility};
 use crate::workspace::ime::WorkspaceImeTarget;
 use crate::workspace::*;
@@ -133,15 +134,6 @@ pub(in crate::workspace) enum AiHeaderAction {
     Settings,
 }
 
-pub(in crate::workspace) struct AiPendingChatStream {
-    pub(super) launch_id: Option<String>,
-    pub(super) conversation_id: String,
-    pub(super) config: AiChatStreamConfig,
-    pub(super) request_content: Option<String>,
-    pub(super) task_system_prompt: Option<String>,
-    pub(super) rag_system_prompt: Option<String>,
-}
-
 impl WorkspaceApp {
     fn render_ai_menu_action(
         &self,
@@ -185,6 +177,7 @@ impl WorkspaceApp {
 
 include!("ai/render.rs");
 include!("ai/input.rs");
+include!("ai/images.rs");
 include!("ai/model_selector.rs");
 include!("ai/actions.rs");
 include!("ai/helpers.rs");

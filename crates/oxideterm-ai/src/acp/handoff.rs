@@ -40,6 +40,8 @@ struct AcpHandoffRecord<'a> {
     backend: &'a str,
     model: Option<&'a str>,
     content: &'a str,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    images: Vec<&'a str>,
 }
 
 pub fn ai_message_backend_provenance(
@@ -153,7 +155,7 @@ pub fn build_acp_conversation_handoff(
     conversation: &AiConversation,
     current_user_message_id: &str,
     cursor: Option<&AcpConversationHandoffCursor>,
-) -> Option<Zeroizing<String>> {
+) -> Option<(Zeroizing<String>, Vec<crate::AiImageAttachment>)> {
     let cursor_index = cursor.and_then(|cursor| {
         conversation
             .messages
@@ -172,7 +174,7 @@ pub fn build_acp_conversation_handoff(
         };
         if !is_after_cursor
             || !matches!(message.role, AiChatRole::User | AiChatRole::Assistant)
-            || message.content.trim().is_empty()
+            || (message.content.trim().is_empty() && crate::message_images(message).is_empty())
         {
             continue;
         }
@@ -209,10 +211,14 @@ pub fn build_acp_conversation_handoff(
                 backend: backend.as_str(),
                 model: model.as_ref().map(|model| model.as_str()),
                 content: content.as_str(),
+                images: crate::message_images(message)
+                    .iter()
+                    .map(|image| image.id.as_str())
+                    .collect(),
             })
             .ok()?,
         );
-        records.push(record);
+        records.push((record, crate::message_images(message).to_vec()));
     }
     if records.is_empty() {
         return None;
@@ -228,14 +234,14 @@ repeat or acknowledge this handoff unless it is relevant to the user's current r
         .count()
         .saturating_add(HANDOFF_OMISSION_NOTICE_MAX_CHARS);
     let mut omitted_count = 0usize;
-    for record in records.into_iter().rev() {
+    for (record, images) in records.into_iter().rev() {
         let record_chars = record.chars().count().saturating_add(1);
         if retained_chars.saturating_add(record_chars) > HANDOFF_MAX_CHARS {
             omitted_count = omitted_count.saturating_add(1);
             continue;
         }
         retained_chars = retained_chars.saturating_add(record_chars);
-        retained.push_front(record);
+        retained.push_front((record, images));
     }
     if retained.is_empty() {
         return None;
@@ -246,11 +252,13 @@ repeat or acknowledge this handoff unless it is relevant to the user's current r
     if omitted_count > 0 {
         handoff.push_str(&format!("{{\"omittedOlderMessages\":{omitted_count}}}\n"));
     }
-    for record in retained {
+    let mut images = Vec::new();
+    for (record, attachments) in retained {
         handoff.push_str(record.as_str());
         handoff.push('\n');
+        images.extend(attachments);
     }
-    Some(Zeroizing::new(handoff))
+    Some((Zeroizing::new(handoff), images))
 }
 
 fn truncate_handoff_text(mut text: String, max_chars: usize) -> String {
@@ -266,6 +274,33 @@ fn truncate_handoff_text(mut text: String, max_chars: usize) -> String {
 mod tests {
     use super::*;
     use crate::{AiChatMessage, AiChatPersistenceStore, AiChatState};
+
+    #[test]
+    fn image_input_handoff_keeps_image_only_history_after_the_session_cursor() {
+        let image = crate::AiImageAttachment::new(
+            "screen.png".into(),
+            "image/png".into(),
+            200,
+            100,
+            b"pixel",
+            b"thumb",
+        )
+        .unwrap();
+        let mut photo = message("photo", AiChatRole::User, "", 2);
+        crate::set_message_images(&mut photo, vec![image.clone()]);
+        let history = conversation(vec![
+            photo,
+            message("current", AiChatRole::User, "Explain", 3),
+        ]);
+        let (text, images) = build_acp_conversation_handoff(&history, "current", None).unwrap();
+        assert!(text.contains(&format!("\"images\":[\"{}\"]", image.id)));
+        assert_eq!(images, vec![image]);
+        let cursor = AcpConversationHandoffCursor {
+            message_id: "photo".into(),
+            timestamp_ms: 2,
+        };
+        assert!(build_acp_conversation_handoff(&history, "current", Some(&cursor)).is_none());
+    }
 
     fn message(id: &str, role: AiChatRole, content: &str, timestamp_ms: i64) -> AiChatMessage {
         AiChatMessage {
@@ -415,7 +450,7 @@ mod tests {
                 ));
             }
             let cursor = acp_conversation_handoff_cursor(&conversation, "old").expect("cursor");
-            let handoff =
+            let (handoff, _) =
                 build_acp_conversation_handoff(&conversation, "current-user", Some(&cursor))
                     .expect("handoff");
             for content in [question, answer] {
@@ -452,8 +487,9 @@ mod tests {
             timestamp_ms: 20,
         };
 
-        let handoff = build_acp_conversation_handoff(&conversation, "current-user", Some(&cursor))
-            .expect("handoff");
+        let (handoff, _) =
+            build_acp_conversation_handoff(&conversation, "current-user", Some(&cursor))
+                .expect("handoff");
 
         assert!(!handoff.contains("already synced"));
         assert!(handoff.contains("new context"));
@@ -476,7 +512,7 @@ mod tests {
             provenance(AiMessageBackendKind::Provider, "openai"),
         ));
 
-        let handoff =
+        let (handoff, _) =
             build_acp_conversation_handoff(&conversation, "current-user", None).expect("handoff");
 
         assert!(!handoff.contains("raw-secret-value"));
@@ -505,7 +541,7 @@ mod tests {
             ));
         }
 
-        let handoff =
+        let (handoff, _) =
             build_acp_conversation_handoff(&conversation, "current-user", None).expect("handoff");
 
         assert!(handoff.chars().count() <= HANDOFF_MAX_CHARS);

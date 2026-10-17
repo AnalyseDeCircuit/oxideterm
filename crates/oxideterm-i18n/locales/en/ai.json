@@ -1,5 +1,26 @@
 {
   "ai": {
+    "images": {
+      "count": "{{count}} images",
+      "request_limit": "These images exceed the request size limit. Remove some images or start a new conversation.",
+      "add": "Add images",
+      "loading": "Reading images…",
+      "pasted": "Pasted image",
+      "remove": "Remove",
+      "tokens": "≈{{count}} tokens",
+      "tokens_uncertain": "≈{{count}} tokens · provisional",
+      "auto": "Images: Auto",
+      "enabled": "Images: Supported",
+      "disabled": "Images: Unsupported",
+      "model_unavailable": "This model’s image support is unavailable or unknown. Choose a vision model, or confirm support in image settings.",
+      "history_prompt": "{{model}} cannot read these historical images. Keep them in the conversation and continue with text only?",
+      "continue_text": "Continue with text only",
+      "invalid": "Use PNG, JPEG or WebP, up to 10 MB and 40 megapixels. Images are resized to 2000 px before sending.",
+      "limit": "Up to 8 images per message.",
+      "queue_only": "Send images as a new message or queue them for the next turn.",
+      "missing": "The saved image could not be loaded.",
+      "settings": "Image settings"
+    },
     "agents": {
       "parent": "Parent agent",
       "runs": "Task runs",

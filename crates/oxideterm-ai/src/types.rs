@@ -156,6 +156,8 @@ pub struct AiChatMessageMetadata {
     pub original_ref: Option<AiHistoryRange>,
     #[serde(default)]
     pub original_user_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<crate::AiImageAttachment>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -259,6 +261,8 @@ pub enum AiApiProtocol {
 
 #[derive(Clone)]
 pub struct AiChatStreamConfig {
+    pub image_input: crate::AiImageInput,
+    pub omit_history_images: bool,
     pub api_protocol: AiApiProtocol,
     pub execution_backend: AiExecutionBackend,
     pub provider_id: Option<String>,

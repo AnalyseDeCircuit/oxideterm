@@ -706,6 +706,7 @@ mod ai_turn_order_tests {
                 original_ref: None,
                 original_messages: Some(compacted),
                 original_user_count: Some(2),
+                images: Vec::new(),
             }),
             transcript_ref: Some(serde_json::json!({
                 "conversationId": "conv-1",

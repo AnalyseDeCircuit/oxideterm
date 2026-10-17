@@ -545,6 +545,7 @@ impl Window<'_> {
 
     fn read(&mut self, value: StoredValue, mut cursor: HistoryContentCursor) -> Result<Value> {
         Ok(match value {
+            StoredValue::Image { metadata, .. } => metadata,
             StoredValue::Shared { id } => {
                 if !self.visiting.insert(id.clone()) {
                     return Err(anyhow!("History tool payload cycle detected"));

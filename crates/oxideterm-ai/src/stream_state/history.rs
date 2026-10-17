@@ -72,7 +72,8 @@ pub fn ai_prompt_token_breakdown(
             breakdown.tool_results = breakdown.tool_results.saturating_add(provider_state_tokens);
             continue;
         }
-        let content_tokens = ai_message_estimated_tokens(message);
+        let content_tokens = ai_message_estimated_tokens(message)
+            .saturating_add(crate::images::message_image_tokens(message, provider_type));
         match message.role {
             AiChatRole::System => {
                 breakdown.system_instructions =
@@ -116,7 +117,8 @@ pub fn ai_message_payload_estimated_tokens(message: &AiChatMessage, provider_typ
     {
         return provider_state_tokens;
     }
-    let mut tokens = ai_message_estimated_tokens(message);
+    let mut tokens = ai_message_estimated_tokens(message)
+        .saturating_add(crate::images::message_image_tokens(message, provider_type));
     if message.role == AiChatRole::Tool {
         tokens = tokens.saturating_add(
             message
@@ -225,7 +227,8 @@ pub fn normalize_ai_stream_history_for_provider(history: &mut Vec<AiChatMessage>
             }
             AiChatRole::System => {}
             AiChatRole::User => {
-                if !message.content.trim().is_empty() {
+                if !message.content.trim().is_empty() || !crate::message_images(&message).is_empty()
+                {
                     message.content = sanitize_for_persistence(&message.content);
                     normalized.push(message);
                 }

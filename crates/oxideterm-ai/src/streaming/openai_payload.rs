@@ -211,7 +211,7 @@ fn openai_message_value(
     match message.role {
         AiChatRole::User => serde_json::json!({
             "role": "user",
-            "content": message.content,
+            "content": if crate::message_images(message).is_empty() { Value::String(message.content.clone()) } else { crate::images::image_message_content(message, "openai") },
         }),
         AiChatRole::System => serde_json::json!({
             "role": "system",
@@ -318,6 +318,8 @@ mod tests {
     fn config(provider_type: &str, reasoning_effort: &str) -> AiChatStreamConfig {
         AiChatStreamConfig {
             api_protocol: crate::AiApiProtocol::default(),
+            image_input: Default::default(),
+            omit_history_images: false,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("provider".to_string()),
             acp_agent_id: None,

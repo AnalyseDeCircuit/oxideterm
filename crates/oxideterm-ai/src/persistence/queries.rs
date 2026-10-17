@@ -21,7 +21,9 @@ impl ConversationStore {
             let mut page = Vec::new();
             for (sequence, key) in keys {
                 end = sequence;
-                page.push(read_message(&tx, conversation, &key, &self.cache)?);
+                let mut message = read_message(&tx, conversation, &key, &self.cache)?;
+                super::images::hydrate(&tx, conversation, &mut message)?;
+                page.push(message);
             }
             page.reverse();
             pages.push(page);
@@ -97,6 +99,7 @@ impl ConversationStore {
         branch: &str,
         budget: usize,
         provider: &str,
+        model: &str,
     ) -> Result<AiConversation> {
         let guard = self.db.read();
         let db = guard
@@ -128,6 +131,9 @@ impl ConversationStore {
                 let mut message: AiChatMessage = serde_json::from_value(value)?;
                 normalize_interrupted_assistant_projection(&mut message);
                 message.is_streaming = false;
+                if !crate::message_images(&message).is_empty() {
+                    message.model = Some(model.to_owned());
+                }
                 // Alternative tails and archived originals are display history, never additional model input.
                 message.branches = None;
                 if let Some(metadata) = &mut message.metadata {
@@ -147,6 +153,7 @@ impl ConversationStore {
                     crate::stream_state::ai_message_payload_estimated_tokens(&message, provider),
                 );
                 let boundary = message.role == AiChatRole::User;
+                super::images::hydrate(&tx, conversation, &mut message)?;
                 result.messages.push(message);
                 if summary || (tokens >= budget && boundary) {
                     break 'pages;

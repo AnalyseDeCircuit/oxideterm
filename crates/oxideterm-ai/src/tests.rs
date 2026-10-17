@@ -13,6 +13,8 @@ use crate::{AiPolicySafetyMode, AiToolChoice, AiToolUsePolicy};
 fn test_stream_config(provider_type: &str) -> AiChatStreamConfig {
     AiChatStreamConfig {
         api_protocol: crate::AiApiProtocol::default(),
+        image_input: Default::default(),
+        omit_history_images: false,
         execution_backend: AiExecutionBackend::Provider,
         provider_id: Some("provider".to_string()),
         acp_agent_id: None,
@@ -53,6 +55,146 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
         branches: None,
         suggestions: Vec::new(),
     }
+}
+
+#[test]
+fn image_input_serializes_across_all_completion_protocols_and_keeps_image_only_turns() {
+    use serde_json::json;
+    let image = AiImageAttachment::new(
+        "screen.png".into(),
+        "image/png".into(),
+        1024,
+        1024,
+        b"pixel",
+        b"thumb",
+    )
+    .unwrap();
+    let mut message = chat_message("image", AiChatRole::User, "");
+    set_message_images(&mut message, vec![image]);
+    let mut messages = vec![message];
+    stream_state::normalize_ai_stream_history_for_provider(&mut messages);
+    for provider in [
+        "openai",
+        "openai_compatible",
+        "ollama",
+        "kimi",
+        "glm",
+        "xai",
+        "custom_vendor",
+    ] {
+        let config = test_stream_config(provider);
+        assert_eq!(
+            openai_chat_messages(&config, &messages)[0]["content"],
+            json!([
+                {"type":"image_url", "image_url":{"url":"data:image/png;base64,cGl4ZWw="}}
+            ]),
+            "{provider}"
+        );
+    }
+    assert_eq!(
+        gemini_chat_contents(&messages).1[0]["parts"],
+        json!([
+            {"inlineData":{"mimeType":"image/png", "data":"cGl4ZWw="}}
+        ])
+    );
+    assert_eq!(
+        crate::streaming::responses_body(&test_stream_config("openai"), &messages)["input"][0]["content"],
+        json!([
+            {"type":"input_image", "image_url":"data:image/png;base64,cGl4ZWw=", "detail":"auto"}
+        ])
+    );
+    messages[0].content = "Explain".into();
+    assert_eq!(
+        openai_chat_messages(&test_stream_config("ollama"), &messages)[0]["content"][0],
+        json!({"type":"text","text":"Explain"})
+    );
+}
+
+#[test]
+fn image_input_model_switch_preserves_history_and_budgets_the_target_model() {
+    let mut message = chat_message("image", AiChatRole::User, "Describe");
+    set_message_images(
+        &mut message,
+        vec![
+            AiImageAttachment::new(
+                "screen.png".into(),
+                "image/png".into(),
+                1024,
+                1024,
+                b"pixel",
+                b"thumb",
+            )
+            .unwrap(),
+        ],
+    );
+    let original = vec![message];
+    for summary in [
+        stream_state::ai_compaction_summary_messages(&original),
+        stream_state::ai_conversation_summary_messages(&original),
+    ] {
+        assert_eq!(message_images(&summary[1]), message_images(&original[0]));
+        assert!(
+            summary[1]
+                .content
+                .contains("Image 1 belongs to conversation message 1.")
+        );
+    }
+    assert_eq!(
+        message_images(&stream_state::ai_compaction_anchor_snapshot(&original)[0]),
+        message_images(&original[0])
+    );
+    let mut config = test_stream_config("openai");
+    for (model, expected) in [("gpt-4o", 765), ("gpt-4o-mini", 25501), ("gpt-5.4", 1229)] {
+        config.model = model.into();
+        let mut request = original.clone();
+        prepare_image_history(&mut request, &config);
+        assert_eq!(
+            stream_state::ai_message_payload_estimated_tokens(&request[0], "openai")
+                - stream_state::ai_message_estimated_tokens(&request[0]),
+            expected,
+            "{model}"
+        );
+    }
+    config.omit_history_images = true;
+    let mut request = original.clone();
+    prepare_image_history(&mut request, &config);
+    assert!(message_images(&request[0]).is_empty());
+    assert_eq!(
+        request[0].content,
+        "Describe\n[Image 1 omitted: text-only conversation mode.]"
+    );
+    assert_eq!(
+        message_images(&original[0])[0].data.as_deref(),
+        Some("cGl4ZWw=")
+    );
+    assert_eq!(
+        model_image_input("deepseek", "deepseek-chat", AiImageInput::Auto),
+        Some(false)
+    );
+    assert_eq!(
+        model_image_input("openai_compatible", "custom", AiImageInput::Auto),
+        None
+    );
+    assert_eq!(
+        model_image_input("openai_compatible", "custom", AiImageInput::Enabled),
+        Some(true)
+    );
+    let unknown = estimate_image_tokens("openai_compatible", "custom", 1024, 1024);
+    assert_eq!(
+        unknown,
+        AiImageTokenEstimate {
+            tokens: 1369,
+            known_rule: false
+        }
+    );
+    assert_eq!(
+        estimate_image_tokens("openai", "gpt-5.4", 2048, 2048).tokens,
+        3000
+    );
+    assert_eq!(
+        estimate_image_tokens("openai", "gpt-6-astra", 2048, 2048).tokens,
+        4916
+    );
 }
 
 #[test]

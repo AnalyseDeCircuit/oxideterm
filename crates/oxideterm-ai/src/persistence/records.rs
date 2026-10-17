@@ -180,6 +180,7 @@ pub(super) enum StoredValue {
     ObjectRef { id: String },
     Shared { id: String },
     JsonText { id: String, order: Option<String> },
+    Image { key: String, metadata: Value },
 }
 
 pub(super) fn initialize(db: &Database) -> Result<()> {

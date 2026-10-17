@@ -1,5 +1,26 @@
 {
   "ai": {
+    "images": {
+      "count": "{{count}} 张图片",
+      "request_limit": "本次请求的图片总大小超出限制。请减少图片，或新建对话。",
+      "add": "添加图片",
+      "loading": "正在读取图片…",
+      "pasted": "粘贴的图片",
+      "remove": "移除",
+      "tokens": "约 {{count}} token",
+      "tokens_uncertain": "约 {{count}} token · 暂估",
+      "auto": "图片：自动判断",
+      "enabled": "图片：支持",
+      "disabled": "图片：不支持",
+      "model_unavailable": "此模型的图片能力未知或不可用。请更换视觉模型，或在图片设置中确认它支持图片。",
+      "history_prompt": "{{model}} 无法读取历史图片。是否保留图片，只用文字继续对话？",
+      "continue_text": "仅用文字继续",
+      "invalid": "支持 PNG、JPEG、WebP，每张不超过 10 MB、4000 万像素。发送前会缩小至最长边 2000 像素。",
+      "limit": "每条消息最多添加 8 张图片。",
+      "queue_only": "请将图片作为新消息发送，或加入下一轮消息队列。",
+      "missing": "无法读取已保存的图片。",
+      "settings": "图片设置"
+    },
     "agents": {
       "parent": "主代理",
       "runs": "运行记录",

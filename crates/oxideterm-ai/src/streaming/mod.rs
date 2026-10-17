@@ -46,9 +46,19 @@ fn chat_stream_provider_family(provider_type: &str) -> ChatStreamProviderFamily 
 
 pub async fn stream_chat_completion(
     config: AiChatStreamConfig,
-    messages: Vec<AiChatMessage>,
+    mut messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) {
+    crate::prepare_image_history(&mut messages, &config);
+    if messages
+        .iter()
+        .any(|message| !crate::message_images(message).is_empty())
+        && crate::model_image_input(&config.provider_type, &config.model, config.image_input)
+            != Some(true)
+    {
+        let _ = events.send(AiStreamEvent::Error("ai_image_model_unsupported".into()));
+        return;
+    }
     for attempt in 0.. {
         let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
         let mut request = Box::pin(stream_once(config.clone(), messages.clone(), sender));
@@ -101,6 +111,7 @@ async fn stream_once(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> anyhow::Result<()> {
+    crate::images::validate_image_request(messages.iter().flat_map(crate::message_images))?;
     let responses = config.api_protocol == crate::AiApiProtocol::Responses;
     if responses {
         if config.uses_responses() {
@@ -153,6 +164,9 @@ pub(crate) use responses_payload::responses_body;
 /// An allowlist of transport categories, never remote error text.
 pub fn stream_error_label(error: &str) -> Option<&'static str> {
     match error {
+        "ai_image_model_unsupported" => Some("ai.images.model_unavailable"),
+        "ai_image_missing" => Some("ai.images.missing"),
+        "ai_image_request_limit" => Some("ai.images.request_limit"),
         "agent_compaction_failed" => Some("settings_view.ai.agent_compaction_failed"),
         "agent_context_full" => Some("settings_view.ai.agent_context_full"),
         "ai_stream_interrupted" => Some("settings_view.ai.stream_interrupted"),

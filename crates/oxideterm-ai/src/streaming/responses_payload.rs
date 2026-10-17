@@ -40,13 +40,13 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
                 }
             }
             role => {
-                if !message.content.is_empty() {
+                if !message.content.is_empty() || !crate::message_images(message).is_empty() {
                     let role = match role {
                         AiChatRole::User => "user",
                         AiChatRole::Assistant => "assistant",
                         _ => "system",
                     };
-                    input.push(json!({"role": role, "content": message.content}));
+                    input.push(json!({"role": role, "content": if crate::message_images(message).is_empty() { Value::String(message.content.clone()) } else { crate::images::image_message_content(message, "responses") }}));
                 }
                 for call in message.tool_calls.iter().filter_map(AiToolCall::from_value) {
                     input.push(json!({

@@ -197,9 +197,14 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
                     _ => message.content.clone(),
                 });
             }
-            AiChatRole::User => {
-                converted.push(("user".to_string(), Value::String(message.content.clone())))
-            }
+            AiChatRole::User => converted.push((
+                "user".to_string(),
+                if crate::message_images(message).is_empty() {
+                    Value::String(message.content.clone())
+                } else {
+                    crate::images::image_message_content(message, "anthropic")
+                },
+            )),
             AiChatRole::Tool => {
                 let mut tool_result = serde_json::json!({
                     "type": "tool_result",
@@ -459,9 +464,40 @@ mod tests {
     use super::*;
     use crate::{AiExecutionBackend, AiPolicySafetyMode, AiToolUsePolicy};
 
+    #[test]
+    fn image_input_anthropic_keeps_an_image_only_user_turn() {
+        let mut message: AiChatMessage = serde_json::from_value(
+            serde_json::json!({"id":"image","role":"user","content":"","timestamp_ms":1}),
+        )
+        .unwrap();
+        crate::set_message_images(
+            &mut message,
+            vec![
+                crate::AiImageAttachment::new(
+                    "screenshot.png".into(),
+                    "image/png".into(),
+                    200,
+                    100,
+                    b"pixel",
+                    b"thumb",
+                )
+                .unwrap(),
+            ],
+        );
+        let body = anthropic_chat_body(&config("auto", 4096), &[message]);
+        assert_eq!(
+            body["messages"][0],
+            serde_json::json!({"role":"user", "content":[
+                {"type":"image","source":{"type":"base64","media_type":"image/png","data":"cGl4ZWw="}}
+            ]})
+        );
+    }
+
     fn config(reasoning_effort: &str, max_response_tokens: i64) -> AiChatStreamConfig {
         AiChatStreamConfig {
             api_protocol: crate::AiApiProtocol::default(),
+            image_input: Default::default(),
+            omit_history_images: false,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some("anthropic".to_string()),
             acp_agent_id: None,

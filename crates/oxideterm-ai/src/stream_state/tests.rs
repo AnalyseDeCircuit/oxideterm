@@ -45,6 +45,7 @@ fn conversation_turn_count_preserves_submissions_across_live_compacted_and_summa
         original_ref: None,
         original_messages: None,
         original_user_count: Some(7),
+        images: Vec::new(),
     });
     let compacted = vec![
         anchor,
@@ -79,6 +80,7 @@ fn provider_history_preserves_text_and_summary_order_without_replaying_old_tool_
         original_ref: None,
         original_messages: None,
         original_user_count: None,
+        images: Vec::new(),
     });
     let mut history = vec![
         message("task-mode", AiChatRole::System, "Task instructions"),

@@ -23,6 +23,106 @@ fn put(index: usize, revision: u64) -> HistoryMutation {
 }
 
 #[test]
+fn image_input_storage_reopens_exports_and_releases_only_the_last_reference() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("images.redb");
+    let store = ConversationStore::open(path.clone()).unwrap();
+    let image = crate::AiImageAttachment::new(
+        "screenshot.png".into(),
+        "image/png".into(),
+        200,
+        100,
+        b"pixel",
+        b"thumb",
+    )
+    .unwrap();
+    let id = image.id.clone();
+    let mut first = message(0);
+    first.content.clear();
+    crate::set_message_images(&mut first, vec![image.clone()]);
+    store
+        .apply(vec![
+            HistoryMutation::Create {
+                conversation: empty_conversation(),
+                revision: 1,
+            },
+            HistoryMutation::PutMessage {
+                conversation_id: "history".into(),
+                branch_id: "main".into(),
+                message: first,
+                revision: 2,
+            },
+        ])
+        .unwrap();
+    let mut second = message(1);
+    crate::set_message_images(&mut second, vec![image.preview_only()]);
+    store
+        .apply(vec![HistoryMutation::PutMessage {
+            conversation_id: "history".into(),
+            branch_id: "main".into(),
+            message: second,
+            revision: 3,
+        }])
+        .unwrap();
+    drop(store);
+    let store = ConversationStore::open(path).unwrap();
+    let first = store.message_by_id("history", "main", "message-0").unwrap();
+    assert_eq!(crate::message_images(&first)[0], image.preview_only());
+    let page = store.message_page("history", "main", None, 50).unwrap();
+    let descriptor = &page.messages[0];
+    let view = store
+        .message_view("history", &descriptor.storage_id, descriptor.revision, None)
+        .unwrap();
+    assert_eq!(
+        crate::message_images(&view.message)[0],
+        image.preview_only()
+    );
+    assert_eq!(
+        store.image_bytes("history", &id).unwrap().as_ref(),
+        b"pixel"
+    );
+    let model = store
+        .model_context("history", "main", 10000, "openai", "gpt-4o")
+        .unwrap();
+    assert_eq!(
+        crate::message_images(&model.messages[0])[0].data.as_deref(),
+        Some("cGl4ZWw=")
+    );
+    assert_eq!(model.messages[0].model.as_deref(), Some("gpt-4o"));
+    let exported = store.export_conversation("history", "main").unwrap();
+    assert_eq!(crate::message_images(&exported.messages[0])[0], image);
+    store
+        .apply(vec![HistoryMutation::Fork {
+            conversation_id: "history".into(),
+            source_branch: "main".into(),
+            branch_id: "retry".into(),
+            through_sequence: Some(0),
+            revision: 4,
+        }])
+        .unwrap();
+    store
+        .apply(vec![HistoryMutation::DeleteBranch {
+            conversation_id: "history".into(),
+            branch_id: "main".into(),
+            revision: 5,
+        }])
+        .unwrap();
+    assert_eq!(
+        store.image_bytes("history", &id).unwrap().as_ref(),
+        b"pixel"
+    );
+    store
+        .apply(vec![HistoryMutation::DeleteMessage {
+            conversation_id: "history".into(),
+            branch_id: "retry".into(),
+            message_id: "message-0".into(),
+            revision: 6,
+        }])
+        .unwrap();
+    assert!(store.image_bytes("history", &id).is_err());
+}
+
+#[test]
 fn independent_revisions_reject_stale_updates_and_keep_deleted_messages_and_histories_closed() {
     let dir = tempfile::tempdir().unwrap();
     let store = ConversationStore::open(dir.path().join("v4.redb")).unwrap();
@@ -1684,10 +1784,12 @@ fn model_context_reads_beyond_the_ui_page_and_keeps_complete_tool_groups() {
         "message-12"
     );
     let full = store
-        .model_context("history", "main", usize::MAX, "openai")
+        .model_context("history", "main", usize::MAX, "openai", "gpt-4o")
         .unwrap();
     assert_eq!(full.messages[0].id, "message-0");
-    let recent = store.model_context("history", "main", 1, "openai").unwrap();
+    let recent = store
+        .model_context("history", "main", 1, "openai", "gpt-4o")
+        .unwrap();
     assert_eq!(
         recent
             .messages
@@ -1758,6 +1860,7 @@ fn archives_keep_all_originals_and_branch_text_out_of_the_loaded_message() {
         original_count: Some(2105),
         compacted_at_ms: Some(2),
         original_user_count: None,
+        images: Vec::new(),
         original_ref: None,
         original_messages: Some((0..2105).map(message).collect()),
     });
@@ -1889,6 +1992,7 @@ fn compaction_references_the_retained_suffix_and_preserves_appends_and_later_for
         kind: "compaction-anchor".into(),
         original_count: None,
         original_user_count: None,
+        images: Vec::new(),
         compacted_at_ms: Some(8),
         original_messages: None,
         original_ref: None,

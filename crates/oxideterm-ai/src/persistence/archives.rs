@@ -276,6 +276,7 @@ impl ConversationStore {
         message: &mut AiChatMessage,
         visited: &mut HashSet<String>,
     ) -> Result<()> {
+        self.hydrate_images(conversation, message)?;
         if let Some(metadata) = &mut message.metadata {
             if let Some(range) = metadata.original_ref.take() {
                 metadata.original_messages =

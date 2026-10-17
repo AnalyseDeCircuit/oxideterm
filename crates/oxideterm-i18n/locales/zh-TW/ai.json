@@ -1,5 +1,26 @@
 {
   "ai": {
+    "images": {
+      "count": "{{count}} 張圖片",
+      "request_limit": "本次請求的圖片總大小超出限制。請減少圖片，或新增對話。",
+      "add": "新增圖片",
+      "loading": "正在讀取圖片…",
+      "pasted": "貼上的圖片",
+      "remove": "移除",
+      "tokens": "約 {{count}} token",
+      "tokens_uncertain": "約 {{count}} token · 暫估",
+      "auto": "圖片：自動判斷",
+      "enabled": "圖片：支援",
+      "disabled": "圖片：不支援",
+      "model_unavailable": "此模型的圖片能力未知或不可用。請選擇視覺模型，或在圖片設定中確認支援。",
+      "history_prompt": "{{model}} 無法讀取歷史圖片。是否保留圖片，僅用文字繼續對話？",
+      "continue_text": "僅用文字繼續",
+      "invalid": "支援 PNG、JPEG、WebP，每張不超過 10 MB、4000 萬像素。傳送前會縮小至最長邊 2000 像素。",
+      "limit": "每則訊息最多新增 8 張圖片。",
+      "queue_only": "請將圖片作為新訊息傳送，或加入下一輪訊息佇列。",
+      "missing": "無法讀取已儲存的圖片。",
+      "settings": "圖片設定"
+    },
     "agents": {
       "parent": "主代理",
       "runs": "執行記錄",

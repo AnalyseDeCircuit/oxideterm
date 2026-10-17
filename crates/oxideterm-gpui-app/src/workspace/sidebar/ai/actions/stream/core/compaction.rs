@@ -86,6 +86,7 @@ impl WorkspaceApp {
             .ai_active_model_context_window(&config)
             .saturating_mul(2);
         let provider = config.provider_type;
+        let model = config.model;
         let runtime = self.forwarding_runtime.clone();
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.ai_entity.update(cx, |ai, _| {
@@ -106,7 +107,7 @@ impl WorkspaceApp {
             let id = conversation_id.clone();
             let source_branch = branch.clone();
             let result = runtime
-                .spawn_blocking(move || store.model_context(&id, &source_branch, budget, &provider))
+                .spawn_blocking(move || store.model_context(&id, &source_branch, budget, &provider, &model))
                 .await;
             let _ = weak.update(cx, |this, cx| {
                 this.ai_entity.update(cx, |ai, _| {

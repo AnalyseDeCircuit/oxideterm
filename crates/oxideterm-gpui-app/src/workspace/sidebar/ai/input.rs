@@ -61,10 +61,17 @@ impl WorkspaceApp {
         let input = self.render_ai_multiline_input(
             WorkspaceImeTarget::AiChatInput, placeholder, enabled, cx,
         );
-        let send_disabled = !enabled || !model_selected || self.ai_entity.read(cx).chat_ui().draft.trim().is_empty();
+        let images_allowed = self.ai_entity.read(cx).chat_ui().images.is_empty()
+            || self.resolve_ai_stream_config(cx).is_ok_and(|config| {
+                config.execution_backend == AiExecutionBackend::Acp
+                    || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) == Some(true)
+            });
+        let send_disabled = !enabled || !model_selected || !images_allowed
+            || self.ai_entity.read(cx).chat_ui().image_import.is_some()
+            || (self.ai_entity.read(cx).chat_ui().draft.trim().is_empty() && self.ai_entity.read(cx).chat_ui().images.is_empty());
         let action_focused = self.ai_entity.read(cx).chat_ui().footer_focus == Some(AiChatFooterAction::Submit)
             && (self.ai_entity.read(cx).chat_is_loading() || !send_disabled);
-        let can_supplement = self.ai_entity.read(cx).can_supplement_agent();
+        let can_supplement = self.ai_entity.read(cx).can_supplement_agent() && self.ai_entity.read(cx).chat_ui().images.is_empty();
         let loading = self.ai_entity.read(cx).chat_is_loading();
         let action = ai_send_button(
             &self.tokens,
@@ -80,6 +87,7 @@ impl WorkspaceApp {
         );
         let focused = self.ai_entity.read(cx).chat_ui().input_focused;
         let frame = ai_chat_input_frame(&self.tokens, focused)
+            .child(self.render_ai_image_controls(cx))
             .child(ai_chat_input_editor(&self.tokens, input));
         let footer_leading = if self.ai_entity.read(cx).chat_is_loading() {
             div()
@@ -171,6 +179,10 @@ impl WorkspaceApp {
         // The toolbar owns the spacing above the composer.
         .pt(px(0.0))
         .relative()
+        .can_drop(|drag, _, _| drag.is::<gpui::ExternalPaths>())
+        .on_drop(cx.listener(|this, paths: &gpui::ExternalPaths, _, cx| {
+            this.import_ai_image_paths(paths.paths().to_vec(), cx);
+        }))
         .when_some(
             self.render_ai_acp_authentication_prompt(cx),
             |root, prompt| root.child(prompt),
@@ -408,6 +420,7 @@ impl WorkspaceApp {
                     turn.id.clone(),
                     turn.content.to_string(),
                     turn.config.model.clone(),
+                    turn.images.len(),
                 )
             })
             .collect();
@@ -424,7 +437,7 @@ impl WorkspaceApp {
                     })
                     .replace("{{count}}", &rows.len().to_string()),
             ));
-        for (index, (id, text, model)) in rows.into_iter().enumerate() {
+        for (index, (id, text, model, image_count)) in rows.into_iter().enumerate() {
             let mut actions = div()
                 .flex()
                 .items_center()
@@ -436,7 +449,7 @@ impl WorkspaceApp {
                 ("up", "ai.queue.move_up"),
                 ("send", "ai.queue.send_now"),
             ] {
-                if (action == "up" && index == 0) || (action == "send" && loading && !can_steer) {
+                if (action == "up" && index == 0) || (action == "send" && loading && (!can_steer || image_count > 0)) {
                     continue;
                 }
                 let cid = conversation.clone();
@@ -476,7 +489,9 @@ impl WorkspaceApp {
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(model),
+                            .child(if image_count == 0 { model } else {
+                                format!("{model} · {}", self.i18n.t("ai.images.count").replace("{{count}}", &image_count.to_string()))
+                            }),
                     )
                     .child(actions),
                 oxideterm_gpui_ui::motion::MotionDuration::Micro,
@@ -1506,6 +1521,7 @@ impl WorkspaceApp {
         std::hash::Hash::hash(&config.provider_id, &mut hasher);
         std::hash::Hash::hash(&config.provider_type, &mut hasher);
         std::hash::Hash::hash(&config.model, &mut hasher);
+        std::hash::Hash::hash(&config.omit_history_images, &mut hasher);
         std::hash::Hash::hash(&config.max_response_tokens, &mut hasher);
         std::hash::Hash::hash(&config.tool_policy.enabled, &mut hasher);
         ai_hash_text_shape(settings.ai.custom_system_prompt.trim(), &mut hasher);

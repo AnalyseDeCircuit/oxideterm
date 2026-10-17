@@ -184,6 +184,18 @@ pub(super) fn message_heap(message: &AiChatMessage) -> usize {
             .sum::<usize>();
     if let Some(metadata) = &message.metadata {
         bytes += metadata.kind.capacity() + 32;
+        bytes += metadata.images.capacity() * std::mem::size_of::<crate::AiImageAttachment>()
+            + metadata
+                .images
+                .iter()
+                .map(|image| {
+                    image.name.capacity()
+                        + image.id.capacity()
+                        + image.mime_type.capacity()
+                        + image.thumbnail.len()
+                        + image.data.as_ref().map_or(0, |data| data.len())
+                })
+                .sum::<usize>();
         if let Some(range) = &metadata.original_ref {
             bytes += range_heap(range);
         }

@@ -254,7 +254,11 @@ fn retain_chunk(
     Ok(())
 }
 
-fn release_chunk(tx: &redb::WriteTransaction, conversation: &str, key: &str) -> Result<()> {
+pub(super) fn release_chunk(
+    tx: &redb::WriteTransaction,
+    conversation: &str,
+    key: &str,
+) -> Result<()> {
     let mut refs = tx.open_table(REFS)?;
     let count = refs
         .get((conversation, key))?

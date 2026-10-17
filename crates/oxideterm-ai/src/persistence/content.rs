@@ -23,6 +23,11 @@ fn store_inner(
     in_payload: bool,
 ) -> Result<StoredValue> {
     Ok(match value {
+        Value::Object(values)
+            if !in_payload && values.get("_oxideImage") == Some(&Value::Bool(true)) =>
+        {
+            super::images::store(tx, conversation, Value::Object(values))?
+        }
         Value::String(text) if text.len() >= 1024 => super::text::store(tx, conversation, text)?,
         Value::Array(values) if values.is_empty() => StoredValue::Scalar(Value::Array(values)),
         Value::Array(values) => {
@@ -71,6 +76,7 @@ fn load_inner(
     visiting: &mut HashSet<String>,
 ) -> Result<Value> {
     Ok(match value {
+        StoredValue::Image { metadata, .. } => metadata,
         StoredValue::Scalar(value) => value,
         StoredValue::Text { id, bytes } => {
             Value::String(super::text::load(tx, conversation, &id, bytes, cache)?)
@@ -159,6 +165,7 @@ pub(super) fn release_value(
     value: StoredValue,
 ) -> Result<()> {
     match value {
+        StoredValue::Image { key, .. } => super::text::release_chunk(tx, conversation, &key)?,
         StoredValue::Text { id, .. } => super::text::remove_tail(tx, conversation, &id, 0)?,
         StoredValue::Array { id, length } => {
             for index in 0..length {

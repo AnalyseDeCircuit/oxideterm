@@ -97,7 +97,7 @@ pub fn ai_compaction_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatM
             ));
         }
     }
-    vec![
+    let mut request = vec![
         AiChatMessage {
             id: "compact-system".to_string(),
             role: AiChatRole::System,
@@ -134,7 +134,9 @@ pub fn ai_compaction_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatM
             branches: None,
             suggestions: Vec::new(),
         },
-    ]
+    ];
+    attach_summary_images(messages, &mut request[1]);
+    request
 }
 
 pub fn ai_conversation_summary_messages(messages: &[AiChatMessage]) -> Vec<AiChatMessage> {
@@ -151,7 +153,7 @@ pub fn ai_conversation_summary_messages(messages: &[AiChatMessage]) -> Vec<AiCha
         })
         .collect::<Vec<_>>()
         .join("\n\n");
-    vec![
+    let mut request = vec![
         AiChatMessage {
             id: "summary-system".to_string(),
             role: AiChatRole::System,
@@ -188,7 +190,24 @@ pub fn ai_conversation_summary_messages(messages: &[AiChatMessage]) -> Vec<AiCha
             branches: None,
             suggestions: Vec::new(),
         },
-    ]
+    ];
+    attach_summary_images(messages, &mut request[1]);
+    request
+}
+
+fn attach_summary_images(messages: &[AiChatMessage], request: &mut AiChatMessage) {
+    let mut images = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        for image in crate::message_images(message) {
+            images.push(image.clone());
+            request.content.push_str(&format!(
+                "\nImage {} belongs to conversation message {}.",
+                images.len(),
+                index + 1
+            ));
+        }
+    }
+    crate::set_message_images(request, images);
 }
 
 pub const AI_MAX_ANCHOR_SNAPSHOT: usize = 50;
@@ -232,6 +251,7 @@ pub fn ai_compaction_anchor_snapshot(messages: &[AiChatMessage]) -> Vec<AiChatMe
             snapshot.is_streaming = false;
             snapshot.thinking_content = None;
             snapshot.metadata = None;
+            crate::set_message_images(&mut snapshot, crate::message_images(message).to_vec());
             snapshot.tool_call_id = None;
             snapshot.tool_calls.clear();
             snapshot.turn = None;

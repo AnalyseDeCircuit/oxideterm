@@ -232,6 +232,7 @@ impl fmt::Debug for AcpManagedEvent {
 
 /// One prompt submitted to a connection-owned ACP thread.
 pub struct AcpManagedPromptRequest {
+    pub images: Vec<crate::AiImageAttachment>,
     pub thread_id: String,
     pub turn_id: String,
     pub existing_session_id: Option<String>,
@@ -815,6 +816,7 @@ async fn run_connection_commands(
                 match command {
                     AcpConnectionCommand::Prompt { request, response_tx } => {
                         let AcpManagedPromptRequest {
+                            images,
                             thread_id,
                             turn_id,
                             existing_session_id,
@@ -824,6 +826,13 @@ async fn run_connection_commands(
                             mcp_servers,
                             prompt,
                         } = request;
+                        let content = match acp_prompt_content(&prompt, &images, runtime.agent_capabilities().prompt_capabilities.image) {
+                            Ok(content) => content,
+                            Err(error) => {
+                                finish_prompt_with_error(&event_tx, &agent_id, thread_id, turn_id, response_tx, error);
+                                continue;
+                            }
+                        };
                         if running_turns.contains_key(&thread_id) {
                             finish_prompt_with_error(
                                 &event_tx,
@@ -913,13 +922,10 @@ async fn run_connection_commands(
                         let completed_outcome = outcome.clone();
                         let completed_tx = completion_tx.clone();
                         let _ = runtime.connection.clone().spawn(async move {
-                            // The ACP wire DTO requires an owned String. Keep the
-                            // zeroizing source alive only until the request has
-                            // been queued and never copy it into diagnostics.
                             let result = prompt_connection
                                 .send_request(PromptRequest::new(
                                     prompt_session_id,
-                                    vec![prompt.as_str().to_string().into()],
+                                    content,
                                 ))
                                 .block_task()
                                 .await
@@ -1114,6 +1120,34 @@ async fn run_connection_commands(
     }
 }
 
+fn acp_prompt_content(
+    prompt: &str,
+    images: &[crate::AiImageAttachment],
+    supports_images: bool,
+) -> Result<Vec<agent_client_protocol::schema::v1::ContentBlock>, AcpConnectionError> {
+    use agent_client_protocol::schema::v1::{ContentBlock, ImageContent};
+    if !images.is_empty() && !supports_images {
+        return Err(AcpConnectionError::Protocol(
+            "ai_image_model_unsupported".into(),
+        ));
+    }
+    crate::images::validate_image_request(images.iter())
+        .map_err(|error| AcpConnectionError::Protocol(error.to_string()))?;
+    let mut content = vec![ContentBlock::from(prompt.to_owned())];
+    for image in images {
+        let data = image
+            .data
+            .as_deref()
+            .ok_or_else(|| AcpConnectionError::Protocol("ai_image_missing".into()))?;
+        content.push(ContentBlock::from(format!("Image {}:", image.id)));
+        content.push(ContentBlock::Image(ImageContent::new(
+            data,
+            image.mime_type.clone(),
+        )));
+    }
+    Ok(content)
+}
+
 fn supported_mcp_servers(
     capabilities: &agent_client_protocol::schema::v1::AgentCapabilities,
     servers: Vec<McpServer>,
@@ -1280,6 +1314,29 @@ fn hash_component(hasher: &mut Sha256, component: &[u8]) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn image_input_acp_requires_negotiation_and_emits_native_content() {
+        use super::*;
+        let image = crate::AiImageAttachment::new(
+            "screen.png".into(),
+            "image/png".into(),
+            200,
+            100,
+            b"pixel",
+            b"thumb",
+        )
+        .unwrap();
+        assert_eq!(
+            acp_prompt_content("Describe", &[image.clone()], false).unwrap_err(),
+            AcpConnectionError::Protocol("ai_image_model_unsupported".into())
+        );
+        let content = acp_prompt_content("Describe", &[image], true).unwrap();
+        let wire = serde_json::to_value(content).unwrap();
+        assert_eq!(wire[0]["text"], "Describe");
+        assert_eq!(wire[2]["type"], "image");
+        assert_eq!(wire[2]["mimeType"], "image/png");
+        assert_eq!(wire[2]["data"], "cGl4ZWw=");
+    }
     use super::*;
     use agent_client_protocol::{
         Agent,
@@ -1371,6 +1428,7 @@ mod tests {
         command_tx
             .send(AcpConnectionCommand::Prompt {
                 request: AcpManagedPromptRequest {
+                    images: Vec::new(),
                     thread_id: thread_id.to_string(),
                     turn_id: turn_id.to_string(),
                     existing_session_id: existing_session_id.map(str::to_string),
@@ -1536,6 +1594,7 @@ mod tests {
                 command_tx
                     .send(AcpConnectionCommand::Prompt {
                         request: AcpManagedPromptRequest {
+                            images: Vec::new(),
                             thread_id: "thread-a".to_string(),
                             turn_id: "turn-1".to_string(),
                             existing_session_id: None,
@@ -1804,6 +1863,7 @@ mod tests {
                 command_tx
                     .send(AcpConnectionCommand::Prompt {
                         request: AcpManagedPromptRequest {
+                            images: Vec::new(),
                             thread_id: "thread-a".to_string(),
                             turn_id: "turn-1".to_string(),
                             existing_session_id: None,

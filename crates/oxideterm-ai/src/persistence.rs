@@ -17,6 +17,7 @@ use serde_json::Value;
 mod agent_queries;
 mod agents;
 mod content;
+mod images;
 mod reachability;
 mod records;
 mod stream_delta;

@@ -567,6 +567,7 @@ impl WorkspaceApp {
         if previous_model.as_deref() != Some(model.as_str()) {
             self.update_ai_model_switch_warning(&provider_id, &model, cx);
         }
+        self.resume_ai_image_request_for_model(cx);
         self.close_ai_model_selector(cx);
         cx.notify();
     }

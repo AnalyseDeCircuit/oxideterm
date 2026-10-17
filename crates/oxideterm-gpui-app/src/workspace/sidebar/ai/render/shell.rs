@@ -44,6 +44,10 @@ fn ai_chat_message_base_signature(message: &AiChatMessage) -> u64 {
     if let Some(metadata) = message.metadata.as_ref() {
         std::hash::Hash::hash(&metadata.kind, &mut hasher);
         std::hash::Hash::hash(&metadata.original_count, &mut hasher);
+        for image in &metadata.images {
+            std::hash::Hash::hash(&image.id, &mut hasher);
+            std::hash::Hash::hash(&(image.width, image.height), &mut hasher);
+        }
     }
     if let Some(transcript_ref) = message.transcript_ref.as_ref() {
         ai_chat_hash_json_value(transcript_ref, &mut hasher);

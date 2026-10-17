@@ -115,13 +115,17 @@ impl WorkspaceApp {
                     .find(|message| message.role == AiChatRole::User)
                     .cloned()
             });
+        let mut images = request_message
+            .as_ref()
+            .map(|m| oxideterm_ai::message_images(m).to_vec())
+            .unwrap_or_default();
         let user_request = request_content
             .or_else(|| {
                 request_message
                     .as_ref()
                     .map(|message| message.content.clone())
             })
-            .filter(|request| !request.trim().is_empty());
+            .filter(|request| !request.trim().is_empty() || !images.is_empty());
         let Some(user_request) = user_request else {
             self.push_ai_settings_toast(
                 self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
@@ -169,8 +173,9 @@ impl WorkspaceApp {
                 )
             });
         let mut prompt = zeroize::Zeroizing::new(String::new());
-        if let Some(handoff) = handoff {
+        if let Some((handoff, historical_images)) = handoff {
             prompt.push_str(handoff.as_str());
+            images.splice(0..0, historical_images);
         }
         self.ai_entity.update(cx, |ai, _| {
             ai.history.model_contexts.remove(&conversation_id);
@@ -290,6 +295,7 @@ impl WorkspaceApp {
                     cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
                 request: oxideterm_ai::AcpManagedPromptRequest {
+                    images,
                     thread_id: conversation_id.clone(),
                     turn_id,
                     existing_session_id: config.acp_session_id,
@@ -444,6 +450,41 @@ impl WorkspaceApp {
         allow_pre_send_compaction: bool,
         cx: &mut Context<Self>,
     ) {
+        if !config.omit_history_images
+            && oxideterm_ai::model_image_input(
+                &config.provider_type,
+                &config.model,
+                config.image_input,
+            ) != Some(true)
+            && self
+                .ai_entity
+                .read(cx)
+                .history
+                .model_contexts
+                .get(&conversation_id)
+                .is_some_and(|history| {
+                    history
+                        .messages
+                        .iter()
+                        .any(|m| !oxideterm_ai::message_images(m).is_empty())
+                })
+        {
+            self.ai_entity.update(cx, |ai, _| {
+                ai.pending_image_requests.insert(
+                    conversation_id.clone(),
+                    AiPendingChatStream {
+                        launch_id: ai.chat_launches.get(&conversation_id).cloned(),
+                        conversation_id,
+                        config,
+                        request_content,
+                        task_system_prompt,
+                        rag_system_prompt,
+                    },
+                );
+            });
+            cx.notify();
+            return;
+        }
         if allow_pre_send_compaction
             && self.should_force_ai_pre_send_compaction(
                 &conversation_id,

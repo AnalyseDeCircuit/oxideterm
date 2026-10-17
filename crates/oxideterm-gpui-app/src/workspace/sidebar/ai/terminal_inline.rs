@@ -842,6 +842,8 @@ window.focus(&this.focus_handle, cx);
         .to_string();
         Ok(AiChatStreamConfig {
             api_protocol: provider.api_protocol,
+            image_input: Default::default(),
+            omit_history_images: false,
             execution_backend: AiExecutionBackend::Provider,
             provider_id: Some(provider.id.clone()),
             acp_agent_id: None,

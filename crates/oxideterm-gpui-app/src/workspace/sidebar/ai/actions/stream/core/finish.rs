@@ -62,6 +62,7 @@ impl AiWorkspaceEntity {
                 original_ref: Some(original_ref),
                 original_messages: None,
                 original_user_count: Some(total_compacted_turns),
+                images: Vec::new(),
             }),
             tool_call_id: None,
             tool_calls: Vec::new(),
