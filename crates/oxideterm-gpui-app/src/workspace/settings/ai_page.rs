@@ -36,5 +36,7 @@ mod provider_card;
 mod provider_keys;
 #[path = "ai/sections.rs"]
 mod sections;
+#[path = "ai/skills.rs"]
+mod skills;
 #[path = "ai/surface.rs"]
 mod surface;
