@@ -12,6 +12,9 @@
       "source": "Nguồn"
     },
     "panel": {
+      "detecting_system": "Đang nhận diện hệ thống từ xa…",
+      "system_unavailable": "Không thể nhận diện hệ thống từ xa. Hãy mở một cửa sổ dòng lệnh cho máy chủ này, kiểm tra xem máy chủ có cho phép các phiên shell riêng biệt không, rồi thử lại.",
+      "sampling_failed": "Không thể thu thập số liệu máy chủ. Hãy kiểm tra quyền mở phiên shell và các lệnh lấy mẫu trên máy chủ, rồi thử lại.",
       "no_connection": "Chưa chọn kết nối hoạt động",
       "sampling": "Đang lấy mẫu...",
       "no_data": "Không có dữ liệu",

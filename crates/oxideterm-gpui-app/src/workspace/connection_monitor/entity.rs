@@ -757,6 +757,12 @@ impl HostToolsEntity {
         })
     }
 
+    pub(super) fn remote_env_detection_running(&self, connection_id: &str) -> bool {
+        self.ssh_registry
+            .get(connection_id)
+            .is_some_and(|handle| handle.remote_env_detection_running())
+    }
+
     pub(super) fn spawn_log_snapshot_capture(
         &self,
         command: String,
@@ -1483,6 +1489,15 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) {
         if !self.visibility.sidebar_is_visible() || self.sampling_config.is_empty() {
+            return;
+        }
+        if self
+            .ssh_registry
+            .get(&connection_id)
+            .is_some_and(|handle| handle.remote_env().is_none())
+        {
+            self.ssh_registry.retry_remote_env_detection(&connection_id);
+            cx.notify();
             return;
         }
         if self.profiler_registry.request_refresh(&connection_id) {

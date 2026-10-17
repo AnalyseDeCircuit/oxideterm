@@ -12,6 +12,9 @@
       "source": "Quelle"
     },
     "panel": {
+      "detecting_system": "Remote-System wird erkannt…",
+      "system_unavailable": "Das Remote-System konnte nicht erkannt werden. Öffnen Sie ein Terminal für diesen Host, prüfen Sie, ob der Server separate Shell-Sitzungen zulässt, und versuchen Sie es erneut.",
+      "sampling_failed": "Host-Messwerte konnten nicht erfasst werden. Prüfen Sie die Berechtigungen für Shell-Sitzungen und die Verfügbarkeit der Messbefehle auf dem Server und versuchen Sie es erneut.",
       "no_connection": "Keine aktive Verbindung ausgewählt",
       "sampling": "Abtastung...",
       "no_data": "Keine Daten",

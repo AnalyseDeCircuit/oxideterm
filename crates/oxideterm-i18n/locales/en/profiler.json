@@ -12,6 +12,9 @@
       "source": "Source"
     },
     "panel": {
+      "detecting_system": "Detecting remote system…",
+      "system_unavailable": "Could not identify the remote system. Open a terminal for this host, check that the server allows separate shell sessions, then retry.",
+      "sampling_failed": "Could not collect host metrics. Check shell session permissions and sampling command availability on the server, then retry.",
       "no_connection": "No active connection selected",
       "sampling": "Sampling...",
       "no_data": "No data available",

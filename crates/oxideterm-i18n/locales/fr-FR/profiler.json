@@ -12,6 +12,9 @@
       "source": "Source"
     },
     "panel": {
+      "detecting_system": "Identification du système distant…",
+      "system_unavailable": "Impossible d’identifier le système distant. Ouvrez un terminal pour cet hôte, vérifiez que le serveur autorise des sessions shell distinctes, puis réessayez.",
+      "sampling_failed": "Impossible de collecter les mesures de l’hôte. Vérifiez les autorisations des sessions shell et la disponibilité des commandes de mesure sur le serveur, puis réessayez.",
       "no_connection": "Aucune connexion active sélectionnée",
       "sampling": "Échantillonnage...",
       "no_data": "Pas de données",

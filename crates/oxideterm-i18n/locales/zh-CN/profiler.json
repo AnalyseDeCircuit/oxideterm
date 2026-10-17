@@ -12,6 +12,9 @@
       "source": "数据来源"
     },
     "panel": {
+      "detecting_system": "正在识别远端系统…",
+      "system_unavailable": "未能识别远端系统。请确认该主机的终端已打开，且服务器允许独立 Shell 会话，再重新探测。",
+      "sampling_failed": "未能获取主机指标。请检查服务器的 Shell 会话权限和采样命令是否可用，再重新探测。",
       "no_connection": "未选择活动连接",
       "sampling": "采样中...",
       "no_data": "暂无数据",

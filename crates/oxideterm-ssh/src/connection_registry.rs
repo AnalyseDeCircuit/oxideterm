@@ -574,6 +574,14 @@ impl SshConnectionHandle {
         self.entry.remote_env()
     }
 
+    pub fn remote_env_detection_running(&self) -> bool {
+        self.entry.remote_env.read().is_none()
+            && self
+                .entry
+                .remote_env_detection_started
+                .load(Ordering::Acquire)
+    }
+
     pub fn set_remote_env(&self, env: RemoteEnvInfo) -> bool {
         self.entry.set_remote_env(env)
     }
@@ -1004,6 +1012,16 @@ impl SshConnectionRegistry {
             self.maybe_spawn_remote_env_detection(entry);
         }
         Some(first)
+    }
+
+    pub fn retry_remote_env_detection(&self, connection_id: &str) {
+        let Some(handle) = self.get(connection_id) else {
+            return;
+        };
+        // Preserve first-terminal output and single-channel connection isolation.
+        if handle.entry.first_visible_terminal_started() && !handle.entry.retire_when_unused {
+            self.maybe_spawn_remote_env_detection(handle.entry);
+        }
     }
 
     fn maybe_spawn_remote_env_detection(&self, entry: Arc<ConnectionEntry>) {
@@ -1783,31 +1801,84 @@ fn topology_consumer_summary(
 }
 
 async fn detect_remote_env_for_handle(handle: &SshConnectionHandle) -> RemoteEnvInfo {
-    tokio::time::timeout(REMOTE_ENV_TOTAL_TIMEOUT, detect_remote_env_inner(handle))
-        .await
-        .unwrap_or_else(|_| RemoteEnvInfo::unknown())
+    let env = tokio::time::timeout(
+        REMOTE_ENV_TOTAL_TIMEOUT,
+        detect_remote_env_inner(handle, None),
+    )
+    .await
+    .unwrap_or_else(|_| RemoteEnvInfo::unknown());
+    if !env.os_type.eq_ignore_ascii_case("unknown") {
+        return env;
+    }
+    // Some SSH servers allow shell requests but reject exec. Use a separate
+    // channel on the registry-owned transport, never the user's terminal stream.
+    let Ok(Ok(mut shell)) = tokio::time::timeout(
+        REMOTE_ENV_PHASE_A_TIMEOUT,
+        handle.open_persistent_shell_channel(""),
+    )
+    .await
+    else {
+        return env;
+    };
+    let detected = tokio::time::timeout(
+        REMOTE_ENV_TOTAL_TIMEOUT,
+        detect_remote_env_inner(handle, Some(&mut shell)),
+    )
+    .await
+    .unwrap_or_else(|_| RemoteEnvInfo::unknown());
+    // Retain the channel outside the timeout so cancellation still closes it.
+    let _ = tokio::time::timeout(REMOTE_ENV_PHASE_A_TIMEOUT, shell.close()).await;
+    detected
 }
 
-async fn detect_remote_env_inner(handle: &SshConnectionHandle) -> RemoteEnvInfo {
-    let phase_a_output = match handle
-        .run_command(
-            REMOTE_ENV_PHASE_A_CMD,
-            REMOTE_ENV_PHASE_A_TIMEOUT,
-            REMOTE_ENV_MAX_OUTPUT_SIZE,
-        )
-        .await
-    {
-        Ok(output) => output,
-        Err(_) => {
-            return handle
-                .run_command(
-                    REMOTE_ENV_PHASE_B_WINDOWS_CMD,
-                    REMOTE_ENV_PHASE_B_TIMEOUT,
+async fn run_remote_env_probe(
+    handle: &SshConnectionHandle,
+    shell: &mut Option<&mut crate::SshShellChannel>,
+    command: &str,
+    timeout: Duration,
+) -> Result<String, crate::SshTransportError> {
+    match shell.as_deref_mut() {
+        Some(shell) => {
+            shell
+                .sample_until(
+                    &format!("{command}\n"),
+                    "===END===",
+                    timeout,
                     REMOTE_ENV_MAX_OUTPUT_SIZE,
                 )
                 .await
-                .map(|output| parse_remote_windows_env(&output))
-                .unwrap_or_else(|_| RemoteEnvInfo::unknown());
+        }
+        None => {
+            handle
+                .run_command(command, timeout, REMOTE_ENV_MAX_OUTPUT_SIZE)
+                .await
+        }
+    }
+}
+
+async fn detect_remote_env_inner(
+    handle: &SshConnectionHandle,
+    mut shell: Option<&mut crate::SshShellChannel>,
+) -> RemoteEnvInfo {
+    let phase_a_output = match run_remote_env_probe(
+        handle,
+        &mut shell,
+        REMOTE_ENV_PHASE_A_CMD,
+        REMOTE_ENV_PHASE_A_TIMEOUT,
+    )
+    .await
+    {
+        Ok(output) => output,
+        Err(_) => {
+            return run_remote_env_probe(
+                handle,
+                &mut shell,
+                REMOTE_ENV_PHASE_B_WINDOWS_CMD,
+                REMOTE_ENV_PHASE_B_TIMEOUT,
+            )
+            .await
+            .map(|output| parse_remote_windows_env(&output))
+            .unwrap_or_else(|_| RemoteEnvInfo::unknown());
         }
     };
 
@@ -1822,13 +1893,13 @@ async fn detect_remote_env_inner(handle: &SshConnectionHandle) -> RemoteEnvInfo 
         REMOTE_ENV_PHASE_B_UNIX_CMD
     };
 
-    match handle
-        .run_command(
-            phase_b_command,
-            REMOTE_ENV_PHASE_B_TIMEOUT,
-            REMOTE_ENV_MAX_OUTPUT_SIZE,
-        )
-        .await
+    match run_remote_env_probe(
+        handle,
+        &mut shell,
+        phase_b_command,
+        REMOTE_ENV_PHASE_B_TIMEOUT,
+    )
+    .await
     {
         Ok(output) if is_windows => parse_remote_windows_env(&output),
         Ok(output) => parse_remote_unix_env(&output, &raw_platform),
@@ -2028,6 +2099,132 @@ impl Default for SshConnectionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn shell_only_server_environment_detection_keeps_sampling_on_separate_channels() {
+        use oxideterm_connection_monitor::ResourceSampler;
+        use russh::{Channel, ChannelId, server};
+        struct ShellOnlyPeer {
+            channels: HashMap<ChannelId, Channel<server::Msg>>,
+        }
+        impl server::Handler for ShellOnlyPeer {
+            type Error = russh::Error;
+            async fn auth_password(
+                &mut self,
+                _: &str,
+                _: &str,
+            ) -> Result<server::Auth, Self::Error> {
+                Ok(server::Auth::Accept)
+            }
+            async fn channel_open_session(
+                &mut self,
+                channel: Channel<server::Msg>,
+                reply: server::ChannelOpenHandle,
+                _: &mut server::Session,
+            ) -> Result<(), Self::Error> {
+                self.channels.insert(channel.id(), channel);
+                reply.accept().await;
+                Ok(())
+            }
+            async fn exec_request(
+                &mut self,
+                channel: ChannelId,
+                _: &[u8],
+                session: &mut server::Session,
+            ) -> Result<(), Self::Error> {
+                session.channel_failure(channel)?;
+                session.close(channel)
+            }
+            async fn shell_request(
+                &mut self,
+                channel: ChannelId,
+                session: &mut server::Session,
+            ) -> Result<(), Self::Error> {
+                session.channel_success(channel)
+            }
+            async fn data(
+                &mut self,
+                channel: ChannelId,
+                data: &[u8],
+                session: &mut server::Session,
+            ) -> Result<(), Self::Error> {
+                let command = std::str::from_utf8(data).unwrap();
+                let output = if command.contains("===DETECT===") {
+                    "===DETECT===\nPLATFORM=Linux\n===END===\n"
+                } else if command.contains("===ENV===") {
+                    "===ENV===\nLinux\n===ARCH===\nx86_64\n===KERNEL===\n6.8\n===SHELL===\n/bin/bash\n===HOME===\n/home/fixture\n===ZDOTDIR===\n===XDG_CONFIG_HOME===\n===DISTRO===\nPRETTY_NAME=Ubuntu\n===END===\n"
+                } else if command.contains("sample-ok") {
+                    "sample-ok\n===END===\n"
+                } else {
+                    ""
+                };
+                session.data(channel, output.as_bytes().to_vec())
+            }
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let key =
+            russh::keys::PrivateKey::random(&mut rand10::rng(), russh::keys::Algorithm::Ed25519)
+                .unwrap();
+        let fingerprint = key
+            .public_key()
+            .fingerprint(russh::keys::HashAlg::Sha256)
+            .to_string();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let session = server::run_stream(
+                Arc::new(server::Config {
+                    keys: vec![key],
+                    ..Default::default()
+                }),
+                stream,
+                ShellOnlyPeer {
+                    channels: HashMap::new(),
+                },
+            )
+            .await
+            .unwrap();
+            let _ = session.await;
+        });
+        let mut config = SshConfig::password("127.0.0.1", port, "fixture", "fixture-password");
+        config.trust_host_key = Some(false);
+        config.expected_host_key_fingerprint = Some(fingerprint);
+        let registry = SshConnectionRegistry::default();
+        let handle = crate::SshTransportClient::new(config)
+            .connect_node_with_registry(
+                registry.clone(),
+                ConnectionConsumer::NodeRouter("fixture".into()),
+            )
+            .await
+            .unwrap();
+        let env = detect_remote_env_for_handle(&handle).await;
+        assert_eq!(env.os_type, "Linux");
+        assert_eq!(env.arch.as_deref(), Some("x86_64"));
+        assert_eq!(env.shell.as_deref(), Some("/bin/bash"));
+        assert_eq!(env.home.as_deref(), Some("/home/fixture"));
+        let mut sample = handle.open_shell("", Duration::from_secs(2)).await.unwrap();
+        assert_eq!(
+            sample
+                .sample_until(
+                    "echo sample-ok; echo '===END==='\n",
+                    "===END===",
+                    Duration::from_secs(2),
+                    1024
+                )
+                .await
+                .unwrap(),
+            "sample-ok\n===END===\n"
+        );
+        sample.close().await.unwrap();
+        assert_eq!(
+            handle.info().consumers,
+            vec![ConnectionConsumer::NodeRouter("fixture".into())]
+        );
+        handle.clear_physical().await;
+        server.abort();
+        let _ = server.await;
+    }
+
     #[tokio::test]
     async fn audit_follows_shared_connection_after_terminal_release_and_new_connection() {
         use oxideterm_audit::*;
@@ -2279,8 +2476,10 @@ mod tests {
         );
 
         assert!(handle.entry.try_begin_remote_env_detection());
+        assert!(handle.remote_env_detection_running());
         assert!(!handle.set_remote_env(RemoteEnvInfo::unknown()));
         assert_eq!(handle.remote_env(), None);
+        assert!(!handle.remote_env_detection_running());
         assert!(handle.entry.try_begin_remote_env_detection());
     }
 

@@ -12,6 +12,9 @@
       "source": "資料來源"
     },
     "panel": {
+      "detecting_system": "正在辨識遠端系統…",
+      "system_unavailable": "無法辨識遠端系統。請確認已開啟該主機的終端機，且伺服器允許獨立 Shell 工作階段，再重新偵測。",
+      "sampling_failed": "無法取得主機指標。請檢查伺服器的 Shell 工作階段權限與取樣指令是否可用，再重新偵測。",
       "no_connection": "未選擇活動連線",
       "sampling": "採樣中...",
       "no_data": "暫無資料",

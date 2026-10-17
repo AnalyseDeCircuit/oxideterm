@@ -363,12 +363,17 @@ impl WorkspaceApp {
         tool: ContextSidebarTool,
         cx: &mut Context<Self>,
     ) {
+        if tool == ContextSidebarTool::Monitor {
+            self.host_tools.update(cx, |host_tools, cx| {
+                if let Some(connection_id) = host_tools.selected_connection_id_owned() {
+                    host_tools.request_profiler_refresh(connection_id, cx);
+                }
+            });
+            return;
+        }
         if matches!(
             tool,
-            ContextSidebarTool::Monitor
-                | ContextSidebarTool::Gpu
-                | ContextSidebarTool::Processes
-                | ContextSidebarTool::Docker
+            ContextSidebarTool::Gpu | ContextSidebarTool::Processes | ContextSidebarTool::Docker
         ) {
             return;
         }

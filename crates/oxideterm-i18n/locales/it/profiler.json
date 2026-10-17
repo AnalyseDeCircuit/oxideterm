@@ -12,6 +12,9 @@
       "source": "Fonte"
     },
     "panel": {
+      "detecting_system": "Rilevamento del sistema remoto…",
+      "system_unavailable": "Impossibile identificare il sistema remoto. Apri un terminale per questo host, verifica che il server consenta sessioni shell separate e riprova.",
+      "sampling_failed": "Impossibile raccogliere le metriche dell’host. Verifica i permessi delle sessioni shell e la disponibilità dei comandi di campionamento sul server, quindi riprova.",
       "no_connection": "Nessuna connessione attiva selezionata",
       "sampling": "Campionamento...",
       "no_data": "Nessun dato",

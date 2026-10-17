@@ -168,7 +168,7 @@ impl HostToolsEntity {
                 cx,
             ));
 
-        if disabled || (!is_running && metrics.is_none()) {
+        if disabled {
             return panel
                 .child(
                     div()
@@ -200,6 +200,51 @@ impl HostToolsEntity {
                         ))
                         // Settings persistence stays in the transient workspace-owned control.
                         .child(enable_control),
+                )
+                .into_any_element();
+        }
+
+        if !is_running && metrics.is_none() {
+            let detecting = self.remote_env_detection_running(selected_id);
+            let system_known = self
+                .connection_os_type(selected_id)
+                .is_some_and(|os| !os.eq_ignore_ascii_case("unknown"));
+            return panel
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap_3()
+                        .py_6()
+                        .px_4()
+                        .text_align(gpui::TextAlign::Center)
+                        .text_color(rgb(render.tokens.ui.text_muted))
+                        .child(div().text_size(px(12.0)).child(
+                            Self::render_monitor_text_with_role(
+                                render,
+                                SelectableTextRole::PlainDocument,
+                                "host-monitor-profiler",
+                                "environment",
+                                render.i18n.t(if detecting {
+                                    "profiler.panel.detecting_system"
+                                } else if system_known {
+                                    "profiler.panel.sampling_failed"
+                                } else {
+                                    "profiler.panel.system_unavailable"
+                                }),
+                                render.tokens.ui.text_muted,
+                                cx,
+                            ),
+                        ))
+                        .when(!detecting, |panel| {
+                            panel.child(self.render_retry_sampling_button(
+                                selected_id.to_string(),
+                                &render.tokens,
+                                &render.i18n,
+                                cx,
+                            ))
+                        }),
                 )
                 .into_any_element();
         }
@@ -266,6 +311,24 @@ impl HostToolsEntity {
             && (matches!(profiler_state, Some(ProfilerState::Degraded))
                 || matches!(metrics.source, MetricsSource::Unsupported));
         panel
+            .when(can_retry_sampling, |panel| {
+                panel.child(
+                    div()
+                        .px_4()
+                        .py_2()
+                        .text_size(px(12.0))
+                        .text_color(rgb(render.tokens.ui.text_muted))
+                        .child(Self::render_monitor_text_with_role(
+                            render,
+                            SelectableTextRole::PlainDocument,
+                            "host-monitor-profiler",
+                            "sampling-failed",
+                            render.i18n.t("profiler.panel.sampling_failed"),
+                            render.tokens.ui.text_muted,
+                            cx,
+                        )),
+                )
+            })
             .child(
                 div()
                     .id("host-tools-monitor-metrics-scroll")
