@@ -27,7 +27,7 @@
       "auto": "Ảnh: Tự động",
       "enabled": "Ảnh: Có hỗ trợ",
       "disabled": "Ảnh: Không hỗ trợ",
-      "model_unavailable": "Chưa rõ khả năng hỗ trợ ảnh hoặc mô hình không hỗ trợ. Chọn mô hình thị giác hoặc xác nhận hỗ trợ trong cài đặt ảnh.",
+      "model_unavailable": "Mô hình hiện tại không thể nhận ảnh. Hãy chuyển sang mô hình hỗ trợ ảnh.",
       "history_prompt": "{{model}} không thể đọc ảnh trước đó. Giữ ảnh trong cuộc trò chuyện và chỉ tiếp tục bằng văn bản?",
       "continue_text": "Chỉ tiếp tục bằng văn bản",
       "invalid": "Hỗ trợ PNG, JPEG, WebP, tối đa 10 MB và 40 triệu điểm ảnh mỗi ảnh. Cạnh dài được thu nhỏ còn tối đa 2000 px trước khi gửi.",

@@ -644,7 +644,7 @@ impl WorkspaceApp {
                 &stream_config.provider_type,
                 &stream_config.model,
                 stream_config.image_input,
-            ) != Some(true)
+            ) == Some(false)
         {
             self.push_ai_settings_toast(
                 self.i18n.t("ai.images.model_unavailable"),

@@ -449,10 +449,6 @@ impl AiWorkspaceEntity {
         &mut self.chat_ui.images
     }
 
-    pub(in crate::workspace) fn toggle_chat_image_settings(&mut self) {
-        self.chat_ui.image_settings_open = !self.chat_ui.image_settings_open;
-    }
-
     pub(in crate::workspace) fn set_chat_image_import(&mut self, task: Option<Task<()>>) {
         self.chat_ui.image_import = task;
     }
@@ -5064,7 +5060,6 @@ pub(super) struct AiChatWorkspaceState {
     pub(super) summarize_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) draft: String,
     pub(super) images: Vec<oxideterm_ai::AiImageAttachment>,
-    pub(super) image_settings_open: bool,
     pub(super) image_import: Option<Task<()>>,
     pub(super) image_preview: Option<(String, Arc<gpui::Image>)>,
     pub(super) image_preview_task: Option<Task<()>>,
@@ -5139,7 +5134,6 @@ impl AiChatWorkspaceState {
             summarize_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             draft: String::new(),
             images: Vec::new(),
-            image_settings_open: false,
             image_import: None,
             image_preview: None,
             image_preview_task: None,

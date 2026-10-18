@@ -567,6 +567,9 @@ impl WorkspaceApp {
         if previous_model.as_deref() != Some(model.as_str()) {
             self.update_ai_model_switch_warning(&provider_id, &model, cx);
         }
+        if !self.ai_entity.read(cx).chat_ui().images.is_empty() {
+            self.check_ai_image_input(cx);
+        }
         self.resume_ai_image_request_for_model(cx);
         self.close_ai_model_selector(cx);
         cx.notify();

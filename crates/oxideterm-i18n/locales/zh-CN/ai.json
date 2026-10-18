@@ -27,7 +27,7 @@
       "auto": "图片：自动判断",
       "enabled": "图片：支持",
       "disabled": "图片：不支持",
-      "model_unavailable": "此模型的图片能力未知或不可用。请更换视觉模型，或在图片设置中确认它支持图片。",
+      "model_unavailable": "当前模型无法接收图片，请切换到支持图片的模型。",
       "history_prompt": "{{model}} 无法读取历史图片。是否保留图片，只用文字继续对话？",
       "continue_text": "仅用文字继续",
       "invalid": "支持 PNG、JPEG、WebP，每张不超过 10 MB、4000 万像素。发送前会缩小至最长边 2000 像素。",

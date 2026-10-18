@@ -455,7 +455,7 @@ impl WorkspaceApp {
                 &config.provider_type,
                 &config.model,
                 config.image_input,
-            ) != Some(true)
+            ) == Some(false)
             && self
                 .ai_entity
                 .read(cx)

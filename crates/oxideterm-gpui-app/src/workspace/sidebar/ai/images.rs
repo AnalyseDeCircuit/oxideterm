@@ -75,35 +75,6 @@ impl WorkspaceApp {
             .unwrap_or(false)
     }
 
-    fn set_ai_image_model_setting(&mut self, setting: AiImageInput, cx: &mut Context<Self>) {
-        let Ok(config) = self.resolve_ai_stream_config(cx) else {
-            return;
-        };
-        let key = ai_image_model_key(
-            config.provider_id.as_deref().unwrap_or_default(),
-            &config.base_url,
-            &config.model,
-        );
-        self.edit_settings(
-            move |settings| {
-                let overrides = settings
-                    .ai
-                    .extra
-                    .entry("imageModelOverrides")
-                    .or_insert_with(|| serde_json::json!({}));
-                if let Some(overrides) = overrides.as_object_mut() {
-                    if setting == AiImageInput::Auto {
-                        overrides.remove(&key);
-                    } else {
-                        overrides.insert(key.clone(), serde_json::json!(setting));
-                    }
-                }
-            },
-            cx,
-        );
-        self.resume_ai_image_request_for_model(cx);
-    }
-
     fn resume_ai_image_request_for_model(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self
             .ai_entity
@@ -133,6 +104,9 @@ impl WorkspaceApp {
 
     fn select_ai_images(&mut self, cx: &mut Context<Self>) {
         if self.ai_entity.read(cx).chat_ui().image_import.is_some() {
+            return;
+        }
+        if !self.check_ai_image_input(cx) {
             return;
         }
         let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
@@ -201,8 +175,31 @@ impl WorkspaceApp {
         false
     }
 
+    fn check_ai_image_input(&mut self, cx: &mut Context<Self>) -> bool {
+        let error = match self.resolve_ai_stream_config(cx) {
+            Ok(config)
+                if config.execution_backend == AiExecutionBackend::Acp
+                    || oxideterm_ai::model_image_input(
+                        &config.provider_type,
+                        &config.model,
+                        config.image_input,
+                    ) != Some(false) =>
+            {
+                return true;
+            }
+            Ok(_) => self.i18n.t("ai.images.model_unavailable"),
+            Err(error) => error,
+        };
+        self.push_ai_settings_toast(error, TerminalNoticeVariant::Warning, cx);
+        cx.notify();
+        false
+    }
+
     fn import_ai_images(&mut self, sources: Vec<AiImageSource>, cx: &mut Context<Self>) {
         if sources.is_empty() || self.ai_entity.read(cx).chat_ui().image_import.is_some() {
+            return;
+        }
+        if !self.check_ai_image_input(cx) {
             return;
         }
         if sources.len() + self.ai_entity.read(cx).chat_ui().images.len()
@@ -239,6 +236,10 @@ impl WorkspaceApp {
                     .active_conversation_id
                     != conversation
                 {
+                    return;
+                }
+                // The selected model may change while image preparation runs.
+                if !this.check_ai_image_input(cx) {
                     return;
                 }
                 match result {
@@ -327,8 +328,12 @@ impl WorkspaceApp {
         draft: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut row = div().w_full().min_w_0().flex().flex_wrap().gap(px(8.0));
-        let config = self.resolve_ai_stream_config(cx).ok();
+        let mut row = div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .when(!draft, |row| row.flex_wrap())
+            .gap(px(8.0));
         for image in images {
             let thumbnail = {
                 let mut cache = self
@@ -368,83 +373,134 @@ impl WorkspaceApp {
                 image.name.clone()
             };
             let mut card = div()
+                .relative()
+                .flex_none()
                 .flex()
                 .flex_col()
                 .gap(px(3.0))
-                .w(px(if expanded { 280.0 } else { 112.0 }))
+                .w(px(if expanded {
+                    280.0
+                } else if draft {
+                    80.0
+                } else {
+                    112.0
+                }))
                 .max_w_full()
                 .child(
                     self.agent_control(
                         format!("ai-image-{}-{draft}", image.id),
                         title.clone(),
-                        div().w_full().child(
-                            gpui::img(preview.unwrap_or(thumbnail))
-                                .w_full()
-                                .h(px(if expanded { 280.0 } else { 80.0 }))
-                                .object_fit(gpui::ObjectFit::Contain),
-                        ),
+                        div()
+                            .w_full()
+                            .overflow_hidden()
+                            .rounded(px(self.tokens.radii.md))
+                            .child(
+                                gpui::img(preview.unwrap_or(thumbnail))
+                                    .w_full()
+                                    .h(px(if expanded { 280.0 } else { 80.0 }))
+                                    .object_fit(gpui::ObjectFit::Contain),
+                            ),
                         move |this, _, cx| this.preview_ai_image(image_copy.clone(), cx),
                         cx,
                     ),
-                )
-                .child(
-                    div()
-                        .truncate()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .child(title),
-                )
-                .child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(format!("{} × {}", image.width, image.height)),
                 );
-            if draft {
-                if let Some(config) = &config {
-                    let cost = oxideterm_ai::estimate_image_tokens(
-                        &config.provider_type,
-                        &config.model,
-                        image.width,
-                        image.height,
-                    );
-                    card = card.child(
+            if !draft {
+                card = card
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .child(title),
+                    )
+                    .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t(if cost.known_rule {
-                                        "ai.images.tokens"
-                                    } else {
-                                        "ai.images.tokens_uncertain"
-                                    })
-                                    .replace("{{count}}", &cost.tokens.to_string()),
-                            ),
+                            .child(format!("{} × {}", image.width, image.height)),
                     );
-                }
+            }
+            if draft {
                 let id = image.id.clone();
-                card = card.child(self.agent_button(
-                    format!("remove-ai-image-{id}"),
-                    self.i18n.t("ai.images.remove"),
-                    move |this, _, cx| {
-                        this.ai_entity.update(cx, |ai, _| {
-                            ai.chat_images_mut().retain(|image| image.id != id);
-                            ai.set_chat_image_preview(None);
-                        });
-                        cx.notify();
-                    },
-                    cx,
-                ));
+                let label = self.i18n.t("ai.images.remove");
+                let tokens = self.tokens;
+                let remove = self
+                    .agent_control(
+                        format!("remove-ai-image-{id}"),
+                        label.clone(),
+                        oxideterm_gpui_ui::button::icon_button(
+                            &self.tokens,
+                            Self::render_lucide_icon(LucideIcon::X, 12.0, rgb(self.tokens.ui.text)),
+                            IconButtonOptions {
+                                background: Some(rgb(self.tokens.ui.bg_panel)),
+                                ..IconButtonOptions::compact(20.0)
+                            },
+                        ),
+                        move |this, _, cx| {
+                            this.ai_entity.update(cx, |ai, _| {
+                                ai.chat_images_mut().retain(|image| image.id != id);
+                                ai.set_chat_image_preview(None);
+                            });
+                            cx.notify();
+                        },
+                        cx,
+                    )
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .tooltip(move |_, cx| {
+                        oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
+                    });
+                card = card.child(remove);
             }
             row = row.child(card);
         }
         row.into_any_element()
     }
 
-    fn render_ai_image_controls(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_ai_image_add_button(&self, enabled: bool, cx: &mut Context<Self>) -> AnyElement {
+        let importing = self.ai_entity.read(cx).chat_ui().image_import.is_some();
+        let label = self.i18n.t(if importing {
+            "ai.images.loading"
+        } else {
+            "ai.images.add"
+        });
+        let disabled = !enabled || importing;
+        let body = oxideterm_gpui_ui::button::icon_button(
+            &self.tokens,
+            Self::render_lucide_icon(
+                if importing {
+                    LucideIcon::LoaderCircle
+                } else {
+                    LucideIcon::Image
+                },
+                16.0,
+                rgb(self.tokens.ui.text_muted),
+            ),
+            IconButtonOptions {
+                disabled,
+                ..IconButtonOptions::compact(24.0)
+            },
+        );
+        let tokens = self.tokens;
+        self.agent_control(
+            "add-ai-image".into(),
+            label.clone(),
+            body,
+            move |this, _, cx| {
+                if !disabled {
+                    this.select_ai_images(cx);
+                }
+            },
+            cx,
+        )
+        .tooltip(move |_, cx| {
+            oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
+        })
+        .into_any_element()
+    }
+
+    fn render_ai_image_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ai = self.ai_entity.read(cx);
-        let importing = ai.chat_ui().image_import.is_some();
-        let settings_open = ai.chat_ui().image_settings_open;
         let pending = ai
             .conversation_state()
             .active_conversation_id
@@ -454,6 +510,10 @@ impl WorkspaceApp {
                     .get(id)
                     .map(|pending| (id.clone(), pending.config.model.clone()))
             });
+        let images = ai.chat_ui().images.clone();
+        if images.is_empty() && pending.is_none() {
+            return None;
+        }
         let mut column = div()
             .w_full()
             .min_w_0()
@@ -461,104 +521,16 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(6.0))
             .p(px(8.0));
-        let images = ai.chat_ui().images.clone();
         if !images.is_empty() {
             column = column.child(
                 div()
                     .id("ai-draft-images")
                     .max_h(px(220.0))
+                    .overflow_x_scroll()
                     .overflow_y_scroll()
                     .child(self.render_ai_images(&images, true, cx)),
             );
         }
-        let mut actions =
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(6.0))
-                .child(self.agent_button(
-                    "add-ai-image".into(),
-                    self.i18n.t(if importing {
-                        "ai.images.loading"
-                    } else {
-                        "ai.images.add"
-                    }),
-                    |this, _, cx| this.select_ai_images(cx),
-                    cx,
-                ));
-        if let Ok(config) = self.resolve_ai_stream_config(cx) {
-            if config.execution_backend != AiExecutionBackend::Acp {
-                actions = actions.child(self.agent_button(
-                    "ai-image-capability".into(),
-                    self.i18n.t("ai.images.settings"),
-                    |this, _, cx| {
-                        this.ai_entity
-                            .update(cx, |ai, _| ai.toggle_chat_image_settings());
-                        cx.notify();
-                    },
-                    cx,
-                ));
-                if settings_open {
-                    let mut options = div().flex().flex_wrap().gap(px(4.0));
-                    for (setting, key) in [
-                        (AiImageInput::Auto, "ai.images.auto"),
-                        (AiImageInput::Enabled, "ai.images.enabled"),
-                        (AiImageInput::Disabled, "ai.images.disabled"),
-                    ] {
-                        let label = self.i18n.t(key);
-                        let body = oxideterm_gpui_ui::button::button_with(
-                            &self.tokens,
-                            label.clone(),
-                            ButtonOptions {
-                                variant: if config.image_input == setting {
-                                    ButtonVariant::Default
-                                } else {
-                                    ButtonVariant::Ghost
-                                },
-                                size: ButtonSize::Sm,
-                                ..Default::default()
-                            },
-                        );
-                        options = options.child(self.agent_control(
-                            key.into(),
-                            label,
-                            body,
-                            move |this, _, cx| this.set_ai_image_model_setting(setting, cx),
-                            cx,
-                        ));
-                    }
-                    column = column
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .child(config.model.clone()),
-                        )
-                        .child(options)
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(self.i18n.t("ai.images.invalid")),
-                        );
-                }
-                if !images.is_empty()
-                    && oxideterm_ai::model_image_input(
-                        &config.provider_type,
-                        &config.model,
-                        config.image_input,
-                    ) != Some(true)
-                {
-                    column = column.child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.warning))
-                            .child(self.i18n.t("ai.images.model_unavailable")),
-                    );
-                }
-            }
-        }
-        column = column.child(actions);
         if let Some((id, model)) = pending {
             column = column
                 .child(
@@ -617,6 +589,6 @@ impl WorkspaceApp {
                     cx,
                 ));
         }
-        column.into_any_element()
+        Some(column.into_any_element())
     }
 }

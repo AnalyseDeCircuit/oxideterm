@@ -198,6 +198,78 @@ fn mimo_preset_discovers_chat_models_and_budgets_images() {
     );
 }
 
+#[tokio::test]
+async fn unknown_image_model_reaches_the_provider_with_its_attachment() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut config = test_stream_config("openai_compatible");
+    config.model = "custom-vision-model".into();
+    config.base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut headers = Vec::new();
+        while !headers.ends_with(b"\r\n\r\n") {
+            headers.push(socket.read_u8().await.unwrap());
+        }
+        let headers = String::from_utf8(headers).unwrap();
+        assert!(headers.starts_with("POST /v1/chat/completions HTTP/1.1"));
+        let length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("content-length")
+                    .then(|| value.trim().parse::<usize>().unwrap())
+            })
+            .unwrap();
+        let mut body = vec![0; length];
+        socket.read_exact(&mut body).await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["model"], "custom-vision-model");
+        assert_eq!(
+            body["messages"][0]["content"],
+            serde_json::json!([
+                {"type":"image_url", "image_url":{"url":"data:image/png;base64,cGl4ZWw="}}
+            ])
+        );
+        let response = r#"{"choices":[{"message":{"role":"assistant","content":"Image received"},"finish_reason":"stop"}]}"#;
+        socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).as_bytes()).await.unwrap();
+    });
+    let mut message = chat_message("image", AiChatRole::User, "");
+    set_message_images(
+        &mut message,
+        vec![
+            AiImageAttachment::new(
+                "screen.png".into(),
+                "image/png".into(),
+                32,
+                32,
+                b"pixel",
+                b"thumb",
+            )
+            .unwrap(),
+        ],
+    );
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        stream_chat_completion(config, vec![message], tx),
+    )
+    .await
+    .unwrap();
+    let mut events = Vec::new();
+    while let Some(event) = rx.recv().await {
+        events.push(event);
+    }
+    assert_eq!(
+        events,
+        vec![
+            AiStreamEvent::Content("Image received".into()),
+            AiStreamEvent::Done
+        ]
+    );
+    server.await.unwrap();
+}
+
 #[test]
 fn image_input_serializes_across_all_completion_protocols_and_keeps_image_only_turns() {
     use serde_json::json;
@@ -217,6 +289,7 @@ fn image_input_serializes_across_all_completion_protocols_and_keeps_image_only_t
     for provider in [
         "openai",
         "openai_compatible",
+        "deepseek",
         "ollama",
         "kimi",
         "glm",
@@ -2248,6 +2321,11 @@ fn deepseek_flash_template_has_current_name_and_capabilities() {
         "deepseek-v4-flash-vision-exp",
     ] {
         assert_eq!(
+            model_image_input("deepseek", model, AiImageInput::Auto),
+            Some(true),
+            "{model}"
+        );
+        assert_eq!(
             model_context_window(
                 model,
                 &serde_json::Map::new(),
@@ -2257,6 +2335,10 @@ fn deepseek_flash_template_has_current_name_and_capabilities() {
             1_048_576
         );
     }
+    assert_eq!(
+        model_image_input("deepseek", "deepseek-v4-pro", AiImageInput::Auto),
+        Some(false)
+    );
     let capability = model_reasoning_capability("deepseek", "deepseek-flash");
     assert!(capability.known_model);
     assert_eq!(

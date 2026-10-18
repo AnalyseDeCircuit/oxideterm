@@ -27,7 +27,7 @@
       "auto": "Immagini: Automatico",
       "enabled": "Immagini: Supportate",
       "disabled": "Immagini: Non supportate",
-      "model_unavailable": "Il supporto delle immagini è sconosciuto o non disponibile. Scegli un modello visivo o conferma il supporto nelle impostazioni delle immagini.",
+      "model_unavailable": "Questo modello non può ricevere immagini. Passa a un modello che le supporta.",
       "history_prompt": "{{model}} non può leggere le immagini precedenti. Conservarle nella conversazione e continuare solo con il testo?",
       "continue_text": "Continua solo con il testo",
       "invalid": "PNG, JPEG o WebP, fino a 10 MB e 40 megapixel. Il lato più lungo viene ridotto a 2000 px prima dell’invio.",

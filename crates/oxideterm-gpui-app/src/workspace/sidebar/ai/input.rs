@@ -64,7 +64,7 @@ impl WorkspaceApp {
         let images_allowed = self.ai_entity.read(cx).chat_ui().images.is_empty()
             || self.resolve_ai_stream_config(cx).is_ok_and(|config| {
                 config.execution_backend == AiExecutionBackend::Acp
-                    || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) == Some(true)
+                    || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) != Some(false)
             });
         let send_disabled = !enabled || !model_selected || !images_allowed
             || self.ai_entity.read(cx).chat_ui().image_import.is_some()
@@ -87,7 +87,7 @@ impl WorkspaceApp {
         );
         let focused = self.ai_entity.read(cx).chat_ui().input_focused;
         let frame = ai_chat_input_frame(&self.tokens, focused)
-            .child(self.render_ai_image_controls(cx))
+            .children(self.render_ai_image_controls(cx))
             .child(ai_chat_input_editor(&self.tokens, input));
         let footer_leading = if self.ai_entity.read(cx).chat_is_loading() {
             div()
@@ -116,6 +116,13 @@ impl WorkspaceApp {
             self.render_ai_context_usage_indicator(cx)
                 .into_any_element()
         };
+        let footer_leading = div()
+            .flex()
+            .min_w_0()
+            .items_center()
+            .gap(px(6.0))
+            .child(self.render_ai_image_add_button(enabled, cx))
+            .child(footer_leading);
         let footer_trailing = div()
             .min_w_0()
             .flex_1()

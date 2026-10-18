@@ -27,7 +27,7 @@
       "auto": "Bilder: Automatisch",
       "enabled": "Bilder: Unterstützt",
       "disabled": "Bilder: Nicht unterstützt",
-      "model_unavailable": "Bildunterstützung ist unbekannt oder nicht verfügbar. Wähle ein Bildmodell oder bestätige die Unterstützung in den Bildeinstellungen.",
+      "model_unavailable": "Dieses Modell kann keine Bilder empfangen. Wechsle zu einem Modell mit Bildunterstützung.",
       "history_prompt": "{{model}} kann frühere Bilder nicht lesen. Bilder im Verlauf behalten und nur mit Text fortfahren?",
       "continue_text": "Nur mit Text fortfahren",
       "invalid": "PNG, JPEG oder WebP, höchstens 10 MB und 40 Megapixel. Vor dem Senden auf maximal 2000 px Kantenlänge verkleinert.",

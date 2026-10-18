@@ -27,7 +27,7 @@
       "auto": "Images: Auto",
       "enabled": "Images: Supported",
       "disabled": "Images: Unsupported",
-      "model_unavailable": "This model’s image support is unavailable or unknown. Choose a vision model, or confirm support in image settings.",
+      "model_unavailable": "Images are unavailable for this model. Switch to a model that supports images.",
       "history_prompt": "{{model}} cannot read these historical images. Keep them in the conversation and continue with text only?",
       "continue_text": "Continue with text only",
       "invalid": "Use PNG, JPEG or WebP, up to 10 MB and 40 megapixels. Images are resized to 2000 px before sending.",

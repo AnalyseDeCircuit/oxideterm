@@ -253,6 +253,7 @@ pub enum AiImageInput {
 }
 
 /// Explicit configuration applies to the endpoint's model, not the provider brand.
+/// None means unknown, not unsupported; callers must not reject it as text-only.
 pub fn model_image_input(provider: &str, model: &str, setting: AiImageInput) -> Option<bool> {
     match setting {
         AiImageInput::Enabled => return Some(true),
@@ -293,7 +294,20 @@ pub fn model_image_input(provider: &str, model: &str, setting: AiImageInput) -> 
         }
         "gemini" if model.starts_with("gemini-") => Some(true),
         "openai" if model.starts_with("gpt-3.5") => Some(false),
-        "deepseek" if matches!(model.as_str(), "deepseek-chat" | "deepseek-reasoner") => {
+        "deepseek"
+            if matches!(
+                model.as_str(),
+                "deepseek-flash" | "deepseek-v4-flash" | "deepseek-v4-flash-vision-exp"
+            ) =>
+        {
+            Some(true)
+        }
+        "deepseek"
+            if matches!(
+                model.as_str(),
+                "deepseek-chat" | "deepseek-reasoner" | "deepseek-v4-pro"
+            ) =>
+        {
             Some(false)
         }
         "kimi" if model == "kimi-k2.5" => Some(true),

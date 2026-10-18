@@ -27,7 +27,7 @@
       "auto": "Imágenes: Automático",
       "enabled": "Imágenes: Compatible",
       "disabled": "Imágenes: No compatible",
-      "model_unavailable": "La compatibilidad con imágenes es desconocida o no está disponible. Elige un modelo visual o confirma la compatibilidad en los ajustes de imágenes.",
+      "model_unavailable": "Este modelo no puede recibir imágenes. Cambia a un modelo que las admita.",
       "history_prompt": "{{model}} no puede leer las imágenes anteriores. ¿Conservarlas en la conversación y continuar solo con texto?",
       "continue_text": "Continuar solo con texto",
       "invalid": "PNG, JPEG o WebP, hasta 10 MB y 40 megapíxeles. Se reducen a un lado máximo de 2000 px antes de enviarlas.",

@@ -54,7 +54,7 @@ pub async fn stream_chat_completion(
         .iter()
         .any(|message| !crate::message_images(message).is_empty())
         && crate::model_image_input(&config.provider_type, &config.model, config.image_input)
-            != Some(true)
+            == Some(false)
     {
         let _ = events.send(AiStreamEvent::Error("ai_image_model_unsupported".into()));
         return;
