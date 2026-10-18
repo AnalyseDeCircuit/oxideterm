@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "Aktive Weiterleitungen",
+      "title": "Portweiterleitungen",
       "type": "Typ",
       "local_address": "Lokale Adresse",
       "remote_address": "Remote-Adresse",
       "status": "Status",
       "actions": "Aktionen",
-      "no_forwards": "Keine aktiven Portweiterleitungen"
+      "no_forwards": "Keine Portweiterleitungsregeln"
     },
     "type": {
       "local": "lokal",
@@ -50,6 +50,7 @@
       "cancel": "Abbrechen",
       "type": "Typ",
       "create_forward": "Weiterleitung erstellen",
+      "save_and_start": "Speichern und starten",
       "creating": "Wird erstellt...",
       "save_changes": "Änderungen speichern",
       "saving": "Wird gespeichert...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "Weitergeleitet"
     },
     "messages": {
-      "node_not_ready": "Öffnen Sie ein aktives SSH-Terminal für diesen Knoten, bevor Sie Weiterleitungen verwalten.",
+      "node_not_ready": "Die SSH-Verbindung konnte nicht gestartet werden. Verbinden Sie diesen Server und versuchen Sie es erneut.",
       "connection_not_ready": "SSH-Verbindung ist noch nicht bereit.",
       "created": "Weiterleitung erstellt",
       "updated": "Weiterleitung aktualisiert",

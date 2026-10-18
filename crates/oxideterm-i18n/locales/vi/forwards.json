@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "Chuyển tiếp đang hoạt động",
+      "title": "Chuyển tiếp cổng",
       "type": "Loại",
       "local_address": "Địa chỉ cục bộ",
       "remote_address": "Địa chỉ từ xa",
       "status": "Trạng thái",
       "actions": "Thao tác",
-      "no_forwards": "Không có chuyển tiếp cổng hoạt động"
+      "no_forwards": "Chưa có quy tắc chuyển tiếp cổng"
     },
     "type": {
       "local": "cục bộ",
@@ -50,6 +50,7 @@
       "cancel": "Hủy",
       "type": "Loại",
       "create_forward": "Tạo chuyển tiếp",
+      "save_and_start": "Lưu và khởi chạy",
       "creating": "Đang tạo...",
       "save_changes": "Lưu thay đổi",
       "saving": "Đang lưu...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "Đã chuyển tiếp"
     },
     "messages": {
-      "node_not_ready": "Mở một terminal SSH đang hoạt động cho nút này trước khi quản lý chuyển tiếp.",
+      "node_not_ready": "Không thể bắt đầu kết nối SSH. Hãy kết nối với máy chủ này rồi thử lại.",
       "connection_not_ready": "Kết nối SSH chưa sẵn sàng.",
       "created": "Đã tạo chuyển tiếp",
       "updated": "Đã cập nhật chuyển tiếp",

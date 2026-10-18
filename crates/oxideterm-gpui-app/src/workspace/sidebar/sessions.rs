@@ -2155,7 +2155,7 @@ impl WorkspaceApp {
             } else if matches!(node_view.status(), ActiveSessionStatus::Error) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    let saved_connection_id = row.saved_connection_id;
+                    let saved_connection_id = row.saved_connection_id.clone();
                     move |this, _event, window, cx| {
                         if let Some(saved_connection_id) = saved_connection_id.as_deref() {
                             this.open_saved_connection_reconnect_editor(
@@ -2180,6 +2180,28 @@ impl WorkspaceApp {
                     cx,
                 ));
             }
+        }
+
+        if self.disclosure_motions.retained(&motion_key, expanded)
+            && row.saved_connection_id.is_some()
+            && !matches!(
+                node_view.status(),
+                ActiveSessionStatus::Active | ActiveSessionStatus::Connected
+            )
+        {
+            let forward_node = node_id.clone();
+            children.push(self.render_session_action_item(
+                node_depth + 1,
+                false,
+                LucideIcon::ArrowLeftRight,
+                self.i18n.t("sessions.tree.actions.port_forwarding"),
+                SessionActionVariant::Primary,
+                cx.listener(move |this, _, window, cx| {
+                    this.open_forwards_tab(forward_node.clone(), window, cx);
+                    cx.stop_propagation();
+                }),
+                cx,
+            ));
         }
 
         if self.disclosure_motions.retained(&motion_key, expanded) {

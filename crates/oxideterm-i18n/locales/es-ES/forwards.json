@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "Reenvíos activos",
+      "title": "Reenvío de puertos",
       "type": "Tipo",
       "local_address": "Dirección local",
       "remote_address": "Dirección remota",
       "status": "Estado",
       "actions": "Acciones",
-      "no_forwards": "No hay reenvíos de puertos activos"
+      "no_forwards": "No hay reglas de reenvío de puertos"
     },
     "type": {
       "local": "Local",
@@ -50,6 +50,7 @@
       "cancel": "Cancelar",
       "type": "Tipo",
       "create_forward": "Crear reenvío",
+      "save_and_start": "Guardar e iniciar",
       "creating": "Creando...",
       "save_changes": "Guardar cambios",
       "saving": "Guardando...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "Reenviado"
     },
     "messages": {
-      "node_not_ready": "Abra una terminal SSH activa para este nodo antes de administrar reenvíos.",
+      "node_not_ready": "No se pudo iniciar la conexión SSH. Conéctese a este servidor e inténtelo de nuevo.",
       "connection_not_ready": "La conexión SSH aún no está lista.",
       "created": "Reenvío creado",
       "updated": "Reenvío actualizado",

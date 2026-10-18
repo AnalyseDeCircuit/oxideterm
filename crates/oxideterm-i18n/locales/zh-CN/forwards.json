@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "活动转发",
+      "title": "端口转发",
       "type": "类型",
       "local_address": "本地地址",
       "remote_address": "远程地址",
       "status": "状态",
       "actions": "操作",
-      "no_forwards": "无活动端口转发"
+      "no_forwards": "暂无端口转发规则"
     },
     "type": {
       "local": "本地",
@@ -50,6 +50,7 @@
       "cancel": "取消",
       "type": "类型",
       "create_forward": "创建转发",
+      "save_and_start": "保存并启动",
       "creating": "创建中...",
       "save_changes": "保存更改",
       "saving": "保存中...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "已转发"
     },
     "messages": {
-      "node_not_ready": "请先为此节点打开一个活动 SSH 终端，再管理端口转发。",
+      "node_not_ready": "无法启动 SSH 连接，请连接此服务器后重试。",
       "connection_not_ready": "SSH 连接尚未就绪。",
       "created": "转发已创建",
       "updated": "转发已更新",

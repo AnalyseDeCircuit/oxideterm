@@ -1,17 +1,17 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use oxideterm_forwarding::{ForwardRule, ForwardStatus, ForwardType, ForwardingRegistry};
+use oxideterm_forwarding::{ForwardRule, ForwardStatus, ForwardType, ForwardingManager};
 use oxideterm_ssh::{ConnectionConsumer, NodeRouter, PhaseResult, ReconnectForwardRule};
+use std::sync::Arc;
 
 pub(in crate::workspace) async fn cleanup_reconnect_created_forwards(
-    forwarding_registry: &ForwardingRegistry,
-    created_forwards: &[(String, String)],
+    created_forwards: &[(Arc<ForwardingManager>, String)],
 ) {
-    for (session_id, rule_id) in created_forwards {
-        if let Some(manager) = forwarding_registry.get(session_id) {
-            let _ = manager.delete_forward(rule_id).await;
-        }
+    // Cleanup belongs to the exact manager that created the listener, not a
+    // replacement manager which may now contain the same durable rule ID.
+    for (manager, rule_id) in created_forwards {
+        let _ = manager.delete_forward(rule_id).await;
     }
 }
 
@@ -62,7 +62,7 @@ pub(in crate::workspace) fn forward_rule_from_reconnect_snapshot(
         },
         _ => return None,
     };
-    // Reconnect allocates a fresh forward id and starts a new runtime rule.
+    restored.id = rule.id.clone();
     restored.description = rule.description.clone();
     restored.status = ForwardStatus::Starting;
     Some(restored)
@@ -175,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn restore_allocates_fresh_starting_rule() {
+    fn restore_preserves_rule_identity_and_restarts_runtime() {
         let snapshot = ReconnectForwardRule {
             id: "old-forward-id".to_string(),
             forward_type: "dynamic".to_string(),
@@ -190,7 +190,7 @@ mod tests {
         let restored = forward_rule_from_reconnect_snapshot(&snapshot)
             .expect("dynamic snapshot should restore");
 
-        assert_ne!(restored.id, snapshot.id);
+        assert_eq!(restored.id, "old-forward-id");
         assert_eq!(restored.status, ForwardStatus::Starting);
         assert_eq!(restored.target_host, "0.0.0.0");
         assert_eq!(restored.target_port, 0);

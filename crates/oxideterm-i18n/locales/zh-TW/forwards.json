@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "使用中的轉發",
+      "title": "連接埠轉發",
       "type": "類型",
       "local_address": "本機位址",
       "remote_address": "遠端位址",
       "status": "狀態",
       "actions": "操作",
-      "no_forwards": "沒有使用中的連接埠轉發"
+      "no_forwards": "尚無連接埠轉發規則"
     },
     "type": {
       "local": "本機",
@@ -50,6 +50,7 @@
       "cancel": "取消",
       "type": "類型",
       "create_forward": "建立轉發",
+      "save_and_start": "儲存並啟動",
       "creating": "建立中...",
       "save_changes": "儲存變更",
       "saving": "儲存中...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "已轉發"
     },
     "messages": {
-      "node_not_ready": "請先為此節點開啟一個使用中的 SSH 終端機，再管理連接埠轉發。",
+      "node_not_ready": "無法啟動 SSH 連線，請連線至此伺服器後重試。",
       "connection_not_ready": "SSH 連線尚未就緒。",
       "created": "轉發已建立",
       "updated": "轉發已更新",

@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "Inoltri Attivi",
+      "title": "Inoltro porte",
       "type": "Tipo",
       "local_address": "Indirizzo Locale",
       "remote_address": "Indirizzo Remoto",
       "status": "Stato",
       "actions": "Azioni",
-      "no_forwards": "Nessun inoltro porta attivo"
+      "no_forwards": "Nessuna regola di inoltro porte"
     },
     "type": {
       "local": "locale",
@@ -50,6 +50,7 @@
       "cancel": "Annulla",
       "type": "Tipo",
       "create_forward": "Crea Inoltro",
+      "save_and_start": "Salva e avvia",
       "creating": "Creazione...",
       "save_changes": "Salva Modifiche",
       "saving": "Salvataggio...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "Inoltrata"
     },
     "messages": {
-      "node_not_ready": "Apri un terminale SSH attivo per questo nodo prima di gestire gli inoltri.",
+      "node_not_ready": "Impossibile avviare la connessione SSH. Connettiti a questo server e riprova.",
       "connection_not_ready": "La connessione SSH non è ancora pronta.",
       "created": "Inoltro creato",
       "updated": "Inoltro aggiornato",

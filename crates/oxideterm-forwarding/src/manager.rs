@@ -333,6 +333,13 @@ impl ForwardingManager {
                 self.emit_status_changed(&stopped.id, stopped.status.clone(), None);
                 return Ok(stopped);
             }
+            if let Some(mut rule) = self.stopped_forwards.get_mut(rule_id) {
+                rule.status = ForwardStatus::Stopped;
+                let stopped = rule.clone();
+                drop(rule);
+                self.emit_status_changed(rule_id, ForwardStatus::Stopped, None);
+                return Ok(stopped);
+            }
             Err(ForwardingError::NotFound(rule_id.to_string()))
         }
         .await;
@@ -819,7 +826,10 @@ impl ForwardingManager {
         let rules = self.list_stopped_forwards();
         let mut restored = Vec::with_capacity(rules.len());
 
-        for rule in rules {
+        for rule in rules
+            .into_iter()
+            .filter(|rule| rule.status == ForwardStatus::Suspended)
+        {
             self.stopped_forwards.remove(&rule.id);
             let mut restarting = rule;
             restarting.status = ForwardStatus::Starting;
@@ -852,7 +862,7 @@ impl ForwardingManager {
         StdTcpListener::bind((bind_address, bind_port)).is_ok()
     }
 
-    fn has_rule(&self, rule_id: &str) -> bool {
+    pub fn has_rule(&self, rule_id: &str) -> bool {
         self.local_forwards.contains_key(rule_id)
             || self.dynamic_forwards.contains_key(rule_id)
             || self.remote_forwards.contains_key(rule_id)

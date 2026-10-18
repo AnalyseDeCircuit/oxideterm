@@ -79,6 +79,7 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
         node_id: NodeId,
+        start: bool,
         cx: &mut Context<Self>,
     ) {
         let (
@@ -124,12 +125,28 @@ impl WorkspaceApp {
             },
         };
         let check_health = !skip_health_check;
+        let can_save = self
+            .ssh_nodes
+            .get(&node_id)
+            .is_some_and(|node| node.saved_connection_id.is_some());
+        let operation = if can_save {
+            self.forwarding.update(cx, |forwarding, _| {
+                forwarding.view.start_after_save =
+                    start.then(|| ForwardingRuntimeOperation::Create {
+                        rule: rule.clone(),
+                        check_health,
+                    });
+            });
+            ForwardingRuntimeOperation::Save { rule }
+        } else {
+            ForwardingRuntimeOperation::Create { rule, check_health }
+        };
         self.start_forward_operation(
             tab_id,
             node_id,
             "forwards.messages.created",
             true,
-            ForwardingRuntimeOperation::Create { rule, check_health },
+            operation,
             cx,
         );
     }
@@ -275,10 +292,27 @@ impl WorkspaceApp {
         operation: ForwardingRuntimeOperation,
         cx: &mut Context<Self>,
     ) {
-        // Tauri gates ForwardsView work on nodeReady and its node_forwarding
-        // commands require an existing forwarding manager; opening this surface
-        // must not become an implicit SSH connect action.
-        if !self.node_is_ready_for_forwarding(&node_id) {
+        if self.forwarding.read(cx).view().pending {
+            return;
+        }
+        let needs_connection = matches!(
+            operation,
+            ForwardingRuntimeOperation::Create { .. }
+                | ForwardingRuntimeOperation::Restart { .. }
+                | ForwardingRuntimeOperation::Quick { .. }
+        );
+        if needs_connection && !self.node_is_ready_for_forwarding(&node_id) {
+            // Only an explicit start requests SSH. Authentication and jump-host
+            // handling stay with the existing connection flow; no shell is opened.
+            if self.ensure_node_connection_started(&node_id, cx) {
+                self.forwarding.update(cx, |forwarding, _| {
+                    forwarding.begin_operation();
+                    forwarding.view.pending_start =
+                        Some((message_key, sync_saved_forwards_on_success, operation));
+                });
+                cx.notify();
+                return;
+            }
             let error = self.i18n.t("forwards.messages.node_not_ready");
             self.forwarding
                 .update(cx, |forwarding, _cx| forwarding.set_error(error));
@@ -300,6 +334,55 @@ impl WorkspaceApp {
             );
         });
         cx.notify();
+    }
+
+    pub(in crate::workspace) fn resume_forward_starts(
+        &mut self,
+        node_id: &NodeId,
+        state: &NodeReadiness,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(
+            state,
+            NodeReadiness::Ready | NodeReadiness::Error | NodeReadiness::Disconnected
+        ) {
+            return;
+        }
+        let tabs = self
+            .forwarding
+            .read(cx)
+            .tab_node_mappings()
+            .iter()
+            .filter(|(_, node)| *node == node_id)
+            .map(|(tab, _)| *tab)
+            .collect::<Vec<_>>();
+        for tab_id in tabs {
+            let _scope = self.enter_forwarding_page(tab_id, cx);
+            let pending = self.forwarding.update(cx, |forwarding, _| {
+                let pending = forwarding.view.pending_start.take();
+                if pending.is_some() {
+                    forwarding.finish_operation();
+                }
+                forwarding.refresh_runtime_snapshot(node_id);
+                pending
+            });
+            if let Some((message, sync, operation)) = pending {
+                if *state == NodeReadiness::Ready {
+                    self.start_forward_operation(
+                        tab_id,
+                        node_id.clone(),
+                        message,
+                        sync,
+                        operation,
+                        cx,
+                    );
+                } else {
+                    let error = self.i18n.t("forwards.messages.connection_not_ready");
+                    self.forwarding
+                        .update(cx, |forwarding, _| forwarding.set_error(error));
+                }
+            }
+        }
     }
 
     pub(super) fn start_port_profiler_for_node(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
@@ -521,8 +604,31 @@ impl WorkspaceApp {
                                 });
                                 changed = true;
                             }
+                            if live_page {
+                                let start = self.forwarding.update(cx, |forwarding, _| {
+                                    forwarding.view.start_after_save.take()
+                                });
+                                if let Some(operation) = start
+                                    && let Some(node) =
+                                        self.forwarding.read(cx).node_for_tab(tab_id)
+                                {
+                                    self.start_forward_operation(
+                                        tab_id,
+                                        node,
+                                        "forwards.messages.created",
+                                        true,
+                                        operation,
+                                        cx,
+                                    );
+                                }
+                            }
                         }
                         Err(error) => {
+                            if live_page {
+                                self.forwarding.update(cx, |forwarding, _| {
+                                    forwarding.view.start_after_save = None;
+                                });
+                            }
                             if self.forwards_tab_is_visible(tab_id, cx) {
                                 self.forwarding.update(cx, |forwarding, _cx| {
                                     forwarding.set_error(error);

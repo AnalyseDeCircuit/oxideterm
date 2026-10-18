@@ -34,6 +34,45 @@ use zeroize::Zeroizing;
 
 struct AuditKeys;
 
+#[tokio::test]
+async fn reconnect_restores_suspended_but_not_manually_stopped_rules() {
+    let ssh = start_forwarding_ssh_server().await;
+    let handle = connect_test_client(&ssh).await;
+    let manager = ForwardingManager::new("stop-reconnect", handle.clone());
+    let stopped = manager
+        .create_forward(ForwardRule::local("127.0.0.1", 0, "localhost", 80))
+        .await
+        .unwrap();
+    let running = manager
+        .create_forward(ForwardRule::local("127.0.0.1", 0, "localhost", 443))
+        .await
+        .unwrap();
+    manager.stop_forward(&stopped.id).await.unwrap();
+    manager.suspend_all_and_save_rules().await;
+    let restored = manager.restore_saved_forwards(handle).await;
+    assert_eq!(
+        restored
+            .into_iter()
+            .map(|result| result.unwrap().id)
+            .collect::<Vec<_>>(),
+        vec![running.id.clone()]
+    );
+    let states = manager
+        .list_forwards()
+        .into_iter()
+        .map(|rule| (rule.id, rule.status))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(
+        states[&stopped.id],
+        oxideterm_forwarding::ForwardStatus::Stopped
+    );
+    assert_eq!(
+        states[&running.id],
+        oxideterm_forwarding::ForwardStatus::Active
+    );
+    manager.stop_all().await;
+}
+
 impl AuditKeyProvider for AuditKeys {
     fn load(&self, _: &str) -> Result<Zeroizing<Vec<u8>>, AuditError> {
         Ok(Zeroizing::new(vec![7; 32]))

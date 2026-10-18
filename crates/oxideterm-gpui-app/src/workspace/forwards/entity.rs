@@ -35,7 +35,7 @@ pub(in crate::workspace) enum ForwardingDeliveryIntent {
         restored: u32,
         detail: String,
         job_id: String,
-        created_forwards: Vec<(String, String)>,
+        created_forwards: Vec<(Arc<ForwardingManager>, String)>,
         bindings: Vec<(String, String, ConnectionConsumer)>,
     },
     Runtime(ForwardEvent),

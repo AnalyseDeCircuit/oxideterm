@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "활성 포워딩",
+      "title": "포트 포워딩",
       "type": "유형",
       "local_address": "로컬 주소",
       "remote_address": "원격 주소",
       "status": "상태",
       "actions": "작업",
-      "no_forwards": "활성 포트 포워딩 없음"
+      "no_forwards": "포트 포워딩 규칙이 없습니다"
     },
     "type": {
       "local": "로컬",
@@ -50,6 +50,7 @@
       "cancel": "취소",
       "type": "유형",
       "create_forward": "포워딩 생성",
+      "save_and_start": "저장 후 시작",
       "creating": "생성 중...",
       "save_changes": "변경 사항 저장",
       "saving": "저장 중...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "포워딩됨"
     },
     "messages": {
-      "node_not_ready": "포워딩을 관리하기 전에 이 노드의 활성 SSH 터미널을 여세요.",
+      "node_not_ready": "SSH 연결을 시작할 수 없습니다. 이 서버에 연결한 후 다시 시도하세요.",
       "connection_not_ready": "SSH 연결이 아직 준비되지 않았습니다.",
       "created": "포워딩이 생성되었습니다",
       "updated": "포워딩이 업데이트되었습니다",

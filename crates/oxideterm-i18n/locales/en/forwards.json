@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "Active Forwards",
+      "title": "Port Forwards",
       "type": "Type",
       "local_address": "Local Address",
       "remote_address": "Remote Address",
       "status": "Status",
       "actions": "Actions",
-      "no_forwards": "No active port forwards"
+      "no_forwards": "No port forwarding rules"
     },
     "type": {
       "local": "local",
@@ -50,6 +50,7 @@
       "cancel": "Cancel",
       "type": "Type",
       "create_forward": "Create Forward",
+      "save_and_start": "Save and Start",
       "creating": "Creating...",
       "save_changes": "Save Changes",
       "saving": "Saving...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "Forwarded"
     },
     "messages": {
-      "node_not_ready": "Open an active SSH terminal for this node before managing forwards.",
+      "node_not_ready": "Unable to start the SSH connection. Connect this server and try again.",
       "connection_not_ready": "SSH connection is not ready yet.",
       "created": "Forward created",
       "updated": "Forward updated",

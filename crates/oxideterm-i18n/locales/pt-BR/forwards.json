@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "Encaminhamentos ativos",
+      "title": "Encaminhamento de portas",
       "type": "Tipo",
       "local_address": "Endereço local",
       "remote_address": "Endereço remoto",
       "status": "Status",
       "actions": "Ações",
-      "no_forwards": "Nenhum encaminhamento de porta ativo"
+      "no_forwards": "Nenhuma regra de encaminhamento de portas"
     },
     "type": {
       "local": "Local",
@@ -50,6 +50,7 @@
       "cancel": "Cancelar",
       "type": "Tipo",
       "create_forward": "Criar encaminhamento",
+      "save_and_start": "Salvar e iniciar",
       "creating": "Criando...",
       "save_changes": "Salvar alterações",
       "saving": "Salvando...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "Encaminhada"
     },
     "messages": {
-      "node_not_ready": "Abra um terminal SSH ativo para este nó antes de gerenciar encaminhamentos.",
+      "node_not_ready": "Não foi possível iniciar a conexão SSH. Conecte-se a este servidor e tente novamente.",
       "connection_not_ready": "A conexão SSH ainda não está pronta.",
       "created": "Encaminhamento criado",
       "updated": "Encaminhamento atualizado",

@@ -9,13 +9,13 @@
       "vscode": "VS Code (8080)"
     },
     "table": {
-      "title": "アクティブな転送",
+      "title": "ポート転送",
       "type": "タイプ",
       "local_address": "ローカルアドレス",
       "remote_address": "リモートアドレス",
       "status": "ステータス",
       "actions": "アクション",
-      "no_forwards": "アクティブなポート転送がありません"
+      "no_forwards": "ポート転送ルールはありません"
     },
     "type": {
       "local": "ローカル",
@@ -50,6 +50,7 @@
       "cancel": "キャンセル",
       "type": "タイプ",
       "create_forward": "転送を作成",
+      "save_and_start": "保存して開始",
       "creating": "作成中...",
       "save_changes": "変更を保存",
       "saving": "保存中...",
@@ -101,7 +102,7 @@
       "alreadyForwarded": "転送済み"
     },
     "messages": {
-      "node_not_ready": "転送を管理する前に、このノードのアクティブな SSH ターミナルを開いてください。",
+      "node_not_ready": "SSH 接続を開始できません。このサーバーに接続してから再試行してください。",
       "connection_not_ready": "SSH 接続はまだ準備できていません。",
       "created": "転送を作成しました",
       "updated": "転送を更新しました",

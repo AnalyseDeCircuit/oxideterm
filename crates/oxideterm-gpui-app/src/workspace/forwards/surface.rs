@@ -682,7 +682,10 @@ impl WorkspaceApp {
         let _scope = self.enter_forwarding_page(tab_id, cx);
         let theme = self.tokens.ui;
         let (local, remote) = forward_addresses(&rule);
-        let active = matches!(rule.status, ForwardStatus::Active);
+        let active = matches!(
+            rule.status,
+            ForwardStatus::Active | ForwardStatus::Suspended
+        );
         let stopped = matches!(rule.status, ForwardStatus::Stopped);
         let rule_for_stop = rule.clone();
         let rule_for_restart = rule.clone();
@@ -726,7 +729,7 @@ impl WorkspaceApp {
                                     tab_id,
                                     node_id.clone(),
                                     "forwards.messages.stopped",
-                                    false,
+                                    true,
                                     ForwardingRuntimeOperation::Stop { forward_id },
                                     cx,
                                 );
