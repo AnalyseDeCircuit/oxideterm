@@ -31,6 +31,26 @@ impl WorkspaceApp {
                 continue;
             }
             match delivery.event {
+                AiStreamDeliveryEvent::ToolImages(images) => {
+                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai_entity.update(cx, |ai, _| {
+                        ai.update_chat_message(
+                            &delivery.conversation_id,
+                            &delivery.assistant_id,
+                            |message| {
+                                let mut attachments =
+                                    oxideterm_ai::message_images(message).to_vec();
+                                for image in images {
+                                    if !attachments.iter().any(|existing| existing.id == image.id) {
+                                        attachments.push(image);
+                                    }
+                                }
+                                oxideterm_ai::set_message_images(message, attachments);
+                            },
+                        );
+                        ai.persist_chat_state();
+                    });
+                }
                 AiStreamDeliveryEvent::ToolResourcesRequested { tool_session_id, name, args, sender } => {
                     let result = self.ai_tool_resource_keys(delivery.generation, &tool_session_id, &name, &args, cx);
                     let _ = sender.send(result);

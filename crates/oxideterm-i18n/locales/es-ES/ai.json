@@ -1,6 +1,7 @@
 {
   "ai": {
     "images": {
+      "tool_invalid": "La herramienta devolvió una imagen ilegible, no compatible o demasiado grande.",
       "count": "{{count}} imágenes",
       "request_limit": "Las imágenes superan el tamaño máximo de la solicitud. Quita algunas o inicia una conversación nueva.",
       "add": "Añadir imágenes",

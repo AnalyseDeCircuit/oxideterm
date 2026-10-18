@@ -1,6 +1,7 @@
 {
   "ai": {
     "images": {
+      "tool_invalid": "L’outil a renvoyé une image illisible, non prise en charge ou trop volumineuse.",
       "count": "{{count}} images",
       "request_limit": "Les images dépassent la taille maximale de la requête. Retirez-en ou démarrez une nouvelle conversation.",
       "add": "Ajouter des images",

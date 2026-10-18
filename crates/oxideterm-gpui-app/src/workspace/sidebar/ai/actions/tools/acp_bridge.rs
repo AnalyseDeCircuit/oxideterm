@@ -312,10 +312,19 @@ fn respond_to_acp_tool(
     // MCP tool results bypass provider-message sanitation, so redact here.
     let model_content =
         oxideterm_ai::sanitize_for_ai(&oxideterm_ai::ai_tool_result_model_content(&executed));
-    let response = if executed.success {
+    let mut response = if executed.success {
         oxideterm_acp_host_tools::AcpHostToolResponse::success(model_content)
     } else {
         oxideterm_acp_host_tools::AcpHostToolResponse::error(model_content)
     };
+    for image in executed.images {
+        let Some(data) = image.data else {
+            let _ = call.respond(oxideterm_acp_host_tools::AcpHostToolResponse::error(
+                "Tool image data is unavailable.",
+            ));
+            return;
+        };
+        response.add_image(data.to_string(), image.mime_type);
+    }
     let _ = call.respond(response);
 }

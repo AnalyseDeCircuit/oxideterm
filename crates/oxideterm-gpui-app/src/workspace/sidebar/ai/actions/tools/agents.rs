@@ -84,6 +84,7 @@ fn agent_tool_result(call: &AiToolCall, value: serde_json::Value) -> AiExecutedT
     let value = oxideterm_ai::sanitize_tool_protocol_json_for_persistence(&value);
     let output = value.to_string();
     AiExecutedToolResult {
+        images: Vec::new(),
         tool_call_id: call.id.clone(),
         tool_name: call.name.clone(),
         success: true,

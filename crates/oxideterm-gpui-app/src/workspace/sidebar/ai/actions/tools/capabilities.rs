@@ -150,6 +150,7 @@ pub(in crate::workspace) struct AiActionResultLite {
     pub(in crate::workspace) summary: String,
     pub(in crate::workspace) output: String,
     pub(in crate::workspace) data: serde_json::Value,
+    pub(in crate::workspace) images: Vec<oxideterm_ai::AiImageAttachment>,
     pub(in crate::workspace) error_code: Option<String>,
     pub(in crate::workspace) error_message: Option<String>,
     pub(in crate::workspace) risk: &'static str,
@@ -215,6 +216,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
     ) && !dangerous_command_approved
     {
         return AiActionResultLite {
+            images: Vec::new(),
             ok: false,
             summary: "Local command failed.".to_string(),
             output: "Command denied for security reasons".to_string(),
@@ -247,6 +249,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
         let path = std::path::Path::new(cwd);
         if !path.exists() {
             return AiActionResultLite {
+                images: Vec::new(),
                 ok: false,
                 summary: "Local command failed.".to_string(),
                 output: format!("Working directory does not exist: {cwd}"),
@@ -296,6 +299,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             .collect::<Vec<_>>()
             .join("\n");
             AiActionResultLite {
+                images: Vec::new(),
                 ok,
                 summary: if output.status.success() {
                     "Local command completed.".to_string()
@@ -331,6 +335,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
             }
         }
         Err(error) => AiActionResultLite {
+            images: Vec::new(),
             ok: false,
             summary: "Local command failed.".to_string(),
             output: error.to_string(),

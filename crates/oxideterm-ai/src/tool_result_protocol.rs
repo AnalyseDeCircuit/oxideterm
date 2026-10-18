@@ -12,6 +12,7 @@ pub struct AiExecutedToolResult {
     pub error: Option<String>,
     pub duration_ms: u128,
     pub envelope: serde_json::Value,
+    pub images: Vec<crate::AiImageAttachment>,
 }
 
 pub const AI_TOOL_MODEL_OUTPUT_MAX_CHARS: usize = 12_000;
@@ -263,6 +264,7 @@ mod tests {
 
     fn result(envelope: serde_json::Value) -> AiExecutedToolResult {
         AiExecutedToolResult {
+            images: Vec::new(),
             tool_call_id: "call-1".to_string(),
             tool_name: "run_command".to_string(),
             success: true,

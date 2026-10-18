@@ -166,10 +166,16 @@ impl AcpHostToolsProtocol {
         let response = response_rx.await.unwrap_or_else(|_| {
             AcpHostToolResponse::error("OxideTerm tool execution was cancelled.")
         });
+        let mut content = vec![json!({"type":"text","text":response.content})];
+        content.extend(response.images.into_iter().map(|image| {
+            json!({
+                "type":"image","mimeType":image.mime_type,"data":image.data
+            })
+        }));
         ProtocolResponse::json(json_rpc_result(
             id,
             json!({
-                "content": [{ "type": "text", "text": response.content }],
+                "content": content,
                 "isError": response.is_error,
             }),
         ))

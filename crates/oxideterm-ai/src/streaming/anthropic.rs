@@ -208,7 +208,7 @@ pub(crate) fn anthropic_chat_messages(messages: &[AiChatMessage]) -> (Option<Str
             AiChatRole::Tool => {
                 let mut tool_result = serde_json::json!({
                     "type": "tool_result",
-                    "content": message.content,
+                    "content": if crate::message_images(message).is_empty() { Value::String(message.content.clone()) } else { crate::images::image_message_content(message, "anthropic") },
                 });
                 if let Some(tool_call_id) = message.tool_call_id.as_ref()
                     && let Some(object) = tool_result.as_object_mut()
@@ -484,12 +484,25 @@ mod tests {
                 .unwrap(),
             ],
         );
-        let body = anthropic_chat_body(&config("auto", 4096), &[message]);
+        let body = anthropic_chat_body(&config("auto", 4096), &[message.clone()]);
         assert_eq!(
             body["messages"][0],
             serde_json::json!({"role":"user", "content":[
                 {"type":"image","source":{"type":"base64","media_type":"image/png","data":"cGl4ZWw="}}
             ]})
+        );
+        message.role = AiChatRole::Tool;
+        message.tool_call_id = Some("screen-call".into());
+        message.content = "Captured".into();
+        let body = anthropic_chat_body(&config("auto", 4096), &[message]);
+        assert_eq!(
+            body["messages"][0]["content"][0],
+            serde_json::json!({
+                "type":"tool_result","tool_use_id":"screen-call","content":[
+                    {"type":"text","text":"Captured"},
+                    {"type":"image","source":{"type":"base64","media_type":"image/png","data":"cGl4ZWw="}}
+                ]
+            })
         );
     }
 

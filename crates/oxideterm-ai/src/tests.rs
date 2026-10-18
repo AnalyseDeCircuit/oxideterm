@@ -58,6 +58,98 @@ fn chat_message(id: &str, role: AiChatRole, content: &str) -> AiChatMessage {
 }
 
 #[test]
+fn tool_images_reach_completion_protocols_after_all_tool_results() {
+    let image = AiImageAttachment::new(
+        "screen.png".into(),
+        "image/png".into(),
+        32,
+        32,
+        b"pixel",
+        b"thumb",
+    )
+    .unwrap();
+    let mut assistant = chat_message("assistant", AiChatRole::Assistant, "");
+    assistant.tool_calls = vec![
+        serde_json::json!({"id":"a","name":"screen","arguments":"{}"}),
+        serde_json::json!({"id":"b","name":"state","arguments":"{}"}),
+    ];
+    let mut first = chat_message("first", AiChatRole::Tool, "Captured");
+    first.tool_call_id = Some("a".into());
+    set_message_images(&mut first, vec![image]);
+    let mut second = chat_message("second", AiChatRole::Tool, "Ready");
+    second.tool_call_id = Some("b".into());
+    let messages = [assistant, first, second];
+    let wire = openai_chat_messages(&test_stream_config("mimo"), &messages);
+    assert_eq!(
+        wire.iter()
+            .map(|m| m["role"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["assistant", "tool", "tool", "user"]
+    );
+    assert_eq!(
+        wire[3]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,cGl4ZWw="
+    );
+    assert!(
+        wire[3]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("a")
+    );
+    let wire = crate::streaming::responses_body(&test_stream_config("openai"), &messages);
+    assert_eq!(
+        wire["input"][2]["output"][1]["image_url"],
+        "data:image/png;base64,cGl4ZWw="
+    );
+    for model in ["gemini-3-flash", "gemini-2.5-flash"] {
+        let contents = gemini_chat_contents(&messages, model).1;
+        let parts = &contents[2]["parts"];
+        let image = if model.starts_with("gemini-3") {
+            &parts[0]["functionResponse"]["parts"][0]
+        } else {
+            &parts[2]
+        };
+        assert_eq!(
+            image["inlineData"],
+            serde_json::json!({"mimeType":"image/png","data":"cGl4ZWw="})
+        );
+        assert_eq!(parts[0]["functionResponse"]["name"], "screen");
+        assert_eq!(
+            parts[0]["functionResponse"]["response"]["output"],
+            "Captured"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tool_images_do_not_disappear_when_a_text_only_model_returns_them() {
+    let mut message = chat_message("result", AiChatRole::Tool, "Captured");
+    message.tool_call_id = Some("a".into());
+    set_message_images(
+        &mut message,
+        vec![
+            AiImageAttachment::new(
+                "screen.png".into(),
+                "image/png".into(),
+                32,
+                32,
+                b"pixel",
+                b"thumb",
+            )
+            .unwrap(),
+        ],
+    );
+    let mut config = test_stream_config("deepseek");
+    config.model = "deepseek-chat".into();
+    config.omit_history_images = true;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    stream_chat_completion(config, vec![message], tx).await;
+    assert!(
+        matches!(rx.recv().await, Some(AiStreamEvent::Error(error)) if error == "ai_image_model_unsupported")
+    );
+}
+
+#[test]
 fn mimo_preset_discovers_chat_models_and_budgets_images() {
     let template = providers::provider_template_by_type("mimo");
     assert_eq!(template.base_url, "https://api.xiaomimimo.com/v1");
@@ -142,7 +234,7 @@ fn image_input_serializes_across_all_completion_protocols_and_keeps_image_only_t
         );
     }
     assert_eq!(
-        gemini_chat_contents(&messages).1[0]["parts"],
+        gemini_chat_contents(&messages, "gemini-2.5-flash").1[0]["parts"],
         json!([
             {"inlineData":{"mimeType":"image/png", "data":"cGl4ZWw="}}
         ])
@@ -1925,7 +2017,7 @@ fn gemini_messages_merge_roles_and_system_instruction() {
         chat_message("3", AiChatRole::User, "two"),
         chat_message("4", AiChatRole::Assistant, "answer"),
     ];
-    let (system, contents) = gemini_chat_contents(&messages);
+    let (system, contents) = gemini_chat_contents(&messages, "gemini-2.5-flash");
     assert_eq!(system.as_deref(), Some("sys"));
     assert_eq!(contents[0]["role"], "user");
     assert_eq!(contents[0]["parts"][0]["text"], "one");
@@ -1937,7 +2029,7 @@ fn gemini_messages_merge_roles_and_system_instruction() {
         chat_message("2", AiChatRole::System, ""),
         chat_message("3", AiChatRole::User, "one"),
     ];
-    let (system, _) = gemini_chat_contents(&messages);
+    let (system, _) = gemini_chat_contents(&messages, "gemini-2.5-flash");
     assert_eq!(system.as_deref(), Some("sys\n\n"));
 
     let messages = vec![
@@ -1945,7 +2037,7 @@ fn gemini_messages_merge_roles_and_system_instruction() {
         chat_message("2", AiChatRole::System, "sys"),
         chat_message("3", AiChatRole::User, "one"),
     ];
-    let (system, _) = gemini_chat_contents(&messages);
+    let (system, _) = gemini_chat_contents(&messages, "gemini-2.5-flash");
     assert_eq!(system.as_deref(), Some("sys"));
 
     let body = gemini_chat_body(
@@ -2034,7 +2126,7 @@ fn gemini_signed_parts_round_trip_without_rebuilding() {
     }
     set_ai_provider_parts(&mut assistant, "gemini", provider_parts);
 
-    let (_, contents) = gemini_chat_contents(&[assistant]);
+    let (_, contents) = gemini_chat_contents(&[assistant], "gemini-2.5-flash");
 
     assert_eq!(
         contents[1]["parts"],

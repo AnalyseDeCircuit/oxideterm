@@ -59,6 +59,7 @@ mod agent_loop_tests {
 
     fn executed(id: String, name: String, summary: &str) -> AiExecutedToolResult {
         AiExecutedToolResult {
+            images: Vec::new(),
             tool_call_id: id,
             tool_name: name.clone(),
             success: true,

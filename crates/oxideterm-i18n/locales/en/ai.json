@@ -1,6 +1,7 @@
 {
   "ai": {
     "images": {
+      "tool_invalid": "The tool returned an unreadable, unsupported, or oversized image.",
       "count": "{{count}} images",
       "request_limit": "These images exceed the request size limit. Remove some images or start a new conversation.",
       "add": "Add images",

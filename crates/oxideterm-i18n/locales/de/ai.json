@@ -1,6 +1,7 @@
 {
   "ai": {
     "images": {
+      "tool_invalid": "Das Werkzeug hat ein unlesbares, nicht unterstütztes oder zu großes Bild zurückgegeben.",
       "count": "{{count}} Bilder",
       "request_limit": "Die Bilder überschreiten das Größenlimit der Anfrage. Entferne Bilder oder starte eine neue Unterhaltung.",
       "add": "Bilder hinzufügen",

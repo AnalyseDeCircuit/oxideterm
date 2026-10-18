@@ -9,6 +9,71 @@ pub const AI_IMAGE_MAX_PIXELS: u64 = 40_000_000;
 pub const AI_IMAGE_MAX_ATTACHMENTS: usize = 8;
 pub const AI_IMAGE_REQUEST_BYTES: usize = 12 * 1024 * 1024;
 
+/// Normalizes uploaded and tool-returned pixels through the same bounded decoder.
+pub fn prepare_image_attachment(name: String, bytes: Vec<u8>) -> anyhow::Result<AiImageAttachment> {
+    use image::ImageDecoder;
+    use std::io::Cursor;
+    anyhow::ensure!(
+        !bytes.is_empty() && bytes.len() <= AI_IMAGE_MAX_BYTES,
+        "image size"
+    );
+    let bytes = zeroize::Zeroizing::new(bytes);
+    let mut reader =
+        image::ImageReader::new(Cursor::new(bytes.as_slice())).with_guessed_format()?;
+    anyhow::ensure!(
+        matches!(
+            reader.format(),
+            Some(image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP)
+        ),
+        "image format"
+    );
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(160 * 1024 * 1024);
+    reader.limits(limits);
+    let mut decoder = reader.into_decoder()?;
+    let (width, height) = decoder.dimensions();
+    anyhow::ensure!(
+        u64::from(width) * u64::from(height) <= AI_IMAGE_MAX_PIXELS,
+        "image dimensions"
+    );
+    let orientation = decoder.orientation()?;
+    let mut decoded = image::DynamicImage::from_decoder(decoder)?;
+    decoded.apply_orientation(orientation);
+    // Normalize orientation and remove file metadata before an explicit send.
+    if decoded.width().max(decoded.height()) > 2000 {
+        decoded = decoded.resize(2000, 2000, image::imageops::FilterType::Lanczos3);
+    }
+    let mut full = Cursor::new(Vec::new());
+    decoded.write_to(&mut full, image::ImageFormat::Png)?;
+    let mut mime = "image/png";
+    if full.get_ref().len() > 3 * 1024 * 1024 {
+        full = Cursor::new(Vec::new());
+        let mut rgba = decoded.to_rgba8();
+        for pixel in rgba.pixels_mut() {
+            let alpha = u16::from(pixel.0[3]);
+            for channel in &mut pixel.0[..3] {
+                *channel = ((u16::from(*channel) * alpha + 255 * (255 - alpha)) / 255) as u8;
+            }
+        }
+        let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut full, 90).encode_image(&rgb)?;
+        mime = "image/jpeg";
+    }
+    anyhow::ensure!(full.get_ref().len() <= 3 * 1024 * 1024, "image size");
+    let mut thumb = Cursor::new(Vec::new());
+    decoded
+        .thumbnail(160, 160)
+        .write_to(&mut thumb, image::ImageFormat::Png)?;
+    AiImageAttachment::new(
+        name,
+        mime.into(),
+        decoded.width(),
+        decoded.height(),
+        full.get_ref(),
+        thumb.get_ref(),
+    )
+}
+
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiImageAttachment {
     #[serde(rename = "_oxideImage")]
@@ -149,16 +214,24 @@ pub(crate) fn validate_image_request<'a>(
 }
 
 pub(crate) fn image_message_content(message: &AiChatMessage, protocol: &str) -> serde_json::Value {
+    image_content_parts(&message.content, message_images(message), protocol)
+}
+
+pub(crate) fn image_content_parts(
+    text: &str,
+    images: &[AiImageAttachment],
+    protocol: &str,
+) -> serde_json::Value {
     use serde_json::json;
     let mut parts = Vec::new();
-    if !message.content.is_empty() || message_images(message).is_empty() {
+    if !text.is_empty() || images.is_empty() {
         parts.push(match protocol {
-            "gemini" => json!({"text":message.content}),
-            "responses" => json!({"type":"input_text", "text":message.content}),
-            _ => json!({"type":"text", "text":message.content}),
+            "gemini" => json!({"text":text}),
+            "responses" => json!({"type":"input_text", "text":text}),
+            _ => json!({"type":"text", "text":text}),
         });
     }
-    for image in message_images(message) {
+    for image in images {
         let data = image.data.as_deref().unwrap_or_default();
         parts.push(match protocol {
             "anthropic" => json!({"type":"image", "source":{"type":"base64", "media_type":image.mime_type, "data":data}}),
@@ -414,13 +487,43 @@ pub fn prepare_image_history(messages: &mut [AiChatMessage], config: &crate::AiC
         if message_images(message).is_empty() {
             continue;
         }
-        if config.omit_history_images {
+        if config.omit_history_images && message.role != crate::AiChatRole::Tool {
             let images = std::mem::take(&mut message.metadata.as_mut().unwrap().images);
             for (index, _) in images.iter().enumerate() {
                 message.content.push_str(&format!(
                     "\n[Image {} omitted: text-only conversation mode.]",
                     index + 1
                 ));
+            }
+            if let Some(providers) = message
+                .turn
+                .as_mut()
+                .and_then(|turn| turn.get_mut("providerParts"))
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                for rounds in providers
+                    .values_mut()
+                    .filter_map(serde_json::Value::as_array_mut)
+                {
+                    for round in rounds {
+                        for result in round
+                            .get_mut("results")
+                            .and_then(serde_json::Value::as_array_mut)
+                            .into_iter()
+                            .flatten()
+                        {
+                            if result
+                                .as_object_mut()
+                                .is_some_and(|object| object.remove("imageIds").is_some())
+                            {
+                                let text = result["output"].as_str().unwrap_or_default();
+                                result["output"] = serde_json::json!(format!(
+                                    "{text}\n[Tool images omitted: text-only conversation mode.]"
+                                ));
+                            }
+                        }
+                    }
+                }
             }
         } else {
             message.model = Some(config.model.clone());

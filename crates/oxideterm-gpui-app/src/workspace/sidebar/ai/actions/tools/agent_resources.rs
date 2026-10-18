@@ -136,9 +136,20 @@ pub(in crate::workspace) async fn execute_ai_tool(
     let result = if let Some(agent) = execution {
         agent.wait(AgentState::AwaitingCondition, future).await.unwrap_or_else(|_|
             rejected_ai_tool_result(cancelled_call.0, cancelled_call.1, "operation_cancelled", "The task was stopped; an already dispatched remote operation may still be running."))
-    } else { future.await };
+    } else {
+        future.await
+    };
     for lease in leases {
         lease.finish_response(result.success);
+    }
+    if !result.images.is_empty() {
+        let _ = send_ai_stream_delivery(
+            ui_tx,
+            generation,
+            conversation_id,
+            assistant_id,
+            AiStreamDeliveryEvent::ToolImages(result.images.clone()),
+        );
     }
     result
 }

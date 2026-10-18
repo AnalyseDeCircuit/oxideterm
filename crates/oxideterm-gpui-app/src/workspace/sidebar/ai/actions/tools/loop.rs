@@ -835,7 +835,9 @@ async fn execute_ai_chat_tool_loop(
                 let _ = send_ai_loop_delivery(execution.is_some(), &ui_tx, generation, &conversation_id, &assistant_id,
                     AiStreamDeliveryEvent::Checkpoint(checkpoint.clone()));
                 round_results.push(AiRoundToolResultSummary {tool_name:call.name.clone(),success:executed.success,summary:executed_summary(&executed)});
-                history.push(ai_tool_result_message(executed));
+                let mut tool_message = ai_tool_result_message(executed);
+                tool_message.model = Some(config.model.clone());
+                history.push(tool_message);
             }
         }
 

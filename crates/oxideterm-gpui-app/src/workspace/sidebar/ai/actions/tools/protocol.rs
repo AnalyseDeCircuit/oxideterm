@@ -23,6 +23,7 @@ pub(in crate::workspace) fn rejected_ai_tool_result(
         }
     });
     AiExecutedToolResult {
+        images: Vec::new(),
         tool_call_id,
         tool_name,
         success: false,
@@ -69,6 +70,7 @@ pub(in crate::workspace) fn pre_execution_rejected_ai_tool_result(
         }
     });
     AiExecutedToolResult {
+        images: Vec::new(),
         tool_call_id,
         tool_name,
         success: false,
@@ -583,6 +585,7 @@ mod tests {
 
     pub(in crate::workspace) fn sample_result() -> AiExecutedToolResult {
         AiExecutedToolResult {
+            images: Vec::new(),
             tool_call_id: "tool-1".to_string(),
             tool_name: "run_command".to_string(),
             success: true,
@@ -599,6 +602,29 @@ mod tests {
                 },
             }),
         }
+    }
+
+    #[test]
+    fn tool_images_remain_attachments_when_building_model_messages() {
+        let image = oxideterm_ai::AiImageAttachment::new(
+            "screen.png".into(),
+            "image/png".into(),
+            32,
+            32,
+            b"pixel",
+            b"thumb",
+        )
+        .unwrap();
+        let mut result = sample_result();
+        result.images.push(image.clone());
+        let message = ai_tool_result_message(result);
+        assert_eq!(message.tool_call_id.as_deref(), Some("tool-1"));
+        assert_eq!(oxideterm_ai::message_images(&message), &[image]);
+        assert!(!message.content.contains("cGl4ZWw="));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&message.content).unwrap()["output"],
+            "ok"
+        );
     }
 
     pub(in crate::workspace) fn sample_target() -> AiOrchestratorTarget {

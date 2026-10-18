@@ -6900,6 +6900,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "futures-util",
+ "image",
  "instant-distance",
  "libc",
  "oxideterm-atomic-file",

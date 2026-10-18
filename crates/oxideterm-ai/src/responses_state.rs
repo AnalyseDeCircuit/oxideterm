@@ -19,11 +19,21 @@ pub fn responses_round_state(
         .filter_map(|message| {
             let local = message.tool_call_id.as_ref()?;
             let wire = ids.get(local)?.as_str()?;
-            Some(json!({
+            let mut result = json!({
                 "type": "function_call_output",
                 "call_id": wire,
                 "output": crate::sanitize_for_ai(&message.content),
-            }))
+            });
+            if !crate::message_images(message).is_empty() {
+                // Binary payloads live in message attachments; native history retains references only.
+                result["imageIds"] = json!(
+                    crate::message_images(message)
+                        .iter()
+                        .map(|image| &image.id)
+                        .collect::<Vec<_>>()
+                );
+            }
+            Some(result)
         })
         .collect();
     Some(json!({ "output": output, "callIds": ids, "results": results }))

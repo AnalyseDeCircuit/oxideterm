@@ -6,6 +6,51 @@ mod tests {
         net::TcpListener,
     };
 
+    #[test]
+    fn tool_images_decode_mcp_blocks_without_leaking_binary_into_text() {
+        let pixels = image::RgbImage::from_pixel(2400, 1200, image::Rgb([210, 100, 40]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let data = base64::engine::general_purpose::STANDARD.encode(png.get_ref());
+        let payload = serde_json::json!({"content":[
+            {"type":"text","text":"Captured"},
+            {"type":"image","mimeType":"image/png","data":data}
+        ]});
+        let mut result: McpCallToolResult = serde_json::from_value(payload.clone()).unwrap();
+        assert!(!format!("{result:?}").contains(&data));
+        let images = result.take_images().unwrap();
+        assert_eq!(
+            images
+                .iter()
+                .map(|image| (image.width, image.height))
+                .collect::<Vec<_>>(),
+            [(2000, 1000)]
+        );
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(images[0].data.as_deref().unwrap())
+            .unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        assert_eq!(decoded.get_pixel(1000, 500).0, [210, 100, 40]);
+        assert_eq!(mcp_tool_output(&result), (true, "Captured".into(), false));
+        assert!(!serde_json::to_string(&result).unwrap().contains(&data));
+        for (mime, data) in [
+            ("image/png", "not base64!"),
+            ("image/png", "bm90IGFuIGltYWdl"),
+            ("image/svg+xml", "cGl4ZWw="),
+        ] {
+            let mut bad: McpCallToolResult = serde_json::from_value(serde_json::json!({"content":[
+                {"type":"image","mimeType":mime,"data":data}
+            ]}))
+            .unwrap();
+            assert!(bad.take_images().is_err(), "{mime}");
+        }
+        let mut too_many: McpCallToolResult = serde_json::from_value(serde_json::json!({
+            "content":vec![payload["content"][1].clone(); crate::AI_IMAGE_MAX_ATTACHMENTS + 1]
+        }))
+        .unwrap();
+        assert!(too_many.take_images().is_err());
+    }
+
     #[tokio::test]
     async fn stdout_reader_dispatches_supported_framing_and_header_orders() {
         let body = r#"{"jsonrpc":"2.0","id":7,"result":{"ok":true}}"#;

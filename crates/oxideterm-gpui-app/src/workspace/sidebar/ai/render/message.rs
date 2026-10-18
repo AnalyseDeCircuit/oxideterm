@@ -502,8 +502,13 @@ impl WorkspaceApp {
                 );
             }
         }
-        if !oxideterm_ai::message_images(message).is_empty() {
-            body = body.child(self.render_ai_images(oxideterm_ai::message_images(message), false, cx));
+        let has_tool_images = message
+            .tool_calls
+            .iter()
+            .any(|call| call.pointer("/result/imageIds").is_some());
+        if !has_tool_images && !oxideterm_ai::message_images(message).is_empty() {
+            body =
+                body.child(self.render_ai_images(oxideterm_ai::message_images(message), false, cx));
         }
         if editing {
             body = body.child(self.render_ai_message_edit_body(cx));
@@ -1698,6 +1703,16 @@ impl WorkspaceApp {
                 );
             }
             if let Some(result) = result {
+                if let Some(ids) = result.get("imageIds").and_then(serde_json::Value::as_array) {
+                    let images = oxideterm_ai::message_images(message)
+                        .iter()
+                        .filter(|image| ids.iter().any(|id| id.as_str() == Some(image.id.as_str())))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if !images.is_empty() {
+                        details = details.child(self.render_ai_images(&images, false, cx));
+                    }
+                }
                 if let Some(policy_decision) = result.pointer("/meta/policyDecision") {
                     details = details.child(
                         div()
@@ -2727,6 +2742,7 @@ fn ai_tool_group_duration(calls: &[serde_json::Value]) -> Option<u64> {
 
 fn ai_runtime_recovery_message_key(code: &str) -> Option<&'static str> {
     match code {
+        "ai_image_tool_invalid" => Some("ai.images.tool_invalid"),
         "agent_direction_changed" => Some("settings_view.ai.replanning"),
         "dependency_failed" => Some("settings_view.ai.dependency_failed"),
         "agent_wait_paused" => Some("settings_view.ai.stop_waiting"),

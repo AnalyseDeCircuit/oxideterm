@@ -78,10 +78,15 @@ async fn tool_calls_are_forwarded_and_completed() {
     let call = calls.recv().await.expect("forwarded tool call");
     assert_eq!(call.name, "mcp::demo::ping");
     assert_eq!(call.arguments["surface"], "processes");
-    call.respond(AcpHostToolResponse::success("sanitized output"))
-        .expect("tool response receiver");
+    let mut result = AcpHostToolResponse::success("sanitized output");
+    result.add_image("cGl4ZWw=", "image/png");
+    call.respond(result).expect("tool response receiver");
     let response = request.await.expect("request task");
     assert_eq!(response["result"]["content"][0]["text"], "sanitized output");
+    assert_eq!(
+        response["result"]["content"][1],
+        json!({"type":"image","mimeType":"image/png","data":"cGl4ZWw="})
+    );
     assert_eq!(response["result"]["isError"], false);
     server.shutdown().await;
 }

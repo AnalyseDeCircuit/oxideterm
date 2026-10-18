@@ -161,13 +161,24 @@ pub struct McpResourceContent {
     pub blob: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct McpCallContent {
     #[serde(rename = "type")]
     pub content_type: String,
     pub text: Option<String>,
     pub data: Option<String>,
+    #[serde(rename = "mimeType", alias = "mime_type")]
     pub mime_type: Option<String>,
+}
+
+impl std::fmt::Debug for McpCallContent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("McpCallContent")
+            .field("content_type", &self.content_type)
+            .field("mime_type", &self.mime_type)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -89,6 +89,7 @@ pub(in crate::workspace) enum AiSftpTransferError {
 }
 
 pub(in crate::workspace) enum AiStreamDeliveryEvent {
+    ToolImages(Vec<oxideterm_ai::AiImageAttachment>),
     Checkpoint(oxideterm_ai::agent::AgentCheckpoint),
     HistoryBarrier(tokio::sync::oneshot::Sender<bool>),
     ToolResourcesRequested {

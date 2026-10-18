@@ -31,8 +31,7 @@ fn ai_image_model_key(provider: &str, endpoint: &str, model: &str) -> String {
 }
 
 fn prepare_ai_image(source: AiImageSource) -> anyhow::Result<AiImageAttachment> {
-    use image::ImageDecoder;
-    use std::io::{Cursor, Read};
+    use std::io::Read;
     let (name, bytes) = match source {
         AiImageSource::File(path) => {
             let mut bytes = Vec::new();
@@ -49,65 +48,7 @@ fn prepare_ai_image(source: AiImageSource) -> anyhow::Result<AiImageAttachment> 
         }
         AiImageSource::Clipboard(bytes) => (String::new(), bytes),
     };
-    anyhow::ensure!(
-        !bytes.is_empty() && bytes.len() <= oxideterm_ai::AI_IMAGE_MAX_BYTES,
-        "image size"
-    );
-    let bytes = zeroize::Zeroizing::new(bytes);
-    let mut reader =
-        image::ImageReader::new(Cursor::new(bytes.as_slice())).with_guessed_format()?;
-    anyhow::ensure!(
-        matches!(
-            reader.format(),
-            Some(image::ImageFormat::Png | image::ImageFormat::Jpeg | image::ImageFormat::WebP)
-        ),
-        "image format"
-    );
-    let mut limits = image::Limits::default();
-    limits.max_alloc = Some(160 * 1024 * 1024);
-    reader.limits(limits);
-    let mut decoder = reader.into_decoder()?;
-    let (width, height) = decoder.dimensions();
-    anyhow::ensure!(
-        u64::from(width) * u64::from(height) <= oxideterm_ai::AI_IMAGE_MAX_PIXELS,
-        "image dimensions"
-    );
-    let orientation = decoder.orientation()?;
-    let mut decoded = image::DynamicImage::from_decoder(decoder)?;
-    decoded.apply_orientation(orientation);
-    // Normalize orientation and remove file metadata before an explicit send.
-    if decoded.width().max(decoded.height()) > 2000 {
-        decoded = decoded.resize(2000, 2000, image::imageops::FilterType::Lanczos3);
-    }
-    let mut full = Cursor::new(Vec::new());
-    decoded.write_to(&mut full, image::ImageFormat::Png)?;
-    let mut mime = "image/png";
-    if full.get_ref().len() > 3 * 1024 * 1024 {
-        full = Cursor::new(Vec::new());
-        let mut rgba = decoded.to_rgba8();
-        for pixel in rgba.pixels_mut() {
-            let alpha = u16::from(pixel.0[3]);
-            for channel in &mut pixel.0[..3] {
-                *channel = ((u16::from(*channel) * alpha + 255 * (255 - alpha)) / 255) as u8;
-            }
-        }
-        let rgb = image::DynamicImage::ImageRgba8(rgba).to_rgb8();
-        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut full, 90).encode_image(&rgb)?;
-        mime = "image/jpeg";
-    }
-    anyhow::ensure!(full.get_ref().len() <= 3 * 1024 * 1024, "image size");
-    let mut thumb = Cursor::new(Vec::new());
-    decoded
-        .thumbnail(160, 160)
-        .write_to(&mut thumb, image::ImageFormat::Png)?;
-    AiImageAttachment::new(
-        name,
-        mime.into(),
-        decoded.width(),
-        decoded.height(),
-        full.get_ref(),
-        thumb.get_ref(),
-    )
+    oxideterm_ai::prepare_image_attachment(name, bytes)
 }
 
 impl WorkspaceApp {

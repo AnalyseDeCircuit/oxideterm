@@ -1,6 +1,7 @@
 {
   "ai": {
     "images": {
+      "tool_invalid": "Công cụ trả về ảnh không đọc được, không được hỗ trợ hoặc vượt quá giới hạn kích thước.",
       "count": "{{count}} ảnh",
       "request_limit": "Tổng dung lượng ảnh vượt giới hạn yêu cầu. Hãy bớt ảnh hoặc bắt đầu cuộc trò chuyện mới.",
       "add": "Thêm ảnh",

@@ -270,19 +270,37 @@ impl AiModelBackendServices {
             .call_prefixed_tool(tool_name, args)
             .await
         {
-            Ok(result) => {
+            Ok(mut result) => {
+                let prepared = tokio::task::spawn_blocking(move || {
+                    let images = result.take_images()?;
+                    Ok::<_, anyhow::Error>((result, images))
+                })
+                .await;
+                let (result, images) = match prepared {
+                    Ok(Ok(value)) => value,
+                    _ => {
+                        return snapshot.fail(
+                            "Could not read tool images.",
+                            "ai_image_tool_invalid",
+                            "The tool returned an invalid, unsupported, or oversized image.",
+                            "read",
+                        );
+                    }
+                };
                 let (success, output, truncated) = oxideterm_ai::mcp_tool_output(&result);
                 if success {
-                    snapshot
+                    let mut action = snapshot
                         .ok(
                             format!("Executed MCP tool {tool_name}."),
                             output,
                             serde_json::json!(result),
                             "write",
                         )
-                        .with_verified(!truncated)
+                        .with_verified(!truncated);
+                    action.images = images;
+                    action
                 } else {
-                    snapshot.fail(
+                    let mut action = snapshot.fail(
                         "MCP tool returned an error.",
                         "mcp_tool_error",
                         if output.is_empty() {
@@ -291,7 +309,9 @@ impl AiModelBackendServices {
                             output
                         },
                         "write",
-                    )
+                    );
+                    action.images = images;
+                    action
                 }
             }
             Err(error) => snapshot.fail(
@@ -1637,6 +1657,7 @@ impl AiOrchestratorRuntimeSnapshot {
         risk: &'static str,
     ) -> AiActionResultLite {
         AiActionResultLite {
+            images: Vec::new(),
             ok: true,
             summary: summary.into(),
             output: output.into(),
@@ -1662,6 +1683,7 @@ impl AiOrchestratorRuntimeSnapshot {
     ) -> AiActionResultLite {
         let message = message.into();
         AiActionResultLite {
+            images: Vec::new(),
             ok: false,
             summary: summary.into(),
             output: message.clone(),
@@ -1797,8 +1819,21 @@ impl AiOrchestratorRuntimeSnapshot {
             serde_json::json!(data_truncated),
         );
         envelope.insert("meta".to_string(), serde_json::Value::Object(meta));
+        if !result.images.is_empty() {
+            envelope.insert(
+                "imageIds".into(),
+                serde_json::json!(
+                    result
+                        .images
+                        .iter()
+                        .map(|image| &image.id)
+                        .collect::<Vec<_>>()
+                ),
+            );
+        }
         let envelope = serde_json::Value::Object(envelope);
         AiExecutedToolResult {
+            images: result.images,
             tool_call_id,
             tool_name,
             success: result.ok,

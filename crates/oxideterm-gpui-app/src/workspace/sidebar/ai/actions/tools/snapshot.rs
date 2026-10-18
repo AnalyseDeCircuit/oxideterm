@@ -3029,6 +3029,7 @@ impl WorkspaceApp {
                     tool_call_id,
                     tool_name,
                     AiActionResultLite {
+                        images: Vec::new(),
                         ok: !output_empty,
                         summary: "Terminal command did not produce completed output.".to_string(),
                         output: if output_empty {

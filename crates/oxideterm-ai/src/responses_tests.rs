@@ -8,6 +8,87 @@ fn config() -> AiChatStreamConfig {
     config
 }
 
+#[test]
+fn tool_images_reopen_in_native_history_and_survive_provider_switches() {
+    let image = AiImageAttachment::new(
+        "screen.png".into(),
+        "image/png".into(),
+        1024,
+        1024,
+        b"pixel",
+        b"thumb",
+    )
+    .unwrap();
+    let mut tool = chat_message("result", AiChatRole::Tool, "Captured");
+    tool.tool_call_id = Some("local-a".into());
+    set_message_images(&mut tool, vec![image.clone()]);
+    let config = config();
+    let mut assistant = chat_message("assistant", AiChatRole::Assistant, "Here is the screen");
+    set_message_images(&mut assistant, vec![image.clone()]);
+    append_responses_round(
+        &mut assistant,
+        &config.response_state_key(),
+        responses_round_state(
+            &[json!({"output":[function("wire-a","screen","{}")]})],
+            &HashMap::from([("wire-a".into(), "local-a".into())]),
+            &[tool],
+        )
+        .unwrap(),
+    );
+    assert!(
+        !assistant
+            .turn
+            .as_ref()
+            .unwrap()
+            .to_string()
+            .contains("cGl4ZWw=")
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("chat.redb");
+    let store = AiChatPersistenceStore::new(path.clone());
+    let mut state = AiChatState::default();
+    let id = state.create_conversation("history".into(), None, 1, None);
+    state.add_message(&id, assistant);
+    store.save_state(state).unwrap();
+    drop(store);
+    let store = ConversationStore::open_or_migrate(&path, |_, _| {}).unwrap();
+    let mut history = store
+        .model_context(&id, "main", 10000, "openai", "gpt-4o")
+        .unwrap()
+        .messages;
+    assert_eq!(message_images(&history[0]), &[image]);
+    let text_tokens = responses_state::responses_history_tokens(&history[0]).unwrap();
+    assert_eq!(
+        stream_state::ai_message_payload_estimated_tokens(&history[0], "openai"),
+        text_tokens + 765
+    );
+    stream_state::normalize_ai_stream_history_for_provider(&mut history);
+    let body = responses_body(&config, &history);
+    assert_eq!(
+        body["input"][1],
+        json!({"type":"function_call_output","call_id":"wire-a","output":[
+            {"type":"input_text","text":"Captured"},
+            {"type":"input_image","image_url":"data:image/png;base64,cGl4ZWw=","detail":"auto"}
+        ]})
+    );
+    let mut text_only = history.clone();
+    let mut text_config = config.clone();
+    text_config.omit_history_images = true;
+    prepare_image_history(&mut text_only, &text_config);
+    assert_eq!(
+        responses_body(&text_config, &text_only)["input"][1]["output"],
+        "Captured\n[Tool images omitted: text-only conversation mode.]"
+    );
+    let chat_config = test_stream_config("mimo");
+    scope_responses_history(&mut history, &chat_config);
+    stream_state::normalize_ai_stream_history_for_provider(&mut history);
+    let body = crate::streaming::openai_chat_messages(&chat_config, &history);
+    assert_eq!(
+        body[1]["content"][1]["image_url"]["url"],
+        "data:image/png;base64,cGl4ZWw="
+    );
+}
+
 fn completed(output: Value) -> Value {
     json!({"type":"response.completed", "response":{"status":"completed","output":output,"usage":{"input_tokens":12,"output_tokens":9}}})
 }

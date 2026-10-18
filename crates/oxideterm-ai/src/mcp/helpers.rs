@@ -691,6 +691,57 @@ pub fn mcp_tool_output(result: &McpCallToolResult) -> (bool, String, bool) {
     (!result.is_error, output, truncated)
 }
 
+impl McpCallToolResult {
+    /// Consume binary image fields before the remaining MCP payload enters text diagnostics.
+    pub fn take_images(&mut self) -> anyhow::Result<Vec<crate::AiImageAttachment>> {
+        let count = self
+            .content
+            .iter()
+            .filter(|part| part.content_type == "image")
+            .count();
+        anyhow::ensure!(
+            count <= crate::AI_IMAGE_MAX_ATTACHMENTS,
+            "Too many tool images"
+        );
+        let mut images = Vec::with_capacity(count);
+        for part in &mut self.content {
+            if part.content_type != "image" {
+                continue;
+            }
+            anyhow::ensure!(
+                matches!(
+                    part.mime_type.as_deref(),
+                    Some("image/png" | "image/jpeg" | "image/webp")
+                ),
+                "Unsupported tool image format"
+            );
+            let data = Zeroizing::new(
+                part.data
+                    .take()
+                    .ok_or_else(|| anyhow::anyhow!("Missing tool image"))?,
+            );
+            anyhow::ensure!(
+                data.len() <= crate::AI_IMAGE_MAX_BYTES * 4 / 3 + 4,
+                "Tool image is too large"
+            );
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data.as_bytes())
+                .map_err(|_| anyhow::anyhow!("Invalid tool image encoding"))?;
+            let mut image = crate::prepare_image_attachment(String::new(), bytes)?;
+            let extension = if image.mime_type == "image/jpeg" {
+                "jpg"
+            } else {
+                "png"
+            };
+            image.name = format!("image-{}.{}", images.len() + 1, extension);
+            images.push(image);
+        }
+        crate::images::validate_image_request(images.iter())?;
+        self.content.retain(|part| part.content_type != "image");
+        Ok(images)
+    }
+}
+
 pub fn mcp_resource_output(contents: &[McpResourceContent]) -> (String, bool) {
     let multiple = contents.len() > 1;
     let text = contents

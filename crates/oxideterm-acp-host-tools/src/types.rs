@@ -84,16 +84,25 @@ impl fmt::Debug for AcpHostToolCall {
     }
 }
 
-/// The application sends only already-redacted model-facing text across this boundary.
+/// Text is redacted by the host; images are separately validated attachments.
 pub struct AcpHostToolResponse {
     pub content: String,
+    pub images: Vec<agent_client_protocol::schema::v1::ImageContent>,
     pub is_error: bool,
 }
 
 impl AcpHostToolResponse {
+    pub fn add_image(&mut self, data: impl Into<String>, mime_type: impl Into<String>) {
+        self.images
+            .push(agent_client_protocol::schema::v1::ImageContent::new(
+                data, mime_type,
+            ));
+    }
+
     pub fn success(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
+            images: Vec::new(),
             is_error: false,
         }
     }
@@ -101,6 +110,7 @@ impl AcpHostToolResponse {
     pub fn error(content: impl Into<String>) -> Self {
         Self {
             content: content.into(),
+            images: Vec::new(),
             is_error: true,
         }
     }

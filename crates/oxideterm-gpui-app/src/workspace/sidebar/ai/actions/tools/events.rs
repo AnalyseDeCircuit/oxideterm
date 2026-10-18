@@ -350,7 +350,7 @@ pub(in crate::workspace) fn ai_tool_call_message_value(call: &AiToolCall) -> ser
 
 pub(in crate::workspace) fn ai_tool_result_message(result: AiExecutedToolResult) -> AiChatMessage {
     let content = ai_tool_result_model_content(&result);
-    AiChatMessage {
+    let mut message = AiChatMessage {
         id: format!("tool-result-{}", result.tool_call_id),
         role: AiChatRole::Tool,
         content,
@@ -367,5 +367,7 @@ pub(in crate::workspace) fn ai_tool_result_message(result: AiExecutedToolResult)
         summary_ref: None,
         branches: None,
         suggestions: Vec::new(),
-    }
+    };
+    oxideterm_ai::set_message_images(&mut message, result.images);
+    message
 }

@@ -656,6 +656,7 @@ fn progress_result(
     output: &str,
 ) -> crate::AiExecutedToolResult {
     crate::AiExecutedToolResult {
+        images: Vec::new(),
         tool_call_id: call.id.clone(),
         tool_name: call.name.clone(),
         success,

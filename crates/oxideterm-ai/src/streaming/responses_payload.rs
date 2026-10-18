@@ -24,7 +24,29 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
                     input.extend(output.iter().cloned());
                 }
                 if let Some(results) = round.get("results").and_then(Value::as_array) {
-                    input.extend(results.iter().cloned());
+                    for result in results {
+                        let mut result = result.clone();
+                        if let Some(ids) = result
+                            .as_object_mut()
+                            .and_then(|object| object.remove("imageIds"))
+                        {
+                            let images = crate::message_images(message)
+                                .iter()
+                                .filter(|image| {
+                                    ids.as_array().is_some_and(|ids| {
+                                        ids.iter().any(|id| id.as_str() == Some(&image.id))
+                                    })
+                                })
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            result["output"] = crate::images::image_content_parts(
+                                result["output"].as_str().unwrap_or_default(),
+                                &images,
+                                "responses",
+                            );
+                        }
+                        input.push(result);
+                    }
                 }
             }
             continue;
@@ -35,7 +57,7 @@ pub(crate) fn responses_body(config: &AiChatStreamConfig, messages: &[AiChatMess
                     input.push(json!({
                         "type": "function_call_output",
                         "call_id": call_ids.get(id).unwrap_or(id),
-                        "output": message.content,
+                        "output": if crate::message_images(message).is_empty() { Value::String(message.content.clone()) } else { crate::images::image_message_content(message, "responses") },
                     }));
                 }
             }
