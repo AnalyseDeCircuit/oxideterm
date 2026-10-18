@@ -646,6 +646,8 @@ impl WorkspaceApp {
                 match (route.ai_page, index) {
                     (AiSettingsPage::Providers, 2) => {
                         settings.ai.providers.len().hash(&mut hasher);
+                        settings.ai.web_search.enabled.hash(&mut hasher);
+                        settings.ai.web_search.provider_id.hash(&mut hasher);
                         self.ai_entity
                             .read(cx)
                             .hash_settings_provider_layout(&mut hasher);

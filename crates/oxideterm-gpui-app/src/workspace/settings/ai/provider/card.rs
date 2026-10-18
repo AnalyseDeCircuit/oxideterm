@@ -46,20 +46,34 @@ impl WorkspaceApp {
         if expanded {
             card = card
                 .child(self.ai_provider_expanded_toolbar(index, provider, cx))
-                .child(self.ai_provider_fields(index, provider, cx))
-                .child(self.ai_provider_models(
-                    index,
-                    provider,
-                    visible_model_count,
-                    hidden_count,
-                    cx,
-                ));
+                .child(self.ai_provider_fields(index, provider, cx));
 
             if self
                 .ai_provider_key_display_state(provider, cx)
                 .shows_key_control()
             {
                 card = card.child(self.ai_provider_key_input(index, provider, cx));
+            }
+            if matches!(
+                provider.provider_type.as_str(),
+                "openai" | "openai_compatible" | "xai"
+            ) {
+                card = card.child(self.ai_provider_protocol_field(index, provider, cx));
+            }
+            card = card.child(self.ai_provider_models(
+                index,
+                provider,
+                visible_model_count,
+                hidden_count,
+                cx,
+            ));
+            if provider.custom {
+                card = card.child(
+                    div()
+                        .px(px(16.0))
+                        .pb(px(12.0))
+                        .child(self.ai_provider_remove_button(index, provider.name.clone(), cx)),
+                );
             }
         }
 
@@ -107,6 +121,16 @@ impl WorkspaceApp {
                                     .child(provider.name.clone()),
                             )
                             .child(self.ai_provider_type_badge(provider.provider_type.clone()))
+                            .when(
+                                self.ai_web_provider_id().is_ok_and(|id| id == provider.id),
+                                |row| {
+                                    row.child(self.ai_provider_badge(
+                                        self.i18n.t("settings_view.ai.provider_search_usage"),
+                                        self.tokens.ui.text_muted,
+                                        0x1a,
+                                    ))
+                                },
+                            )
                             .when(active_provider, |row| {
                                 row.child(self.ai_provider_badge(
                                     self.i18n.t("settings_view.ai.active"),

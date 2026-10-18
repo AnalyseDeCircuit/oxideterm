@@ -2,7 +2,6 @@ use super::*;
 
 pub(in crate::workspace) const AI_PROVIDER_ACTION_BUTTON_H: f32 = 28.0; // Tauri provider card action h-7.
 pub(in crate::workspace) const AI_PROVIDER_ACTION_BUTTON_PX: f32 = 8.0; // Tauri provider card action px-2.
-pub(in crate::workspace) const AI_PROVIDER_REFRESH_TEXT_SIZE: f32 = 10.0; // Tauri refresh action uses compact 10px text.
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_provider_type_badge(&self, provider_type: String) -> AnyElement {
@@ -42,43 +41,31 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let provider = provider.clone();
-        // Tauri AiTab renders "set active" as a rounded span[role=button]
-        // rather than a shadcn Button. Keep that pill shape here while still
-        // removing the old ad-hoc Button construction.
-        div()
-            .rounded_full()
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .px(px(10.0))
-            .py(px(4.0))
-            .text_size(px(11.0))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .cursor_pointer()
-            .hover({
-                let accent = self.tokens.ui.accent;
-                move |pill| {
-                    pill.border_color(rgba((accent << 8) | 0x99))
-                        .text_color(rgb(accent))
-                }
-            })
-            .child(self.i18n.t("settings_view.ai.set_active"))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.edit_settings(
-                        |settings| {
-                            ai_set_active_provider_selection(
-                                &mut settings.ai.active_provider_id,
-                                &mut settings.ai.active_model,
-                                &provider,
-                            );
-                        },
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+        self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.ai.set_active"),
+            None,
+            ToolbarButtonOptions::compact_text(
+                ButtonVariant::Outline,
+                ButtonRadius::Md,
+                AI_PROVIDER_ACTION_BUTTON_H,
+                AI_PROVIDER_ACTION_BUTTON_PX,
+                self.tokens.metrics.ui_text_xs,
+            ),
+            cx.listener(move |this, _event, _window, cx| {
+                this.edit_settings(
+                    |settings| {
+                        ai_set_active_provider_selection(
+                            &mut settings.ai.active_provider_id,
+                            &mut settings.ai.active_model,
+                            &provider,
+                        );
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn ai_provider_enabled_toggle(
@@ -187,16 +174,6 @@ impl WorkspaceApp {
                             .child(self.i18n.t("settings_view.ai.provider_enabled")),
                     ),
             )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.ai_provider_refresh_button(index, provider, cx))
-                    .when(provider.custom, |row| {
-                        row.child(self.ai_provider_remove_button(index, provider.name.clone(), cx))
-                    }),
-            )
             .into_any_element()
     }
 
@@ -213,7 +190,7 @@ impl WorkspaceApp {
             ButtonRadius::Md,
             AI_PROVIDER_ACTION_BUTTON_H,
             AI_PROVIDER_ACTION_BUTTON_PX,
-            AI_PROVIDER_REFRESH_TEXT_SIZE,
+            self.tokens.metrics.ui_text_xs,
         );
         options.button.disabled = refreshing;
         options.icon_gap = Some(4.0);
@@ -247,8 +224,8 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .px(px(16.0))
             .pb(px(12.0))
-            .grid()
-            .grid_cols(2)
+            .flex()
+            .flex_col()
             .gap(px(12.0))
             .child(self.ai_provider_field(
                 "settings_view.ai.provider_name",
@@ -272,18 +249,22 @@ impl WorkspaceApp {
                     cx,
                 ),
             ))
-            .when(
-                matches!(
-                    provider.provider_type.as_str(),
-                    "openai" | "openai_compatible" | "xai"
-                ),
-                |fields| {
-                    fields.child(self.ai_provider_field(
-                        "settings_view.ai.api_protocol",
-                        self.ai_provider_protocol_control(index, provider, cx),
-                    ))
-                },
-            )
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn ai_provider_protocol_field(
+        &self,
+        index: usize,
+        provider: &AiProviderView,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .px(px(16.0))
+            .pb(px(16.0))
+            .child(self.ai_provider_field(
+                "settings_view.ai.api_protocol",
+                self.ai_provider_protocol_control(index, provider, cx),
+            ))
             .into_any_element()
     }
 
@@ -377,17 +358,17 @@ impl WorkspaceApp {
         label_key: &str,
         control: AnyElement,
     ) -> AnyElement {
-        div()
-            .min_w(px(0.0))
-            .grid()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(control)
-            .into_any_element()
+        settings_row(
+            &self.tokens,
+            div().child(self.i18n.t(label_key)).into_any_element(),
+            None,
+            div()
+                .min_w(px(AI_PROVIDER_SELECT_W))
+                .max_w_full()
+                .flex_basis(px(320.0))
+                .flex_grow(2.0)
+                .child(control)
+                .into_any_element(),
+        )
     }
 }

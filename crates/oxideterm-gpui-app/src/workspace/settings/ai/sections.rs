@@ -657,6 +657,7 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
+            .child(div().mt(px(12.0)).child(self.ai_provider_add_controls(cx)))
             .when_some(provider_list, |section, provider_list| {
                 section.child(provider_list)
             })
@@ -672,7 +673,6 @@ impl WorkspaceApp {
             .iter()
             .map(|provider| self.ai_provider_card_estimated_height(provider, cx))
             .sum::<f32>()
-            + AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT
     }
 
     pub(in crate::workspace) fn ai_provider_card_estimated_height(
@@ -714,14 +714,24 @@ impl WorkspaceApp {
         } else {
             0.0
         };
-        // This mirrors the nested card structure: header, toolbar, two-column
-        // fields, model-chip rows, optional API-key editor, and row spacing.
+        let protocol_height = if matches!(
+            provider.provider_type.as_str(),
+            "openai" | "openai_compatible" | "xai"
+        ) {
+            64.0
+        } else {
+            0.0
+        };
+        let remove_height = if provider.custom { 40.0 } else { 0.0 };
+        // Account for independently wrapped fields and the optional protocol/key controls.
         72.0 + 52.0
-            + 112.0
+            + 144.0
             + 34.0
             + chip_rows as f32 * AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT
             + 48.0
             + key_input_height
+            + protocol_height
+            + remove_height
             + 16.0
     }
 
@@ -730,7 +740,7 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &App,
     ) {
-        let mut signatures = providers
+        let signatures = providers
             .iter()
             .map(|provider| {
                 let active_provider = self
@@ -744,6 +754,7 @@ impl WorkspaceApp {
                     .ai_entity
                     .read(cx)
                     .settings_provider_expanded(&provider.id, active_provider);
+                let mut hasher = DefaultHasher::new();
                 ai_provider_card_signature(
                     provider,
                     expanded,
@@ -752,11 +763,13 @@ impl WorkspaceApp {
                         .settings_provider_models_expanded(&provider.id),
                     self.ai_provider_has_key_cached(&provider.id, cx),
                 )
+                .hash(&mut hasher);
+                self.ai_web_provider_id()
+                    .is_ok_and(|id| id == provider.id)
+                    .hash(&mut hasher);
+                hasher.finish()
             })
             .collect::<Vec<_>>();
-        // The add-provider controls are the final virtual row inside this
-        // section. Keep a stable sentinel signature for that fixed row.
-        signatures.push(0xadd0_0001);
         let ai = self.ai_entity.read(cx);
         let model_ui = ai.model_ui();
         sync_tauri_variable_list_state_by_signatures(
@@ -781,14 +794,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let providers = ai_provider_views(self.settings_store.settings());
-        if index == providers.len() {
-            return div()
-                .w_full()
-                .min_w(px(0.0))
-                .pb(px(12.0))
-                .child(self.ai_provider_add_controls(cx))
-                .into_any_element();
-        }
         let Some(provider) = providers.get(index) else {
             return div().into_any_element();
         };
@@ -867,7 +872,7 @@ impl WorkspaceApp {
         let has_custom_prompt = !settings.ai.custom_system_prompt.trim().is_empty();
         settings_ai_editor_summary_section(
             &self.tokens,
-            self.ai_section_title("settings_view.ai.system_prompt_title"),
+            self.i18n.t("settings_view.ai.system_prompt_title"),
             self.i18n.t("settings_view.ai.system_prompt_hint"),
             None,
             self.i18n.t(if has_custom_prompt {
@@ -893,11 +898,7 @@ impl WorkspaceApp {
                 .any(|entry| !entry.content.trim().is_empty());
         settings_ai_editor_summary_section(
             &self.tokens,
-            settings_ai_icon_heading(
-                Self::render_lucide_icon(LucideIcon::Brain, 16.0, rgb(self.tokens.ui.text)),
-                self.ai_section_title("settings_view.ai.memory_title"),
-            )
-            .into_any_element(),
+            self.i18n.t("settings_view.ai.memory_title"),
             self.i18n.t("settings_view.ai.memory_hint"),
             Some(self.bool_row(
                 "settings_view.ai.memory_enabled",
@@ -1427,31 +1428,33 @@ impl WorkspaceApp {
         let input = SettingsInput::AiModelContextWindow(provider_index, model_index);
         let reset_provider_id = provider_id.to_string();
         let reset_model = model.to_string();
-        let reset = row.has_override.then(|| {
-            div()
-                .cursor_pointer()
-                .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
-                .hover(|style| style.text_color(rgb(self.tokens.ui.text)))
-                .child(Self::render_lucide_icon(
-                    LucideIcon::X,
-                    12.0,
-                    rgb(self.tokens.ui.text_muted),
-                ))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        let provider_id = reset_provider_id.clone();
-                        let model = reset_model.clone();
-                        this.edit_settings(
-                            move |settings| {
-                                set_ai_user_context_window(settings, &provider_id, &model, None);
-                            },
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                )
-                .into_any_element()
+        let reset = Some({
+            self.workspace_toolbar_action_button(
+                self.i18n.t("settings_view.ai.ctx_reset"),
+                None,
+                ToolbarButtonOptions {
+                    button: ButtonOptions {
+                        variant: ButtonVariant::Ghost,
+                        size: ButtonSize::Sm,
+                        disabled: !row.has_override,
+                        ..Default::default()
+                    },
+                    height: Some(28.0),
+                    ..Default::default()
+                },
+                cx.listener(move |this, _event, _window, cx| {
+                    let provider_id = reset_provider_id.clone();
+                    let model = reset_model.clone();
+                    this.edit_settings(
+                        move |settings| {
+                            set_ai_user_context_window(settings, &provider_id, &model, None);
+                        },
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
         });
         settings_ai_context_window_row(
             &self.tokens,

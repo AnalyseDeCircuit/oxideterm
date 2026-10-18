@@ -46,56 +46,52 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .px(px(16.0))
             .pb(px(16.0))
-            .grid()
-            .gap(px(4.0))
             .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.ai.api_key")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .child(self.ai_provider_secret_input(
-                                input,
-                                "",
-                                "sk-...".to_string(),
-                                focused,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        // ProviderKeyInput.tsx uses a secondary small Button
-                        // with h-8 text-xs for save. Route activation through
-                        // the workspace action wrapper so disabled state cannot
-                        // dispatch, matching the browser Button attribute.
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.ai.save"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Secondary,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: save_disabled,
+                self.ai_provider_field(
+                    "settings_view.ai.api_key",
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.0))
+                                .child(self.ai_provider_secret_input(
+                                    input,
+                                    "",
+                                    "sk-...".to_string(),
+                                    focused,
+                                    cx,
+                                )),
+                        )
+                        .child(
+                            // ProviderKeyInput.tsx uses a secondary small Button
+                            // with h-8 text-xs for save. Route activation through
+                            // the workspace action wrapper so disabled state cannot
+                            // dispatch, matching the browser Button attribute.
+                            self.workspace_toolbar_action_button(
+                                self.i18n.t("settings_view.ai.save"),
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Secondary,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: save_disabled,
+                                    },
+                                    height: Some(32.0),
+                                    font_size: Some(self.tokens.metrics.ui_text_xs),
+                                    ..ToolbarButtonOptions::default()
                                 },
-                                height: Some(32.0),
-                                font_size: Some(self.tokens.metrics.ui_text_xs),
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.save_ai_provider_api_key(index, cx);
-                                cx.stop_propagation();
-                            }),
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.save_ai_provider_api_key(index, cx);
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .into_any_element(),
                         )
                         .into_any_element(),
-                    ),
+                ),
             )
             .into_any_element()
     }
@@ -112,76 +108,74 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .px(px(16.0))
             .pb(px(16.0))
-            .grid()
-            .gap(px(4.0))
             .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.ai.api_key")),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .h(px(32.0))
-                            .px(px(8.0))
-                            .flex()
-                            .items_center()
-                            .rounded(px(self.tokens.radii.sm))
-                            .border_1()
-                            .border_color(rgba(
-                                (self.tokens.ui.border << 8) | AI_PROVIDER_MODEL_BORDER_ALPHA,
-                            ))
-                            // The masked key display sits inside a provider
-                            // card, so border/background is enough elevation.
-                            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .italic()
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child("••••••••••••••••"),
-                    )
-                    .child(
-                        // Stored API key removal mirrors Tauri's ghost small
-                        // danger Button. Shared activation keeps this confirm
-                        // trigger on the same disabled/loading path as the
-                        // rest of AI provider actions.
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.ai.remove"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Ghost,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
+                self.ai_provider_field(
+                    "settings_view.ai.api_key",
+                    div()
+                        .flex()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .min_w(px(0.0))
+                                .flex_1()
+                                .h(px(32.0))
+                                .px(px(8.0))
+                                .flex()
+                                .items_center()
+                                .rounded(px(self.tokens.radii.sm))
+                                .border_1()
+                                .border_color(rgba(
+                                    (self.tokens.ui.border << 8) | AI_PROVIDER_MODEL_BORDER_ALPHA,
+                                ))
+                                // The masked key display sits inside a provider
+                                // card, so border/background is enough elevation.
+                                .bg(self.settings_panel_background(self.tokens.ui.bg_card))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .italic()
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child("••••••••••••••••"),
+                        )
+                        .child(
+                            // Stored API key removal mirrors Tauri's ghost small
+                            // danger Button. Shared activation keeps this confirm
+                            // trigger on the same disabled/loading path as the
+                            // rest of AI provider actions.
+                            self.workspace_toolbar_action_button(
+                                self.i18n.t("settings_view.ai.remove"),
+                                None,
+                                ToolbarButtonOptions {
+                                    button: ButtonOptions {
+                                        variant: ButtonVariant::Ghost,
+                                        size: ButtonSize::Sm,
+                                        radius: ButtonRadius::Md,
+                                        disabled: false,
+                                    },
+                                    height: Some(32.0),
+                                    font_size: Some(self.tokens.metrics.ui_text_xs),
+                                    text_color: Some(rgb(self.tokens.ui.error)),
+                                    hover_text_color: Some(rgb(self.tokens.ui.error)),
+                                    hover_background: Some(rgba(
+                                        (self.tokens.ui.error << 8) | 0x1a,
+                                    )),
+                                    ..ToolbarButtonOptions::default()
                                 },
-                                height: Some(32.0),
-                                font_size: Some(self.tokens.metrics.ui_text_xs),
-                                text_color: Some(rgb(self.tokens.ui.error)),
-                                hover_text_color: Some(rgb(self.tokens.ui.error)),
-                                hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1a)),
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.ai_entity.update(cx, |ai, cx| {
-                                    ai.open_provider_key_remove_confirm(
-                                        index,
-                                        provider_id.clone(),
-                                        cx,
-                                    );
-                                });
-                                this.reset_standard_confirm_focus();
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.ai_entity.update(cx, |ai, cx| {
+                                        ai.open_provider_key_remove_confirm(
+                                            index,
+                                            provider_id.clone(),
+                                            cx,
+                                        );
+                                    });
+                                    this.reset_standard_confirm_focus();
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .into_any_element(),
                         )
                         .into_any_element(),
-                    ),
+                ),
             )
             .into_any_element()
     }

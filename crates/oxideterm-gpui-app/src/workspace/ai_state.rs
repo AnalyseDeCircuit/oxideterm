@@ -294,7 +294,7 @@ impl Default for AiSettingsViewState {
             new_provider_type,
             provider_settings_expanded: true,
             tool_use_expanded: true,
-            context_windows_expanded: true,
+            context_windows_expanded: false,
             expanded_providers: std::collections::BTreeMap::new(),
             expanded_provider_models: std::collections::BTreeSet::new(),
             expanded_context_providers: std::collections::BTreeSet::new(),

@@ -17,12 +17,27 @@ impl WorkspaceApp {
                     &mut settings.ai.active_provider_id,
                     &mut settings.ai.active_model,
                     template,
-                    id,
+                    id.clone(),
                     label,
                     now_ms,
                 );
             },
             cx,
         );
+        let active = self
+            .settings_store
+            .settings()
+            .ai
+            .active_provider_id
+            .as_deref()
+            == Some(id.as_str());
+        self.ai_entity.update(cx, |ai, cx| {
+            if !ai.settings_section_expanded(AiSettingsViewSection::ProviderSettings) {
+                ai.toggle_settings_section(AiSettingsViewSection::ProviderSettings, cx);
+            }
+            if !ai.settings_provider_expanded(&id, active) {
+                ai.toggle_settings_provider_expanded(&id, active, cx);
+            }
+        });
     }
 }

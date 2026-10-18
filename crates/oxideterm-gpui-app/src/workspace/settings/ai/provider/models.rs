@@ -33,9 +33,11 @@ impl WorkspaceApp {
                     .w_full()
                     .min_w(px(0.0))
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .justify_between()
                     .px(px(16.0))
+                    .gap(px(8.0))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -46,38 +48,46 @@ impl WorkspaceApp {
                                 provider.models.len()
                             )),
                     )
-                    .when(
-                        provider.models.len() > AI_PROVIDER_VISIBLE_MODEL_LIMIT,
-                        |row| {
-                            row.child(
-                                div()
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(self.tokens.ui.accent))
-                                    .cursor_pointer()
-                                    .child(if models_expanded {
-                                        self.i18n.t("settings_view.ai.show_fewer_models")
-                                    } else {
-                                        self.i18n_count(
-                                            "settings_view.ai.show_all_models",
-                                            provider.models.len(),
-                                        )
-                                    })
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, _event, _window, cx| {
-                                            this.ai_entity.update(cx, |ai, cx| {
-                                                ai.toggle_settings_provider_models(
-                                                    &provider_id,
-                                                    cx,
-                                                );
-                                            });
-                                            cx.stop_propagation();
-                                            // WorkspaceApp owns the surrounding settings render.
-                                            cx.notify();
-                                        }),
-                                    ),
-                            )
-                        },
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(self.ai_provider_refresh_button(index, provider, cx))
+                            .when(
+                                provider.models.len() > AI_PROVIDER_VISIBLE_MODEL_LIMIT,
+                                |row| {
+                                    row.child(
+                                        div()
+                                            .text_size(px(10.0))
+                                            .text_color(rgb(self.tokens.ui.accent))
+                                            .cursor_pointer()
+                                            .child(if models_expanded {
+                                                self.i18n.t("settings_view.ai.show_fewer_models")
+                                            } else {
+                                                self.i18n_count(
+                                                    "settings_view.ai.show_all_models",
+                                                    provider.models.len(),
+                                                )
+                                            })
+                                            .on_mouse_down(
+                                                MouseButton::Left,
+                                                cx.listener(move |this, _event, _window, cx| {
+                                                    this.ai_entity.update(cx, |ai, cx| {
+                                                        ai.toggle_settings_provider_models(
+                                                            &provider_id,
+                                                            cx,
+                                                        );
+                                                    });
+                                                    cx.stop_propagation();
+                                                    // WorkspaceApp owns the surrounding settings render.
+                                                    cx.notify();
+                                                }),
+                                            ),
+                                    )
+                                },
+                            ),
                     ),
             );
 
