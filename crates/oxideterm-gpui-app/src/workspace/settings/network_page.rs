@@ -189,6 +189,72 @@ fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) 
     }
 }
 
+// These are display families only; each checkbox retains its original ToolGroup authority.
+fn public_mcp_permission_sections()
+-> [(&'static str, &'static [oxideterm_public_mcp::ToolGroup]); 6] {
+    use oxideterm_public_mcp::ToolGroup::*;
+    [
+        (
+            "settings_view.network.mcp_family_connections",
+            &[
+                ConnectionDirectory,
+                ConnectionRead,
+                ConnectionManage,
+                CredentialManage,
+                NodeSession,
+            ],
+        ),
+        (
+            "settings_view.network.mcp_family_terminal",
+            &[
+                TerminalSession,
+                TerminalObserve,
+                TerminalInput,
+                RecordingControl,
+                RecordingContent,
+                CommandObserve,
+                CommandExecute,
+                QuickCommandRead,
+                QuickCommandContentRead,
+                QuickCommandManage,
+                QuickCommandExecute,
+            ],
+        ),
+        (
+            "settings_view.network.mcp_family_desktop",
+            &[
+                DesktopSession,
+                DesktopObserve,
+                DesktopInput,
+                DesktopClipboard,
+            ],
+        ),
+        (
+            "settings_view.network.mcp_family_files",
+            &[
+                ArtifactTransfer,
+                FileRead,
+                FileWrite,
+                WorkspaceRead,
+                WorkspaceEdit,
+            ],
+        ),
+        (
+            "settings_view.network.mcp_family_host",
+            &[
+                HostToolsObserve,
+                HostToolsOperate,
+                ForwardRead,
+                ForwardManage,
+            ],
+        ),
+        (
+            "settings_view.network.mcp_family_other",
+            &[AddonRead, AddonManage, AuditRead, CloudSync],
+        ),
+    ]
+}
+
 fn schedule_settings_network_proxy_test(
     runtime: &tokio::runtime::Runtime,
     host: String,
@@ -368,6 +434,83 @@ impl WorkspaceApp {
         }
     }
 
+    fn public_mcp_create_client_controls(&self, cx: &mut Context<Self>) -> AnyElement {
+        let mode = self.settings_workspace.read(cx).new_mcp_client_mode;
+        let mut picker = div().flex().flex_wrap().gap(px(4.0));
+        for (value, label) in [
+            (
+                oxideterm_public_mcp::ClientApprovalMode::Standard,
+                "settings_view.network.client_mode_standard",
+            ),
+            (
+                oxideterm_public_mcp::ClientApprovalMode::Unattended,
+                "settings_view.network.client_mode_full",
+            ),
+        ] {
+            picker = picker.child(
+                oxideterm_gpui_ui::segmented_control_item(
+                    &self.tokens,
+                    self.i18n.t(label),
+                    mode == value,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.settings_workspace.update(cx, |state, cx| {
+                            state.new_mcp_client_mode = value;
+                            cx.notify();
+                        });
+                        cx.notify();
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
+        }
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(px(12.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.network.mcp_new_client_mode")),
+            )
+            .child(picker)
+            .child(self.workspace_toolbar_action_button(
+                self.i18n.t("settings_view.network.mcp_create_client"),
+                Some(Self::render_lucide_icon(
+                    LucideIcon::Plus,
+                    SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                    rgb(self.tokens.ui.bg),
+                )),
+                ToolbarButtonOptions {
+                    button: ButtonOptions {
+                        variant: ButtonVariant::Default,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                cx.listener(|this, _event, _window, cx| {
+                    let mode = this.settings_workspace.read(cx).new_mcp_client_mode;
+                    let label = format!(
+                        "{} {}",
+                        this.i18n.t("settings_view.network.external_client_name"),
+                        this.public_mcp.clients().len() + 1
+                    );
+                    if let Err(error) = this.public_mcp.create_client(label, mode) {
+                        this.public_mcp.record_action_error(error);
+                    }
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            ))
+            .into_any_element()
+    }
+
     fn settings_public_mcp_section(&self, cx: &mut Context<Self>) -> AnyElement {
         let endpoint = self.public_mcp.endpoint_url().map(str::to_owned);
         let startup_error = self.public_mcp.startup_error().map(str::to_owned);
@@ -408,9 +551,16 @@ impl WorkspaceApp {
                         div()
                             .min_w(px(0.0))
                             .flex_1()
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(endpoint),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.success))
+                            .child(self.i18n.t("settings_view.network.mcp_running")),
                     )
                     .child(self.workspace_toolbar_action_button(
                         self.i18n.t("settings_view.network.copy_endpoint"),
@@ -431,47 +581,50 @@ impl WorkspaceApp {
         }
 
         content = content.child(
-            div()
-                .w_full()
-                .min_w(px(0.0))
-                .flex()
-                .flex_wrap()
-                .items_end()
-                .gap(px(SETTINGS_PUBLIC_MCP_ENDPOINT_GAP))
-                .child(
-                    div()
-                        .w(px(SETTINGS_NETWORK_PORT_FIELD_WIDTH))
-                        .max_w_full()
-                        .child(self.network_input_field(
-                            "settings_view.network.public_mcp_port",
-                            "settings_view.network.public_mcp_port_hint",
-                            SettingsInput::PublicMcpPort,
-                            self.current_settings_input_value(SettingsInput::PublicMcpPort, cx),
-                            "0".to_string(),
-                            true,
-                            cx,
-                        )),
-                )
-                .child(self.workspace_toolbar_action_button(
-                    self.i18n.t("settings_view.network.apply_public_mcp_port"),
-                    None,
-                    ToolbarButtonOptions::default(),
-                    cx.listener(move |this, _event, _window, cx| {
-                        let draft = this.public_mcp.port_draft().trim().to_owned();
-                        let Ok(port) = draft.parse::<u16>() else {
-                            let error =
-                                this.i18n.t("settings_view.network.invalid_public_mcp_port");
-                            this.public_mcp.record_action_error(error);
+            self.setting_row(
+                "settings_view.network.public_mcp_port",
+                "settings_view.network.public_mcp_port_hint",
+                div()
+                    .min_w(px(0.0))
+                    .flex()
+                    .flex_wrap()
+                    .items_end()
+                    .gap(px(SETTINGS_PUBLIC_MCP_ENDPOINT_GAP))
+                    .child(
+                        div()
+                            .w(px(SETTINGS_NETWORK_PORT_FIELD_WIDTH))
+                            .max_w_full()
+                            .child(self.settings_text_input_control_fill(
+                                SettingsInput::PublicMcpPort,
+                                self.current_settings_input_value(SettingsInput::PublicMcpPort, cx),
+                                "0".to_string(),
+                                cx,
+                            )),
+                    )
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.network.apply_public_mcp_port"),
+                        None,
+                        ToolbarButtonOptions::default(),
+                        cx.listener(move |this, _event, _window, cx| {
+                            let draft = this.public_mcp.port_draft().trim().to_owned();
+                            let Ok(port) = draft.parse::<u16>() else {
+                                let error =
+                                    this.i18n.t("settings_view.network.invalid_public_mcp_port");
+                                this.public_mcp.record_action_error(error);
+                                cx.notify();
+                                return;
+                            };
+                            let runtime = this.forwarding_runtime.handle().clone();
+                            if let Err(error) = this.public_mcp.apply_preferred_port(&runtime, port)
+                            {
+                                this.public_mcp.record_action_error(error.to_string());
+                            }
                             cx.notify();
-                            return;
-                        };
-                        let runtime = this.forwarding_runtime.handle().clone();
-                        if let Err(error) = this.public_mcp.apply_preferred_port(&runtime, port) {
-                            this.public_mcp.record_action_error(error.to_string());
-                        }
-                        cx.notify();
-                    }),
-                )),
+                        }),
+                    ))
+                    .into_any_element(),
+                cx,
+            ),
         );
 
         content = content.child(
@@ -484,111 +637,27 @@ impl WorkspaceApp {
                 ),
         );
 
-        if credential_ready {
-            content = content.child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.warning))
-                    .p(px(SETTINGS_PUBLIC_MCP_CREDENTIAL_PADDING))
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("settings_view.network.credential_once")),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.warning))
-                                    .child(self.i18n.t("settings_view.network.stdio_json_hint")),
-                            ),
-                    )
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.copy_credential"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Copy,
-                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                            rgb(self.tokens.ui.bg),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                ..ButtonOptions::default()
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(credential) = this.public_mcp.revealed_credential() {
-                                cx.write_to_clipboard(ClipboardItem::new_string(
-                                    credential.to_owned(),
-                                ));
-                            }
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.copy_stdio_json"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Copy,
-                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                            rgb(self.tokens.ui.text),
-                        )),
-                        ToolbarButtonOptions::default(),
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(credential) = this.public_mcp.revealed_credential() {
-                                let mut config = public_mcp_stdio_json(credential);
-                                // The clipboard is the explicit external boundary; app state never retains the JSON.
-                                let clipboard_config = std::mem::take(&mut *config);
-                                cx.write_to_clipboard(ClipboardItem::new_string(clipboard_config));
-                            }
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.dismiss_credential"),
-                        None,
-                        ToolbarButtonOptions::default(),
-                        cx.listener(|this, _event, _window, cx| {
-                            this.public_mcp.dismiss_revealed_credential();
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    )),
-            );
-        }
-
-        content = content
-            .child(self.card_separator())
-            .child(self.network_subsection_heading(
-                "settings_view.network.pending_approvals",
-                "settings_view.network.pending_approvals_hint",
-            ));
         let pending = approvals
             .into_iter()
             .filter(|approval| approval.status == oxideterm_public_mcp::ApprovalStatus::Pending)
             .collect::<Vec<_>>();
-        if pending.is_empty() {
+        content = content.child(self.card_separator()).child(
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(self.tokens.ui.text))
+                .child(format!(
+                    "{} · {}",
+                    self.i18n.t("settings_view.network.pending_approvals"),
+                    pending.len()
+                )),
+        );
+        if !pending.is_empty() {
             content = content.child(
                 div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.network.no_pending_approvals")),
+                    .child(self.i18n.t("settings_view.network.pending_approvals_hint")),
             );
-        } else {
             for approval in pending {
                 let approval_ref_for_accept = approval.approval_ref.clone();
                 let approval_ref_for_reject = approval.approval_ref.clone();
@@ -718,6 +787,95 @@ impl WorkspaceApp {
                 "settings_view.network.external_clients_hint",
             ));
 
+        content = content.child(self.public_mcp_create_client_controls(cx));
+
+        if credential_ready {
+            content = content.child(
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.warning))
+                    .p(px(SETTINGS_PUBLIC_MCP_CREDENTIAL_PADDING))
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(self.i18n.t("settings_view.network.credential_once")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.warning))
+                                    .child(self.i18n.t("settings_view.network.stdio_json_hint")),
+                            ),
+                    )
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.network.copy_credential"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::Copy,
+                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                            rgb(self.tokens.ui.bg),
+                        )),
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Default,
+                                ..ButtonOptions::default()
+                            },
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Some(credential) = this.public_mcp.revealed_credential() {
+                                cx.write_to_clipboard(ClipboardItem::new_string(
+                                    credential.to_owned(),
+                                ));
+                            }
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.network.copy_stdio_json"),
+                        Some(Self::render_lucide_icon(
+                            LucideIcon::Copy,
+                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                            rgb(self.tokens.ui.text),
+                        )),
+                        ToolbarButtonOptions::default(),
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Some(credential) = this.public_mcp.revealed_credential() {
+                                let mut config = public_mcp_stdio_json(credential);
+                                // The clipboard is the explicit external boundary; app state never retains the JSON.
+                                let clipboard_config = std::mem::take(&mut *config);
+                                cx.write_to_clipboard(ClipboardItem::new_string(clipboard_config));
+                            }
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.network.dismiss_credential"),
+                        None,
+                        ToolbarButtonOptions::default(),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.public_mcp.dismiss_revealed_credential();
+                            cx.notify();
+                            cx.stop_propagation();
+                        }),
+                    )),
+            );
+        }
+
         if clients.is_empty() {
             content = content.child(
                 div()
@@ -772,67 +930,158 @@ impl WorkspaceApp {
                         "settings_view.network.switch_to_standard_mode"
                     }
                 };
-                let mut group_controls = div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP));
-                let visible_tool_groups = std::iter::once(oxideterm_public_mcp::ToolGroup::Basic)
-                    .chain(
-                        oxideterm_public_mcp::ToolGroup::selectable()
+                let group_controls = permissions_expanded.then(|| {
+                    let mut families = div().w_full().min_w_0().flex().flex_wrap();
+                    for (title_key, groups) in public_mcp_permission_sections() {
+                        let selected = groups
                             .iter()
-                            .copied(),
-                    );
-                for tool_group in visible_tool_groups {
-                    let label_key = public_mcp_tool_group_label_key(tool_group);
-                    let checked = client.tool_groups.contains(&tool_group);
-                    let client_ref_for_group = client.client_ref.clone();
-                    let required_group = tool_group == oxideterm_public_mcp::ToolGroup::Basic;
-                    let mut control = checkbox_with_state(
-                        &self.tokens,
-                        String::new(),
-                        if checked {
-                            CheckboxState::Checked
-                        } else {
-                            CheckboxState::Unchecked
-                        },
-                        CheckboxOptions {
-                            disabled: required_group,
-                            ..CheckboxOptions::default()
-                        },
-                    );
-                    if !required_group {
-                        control = control.on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this.set_public_mcp_client_tool_group(
-                                    &client_ref_for_group,
-                                    tool_group,
-                                    !checked,
-                                    cx,
-                                ) {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
+                            .filter(|group| client.tool_groups.contains(group))
+                            .count();
+                        let mut items = Vec::new();
+                        for &tool_group in groups {
+                            let checked = client.tool_groups.contains(&tool_group);
+                            let client_ref = client.client_ref.clone();
+                            let control = checkbox(&self.tokens, String::new(), checked)
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) = this.set_public_mcp_client_tool_group(
+                                            &client_ref,
+                                            tool_group,
+                                            !checked,
+                                            cx,
+                                        ) {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                                .into_any_element();
+                            items.push(settings_ai_tool_policy_item(
+                                &self.tokens,
+                                self.i18n.t(public_mcp_tool_group_label_key(tool_group)),
+                                control,
+                            ));
+                        }
+                        families = families.child(
+                            div()
+                                .flex_basis(gpui::relative(0.5))
+                                .flex_grow(1.0)
+                                .min_w(px(300.0))
+                                .max_w_full()
+                                .pr(px(12.0))
+                                .pb(px(16.0))
+                                .child(settings_ai_tool_policy_group(
+                                    &self.tokens,
+                                    self.i18n.t(title_key),
+                                    String::new(),
+                                    div()
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(format!("{selected}/{}", groups.len()))
+                                        .into_any_element(),
+                                    items,
+                                )),
                         );
                     }
-                    group_controls = group_controls.child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
-                            .child(control)
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(self.i18n.t(label_key)),
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(12.0))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child(self.i18n.t("settings_view.network.mcp_group_basic")),
+                        )
+                        .child(families)
+                        .into_any_element()
+                });
+                let client_details = permissions_expanded.then(|| {
+                    div()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(16.0))
+                        .child(
+                            self.setting_row(
+                                "settings_view.network.mcp_approval_mode",
+                                "settings_view.network.mcp_approval_mode_hint",
+                                self.workspace_toolbar_action_button(
+                                    self.i18n.t(mode_toggle_key),
+                                    None,
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) = this
+                                            .set_public_mcp_client_approval_mode(
+                                                &client_ref_for_mode,
+                                                next_approval_mode,
+                                                cx,
+                                            )
+                                        {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                )
+                                .into_any_element(),
+                                cx,
                             ),
-                    );
-                }
+                        )
+                        .children(group_controls)
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap(px(8.0))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t(toggle_key),
+                                    None,
+                                    ToolbarButtonOptions::default(),
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) = this.set_public_mcp_client_enabled(
+                                            &client_ref_for_toggle,
+                                            next_enabled,
+                                            cx,
+                                        ) {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t("settings_view.network.revoke_client"),
+                                    Some(Self::render_lucide_icon(
+                                        LucideIcon::Trash2,
+                                        SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
+                                        rgb(self.tokens.ui.text),
+                                    )),
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Ghost,
+                                            ..Default::default()
+                                        },
+                                        text_color: Some(rgb(self.tokens.ui.error)),
+                                        ..Default::default()
+                                    },
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        if let Err(error) = this
+                                            .remove_public_mcp_client(&client_ref_for_remove, cx)
+                                        {
+                                            this.public_mcp.record_action_error(error);
+                                        }
+                                        cx.notify();
+                                        cx.stop_propagation();
+                                    }),
+                                )),
+                        )
+                        .into_any_element()
+                });
                 content = content.child(
                     div()
                         .w_full()
@@ -866,9 +1115,10 @@ impl WorkspaceApp {
                                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                                 .text_color(rgb(self.tokens.ui.text_muted))
                                                 .child(format!(
-                                                    "{} · {}",
+                                                    "{} · {} · {}",
                                                     self.i18n.t(status_key),
-                                                    self.i18n.t(mode_key)
+                                                    self.i18n.t(mode_key),
+                                                    self.i18n.t("settings_view.network.mcp_permission_count").replace("{{count}}", &client.tool_groups.iter().filter(|group| **group != oxideterm_public_mcp::ToolGroup::Basic).count().to_string())
                                                 )),
                                         ),
                                 )
@@ -878,16 +1128,13 @@ impl WorkspaceApp {
                                     } else {
                                         "settings_view.network.show_permissions"
                                     }),
-                                    Some(Self::render_lucide_icon(
-                                        if permissions_expanded {
-                                            LucideIcon::ChevronDown
-                                        } else {
-                                            LucideIcon::ChevronRight
-                                        },
+                                    Some(self.render_animated_chevron(
+                                        (gpui::SharedString::from(format!("public-mcp-client-{}", client.client_ref)), permissions_expanded as usize),
+                                        permissions_expanded,
                                         SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
                                         rgb(self.tokens.ui.text),
                                     )),
-                                    ToolbarButtonOptions::default(),
+                                    ToolbarButtonOptions { button: ButtonOptions { variant: ButtonVariant::Ghost, ..Default::default() }, ..Default::default() },
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.settings_workspace.update(cx, |settings, cx| {
                                             settings.expanded_mcp_client = (!permissions_expanded)
@@ -898,121 +1145,12 @@ impl WorkspaceApp {
                                         cx.stop_propagation();
                                     }),
                                 ))
-                                .child(self.workspace_toolbar_action_button(
-                                    self.i18n.t(mode_toggle_key),
-                                    None,
-                                    ToolbarButtonOptions::default(),
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if let Err(error) = this
-                                            .set_public_mcp_client_approval_mode(
-                                                &client_ref_for_mode,
-                                                next_approval_mode,
-                                                cx,
-                                            )
-                                        {
-                                            this.public_mcp.record_action_error(error);
-                                        }
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    }),
-                                ))
-                                .child(self.workspace_toolbar_action_button(
-                                    self.i18n.t(toggle_key),
-                                    None,
-                                    ToolbarButtonOptions::default(),
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if let Err(error) = this.set_public_mcp_client_enabled(
-                                            &client_ref_for_toggle,
-                                            next_enabled,
-                                            cx,
-                                        ) {
-                                            this.public_mcp.record_action_error(error);
-                                        }
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    }),
-                                ))
-                                .child(self.workspace_toolbar_action_button(
-                                    self.i18n.t("settings_view.network.revoke_client"),
-                                    Some(Self::render_lucide_icon(
-                                        LucideIcon::Trash2,
-                                        SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                                        rgb(self.tokens.ui.text),
-                                    )),
-                                    ToolbarButtonOptions::default(),
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if let Err(error) = this
-                                            .remove_public_mcp_client(&client_ref_for_remove, cx)
-                                        {
-                                            this.public_mcp.record_action_error(error);
-                                        }
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    }),
-                                )),
                         )
-                        .when(permissions_expanded, |card| card.child(group_controls)),
+                        .children(client_details),
                 );
             }
         }
 
-        let next_client_number = self.public_mcp.clients().len() + 1;
-        content = content.child(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
-                .child(self.workspace_toolbar_action_button(
-                    self.i18n.t("settings_view.network.create_standard_client"),
-                    Some(Self::render_lucide_icon(
-                        LucideIcon::Plus,
-                        SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                        rgb(self.tokens.ui.bg),
-                    )),
-                    ToolbarButtonOptions {
-                        button: ButtonOptions {
-                            variant: ButtonVariant::Default,
-                            ..ButtonOptions::default()
-                        },
-                        ..ToolbarButtonOptions::default()
-                    },
-                    cx.listener(move |this, _event, _window, cx| {
-                        let label = format!(
-                            "{} {}",
-                            this.i18n.t("settings_view.network.external_client_name"),
-                            next_client_number
-                        );
-                        if let Err(error) = this.public_mcp.create_client(
-                            label,
-                            oxideterm_public_mcp::ClientApprovalMode::Standard,
-                        ) {
-                            this.public_mcp.record_action_error(error);
-                        }
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.workspace_toolbar_action_button(
-                    self.i18n.t("settings_view.network.create_full_client"),
-                    None,
-                    ToolbarButtonOptions::default(),
-                    cx.listener(move |this, _event, _window, cx| {
-                        let label = format!(
-                            "{} {}",
-                            this.i18n.t("settings_view.network.external_client_name"),
-                            next_client_number
-                        );
-                        if let Err(error) = this.public_mcp.create_client(
-                            label,
-                            oxideterm_public_mcp::ClientApprovalMode::Unattended,
-                        ) {
-                            this.public_mcp.record_action_error(error);
-                        }
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                )),
-        );
 
         self.settings_card(
             "settings_view.network.public_mcp",
@@ -2023,6 +2161,18 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mcp_permission_sections_preserve_every_selectable_group_once() {
+        let mut displayed = public_mcp_permission_sections()
+            .into_iter()
+            .flat_map(|(_, groups)| groups.iter().copied())
+            .collect::<Vec<_>>();
+        displayed.sort();
+        let mut selectable = oxideterm_public_mcp::ToolGroup::selectable().to_vec();
+        selectable.sort();
+        assert_eq!(displayed, selectable);
+    }
     use gpui::{AppContext, TestAppContext};
     use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyProtocol};
 
