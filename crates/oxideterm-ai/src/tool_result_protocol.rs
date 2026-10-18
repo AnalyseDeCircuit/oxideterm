@@ -107,7 +107,13 @@ pub fn ai_tool_result_model_content(result: &AiExecutedToolResult) -> String {
             payload.insert(key.to_string(), value.clone());
         }
     }
-    for key in ["warnings", "observations", "targets", "nextActions"] {
+    for key in [
+        "warnings",
+        "observations",
+        "targets",
+        "nextActions",
+        "sources",
+    ] {
         ai_insert_non_empty_model_array(&mut payload, key, envelope.get(key));
     }
     for key in ["disambiguation", "outputPreview"] {

@@ -380,6 +380,8 @@ pub struct AiSettings {
     #[serde(default)]
     pub skills: AiSkillsSettings,
     pub tool_use: AiToolUseSettings,
+    #[serde(default)]
+    pub web_search: AiWebSearchSettings,
     pub context_sources: AiContextSources,
     #[serde(default)]
     pub mcp_servers: Vec<Value>,
@@ -416,6 +418,7 @@ impl Default for AiSettings {
             memory: AiMemorySettings::default(),
             skills: AiSkillsSettings::default(),
             tool_use: AiToolUseSettings::default(),
+            web_search: AiWebSearchSettings::default(),
             context_sources: AiContextSources::default(),
             mcp_servers: Vec::new(),
             acp_agents: Vec::new(),
@@ -424,6 +427,13 @@ impl Default for AiSettings {
             extra: ExtraFields::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AiWebSearchSettings {
+    pub enabled: bool,
+    pub provider_id: Option<String>,
 }
 
 #[cfg(test)]

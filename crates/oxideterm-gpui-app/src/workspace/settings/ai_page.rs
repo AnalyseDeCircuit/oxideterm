@@ -40,3 +40,5 @@ mod sections;
 mod skills;
 #[path = "ai/surface.rs"]
 mod surface;
+#[path = "ai/web.rs"]
+mod web;

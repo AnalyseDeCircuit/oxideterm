@@ -441,6 +441,12 @@ fn orchestrator_v2_authority_inventory_covers_every_tool() {
         "list_memory_entries": { "authority": "memory_store", "fields": [] },
         "manage_memory_entry": { "authority": "memory_store", "fields": [] }
     });
+    for name in ["search_web", "read_web_page"] {
+        inventory.as_object_mut().unwrap().insert(
+            name.into(),
+            serde_json::json!({"authority":"global_search_configuration", "fields":[]}),
+        );
+    }
     inventory
         .as_object_mut()
         .expect("the contract inventory is an object")

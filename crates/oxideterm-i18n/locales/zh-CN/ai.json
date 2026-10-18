@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "来源",
+      "disabled": "联网搜索已关闭。",
+      "configuration": "请在 AI 设置中选择官方 DeepSeek 配置。",
+      "authentication": "DeepSeek 密钥缺失或无效，请检查所选配置。",
+      "balance": "DeepSeek 账号余额不足。",
+      "rate_limit": "搜索服务请求过于频繁，请稍后重试。",
+      "unavailable": "无法读取该网页，可能无法访问或不支持正文提取。",
+      "invalid_arguments": "请使用不含凭据的公开网页地址，或不超过 128 字的搜索词。",
+      "request": "联网请求失败或超时，请检查网络后重试。",
+      "response": "搜索服务返回的数据无效或超过大小限制。",
+      "search_done": "搜索完成",
+      "read_done": "网页已读取"
+    },
     "images": {
       "tool_invalid": "工具返回的图片无法读取、格式不受支持或超出大小限制。",
       "count": "{{count}} 张图片",
@@ -271,6 +285,8 @@
       "approve": "批准",
       "reject": "拒绝",
       "tool_names": {
+        "search_web": "搜索网页",
+        "read_web_page": "读取网页",
         "delegate_task": "委派任务",
         "send_agent_message": "向子代理发送消息",
         "wait_agents": "等待子代理",

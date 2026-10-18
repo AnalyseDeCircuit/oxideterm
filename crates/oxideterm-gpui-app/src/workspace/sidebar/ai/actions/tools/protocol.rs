@@ -551,6 +551,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn web_search_sources_survive_model_output_truncation() {
+        let snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
+        let sources = serde_json::json!([
+            {"title":"Rust releases", "url":"https://blog.rust-lang.org/releases/?page=2#stable"},
+            {"title":"Rust installation", "url":"https://www.rust-lang.org/tools/install"}
+        ]);
+        let result = snapshot.to_executed_tool_result(
+            "search-1".into(),
+            "search_web".into(),
+            snapshot.ok(
+                "Web request completed.",
+                "article text ".repeat(2000),
+                serde_json::json!({"sources":sources,"truncated":false}),
+                "read",
+            ),
+            0,
+        );
+        assert_eq!(result.envelope["sources"], sources);
+        let model: serde_json::Value =
+            serde_json::from_str(&oxideterm_ai::ai_tool_result_model_content(&result)).unwrap();
+        assert_eq!(model["sources"], sources);
+        assert_eq!(model["truncated"], true);
+    }
+
+    #[test]
     fn terminal_input_state_reaches_model_without_false_secret_waits() {
         let snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
         for (buffer, known_secret, alternate, expected_reason, expected_tui) in [

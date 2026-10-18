@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "出典",
+      "disabled": "ウェブアクセスは無効です。",
+      "configuration": "AI 設定で公式 DeepSeek の設定を選択してください。",
+      "authentication": "DeepSeek キーがないか無効です。選択した設定を確認してください。",
+      "balance": "DeepSeek アカウントの残高が不足しています。",
+      "rate_limit": "検索サービスのリクエスト上限に達しました。しばらくしてから再試行してください。",
+      "unavailable": "ページにアクセスできないか、本文を取得できませんでした。",
+      "invalid_arguments": "認証情報を含まない公開 URL、または 128 文字以内の検索語を使用してください。",
+      "request": "ウェブリクエストが失敗またはタイムアウトしました。接続を確認してください。",
+      "response": "検索サービスから無効または大きすぎるデータが返されました。",
+      "search_done": "検索完了",
+      "read_done": "ページを取得しました"
+    },
     "images": {
       "tool_invalid": "ツールが返した画像は読み取れないか、未対応の形式、またはサイズ制限を超えています。",
       "count": "画像 {{count}} 枚",
@@ -271,6 +285,8 @@
       "approve": "承認",
       "reject": "拒否",
       "tool_names": {
+        "search_web": "ウェブを検索",
+        "read_web_page": "ウェブページを読む",
         "delegate_task": "タスクを委派",
         "send_agent_message": "サブエージェントに送信",
         "wait_agents": "サブエージェントを待つ",

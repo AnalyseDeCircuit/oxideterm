@@ -1132,6 +1132,13 @@
       "action_failed": "Operazione sulla chiave gestita non riuscita: {{error}}"
     },
     "ai": {
+      "web_title": "Ricerca web",
+      "web_enabled": "Consenti accesso al web",
+      "web_enabled_hint": "Impostazione globale. Tutte le conversazioni possono cercare e leggere pagine web. Richiede le chiamate agli strumenti.",
+      "web_provider": "Account di ricerca",
+      "web_provider_hint": "Usa la chiave salvata di una configurazione DeepSeek, indipendentemente dal modello della chat. Aggiungi prima DeepSeek tra i fornitori di modelli.",
+      "web_provider_none": "Seleziona configurazione DeepSeek",
+      "web_billing_hint": "Le ricerche e gli URL vengono inviati a DeepSeek. Ricerche e letture vengono addebitate separatamente per richiesta.",
       "automatic_placeholder": "Automatico",
       "conversation_agents_hint": "Queste impostazioni si applicano a tutte le conversazioni. I sottoagenti usano gli strumenti nell’ambito consentito dell’attività principale e ne seguono le regole di approvazione.",
       "conversation_agents": "Sottoagenti",

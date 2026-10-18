@@ -532,6 +532,8 @@ impl WorkspaceApp {
                 matches!(
                     name.as_str(),
                     "list_targets"
+                        | "search_web"
+                        | "read_web_page"
                         | "select_target"
                         | "get_state"
                         | "run_command"

@@ -1926,6 +1926,40 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Ai, SettingsSelect::AiWebSearchProvider) => {
+                let current = settings.ai.web_search.provider_id.clone();
+                let mut popup = select_panel_overlay_popup_with_max_height(
+                    &self.tokens,
+                    width.max(AI_PROVIDER_SELECT_W),
+                    320.0,
+                );
+                let options =
+                    std::iter::once((None, self.i18n.t("settings_view.ai.web_provider_none")))
+                        .chain(
+                            ai_provider_views(settings)
+                                .into_iter()
+                                .filter(oxideterm_ai::web::official_deepseek_provider)
+                                .map(|provider| (Some(provider.id), provider.name)),
+                        );
+                for (provider_id, label) in options {
+                    let selected = current == provider_id;
+                    popup = popup.child(select_option_action(
+                        select_option(&self.tokens, label, selected),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let provider_id = provider_id.clone();
+                            this.close_settings_select();
+                            this.edit_settings(
+                                move |settings| settings.ai.web_search.provider_id = provider_id,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Ai, SettingsSelect::AiMcpTransport) => {
                 let current = self
                     .ai_entity

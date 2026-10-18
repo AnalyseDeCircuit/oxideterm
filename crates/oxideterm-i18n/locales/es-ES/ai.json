@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "Fuentes",
+      "disabled": "El acceso a Internet está desactivado.",
+      "configuration": "Selecciona una configuración oficial de DeepSeek en los ajustes de IA.",
+      "authentication": "Falta la clave de DeepSeek o no es válida. Revisa la configuración seleccionada.",
+      "balance": "La cuenta de DeepSeek no tiene saldo suficiente.",
+      "rate_limit": "Se ha superado el límite de consultas. Inténtalo más tarde.",
+      "unavailable": "La página no está disponible o no se pudo extraer su texto.",
+      "invalid_arguments": "Usa una URL pública sin credenciales o una consulta de hasta 128 caracteres.",
+      "request": "La solicitud web falló o agotó el tiempo de espera. Comprueba la conexión.",
+      "response": "El servicio devolvió datos no válidos o demasiado grandes.",
+      "search_done": "Búsqueda completada",
+      "read_done": "Página obtenida"
+    },
     "images": {
       "tool_invalid": "La herramienta devolvió una imagen ilegible, no compatible o demasiado grande.",
       "count": "{{count}} imágenes",
@@ -271,6 +285,8 @@
       "approve": "Aprobar",
       "reject": "Rechazar",
       "tool_names": {
+        "search_web": "Buscar en la web",
+        "read_web_page": "Leer página web",
         "delegate_task": "Delegar tarea",
         "send_agent_message": "Enviar mensaje al subagente",
         "wait_agents": "Esperar a subagentes",

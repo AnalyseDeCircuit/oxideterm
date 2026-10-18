@@ -346,7 +346,7 @@ mod ai_turn_order_tests {
     }
 
     #[test]
-    fn native_chat_tool_definitions_include_mcp_bridge_tools() {
+    fn native_chat_tool_definitions_include_mcp_bridge_tools_and_gate_web_search() {
         let registry = oxideterm_ai::McpRegistry::new(oxideterm_ai::AiProviderKeyStore::new());
         let policy = oxideterm_ai::AiToolUsePolicy {
             enabled: true,
@@ -357,7 +357,7 @@ mod ai_turn_order_tests {
             ..oxideterm_ai::AiToolUsePolicy::default()
         };
 
-        let tools = ai_stream_tool_definitions(true, true, &policy, &registry);
+        let tools = ai_stream_tool_definitions(true, true, false, &policy, &registry);
         let names = tools
             .iter()
             .map(|tool| tool.name.as_str())
@@ -366,6 +366,16 @@ mod ai_turn_order_tests {
         assert!(names.contains(&"read_resource"));
         assert!(names.contains(&"read_mcp_resource"));
         assert!(!names.contains(&"list_mcp_resources"));
+        assert!(!names.contains(&"search_web"));
+        assert!(!names.contains(&"read_web_page"));
+
+        let web_names = ai_stream_tool_definitions(true, true, true, &policy, &registry)
+            .into_iter()
+            .filter(|tool| oxideterm_ai::web::is_web_tool(&tool.name))
+            .map(|tool| tool.name)
+            .collect::<Vec<_>>();
+        assert_eq!(web_names, ["search_web", "read_web_page"]);
+        assert!(ai_stream_tool_definitions(false, true, true, &policy, &registry).is_empty());
     }
 
     #[test]

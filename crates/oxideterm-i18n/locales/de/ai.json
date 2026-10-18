@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "Quellen",
+      "disabled": "Der Internetzugriff ist deaktiviert.",
+      "configuration": "Wähle in den KI-Einstellungen eine offizielle DeepSeek-Konfiguration.",
+      "authentication": "Der DeepSeek-Schlüssel fehlt oder ist ungültig. Prüfe die gewählte Konfiguration.",
+      "balance": "Das Guthaben des DeepSeek-Kontos reicht nicht aus.",
+      "rate_limit": "Zu viele Anfragen an den Suchdienst. Versuche es später erneut.",
+      "unavailable": "Die Seite ist nicht verfügbar oder ihr Text konnte nicht extrahiert werden.",
+      "invalid_arguments": "Verwende eine öffentliche URL ohne Zugangsdaten oder einen Suchtext mit höchstens 128 Zeichen.",
+      "request": "Die Webanfrage ist fehlgeschlagen oder abgelaufen. Prüfe die Netzwerkverbindung.",
+      "response": "Der Suchdienst hat ungültige oder zu große Daten zurückgegeben.",
+      "search_done": "Suche abgeschlossen",
+      "read_done": "Seite abgerufen"
+    },
     "images": {
       "tool_invalid": "Das Werkzeug hat ein unlesbares, nicht unterstütztes oder zu großes Bild zurückgegeben.",
       "count": "{{count}} Bilder",
@@ -271,6 +285,8 @@
       "approve": "Genehmigen",
       "reject": "Ablehnen",
       "tool_names": {
+        "search_web": "Web durchsuchen",
+        "read_web_page": "Webseite lesen",
         "delegate_task": "Aufgabe delegieren",
         "send_agent_message": "Unteragent kontaktieren",
         "wait_agents": "Auf Unteragenten warten",

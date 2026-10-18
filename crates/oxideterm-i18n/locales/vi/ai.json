@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "Nguồn",
+      "disabled": "Truy cập web đã tắt.",
+      "configuration": "Chọn cấu hình DeepSeek chính thức trong thiết lập AI.",
+      "authentication": "Khóa DeepSeek bị thiếu hoặc không hợp lệ. Hãy kiểm tra cấu hình đã chọn.",
+      "balance": "Tài khoản DeepSeek không đủ số dư.",
+      "rate_limit": "Dịch vụ tìm kiếm đã đạt giới hạn yêu cầu. Hãy thử lại sau.",
+      "unavailable": "Trang không khả dụng hoặc không thể trích xuất nội dung.",
+      "invalid_arguments": "Dùng URL công khai không chứa thông tin đăng nhập hoặc từ khóa tối đa 128 ký tự.",
+      "request": "Yêu cầu web thất bại hoặc hết thời gian chờ. Hãy kiểm tra kết nối.",
+      "response": "Dịch vụ tìm kiếm trả về dữ liệu không hợp lệ hoặc quá lớn.",
+      "search_done": "Tìm kiếm hoàn tất",
+      "read_done": "Đã đọc trang"
+    },
     "images": {
       "tool_invalid": "Công cụ trả về ảnh không đọc được, không được hỗ trợ hoặc vượt quá giới hạn kích thước.",
       "count": "{{count}} ảnh",
@@ -271,6 +285,8 @@
       "approve": "Phê duyệt",
       "reject": "Từ chối",
       "tool_names": {
+        "search_web": "Tìm kiếm web",
+        "read_web_page": "Đọc trang web",
         "delegate_task": "Giao tác vụ",
         "send_agent_message": "Gửi tin cho tác nhân con",
         "wait_agents": "Chờ tác nhân con",

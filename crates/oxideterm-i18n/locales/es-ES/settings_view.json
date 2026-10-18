@@ -1132,6 +1132,13 @@
       "action_failed": "La operación de clave gestionada falló: {{error}}"
     },
     "ai": {
+      "web_title": "Búsqueda web",
+      "web_enabled": "Permitir acceso a Internet",
+      "web_enabled_hint": "Ajuste global. Todas las conversaciones pueden buscar y leer páginas web. Requiere llamadas a herramientas.",
+      "web_provider": "Cuenta de búsqueda",
+      "web_provider_hint": "Usa la clave guardada de una configuración de DeepSeek, independiente del modelo de chat. Añade DeepSeek en proveedores de modelos primero.",
+      "web_provider_none": "Seleccionar configuración de DeepSeek",
+      "web_billing_hint": "Las consultas y las URL se envían a DeepSeek. Las búsquedas y las lecturas se cobran por separado por solicitud.",
       "automatic_placeholder": "Automático",
       "conversation_agents_hint": "Estos ajustes se aplican a todas las conversaciones. Los subagentes usan herramientas dentro del alcance permitido de la tarea principal y siguen sus reglas de aprobación.",
       "conversation_agents": "Subagentes",

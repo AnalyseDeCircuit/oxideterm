@@ -1132,6 +1132,13 @@
       "action_failed": "Vorgang für verwalteten Schlüssel fehlgeschlagen: {{error}}"
     },
     "ai": {
+      "web_title": "Websuche",
+      "web_enabled": "Internetzugriff erlauben",
+      "web_enabled_hint": "Globale Einstellung. Alle Unterhaltungen dürfen Webseiten suchen und lesen. Werkzeugaufrufe müssen aktiviert sein.",
+      "web_provider": "Suchkonto",
+      "web_provider_hint": "Gespeicherten Schlüssel einer DeepSeek-Konfiguration unabhängig vom Chatmodell verwenden. DeepSeek zuerst unter Modellanbieter hinzufügen.",
+      "web_provider_none": "DeepSeek-Konfiguration wählen",
+      "web_billing_hint": "Suchanfragen und Seiten-URLs werden an DeepSeek gesendet. Suchen und Seitenabrufe werden jeweils pro Anfrage berechnet.",
       "automatic_placeholder": "Automatisch",
       "conversation_agents_hint": "Diese Einstellungen gelten für alle Unterhaltungen. Unteragenten nutzen Werkzeuge im erlaubten Umfang der übergeordneten Aufgabe und befolgen deren Freigaberegeln.",
       "conversation_agents": "Unteragenten",

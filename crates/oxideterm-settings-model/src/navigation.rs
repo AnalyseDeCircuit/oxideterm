@@ -246,8 +246,8 @@ pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
         // Context controls, prompt, memory, and model windows are
         // separate cards so each virtual row owns one stable responsibility.
         AiSettingsPage::Context => 4,
-        // Tool policy, conversation agents, skills, and MCP servers have separate scopes.
-        AiSettingsPage::Tools => 4,
+        // Global tool policy, web access, subagents, skills, and MCP have separate cards.
+        AiSettingsPage::Tools => 5,
     };
     // The first section is the subpage picker, matching terminal settings.
     1 + page_cards

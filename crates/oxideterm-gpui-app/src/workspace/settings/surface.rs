@@ -294,18 +294,25 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 1) => self.ai_disabled_settings_card(
+            (AiSettingsPage::Tools, 1) => {
+                let settings = self.settings_store.settings();
+                self.ai_disabled_settings_card(
+                    self.ai_web_search_section(settings, cx),
+                    settings.ai.enabled,
+                )
+            }
+            (AiSettingsPage::Tools, 2) => self.ai_disabled_settings_card(
                 self.render_ai_agent_settings(cx),
                 self.settings_store.settings().ai.enabled,
             ),
-            (AiSettingsPage::Tools, 2) => {
+            (AiSettingsPage::Tools, 3) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_skills_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 3) => {
+            (AiSettingsPage::Tools, 4) => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_mcp_servers_section(settings, cx),
@@ -657,6 +664,11 @@ impl WorkspaceApp {
                             .hash(&mut hasher);
                     }
                     (AiSettingsPage::Tools, 3) => {
+                        settings.ai.web_search.enabled.hash(&mut hasher);
+                        settings.ai.web_search.provider_id.hash(&mut hasher);
+                        settings.ai.providers.len().hash(&mut hasher);
+                    }
+                    (AiSettingsPage::Tools, 4) => {
                         settings.ai.tool_use.enabled.hash(&mut hasher);
                         let ai = self.ai_entity.read(cx);
                         ai.agents.settings_model_picker_open.hash(&mut hasher);
@@ -673,7 +685,7 @@ impl WorkspaceApp {
                             provider.models.hash(&mut hasher);
                         }
                     }
-                    (AiSettingsPage::Tools, 4) => {
+                    (AiSettingsPage::Tools, 5) => {
                         let state = self.settings_workspace.read(cx);
                         state.skill_search_query.hash(&mut hasher);
                         format!("{:?}", state.skill_scope_filter).hash(&mut hasher);

@@ -1132,6 +1132,13 @@
       "action_failed": "Falha na operação de chave gerenciada: {{error}}"
     },
     "ai": {
+      "web_title": "Pesquisa na web",
+      "web_enabled": "Permitir acesso à web",
+      "web_enabled_hint": "Configuração global. Todas as conversas podem pesquisar e ler páginas. Requer chamadas de ferramentas.",
+      "web_provider": "Conta de pesquisa",
+      "web_provider_hint": "Use a chave salva de uma configuração DeepSeek, independentemente do modelo da conversa. Adicione o DeepSeek aos provedores de modelos primeiro.",
+      "web_provider_none": "Selecionar configuração DeepSeek",
+      "web_billing_hint": "As consultas e URLs são enviadas ao DeepSeek. Pesquisas e leituras são cobradas separadamente por solicitação.",
       "automatic_placeholder": "Automático",
       "conversation_agents_hint": "Estas configurações se aplicam a todas as conversas. Os subagentes usam ferramentas dentro do escopo permitido da tarefa principal e seguem suas regras de aprovação.",
       "conversation_agents": "Subagentes",

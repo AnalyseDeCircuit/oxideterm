@@ -1132,6 +1132,13 @@
       "action_failed": "Thao tác với key được quản lý thất bại: {{error}}"
     },
     "ai": {
+      "web_title": "Tìm kiếm web",
+      "web_enabled": "Cho phép truy cập web",
+      "web_enabled_hint": "Thiết lập toàn cục. Cho phép mọi cuộc trò chuyện tìm kiếm và đọc trang web. Cần bật gọi công cụ.",
+      "web_provider": "Tài khoản tìm kiếm",
+      "web_provider_hint": "Dùng khóa đã lưu của cấu hình DeepSeek, độc lập với mô hình trò chuyện. Trước tiên hãy thêm DeepSeek trong nhà cung cấp mô hình.",
+      "web_provider_none": "Chọn cấu hình DeepSeek",
+      "web_billing_hint": "Từ khóa và URL trang được gửi đến DeepSeek. Tìm kiếm và đọc trang được tính phí riêng theo lượt yêu cầu.",
       "automatic_placeholder": "Tự động",
       "conversation_agents_hint": "Các thiết lập này áp dụng cho mọi cuộc trò chuyện. Tác nhân phụ dùng công cụ trong phạm vi được phép của tác vụ cha và tuân theo quy tắc phê duyệt của tác vụ đó.",
       "conversation_agents": "Tác nhân con",

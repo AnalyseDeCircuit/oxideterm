@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "來源",
+      "disabled": "網路搜尋已關閉。",
+      "configuration": "請在 AI 設定中選擇官方 DeepSeek 設定。",
+      "authentication": "DeepSeek 金鑰缺失或無效，請檢查所選設定。",
+      "balance": "DeepSeek 帳號餘額不足。",
+      "rate_limit": "搜尋服務請求過於頻繁，請稍後重試。",
+      "unavailable": "無法讀取該網頁，可能無法存取或不支援正文擷取。",
+      "invalid_arguments": "請使用不含憑證的公開網頁網址，或不超過 128 字的搜尋詞。",
+      "request": "連網請求失敗或逾時，請檢查網路後重試。",
+      "response": "搜尋服務傳回的資料無效或超過大小限制。",
+      "search_done": "搜尋完成",
+      "read_done": "網頁已讀取"
+    },
     "images": {
       "tool_invalid": "工具傳回的圖片無法讀取、格式不受支援或超出大小限制。",
       "count": "{{count}} 張圖片",
@@ -271,6 +285,8 @@
       "approve": "核准",
       "reject": "拒絕",
       "tool_names": {
+        "search_web": "搜尋網頁",
+        "read_web_page": "讀取網頁",
         "delegate_task": "委派任務",
         "send_agent_message": "傳送訊息給子代理",
         "wait_agents": "等待子代理",

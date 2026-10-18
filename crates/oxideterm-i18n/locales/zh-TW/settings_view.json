@@ -1132,6 +1132,13 @@
       "action_failed": "託管金鑰操作失敗：{{error}}"
     },
     "ai": {
+      "web_title": "網路搜尋",
+      "web_enabled": "允許連網",
+      "web_enabled_hint": "全域設定。允許所有對話搜尋和讀取網頁，需先啟用工具呼叫。",
+      "web_provider": "搜尋帳號",
+      "web_provider_hint": "使用既有 DeepSeek 設定的金鑰，與聊天模型獨立。請先在模型服務中新增 DeepSeek。",
+      "web_provider_none": "選擇 DeepSeek 設定",
+      "web_billing_hint": "搜尋詞和網頁網址將傳送給 DeepSeek；搜尋和讀取分別按次計費。",
       "automatic_placeholder": "自動",
       "conversation_agents_hint": "這些設定適用於所有對話。子 Agent 在父任務允許的範圍內使用工具，並遵循相同的確認規則。",
       "conversation_agents": "子 Agent",

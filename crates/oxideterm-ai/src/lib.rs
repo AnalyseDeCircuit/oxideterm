@@ -33,6 +33,7 @@ mod target_projection;
 mod tool_protocol;
 mod tool_result_protocol;
 mod types;
+pub mod web;
 
 pub use acp::{
     AcpAgentRuntime, AcpAuthMethod, AcpAuthMethodKind, AcpClientEvent, AcpClientEventSender,

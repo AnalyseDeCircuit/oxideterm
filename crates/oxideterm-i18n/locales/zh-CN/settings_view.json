@@ -1132,6 +1132,13 @@
       "action_failed": "托管密钥操作失败：{{error}}"
     },
     "ai": {
+      "web_title": "联网搜索",
+      "web_enabled": "允许联网",
+      "web_enabled_hint": "全局设置。允许所有会话搜索和读取网页，需先开启工具调用。",
+      "web_provider": "搜索账号",
+      "web_provider_hint": "使用已有 DeepSeek 配置的密钥，与聊天模型独立。请先在模型服务中添加 DeepSeek。",
+      "web_provider_none": "选择 DeepSeek 配置",
+      "web_billing_hint": "搜索词和网页地址将发送给 DeepSeek；搜索和读取分别按次计费。",
       "automatic_placeholder": "自动",
       "conversation_agents_hint": "这些设置适用于所有会话。子 Agent 在父任务允许的范围内使用工具，并遵循相同的确认规则。",
       "conversation_agents": "子 Agent",

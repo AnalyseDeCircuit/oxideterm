@@ -1132,6 +1132,13 @@
       "action_failed": "管理対象キーの操作に失敗しました: {{error}}"
     },
     "ai": {
+      "web_title": "ウェブ検索",
+      "web_enabled": "ウェブアクセスを許可",
+      "web_enabled_hint": "全体設定です。すべての会話でウェブ検索とページの読み取りを許可します。ツール呼び出しを有効にしてください。",
+      "web_provider": "検索アカウント",
+      "web_provider_hint": "チャットモデルとは別に、DeepSeek 設定の保存済みキーを使用します。先にモデルプロバイダーで DeepSeek を追加してください。",
+      "web_provider_none": "DeepSeek 設定を選択",
+      "web_billing_hint": "検索語とページの URL を DeepSeek に送信します。検索と読み取りはそれぞれリクエスト単位で課金されます。",
       "automatic_placeholder": "自動",
       "conversation_agents_hint": "この設定はすべての会話に適用されます。サブエージェントは親タスクに許可された範囲でツールを使用し、同じ承認ルールに従います。",
       "conversation_agents": "サブエージェント",

@@ -109,6 +109,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::NetworkProxyAuth => SelectAnchorId::SettingsNetworkProxyAuth,
             Self::AiProviderTemplate => SelectAnchorId::SettingsAiProviderTemplate,
             Self::AiEmbeddingProvider => SelectAnchorId::SettingsAiEmbeddingProvider,
+            Self::AiWebSearchProvider => SelectAnchorId::SettingsAiWebSearchProvider,
             Self::KnowledgeCollectionScope => SelectAnchorId::SettingsKnowledgeCollectionScope,
             Self::KnowledgeDocumentFormat => SelectAnchorId::SettingsKnowledgeDocumentFormat,
             Self::AiMcpTransport => SelectAnchorId::SettingsAiMcpTransport,

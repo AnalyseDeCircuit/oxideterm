@@ -981,6 +981,7 @@ impl WorkspaceApp {
         let active_tool_count = ai_active_tool_count(
             enabled,
             self.settings_store.settings().ai.skills.enabled,
+            self.ai_web_provider_id().is_ok(),
             &tool_policy,
             self.ai_entity.read(cx).mcp_registry(),
         );

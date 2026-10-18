@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "출처",
+      "disabled": "웹 접근이 꺼져 있습니다.",
+      "configuration": "AI 설정에서 공식 DeepSeek 설정을 선택하세요.",
+      "authentication": "DeepSeek 키가 없거나 유효하지 않습니다. 선택한 설정을 확인하세요.",
+      "balance": "DeepSeek 계정 잔액이 부족합니다.",
+      "rate_limit": "검색 서비스 요청 한도에 도달했습니다. 나중에 다시 시도하세요.",
+      "unavailable": "페이지에 접근할 수 없거나 본문을 추출할 수 없습니다.",
+      "invalid_arguments": "인증 정보가 없는 공개 URL이나 128자 이하의 검색어를 사용하세요.",
+      "request": "웹 요청이 실패했거나 시간이 초과되었습니다. 네트워크를 확인하세요.",
+      "response": "검색 서비스가 잘못되었거나 너무 큰 데이터를 반환했습니다.",
+      "search_done": "검색 완료",
+      "read_done": "페이지를 읽었습니다"
+    },
     "images": {
       "tool_invalid": "도구가 읽을 수 없거나 지원되지 않거나 크기 제한을 초과한 이미지를 반환했습니다.",
       "count": "이미지 {{count}}개",
@@ -271,6 +285,8 @@
       "approve": "승인",
       "reject": "거부",
       "tool_names": {
+        "search_web": "웹 검색",
+        "read_web_page": "웹페이지 읽기",
         "delegate_task": "작업 위임",
         "send_agent_message": "하위 에이전트에 메시지 보내기",
         "wait_agents": "하위 에이전트 대기",

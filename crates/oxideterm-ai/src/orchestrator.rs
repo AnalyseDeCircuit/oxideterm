@@ -435,6 +435,7 @@ pub fn orchestrator_tool_definitions() -> Vec<AiToolDefinition> {
         ),
     ];
     tools.extend(crate::application_tools::extended_application_tool_definitions());
+    tools.extend(crate::web::tool_definitions());
     tools
 }
 
@@ -467,6 +468,10 @@ pub fn canonicalize_orchestrator_tool_arguments(
         .as_object()
         .ok_or(OrchestratorArgumentError::InvalidArguments)?;
     match tool_name {
+        "search_web" | "read_web_page" => {
+            crate::web::validate_arguments(tool_name, &arguments)
+                .map_err(|_| OrchestratorArgumentError::InvalidArguments)?;
+        }
         "list_targets" => validate_list_targets(object)?,
         "select_target" => validate_select_target(object)?,
         "connect_target" => validate_connect_target(object)?,

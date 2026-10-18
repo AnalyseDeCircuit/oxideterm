@@ -1,6 +1,7 @@
 pub(in crate::workspace) fn ai_stream_tool_definitions(
     tool_use_enabled: bool,
     skills_enabled: bool,
+    web_enabled: bool,
     tool_policy: &oxideterm_ai::AiToolUsePolicy,
     mcp_registry: &oxideterm_ai::McpRegistry,
 ) -> Vec<oxideterm_ai::AiToolDefinition> {
@@ -8,6 +9,9 @@ pub(in crate::workspace) fn ai_stream_tool_definitions(
         return Vec::new();
     }
     let mut tools = oxideterm_ai::orchestrator_tool_definitions();
+    if !web_enabled {
+        tools.retain(|tool| !oxideterm_ai::web::is_web_tool(&tool.name));
+    }
     if !skills_enabled {
         // The global Skills switch controls capability exposure, not only
         // whether a guessed tool call succeeds at execution time.
@@ -28,6 +32,7 @@ pub(in crate::workspace) fn ai_stream_tool_definitions(
 pub(in crate::workspace) fn ai_active_tool_count(
     tool_use_enabled: bool,
     skills_enabled: bool,
+    web_enabled: bool,
     tool_policy: &oxideterm_ai::AiToolUsePolicy,
     mcp_registry: &oxideterm_ai::McpRegistry,
 ) -> usize {
@@ -36,6 +41,7 @@ pub(in crate::workspace) fn ai_active_tool_count(
     ai_stream_tool_definitions(
         tool_use_enabled,
         skills_enabled,
+        web_enabled,
         tool_policy,
         mcp_registry,
     )
@@ -242,6 +248,7 @@ impl WorkspaceApp {
             let tools = ai_stream_tool_definitions(
                 tool_policy.enabled,
                 settings.ai.skills.enabled,
+                self.ai_web_provider_id().is_ok(),
                 &tool_policy,
                 self.ai_entity.read(cx).mcp_registry(),
             );
@@ -309,6 +316,7 @@ impl WorkspaceApp {
         let tools = ai_stream_tool_definitions(
             tool_policy.enabled,
             settings.ai.skills.enabled,
+            self.ai_web_provider_id().is_ok(),
             &tool_policy,
             self.ai_entity.read(cx).mcp_registry(),
         );

@@ -32,15 +32,23 @@ pub fn result_recovery(result: &AiExecutedToolResult) -> Option<Recovery> {
         }
     }
     Some(match code {
-        "network_timeout" | "connection_reset" | "service_unavailable" | "rate_limited" => {
-            Recovery::Transient
-        }
+        "network_timeout"
+        | "connection_reset"
+        | "service_unavailable"
+        | "rate_limited"
+        | "web_request"
+        | "web_rate_limit" => Recovery::Transient,
         "permission_denied"
+        | "web_disabled"
+        | "web_configuration"
+        | "web_authentication"
+        | "web_balance"
         | "authentication_required"
         | "credential_interaction_required"
         | "user_rejected"
         | "resource_execution_unresolved" => Recovery::NeedsUser,
         "invalid_tool_arguments"
+        | "web_invalid_arguments"
         | "missing_command"
         | "missing_path"
         | "missing_mcp_resource_args"
@@ -51,7 +59,10 @@ pub fn result_recovery(result: &AiExecutedToolResult) -> Option<Recovery> {
         | "agent_direction_changed"
         | "dependency_failed"
         | "agent_wait_paused" => Recovery::Cancelled,
-        "agent_scope_denied" | "runtime_capability_unavailable" => Recovery::Permanent,
+        "agent_scope_denied"
+        | "runtime_capability_unavailable"
+        | "web_unavailable"
+        | "web_response" => Recovery::Permanent,
         _ => Recovery::OutcomeUnknown,
     })
 }

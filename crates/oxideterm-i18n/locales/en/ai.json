@@ -1,5 +1,19 @@
 {
   "ai": {
+    "web": {
+      "sources": "Sources",
+      "disabled": "Web access is off.",
+      "configuration": "Select an official DeepSeek configuration in AI settings.",
+      "authentication": "The DeepSeek key is missing or invalid. Check the selected configuration.",
+      "balance": "The DeepSeek account has insufficient balance.",
+      "rate_limit": "The search service is rate limited. Try again later.",
+      "unavailable": "The page is unavailable or its text could not be extracted.",
+      "invalid_arguments": "Use a public URL without credentials, or a query of at most 128 characters.",
+      "request": "The web request failed or timed out. Check your network and retry.",
+      "response": "The search service returned invalid or oversized data.",
+      "search_done": "Search complete",
+      "read_done": "Page retrieved"
+    },
     "images": {
       "tool_invalid": "The tool returned an unreadable, unsupported, or oversized image.",
       "count": "{{count}} images",
@@ -271,6 +285,8 @@
       "approve": "Approve",
       "reject": "Reject",
       "tool_names": {
+        "search_web": "Search web",
+        "read_web_page": "Read web page",
         "delegate_task": "Delegate task",
         "send_agent_message": "Message subagent",
         "wait_agents": "Wait for subagents",

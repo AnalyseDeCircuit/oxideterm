@@ -1471,6 +1471,16 @@ impl WorkspaceApp {
                 .and_then(ai_runtime_recovery_message_key)
                 .map(|key| self.i18n.t(key))
                 .or_else(|| {
+                    (status == AiToolStatus::Completed && oxideterm_ai::web::is_web_tool(&name))
+                        .then(|| {
+                            self.i18n.t(if name == "search_web" {
+                                "ai.web.search_done"
+                            } else {
+                                "ai.web.read_done"
+                            })
+                        })
+                })
+                .or_else(|| {
                     call.get("summary")
                         .and_then(serde_json::Value::as_str)
                         .map(str::to_string)
@@ -1703,6 +1713,78 @@ impl WorkspaceApp {
                 );
             }
             if let Some(result) = result {
+                if let Some(sources) = result
+                    .get("sources")
+                    .and_then(serde_json::Value::as_array)
+                    .filter(|sources| !sources.is_empty())
+                {
+                    details = details.child(ai_tool_section_label(
+                        &self.tokens,
+                        self.i18n.t("ai.web.sources"),
+                        None,
+                    ));
+                    for source in sources {
+                        let Some(url) = source
+                            .get("url")
+                            .and_then(serde_json::Value::as_str)
+                            .filter(|url| oxideterm_ai::web::public_web_url(url))
+                        else {
+                            continue;
+                        };
+                        let title = source
+                            .get("title")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or(url);
+                        let url = url.to_owned();
+                        let target = url.clone();
+                        details = details.child(
+                            div()
+                                .w_full()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .child(
+                                    self.workspace_toolbar_action_button(
+                                        String::new(),
+                                        Some(Self::render_lucide_icon(
+                                            LucideIcon::ExternalLink,
+                                            14.0,
+                                            rgb(self.tokens.ui.accent),
+                                        )),
+                                        ToolbarButtonOptions {
+                                            button: ButtonOptions {
+                                                variant: ButtonVariant::Ghost,
+                                                size: ButtonSize::Sm,
+                                                ..Default::default()
+                                            },
+                                            show_label: false,
+                                            text_color: Some(rgb(self.tokens.ui.accent)),
+                                            ..Default::default()
+                                        },
+                                        cx.listener(move |_this, _event, _window, cx| {
+                                            cx.open_url(&target);
+                                            cx.stop_propagation();
+                                        }),
+                                    )
+                                    .w_full()
+                                    .min_w_0()
+                                    .justify_start()
+                                    .child(
+                                        div().min_w_0().flex_1().truncate().child(title.to_owned()),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .w_full()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(url),
+                                ),
+                        );
+                    }
+                }
                 if let Some(ids) = result.get("imageIds").and_then(serde_json::Value::as_array) {
                     let images = oxideterm_ai::message_images(message)
                         .iter()
@@ -2742,6 +2824,15 @@ fn ai_tool_group_duration(calls: &[serde_json::Value]) -> Option<u64> {
 
 fn ai_runtime_recovery_message_key(code: &str) -> Option<&'static str> {
     match code {
+        "web_disabled" => Some("ai.web.disabled"),
+        "web_configuration" => Some("ai.web.configuration"),
+        "web_authentication" => Some("ai.web.authentication"),
+        "web_balance" => Some("ai.web.balance"),
+        "web_rate_limit" => Some("ai.web.rate_limit"),
+        "web_unavailable" => Some("ai.web.unavailable"),
+        "web_invalid_arguments" => Some("ai.web.invalid_arguments"),
+        "web_request" => Some("ai.web.request"),
+        "web_response" => Some("ai.web.response"),
         "ai_image_tool_invalid" => Some("ai.images.tool_invalid"),
         "agent_direction_changed" => Some("settings_view.ai.replanning"),
         "dependency_failed" => Some("settings_view.ai.dependency_failed"),

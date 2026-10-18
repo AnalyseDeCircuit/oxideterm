@@ -122,6 +122,7 @@ pub enum SelectAnchorId {
     SettingsNetworkProxyAuth,
     SettingsAiProviderTemplate,
     SettingsAiEmbeddingProvider,
+    SettingsAiWebSearchProvider,
     SettingsKnowledgeCollectionScope,
     SettingsKnowledgeDocumentFormat,
     SettingsAiMcpTransport,
@@ -250,6 +251,7 @@ impl SelectAnchorId {
                 | Self::SettingsNetworkProxyAuth
                 | Self::SettingsAiProviderTemplate
                 | Self::SettingsAiEmbeddingProvider
+                | Self::SettingsAiWebSearchProvider
                 | Self::SettingsKnowledgeCollectionScope
                 | Self::SettingsKnowledgeDocumentFormat
                 | Self::SettingsAiMcpTransport

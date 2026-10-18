@@ -1704,7 +1704,7 @@ impl AiOrchestratorRuntimeSnapshot {
         &self,
         tool_call_id: String,
         tool_name: String,
-        result: AiActionResultLite,
+        mut result: AiActionResultLite,
         duration_ms: u128,
     ) -> AiExecutedToolResult {
         let safe_summary = ai_model_safe_runtime_text(&result.summary);
@@ -1713,6 +1713,15 @@ impl AiOrchestratorRuntimeSnapshot {
             .error_message
             .as_deref()
             .map(ai_model_safe_runtime_text);
+        // Source URLs are validated by the web adapter and must not be shortened into broken links.
+        let sources = oxideterm_ai::web::is_web_tool(&tool_name)
+            .then(|| {
+                result
+                    .data
+                    .as_object_mut()
+                    .and_then(|data| data.remove("sources"))
+            })
+            .flatten();
         let (safe_data, data_truncated) = ai_model_safe_runtime_value_with_limits(&result.data);
         let (output, raw_output, output_preview, truncated) = prepare_ai_tool_output(&safe_output);
         let targets = result
@@ -1734,6 +1743,9 @@ impl AiOrchestratorRuntimeSnapshot {
             .as_object()
             .is_some_and(|object| object.len() == 1 && object.contains_key("waitingForInput"));
         let mut envelope = serde_json::Map::new();
+        if let Some(sources) = sources {
+            envelope.insert("sources".into(), sources);
+        }
         envelope.insert("ok".to_string(), serde_json::json!(result.ok));
         envelope.insert("summary".to_string(), serde_json::json!(safe_summary));
         envelope.insert("output".to_string(), serde_json::json!(output));

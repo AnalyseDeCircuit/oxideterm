@@ -1132,6 +1132,13 @@
       "action_failed": "Échec de l’opération sur la clé gérée : {{error}}"
     },
     "ai": {
+      "web_title": "Recherche web",
+      "web_enabled": "Autoriser l’accès au web",
+      "web_enabled_hint": "Réglage global. Toutes les conversations peuvent rechercher et lire des pages web. Les appels d’outils doivent être activés.",
+      "web_provider": "Compte de recherche",
+      "web_provider_hint": "Utiliser la clé enregistrée d’une configuration DeepSeek, indépendamment du modèle de discussion. Ajoutez d’abord DeepSeek aux fournisseurs de modèles.",
+      "web_provider_none": "Choisir une configuration DeepSeek",
+      "web_billing_hint": "Les recherches et les URL sont envoyées à DeepSeek. Chaque recherche et chaque lecture sont facturées séparément.",
       "automatic_placeholder": "Automatique",
       "conversation_agents_hint": "Ces réglages s’appliquent à toutes les conversations. Les sous-agents utilisent les outils dans le périmètre autorisé de la tâche parente et suivent ses règles d’approbation.",
       "conversation_agents": "Sous-agents",

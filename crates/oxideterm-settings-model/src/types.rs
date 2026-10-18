@@ -127,6 +127,7 @@ pub enum SettingsSelect {
     NetworkProxyAuth,
     AiProviderTemplate,
     AiEmbeddingProvider,
+    AiWebSearchProvider,
     KnowledgeCollectionScope,
     KnowledgeDocumentFormat,
     AiMcpTransport,

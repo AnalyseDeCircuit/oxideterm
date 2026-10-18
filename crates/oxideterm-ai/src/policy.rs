@@ -56,6 +56,8 @@ pub struct AiToolUsePolicy {
 }
 
 pub const ORCHESTRATOR_TOOL_NAMES: &[&str] = &[
+    "search_web",
+    "read_web_page",
     "list_targets",
     "select_target",
     "connect_target",

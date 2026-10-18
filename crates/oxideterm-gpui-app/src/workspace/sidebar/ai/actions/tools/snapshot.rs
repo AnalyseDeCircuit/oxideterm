@@ -1652,6 +1652,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let conversation_id = owner.conversation_id.clone();
+        if oxideterm_ai::web::is_web_tool(&tool_name) {
+            self.start_ai_web_execution(owner, tool_call_id, tool_name, args, sender, cx);
+            return;
+        }
         let args = match self.prepare_ai_runtime_authority(&tool_session_id, &tool_name, args, cx) {
             Ok(args) => args,
             Err(error) => {
