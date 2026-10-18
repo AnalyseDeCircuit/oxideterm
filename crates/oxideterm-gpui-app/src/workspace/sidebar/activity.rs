@@ -33,8 +33,11 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center()
-            .border_r_1()
-            .border_color(self.workspace_chrome_divider());
+            .when(self.window_background_preferences().is_none(), |bar| {
+                // A transparent layout border would leave an untinted wallpaper seam.
+                bar.border_r_1()
+                    .border_color(self.workspace_divider_color(theme.border, 0x40))
+            });
 
         bar = bar.child(
             div()

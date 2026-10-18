@@ -59,7 +59,7 @@ use zeroize::Zeroizing;
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
 
-const BG_ACTIVE_THEME_ALPHA: u32 = 0x66; // Tauri [data-bg-active] color-mix(... 40%, transparent)
+const BG_ACTIVE_THEME_ALPHA: u32 = 0x99; // Nested fills share the tab's sidebar-bounded tint budget.
 const BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri bg-hover 50%
 const BG_ACTIVE_ROW_HOVER_ALPHA: u32 = 0x4d; // Keep full-width row hover quieter than compact controls.
 const ROW_HOVER_ALPHA: u32 = 0x66; // Plain-theme rows use the same restrained hierarchy as image-backed rows.

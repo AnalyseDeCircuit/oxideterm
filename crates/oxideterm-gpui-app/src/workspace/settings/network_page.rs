@@ -1151,7 +1151,6 @@ impl WorkspaceApp {
             }
         }
 
-
         self.settings_card(
             "settings_view.network.public_mcp",
             "settings_view.network.public_mcp_hint",

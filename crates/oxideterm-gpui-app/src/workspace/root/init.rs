@@ -1540,11 +1540,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn workspace_chrome_background(&self, color: u32) -> Rgba {
-        if self.window_background_preferences().is_some() {
-            rgba((color << 8) | alpha_byte(self.tokens.metrics.panel_vibrancy_alpha))
-        } else {
-            rgb(color)
-        }
+        self.workspace_sidebar_background(color)
     }
 
     pub(in crate::workspace) fn workspace_sidebar_background(&self, color: u32) -> Rgba {

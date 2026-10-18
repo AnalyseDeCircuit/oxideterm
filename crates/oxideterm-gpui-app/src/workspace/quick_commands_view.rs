@@ -1814,7 +1814,14 @@ impl WorkspaceApp {
             .overflow_hidden()
             .border_r_1()
             .border_color(rgba((theme.border << 8) | 0x99))
-            .bg(rgba((theme.bg << 8) | 0x73))
+            .bg(
+                if !snapshot.managing && self.window_background_preferences().is_some() {
+                    // The dock owns the background; categories share its tint budget with controls.
+                    rgba(0x00000000)
+                } else {
+                    rgba((theme.bg << 8) | 0x73)
+                },
+            )
             .p(px(8.0))
             .flex()
             .flex_col()

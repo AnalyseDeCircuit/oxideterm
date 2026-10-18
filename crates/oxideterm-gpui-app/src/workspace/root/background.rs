@@ -203,11 +203,23 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(background_key) = background_key else {
-            return content;
+            return if self.window_background_preferences().is_some() {
+                oxideterm_gpui_ui::surface::tab_surface(&self.tokens, content)
+            } else {
+                content
+            };
         };
-        if matches!(background_key, "terminal" | "local_terminal") {
+        if matches!(
+            background_key,
+            "terminal" | "local_terminal" | "remote_desktop"
+        ) {
             return content;
         }
+        let content = if self.background_surface_active(background_key) {
+            oxideterm_gpui_ui::surface::tab_surface(&self.tokens, content)
+        } else {
+            content
+        };
         let Some(background) = self.terminal_background_preferences(background_key) else {
             return content;
         };

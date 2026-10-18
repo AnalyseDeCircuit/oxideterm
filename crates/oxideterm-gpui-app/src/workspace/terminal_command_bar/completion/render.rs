@@ -39,6 +39,12 @@ impl WorkspaceApp {
             .font_family(settings_mono_font_family(self.settings_store.settings()));
 
         let active_scope = usize::from(self.terminal_history_all_connections);
+        let control_id = "command-history-scope";
+        let previous_scope = self
+            .segmented_control_user_previous_index(control_id, active_scope)
+            .unwrap_or(active_scope);
+        let transition_active =
+            self.segmented_control_user_transition_active(control_id, active_scope);
         let scope_items = [
             (false, "terminal.history.current"),
             (true, "terminal.history.all"),
@@ -51,9 +57,21 @@ impl WorkspaceApp {
                 self.i18n.t(label),
                 index == active_scope,
             )
+            .rounded_none()
+            .px(px(8.0))
+            .py(px(4.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _, _, cx| {
+                    if index != active_scope {
+                        this.begin_user_segmented_control_transition_from(
+                            control_id,
+                            active_scope,
+                            index,
+                            cx,
+                        );
+                    }
                     this.terminal_history_all_connections = all;
                     this.terminal_command_sender
                         .update(cx, |sender, cx| sender.show_compact_history(cx));
@@ -76,19 +94,18 @@ impl WorkspaceApp {
                     .gap_2()
                     .px_2()
                     .py_1()
-                    .child(
-                        oxideterm_gpui_ui::segmented_control(
-                            &self.tokens,
-                            "command-history-scope",
-                            oxideterm_gpui_ui::SegmentedControlOptions::new(
-                                active_scope,
-                                active_scope,
-                                2,
-                            ),
-                            scope_items,
+                    .child(oxideterm_gpui_ui::segmented_control(
+                        &self.tokens,
+                        control_id,
+                        oxideterm_gpui_ui::SegmentedControlOptions::new(
+                            active_scope,
+                            previous_scope,
+                            2,
                         )
-                        .w(px(240.0)),
-                    )
+                        .user_transition_active(transition_active)
+                        .underline(240.0),
+                        scope_items,
+                    ))
                     .child(self.command_history_icon_button(
                         if paused {
                             LucideIcon::Play

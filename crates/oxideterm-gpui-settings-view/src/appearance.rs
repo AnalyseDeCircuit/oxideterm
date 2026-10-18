@@ -70,7 +70,7 @@ pub fn settings_appearance_card_shell(
         card,
         tokens,
         background_active,
-        SETTINGS_BG_ACTIVE_SURFACE_ALPHA,
+        oxideterm_gpui_ui::theme_glass_card_background_alpha(tokens),
     )
     .into_any_element()
 }

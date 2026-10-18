@@ -2,7 +2,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, Context, CursorStyle, MouseButton, MouseMoveEvent, Pixels, Window, div, prelude::*,
-    px, rgb,
+    px, rgb, rgba,
 };
 
 use super::super::{WorkspaceApp, settings_ui_font_family};
@@ -53,6 +53,7 @@ impl QuickCommandsPanelState {
 
 fn panel_frame(
     tokens: &oxideterm_theme::ThemeTokens,
+    has_background: bool,
     height: f32,
     sidebar: AnyElement,
     body: AnyElement,
@@ -68,7 +69,11 @@ fn panel_frame(
         .overflow_hidden()
         .border_t_1()
         .border_color(rgb(tokens.ui.border))
-        .bg(rgb(tokens.ui.bg))
+        .bg(if has_background {
+            rgba((tokens.ui.bg << 8) | oxideterm_gpui_ui::theme_glass_card_background_alpha(tokens))
+        } else {
+            rgb(tokens.ui.bg)
+        })
         .child(sidebar)
         .child(body)
 }
@@ -128,9 +133,11 @@ impl WorkspaceApp {
             tokens.motion.spatial_enabled = false;
         }
         let snapshot = open.then(|| self.quick_commands_render_snapshot(cx));
+        let has_background = self.window_background_preferences().is_some();
         let content = snapshot.map(|snapshot| {
-            panel_frame(
+            let panel = panel_frame(
                 &tokens,
+                has_background,
                 height,
                 self.render_quick_command_category_sidebar(&snapshot, cx),
                 self.render_quick_command_body(&snapshot, cx),
@@ -170,7 +177,12 @@ impl WorkspaceApp {
                         }),
                     ),
             )
-            .into_any_element()
+            .into_any_element();
+            if has_background {
+                oxideterm_gpui_ui::surface::tab_surface(&tokens, panel)
+            } else {
+                panel
+            }
         });
         oxideterm_gpui_ui::motion::auto_height(&tokens, "quick-commands-panel-height", content)
             .target_height(if open { height } else { 0.0 })
@@ -280,7 +292,7 @@ mod tests {
                         &tokens,
                         "dock",
                         Some(
-                            panel_frame(&tokens, height, sidebar, body)
+                            panel_frame(&tokens, false, height, sidebar, body)
                                 .debug_selector(|| "dock".into())
                                 .into_any_element(),
                         ),

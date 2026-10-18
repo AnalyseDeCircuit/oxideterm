@@ -78,6 +78,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_window_background = self.window_background_preferences().is_some();
         let bar = div()
             .h(px(self.tokens.metrics.tabbar_height))
             .flex()
@@ -87,7 +88,14 @@ impl WorkspaceApp {
             .overflow_hidden()
             .border_b_1()
             .border_color(self.workspace_chrome_divider())
-            .bg(self.workspace_chrome_background(theme.bg));
+            .bg(if has_window_background {
+                rgba(
+                    (theme.bg << 8)
+                        | oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens),
+                )
+            } else {
+                rgb(theme.bg)
+            });
 
         // Tauri's scroll container measures the full inline-flex tab row as
         // scrollWidth. GPUI's ScrollHandle computes max_offset from direct
@@ -242,11 +250,7 @@ impl WorkspaceApp {
                 } else {
                     self.workspace_chrome_divider()
                 })
-                .bg(self.workspace_chrome_background(if active {
-                    theme.bg_panel
-                } else {
-                    theme.bg
-                }))
+                .bg(self.workspace_tab_background(active))
                 .text_color(tab_text_color)
                 .opacity(if is_being_dragged && drag_active {
                     0.5
@@ -399,9 +403,28 @@ impl WorkspaceApp {
         scroll_viewport = scroll_viewport
             .child(self.render_window_drag_region("workspace-tabbar-drag-region", cx));
 
-        bar.child(scroll_viewport)
+        let bar = bar
+            .child(scroll_viewport)
             .child(self.render_tabbar_scrollbar(window, cx))
-            .into_any_element()
+            .into_any_element();
+        if has_window_background {
+            oxideterm_gpui_ui::surface::tab_surface(&self.tokens, bar)
+        } else {
+            bar
+        }
+    }
+
+    fn workspace_tab_background(&self, active: bool) -> Rgba {
+        if !active && self.window_background_preferences().is_some() {
+            // The strip owns the idle fill; only the selected tab adds a surface.
+            rgba(0x00000000)
+        } else {
+            self.workspace_chrome_background(if active {
+                self.tokens.ui.bg_panel
+            } else {
+                self.tokens.ui.bg
+            })
+        }
     }
 
     fn render_detached_return_tab_placeholder(
@@ -616,11 +639,7 @@ impl WorkspaceApp {
             .gap(px(self.tokens.metrics.tab_gap))
             .border_r_1()
             .border_color(self.workspace_chrome_divider())
-            .bg(self.workspace_chrome_background(if exiting.was_active {
-                theme.bg_panel
-            } else {
-                theme.bg
-            }))
+            .bg(self.workspace_tab_background(exiting.was_active))
             .text_color(rgb(if exiting.was_active {
                 theme.text
             } else {

@@ -809,49 +809,51 @@ impl Style {
         // and its children together as one group; without a filter it paints directly.
         let paint_box = |window: &mut Window, cx: &mut App| {
             let background_color = self.background.as_ref().and_then(Fill::color);
-            if background_color.is_some_and(|color| !color.is_transparent()) {
-                let mut border_color = match background_color {
-                    Some(color) => match color.tag {
-                        BackgroundTag::Solid
-                        | BackgroundTag::PatternSlash
-                        | BackgroundTag::Checkerboard => color.solid.into(),
+            window.with_surface_background(background_color, |window, background_color| {
+                if background_color.is_some_and(|color| !color.is_transparent()) {
+                    let mut border_color = match background_color {
+                        Some(color) => match color.tag {
+                            BackgroundTag::Solid
+                            | BackgroundTag::PatternSlash
+                            | BackgroundTag::Checkerboard => color.solid.into(),
 
-                        BackgroundTag::LinearGradient | BackgroundTag::ProceduralNoise => color
-                            .colors
-                            .first()
-                            .map(|stop| stop.color.into())
-                            .unwrap_or_default(),
-                    },
-                    None => Hsla::default(),
-                };
-                border_color.a = 0.;
-                window.paint_quad(quad(
-                    bounds,
-                    corner_radii,
-                    background_color.unwrap_or_default(),
-                    Edges::default(),
-                    border_color,
-                    self.border_style,
-                ));
-            }
+                            BackgroundTag::LinearGradient | BackgroundTag::ProceduralNoise => color
+                                .colors
+                                .first()
+                                .map(|stop| stop.color.into())
+                                .unwrap_or_default(),
+                        },
+                        None => Hsla::default(),
+                    };
+                    border_color.a = 0.;
+                    window.paint_quad(quad(
+                        bounds,
+                        corner_radii,
+                        background_color.unwrap_or_default(),
+                        Edges::default(),
+                        border_color,
+                        self.border_style,
+                    ));
+                }
 
-            window.paint_inset_shadows(bounds, corner_radii, &self.box_shadow);
+                window.paint_inset_shadows(bounds, corner_radii, &self.box_shadow);
 
-            continuation(window, cx);
+                continuation(window, cx);
 
-            if self.is_border_visible() {
-                let border_widths = self.border_widths.to_pixels(rem_size);
-                let mut background = self.border_color.unwrap_or_default();
-                background.a = 0.;
-                window.paint_quad(quad(
-                    bounds,
-                    corner_radii,
-                    background,
-                    border_widths,
-                    self.border_color.unwrap_or_default(),
-                    self.border_style,
-                ));
-            }
+                if self.is_border_visible() {
+                    let border_widths = self.border_widths.to_pixels(rem_size);
+                    let mut background = self.border_color.unwrap_or_default();
+                    background.a = 0.;
+                    window.paint_quad(quad(
+                        bounds,
+                        corner_radii,
+                        background,
+                        border_widths,
+                        self.border_color.unwrap_or_default(),
+                        self.border_style,
+                    ));
+                }
+            });
         };
 
         if self.filter.is_empty() && !self.clip_rounded {

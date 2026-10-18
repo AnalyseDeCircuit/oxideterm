@@ -4,6 +4,88 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
+/// Tab content shares a tint budget; media and accent colors retain their own opacity.
+pub fn tab_surface(tokens: &ThemeTokens, content: AnyElement) -> AnyElement {
+    TabSurface {
+        content,
+        limit: (tokens.metrics.sidebar_vibrancy_alpha.clamp(0.0, 1.0) * 255.0).round() / 255.0,
+        colors: [
+            tokens.ui.bg,
+            tokens.ui.bg_panel,
+            tokens.ui.bg_card,
+            tokens.ui.bg_elevated,
+            tokens.ui.bg_sunken,
+            tokens.ui.bg_hover,
+        ]
+        .map(|color| rgb(color).into()),
+    }
+    .into_any_element()
+}
+
+struct TabSurface {
+    content: AnyElement,
+    limit: f32,
+    colors: [gpui::Hsla; 6],
+}
+
+impl IntoElement for TabSurface {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl gpui::Element for TabSurface {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) -> (gpui::LayoutId, ()) {
+        (self.content.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<gpui::Pixels>,
+        _: &mut (),
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        self.content.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<gpui::Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut gpui::Window,
+        cx: &mut gpui::App,
+    ) {
+        window.with_surface_tint_limit(self.limit, &self.colors, |window| {
+            self.content.paint(window, cx);
+        });
+    }
+}
+
 const TAURI_CARD_DARK_SHADOW_1_ALPHA: u32 = 0x66; // Tauri --theme-card-shadow rgba(0,0,0,0.4).
 const TAURI_CARD_DARK_SHADOW_2_ALPHA: u32 = 0x40; // Tauri --theme-card-shadow rgba(0,0,0,0.25).
 const TAURI_CARD_LIGHT_SHADOW_1_ALPHA: u32 = 0x14; // Tauri light --theme-card-shadow rgba(0,0,0,0.08).
@@ -13,9 +95,6 @@ const LOW_SURFACE_SEPARATION: f32 = 0.035;
 const MEDIUM_SURFACE_SEPARATION: f32 = 0.08;
 const SEMANTIC_SURFACE_STRONG_ALPHA: u32 = 0xf2;
 const SEMANTIC_SURFACE_PANEL_ALPHA: u32 = 0xe6;
-const SEMANTIC_SURFACE_CARD_BACKGROUND_ALPHA: u32 = 0x66; // Tauri [data-bg-active] card fill uses 40% opacity.
-const SEMANTIC_SURFACE_CARD_MID_BACKGROUND_ALPHA: u32 = 0x7a;
-const SEMANTIC_SURFACE_CARD_DARK_BACKGROUND_ALPHA: u32 = 0x8f;
 const SEMANTIC_SURFACE_INSET_ALPHA: u32 = 0x99;
 const SEMANTIC_SURFACE_BORDER_ALPHA: u32 = 0x80;
 const SEMANTIC_SURFACE_STRONG_BORDER_ALPHA: u32 = 0x99;
@@ -239,17 +318,9 @@ pub fn surface_chrome(tokens: &ThemeTokens, options: SurfaceOptions) -> SurfaceC
     }
 }
 
-/// Preserve Paper Oxide's light glass while giving dark palettes enough fill
-/// to remain legible over images with bright or high-frequency detail.
+/// Leave a small part of the sidebar tint budget for inset controls.
 pub fn theme_glass_card_background_alpha(tokens: &ThemeTokens) -> u32 {
-    let background_luma = color_luma(tokens.ui.bg);
-    if background_luma < 0.18 {
-        SEMANTIC_SURFACE_CARD_DARK_BACKGROUND_ALPHA
-    } else if background_luma < TAURI_CARD_LIGHT_LUMA_THRESHOLD {
-        SEMANTIC_SURFACE_CARD_MID_BACKGROUND_ALPHA
-    } else {
-        SEMANTIC_SURFACE_CARD_BACKGROUND_ALPHA
-    }
+    ((tokens.metrics.sidebar_vibrancy_alpha - 0.04).clamp(0.0, 1.0) * 255.0).floor() as u32
 }
 
 pub fn surface_padding_px(tokens: &ThemeTokens, padding: SurfacePadding) -> f32 {
@@ -558,6 +629,78 @@ fn color_luma(color: u32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn tab_tint_budget_caps_nested_surfaces_without_fading_accents(cx: &mut gpui::TestAppContext) {
+        let window = cx.add_empty_window();
+        let mut tokens = oxideterm_theme::default_tokens();
+        tokens.ui.bg_card = 0x102030;
+        tokens.ui.bg_elevated = 0x304050;
+        tokens.ui.bg_sunken = 0x506070;
+        tokens.ui.accent = 0x00aaff;
+        tokens.metrics.sidebar_vibrancy_alpha = 0.64;
+        window.draw(
+            point(px(0.0), px(0.0)),
+            gpui::size(px(200.0), px(200.0)),
+            |_, _| {
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .child(tab_surface(
+                        &tokens,
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .h(px(50.0))
+                                    .bg(rgb(tokens.ui.bg_card).alpha(0.6))
+                                    .child(
+                                        div()
+                                            .h(px(30.0))
+                                            .bg(rgb(tokens.ui.bg_elevated).alpha(0.5))
+                                            .child(
+                                                div()
+                                                    .h(px(10.0))
+                                                    .bg(rgb(tokens.ui.bg_sunken).alpha(0.5)),
+                                            ),
+                                    )
+                                    .child(div().h(px(5.0)).bg(rgb(tokens.ui.accent))),
+                            )
+                            .child(div().h(px(40.0)).bg(rgb(tokens.ui.bg_card).alpha(0.6)))
+                            .into_any_element(),
+                    ))
+                    .child(div().h(px(20.0)).bg(rgb(tokens.ui.bg_elevated).alpha(0.5)))
+            },
+        );
+        window.update(|window, _| {
+            let fills: Vec<_> = window
+                .painted_quads()
+                .iter()
+                .filter_map(|quad| {
+                    quad.background
+                        .as_solid()
+                        .map(|color| (quad.bounds.size.height.0 / window.scale_factor(), color.a))
+                })
+                .collect();
+            let alpha = |height| fills.iter().find(|(h, _)| *h == height).unwrap().1;
+            assert!((alpha(50.0) - 0.6).abs() < 0.001);
+            assert!((alpha(30.0) - 0.0980392).abs() < 0.001);
+            assert!(!fills.iter().any(|(height, _)| *height == 10.0));
+            assert_eq!(alpha(5.0), 1.0, "accent controls retain their color");
+            assert!(
+                (alpha(40.0) - 0.6).abs() < 0.001,
+                "siblings have independent budgets"
+            );
+            assert_eq!(
+                alpha(20.0),
+                0.5,
+                "the limit must not escape the tab subtree"
+            );
+        });
+    }
 
     #[gpui::test]
     fn edge_highlights_leave_panel_controls_clickable(cx: &mut gpui::TestAppContext) {

@@ -1205,6 +1205,7 @@ pub struct Window {
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
+    surface_tint: Option<(f32, Vec<Hsla>, f32)>,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
@@ -2135,6 +2136,7 @@ impl Window {
             element_offset_stack: Vec::new(),
             content_mask_stack: Vec::new(),
             element_opacity: 1.0,
+            surface_tint: None,
             requested_autoscroll: None,
             last_text_input_configuration: None,
             focused_text_input_active: false,
@@ -4198,6 +4200,53 @@ impl Window {
         self.element_opacity = previous_opacity * opacity;
         let result = f(self);
         self.element_opacity = previous_opacity;
+        result
+    }
+
+    /// Limits the composed opacity of palette surface fills, without fading text,
+    /// images, accent controls, or borders. The scope belongs to the painted subtree.
+    pub fn with_surface_tint_limit<R>(
+        &mut self,
+        limit: f32,
+        colors: &[Hsla],
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        let previous = self
+            .surface_tint
+            .replace((limit.clamp(0.0, 1.0), colors.to_vec(), 0.0));
+        let result = f(self);
+        self.surface_tint = previous;
+        result
+    }
+
+    pub(crate) fn with_surface_background<R>(
+        &mut self,
+        background: Option<Background>,
+        f: impl FnOnce(&mut Self, Option<Background>) -> R,
+    ) -> R {
+        let Some(color) = background.and_then(|background| background.as_solid()) else {
+            return f(self, background);
+        };
+        let Some((limit, colors, accumulated)) = self.surface_tint.as_mut() else {
+            return f(self, background);
+        };
+        if !colors.iter().any(|candidate| {
+            candidate.h == color.h && candidate.s == color.s && candidate.l == color.l
+        }) {
+            return f(self, background);
+        }
+        let previous = *accumulated;
+        let available = if previous < 1.0 {
+            ((*limit - previous) / (1.0 - previous)).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let color = color.alpha(color.a.min(available));
+        *accumulated = previous + (1.0 - previous) * color.a;
+        let result = f(self, Some(color.into()));
+        if let Some((_, _, accumulated)) = self.surface_tint.as_mut() {
+            *accumulated = previous;
+        }
         result
     }
 
