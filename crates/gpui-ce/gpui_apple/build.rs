@@ -128,6 +128,16 @@ mod macos_build {
     #[cfg(not(feature = "runtime_shaders"))]
     fn compile_metal_shaders(header_path: &Path) {
         use std::process::{self, Command};
+        println!("cargo:rerun-if-env-changed=DEVELOPER_DIR");
+        println!("cargo:rerun-if-env-changed=TOOLCHAINS");
+        // New Xcode versions ship a placeholder in the default toolchain even
+        // when the separate Metal component is installed. Honor explicit user
+        // selection; otherwise use that component when xcrun can resolve it.
+        let use_metal_toolchain = env::var_os("TOOLCHAINS").is_none()
+            && Command::new("xcrun")
+                .args(["--toolchain", "Metal", "--find", "metal"])
+                .output()
+                .is_ok_and(|output| output.status.success());
         let shader_path = "./src/shaders.metal";
         let air_output_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("shaders.air");
         let metallib_output_path =
@@ -141,7 +151,11 @@ mod macos_build {
         let staged_shader_path = PathBuf::from(env::var("OUT_DIR").unwrap()).join("shaders.metal");
         std::fs::copy(shader_path, &staged_shader_path).unwrap();
 
-        let output = Command::new("xcrun")
+        let mut compiler = Command::new("xcrun");
+        if use_metal_toolchain {
+            compiler.args(["--toolchain", "Metal"]);
+        }
+        let output = compiler
             .args([
                 "-sdk",
                 "macosx",
@@ -165,7 +179,11 @@ mod macos_build {
             process::exit(1);
         }
 
-        let output = Command::new("xcrun")
+        let mut linker = Command::new("xcrun");
+        if use_metal_toolchain {
+            linker.args(["--toolchain", "Metal"]);
+        }
+        let output = linker
             .args(["-sdk", "macosx", "metallib"])
             .arg(&air_output_path)
             .arg("-o")
