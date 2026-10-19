@@ -34,7 +34,16 @@ pub async fn fetch_provider_models(
     let payload = fetch_provider_models_payload(&client, &provider, api_key.as_ref())
         .await
         .with_context(|| format!("failed to refresh models for {}", provider.name))?;
-    let models = parse_provider_models(provider_type, &payload);
+    // Custom endpoints can expose models outside OpenAI's naming conventions.
+    let model_list_type = if provider_type == "openai"
+        && !reqwest::Url::parse(provider.base_url.trim())
+            .is_ok_and(|url| url.host_str() == Some("api.openai.com"))
+    {
+        "openai_compatible"
+    } else {
+        provider_type
+    };
+    let models = parse_provider_models(model_list_type, &payload);
     if models.is_empty() {
         return Err(anyhow!("model refresh returned no models"));
     }
