@@ -181,6 +181,11 @@ fn filters_connections_by_common_fields() {
 #[test]
 fn snapshot_changes_describe_incoming_records() {
     let snapshot = SavedConnectionsSyncSnapshot {
+        plugin_profiles: vec![serde_json::from_value(serde_json::json!({
+            "id":"custom", "plugin_id":"missing.provider", "type_id":"custom", "name":"Device", "group":null,
+            "config":{}, "credential_refs":{}, "created_at":"2026-10-19T00:00:00Z", "updated_at":"2026-10-19T00:00:00Z", "last_used_at":null
+        })).unwrap()],
+        plugin_tombstones: vec![oxideterm_connections::DeletedConnectionTombstone { id: "removed".into(), deleted_at: chrono::Utc::now() }],
         totp_credentials: Vec::new(),
         local_terminal_profiles: Vec::new(),
         local_terminal_tombstones: Vec::new(),
@@ -198,7 +203,19 @@ fn snapshot_changes_describe_incoming_records() {
 
     let changes = connections_snapshot_changes(&snapshot);
 
-    assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].action, "snapshotUpsert");
-    assert_eq!(changes[0].after.as_deref(), Some("Prod"));
+    assert_eq!(
+        changes
+            .iter()
+            .map(|change| (
+                change.action,
+                change.target.as_str(),
+                change.after.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        vec![
+            ("snapshotUpsert", "id-1", Some("Prod")),
+            ("snapshotUpsert", "custom", Some("Device")),
+            ("snapshotDelete", "removed", None),
+        ]
+    );
 }

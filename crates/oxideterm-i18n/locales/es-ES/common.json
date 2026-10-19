@@ -257,6 +257,21 @@
     "shortcut_count": "atajos"
   },
   "plugin": {
+    "connections": {
+      "name": "Nombre",
+      "group": "Grupo",
+      "cancel": "Cancelar",
+      "save": "Guardar",
+      "save_connect": "Guardar y conectar",
+      "failed": "No se pudo completar la operación. Revisa la configuración de conexión y los permisos del complemento.",
+      "disconnect": "Desconectar",
+      "connecting": "Conectando…",
+      "connected": "Conectado",
+      "disconnected": "Desconectado",
+      "unavailable": "El complemento de conexión no está disponible. Actívalo o instálalo para conectar.",
+      "password_unchanged": "Deja el campo vacío para conservar el valor guardado",
+      "clear_credentials": "Borrar las credenciales guardadas"
+    },
     "install_queued": "En espera · posición {{position}}",
     "installing_named": "Instalando {{name}}",
     "install_queue_count": "{{count}} en espera",
@@ -861,6 +876,7 @@
         "redacted": "oculto"
       },
       "diff_fields": {
+        "plugin_configuration": "Configuración de conexión",
         "name": "Nombre",
         "group": "Grupo",
         "host": "Host",

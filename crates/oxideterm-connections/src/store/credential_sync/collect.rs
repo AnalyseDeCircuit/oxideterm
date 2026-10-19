@@ -77,6 +77,19 @@ impl ConnectionStore {
         global_proxy: Option<&'a SavedUpstreamProxyConfig>,
     ) -> Vec<CredentialBinding<'a>> {
         let mut bindings = Vec::new();
+        for profile in &self.data.plugin_profiles {
+            for (field, reference) in &profile.credential_refs {
+                bindings.push(CredentialBinding {
+                    target: CredentialTarget {
+                        owner: CredentialOwner::PluginConnection(profile.id.clone()),
+                        slot: CredentialSlot::PluginField(field.clone()),
+                        identity: profile.credential_identity(),
+                    },
+                    reference: reference.as_deref(),
+                    plaintext: None,
+                });
+            }
+        }
         for credential in &self.data.totp_credentials {
             bindings.push(CredentialBinding {
                 target: CredentialTarget {
@@ -288,11 +301,13 @@ impl ConnectionStore {
                 continue;
             }
             let secret = if let Some(reference) = binding.reference {
-                Some(
-                    self.keychain
-                        .get(reference)
-                        .context("failed to read selected credential from protected storage")?,
-                )
+                let secret = if matches!(binding.target.owner, CredentialOwner::PluginConnection(_))
+                {
+                    self.keychain.get_preserving_multiline(reference)
+                } else {
+                    self.keychain.get(reference)
+                };
+                Some(secret.context("failed to read selected credential from protected storage")?)
             } else {
                 binding.plaintext.cloned()
             };

@@ -21,6 +21,7 @@ pub const NATIVE_PLUGIN_UI_EVENT: &str = "ui.event";
 pub(crate) const NATIVE_PLUGIN_DECLARATIVE_UI_FORM_KIND: &str = "form";
 pub(crate) const NATIVE_PLUGIN_DECLARATIVE_UI_CONTROL_KINDS: &[&str] = &[
     "text",
+    "textarea",
     "textWorkbench",
     "password",
     "number",

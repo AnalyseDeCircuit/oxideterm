@@ -20,10 +20,10 @@ use std::{
 use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout},
+    process::{Child, ChildStdin},
     time,
 };
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use oxideterm_plugin_manifest::NativePluginManifest;
 pub use oxideterm_plugin_protocol::{
@@ -64,6 +64,7 @@ pub trait PluginRuntimeBridge: Send {
 #[derive(Debug, PartialEq)]
 pub struct NativePluginRuntimeActivation {
     pub plugin_id: String,
+    pub generation: u64,
     pub response: PluginResponse,
     pub messages: Vec<PluginOutboundMessage>,
     pub effects: Vec<PluginOutboundEffect>,
@@ -87,8 +88,15 @@ pub struct NativePluginRuntimeEventDispatch {
     pub effects: Vec<PluginOutboundEffect>,
 }
 
+pub struct NativePluginRuntimePush {
+    pub messages: Vec<PluginOutboundMessage>,
+    pub effects: Vec<PluginOutboundEffect>,
+}
+
 #[derive(Default)]
 pub struct NativePluginRuntimeHost {
+    next_generation: u64,
+    output_wake: Arc<tokio::sync::Notify>,
     process_runtimes: HashMap<String, NativeProcessPluginRuntime>,
     process_permissions: HashMap<String, PluginPermissionSet>,
     #[cfg(feature = "wasm-runtime")]
@@ -99,6 +107,65 @@ pub struct NativePluginRuntimeHost {
 }
 
 impl NativePluginRuntimeHost {
+    pub fn dispose_connection_views(&mut self, plugin_id: &str, instance_id: &str) {
+        if let Some(runtime) = self.process_runtimes.get_mut(plugin_id) {
+            runtime.supervisor.dispose_connection_views(instance_id);
+        }
+    }
+
+    pub fn process_generation(&self, plugin_id: &str) -> Option<u64> {
+        self.process_runtimes
+            .get(plugin_id)
+            .map(|runtime| runtime.generation)
+    }
+    pub fn output_wake(&self) -> Arc<tokio::sync::Notify> {
+        self.output_wake.clone()
+    }
+
+    pub async fn receive_pending_output(
+        &mut self,
+    ) -> Vec<(String, u64, Result<NativePluginRuntimePush, PluginError>)> {
+        let mut pushes = Vec::new();
+        for (plugin_id, runtime) in &mut self.process_runtimes {
+            let result = time::timeout(
+                runtime.supervisor.lifecycle_timeout(),
+                runtime.receive_pending_output(),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                Err(PluginError::runtime(
+                    "process_response_timeout",
+                    "Native plugin output handling timed out",
+                ))
+            });
+            let messages = runtime.drain_outbound_messages();
+            let effects = runtime.drain_outbound_effects();
+            let permissions = self
+                .process_permissions
+                .get(plugin_id)
+                .cloned()
+                .unwrap_or_default();
+            let result = result
+                .and_then(|_| validate_outbound_message_permissions(&messages, &permissions))
+                .and_then(|_| validate_outbound_effect_permissions(&effects, &permissions));
+            match result {
+                Err(error) => {
+                    runtime.kill().await.ok();
+                    pushes.push((plugin_id.clone(), runtime.generation, Err(error)));
+                }
+                Ok(()) if !messages.is_empty() || !effects.is_empty() => {
+                    pushes.push((
+                        plugin_id.clone(),
+                        runtime.generation,
+                        Ok(NativePluginRuntimePush { messages, effects }),
+                    ));
+                }
+                Ok(()) => {}
+            }
+        }
+        pushes
+    }
+
     pub fn set_host_api_resolver(&mut self, resolver: NativeHostApiResolver) {
         self.host_api_resolver = Some(resolver);
         let Some(resolver) = self.host_api_resolver.clone() else {
@@ -138,6 +205,10 @@ impl NativePluginRuntimeHost {
             entry,
             lifecycle_timeout,
         );
+        runtime.set_output_wake(self.output_wake.clone());
+        self.next_generation += 1;
+        let generation = self.next_generation;
+        runtime.generation = generation;
         if let Some(resolver) = self.host_api_resolver.clone() {
             install_process_host_call_handler(
                 &mut runtime,
@@ -171,6 +242,7 @@ impl NativePluginRuntimeHost {
 
         Ok(NativePluginRuntimeActivation {
             plugin_id,
+            generation,
             response,
             messages,
             effects,
@@ -232,6 +304,7 @@ impl NativePluginRuntimeHost {
 
             Ok(NativePluginRuntimeActivation {
                 plugin_id,
+                generation: 0,
                 response,
                 messages,
                 effects,
@@ -243,7 +316,7 @@ impl NativePluginRuntimeHost {
         &mut self,
         plugin_id: &str,
         command: String,
-        args: Value,
+        mut args: Value,
         timeout: Duration,
     ) -> Result<NativePluginRuntimeCommandDispatch, PluginError> {
         #[cfg(feature = "wasm-runtime")]
@@ -281,12 +354,13 @@ impl NativePluginRuntimeHost {
             .get(plugin_id)
             .cloned()
             .unwrap_or_default();
-        let runtime = self.process_runtimes.get_mut(plugin_id).ok_or_else(|| {
-            PluginError::runtime(
+        let Some(runtime) = self.process_runtimes.get_mut(plugin_id) else {
+            oxideterm_plugin_protocol::zeroize_json_value(&mut args);
+            return Err(PluginError::runtime(
                 "plugin_runtime_not_active",
                 format!("Native plugin runtime \"{plugin_id}\" is not active"),
-            )
-        })?;
+            ));
+        };
         if let Some(resolver) = self.host_api_resolver.clone() {
             install_process_host_call_handler(
                 runtime,

@@ -64,6 +64,9 @@ pub enum PluginRequestKind {
 
 impl PluginRequest {
     pub fn zeroize_sensitive_host_call_args(&mut self) {
+        if let PluginRequestKind::DispatchCommand { args, .. } = &mut self.kind {
+            zeroize_json_value(args);
+        }
         if let PluginRequestKind::CallHostApi {
             namespace,
             method,
@@ -145,6 +148,19 @@ mod tests {
         let debug = format!("{command:?}");
         assert!(!debug.contains("terminal-private-token"));
         assert!(debug.contains("json.pretty"));
+        let mut request = PluginRequest {
+            request_id: "open".into(),
+            kind: command,
+            timeout_ms: None,
+        };
+        request.zeroize_sensitive_host_call_args();
+        assert!(matches!(
+            request.kind,
+            PluginRequestKind::DispatchCommand {
+                args: Value::Null,
+                ..
+            }
+        ));
         for method in ["exportOxide", "previewImport"] {
             let mut request = PluginRequest {
                 request_id: "sync-1".to_string(),

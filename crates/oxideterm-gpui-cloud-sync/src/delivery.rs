@@ -918,6 +918,12 @@ fn filter_structured_preview_for_selection(
     // Apply only selected structured records while preserving the downloaded preview metadata.
     if let Some(snapshot) = preview.connections_snapshot.as_mut() {
         snapshot
+            .plugin_profiles
+            .retain(|p| selection.selected_connection_ids.contains(&p.id));
+        snapshot
+            .plugin_tombstones
+            .retain(|p| selection.selected_connection_ids.contains(&p.id));
+        snapshot
             .local_terminal_profiles
             .retain(|p| selection.selected_connection_ids.contains(&p.id));
         snapshot
@@ -1178,6 +1184,11 @@ mod tests {
             remote_metadata: Default::default(),
             manifest,
             connections_snapshot: Some(SavedConnectionsSyncSnapshot {
+                plugin_profiles: ["kept", "excluded"].into_iter().map(|id| serde_json::from_value(serde_json::json!({
+                    "id":id, "plugin_id":"missing.provider", "type_id":"custom", "name":id, "group":null,
+                    "config":{}, "credential_refs":{}, "created_at":"2026-09-07T00:00:00Z", "updated_at":"2026-09-07T00:00:00Z", "last_used_at":null
+                })).unwrap()).collect(),
+                plugin_tombstones: ["delete-kept", "delete-excluded"].into_iter().map(|id| oxideterm_connections::DeletedConnectionTombstone { id:id.into(), deleted_at:chrono::Utc::now() }).collect(),
                 totp_credentials: Vec::new(),
                 local_terminal_profiles: Vec::new(),
                 local_terminal_tombstones: Vec::new(),
@@ -1217,10 +1228,34 @@ mod tests {
             CloudSyncPreviewSelection::from_preview(&preview, ConflictStrategy::Merge);
         selection.selected_remote_desktop_profile_ids =
             std::collections::BTreeSet::from([first.id.clone()]);
+        assert_eq!(
+            selection.selected_connection_ids,
+            ["kept", "excluded", "delete-kept", "delete-excluded"]
+                .map(str::to_string)
+                .into()
+        );
+        selection.selected_connection_ids = ["kept", "delete-kept"].map(str::to_string).into();
         let CloudSyncPendingPreview::Structured(mut preview) = preview else {
             unreachable!()
         };
         filter_structured_preview_for_selection(&mut preview, &selection);
+        let snapshot = preview.connections_snapshot.unwrap();
+        assert_eq!(
+            snapshot
+                .plugin_profiles
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["kept"]
+        );
+        assert_eq!(
+            snapshot
+                .plugin_tombstones
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["delete-kept"]
+        );
         let records = preview.remote_desktop_profiles_snapshot.unwrap().records;
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].id, first.id);

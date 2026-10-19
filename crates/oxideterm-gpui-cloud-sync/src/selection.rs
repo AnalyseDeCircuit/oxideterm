@@ -167,8 +167,8 @@ impl CloudSyncUploadSelection {
                 .connections
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| snapshot.records.iter())
-                .map(|record| record.id.clone())
+                .flat_map(|snapshot| snapshot.record_ids())
+                .map(ToOwned::to_owned)
                 .collect(),
             selected_connection_ids: None,
             sync_forwards: scope.sync_forwards,
@@ -1428,6 +1428,8 @@ mod tests {
             remote_metadata: Default::default(),
             manifest,
             connections_snapshot: Some(SavedConnectionsSyncSnapshot {
+                plugin_profiles: Vec::new(),
+                plugin_tombstones: Vec::new(),
                 totp_credentials: Vec::new(),
                 local_terminal_profiles: Vec::new(),
                 local_terminal_tombstones: Vec::new(),

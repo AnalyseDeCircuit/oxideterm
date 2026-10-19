@@ -257,6 +257,21 @@
     }
   },
   "plugin": {
+    "connections": {
+      "name": "Name",
+      "group": "Group",
+      "cancel": "Cancel",
+      "save": "Save",
+      "save_connect": "Save and connect",
+      "failed": "Could not complete the operation. Check the connection settings and plugin permissions.",
+      "disconnect": "Disconnect",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "disconnected": "Disconnected",
+      "unavailable": "The connection provider is unavailable. Enable or install the plugin to connect.",
+      "password_unchanged": "Leave blank to keep the saved value",
+      "clear_credentials": "Clear saved credentials"
+    },
     "install_queued": "Waiting · {{position}}",
     "installing_named": "Installing {{name}}",
     "install_queue_count": "{{count}} waiting",
@@ -853,6 +868,7 @@
         "redacted": "redacted"
       },
       "diff_fields": {
+        "plugin_configuration": "Connection settings",
         "name": "Name",
         "group": "Group",
         "host": "Host",

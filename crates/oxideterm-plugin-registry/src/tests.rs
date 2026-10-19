@@ -5,6 +5,64 @@
 
 use super::*;
 
+#[test]
+fn connection_declarations_validate_provider_permissions_and_form_boundaries() {
+    let mut manifest = minimal_manifest();
+    manifest.runtime = Some(NativePluginRuntime {
+        kind: NativePluginRuntimeKind::Process,
+        entry: "bin/provider".into(),
+    });
+    manifest.engines = Some(oxideterm_plugin_manifest::NativePluginEngines {
+        oxideterm: Some(">2.2.4".into()),
+    });
+    manifest.permissions.capabilities = vec!["ui.write".into(), "credentials.raw.read".into()];
+    manifest.contributes = Some(
+        serde_json::from_value(serde_json::json!({"connections":[{
+            "id":"device", "title":"Device", "icon":"plug", "terminalEntry":"bin/terminal",
+            "form":{"controls":[{"kind":"password","id":"token"},{"kind":"textarea","id":"body"}]}
+        }]}))
+        .unwrap(),
+    );
+    validate_native_plugin_manifest(&manifest).unwrap();
+    let valid = manifest.clone();
+    manifest
+        .permissions
+        .capabilities
+        .retain(|c| c != "credentials.raw.read");
+    assert_eq!(
+        validate_native_plugin_manifest(&manifest).unwrap_err(),
+        "Connection password fields require credentials.raw.read"
+    );
+    for (field, value, expected) in [
+        (
+            "terminalEntry",
+            serde_json::json!("../outside"),
+            "escape the plugin directory",
+        ),
+        (
+            "form",
+            serde_json::json!({"sections":[{"id":"__profile","controls":[{"kind":"text","id":"name"}]}]}),
+            "section ID",
+        ),
+        (
+            "form",
+            serde_json::json!({"controls":[{"kind":"button","id":"run"}]}),
+            "fields and layout",
+        ),
+        (
+            "form",
+            serde_json::json!({"controls":[{"kind":"text","id":"a/b"}]}),
+            "slashes",
+        ),
+    ] {
+        let mut serialized = serde_json::to_value(&valid).unwrap();
+        serialized["contributes"]["connections"][0][field] = value;
+        let invalid = serde_json::from_value(serialized).unwrap();
+        let error = validate_native_plugin_manifest(&invalid).unwrap_err();
+        assert!(error.contains(expected), "{field}: {error}");
+    }
+}
+
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::{ZipWriter, write::SimpleFileOptions};
@@ -2628,6 +2686,8 @@ fn disabled_or_loading_declarative_buttons_are_not_actionable() {
         max: None,
         step: None,
         indeterminate: false,
+        row_key: None,
+        selectable: false,
         strong: false,
         disabled: false,
         loading: false,
@@ -2658,6 +2718,8 @@ fn declarative_component_schema_accepts_shared_components_and_rejects_unsafe_sha
             "variant": "inspector",
             "children": [
                 { "kind": "statusBadge", "label": "Ready", "tone": "success" },
+                { "kind": "textarea", "id": "payload", "value": "first\nsecond" },
+                { "kind": "table", "id": "messages", "selectable": true, "rowKey": "id", "rows": [{"id":"a"}, {"id":"b"}] },
                 { "kind": "textWorkbench", "id": "tools", "options":[{"label":"Encode","value":{"command":"base64.encode"}}] },
                 { "kind": "select", "id": "environment", "options": [
                     { "label": "Production", "value": "production" }
@@ -2678,6 +2740,34 @@ fn declarative_component_schema_accepts_shared_components_and_rejects_unsafe_sha
     }))
     .unwrap();
     assert!(validate_native_plugin_declarative_ui_schema(&schema).is_ok());
+
+    for (control, expected) in [
+        (serde_json::json!({"kind":"textarea"}), "requires id"),
+        (
+            serde_json::json!({"kind":"textarea", "id":"body", "value":42}),
+            "strings or null",
+        ),
+        (
+            serde_json::json!({"kind":"table", "selectable":true}),
+            "require id and rowKey",
+        ),
+        (
+            serde_json::json!({"kind":"table", "id":"messages", "rowKey":"id", "rows":[{"id":"a"},{"id":"a"}]}),
+            "Duplicate",
+        ),
+        (
+            serde_json::json!({"kind":"table", "id":"messages", "rowKey":"id", "rows":[{"id":"a"},{}]}),
+            "string identity",
+        ),
+    ] {
+        let invalid =
+            runtime_declarative_ui_schema(&serde_json::json!({"controls":[control]})).unwrap();
+        assert!(
+            validate_native_plugin_declarative_ui_schema(&invalid)
+                .unwrap_err()
+                .contains(expected)
+        );
+    }
 
     let unsupported_version = runtime_declarative_ui_schema(&serde_json::json!({
         "componentVersion": 2,
@@ -2949,6 +3039,7 @@ fn write_manifest(plugin_dir: &Path, manifest: &NativePluginManifest) {
 
 fn sample_contributes() -> NativePluginContributes {
     NativePluginContributes {
+        connections: None,
         backgrounds: None,
         helper: None,
         terminal_transport: None,

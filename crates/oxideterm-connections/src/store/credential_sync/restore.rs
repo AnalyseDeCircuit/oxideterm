@@ -108,6 +108,21 @@ fn update_reference(
     global: &mut Option<SavedUpstreamProxyConfig>,
 ) -> Result<()> {
     match &target.owner {
+        CredentialOwner::PluginConnection(id) => {
+            let profile = data
+                .plugin_profiles
+                .iter_mut()
+                .find(|p| &p.id == id)
+                .context("Plugin connection is unavailable")?;
+            let CredentialSlot::PluginField(field) = &target.slot else {
+                bail!("Invalid plugin credential slot");
+            };
+            let slot = profile
+                .credential_refs
+                .get_mut(field)
+                .context("Plugin credential field is unavailable")?;
+            *slot = reference;
+        }
         CredentialOwner::Totp(id) => {
             let credential = data
                 .totp_credentials

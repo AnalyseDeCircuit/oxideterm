@@ -91,12 +91,16 @@ pub(in crate::workspace) struct PluginRuntimeRequestSenders {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum PluginRuntimeAdapterRefresh {
+    None,
     TerminalHooks,
     TerminalInputInterceptors,
     All,
 }
 
 pub(in crate::workspace) enum PluginRuntimeIntent {
+    PreparePush {
+        resolver: tokio::sync::oneshot::Sender<plugin_runtime::NativeHostApiResolver>,
+    },
     ApplyEffects {
         plugin_id: String,
         audit_context: Option<oxideterm_audit::AuditContext>,
@@ -161,6 +165,7 @@ fn plugin_workspace_released_response(request_id: String) -> plugin_runtime::Plu
 
 /// Owns plugin workers and reliable delivery independently from plugin page visibility.
 pub(in crate::workspace) struct PluginWorkspaceEntity {
+    pub(in crate::workspace) connections: super::plugin_connections::PluginConnections,
     task_runtime: Arc<tokio::runtime::Runtime>,
     registry: Arc<plugin_host::NativePluginRegistry>,
     security_key_provider: Option<Arc<oxideterm_ssh::SecurityKeyProvider>>,
@@ -169,6 +174,7 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     runtime_delivery_rx: std::sync::mpsc::Receiver<NativePluginRuntimeDelivery>,
     runtime_intents: VecDeque<PluginRuntimeIntent>,
     active_runtime_plugin_ids: HashSet<String>,
+    runtime_generations: HashMap<String, u64>,
     owned_tasks: Arc<Mutex<HashMap<u64, Option<tokio::task::AbortHandle>>>>,
     next_owned_task_id: AtomicU64,
     release_shutdown_started: bool,
@@ -232,6 +238,7 @@ impl PluginWorkspaceEntity {
         let (oxide_import_delivery_tx, oxide_import_delivery_rx) =
             delivery::ActiveDeliverySender::channel();
         let entity = Self {
+            connections: Default::default(),
             task_runtime,
             registry: Arc::new(registry),
             security_key_provider: None,
@@ -242,6 +249,7 @@ impl PluginWorkspaceEntity {
             runtime_delivery_rx,
             runtime_intents: VecDeque::new(),
             active_runtime_plugin_ids: HashSet::new(),
+            runtime_generations: HashMap::new(),
             owned_tasks: Arc::new(Mutex::new(HashMap::new())),
             next_owned_task_id: AtomicU64::new(1),
             release_shutdown_started: false,
@@ -286,6 +294,7 @@ impl PluginWorkspaceEntity {
             event_log_last_id: 0,
         };
         entity.schedule_runtime_delivery(cx);
+        entity.schedule_runtime_pushes();
         entity.schedule_manager_delivery(cx);
         entity.schedule_runtime_request_delivery(cx);
         entity.schedule_oxide_import_delivery(cx);
@@ -874,6 +883,74 @@ impl PluginWorkspaceEntity {
         );
     }
 
+    pub(in crate::workspace) fn start_connection_open(
+        &self,
+        plugin_id: String,
+        instance_id: String,
+        arguments: serde_json::Value,
+        cancel: tokio_util::sync::CancellationToken,
+        resolver: plugin_runtime::NativeHostApiResolver,
+    ) {
+        let mut arguments = arguments;
+        let Some(generation) = self.runtime_generations.get(&plugin_id).copied() else {
+            oxideterm_plugin_protocol::zeroize_json_value(&mut arguments);
+            return;
+        };
+        let host = self.runtime_host.clone();
+        let delivery = self.runtime_delivery_tx.clone();
+        // The owned task and protocol request erase credentials even when activation is retired.
+        let encoded =
+            Zeroizing::new(serde_json::to_string(&arguments).expect("JSON value serializes"));
+        oxideterm_plugin_protocol::zeroize_json_value(&mut arguments);
+        self.spawn_owned_task(async move {
+            let mut host = tokio::select! {
+                _ = cancel.cancelled() => return,
+                host = host.lock() => host,
+            };
+            if cancel.is_cancelled() || host.process_generation(&plugin_id) != Some(generation) { return; }
+            host.set_host_api_resolver(resolver);
+            let arguments = serde_json::from_str(&encoded).expect("host serialized JSON");
+            drop(encoded);
+            let result = host.dispatch_command(&plugin_id, "connection.open".into(), arguments, NATIVE_PLUGIN_LIFECYCLE_TIMEOUT).await;
+            if result.is_err() {
+                // A timed-out stream cannot safely correlate later responses.
+                let _ = host.deactivate_plugin(&plugin_id).await;
+            } else if cancel.is_cancelled() {
+                let close = host.dispatch_command(&plugin_id, "connection.close".into(), serde_json::json!({"instanceId":instance_id}), NATIVE_PLUGIN_LIFECYCLE_TIMEOUT).await;
+                host.dispose_connection_views(&plugin_id, &instance_id);
+                if !matches!(close, Ok(ref dispatch) if matches!(dispatch.response.result, plugin_runtime::PluginResponseResult::Ok { .. })) {
+                    let _ = host.deactivate_plugin(&plugin_id).await;
+                }
+                let _ = delivery.send(NativePluginRuntimeDelivery::ConnectionClose { plugin_id: plugin_id.clone(), generation, result: close });
+            }
+            let _ = delivery.send(NativePluginRuntimeDelivery::ConnectionOpen { plugin_id, instance_id, generation, result });
+        });
+    }
+
+    pub(in crate::workspace) fn start_connection_close(
+        &self,
+        plugin_id: String,
+        instance_id: String,
+        resolver: plugin_runtime::NativeHostApiResolver,
+    ) {
+        let Some(generation) = self.runtime_generations.get(&plugin_id).copied() else {
+            return;
+        };
+        let host = self.runtime_host.clone();
+        let delivery = self.runtime_delivery_tx.clone();
+        self.spawn_owned_task(async move {
+            let mut host = host.lock().await;
+            if host.process_generation(&plugin_id) != Some(generation) { return; }
+            host.set_host_api_resolver(resolver);
+            let result = host.dispatch_command(&plugin_id, "connection.close".into(), serde_json::json!({"instanceId":instance_id}), NATIVE_PLUGIN_LIFECYCLE_TIMEOUT).await;
+            host.dispose_connection_views(&plugin_id, &instance_id);
+            if !matches!(result, Ok(ref dispatch) if matches!(dispatch.response.result, plugin_runtime::PluginResponseResult::Ok { .. })) {
+                let _ = host.deactivate_plugin(&plugin_id).await;
+            }
+            let _ = delivery.send(NativePluginRuntimeDelivery::ConnectionClose { plugin_id, generation, result });
+        });
+    }
+
     pub(in crate::workspace) fn start_runtime_command_with_arguments(
         &self,
         plugin_id: String,
@@ -941,11 +1018,14 @@ impl PluginWorkspaceEntity {
     }
 
     fn start_runtime_deactivation(&mut self, plugin_id: String) {
+        self.connections.stop_plugin(&plugin_id);
         if self.release_shutdown_started {
             return;
         }
         // Declarative views are no longer valid once their runtime starts deactivating.
         self.ui_state.remove_plugin(&plugin_id);
+        self.active_runtime_plugin_ids.remove(&plugin_id);
+        self.runtime_generations.remove(&plugin_id);
         let host = self.runtime_host.clone();
         let delivery_tx = self.runtime_delivery_tx.clone();
         self.spawn_owned_task(async move {
@@ -1991,6 +2071,51 @@ impl PluginWorkspaceEntity {
         .detach();
     }
 
+    fn schedule_runtime_pushes(&self) {
+        let host = self.runtime_host.clone();
+        let delivery = self.runtime_delivery_tx.clone();
+        // The entity cancels this owner on release. Acknowledgement bounds UI
+        // backlog even when the plugin produces faster than GPUI can render.
+        self.spawn_owned_task(async move {
+            let wake = host.lock().await.output_wake();
+            loop {
+                wake.notified().await;
+                let (resolver, ready) = tokio::sync::oneshot::channel();
+                if delivery
+                    .send(NativePluginRuntimeDelivery::PreparePush { resolver })
+                    .is_err()
+                {
+                    return;
+                }
+                let Ok(resolver) = ready.await else {
+                    return;
+                };
+                let pushes = {
+                    let mut host = host.lock().await;
+                    host.set_host_api_resolver(resolver);
+                    host.receive_pending_output().await
+                };
+                for (plugin_id, generation, result) in pushes {
+                    let (consumed, receipt) = tokio::sync::oneshot::channel();
+                    if delivery
+                        .send(NativePluginRuntimeDelivery::Push {
+                            plugin_id,
+                            generation,
+                            result,
+                            consumed,
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                    if receipt.await.is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
     fn drain_runtime_deliveries(&mut self, cx: &mut Context<Self>) -> bool {
         let drain = delivery::drain_channel(
             &self.runtime_delivery_rx,
@@ -2012,6 +2137,72 @@ impl PluginWorkspaceEntity {
         delivery: NativePluginRuntimeDelivery,
     ) -> PluginRuntimeIntent {
         match delivery {
+            NativePluginRuntimeDelivery::ConnectionClose {
+                plugin_id,
+                generation,
+                result,
+            } => {
+                if self.runtime_generations.get(&plugin_id) != Some(&generation) {
+                    return PluginRuntimeIntent::StateChanged;
+                }
+                if !matches!(result, Ok(ref dispatch) if matches!(dispatch.response.result, plugin_runtime::PluginResponseResult::Ok { .. }))
+                {
+                    self.start_runtime_deactivation(plugin_id.clone());
+                    let _ = self.registry_mut().mark_runtime_error(
+                        &plugin_id,
+                        NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC.into(),
+                    );
+                    return PluginRuntimeIntent::StateChanged;
+                }
+                self.apply_command_dispatch_result(plugin_id, None, result)
+            }
+            NativePluginRuntimeDelivery::ConnectionOpen {
+                plugin_id,
+                instance_id,
+                generation,
+                result,
+            } => {
+                if self.runtime_generations.get(&plugin_id) != Some(&generation) {
+                    return PluginRuntimeIntent::StateChanged;
+                }
+                if result.is_err() {
+                    self.start_runtime_deactivation(plugin_id.clone());
+                    let _ = self.registry_mut().mark_runtime_error(
+                        &plugin_id,
+                        NATIVE_PLUGIN_RUNTIME_FAILURE_DIAGNOSTIC.into(),
+                    );
+                    return PluginRuntimeIntent::StateChanged;
+                }
+                let value = result
+                    .as_ref()
+                    .ok()
+                    .and_then(|dispatch| match &dispatch.response.result {
+                        plugin_runtime::PluginResponseResult::Ok { value } => Some(value.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or(serde_json::Value::Null);
+                self.enqueue_product_ui_effect(NativePluginProductUiEffect {
+                    plugin_id: plugin_id.clone(),
+                    audit_context: None,
+                    namespace: "pluginConnection".into(),
+                    method: "opened".into(),
+                    args: serde_json::json!({"instanceId":instance_id,"value":value}),
+                });
+                self.apply_command_dispatch_result(plugin_id, None, result)
+            }
+            NativePluginRuntimeDelivery::PreparePush { resolver } => {
+                PluginRuntimeIntent::PreparePush { resolver }
+            }
+            NativePluginRuntimeDelivery::Push {
+                plugin_id,
+                generation,
+                result,
+                consumed,
+            } => {
+                let intent = self.apply_runtime_push(plugin_id, generation, result);
+                let _ = consumed.send(());
+                intent
+            }
             NativePluginRuntimeDelivery::Activation { plugin_id, result } => {
                 self.apply_activation_result(plugin_id, result)
             }
@@ -2031,6 +2222,50 @@ impl PluginWorkspaceEntity {
         }
     }
 
+    fn apply_runtime_push(
+        &mut self,
+        plugin_id: String,
+        generation: u64,
+        result: Result<plugin_runtime::NativePluginRuntimePush, plugin_runtime::PluginError>,
+    ) -> PluginRuntimeIntent {
+        if !self.active_runtime_plugin_ids.contains(&plugin_id)
+            || self.runtime_generations.get(&plugin_id) != Some(&generation)
+        {
+            return PluginRuntimeIntent::StateChanged;
+        }
+        let push = match result {
+            Ok(push) => push,
+            Err(error) => {
+                self.start_runtime_deactivation(plugin_id.clone());
+                self.registry_mut()
+                    .cleanup_runtime_plugin_contributions(&plugin_id);
+                let _ = self
+                    .registry_mut()
+                    .mark_runtime_error(&plugin_id, native_plugin_runtime_failure_message(error));
+                return PluginRuntimeIntent::StateChanged;
+            }
+        };
+        for message in &push.messages {
+            if let Err(error) = self.apply_plugin_message(&plugin_id, message) {
+                self.start_runtime_deactivation(plugin_id.clone());
+                self.registry_mut()
+                    .cleanup_runtime_plugin_contributions(&plugin_id);
+                let _ = self.registry_mut().mark_runtime_error(&plugin_id, error);
+                return PluginRuntimeIntent::StateChanged;
+            }
+        }
+        let refresh = if push.messages.iter().all(|message| matches!(message,
+            plugin_runtime::PluginOutboundMessage::RegisterContribution { registration }
+                if matches!(registration.kind, plugin_runtime::PluginRegistrationKind::Tab | plugin_runtime::PluginRegistrationKind::SidebarPanel)
+        )) { PluginRuntimeAdapterRefresh::None } else { PluginRuntimeAdapterRefresh::All };
+        PluginRuntimeIntent::ApplyEffects {
+            plugin_id,
+            audit_context: None,
+            effects: push.effects,
+            refresh,
+        }
+    }
+
     fn apply_activation_result(
         &mut self,
         plugin_id: String,
@@ -2047,6 +2282,7 @@ impl PluginWorkspaceEntity {
 
         let plugin_runtime::NativePluginRuntimeActivation {
             plugin_id: activated_plugin_id,
+            generation,
             response,
             messages,
             effects,
@@ -2064,10 +2300,7 @@ impl PluginWorkspaceEntity {
         }
 
         for message in &messages {
-            if let Err(error) = self
-                .registry_mut()
-                .apply_runtime_outbound_message(&plugin_id, message)
-            {
+            if let Err(error) = self.apply_plugin_message(&plugin_id, message) {
                 self.registry_mut()
                     .cleanup_runtime_plugin_contributions(&plugin_id);
                 let _ = self.registry_mut().mark_runtime_error(&plugin_id, error);
@@ -2080,6 +2313,8 @@ impl PluginWorkspaceEntity {
             plugin_runtime::PluginResponseResult::Ok { .. } => {
                 let _ = self.registry_mut().mark_runtime_active(&plugin_id);
                 self.active_runtime_plugin_ids.insert(plugin_id.clone());
+                self.runtime_generations
+                    .insert(plugin_id.clone(), generation);
             }
             plugin_runtime::PluginResponseResult::Error { error } => {
                 self.registry_mut()
@@ -2104,6 +2339,7 @@ impl PluginWorkspaceEntity {
         result: Result<plugin_runtime::PluginResponse, plugin_runtime::PluginError>,
     ) -> PluginRuntimeIntent {
         self.active_runtime_plugin_ids.remove(&plugin_id);
+        self.runtime_generations.remove(&plugin_id);
         self.registry_mut()
             .cleanup_runtime_plugin_contributions(&plugin_id);
         match result {
@@ -2162,10 +2398,7 @@ impl PluginWorkspaceEntity {
         }
 
         for message in &messages {
-            if let Err(error) = self
-                .registry_mut()
-                .apply_runtime_outbound_message(&dispatched_plugin_id, message)
-            {
+            if let Err(error) = self.apply_plugin_message(&dispatched_plugin_id, message) {
                 self.registry_mut().record_manager_error(
                     dispatched_plugin_id.clone(),
                     format!("Native plugin command contribution update failed: {error}"),
@@ -2184,6 +2417,18 @@ impl PluginWorkspaceEntity {
             effects,
             refresh: PluginRuntimeAdapterRefresh::TerminalHooks,
         }
+    }
+
+    fn apply_plugin_message(
+        &mut self,
+        plugin: &str,
+        message: &plugin_runtime::PluginOutboundMessage,
+    ) -> Result<(), String> {
+        if let Some(result) = self.connections.apply_message(plugin, message) {
+            return result;
+        }
+        self.registry_mut()
+            .apply_runtime_outbound_message(plugin, message)
     }
 
     fn apply_event_dispatch_result(
@@ -2220,10 +2465,7 @@ impl PluginWorkspaceEntity {
         }
 
         for message in &messages {
-            if let Err(error) = self
-                .registry_mut()
-                .apply_runtime_outbound_message(&dispatched_plugin_id, message)
-            {
+            if let Err(error) = self.apply_plugin_message(&dispatched_plugin_id, message) {
                 self.registry_mut().record_manager_error(
                     dispatched_plugin_id.clone(),
                     format!("Native plugin event contribution update failed: {error}"),
@@ -3000,6 +3242,149 @@ mod tests {
         assert_eq!(first_confirm_rx.try_recv(), Ok(true));
     }
 
+    #[cfg(unix)]
+    #[gpui::test]
+    fn cancelled_connection_open_releases_the_provider_resource(cx: &mut TestAppContext) {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("provider");
+        std::fs::write(&executable, r##"#!/bin/sh
+read request
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate:example.provider","payload":{"requestId":"activate:example.provider","result":{"status":"ok","value":null}}}'
+read request
+printf '%s' "$request" > opened.tmp
+mv opened.tmp opened.json
+while [ ! -f release ]; do sleep 0.01; done
+printf '%s\n' '{"protocolVersion":1,"requestId":"command:example.provider:connection.open","payload":{"requestId":"command:example.provider:connection.open","result":{"status":"ok","value":{"kind":"workbench","schema":{"controls":[{"kind":"markdown","text":"Ready"}]}}}}}'
+read request
+printf '%s' "$request" > closed.tmp
+mv closed.tmp closed.json
+printf '%s\n' '{"protocolVersion":1,"requestId":"command:example.provider:connection.close","payload":{"requestId":"command:example.provider:connection.close","result":{"status":"ok","value":null}}}'
+read request
+"##).unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(
+                runtime.clone(),
+                plugin_host::NativePluginRegistry::default(),
+                cx,
+            )
+        });
+        let host = entity.read_with(cx, |entity, _| entity.runtime_host.clone());
+        let manifest = serde_json::from_value(serde_json::json!({"id":"example.provider","name":"Test provider","version":"1.0.0","runtime":{"kind":"process","entry":"provider"}})).unwrap();
+        let activation = runtime.block_on(async {
+            host.lock()
+                .await
+                .activate_process_plugin(
+                    manifest,
+                    directory.path().into(),
+                    "provider".into(),
+                    Default::default(),
+                    Duration::from_secs(5),
+                )
+                .await
+                .unwrap()
+        });
+        let cancel = tokio_util::sync::CancellationToken::new();
+        entity.update(cx, |entity, _| {
+            entity.apply_activation_result("example.provider".into(), Ok(activation));
+            entity.start_connection_open(
+                "example.provider".into(),
+                "one".into(),
+                serde_json::json!({"instanceId":"one"}),
+                cancel.clone(),
+                Arc::new(|_, _, _| None),
+            );
+        });
+        let wait_for = |file: &str| {
+            let path = directory.path().join(file);
+            runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while !path.exists() {
+                        tokio::time::sleep(Duration::from_millis(10)).await;
+                    }
+                })
+                .await
+                .unwrap();
+            });
+            serde_json::from_slice::<serde_json::Value>(&std::fs::read(path).unwrap()).unwrap()
+        };
+        let opened = wait_for("opened.json");
+        assert_eq!(opened["payload"]["kind"]["args"]["instanceId"], "one");
+        cancel.cancel();
+        std::fs::write(directory.path().join("release"), b"").unwrap();
+        let closed = wait_for("closed.json");
+        assert_eq!(closed["payload"]["kind"]["command"], "connection.close");
+        assert_eq!(
+            closed["payload"]["kind"]["args"],
+            serde_json::json!({"instanceId":"one"})
+        );
+        runtime.block_on(async {
+            host.lock()
+                .await
+                .deactivate_plugin("example.provider")
+                .await
+                .unwrap();
+        });
+    }
+
+    #[gpui::test]
+    fn runtime_push_delivery_rejects_retired_instances(cx: &mut TestAppContext) {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap(),
+        );
+        let entity = cx.new(|cx| {
+            PluginWorkspaceEntity::new(runtime, plugin_host::NativePluginRegistry::default(), cx)
+        });
+        entity.update(cx, |entity, _| {
+            let id = "plugin.push".to_string();
+            entity.active_runtime_plugin_ids.insert(id.clone());
+            entity.runtime_generations.insert(id.clone(), 2);
+            for generation in [1, 2] {
+                let (consumed, mut receipt) = tokio::sync::oneshot::channel();
+                let event = plugin_runtime::PluginEvent {
+                    name: "plugin.push.message".into(),
+                    payload: serde_json::json!({"topic":"devices/status", "body":"ready"}),
+                };
+                let intent = entity.apply_runtime_delivery(NativePluginRuntimeDelivery::Push {
+                    plugin_id: id.clone(),
+                    generation,
+                    consumed,
+                    result: Ok(plugin_runtime::NativePluginRuntimePush {
+                        messages: Vec::new(),
+                        effects: vec![plugin_runtime::PluginOutboundEffect::Event(event.clone())],
+                    }),
+                });
+                assert_eq!(receipt.try_recv(), Ok(()));
+                if generation == 1 {
+                    assert!(matches!(intent, PluginRuntimeIntent::StateChanged));
+                } else {
+                    let PluginRuntimeIntent::ApplyEffects {
+                        plugin_id, effects, ..
+                    } = intent
+                    else {
+                        panic!("current runtime must deliver its event")
+                    };
+                    assert_eq!(plugin_id, id);
+                    assert_eq!(
+                        effects,
+                        vec![plugin_runtime::PluginOutboundEffect::Event(event)]
+                    );
+                }
+            }
+        });
+    }
+
     #[gpui::test]
     fn runtime_delivery_is_entity_owned_and_redacts_plugin_error_text(cx: &mut TestAppContext) {
         let runtime = Arc::new(
@@ -3372,7 +3757,7 @@ mod tests {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .len(),
-                1
+                2
             );
             assert!(entity.begin_release_shutdown());
             assert!(!entity.begin_release_shutdown());

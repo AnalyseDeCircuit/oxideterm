@@ -669,6 +669,16 @@ impl ConnectionStore {
                 .groups
                 .retain(|group| !group_path_is_within(group, &name));
             let now = Utc::now();
+            for profile in &mut self.data.plugin_profiles {
+                if profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|group| group_path_is_within(group, &name))
+                {
+                    profile.group = None;
+                    profile.updated_at = now;
+                }
+            }
             for conn in &mut self.data.connections {
                 if conn
                     .group
@@ -810,6 +820,17 @@ impl ConnectionStore {
                 updated += 1;
             }
         }
+        for profile in &mut self.data.plugin_profiles {
+            if let Some(renamed) = profile
+                .group
+                .as_deref()
+                .and_then(|group| rename_group_path(group, &old_name, &new_name))
+            {
+                profile.group = Some(renamed);
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
         for profile in &mut self.data.local_terminal_profiles {
             if let Some(renamed) = profile
                 .group
@@ -896,7 +917,7 @@ impl ConnectionStore {
     }
 
     pub fn move_to_group(&mut self, ids: &[String], group: Option<&str>) -> Result<usize> {
-        self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], &[], &[], group)
+        self.move_session_assets_to_group(ids, &[], &[], &[], &[], &[], &[], &[], &[], group)
     }
 
     /// Moves all saved Session Manager asset types in one metadata save.
@@ -910,6 +931,7 @@ impl ConnectionStore {
         standalone_sftp_profile_ids: &[String],
         remote_desktop_ids: &[String],
         ftp_profile_ids: &[String],
+        plugin_profile_ids: &[String],
         group: Option<&str>,
     ) -> Result<usize> {
         let original_groups = self.data.groups.clone();
@@ -932,6 +954,13 @@ impl ConnectionStore {
         let ftp_profile_id_set = ftp_profile_ids.iter().collect::<HashSet<_>>();
         let now = Utc::now();
         let mut updated = 0;
+        for profile in &mut self.data.plugin_profiles {
+            if plugin_profile_ids.contains(&profile.id) && profile.group != group {
+                profile.group = group.clone();
+                profile.updated_at = now;
+                updated += 1;
+            }
+        }
         for conn in &mut self.data.connections {
             if connection_id_set.contains(&conn.id) && conn.group != group {
                 conn.group = group.clone();
@@ -4092,7 +4121,18 @@ impl ConnectionStore {
                     .iter()
                     .filter_map(|profile| profile.group.clone()),
             )
-            .chain(self.data.local_terminal_profiles.iter().filter_map(|profile| profile.group.clone()))
+            .chain(
+                self.data
+                    .local_terminal_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
+            .chain(
+                self.data
+                    .plugin_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
             .collect::<Vec<_>>();
         for group in implicit_local_groups {
             if !self.data.groups.contains(&group) {

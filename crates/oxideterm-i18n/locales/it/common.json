@@ -257,6 +257,21 @@
     "shortcut_count": "scorciatoie"
   },
   "plugin": {
+    "connections": {
+      "name": "Nome",
+      "group": "Gruppo",
+      "cancel": "Annulla",
+      "save": "Salva",
+      "save_connect": "Salva e connetti",
+      "failed": "Impossibile completare l’operazione. Controlla le impostazioni di connessione e le autorizzazioni del componente aggiuntivo.",
+      "disconnect": "Disconnetti",
+      "connecting": "Connessione in corso…",
+      "connected": "Connesso",
+      "disconnected": "Disconnesso",
+      "unavailable": "Il componente aggiuntivo di connessione non è disponibile. Attivalo o installalo per connetterti.",
+      "password_unchanged": "Lascia vuoto per mantenere il valore salvato",
+      "clear_credentials": "Cancella le credenziali salvate"
+    },
     "install_queued": "In attesa · posizione {{position}}",
     "installing_named": "Installazione di {{name}}",
     "install_queue_count": "{{count}} in attesa",
@@ -861,6 +876,7 @@
         "redacted": "nascosto"
       },
       "diff_fields": {
+        "plugin_configuration": "Impostazioni di connessione",
         "name": "Nome",
         "group": "Gruppo",
         "host": "Host",

@@ -300,6 +300,138 @@ fn write_process_plugin(plugin_dir: &Path, body: &str) {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn runtime_host_delivers_idle_pushes_and_stops_delivery_on_deactivation() {
+    let plugin_dir = unique_temp_dir("plugin-idle-push");
+    write_process_plugin(
+        &plugin_dir,
+        r#"#!/bin/sh
+read request
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","payload":{"requestId":"activate:com.example.runtime","result":{"status":"ok","value":null}}}'
+while [ ! -f release ]; do sleep 0.01; done
+printf '%s\n' '{"protocolVersion":1,"payload":{"type":"registerContribution","registration":{"registrationId":"live","pluginId":"com.example.runtime","kind":"tab","metadata":{"tabId":"messages","schema":{"kind":"form","controls":[{"kind":"table","id":"messages","rows":[{"topic":"devices/one","payload":"ready"}]}]}}}}}'
+read request
+printf '%s\n' '{"protocolVersion":1,"requestId":"command:com.example.runtime:publish","payload":{"requestId":"command:com.example.runtime:publish","result":{"status":"ok","value":{"sent":"devices/two"}}}}'
+read request
+"#,
+    );
+    let mut host = NativePluginRuntimeHost::default();
+    let wake = host.output_wake();
+    host.activate_process_plugin(
+        sample_manifest(),
+        plugin_dir.clone(),
+        "bin/plugin".into(),
+        PluginPermissionSet {
+            capabilities: vec!["ui.write".into()],
+            allowed_host_apis: vec![],
+        },
+        process_runtime_test_timeout(),
+    )
+    .await
+    .unwrap();
+    fs::write(plugin_dir.join("release"), b"").unwrap();
+    let push = time::timeout(process_runtime_test_timeout(), async {
+        loop {
+            wake.notified().await;
+            let mut pushes = host.receive_pending_output().await;
+            if !pushes.is_empty() {
+                break pushes.remove(0);
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(push.0, "com.example.runtime");
+    let push = push.2.unwrap();
+    let PluginOutboundMessage::RegisterContribution { registration } = &push.messages[0] else {
+        panic!("expected a live view update")
+    };
+    assert_eq!(
+        registration.metadata["schema"]["controls"][0]["rows"],
+        serde_json::json!([{"topic":"devices/one","payload":"ready"}])
+    );
+    assert_eq!(
+        push.effects,
+        vec![PluginOutboundEffect::RegistrationChanged]
+    );
+    let reply = host
+        .dispatch_command(
+            "com.example.runtime",
+            "publish".into(),
+            Value::Null,
+            process_runtime_test_timeout(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.response.result,
+        PluginResponseResult::Ok {
+            value: serde_json::json!({"sent":"devices/two"})
+        }
+    );
+    host.deactivate_plugin("com.example.runtime").await.unwrap();
+    assert!(host.receive_pending_output().await.is_empty());
+    assert_eq!(
+        host.dispatch_command(
+            "com.example.runtime",
+            "publish".into(),
+            Value::Null,
+            process_runtime_test_timeout()
+        )
+        .await
+        .unwrap_err()
+        .code,
+        "plugin_runtime_not_active"
+    );
+    fs::remove_dir_all(plugin_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn runtime_host_rejects_unapproved_idle_contributions() {
+    let plugin_dir = unique_temp_dir("plugin-idle-denied");
+    write_process_plugin(
+        &plugin_dir,
+        r#"#!/bin/sh
+read request
+printf '%s\n' '{"protocolVersion":1,"requestId":"activate:com.example.runtime","payload":{"requestId":"activate:com.example.runtime","result":{"status":"ok","value":null}}}'
+while [ ! -f release ]; do sleep 0.01; done
+printf '%s\n' '{"protocolVersion":1,"payload":{"type":"registerContribution","registration":{"registrationId":"live","pluginId":"com.example.runtime","kind":"tab","metadata":{"tabId":"messages"}}}}'
+read request
+"#,
+    );
+    let mut host = NativePluginRuntimeHost::default();
+    let wake = host.output_wake();
+    host.activate_process_plugin(
+        sample_manifest(),
+        plugin_dir.clone(),
+        "bin/plugin".into(),
+        PluginPermissionSet::default(),
+        process_runtime_test_timeout(),
+    )
+    .await
+    .unwrap();
+    fs::write(plugin_dir.join("release"), b"").unwrap();
+    let result = time::timeout(process_runtime_test_timeout(), async {
+        loop {
+            wake.notified().await;
+            let mut pushes = host.receive_pending_output().await;
+            if !pushes.is_empty() {
+                break pushes.remove(0).2;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let Err(error) = result else {
+        panic!("unapproved UI push must be rejected")
+    };
+    assert_eq!(error.code, "plugin_capability_not_allowed");
+    assert!(host.process_runtimes["com.example.runtime"].child.is_none());
+    fs::remove_dir_all(plugin_dir).unwrap();
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn process_runtime_collects_activate_time_outbound_frames() {
     let temp_dir = unique_temp_dir("plugin-process-outbound");
     let plugin_dir = temp_dir.join("plugin");

@@ -586,7 +586,8 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Option<ActiveWindowModalOwner> {
         let connection_form = self.connection_form_state(cx);
-        let new_connection_open = connection_form.form.is_some();
+        let new_connection_open = connection_form.form.is_some()
+            || self.plugin_entity.read(cx).connections.form.is_some();
         let jump_server_open = connection_form
             .form
             .as_ref()
@@ -923,6 +924,16 @@ impl WorkspaceApp {
         {
             return false;
         }
+        if owner == ActiveWindowModalOwner::NewConnection
+            && self.plugin_entity.read(cx).connections.form.is_some()
+            && event.keystroke.key != "escape"
+            && self
+                .plugin_ui_state(cx)
+                .focused_text_area_context(window, cx)
+                .is_some_and(|context| context.surface_kind == "connectionForm")
+        {
+            return false;
+        }
         let route = owner.key_route(event.keystroke.key.as_str());
         if route.dispatch_owner.is_some() && owner.allows_modal_ime() {
             if self.defer_active_ime_key(&event.keystroke, window, cx) {
@@ -946,7 +957,13 @@ impl WorkspaceApp {
         };
         match owner {
             ActiveWindowModalOwner::NewConnection | ActiveWindowModalOwner::JumpServer => {
-                let _ = self.handle_new_connection_key(event, window, cx);
+                if self.plugin_entity.read(cx).connections.form.is_some() {
+                    if event.keystroke.key == "escape" {
+                        self.close_plugin_connection_form(cx);
+                    }
+                } else {
+                    let _ = self.handle_new_connection_key(event, window, cx);
+                }
             }
             ActiveWindowModalOwner::LocalShellLauncher => {
                 let _ = self.handle_local_shell_launcher_key(event, window, cx);

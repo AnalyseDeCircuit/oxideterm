@@ -6,7 +6,9 @@ use oxideterm_gpui_ui::{
     select::{select_option, select_option_action, select_panel_overlay_popup_with_max_height},
 };
 use zeroize::Zeroizing;
+mod text_area;
 mod text_workbench;
+use text_area::{PluginTextArea, TextAreaChanged};
 use text_workbench::PluginTextWorkbench;
 
 const NATIVE_PLUGIN_UI_LIST_OVERSCAN: usize = 8;
@@ -37,10 +39,37 @@ struct NativePluginUiControlState {
     select_options: Vec<plugin_host::NativePluginDeclarativeUiOption>,
 }
 
+struct NativePluginDataState {
+    list: ListState,
+    rows: Arc<Vec<serde_json::Value>>,
+    focus: FocusHandle,
+}
+
+impl NativePluginDataState {
+    fn update_rows(&mut self, rows: Arc<Vec<serde_json::Value>>, row_key: Option<&str>) {
+        if self.rows == rows {
+            return;
+        }
+        let mut anchor = self.list.logical_scroll_top();
+        if let Some(key) = row_key
+            && let Some(identity) = self.rows.get(anchor.item_ix).and_then(|row| row.get(key))
+            && let Some(index) = rows.iter().position(|row| row.get(key) == Some(identity))
+        {
+            anchor.item_ix = index;
+        }
+        anchor.item_ix = anchor.item_ix.min(rows.len().saturating_sub(1));
+        self.list.splice(0..self.rows.len(), rows.len());
+        self.list.scroll_to(anchor);
+        self.rows = rows;
+    }
+}
+
 #[derive(Default)]
 pub(super) struct NativePluginUiState {
     controls: HashMap<u64, NativePluginUiControlState>,
     workbenches: HashMap<u64, Entity<PluginTextWorkbench>>,
+    text_areas: HashMap<u64, (Entity<PluginTextArea>, Subscription)>,
+    data_views: HashMap<u64, NativePluginDataState>,
     pub focused_input: Option<u64>,
     pub(in crate::workspace) open_select: Option<u64>,
     select_window: Option<gpui::WindowId>,
@@ -49,6 +78,78 @@ pub(super) struct NativePluginUiState {
 }
 
 impl NativePluginUiState {
+    pub(in crate::workspace) fn focused_text_area_context(
+        &self,
+        window: &Window,
+        cx: &App,
+    ) -> Option<&NativePluginUiControlContext> {
+        self.text_areas
+            .iter()
+            .find(|(_, (area, _))| area.read(cx).is_focused(window, cx))
+            .and_then(|(key, _)| self.context(*key))
+    }
+    pub(in crate::workspace) fn set_context_value(
+        &mut self,
+        context: &NativePluginUiControlContext,
+        value: serde_json::Value,
+    ) {
+        let key = native_plugin_ui_control_key(context);
+        if let Some(state) = self.controls.get_mut(&key) {
+            state.draft = if matches!(
+                context.control_kind.as_str(),
+                "text" | "password" | "textarea"
+            ) {
+                NativePluginUiControlDraft::Text(Zeroizing::new(
+                    value.as_str().unwrap_or_default().to_string(),
+                ))
+            } else {
+                NativePluginUiControlDraft::Value(value)
+            };
+        }
+    }
+
+    pub(in crate::workspace) fn connection_values(
+        &self,
+        plugin: &str,
+        surface: &str,
+    ) -> (
+        std::collections::BTreeMap<String, serde_json::Value>,
+        std::collections::BTreeMap<String, Zeroizing<String>>,
+    ) {
+        let mut values = std::collections::BTreeMap::new();
+        let mut secrets = std::collections::BTreeMap::new();
+        for (key, state) in &self.controls {
+            let context = &state.context;
+            if context.plugin_id != plugin
+                || context.surface_id != surface
+                || context.surface_kind != "connectionForm"
+            {
+                continue;
+            }
+            let field = format!("{}/{}", context.section_id, context.control_id);
+            if context.control_kind == "password" {
+                if let Some(text) = self.text(*key) {
+                    secrets.insert(field, Zeroizing::new(text.to_string()));
+                }
+            } else if matches!(
+                context.control_kind.as_str(),
+                "text" | "textarea" | "number" | "checkbox" | "select"
+            ) {
+                if let Some(mut value) = self.value(*key) {
+                    if value.is_null() {
+                        match context.control_kind.as_str() {
+                            "checkbox" => value = serde_json::Value::Bool(false),
+                            "textarea" => value = serde_json::Value::String(String::new()),
+                            _ => {}
+                        }
+                    }
+                    values.insert(field, value);
+                }
+            }
+        }
+        (values, secrets)
+    }
+
     pub(in crate::workspace) fn begin_surface_render(&mut self) -> u64 {
         self.render_generation = self.render_generation.wrapping_add(1);
         self.render_generation
@@ -128,6 +229,16 @@ impl NativePluginUiState {
     }
 
     fn clear_stale_focus(&mut self) {
+        self.text_areas.retain(|key, _| {
+            self.controls
+                .get(key)
+                .is_some_and(|state| state.context.control_kind == "textarea")
+        });
+        self.data_views.retain(|key, _| {
+            self.controls.get(key).is_some_and(|state| {
+                matches!(state.context.control_kind.as_str(), "table" | "list")
+            })
+        });
         self.workbenches
             .retain(|key, _| self.controls.contains_key(key));
         self.select_anchors
@@ -404,6 +515,15 @@ impl WorkspaceApp {
         tab_id: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self
+            .plugin_entity
+            .read(cx)
+            .connections
+            .sessions
+            .contains_key(tab_id)
+        {
+            return self.render_plugin_connection_surface(tab_id, cx);
+        }
         self.bootstrap_native_plugin_runtime(cx);
         let theme = self.tokens.ui;
         let contribution = self
@@ -562,7 +682,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_native_plugin_declarative_schema(
+    pub(in crate::workspace) fn render_native_plugin_declarative_schema(
         &mut self,
         plugin_id: &str,
         surface_kind: &str,
@@ -704,6 +824,18 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match control.kind.as_str() {
+            "textarea" => self.render_native_plugin_text_area(
+                native_plugin_ui_control_context(
+                    plugin_id,
+                    surface_kind,
+                    surface_id,
+                    section_id,
+                    control,
+                ),
+                control,
+                render_generation,
+                cx,
+            ),
             "textWorkbench" => self
                 .native_plugin_text_workbench(
                     plugin_id,
@@ -800,14 +932,136 @@ impl WorkspaceApp {
                 self.render_native_plugin_status_badge(control)
             }
             "progress" => self.render_native_plugin_progress_control(control),
-            "table" => self.render_native_plugin_table_control(control),
-            "list" => self.render_native_plugin_list_control(control),
+            "table" | "list" => {
+                let context = native_plugin_ui_control_context(
+                    plugin_id,
+                    surface_kind,
+                    surface_id,
+                    section_id,
+                    control,
+                );
+                let (key, state, rows, selected) =
+                    self.native_plugin_data_view(context, control, render_generation, cx);
+                if control.kind == "table" {
+                    self.render_native_plugin_table_control(control, key, state, rows, selected, cx)
+                } else {
+                    self.render_native_plugin_list_control(control, state, rows)
+                }
+            }
             "emptyState" | "empty-state" => self.render_native_plugin_empty_state_control(control),
             "keyValue" | "key-value" | "keyValueRow" | "key-value-row" => {
                 self.render_native_plugin_key_value_control(control)
             }
             _ => self.render_native_plugin_text_block_control(control, false),
         }
+    }
+
+    fn render_native_plugin_text_area(
+        &mut self,
+        context: NativePluginUiControlContext,
+        control: &plugin_host::NativePluginDeclarativeUiControl,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let key = self.update_plugin_ui_state(cx, |ui| {
+            ui.sync_control(context.clone(), control, generation)
+        });
+        let existing = self
+            .plugin_ui_state(cx)
+            .text_areas
+            .get(&key)
+            .map(|(view, _)| view.clone());
+        let view = if let Some(view) = existing {
+            view.update(cx, |area, cx| {
+                area.update_definition(control, self.tokens, &self.i18n, cx)
+            });
+            view
+        } else {
+            let view = cx.new(|cx| PluginTextArea::new(control, self.tokens, &self.i18n, cx));
+            let subscription = cx.subscribe(&view, move |this, _, event: &TextAreaChanged, cx| {
+                this.dispatch_native_plugin_ui_control_event(
+                    context.clone(),
+                    "input",
+                    serde_json::Value::String(event.0.to_string()),
+                    cx,
+                );
+            });
+            self.update_plugin_ui_state(cx, |ui| {
+                ui.text_areas.insert(key, (view.clone(), subscription));
+            });
+            view
+        };
+        let editor = div()
+            .w_full()
+            .capture_any_mouse_down(cx.listener(|this, _: &MouseDownEvent, _, cx| {
+                // The embedded editor owns IME; release any prior workspace field first.
+                this.blur_text_inputs(cx);
+                this.blur_native_plugin_ui_input(cx);
+                this.close_native_plugin_select(cx);
+            }))
+            .child(view);
+        self.render_native_plugin_form_field(control, editor)
+    }
+
+    fn native_plugin_data_view(
+        &mut self,
+        context: NativePluginUiControlContext,
+        control: &plugin_host::NativePluginDeclarativeUiControl,
+        generation: u64,
+        cx: &mut Context<Self>,
+    ) -> (
+        Option<u64>,
+        ListState,
+        Arc<Vec<serde_json::Value>>,
+        serde_json::Value,
+    ) {
+        let rows = Arc::new(control.rows.clone().unwrap_or_default());
+        let row_height = if control.kind == "table" {
+            oxideterm_gpui_ui::TauriTableMetrics::from_tokens(&self.tokens).row_min_height
+        } else {
+            self.tokens.metrics.ui_button_sm_height + self.tokens.spacing.one
+        };
+        let spec = TauriVirtualListSpec::new(px(row_height), NATIVE_PLUGIN_UI_LIST_OVERSCAN);
+        // Existing id-less display tables remain valid; stable state is opt-in by ID.
+        if control.id.is_none() {
+            return (
+                None,
+                tauri_virtual_list_state(rows.len(), ListAlignment::Top, spec),
+                rows,
+                serde_json::Value::Null,
+            );
+        }
+        let existing_key = native_plugin_ui_control_key(&context);
+        let focus = self
+            .plugin_ui_state(cx)
+            .data_views
+            .get(&existing_key)
+            .map(|data| data.focus.clone())
+            .unwrap_or_else(|| cx.focus_handle());
+        self.update_plugin_ui_state(cx, |ui| {
+            let key = ui.sync_control(context, control, generation);
+            let data = ui
+                .data_views
+                .entry(key)
+                .or_insert_with(|| NativePluginDataState {
+                    list: tauri_virtual_list_state(rows.len(), ListAlignment::Top, spec),
+                    rows: rows.clone(),
+                    focus,
+                });
+            data.update_rows(rows, control.row_key.as_deref());
+            let list = data.list.clone();
+            let rows = data.rows.clone();
+            let mut selected = ui.value(key).unwrap_or(serde_json::Value::Null);
+            if control.selectable
+                && !rows.iter().any(|row| {
+                    control.row_key.as_ref().and_then(|field| row.get(field)) == Some(&selected)
+                })
+            {
+                selected = serde_json::Value::Null;
+                ui.set_value(key, selected.clone());
+            }
+            (Some(key), list, rows, selected)
+        })
     }
 
     fn render_native_plugin_button_control(
@@ -1616,6 +1870,9 @@ impl WorkspaceApp {
         let Some(context) = self.plugin_ui_state(cx).context(key).cloned() else {
             return;
         };
+        if context.surface_kind == "connectionForm" {
+            return;
+        }
         let value = if context.control_kind == "password" {
             let approved = self.native_plugin_ui_secret_event_is_approved(&context.plugin_id, cx);
             let Some(password) = self.plugin_ui_state(cx).text(key) else {
@@ -1661,6 +1918,13 @@ impl WorkspaceApp {
             return false;
         };
         match context.surface_kind.as_str() {
+            "connectionForm" => self
+                .plugin_entity
+                .read(cx)
+                .connections
+                .form
+                .as_ref()
+                .is_some_and(|form| form.profile.id == context.surface_id),
             "tab" => self.active_content_tab(cx).is_some_and(|tab| {
                 matches!(
                     &tab.kind,
@@ -1690,6 +1954,10 @@ impl WorkspaceApp {
         value: serde_json::Value,
         cx: &mut Context<Self>,
     ) {
+        if context.surface_kind == "connectionForm" {
+            self.update_plugin_connection_form_value(&context, value, cx);
+            return;
+        }
         self.dispatch_native_plugin_event(
             context.plugin_id,
             plugin_host::NATIVE_PLUGIN_UI_EVENT,
@@ -1821,18 +2089,35 @@ impl WorkspaceApp {
     fn render_native_plugin_table_control(
         &self,
         control: &plugin_host::NativePluginDeclarativeUiControl,
+        key: Option<u64>,
+        state: ListState,
+        rows: Arc<Vec<serde_json::Value>>,
+        selected: serde_json::Value,
+        cx: &Context<Self>,
     ) -> AnyElement {
-        let rows = Arc::new(control.rows.clone().unwrap_or_default());
         let row_count = rows.len();
         let metrics = oxideterm_gpui_ui::TauriTableMetrics::from_tokens(&self.tokens);
         let spec =
             TauriVirtualListSpec::new(px(metrics.row_min_height), NATIVE_PLUGIN_UI_LIST_OVERSCAN);
-        let state = tauri_virtual_list_state(row_count, ListAlignment::Top, spec);
         let height = native_plugin_virtual_list_height(row_count, metrics.row_min_height)
             + metrics.header_min_height;
         let columns = Arc::new(native_plugin_table_columns(control));
         let colors = native_plugin_table_colors(&self.tokens);
         let tokens = self.tokens;
+        let owner = cx.entity().downgrade();
+        let selectable = control.selectable && !control.disabled && !control.loading;
+        let row_key = control.row_key.clone();
+        let focus = key.and_then(|key| {
+            self.plugin_ui_state(cx)
+                .data_views
+                .get(&key)
+                .map(|data| data.focus.clone())
+        });
+        let keyboard_rows = rows.clone();
+        let keyboard_row_key = row_key.clone();
+        let keyboard_selected = selected.clone();
+        let keyboard_list = state.clone();
+        let row_focus = focus.clone();
         let mut header = oxideterm_gpui_ui::tauri_table_header(&self.tokens, colors, metrics);
         if columns.is_empty() {
             header = header.child(
@@ -1846,6 +2131,32 @@ impl WorkspaceApp {
             }
         }
         div()
+            .when_some(focus, |table, focus| table.track_focus(&focus))
+            .when_some(key.filter(|_| selectable), |table, key| {
+                table.on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                    let current = keyboard_rows.iter().position(|row| {
+                        keyboard_row_key.as_ref().and_then(|field| row.get(field))
+                            == Some(&keyboard_selected)
+                    });
+                    let index = match event.keystroke.key.as_str() {
+                        "up" => current.unwrap_or(0).saturating_sub(1),
+                        "down" => current
+                            .map_or(0, |index| index + 1)
+                            .min(keyboard_rows.len().saturating_sub(1)),
+                        "home" => 0,
+                        "end" => keyboard_rows.len().saturating_sub(1),
+                        _ => return,
+                    };
+                    if let Some(value) = keyboard_rows
+                        .get(index)
+                        .and_then(|row| keyboard_row_key.as_ref().and_then(|field| row.get(field)))
+                    {
+                        this.set_native_plugin_ui_control_value(key, value.clone(), cx);
+                        keyboard_list.scroll_to_reveal_item(index);
+                        cx.stop_propagation();
+                    }
+                }))
+            })
             .w_full()
             .flex()
             .flex_col()
@@ -1868,13 +2179,43 @@ impl WorkspaceApp {
                         spec,
                         move |index, _window, _cx| {
                             let row = rows.get(index).cloned().unwrap_or(serde_json::Value::Null);
-                            native_plugin_table_row_element(
+                            let identity = row_key
+                                .as_ref()
+                                .and_then(|key| row.get(key))
+                                .cloned()
+                                .unwrap_or_default();
+                            let element = native_plugin_table_row_element(
                                 row,
                                 columns.clone(),
                                 tokens,
                                 colors,
                                 metrics,
-                            )
+                                identity == selected && !identity.is_null(),
+                            );
+                            if let Some(key) = key.filter(|_| selectable) {
+                                let owner = owner.clone();
+                                let focus = row_focus.clone();
+                                div()
+                                    .id(("plugin-table-row", index))
+                                    .cursor_pointer()
+                                    .child(element)
+                                    .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                                        if let Some(focus) = &focus {
+                                            window.focus(focus, cx);
+                                        }
+                                        let _ = owner.update(cx, |this, cx| {
+                                            this.set_native_plugin_ui_control_value(
+                                                key,
+                                                identity.clone(),
+                                                cx,
+                                            )
+                                        });
+                                        cx.stop_propagation();
+                                    })
+                                    .into_any_element()
+                            } else {
+                                element
+                            }
                         },
                     )),
             )
@@ -1884,12 +2225,12 @@ impl WorkspaceApp {
     fn render_native_plugin_list_control(
         &self,
         control: &plugin_host::NativePluginDeclarativeUiControl,
+        state: ListState,
+        rows: Arc<Vec<serde_json::Value>>,
     ) -> AnyElement {
-        let rows = Arc::new(control.rows.clone().unwrap_or_default());
         let row_count = rows.len();
         let row_height = self.tokens.metrics.ui_button_sm_height + self.tokens.spacing.one;
         let spec = TauriVirtualListSpec::new(px(row_height), NATIVE_PLUGIN_UI_LIST_OVERSCAN);
-        let state = tauri_virtual_list_state(row_count, ListAlignment::Top, spec);
         let height = native_plugin_virtual_list_height(row_count, row_height);
         let tokens = self.tokens;
         div()
@@ -2211,8 +2552,9 @@ fn native_plugin_table_row_element(
     tokens: ThemeTokens,
     colors: oxideterm_gpui_ui::TauriTableColors,
     metrics: oxideterm_gpui_ui::TauriTableMetrics,
+    selected: bool,
 ) -> AnyElement {
-    let mut row = oxideterm_gpui_ui::tauri_table_row(colors, metrics, false);
+    let mut row = oxideterm_gpui_ui::tauri_table_row(colors, metrics, selected);
     if columns.is_empty() {
         return row
             .child(
@@ -2308,6 +2650,54 @@ fn native_plugin_password_event_value(
 #[cfg(test)]
 mod tests {
     use super::native_plugin_password_event_value;
+    use super::*;
+
+    #[gpui::test]
+    fn data_refresh_keeps_visible_row_and_selection_identity(cx: &mut gpui::TestAppContext) {
+        let rows = Arc::new(vec![
+            serde_json::json!({"id":"a"}),
+            serde_json::json!({"id":"b"}),
+            serde_json::json!({"id":"c"}),
+        ]);
+        let mut data = NativePluginDataState {
+            list: ListState::new(3, ListAlignment::Top, px(100.0)),
+            rows,
+            focus: cx.update(|cx| cx.focus_handle()),
+        };
+        data.list.scroll_to(gpui::ListOffset {
+            item_ix: 1,
+            offset_in_item: px(7.0),
+        });
+        data.update_rows(
+            Arc::new(vec![
+                serde_json::json!({"id":"new"}),
+                serde_json::json!({"id":"a"}),
+                serde_json::json!({"id":"b", "text":"updated"}),
+                serde_json::json!({"id":"c"}),
+            ]),
+            Some("id"),
+        );
+        let anchor = data.list.logical_scroll_top();
+        assert_eq!(
+            data.rows[anchor.item_ix],
+            serde_json::json!({"id":"b","text":"updated"})
+        );
+        assert_eq!(anchor.offset_in_item, px(7.0));
+        data.update_rows(Arc::new(vec![serde_json::json!({"id":"c"})]), Some("id"));
+        assert_eq!(data.list.logical_scroll_top().item_ix, 0);
+        assert_eq!(data.list.item_count(), 1);
+
+        let control = serde_json::from_value(serde_json::json!({"kind":"table","id":"messages","selectable":true,"rowKey":"id","value":"a"})).unwrap();
+        let context =
+            native_plugin_ui_control_context("plugin.test", "tab", "messages", "root", &control);
+        let mut ui = NativePluginUiState::default();
+        let key = ui.sync_control(context.clone(), &control, 1);
+        ui.set_value(key, serde_json::json!("b"));
+        ui.sync_control(context, &control, 2);
+        assert_eq!(ui.value(key), Some(serde_json::json!("b")));
+        ui.remove_surface("plugin.test", "tab", "messages");
+        assert_eq!(ui.value(key), None);
+    }
 
     #[test]
     fn plugin_schema_localizes_owned_labels_without_changing_command_identity() {
@@ -2327,5 +2717,60 @@ mod tests {
         assert_eq!(payload["present"], true);
         assert_eq!(payload["redacted"], true);
         assert!(!payload.to_string().contains(representative_secret));
+    }
+
+    #[test]
+    fn connection_form_drafts_keep_secrets_out_of_saved_config_and_isolate_profiles() {
+        let mut state = NativePluginUiState::default();
+        for (surface, kind, id, value) in [
+            ("first", "text", "host", "device.local"),
+            ("first", "password", "token", "private-token"),
+            ("second", "text", "host", "other.local"),
+        ] {
+            let control =
+                serde_json::from_value(serde_json::json!({"kind":kind,"id":id,"value":"initial"}))
+                    .unwrap();
+            let context = native_plugin_ui_control_context(
+                "provider",
+                "connectionForm",
+                surface,
+                "root",
+                &control,
+            );
+            let key = state.sync_control(context.clone(), &control, 1);
+            *state.text_mut(key).unwrap() = value.to_string();
+            state.sync_control(context, &control, 2);
+        }
+        for (kind, id) in [("checkbox", "enabled"), ("textarea", "body")] {
+            let control = serde_json::from_value(serde_json::json!({"kind":kind,"id":id})).unwrap();
+            let context = native_plugin_ui_control_context(
+                "provider",
+                "connectionForm",
+                "first",
+                "root",
+                &control,
+            );
+            state.sync_control(context, &control, 2);
+        }
+        let (values, secrets) = state.connection_values("provider", "first");
+        assert_eq!(
+            values,
+            [
+                ("root/host".into(), serde_json::json!("device.local")),
+                ("root/enabled".into(), serde_json::json!(false)),
+                ("root/body".into(), serde_json::json!(""))
+            ]
+            .into()
+        );
+        assert_eq!(secrets["root/token"].as_str(), "private-token");
+        state.remove_surface("provider", "connectionForm", "first");
+        assert_eq!(
+            state.connection_values("provider", "first"),
+            (Default::default(), Default::default())
+        );
+        assert_eq!(
+            state.connection_values("provider", "second").0,
+            [("root/host".into(), serde_json::json!("other.local"))].into()
+        );
     }
 }

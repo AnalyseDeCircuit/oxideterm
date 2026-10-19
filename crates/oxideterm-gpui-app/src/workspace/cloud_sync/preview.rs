@@ -448,6 +448,7 @@ impl CloudSyncPageRenderer {
             use oxideterm_connections::CredentialOwner;
             let fallback = match &owner {
                 CredentialOwner::Totp(id)
+                | CredentialOwner::PluginConnection(id)
                 | CredentialOwner::Connection(id)
                 | CredentialOwner::StandaloneSftp(id)
                 | CredentialOwner::Mosh(id)
@@ -458,6 +459,11 @@ impl CloudSyncPageRenderer {
             };
             let name = if let CloudSyncPendingPreview::Structured(preview) = preview {
                 match &owner {
+                    CredentialOwner::PluginConnection(id) => preview
+                        .connections_snapshot
+                        .as_ref()
+                        .and_then(|s| s.plugin_profiles.iter().find(|p| &p.id == id))
+                        .map(|p| p.name.clone()),
                     CredentialOwner::Totp(id) => preview
                         .connections_snapshot
                         .as_ref()

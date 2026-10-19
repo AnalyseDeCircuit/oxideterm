@@ -97,6 +97,16 @@ impl WorkspaceApp {
         connection_count
             + self
                 .connection_store
+                .plugin_profiles()
+                .iter()
+                .filter(|profile| {
+                    profile.group.as_deref().is_some_and(|candidate| {
+                        candidate == group || candidate.starts_with(&format!("{group}/"))
+                    })
+                })
+                .count()
+            + self
+                .connection_store
                 .ftp_profiles()
                 .iter()
                 .filter(|profile| {
@@ -1325,6 +1335,18 @@ impl WorkspaceApp {
         let mut deleted = 0;
         for target in targets {
             match target {
+                SessionManagerSelectionTarget::Plugin(id) => {
+                    match self.connection_store.delete_plugin_profile(&id) {
+                        Ok(true) => deleted += 1,
+                        Ok(false) => {}
+                        Err(_) => {
+                            let status = self.i18n.t("plugin.connections.failed");
+                            self.session_manager
+                                .update(cx, |state, cx| state.set_status(Some(status), cx));
+                            return;
+                        }
+                    }
+                }
                 SessionManagerSelectionTarget::Connection(id) => {
                     if self.connection_store.delete(&id).unwrap_or(false) {
                         // Keep batch delete aligned with the single-delete command path.
@@ -1535,12 +1557,14 @@ impl WorkspaceApp {
         let mut mosh_profile_ids = Vec::new();
         let mut standalone_sftp_profile_ids = Vec::new();
         let mut remote_desktop_ids = Vec::new();
+        let mut plugin_ids = Vec::new();
         for target in targets.iter().filter(|target| {
             // Drop evaluation never writes metadata; only assets whose group changes reach storage.
             self.session_target_group(target)
                 .is_some_and(|current_group| current_group != group)
         }) {
             match target {
+                SessionManagerSelectionTarget::Plugin(id) => plugin_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::LocalTerminal(id) => {
@@ -1558,6 +1582,7 @@ impl WorkspaceApp {
             }
         }
         let has_group_changes = !connection_ids.is_empty()
+            || !plugin_ids.is_empty()
             || !ftp_profile_ids.is_empty()
             || !serial_profile_ids.is_empty()
             || !local_terminal_profile_ids.is_empty()
@@ -1584,6 +1609,7 @@ impl WorkspaceApp {
             &standalone_sftp_profile_ids,
             &remote_desktop_ids,
             &ftp_profile_ids,
+            &plugin_ids,
             group,
         ) {
             Ok(count) => {
@@ -1626,6 +1652,12 @@ impl WorkspaceApp {
     ) -> Option<Option<&'a str>> {
         // Returning an outer Option distinguishes missing assets from the ungrouped root.
         match target {
+            SessionManagerSelectionTarget::Plugin(id) => self
+                .connection_store
+                .plugin_profiles()
+                .iter()
+                .find(|p| &p.id == id)
+                .map(|p| p.group.as_deref()),
             SessionManagerSelectionTarget::Ftp(id) => self
                 .connection_store
                 .get_ftp_profile(id)

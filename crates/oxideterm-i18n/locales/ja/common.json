@@ -257,6 +257,21 @@
     "shortcut_count": "件のショートカット"
   },
   "plugin": {
+    "connections": {
+      "name": "名前",
+      "group": "グループ",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "save_connect": "保存して接続",
+      "failed": "操作に失敗しました。接続設定とプラグインの権限を確認してください。",
+      "disconnect": "切断",
+      "connecting": "接続中…",
+      "connected": "接続済み",
+      "disconnected": "切断済み",
+      "unavailable": "接続用プラグインが利用できません。有効にするかインストールしてください。",
+      "password_unchanged": "空欄にすると保存済みの値を維持します",
+      "clear_credentials": "保存済みの認証情報を削除"
+    },
     "install_queued": "待機中 · {{position}} 番目",
     "installing_named": "{{name}} をインストール中",
     "install_queue_count": "{{count}} 件が待機中",
@@ -861,6 +876,7 @@
         "redacted": "非表示"
       },
       "diff_fields": {
+        "plugin_configuration": "接続設定",
         "name": "名前",
         "group": "グループ",
         "host": "ホスト",

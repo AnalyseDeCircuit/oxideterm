@@ -95,6 +95,45 @@ pub(crate) fn validate_native_plugin_manifest(
         }
     }
     let runtime_plan = native_runtime_plan_for_manifest(manifest)?;
+    if let Some(connections) = manifest
+        .contributes
+        .as_ref()
+        .and_then(|c| c.connections.as_ref())
+    {
+        if connections.is_empty()
+            || !matches!(runtime_plan, NativePluginRuntimePlan::Process { .. })
+        {
+            return Err(
+                "Connection providers require a process runtime and at least one connection type"
+                    .into(),
+            );
+        }
+        if manifest
+            .engines
+            .as_ref()
+            .and_then(|e| e.oxideterm.as_deref())
+            .is_none()
+        {
+            return Err("Connection providers must declare a host version range".into());
+        }
+        let capabilities =
+            normalize_native_plugin_capabilities(&manifest.permissions.capabilities)?;
+        if !capabilities.iter().any(|c| c == "ui.write") {
+            return Err("Connection providers require ui.write".into());
+        }
+        fn has_password(controls: &[NativePluginDeclarativeUiControl]) -> bool {
+            controls
+                .iter()
+                .any(|c| c.kind == "password" || has_password(&c.children))
+        }
+        if connections.iter().any(|c| {
+            has_password(&c.form.controls)
+                || c.form.sections.iter().any(|s| has_password(&s.controls))
+        }) && !capabilities.iter().any(|c| c == "credentials.raw.read")
+        {
+            return Err("Connection password fields require credentials.raw.read".into());
+        }
+    }
     if let Some(backgrounds) = manifest
         .contributes
         .as_ref()
@@ -312,6 +351,54 @@ fn validate_language_asset(path: &str, checksum: &str) -> Result<(), String> {
 pub(crate) fn validate_native_plugin_contributions(
     contributes: &NativePluginContributes,
 ) -> Result<(), String> {
+    if let Some(connections) = &contributes.connections {
+        let mut ids = HashSet::new();
+        for connection in connections {
+            validate_manifest_text_field("connections.id", &connection.id)?;
+            validate_manifest_text_field("connections.title", &connection.title)?;
+            validate_manifest_text_field("connections.icon", &connection.icon)?;
+            if !ids.insert(&connection.id) {
+                return Err("Duplicate plugin connection type".into());
+            }
+            validate_native_plugin_declarative_ui_schema(&connection.form)?;
+            fn fields(controls: &[NativePluginDeclarativeUiControl]) -> Result<(), String> {
+                for control in controls {
+                    if control.id.as_ref().is_some_and(|id| id.contains('/')) {
+                        return Err("Connection field IDs cannot contain slashes".into());
+                    }
+                    if !matches!(
+                        control.kind.as_str(),
+                        "text"
+                            | "password"
+                            | "number"
+                            | "checkbox"
+                            | "select"
+                            | "textarea"
+                            | "stack"
+                            | "row"
+                            | "columns"
+                            | "markdown"
+                    ) {
+                        return Err(
+                            "Connection forms accept fields and layout controls only".into()
+                        );
+                    }
+                    fields(&control.children)?;
+                }
+                Ok(())
+            }
+            fields(&connection.form.controls)?;
+            for section in &connection.form.sections {
+                if section.id == "__profile" || section.id.contains('/') {
+                    return Err("Invalid connection form section ID".into());
+                }
+                fields(&section.controls)?;
+            }
+            if let Some(entry) = &connection.terminal_entry {
+                validate_plugin_relative_path(entry)?;
+            }
+        }
+    }
     if let Some(tabs) = &contributes.tabs {
         for tab in tabs {
             validate_manifest_text_field("contributes.tabs.id", &tab.id)?;
@@ -784,7 +871,7 @@ pub(crate) fn runtime_declarative_ui_schema(
         .map_err(|error| format!("Runtime declarative UI schema is invalid: {error}"))
 }
 
-pub(crate) fn validate_native_plugin_declarative_ui_schema(
+pub fn validate_native_plugin_declarative_ui_schema(
     schema: &NativePluginDeclarativeUiSchema,
 ) -> Result<(), String> {
     let encoded_size = serde_json::to_vec(schema)
@@ -951,6 +1038,39 @@ pub(crate) fn validate_native_plugin_declarative_controls(
 fn validate_native_plugin_declarative_control_options(
     control: &NativePluginDeclarativeUiControl,
 ) -> Result<(), String> {
+    if (control.kind == "textarea" || control.selectable)
+        && control
+            .value
+            .as_ref()
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+    {
+        return Err("Textarea and selectable table values must be strings or null".to_string());
+    }
+    if control.selectable
+        && (control.kind != "table"
+            || control.id.as_deref().is_none_or(str::is_empty)
+            || control.row_key.is_none())
+    {
+        return Err("Selectable tables require id and rowKey".to_string());
+    }
+    if let Some(key) = &control.row_key {
+        if !matches!(control.kind.as_str(), "table" | "list") || key.is_empty() {
+            return Err("rowKey requires a table or list and a nonempty field name".to_string());
+        }
+        let mut keys = HashSet::new();
+        for row in control.rows.iter().flatten() {
+            let Some(id) = row
+                .get(key)
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+            else {
+                return Err("Every keyed row requires a nonempty string identity".to_string());
+            };
+            if !keys.insert(id) {
+                return Err("Duplicate table or list row identity".to_string());
+            }
+        }
+    }
     if control.kind == "textWorkbench" {
         let options = control
             .options
@@ -1066,6 +1186,7 @@ pub(crate) fn native_plugin_declarative_control_requires_id(kind: &str) -> bool 
     matches!(
         kind,
         "text"
+            | "textarea"
             | "textWorkbench"
             | "password"
             | "number"

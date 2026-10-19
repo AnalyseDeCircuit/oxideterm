@@ -515,6 +515,28 @@ fn connections_snapshot_changes(snapshot: &SavedConnectionsSyncSnapshot) -> Vec<
                 .as_ref()
                 .map(|connection| connection.name.clone()),
         })
+        .chain(
+            snapshot
+                .plugin_profiles
+                .iter()
+                .map(|profile| ConnectionsChange {
+                    action: "snapshotUpsert",
+                    target: profile.id.clone(),
+                    before: None,
+                    after: Some(profile.name.clone()),
+                }),
+        )
+        .chain(
+            snapshot
+                .plugin_tombstones
+                .iter()
+                .map(|profile| ConnectionsChange {
+                    action: "snapshotDelete",
+                    target: profile.id.clone(),
+                    before: None,
+                    after: None,
+                }),
+        )
         .collect()
 }
 

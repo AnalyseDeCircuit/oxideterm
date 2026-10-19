@@ -93,6 +93,32 @@ impl ConnectionStore {
             }
         }
         next.local_terminal_profiles = incoming.connections.local_terminal_profiles;
+        let mut plugin_ids = HashSet::new();
+        for profile in &mut incoming.connections.plugin_profiles {
+            profile.validate()?;
+            if !plugin_ids.insert(profile.id.clone()) {
+                bail!("Duplicate plugin connection identity");
+            }
+            profile.preserve_local_credentials(
+                self.data
+                    .plugin_profiles
+                    .iter()
+                    .find(|p| p.id == profile.id),
+            );
+        }
+        next.plugin_tombstones
+            .retain(|entry| !plugin_ids.contains(&entry.id));
+        for profile in &self.data.plugin_profiles {
+            if !plugin_ids.contains(&profile.id) {
+                next.plugin_tombstones
+                    .retain(|entry| entry.id != profile.id);
+                next.plugin_tombstones.push(DeletedConnectionTombstone {
+                    id: profile.id.clone(),
+                    deleted_at: now,
+                });
+            }
+        }
+        next.plugin_profiles = incoming.connections.plugin_profiles;
         for credential in &mut incoming.connections.totp_credentials {
             credential.validate()?;
             credential.secret_reference = self

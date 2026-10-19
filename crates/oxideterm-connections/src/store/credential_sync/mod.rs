@@ -16,6 +16,7 @@ pub const CLEARED_PROFILE_CREDENTIAL_KIND: &str = "cleared_profile_credential";
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(tag = "type", content = "id", rename_all = "snake_case")]
 pub enum CredentialOwner {
+    PluginConnection(String),
     Totp(String),
     Connection(String),
     StandaloneSftp(String),
@@ -29,6 +30,7 @@ pub enum CredentialOwner {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CredentialSlot {
+    PluginField(String),
     Primary,
     Hop(usize),
     UpstreamProxy,
@@ -47,6 +49,7 @@ pub struct CredentialTarget {
 
 #[derive(Clone, Debug, Default)]
 pub struct CredentialSyncSelection {
+    pub plugin_connection_ids: BTreeSet<String>,
     pub totp_ids: BTreeSet<String>,
     pub connection_ids: BTreeSet<String>,
     pub sftp_ids: BTreeSet<String>,
@@ -60,6 +63,7 @@ pub struct CredentialSyncSelection {
 impl CredentialSyncSelection {
     pub fn contains(&self, owner: &CredentialOwner) -> bool {
         match owner {
+            CredentialOwner::PluginConnection(id) => self.plugin_connection_ids.contains(id),
             CredentialOwner::Totp(id) => self.totp_ids.contains(id),
             CredentialOwner::Connection(id) => self.connection_ids.contains(id),
             CredentialOwner::StandaloneSftp(id) => self.sftp_ids.contains(id),
@@ -125,6 +129,12 @@ impl ConnectionStore {
     /// Metadata-only revision: never publish a password digest that could be guessed offline.
     pub fn profile_credentials_revision(&self) -> Result<String> {
         sha256_hex(&(
+            self.data
+                .plugin_profiles
+                .iter()
+                .map(|p| (&p.id, p.updated_at))
+                .collect::<Vec<_>>(),
+            &self.data.plugin_tombstones,
             self.data
                 .connections
                 .iter()

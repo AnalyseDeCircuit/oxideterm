@@ -257,6 +257,21 @@
     "shortcut_count": "raccourcis"
   },
   "plugin": {
+    "connections": {
+      "name": "Nom",
+      "group": "Groupe",
+      "cancel": "Annuler",
+      "save": "Enregistrer",
+      "save_connect": "Enregistrer et connecter",
+      "failed": "L’opération a échoué. Vérifiez les paramètres de connexion et les autorisations de l’extension.",
+      "disconnect": "Déconnecter",
+      "connecting": "Connexion en cours…",
+      "connected": "Connecté",
+      "disconnected": "Déconnecté",
+      "unavailable": "L’extension de connexion est indisponible. Activez-la ou installez-la pour vous connecter.",
+      "password_unchanged": "Laissez vide pour conserver la valeur enregistrée",
+      "clear_credentials": "Effacer les identifiants enregistrés"
+    },
     "install_queued": "En attente · position {{position}}",
     "installing_named": "Installation de {{name}}",
     "install_queue_count": "{{count}} en attente",
@@ -861,6 +876,7 @@
         "redacted": "masqué"
       },
       "diff_fields": {
+        "plugin_configuration": "Paramètres de connexion",
         "name": "Nom",
         "group": "Groupe",
         "host": "Hôte",

@@ -257,6 +257,21 @@
     "shortcut_count": "Tastaturkürzel"
   },
   "plugin": {
+    "connections": {
+      "name": "Name",
+      "group": "Gruppe",
+      "cancel": "Abbrechen",
+      "save": "Speichern",
+      "save_connect": "Speichern und verbinden",
+      "failed": "Der Vorgang ist fehlgeschlagen. Prüfen Sie die Verbindungseinstellungen und Plugin-Berechtigungen.",
+      "disconnect": "Trennen",
+      "connecting": "Verbindung wird hergestellt…",
+      "connected": "Verbunden",
+      "disconnected": "Getrennt",
+      "unavailable": "Das Verbindungs-Plugin ist nicht verfügbar. Aktivieren oder installieren Sie es, um eine Verbindung herzustellen.",
+      "password_unchanged": "Leer lassen, um den gespeicherten Wert beizubehalten",
+      "clear_credentials": "Gespeicherte Zugangsdaten löschen"
+    },
     "install_queued": "Wartet · Position {{position}}",
     "installing_named": "{{name}} wird installiert",
     "install_queue_count": "{{count}} warten",
@@ -861,6 +876,7 @@
         "redacted": "ausgeblendet"
       },
       "diff_fields": {
+        "plugin_configuration": "Verbindungseinstellungen",
         "name": "Name",
         "group": "Gruppe",
         "host": "Host",

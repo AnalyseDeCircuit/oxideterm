@@ -13,6 +13,7 @@ use zeroize::{Zeroize, Zeroizing};
 pub enum ResourceKind {
     Connection,
     LocalTerminal,
+    PluginConnection,
     Forward,
     QuickCommand,
     QuickCommandCategory,

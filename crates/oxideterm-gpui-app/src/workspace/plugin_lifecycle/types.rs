@@ -16,6 +16,28 @@ use zeroize::Zeroizing;
 use crate::workspace::plugin_runtime;
 
 pub(in crate::workspace) enum NativePluginRuntimeDelivery {
+    ConnectionClose {
+        plugin_id: String,
+        generation: u64,
+        result:
+            Result<plugin_runtime::NativePluginRuntimeCommandDispatch, plugin_runtime::PluginError>,
+    },
+    ConnectionOpen {
+        plugin_id: String,
+        instance_id: String,
+        generation: u64,
+        result:
+            Result<plugin_runtime::NativePluginRuntimeCommandDispatch, plugin_runtime::PluginError>,
+    },
+    PreparePush {
+        resolver: tokio::sync::oneshot::Sender<plugin_runtime::NativeHostApiResolver>,
+    },
+    Push {
+        plugin_id: String,
+        generation: u64,
+        result: Result<plugin_runtime::NativePluginRuntimePush, plugin_runtime::PluginError>,
+        consumed: tokio::sync::oneshot::Sender<()>,
+    },
     Activation {
         plugin_id: String,
         result: Result<plugin_runtime::NativePluginRuntimeActivation, plugin_runtime::PluginError>,

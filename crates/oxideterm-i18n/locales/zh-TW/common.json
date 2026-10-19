@@ -257,6 +257,21 @@
     "shortcut_count": "個快捷鍵"
   },
   "plugin": {
+    "connections": {
+      "name": "名稱",
+      "group": "群組",
+      "cancel": "取消",
+      "save": "儲存",
+      "save_connect": "儲存並連線",
+      "failed": "操作失敗，請檢查連線設定與外掛權限。",
+      "disconnect": "中斷連線",
+      "connecting": "正在連線…",
+      "connected": "已連線",
+      "disconnected": "已中斷",
+      "unavailable": "連線外掛無法使用，啟用或安裝外掛後即可連線。",
+      "password_unchanged": "留空以保留已儲存的內容",
+      "clear_credentials": "清除已儲存的憑證"
+    },
     "install_queued": "等待中 · 第 {{position}} 項",
     "installing_named": "正在安裝 {{name}}",
     "install_queue_count": "{{count}} 項等待安裝",
@@ -861,6 +876,7 @@
         "redacted": "已隱藏"
       },
       "diff_fields": {
+        "plugin_configuration": "連線設定",
         "name": "名稱",
         "group": "分組",
         "host": "主機",

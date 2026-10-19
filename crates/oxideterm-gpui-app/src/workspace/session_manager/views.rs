@@ -23,6 +23,7 @@ impl Render for SessionManagerDrag {
 
 #[derive(Clone)]
 pub(super) enum SessionManagerDisplayItem {
+    Plugin(oxideterm_connections::PluginConnectionProfile),
     Connection(ConnectionInfo),
     SshConfig(SessionManagerSshConfigDisplayItem),
     Serial(SerialProfile),
@@ -58,6 +59,7 @@ impl From<&SshConfigHost> for SessionManagerSshConfigDisplayItem {
 
 #[derive(Clone)]
 pub(super) enum SessionManagerOpenTarget {
+    Plugin(String),
     Connection(String),
     SshConfig(String),
     Serial(String),
@@ -124,6 +126,7 @@ impl SessionManagerDisplayItem {
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.id,
             Self::LocalTerminal(profile) => &profile.id,
+            Self::Plugin(profile) => &profile.id,
             Self::Telnet(profile) => &profile.id,
             Self::Ftp(profile) => &profile.id,
             Self::Mosh(profile) => &profile.id,
@@ -135,6 +138,9 @@ impl SessionManagerDisplayItem {
     pub(super) fn selection_target(&self) -> Option<SessionManagerSelectionTarget> {
         // Only SSH config discoveries are transient; every saved profile can use batch actions.
         match self {
+            Self::Plugin(profile) => {
+                Some(SessionManagerSelectionTarget::Plugin(profile.id.clone()))
+            }
             Self::Connection(connection) => Some(SessionManagerSelectionTarget::Connection(
                 connection.id.clone(),
             )),
@@ -162,6 +168,9 @@ impl SessionManagerDisplayItem {
     pub(super) fn row_action_target(&self) -> Option<SessionManagerRowActionTarget> {
         // SSH config discoveries are not persisted rows and therefore have no delete menu.
         match self {
+            Self::Plugin(profile) => {
+                Some(SessionManagerRowActionTarget::Plugin(profile.id.clone()))
+            }
             Self::Connection(connection) => Some(SessionManagerRowActionTarget::Connection(
                 connection.id.clone(),
             )),
@@ -188,6 +197,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn open_target(&self) -> SessionManagerOpenTarget {
         match self {
+            Self::Plugin(profile) => SessionManagerOpenTarget::Plugin(profile.id.clone()),
             Self::Connection(connection) => {
                 SessionManagerOpenTarget::Connection(connection.id.clone())
             }
@@ -210,6 +220,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn name(&self) -> &str {
         match self {
+            Self::Plugin(profile) => &profile.name,
             Self::Connection(connection) => &connection.name,
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.name,
@@ -224,6 +235,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn group(&self) -> Option<&str> {
         match self {
+            Self::Plugin(profile) => profile.group.as_deref(),
             Self::Connection(connection) => connection.group.as_deref(),
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.group.as_deref(),
@@ -238,6 +250,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn last_used(&self) -> Option<String> {
         match self {
+            Self::Plugin(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Connection(connection) => connection.last_used_at.clone(),
             Self::SshConfig(_) => None,
             Self::Serial(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
@@ -252,6 +265,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn host(&self) -> &str {
         match self {
+            Self::Plugin(profile) => &profile.plugin_id,
             Self::Connection(connection) => &connection.host,
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
             Self::Serial(profile) => &profile.port_path,
@@ -266,6 +280,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn port_sort_key(&self) -> u32 {
         match self {
+            Self::Plugin(_) => 0,
             Self::Connection(connection) => u32::from(connection.port),
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
             Self::Serial(profile) => profile.baud_rate,
@@ -280,6 +295,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn username(&self) -> &str {
         match self {
+            Self::Plugin(_) => "",
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
             Self::Serial(_) | Self::Telnet(_) => "",
@@ -293,6 +309,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn auth_sort_key(&self) -> String {
         match self {
+            Self::Plugin(profile) => profile.type_id.clone(),
             Self::Connection(connection) => auth_label(connection.auth_type).to_lowercase(),
             Self::SshConfig(_) => "ssh config".to_string(),
             Self::Serial(_) => "serial".to_string(),
@@ -307,6 +324,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn subtitle(&self) -> String {
         match self {
+            Self::Plugin(profile) => format!("{} · {}", profile.plugin_id, profile.type_id),
             Self::Connection(connection) => {
                 format!(
                     "{}@{}:{}",
@@ -349,6 +367,13 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn search_text(&self) -> String {
         match self {
+            Self::Plugin(profile) => format!(
+                "{}\n{}\n{}\n{}",
+                profile.name,
+                profile.plugin_id,
+                profile.type_id,
+                profile.group.as_deref().unwrap_or_default()
+            ),
             Self::Connection(connection) => connection.search_text(),
             Self::SshConfig(host) => format!(
                 "{}\n{}\n{}\n{}\nssh config",
@@ -413,6 +438,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn icon(&self) -> session_icons::SessionIcon {
         match self {
+            Self::Plugin(_) => LucideIcon::Puzzle.into(),
             Self::Connection(connection) => {
                 session_icons::session_icon_from_id(connection.icon.as_deref())
                     .unwrap_or(LucideIcon::Server.into())
@@ -443,6 +469,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn icon_color(&self) -> Option<&str> {
         match self {
+            Self::Plugin(_) => None,
             Self::Connection(connection) => connection.color.as_deref(),
             Self::Serial(profile) => profile.color.as_deref(),
             Self::LocalTerminal(profile) => profile.color.as_deref(),
@@ -457,6 +484,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn icon_background_color(&self) -> Option<&str> {
         match self {
+            Self::Plugin(_) => None,
             Self::Connection(connection) => connection.icon_background_color.as_deref(),
             Self::Serial(profile) => profile.icon_background_color.as_deref(),
             Self::LocalTerminal(profile) => profile.icon_background_color.as_deref(),
@@ -497,6 +525,13 @@ impl WorkspaceApp {
             .connection_infos()
             .into_iter()
             .map(SessionManagerDisplayItem::Connection)
+            .chain(
+                self.connection_store
+                    .plugin_profiles()
+                    .iter()
+                    .cloned()
+                    .map(SessionManagerDisplayItem::Plugin),
+            )
             .chain(
                 self.connection_store
                     .serial_profiles()
@@ -1786,6 +1821,7 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Connection(_)
             | SessionManagerDisplayItem::RemoteDesktop(_) => (0x0ea5e933, 0x7dd3fc),
             SessionManagerDisplayItem::SshConfig(_) => (0x8b5cf633, 0xc4b5fd),
+            SessionManagerDisplayItem::Plugin(_) => (0x8b5cf633, 0xc4b5fd),
             SessionManagerDisplayItem::Serial(_) => (0xf59e0b33, 0xfcd34d),
             SessionManagerDisplayItem::LocalTerminal(_) => (0xf59e0b33, 0xfcd34d),
             SessionManagerDisplayItem::Telnet(_) => (0x22c55e33, 0x86efac),
@@ -1828,6 +1864,59 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Div {
         match item {
+            SessionManagerDisplayItem::Plugin(profile) => {
+                let open = profile.id.clone();
+                let edit = profile.id.clone();
+                let menu = profile.id.clone();
+                div()
+                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(MANAGER_ROW_ACTION_GAP))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Play,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.accent),
+                        has_background,
+                        move |this, _, _, cx| {
+                            this.open_plugin_connection(&open, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _, window, cx| {
+                            this.edit_plugin_connection(&edit, window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::MoreVertical,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, event, _, cx| {
+                            this.open_session_manager_row_action_menu(
+                                SessionManagerRowActionTarget::Plugin(menu.clone()),
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
             SessionManagerDisplayItem::Connection(connection) => {
                 let open_id = connection.id.clone();
                 let edit_id = connection.id.clone();
@@ -2263,6 +2352,7 @@ impl WorkspaceApp {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
             SessionManagerRowActionTarget::Serial(_)
+            | SessionManagerRowActionTarget::Plugin(_)
             | SessionManagerRowActionTarget::LocalTerminal(_)
             | SessionManagerRowActionTarget::Telnet(_)
             | SessionManagerRowActionTarget::Ftp(_)
@@ -2542,7 +2632,32 @@ impl WorkspaceApp {
                 .child(dropdown_menu_separator(&self.tokens));
         }
 
+        if let SessionManagerRowActionTarget::Plugin(id) = &menu.target {
+            let id = id.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.actions.edit"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _, window, cx| {
+                        this.edit_plugin_connection(&id, window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
         let delete_action = match &menu.target {
+            SessionManagerRowActionTarget::Plugin(id) => {
+                Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
+            }
             SessionManagerRowActionTarget::Ftp(id) => {
                 Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
             }
@@ -2597,6 +2712,17 @@ impl WorkspaceApp {
                     has_background,
                     move |this, _event, _window, cx| {
                         match &delete_target {
+                            SessionManagerRowActionTarget::Plugin(_) => {
+                                this.session_manager.update(cx, |state, cx| {
+                                    state.delete_confirm =
+                                        Some(SessionManagerDeleteConfirm::Batch {
+                                            targets: vec![SessionManagerSelectionTarget::Plugin(
+                                                delete_id.clone(),
+                                            )],
+                                        });
+                                    cx.notify();
+                                });
+                            }
                             SessionManagerRowActionTarget::Ftp(_) => {
                                 this.request_delete_ftp_profile(&delete_id, cx)
                             }
@@ -2704,6 +2830,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match target {
+            SessionManagerOpenTarget::Plugin(id) => self.open_plugin_connection(&id, cx),
             SessionManagerOpenTarget::Ftp(id) => self.open_saved_ftp_profile(&id, window, cx),
             SessionManagerOpenTarget::Connection(connection_id) => {
                 self.open_saved_connection(&connection_id, window, cx)

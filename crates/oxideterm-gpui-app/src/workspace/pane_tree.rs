@@ -426,6 +426,15 @@ impl WorkspaceApp {
         pane_id: &PaneId,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
+        if let Some(terminal) = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .get(pane_id)
+            .map(|pane| pane.read(cx).shared_session())
+        {
+            self.close_plugin_connection_terminal(&terminal, cx);
+        }
         if self
             .ai_entity
             .read(cx)

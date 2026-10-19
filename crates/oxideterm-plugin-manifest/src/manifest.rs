@@ -91,6 +91,8 @@ pub enum NativePluginRuntimeKind {
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativePluginContributes {
+    #[serde(default)]
+    pub connections: Option<Vec<crate::NativePluginConnectionDef>>,
     /// Package-relative media imported into the user's background gallery on installation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backgrounds: Option<Vec<String>>,
@@ -359,6 +361,10 @@ pub struct NativePluginDeclarativeUiControl {
     pub options: Option<Vec<NativePluginDeclarativeUiOption>>,
     #[serde(default)]
     pub rows: Option<Vec<Value>>,
+    #[serde(default)]
+    pub row_key: Option<String>,
+    #[serde(default)]
+    pub selectable: bool,
     #[serde(default)]
     pub columns: Option<Vec<String>>,
     #[serde(default)]

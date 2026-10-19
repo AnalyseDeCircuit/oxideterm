@@ -22,8 +22,8 @@ use zip::ZipArchive;
 pub use oxideterm_plugin_manifest::{
     NativePluginActivityBarItemContribution, NativePluginActivityBarItemDef,
     NativePluginAiToolContribution, NativePluginAiToolDef, NativePluginApiCommandContribution,
-    NativePluginConfigEntry, NativePluginConnectionHookContribution, NativePluginContributes,
-    NativePluginDeclarativeUiColumn, NativePluginDeclarativeUiControl,
+    NativePluginConfigEntry, NativePluginConnectionDef, NativePluginConnectionHookContribution,
+    NativePluginContributes, NativePluginDeclarativeUiColumn, NativePluginDeclarativeUiControl,
     NativePluginDeclarativeUiOption, NativePluginDeclarativeUiSchema,
     NativePluginDeclarativeUiSection, NativePluginDiagnostic, NativePluginGlobalConfig,
     NativePluginHelperDef, NativePluginHostMonitorContribution, NativePluginHostMonitorDef,
@@ -99,7 +99,8 @@ pub use validation::{
     native_plugin_custom_event_key, native_plugin_declarative_control_is_actionable,
     native_plugin_runtime_subscription_event, native_plugin_state_for,
     native_plugin_state_for_manifest, native_runtime_kind_label, native_runtime_plan_for_manifest,
-    validate_native_plugin_id, validate_plugin_relative_path,
+    validate_native_plugin_declarative_ui_schema, validate_native_plugin_id,
+    validate_plugin_relative_path,
 };
 
 /// Maximum package size accepted by every managed plugin install path.

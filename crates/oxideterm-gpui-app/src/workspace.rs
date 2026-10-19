@@ -32,6 +32,7 @@ mod onboarding;
 mod overlay;
 mod pane_tree;
 mod path_completion;
+mod plugin_connections;
 mod plugin_entity;
 mod plugin_lifecycle;
 mod plugin_manager;

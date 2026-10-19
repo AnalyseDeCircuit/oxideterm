@@ -212,6 +212,272 @@ mod tests {
     }
 
     #[test]
+    fn plugin_sync_preserves_unknown_config_and_restores_only_local_credentials() {
+        let mut source = load_empty_store("plugin-sync-source");
+        let now = Utc::now();
+        source
+            .save_plugin_profile_credentials(
+                PluginConnectionProfile {
+                    id: "custom".into(),
+                    plugin_id: "uninstalled.provider".into(),
+                    type_id: "future-device".into(),
+                    name: "Custom device".into(),
+                    group: Some("Lab".into()),
+                    config: [(
+                        "future/settings".into(),
+                        serde_json::json!({"nested":[1,true,"keep"]}),
+                    )]
+                    .into(),
+                    credential_refs: Default::default(),
+                    created_at: now,
+                    updated_at: now,
+                    last_used_at: None,
+                },
+                [(
+                    "auth/token".into(),
+                    SecretString::from("plugin-sync-secret\nsecond-line"),
+                )]
+                .into(),
+            )
+            .unwrap();
+        let snapshot = source.export_saved_connections_snapshot().unwrap();
+        assert_eq!(
+            snapshot.plugin_profiles[0].credential_refs,
+            [("auth/token".into(), None)].into()
+        );
+        source.mark_plugin_profile_used("custom").unwrap();
+        assert_eq!(
+            source.export_saved_connections_snapshot().unwrap().revision,
+            snapshot.revision
+        );
+        let selection = CredentialSyncSelection {
+            plugin_connection_ids: ["custom".into()].into(),
+            ..Default::default()
+        };
+        let secrets = source.export_sync_credentials(&selection, None).unwrap();
+        let mut target = load_empty_store("plugin-sync-target");
+        let mut incoming = snapshot.clone();
+        incoming.plugin_profiles[0]
+            .credential_refs
+            .insert("auth/token".into(), Some("foreign-device-reference".into()));
+        target
+            .apply_saved_connections_snapshot(incoming, SavedConnectionsConflictStrategy::Merge)
+            .unwrap();
+        assert_eq!(
+            target.plugin_profiles()[0].credential_refs["auth/token"],
+            None
+        );
+        let mut staged = target
+            .prepare_profile_credentials(&secrets, &selection, &mut None)
+            .unwrap();
+        target.save().unwrap();
+        target.commit_profile_credentials(&mut staged).unwrap();
+        let reference = target.plugin_profiles()[0].credential_refs["auth/token"]
+            .clone()
+            .unwrap();
+        assert_ne!(
+            Some(&reference),
+            source.plugin_profiles()[0].credential_refs["auth/token"].as_ref()
+        );
+        assert_eq!(
+            target.plugin_connection_credentials("custom").unwrap()["auth/token"].expose_secret(),
+            "plugin-sync-secret\nsecond-line"
+        );
+        target
+            .apply_saved_connections_snapshot(
+                snapshot.clone(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+        let saved = ConnectionStore::load(target.path()).unwrap();
+        assert_eq!(
+            saved.plugin_profiles()[0].config["future/settings"],
+            serde_json::json!({"nested":[1,true,"keep"]})
+        );
+        assert_eq!(
+            saved.plugin_profiles()[0].credential_refs["auth/token"].as_ref(),
+            Some(&reference)
+        );
+
+        // An obsolete credential slot is preserved without being read by an older provider.
+        target.data.plugin_profiles[0].credential_refs.insert(
+            "future/token".into(),
+            Some("missing-obsolete-reference".into()),
+        );
+        let known = target
+            .plugin_connection_credentials_for_fields("custom", |field| field == "auth/token")
+            .unwrap();
+        assert_eq!(
+            known.keys().map(String::as_str).collect::<Vec<_>>(),
+            vec!["auth/token"]
+        );
+        assert_eq!(
+            known["auth/token"].expose_secret(),
+            "plugin-sync-secret\nsecond-line"
+        );
+
+        let mut cleared = source.plugin_profiles()[0].clone();
+        cleared.credential_refs.insert("auth/token".into(), None);
+        source.save_plugin_profile(cleared).unwrap();
+        let clears = source.export_sync_credentials(&selection, None).unwrap();
+        let mut staged = target
+            .prepare_profile_credentials(&clears, &selection, &mut None)
+            .unwrap();
+        assert_eq!(staged.summary.cleared, 1);
+        target.save().unwrap();
+        target.commit_profile_credentials(&mut staged).unwrap();
+        assert!(target.keychain.get_optional(&reference).unwrap().is_none());
+        source.delete_plugin_profile("custom").unwrap();
+        target
+            .apply_saved_connections_snapshot(
+                source.export_saved_connections_snapshot().unwrap(),
+                SavedConnectionsConflictStrategy::Merge,
+            )
+            .unwrap();
+        target
+            .apply_saved_connections_snapshot(snapshot, SavedConnectionsConflictStrategy::Merge)
+            .unwrap();
+        assert!(target.plugin_profiles().is_empty());
+        assert_eq!(
+            target
+                .export_saved_connections_snapshot()
+                .unwrap()
+                .plugin_tombstones[0]
+                .id,
+            "custom"
+        );
+    }
+
+    #[test]
+    fn plugin_connections_persist_edit_group_and_delete_with_isolated_credentials() {
+        let mut store = load_empty_store("plugin-connections");
+        let now = Utc::now();
+        let profile = PluginConnectionProfile {
+            id: "plugin-one".into(),
+            plugin_id: "example.provider".into(),
+            type_id: "device".into(),
+            name: "Device one".into(),
+            group: Some("Lab".into()),
+            config: [
+                ("root/host".into(), serde_json::json!("localhost")),
+                (
+                    "root/password".into(),
+                    serde_json::json!("must-not-persist"),
+                ),
+            ]
+            .into(),
+            credential_refs: Default::default(),
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        };
+        store
+            .save_plugin_profile_credentials(
+                profile,
+                [(
+                    "root/password".into(),
+                    SecretString::from("private-token\nsecond-line"),
+                )]
+                .into(),
+            )
+            .unwrap();
+        let first_ref = store.plugin_profiles()[0].credential_refs["root/password"]
+            .clone()
+            .unwrap();
+        assert_eq!(
+            store.plugin_connection_credentials("plugin-one").unwrap()["root/password"]
+                .expose_secret(),
+            "private-token\nsecond-line"
+        );
+        let metadata = serde_json::to_value(&store.data).unwrap();
+        assert_eq!(
+            metadata["plugin_profiles"][0]["config"],
+            serde_json::json!({"root/host":"localhost"})
+        );
+        assert!(!metadata.to_string().contains("private-token"));
+        let mut second = store.plugin_profiles()[0].clone();
+        second.id = "plugin-two".into();
+        second.name = "Device two".into();
+        second.credential_refs.clear();
+        store
+            .save_plugin_profile_credentials(
+                second,
+                [("root/password".into(), SecretString::from("second-token"))].into(),
+            )
+            .unwrap();
+        let mut first = store.plugin_profiles()[0].clone();
+        first.name = "Renamed device".into();
+        first
+            .config
+            .insert("root/host".into(), serde_json::json!("device.local"));
+        store
+            .save_plugin_profile_credentials(
+                first,
+                [(
+                    "root/password".into(),
+                    SecretString::from("replacement-token"),
+                )]
+                .into(),
+            )
+            .unwrap();
+        assert!(store.keychain.get_optional(&first_ref).unwrap().is_none());
+        store
+            .move_session_assets_to_group(
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &[],
+                &["plugin-one".into()],
+                Some("Lab/Devices"),
+            )
+            .unwrap();
+        let reloaded = ConnectionStore::load(&store.path).unwrap();
+        let saved = reloaded
+            .plugin_profiles()
+            .iter()
+            .find(|p| p.id == "plugin-one")
+            .unwrap();
+        assert_eq!(
+            (
+                &saved.name,
+                saved.group.as_deref(),
+                &saved.config["root/host"]
+            ),
+            (
+                &"Renamed device".to_string(),
+                Some("Lab/Devices"),
+                &serde_json::json!("device.local")
+            )
+        );
+        let replacement_ref = saved.credential_refs["root/password"].clone().unwrap();
+        store.delete_plugin_profile("plugin-one").unwrap();
+        assert_eq!(
+            store
+                .plugin_profiles()
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["plugin-two"]
+        );
+        assert!(
+            store
+                .keychain
+                .get_optional(&replacement_ref)
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            store.plugin_connection_credentials("plugin-two").unwrap()["root/password"]
+                .expose_secret(),
+            "second-token"
+        );
+    }
+
+    #[test]
     fn standalone_sftp_persists_references_and_loads_redacted_runtime_secrets() {
         const PRIMARY_SECRET: &str = "standalone-primary-secret";
         const HOP_SECRET: &str = "standalone-hop-secret";
@@ -3499,6 +3765,7 @@ mod tests {
                     &[],
                     std::slice::from_ref(&cleared.id),
                     &[],
+                    &[],
                     Some("Moved"),
                 )
                 .unwrap(),
@@ -3573,6 +3840,7 @@ mod tests {
                     std::slice::from_ref(&mosh.id),
                     std::slice::from_ref(&standalone_sftp.id),
                     std::slice::from_ref(&remote.id),
+                    &[],
                     &[],
                     Some("Moved"),
                 )

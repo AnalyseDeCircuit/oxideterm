@@ -26,6 +26,7 @@ include!("store/helpers.rs");
 include!("store/sync.rs");
 include!("store/ftp.rs");
 include!("store/local_terminal.rs");
+include!("store/plugin.rs");
 include!("store/resolved_sync.rs");
 include!("store/managed_sync.rs");
 include!("store/privilege_sync.rs");

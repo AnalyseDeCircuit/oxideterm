@@ -434,6 +434,10 @@ impl WorkspaceApp {
                     return;
                 }
                 if this.active_sftp_editor_owns_key(event.keystroke.key.as_str(), cx)
+                    || this
+                        .plugin_ui_state(cx)
+                        .focused_text_area_context(window, cx)
+                        .is_some()
                     || this.quick_command_text_editor_focused(window, cx)
                     || this
                         .tab_host
@@ -1155,6 +1159,10 @@ impl WorkspaceApp {
             .when(self.connection_form_state(cx).form.is_some(), |root| {
                 root.child(self.render_new_connection_modal(window, cx))
             })
+            .when_some(
+                self.render_plugin_connection_form(window, cx),
+                |root, form| root.child(form),
+            )
             .when_some(self.render_ssh_algorithm_context_menu(cx), |root, menu| {
                 root.child(menu)
             })

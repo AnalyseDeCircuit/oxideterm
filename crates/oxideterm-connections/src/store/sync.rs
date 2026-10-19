@@ -193,9 +193,36 @@ impl ConnectionStore {
             .records
             .iter()
             .map(|record| record.updated_at.clone())
-            .chain(snapshot.local_terminal_profiles.iter().map(|p| p.updated_at.to_rfc3339()))
-            .chain(snapshot.local_terminal_tombstones.iter().map(|p| p.deleted_at.to_rfc3339()))
-            .chain(snapshot.totp_credentials.iter().map(|p| p.updated_at.to_rfc3339()))
+            .chain(
+                snapshot
+                    .local_terminal_profiles
+                    .iter()
+                    .map(|p| p.updated_at.to_rfc3339()),
+            )
+            .chain(
+                snapshot
+                    .local_terminal_tombstones
+                    .iter()
+                    .map(|p| p.deleted_at.to_rfc3339()),
+            )
+            .chain(
+                snapshot
+                    .plugin_profiles
+                    .iter()
+                    .map(|p| p.updated_at.to_rfc3339()),
+            )
+            .chain(
+                snapshot
+                    .plugin_tombstones
+                    .iter()
+                    .map(|p| p.deleted_at.to_rfc3339()),
+            )
+            .chain(
+                snapshot
+                    .totp_credentials
+                    .iter()
+                    .map(|p| p.updated_at.to_rfc3339()),
+            )
             .max()
             .unwrap_or_else(|| snapshot.exported_at.clone());
 
@@ -384,8 +411,35 @@ impl ConnectionStore {
                 self.add_connection(next_connection);
                 result.applied += 1;
             }
-            self.apply_local_terminal_profiles(snapshot.local_terminal_profiles, snapshot.local_terminal_tombstones, strategy, &mut result)?;
-            result.applied += self.merge_totp_credentials(snapshot.totp_credentials, strategy == SavedConnectionsConflictStrategy::Replace)?;
+            self.apply_local_terminal_profiles(
+                snapshot.local_terminal_profiles,
+                snapshot.local_terminal_tombstones,
+                strategy,
+                &mut result,
+            )?;
+            let old_plugin_refs = self
+                .data
+                .plugin_profiles
+                .iter()
+                .flat_map(|p| p.credential_refs.values().flatten().cloned())
+                .collect::<HashSet<_>>();
+            self.apply_plugin_profiles(
+                snapshot.plugin_profiles,
+                snapshot.plugin_tombstones,
+                strategy,
+                &mut result,
+            )?;
+            let next_plugin_refs = self
+                .data
+                .plugin_profiles
+                .iter()
+                .flat_map(|p| p.credential_refs.values().flatten().cloned())
+                .collect::<HashSet<_>>();
+            keychain_ids_to_delete.extend(old_plugin_refs.difference(&next_plugin_refs).cloned());
+            result.applied += self.merge_totp_credentials(
+                snapshot.totp_credentials,
+                strategy == SavedConnectionsConflictStrategy::Replace,
+            )?;
             self.normalize();
             if result.applied > 0 {
                 self.save()?;
@@ -778,13 +832,37 @@ fn build_saved_connections_sync_snapshot(
 
     let mut local_terminal_profiles = data.local_terminal_profiles.clone();
     local_terminal_profiles.sort_by(|a, b| a.id.cmp(&b.id));
-    for profile in &mut local_terminal_profiles { profile.last_used_at = None; }
-    let mut local_terminal_tombstones = active_connection_tombstones(&data.local_terminal_tombstones);
+    for profile in &mut local_terminal_profiles {
+        profile.last_used_at = None;
+    }
+    let mut local_terminal_tombstones =
+        active_connection_tombstones(&data.local_terminal_tombstones);
     local_terminal_tombstones.sort_by(|a, b| a.id.cmp(&b.id));
-    let mut totp_credentials = data.totp_credentials.iter().map(crate::totp::TotpCredential::portable).collect::<Vec<_>>();
+    let mut totp_credentials = data
+        .totp_credentials
+        .iter()
+        .map(crate::totp::TotpCredential::portable)
+        .collect::<Vec<_>>();
     totp_credentials.sort_by(|a, b| a.id.cmp(&b.id));
-    let revision = sha256_hex(&(&records, &local_terminal_profiles, &local_terminal_tombstones, &totp_credentials))?;
+    let mut plugin_profiles = data
+        .plugin_profiles
+        .iter()
+        .map(PluginConnectionProfile::portable)
+        .collect::<Vec<_>>();
+    plugin_profiles.sort_by(|a, b| a.id.cmp(&b.id));
+    let mut plugin_tombstones = active_connection_tombstones(&data.plugin_tombstones);
+    plugin_tombstones.sort_by(|a, b| a.id.cmp(&b.id));
+    let revision = sha256_hex(&(
+        &records,
+        &local_terminal_profiles,
+        &local_terminal_tombstones,
+        &totp_credentials,
+        &plugin_profiles,
+        &plugin_tombstones,
+    ))?;
     Ok(SavedConnectionsSyncSnapshot {
+        plugin_profiles,
+        plugin_tombstones,
         totp_credentials,
         revision,
         exported_at: Utc::now().to_rfc3339(),

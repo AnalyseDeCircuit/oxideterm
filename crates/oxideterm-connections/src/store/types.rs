@@ -1915,6 +1915,10 @@ impl fmt::Debug for SavedConnectionRuntimeSecrets {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ConnectionStoreData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_tombstones: Vec<DeletedConnectionTombstone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_profiles: Vec<PluginConnectionProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub totp_credentials: Vec<crate::totp::TotpCredential>,
     #[serde(default = "default_config_version")]
     pub version: u32,
@@ -1967,6 +1971,8 @@ pub struct ConnectionStoreData {
 impl Default for ConnectionStoreData {
     fn default() -> Self {
         Self {
+            plugin_tombstones: Vec::new(),
+            plugin_profiles: Vec::new(),
             totp_credentials: Vec::new(),
             version: CONFIG_VERSION,
             connections: Vec::new(),
@@ -2103,6 +2109,10 @@ pub struct SavedConnectionSyncRecord {
 #[serde(rename_all = "camelCase")]
 pub struct SavedConnectionsSyncSnapshot {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_profiles: Vec<PluginConnectionProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_tombstones: Vec<DeletedConnectionTombstone>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub totp_credentials: Vec<crate::totp::TotpCredential>,
     pub revision: String,
     pub exported_at: String,
@@ -2115,11 +2125,19 @@ pub struct SavedConnectionsSyncSnapshot {
 
 impl SavedConnectionsSyncSnapshot {
     pub fn record_count(&self) -> usize {
-        self.records.len() + self.local_terminal_profiles.len() + self.local_terminal_tombstones.len()
+        self.records.len()
+            + self.local_terminal_profiles.len()
+            + self.local_terminal_tombstones.len()
+            + self.plugin_profiles.len()
+            + self.plugin_tombstones.len()
     }
 
     pub fn record_ids(&self) -> impl Iterator<Item = &str> {
-        self.records.iter().map(|r| r.id.as_str())
+        self.records
+            .iter()
+            .map(|r| r.id.as_str())
+            .chain(self.plugin_profiles.iter().map(|p| p.id.as_str()))
+            .chain(self.plugin_tombstones.iter().map(|p| p.id.as_str()))
             .chain(self.local_terminal_profiles.iter().map(|p| p.id.as_str()))
             .chain(self.local_terminal_tombstones.iter().map(|p| p.id.as_str()))
     }

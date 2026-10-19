@@ -257,6 +257,21 @@
     "shortcut_count": "atalhos"
   },
   "plugin": {
+    "connections": {
+      "name": "Nome",
+      "group": "Grupo",
+      "cancel": "Cancelar",
+      "save": "Salvar",
+      "save_connect": "Salvar e conectar",
+      "failed": "Não foi possível concluir a operação. Verifique as configurações de conexão e as permissões do plugin.",
+      "disconnect": "Desconectar",
+      "connecting": "Conectando…",
+      "connected": "Conectado",
+      "disconnected": "Desconectado",
+      "unavailable": "O plugin de conexão está indisponível. Ative ou instale o plugin para conectar.",
+      "password_unchanged": "Deixe em branco para manter o valor salvo",
+      "clear_credentials": "Limpar credenciais salvas"
+    },
     "install_queued": "Na fila · posição {{position}}",
     "installing_named": "Instalando {{name}}",
     "install_queue_count": "{{count}} na fila",
@@ -861,6 +876,7 @@
         "redacted": "oculto"
       },
       "diff_fields": {
+        "plugin_configuration": "Configurações de conexão",
         "name": "Nome",
         "group": "Grupo",
         "host": "Host",

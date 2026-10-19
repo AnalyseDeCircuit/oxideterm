@@ -4,6 +4,7 @@
 //! Native plugin manifest and registry data model.
 
 mod config;
+mod connection;
 mod contributions;
 mod language;
 mod manifest;
@@ -11,6 +12,7 @@ mod registry;
 mod runtime;
 
 pub use config::{NativePluginConfigEntry, NativePluginGlobalConfig};
+pub use connection::NativePluginConnectionDef;
 pub use contributions::*;
 pub use language::NativePluginLanguageDefinition;
 pub use manifest::*;

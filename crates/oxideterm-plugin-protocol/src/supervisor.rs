@@ -98,6 +98,17 @@ impl PluginRuntimeSupervisorState {
         self.registrations.remove(registration_id).is_some()
     }
 
+    pub fn dispose_connection_views(&mut self, instance_id: &str) {
+        self.registrations.retain(|_, registration| {
+            registration.kind != crate::PluginRegistrationKind::Tab
+                || registration
+                    .metadata
+                    .get("connectionId")
+                    .and_then(Value::as_str)
+                    != Some(instance_id)
+        });
+    }
+
     pub fn registration_count(&self) -> usize {
         self.registrations.len()
     }
@@ -241,6 +252,34 @@ impl fmt::Debug for PluginOutboundEffect {
 mod tests {
     use super::*;
     use crate::PluginRegistrationKind;
+
+    #[test]
+    fn closing_a_connection_removes_only_its_scoped_views() {
+        let mut supervisor = PluginRuntimeSupervisorState::new("provider", Duration::from_secs(5));
+        for (id, metadata) in [
+            ("one", serde_json::json!({"connectionId":"first"})),
+            ("two", serde_json::json!({"connectionId":"second"})),
+            ("global", serde_json::json!({"tabId":"overview"})),
+        ] {
+            supervisor
+                .record_registration(PluginRegistration {
+                    registration_id: id.into(),
+                    plugin_id: "provider".into(),
+                    kind: PluginRegistrationKind::Tab,
+                    metadata,
+                })
+                .unwrap();
+        }
+        supervisor.dispose_connection_views("first");
+        supervisor.dispose_connection_views("first");
+        let mut remaining = supervisor
+            .registrations
+            .keys()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        remaining.sort();
+        assert_eq!(remaining, ["global", "two"]);
+    }
 
     #[test]
     fn supervisor_auto_disables_and_cleans_registrations_after_repeated_errors() {

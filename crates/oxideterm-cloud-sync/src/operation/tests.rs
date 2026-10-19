@@ -133,6 +133,8 @@ fn remote_desktop_apply_preserves_local_credentials_and_valid_gateway_refs() {
         remote_desktop_snapshot(Some("untrusted-remote-keychain-entry"), "remote.test");
     incoming.records[0].ssh_gateway_connection_id = Some("conn-1".to_string());
     let incoming_connections = oxideterm_connections::SavedConnectionsSyncSnapshot {
+        plugin_profiles: Vec::new(),
+        plugin_tombstones: Vec::new(),
         totp_credentials: Vec::new(),
         local_terminal_profiles: Vec::new(),
         local_terminal_tombstones: Vec::new(),
@@ -244,6 +246,8 @@ fn connection_merge_preserves_independent_full_option_changes() {
         vec!["hmac-sha2-512-etm@openssh.com".to_string()];
     let base = SavedConnectionsSyncSnapshot {
         totp_credentials: Vec::new(),
+        plugin_profiles: Vec::new(),
+        plugin_tombstones: Vec::new(),
         local_terminal_profiles: Vec::new(),
         local_terminal_tombstones: Vec::new(),
         revision: "base".to_string(),
@@ -252,6 +256,8 @@ fn connection_merge_preserves_independent_full_option_changes() {
     };
     let local = SavedConnectionsSyncSnapshot {
         totp_credentials: Vec::new(),
+        plugin_profiles: Vec::new(),
+        plugin_tombstones: Vec::new(),
         local_terminal_profiles: Vec::new(),
         local_terminal_tombstones: Vec::new(),
         revision: "local".to_string(),
@@ -260,6 +266,8 @@ fn connection_merge_preserves_independent_full_option_changes() {
     };
     let mut remote = SavedConnectionsSyncSnapshot {
         totp_credentials: Vec::new(),
+        plugin_profiles: Vec::new(),
+        plugin_tombstones: Vec::new(),
         local_terminal_profiles: Vec::new(),
         local_terminal_tombstones: Vec::new(),
         revision: "remote".to_string(),
@@ -531,6 +539,8 @@ fn local_profile_cloud_merge_and_selection_preserve_independent_edits() {
     };
     let base = SavedConnectionsSyncSnapshot {
         revision: "base".into(),
+        plugin_profiles: Vec::new(),
+        plugin_tombstones: Vec::new(),
         totp_credentials: Vec::new(),
         exported_at: now.to_rfc3339(),
         records: vec![],

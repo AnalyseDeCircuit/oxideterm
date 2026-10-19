@@ -257,6 +257,21 @@
     "shortcut_count": "phím tắt"
   },
   "plugin": {
+    "connections": {
+      "name": "Tên",
+      "group": "Nhóm",
+      "cancel": "Hủy",
+      "save": "Lưu",
+      "save_connect": "Lưu và kết nối",
+      "failed": "Không thể hoàn tất thao tác. Hãy kiểm tra cài đặt kết nối và quyền của tiện ích.",
+      "disconnect": "Ngắt kết nối",
+      "connecting": "Đang kết nối…",
+      "connected": "Đã kết nối",
+      "disconnected": "Đã ngắt kết nối",
+      "unavailable": "Tiện ích kết nối không khả dụng. Hãy bật hoặc cài đặt tiện ích để kết nối.",
+      "password_unchanged": "Để trống để giữ giá trị đã lưu",
+      "clear_credentials": "Xóa thông tin xác thực đã lưu"
+    },
     "install_queued": "Đang chờ · vị trí {{position}}",
     "installing_named": "Đang cài đặt {{name}}",
     "install_queue_count": "{{count}} mục đang chờ",
@@ -861,6 +876,7 @@
         "redacted": "đã ẩn"
       },
       "diff_fields": {
+        "plugin_configuration": "Cài đặt kết nối",
         "name": "Tên",
         "group": "Nhóm",
         "host": "Máy chủ",

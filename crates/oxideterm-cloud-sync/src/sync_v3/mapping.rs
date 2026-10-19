@@ -85,6 +85,16 @@ impl ConfigurationView {
         for record in snapshot.local_terminal_profiles {
             self.insert(ResourceKind::LocalTerminal, &record.id, &record)?;
         }
+        for record in snapshot.plugin_profiles {
+            self.insert(
+                ResourceKind::PluginConnection,
+                &record.id,
+                &record.portable(),
+            )?;
+        }
+        for record in snapshot.plugin_tombstones {
+            self.mark_deleted(ResourceKind::PluginConnection, &record.id)?;
+        }
         for record in snapshot.local_terminal_tombstones {
             self.mark_deleted(ResourceKind::LocalTerminal, &record.id)?;
         }
@@ -189,6 +199,13 @@ impl ConfigurationView {
         }
         for record in saved.local_terminal_profiles {
             view.insert(ResourceKind::LocalTerminal, &record.id, &record)?;
+        }
+        for record in saved.plugin_profiles {
+            view.insert(
+                ResourceKind::PluginConnection,
+                &record.id,
+                &record.portable(),
+            )?;
         }
         for record in saved.totp_credentials {
             view.insert(ResourceKind::Totp, &record.id, &record.portable())?;
@@ -304,7 +321,9 @@ impl ConfigurationView {
                     ids.as_ref().is_none_or(|ids| ids.contains(&resource.id))
                 };
                 match resource.kind {
-                    ResourceKind::Connection | ResourceKind::LocalTerminal => {
+                    ResourceKind::Connection
+                    | ResourceKind::LocalTerminal
+                    | ResourceKind::PluginConnection => {
                         scope.sync_connections && within(&filter.connection_ids)
                     }
                     ResourceKind::StandaloneSftp | ResourceKind::Ftp => scope.sync_connections,
@@ -467,6 +486,8 @@ impl ConfigurationView {
         }
         Ok(ResolvedConnectionConfiguration {
             connections: SavedConnectionsSyncSnapshot {
+                plugin_profiles: self.records(ResourceKind::PluginConnection, values)?,
+                plugin_tombstones: Vec::new(),
                 revision: "sync-v3".into(),
                 exported_at: now,
                 records,
@@ -721,7 +742,7 @@ fn credential_selected(id: &str, scope: &SyncScope, filter: &StructuredUploadIte
     let within =
         |id: &str, ids: &Option<BTreeSet<String>>| ids.as_ref().is_none_or(|ids| ids.contains(id));
     match target.owner {
-        CredentialOwner::Connection(id) => {
+        CredentialOwner::Connection(id) | CredentialOwner::PluginConnection(id) => {
             scope.sync_connections && within(&id, &filter.connection_ids)
         }
         CredentialOwner::StandaloneSftp(_) | CredentialOwner::Ftp(_) => scope.sync_connections,

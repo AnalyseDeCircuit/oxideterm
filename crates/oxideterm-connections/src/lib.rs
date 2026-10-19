@@ -52,7 +52,7 @@ pub use store::{
     LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, LocalSyncMetadata, LocalTerminalProfile,
     ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeySyncRecord, ManagedSshKeyUsage,
     MoshIpFamily, MoshPredictionMode, MoshProfile, MoshProfilesSyncSnapshot, MoshUdpPortSelection,
-    PROFILE_CREDENTIAL_KIND, PreparedProfileCredentials, PreparedSavedConnectionsSync,
+    PROFILE_CREDENTIAL_KIND, PluginConnectionProfile, PreparedProfileCredentials, PreparedSavedConnectionsSync,
     PrivilegeCredentialKind, PrivilegeCredentialSyncRecord, ProfileCredentialRestoreSummary,
     ProxyHopInfo, RemoteDesktopProfile, RemoteDesktopProfilesSyncSnapshot,
     ResolvedConnectionConfiguration, SaveConnectionRequest, SaveFtpProfileRequest,

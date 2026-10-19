@@ -5,6 +5,9 @@
 //! validated runtime effects.
 
 use super::*;
+use tokio::sync::{Notify, mpsc};
+
+const PROCESS_OUTPUT_QUEUE_CAPACITY: usize = 32;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -13,9 +16,13 @@ pub struct NativeProcessPluginRuntime {
     plugin_dir: PathBuf,
     entry: String,
     pub(super) supervisor: PluginRuntimeSupervisorState,
+    pub(super) generation: u64,
     pub(super) child: Option<Child>,
     stdin: Option<ChildStdin>,
-    stdout: Option<BufReader<ChildStdout>>,
+    output: Option<mpsc::Receiver<Result<Zeroizing<String>, PluginError>>>,
+    output_reader: Option<tokio::task::JoinHandle<()>>,
+    stderr_reader: Option<tokio::task::JoinHandle<()>>,
+    output_wake: Arc<Notify>,
     outbound_messages: VecDeque<PluginOutboundMessage>,
     outbound_effects: VecDeque<PluginOutboundEffect>,
     host_call_handler: Option<PluginHostCallHandler>,
@@ -48,9 +55,13 @@ impl NativeProcessPluginRuntime {
             plugin_dir: plugin_dir.into(),
             entry: entry.into(),
             supervisor: PluginRuntimeSupervisorState::new(plugin_id, lifecycle_timeout),
+            generation: 0,
             child: None,
             stdin: None,
-            stdout: None,
+            output: None,
+            output_reader: None,
+            stderr_reader: None,
+            output_wake: Arc::new(Notify::new()),
             outbound_messages: VecDeque::new(),
             outbound_effects: VecDeque::new(),
             host_call_handler: None,
@@ -62,6 +73,10 @@ impl NativeProcessPluginRuntime {
         // Phase 3 plugins that only emit one-way effects keep the same behavior,
         // while Phase 4 APIs such as storage.get can opt into request/response.
         self.host_call_handler = Some(handler);
+    }
+
+    pub fn set_output_wake(&mut self, wake: Arc<Notify>) {
+        self.output_wake = wake;
     }
 
     pub fn drain_outbound_messages(&mut self) -> Vec<PluginOutboundMessage> {
@@ -117,9 +132,44 @@ impl NativeProcessPluginRuntime {
                     "Native plugin process did not expose stdout",
                 )
             })?;
+            // Raw frames retain zeroizing ownership until consumed. The bounded
+            // queue applies pipe backpressure without blocking the UI thread.
+            let (output_tx, output_rx) = mpsc::channel(PROCESS_OUTPUT_QUEUE_CAPACITY);
+            let wake = self.output_wake.clone();
+            self.output_reader = Some(tokio::spawn(async move {
+                let mut stdout = BufReader::new(stdout);
+                loop {
+                    let mut line = Zeroizing::new(String::new());
+                    let frame = match stdout.read_line(&mut line).await {
+                        Ok(0) => Err(PluginError::runtime(
+                            "process_exited",
+                            "Native plugin process closed stdout",
+                        )),
+                        Ok(_) => Ok(line),
+                        Err(_) => Err(PluginError::runtime(
+                            "process_response_read_failed",
+                            "Cannot read native plugin output",
+                        )),
+                    };
+                    let ended = frame.is_err();
+                    if output_tx.send(frame).await.is_err() {
+                        break;
+                    }
+                    wake.notify_one();
+                    if ended {
+                        break;
+                    }
+                }
+            }));
+            if let Some(mut stderr) = child.stderr.take() {
+                // Drain diagnostics without retaining potentially sensitive plugin text.
+                self.stderr_reader = Some(tokio::spawn(async move {
+                    let _ = tokio::io::copy(&mut stderr, &mut tokio::io::sink()).await;
+                }));
+            }
             self.child = Some(child);
             self.stdin = Some(stdin);
-            self.stdout = Some(BufReader::new(stdout));
+            self.output = Some(output_rx);
             Ok(())
         })
     }
@@ -128,7 +178,13 @@ impl NativeProcessPluginRuntime {
         Box::pin(async move {
             self.supervisor.start_deactivation();
             self.stdin.take();
-            self.stdout.take();
+            self.output.take();
+            if let Some(task) = self.output_reader.take() {
+                task.abort();
+            }
+            if let Some(task) = self.stderr_reader.take() {
+                task.abort();
+            }
             if let Some(mut child) = self.child.take() {
                 let _ = child.kill().await;
             }
@@ -138,6 +194,28 @@ impl NativeProcessPluginRuntime {
                 serde_json::json!({ "state": "killed" }),
             ))
         })
+    }
+
+    /// Consume unsolicited frames without sending a request or waiting for more data.
+    pub async fn receive_pending_output(&mut self) -> Result<(), PluginError> {
+        for _ in 0..PROCESS_OUTPUT_QUEUE_CAPACITY {
+            let frame = match self.output.as_mut().map(|output| output.try_recv()) {
+                Some(Ok(frame)) => frame?,
+                _ => return Ok(()),
+            };
+            match decode_process_output_frame(&frame)? {
+                PluginProcessFrame::Outbound(message) => self.accept_outbound(message).await?,
+                PluginProcessFrame::Response { response, .. } => {
+                    let _owner = PluginHostResponseOwner(response);
+                    return Err(PluginError::protocol(
+                        "process_response_request_mismatch",
+                        "Unexpected native plugin response while idle",
+                    ));
+                }
+            }
+        }
+        self.output_wake.notify_one();
+        Ok(())
     }
 
     fn call_process_request<'a>(
@@ -156,13 +234,13 @@ impl NativeProcessPluginRuntime {
     }
 
     async fn write_process_request(&mut self, request: PluginRequest) -> Result<(), PluginError> {
+        let request = ProcessPluginRequestOwner(request);
         let stdin = self.stdin.as_mut().ok_or_else(|| {
             PluginError::runtime(
                 "process_stdin_closed",
                 "Native plugin process stdin is not available",
             )
         })?;
-        let request = ProcessPluginRequestOwner(request);
         let envelope = PluginProtocolEnvelope::new(Some(request.request_id.clone()), &*request);
         let mut line = Zeroizing::new(serde_json::to_vec(&envelope).map_err(|error| {
             PluginError::protocol(
@@ -225,7 +303,6 @@ impl NativeProcessPluginRuntime {
         timeout: Duration,
     ) -> Result<PluginResponse, PluginError> {
         let started_at = Instant::now();
-        let mut line = Zeroizing::new(String::new());
         loop {
             let remaining = timeout.checked_sub(started_at.elapsed()).ok_or_else(|| {
                 PluginError::runtime(
@@ -236,17 +313,14 @@ impl NativeProcessPluginRuntime {
                     ),
                 )
             })?;
-            // Wipe the previous frame before reusing its allocation. `clear`
-            // alone would leave the old bytes in the string capacity.
-            line.zeroize();
-            let read = {
-                let stdout = self.stdout.as_mut().ok_or_else(|| {
+            let line = {
+                let output = self.output.as_mut().ok_or_else(|| {
                     PluginError::runtime(
                         "process_stdout_closed",
                         "Native plugin process stdout is not available",
                     )
                 })?;
-                time::timeout(remaining, stdout.read_line(&mut line))
+                time::timeout(remaining, output.recv())
                     .await
                     .map_err(|_| {
                         PluginError::runtime(
@@ -257,21 +331,15 @@ impl NativeProcessPluginRuntime {
                             ),
                         )
                     })?
-                    .map_err(|error| {
+                    .ok_or_else(|| {
                         PluginError::runtime(
-                            "process_response_read_failed",
-                            format!("Cannot read native plugin response: {error}"),
+                            "process_exited",
+                            "Native plugin process closed stdout before responding",
                         )
-                    })?
+                    })??
             };
-            if read == 0 {
-                return Err(PluginError::runtime(
-                    "process_exited",
-                    "Native plugin process closed stdout before responding",
-                ));
-            }
             let frame = decode_process_output_frame(&line);
-            line.zeroize();
+            drop(line);
             match frame? {
                 PluginProcessFrame::Response {
                     envelope_request_id,
@@ -280,6 +348,7 @@ impl NativeProcessPluginRuntime {
                     if envelope_request_id.as_deref() != Some(request_id)
                         || response.request_id != request_id
                     {
+                        let _owner = PluginHostResponseOwner(response);
                         return Err(PluginError::protocol(
                             "process_response_request_mismatch",
                             format!(
@@ -290,40 +359,42 @@ impl NativeProcessPluginRuntime {
                     return Ok(response);
                 }
                 PluginProcessFrame::Outbound(message) => {
-                    if message.host_call_sensitivity().is_sensitive() {
-                        // Sensitive calls are synchronous and intentionally do not
-                        // enter the raw-message or effect audit queues.
-                        let host_call_response =
-                            self.returnable_sensitive_host_call_response(message);
-                        if let Some(response) = host_call_response {
-                            self.write_process_host_call_response(response).await?;
-                        }
-                        continue;
-                    }
-                    let supervisor_message = message.clone_public().ok_or_else(|| {
-                        PluginError::protocol(
-                            "sensitive_host_call_clone_rejected",
-                            "Sensitive host calls cannot enter the outbound audit path",
-                        )
-                    })?;
-                    let effect = self
-                        .supervisor
-                        .handle_outbound_message(supervisor_message)
-                        .map_err(|error| {
-                            PluginError::protocol(
-                                "process_outbound_rejected",
-                                format!("Native plugin outbound frame rejected: {}", error.message),
-                            )
-                        })?;
-                    let host_call_response = self.returnable_host_call_response(&message);
-                    self.outbound_messages.push_back(message);
-                    self.outbound_effects.push_back(effect);
-                    if let Some(response) = host_call_response {
-                        self.write_process_host_call_response(response).await?;
-                    }
+                    self.accept_outbound(message).await?;
                 }
             }
         }
+    }
+
+    async fn accept_outbound(&mut self, message: PluginOutboundMessage) -> Result<(), PluginError> {
+        if message.host_call_sensitivity().is_sensitive() {
+            // Credentials never enter the public message/effect queues, even while idle.
+            if let Some(response) = self.returnable_sensitive_host_call_response(message) {
+                self.write_process_host_call_response(response).await?;
+            }
+            return Ok(());
+        }
+        let supervisor_message = message.clone_public().ok_or_else(|| {
+            PluginError::protocol(
+                "sensitive_host_call_clone_rejected",
+                "Sensitive host calls cannot enter the outbound audit path",
+            )
+        })?;
+        let effect = self
+            .supervisor
+            .handle_outbound_message(supervisor_message)
+            .map_err(|error| {
+                PluginError::protocol(
+                    "process_outbound_rejected",
+                    format!("Native plugin outbound frame rejected: {}", error.message),
+                )
+            })?;
+        let response = self.returnable_host_call_response(&message);
+        self.outbound_messages.push_back(message);
+        self.outbound_effects.push_back(effect);
+        if let Some(response) = response {
+            self.write_process_host_call_response(response).await?;
+        }
+        Ok(())
     }
 
     fn returnable_host_call_response(
@@ -384,6 +455,17 @@ impl NativeProcessPluginRuntime {
     fn record_runtime_error(&mut self, error: PluginError) -> PluginError {
         self.supervisor.record_error(error.clone());
         error
+    }
+}
+
+impl Drop for NativeProcessPluginRuntime {
+    fn drop(&mut self) {
+        if let Some(task) = self.output_reader.take() {
+            task.abort();
+        }
+        if let Some(task) = self.stderr_reader.take() {
+            task.abort();
+        }
     }
 }
 

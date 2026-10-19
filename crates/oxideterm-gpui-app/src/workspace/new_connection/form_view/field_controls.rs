@@ -2858,6 +2858,8 @@ impl WorkspaceApp {
             LucideIcon::FolderSync,
             true,
         ));
+        let plugin_types = self.plugin_connection_types(cx);
+        let has_plugin_types = !plugin_types.is_empty();
         let mut sidebar = div()
             .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
             .h_full()
@@ -3062,7 +3064,46 @@ impl WorkspaceApp {
                 );
             sidebar = sidebar.child(row);
         }
-        sidebar.into_any_element()
+        for (plugin, definition) in plugin_types {
+            sidebar = sidebar.child(
+                div()
+                    .w_full()
+                    .h(px(NEW_CONNECTION_TRANSPORT_ROW_HEIGHT))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .cursor_pointer()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.text))
+                    .hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::from_plugin_name(&definition.icon),
+                        14.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(definition.title)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            this.open_plugin_connection_form(
+                                &plugin,
+                                &definition.id,
+                                None,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
+        }
+        if has_plugin_types {
+            sidebar.overflow_y_scrollbar().into_any_element()
+        } else {
+            sidebar.into_any_element()
+        }
     }
 
     pub(super) fn render_local_terminal_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {
