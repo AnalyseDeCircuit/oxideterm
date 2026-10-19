@@ -85,12 +85,13 @@ impl IdeSurface {
             .tree_width
             .clamp(IDE_TREE_MIN_WIDTH, IDE_TREE_MAX_WIDTH);
         let mut tree = div()
+            .debug_selector(|| "ide-tree-panel".into())
+            .relative()
+            .flex_none()
             .w(px(width))
             .h_full()
             .flex()
             .flex_col()
-            .border_r_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | IDE_BORDER_HALF_ALPHA))
             .bg(self.ide_bg(self.tokens.ui.bg, IDE_BG_HALF_ALPHA));
 
         let Some(snapshot) = self.workspace.snapshot().ok() else {
@@ -277,6 +278,8 @@ impl IdeSurface {
                 div()
                     .id("ide-tree-scroll")
                     .relative()
+                    // Leave the existing scrollbar outside the divider's hit target.
+                    .mr(px(SIDEBAR_RESIZE_HOTZONE_WIDTH))
                     .flex_1()
                     .min_h_0()
                     .py_1()
@@ -314,7 +317,59 @@ impl IdeSurface {
                         Scrollbar::new(&tree_scrollbar_handle).id("ide-tree-vertical-scrollbar"),
                     ),
             );
-        tree.into_any_element()
+        tree.child(
+            sidebar_resize_hotzone_chrome(
+                "ide-tree-resize",
+                if self.tree_resize.is_some() {
+                    rgb(self.tokens.ui.accent)
+                } else {
+                    rgba((self.tokens.ui.border << 8) | IDE_BORDER_HALF_ALPHA)
+                },
+                true,
+            )
+            .right_0()
+            .top_0()
+            .bottom_0()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    this.tree_resize = Some((event.position.x, width));
+                    this.tree_resize_activation =
+                        Some(cx.observe_window_activation(window, |this, window, cx| {
+                            if !window.is_window_active() {
+                                this.finish_tree_resize(cx);
+                            }
+                        }));
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ),
+        )
+        .into_any_element()
+    }
+
+    fn update_tree_resize(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some((start_x, start_width)) = self.tree_resize else {
+            return;
+        };
+        if !event.dragging() {
+            self.finish_tree_resize(cx);
+            return;
+        }
+        let width = (start_width + f32::from(event.position.x - start_x))
+            .clamp(IDE_TREE_MIN_WIDTH, IDE_TREE_MAX_WIDTH);
+        if self.tree_width != width {
+            self.tree_width = width;
+            cx.notify();
+        }
+    }
+
+    fn finish_tree_resize(&mut self, cx: &mut Context<Self>) {
+        if self.tree_resize.take().is_some() {
+            self.tree_resize_activation = None;
+            cx.notify();
+        }
     }
 
     fn render_tree_rows(&mut self, root: IdeLocation, cx: &mut Context<Self>) -> AnyElement {
@@ -419,4 +474,130 @@ impl IdeSurface {
         }
     }
 
+}
+
+#[cfg(test)]
+mod tree_resize_tests {
+    use super::*;
+    use gpui::{Modifiers, TestAppContext, point, size};
+
+    struct OffsetIdeView(Entity<IdeSurface>);
+
+    impl Render for OffsetIdeView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().pl(px(100.0)).child(self.0.clone())
+        }
+    }
+
+    #[gpui::test]
+    fn tree_divider_drag_resizes_layout_and_stops_on_release(cx: &mut TestAppContext) {
+        let surface = cx.new(|cx| {
+            let router =
+                oxideterm_ssh::NodeRouter::new(oxideterm_ssh::SshConnectionRegistry::default());
+            let backend = Arc::new(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            );
+            let mut surface = IdeSurface::new(
+                NodeAgentIdeFileSystem::new(router, NodeAgentMode::Disabled),
+                oxideterm_theme::default_tokens(),
+                IdeLabels::default(),
+                IdeRuntimeSettings::default(),
+                backend,
+                cx,
+            );
+            surface
+                .workspace
+                .open_project(IdeLocation::local("/repo"), "repo");
+            surface
+                .workspace
+                .set_tree_children(
+                    IdeLocation::local("/repo"),
+                    (0..60)
+                        .map(|index| FileTreeEntry {
+                            location: IdeLocation::local(format!("/repo/{index:02}.rs")),
+                            name: format!("{index:02}_long_filename_for_resize.rs"),
+                            kind: FileKind::File,
+                            version: SavedFileVersion::unknown(),
+                        })
+                        .collect(),
+                )
+                .unwrap();
+            surface.load_state = IdeLoadState::Ready;
+            surface
+        });
+        let (_, cx) = cx.add_window_view(|_, _| OffsetIdeView(surface.clone()));
+        cx.simulate_resize(size(px(1100.0), px(700.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let modifiers = Modifiers::default();
+        // Use an offset IDE surface and grab inside the hotzone, not on its edge.
+        for (delta, expected) in [(100.0, 380.0), (400.0, 500.0), (-400.0, 200.0)] {
+            let bounds = cx.debug_bounds("ide-tree-panel").unwrap();
+            let start = point(bounds.right() - px(3.0), bounds.top() + px(80.0));
+            let end = point(start.x + px(delta), start.y);
+            cx.simulate_mouse_down(start, MouseButton::Left, modifiers);
+            cx.simulate_mouse_move(end, MouseButton::Left, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("ide-tree-panel").unwrap().size.width,
+                px(expected)
+            );
+            cx.simulate_mouse_up(end, MouseButton::Left, modifiers);
+            cx.simulate_mouse_move(start, None, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("ide-tree-panel").unwrap().size.width,
+                px(expected)
+            );
+        }
+        let bounds = cx.debug_bounds("ide-tree-panel").unwrap();
+        let start = point(bounds.right() - px(3.0), bounds.top() + px(80.0));
+        cx.simulate_mouse_down(start, MouseButton::Left, modifiers);
+        cx.simulate_mouse_move(
+            start + point(px(110.0), px(0.0)),
+            MouseButton::Left,
+            modifiers,
+        );
+        cx.simulate_mouse_up(point(px(-10.0), px(-10.0)), MouseButton::Left, modifiers);
+        cx.simulate_mouse_move(start, None, modifiers);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            cx.debug_bounds("ide-tree-panel").unwrap().size.width,
+            px(310.0)
+        );
+        surface.read_with(cx, |surface, _| assert!(surface.tree_resize.is_none()));
+
+        // Missing mouse-up must not leave a captured drag after re-entering.
+        let start = point(px(407.0), px(80.0));
+        cx.simulate_mouse_down(start, MouseButton::Left, modifiers);
+        cx.simulate_mouse_move(start + point(px(90.0), px(0.0)), None, modifiers);
+        surface.read_with(cx, |surface, _| assert!(surface.tree_resize.is_none()));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // The adjacent scrollbar must still drag without resizing the tree.
+        let thumb = point(px(396.0), px(80.0));
+        let end = point(thumb.x, px(350.0));
+        cx.simulate_mouse_down(thumb, MouseButton::Left, modifiers);
+        cx.simulate_mouse_move(
+            thumb + point(px(0.0), px(10.0)),
+            MouseButton::Left,
+            modifiers,
+        );
+        cx.simulate_mouse_move(end, MouseButton::Left, modifiers);
+        cx.simulate_mouse_up(end, MouseButton::Left, modifiers);
+        surface.read_with(cx, |surface, _| {
+            assert_eq!(surface.tree_width, 310.0);
+            assert!(surface.tree_scroll_handle.0.borrow().base_handle.offset().y < px(0.0));
+        });
+        surface.update(cx, |surface, cx| {
+            surface.search.open = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            cx.debug_bounds("ide-project-search-panel").unwrap().left(),
+            px(422.0)
+        );
+    }
 }

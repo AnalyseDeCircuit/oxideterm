@@ -1,7 +1,8 @@
 use super::*;
 
-pub(in crate::workspace) const SIDEBAR_RESIZE_DIVIDER_WIDTH: f32 = 1.0;
-pub(in crate::workspace) const SIDEBAR_RESIZE_HOTZONE_WIDTH: f32 = 9.0;
+pub(in crate::workspace) use oxideterm_gpui_ui::separator::{
+    SIDEBAR_RESIZE_HOTZONE_WIDTH, sidebar_resize_hotzone_chrome,
+};
 const EMBEDDED_SFTP_SPLIT_HANDLE_SIZE: f32 = 7.0;
 const EMBEDDED_SFTP_SPLIT_LINE_SIZE: f32 = 1.0;
 const EMBEDDED_SFTP_SPLIT_HOVER_ALPHA: u32 = 0x1f;
@@ -28,36 +29,6 @@ pub(in crate::workspace) fn context_sidebar_frame_chrome(
 
 pub(in crate::workspace) fn context_sidebar_region_chrome() -> gpui::Div {
     div().relative().flex_1().min_w(px(0.0)).h_full().min_h_0()
-}
-
-pub(in crate::workspace) fn sidebar_resize_hotzone_chrome(
-    element_id: &'static str,
-    line_color: gpui::Rgba,
-    divider_at_right: bool,
-) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(element_id)
-        .group(element_id)
-        .absolute()
-        .w(px(SIDEBAR_RESIZE_HOTZONE_WIDTH))
-        .cursor_col_resize()
-        // Keep the full drag target inside the sidebar so terminal column zero
-        // remains selectable even when the terminal has no padding.
-        .occlude()
-        .bg(rgba(0x00000000))
-        .child(
-            div()
-                .absolute()
-                .when(divider_at_right, |divider| divider.right_0())
-                .when(!divider_at_right, |divider| divider.left_0())
-                .top_0()
-                .bottom_0()
-                .w(px(SIDEBAR_RESIZE_DIVIDER_WIDTH))
-                // Keep the resize cursor when the pointer lands on the painted line itself.
-                .cursor_col_resize()
-                .bg(line_color)
-                .group_hover(element_id, move |style| style.bg(line_color.alpha(1.0))),
-        )
 }
 
 pub(in crate::workspace) fn sidebar_resize_hotzone_origin(seam: f32) -> f32 {

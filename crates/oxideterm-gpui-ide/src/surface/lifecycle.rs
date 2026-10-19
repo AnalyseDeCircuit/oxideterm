@@ -24,6 +24,8 @@ impl IdeSurface {
             root_path: None,
             git_branch: None,
             tree_width: IDE_TREE_DEFAULT_WIDTH,
+            tree_resize: None,
+            tree_resize_activation: None,
             generation: 0,
             editors: HashMap::new(),
             loading_paths: HashSet::new(),
@@ -94,6 +96,7 @@ impl IdeSurface {
             return;
         }
         let was_visible = self.mount.is_visible();
+        self.finish_tree_resize(cx);
         self.mount = mount;
         if mount.is_visible() {
             if !was_visible {

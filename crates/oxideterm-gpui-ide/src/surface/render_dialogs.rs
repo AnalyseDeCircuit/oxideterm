@@ -768,9 +768,10 @@ impl IdeSurface {
             .map(|group| group.matches.len())
             .sum::<usize>();
         let panel = div()
+            .debug_selector(|| "ide-project-search-panel".into())
             .absolute()
             .top(px(48.0))
-            .left(px(IDE_TREE_DEFAULT_WIDTH + 12.0))
+            .left(px(self.tree_width + 12.0))
             .w(px(420.0))
             .max_h(px(560.0))
             .flex()

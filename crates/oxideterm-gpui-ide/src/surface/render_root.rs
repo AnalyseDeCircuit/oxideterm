@@ -37,10 +37,16 @@ impl Render for IdeSurface {
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
                     this.finish_tab_drag(cx);
+                    this.finish_tree_resize(cx);
                     this.finish_folder_picker_path_selection_drag();
                 }),
             )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| this.finish_tree_resize(cx)),
+            )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.update_tree_resize(event, cx);
                 this.update_folder_picker_path_selection_drag(event, window, cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
@@ -110,6 +116,28 @@ impl Render for IdeSurface {
         }
         if self.agent_opt_in_open {
             root = root.child(self.render_agent_opt_in_dialog(cx));
+        }
+        if self.tree_resize.is_some() {
+            // Match sidebar capture: editor and scrollable children must not
+            // consume movement while the pointer is away from the divider.
+            root = root.child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .occlude()
+                    .cursor_col_resize()
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                        this.update_tree_resize(event, cx);
+                        cx.stop_propagation();
+                    }))
+                    .on_mouse_up(
+                        MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.finish_tree_resize(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
         }
         root
     }
