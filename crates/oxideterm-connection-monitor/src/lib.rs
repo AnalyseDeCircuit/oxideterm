@@ -86,7 +86,7 @@ pub use process::{
     sort_process_rows, visible_process_rows,
 };
 pub use profiler::{
-    ConnectionProfilerSnapshot, ProfilerRegistry, ProfilerState, ProfilerUpdate,
+    ConnectionProfilerSnapshot, ProfilerFailure, ProfilerRegistry, ProfilerState, ProfilerUpdate,
     RESOURCE_CHANNEL_OPEN_TIMEOUT, RESOURCE_END_MARKER, RESOURCE_MAX_CONSECUTIVE_FAILURES,
     RESOURCE_MAX_OUTPUT_SIZE, RESOURCE_SAMPLE_INTERVAL, RESOURCE_SAMPLE_TIMEOUT,
     ResourceSampleShell, ResourceSampler, ResourceSamplerFuture, ResourceSamplingConfig,

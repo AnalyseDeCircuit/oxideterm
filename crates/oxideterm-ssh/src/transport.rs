@@ -803,7 +803,8 @@ impl SshShellChannel {
                             break;
                         }
                         if let Ok(text) = std::str::from_utf8(&output)
-                            && text.contains(end_marker)
+                            // Gateways may echo the command itself, including its quoted marker.
+                            && text.lines().any(|line| line == end_marker)
                         {
                             break;
                         }

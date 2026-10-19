@@ -12,6 +12,9 @@
       "source": "資料來源"
     },
     "panel": {
+      "session_failed": "無法建立監控工作階段。請檢查連線狀態；單通道模式還需要為獨立連線完成驗證。",
+      "sample_read_failed": "無法讀取完整的採樣結果，請重新偵測。",
+      "sample_unrecognized": "已收到採樣結果，但無法辨識主機指標。請檢查遠端系統與採樣命令的相容性。",
       "detecting_system": "正在辨識遠端系統…",
       "system_unavailable": "無法辨識遠端系統。請確認已開啟該主機的終端機，且伺服器允許獨立 Shell 工作階段，再重新偵測。",
       "sampling_failed": "無法取得主機指標。請檢查伺服器的 Shell 工作階段權限與取樣指令是否可用，再重新偵測。",

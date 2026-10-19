@@ -12,6 +12,9 @@
       "source": "Fonte"
     },
     "panel": {
+      "session_failed": "Impossibile aprire una sessione di monitoraggio. Controlla la connessione; la modalità a canale singolo richiede anche l’autenticazione di una connessione separata.",
+      "sample_read_failed": "Impossibile leggere un campione completo. Riprova il rilevamento.",
+      "sample_unrecognized": "È stato ricevuto un campione, ma non sono state riconosciute metriche dell’host. Verifica la compatibilità del sistema remoto e dei comandi di campionamento.",
       "detecting_system": "Rilevamento del sistema remoto…",
       "system_unavailable": "Impossibile identificare il sistema remoto. Apri un terminale per questo host, verifica che il server consenta sessioni shell separate e riprova.",
       "sampling_failed": "Impossibile raccogliere le metriche dell’host. Verifica i permessi delle sessioni shell e la disponibilità dei comandi di campionamento sul server, quindi riprova.",

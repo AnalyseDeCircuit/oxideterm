@@ -12,6 +12,9 @@
       "source": "Fuente"
     },
     "panel": {
+      "session_failed": "No se pudo abrir una sesión de monitorización. Comprueba la conexión; el modo de canal único también requiere autenticar una conexión independiente.",
+      "sample_read_failed": "No se pudo leer una muestra completa. Reintenta la detección.",
+      "sample_unrecognized": "Se recibió una muestra, pero no se reconocieron métricas del equipo. Comprueba la compatibilidad del sistema remoto y de los comandos de muestreo.",
       "detecting_system": "Detectando el sistema remoto…",
       "system_unavailable": "No se pudo identificar el sistema remoto. Abre un terminal para este host, comprueba que el servidor permite sesiones de shell independientes y vuelve a intentarlo.",
       "sampling_failed": "No se pudieron recopilar las métricas del host. Comprueba los permisos de las sesiones de shell y la disponibilidad de los comandos de muestreo en el servidor, y vuelve a intentarlo.",

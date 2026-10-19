@@ -151,6 +151,12 @@ impl HostToolsEntity {
             .current(&active_connection.connection_id);
         let disabled = !monitor_enabled;
         let profiler_state = current.as_ref().map(|(_, state)| *state);
+        let failure = self
+            .profiler_registry()
+            .failure(&active_connection.connection_id);
+        let failure_key = failure
+            .map(|failure| failure.label_key())
+            .unwrap_or("profiler.panel.sampling_failed");
         let is_running = matches!(profiler_state, Some(ProfilerState::Running));
         let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
         let panel = div()
@@ -229,7 +235,7 @@ impl HostToolsEntity {
                                 render.i18n.t(if detecting {
                                     "profiler.panel.detecting_system"
                                 } else if system_known {
-                                    "profiler.panel.sampling_failed"
+                                    failure_key
                                 } else {
                                     "profiler.panel.system_unavailable"
                                 }),
@@ -308,7 +314,8 @@ impl HostToolsEntity {
         };
 
         let can_retry_sampling = !disabled
-            && (matches!(profiler_state, Some(ProfilerState::Degraded))
+            && (failure.is_some()
+                || matches!(profiler_state, Some(ProfilerState::Degraded))
                 || matches!(metrics.source, MetricsSource::Unsupported));
         panel
             .when(can_retry_sampling, |panel| {
@@ -323,7 +330,7 @@ impl HostToolsEntity {
                             SelectableTextRole::PlainDocument,
                             "host-monitor-profiler",
                             "sampling-failed",
-                            render.i18n.t("profiler.panel.sampling_failed"),
+                            render.i18n.t(failure_key),
                             render.tokens.ui.text_muted,
                             cx,
                         )),

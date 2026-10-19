@@ -12,6 +12,9 @@
       "source": "数据来源"
     },
     "panel": {
+      "session_failed": "无法建立监控会话。请检查连接状态；单通道模式还需要为独立连接完成认证。",
+      "sample_read_failed": "未能读取完整的采样结果，请重新探测。",
+      "sample_unrecognized": "已收到采样结果，但无法识别主机指标。请检查远端系统和采样命令的兼容性。",
       "detecting_system": "正在识别远端系统…",
       "system_unavailable": "未能识别远端系统。请确认该主机的终端已打开，且服务器允许独立 Shell 会话，再重新探测。",
       "sampling_failed": "未能获取主机指标。请检查服务器的 Shell 会话权限和采样命令是否可用，再重新探测。",

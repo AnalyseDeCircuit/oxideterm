@@ -163,6 +163,25 @@ pub struct ConnectionProfilerSnapshot {
     pub metrics: Option<ResourceMetrics>,
     pub history: Vec<ResourceMetrics>,
     pub state: ProfilerState,
+    pub failure: Option<ProfilerFailure>,
+}
+
+/// Keep failure stages without retaining commands, output, or authentication prompts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ProfilerFailure {
+    OpenSession,
+    ReadSample,
+    NoMetrics,
+}
+
+impl ProfilerFailure {
+    pub fn label_key(self) -> &'static str {
+        match self {
+            Self::OpenSession => "profiler.panel.session_failed",
+            Self::ReadSample => "profiler.panel.sample_read_failed",
+            Self::NoMetrics => "profiler.panel.sample_unrecognized",
+        }
+    }
 }
 
 pub type ResourceSamplerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
@@ -424,6 +443,12 @@ impl ProfilerRegistry {
         let Some(entry) = profilers.get_mut(&update.connection_id) else {
             return false;
         };
+        if matches!(
+            update.metrics.source,
+            MetricsSource::Full | MetricsSource::Partial
+        ) {
+            entry.snapshot.failure = None;
+        }
         entry.snapshot.metrics = Some(update.metrics.clone());
         push_history(&mut entry.snapshot.history, update.metrics);
         true
@@ -433,6 +458,18 @@ impl ProfilerRegistry {
         lock(&self.profilers)
             .get(connection_id)
             .and_then(|entry| entry.snapshot.metrics.clone())
+    }
+
+    fn record_failure(&self, connection_id: &str, failure: ProfilerFailure) {
+        if let Some(entry) = lock(&self.profilers).get_mut(connection_id) {
+            entry.snapshot.failure = Some(failure);
+        }
+    }
+
+    pub fn failure(&self, connection_id: &str) -> Option<ProfilerFailure> {
+        lock(&self.profilers)
+            .get(connection_id)
+            .and_then(|entry| entry.snapshot.failure)
     }
 
     pub fn history(&self, connection_id: &str) -> Vec<ResourceMetrics> {
@@ -675,6 +712,7 @@ fn running_snapshot() -> ConnectionProfilerSnapshot {
         metrics: None,
         history: Vec::with_capacity(RESOURCE_HISTORY_CAPACITY),
         state: ProfilerState::Running,
+        failure: None,
     }
 }
 
@@ -713,6 +751,7 @@ async fn sample_loop(
     let mut shell = match opened {
         Ok(shell) => shell,
         Err(_) => {
+            registry.record_failure(&connection_id, ProfilerFailure::OpenSession);
             registry.mark_degraded(&connection_id);
             record_and_emit(
                 &registry,
@@ -803,6 +842,7 @@ async fn sample_loop(
                             metrics.source,
                             MetricsSource::RttOnly | MetricsSource::Unsupported
                         ) {
+                            registry.record_failure(&connection_id, ProfilerFailure::NoMetrics);
                             consecutive_failures = consecutive_failures.saturating_add(1);
                         } else {
                             consecutive_failures = 0;
@@ -827,6 +867,7 @@ async fn sample_loop(
                         record_and_emit(&registry, &update_tx, connection_id.clone(), metrics);
                     }
                     Err(_) => {
+                        registry.record_failure(&connection_id, ProfilerFailure::ReadSample);
                         consecutive_failures = consecutive_failures.saturating_add(1);
                         if consecutive_failures >= RESOURCE_MAX_CONSECUTIVE_FAILURES {
                             registry.mark_degraded(&connection_id);
@@ -1106,9 +1147,15 @@ mod tests {
 
         assert_eq!(registry.state("conn-1"), Some(ProfilerState::Degraded));
         assert_eq!(
+            registry.failure("conn-1"),
+            Some(ProfilerFailure::OpenSession)
+        );
+        assert_eq!(
             registry.latest("conn-1").map(|metrics| metrics.source),
             Some(MetricsSource::RttOnly)
         );
+        registry.start("conn-1");
+        assert_eq!(registry.failure("conn-1"), None);
     }
 
     #[test]
@@ -1166,7 +1213,7 @@ mod tests {
                 }
             }
             response
-                .send(format!("===CPU_DIRECT===\n{cpu}\n===END==="))
+                .send(Ok(format!("===CPU_DIRECT===\n{cpu}\n===END===")))
                 .unwrap();
             tokio::time::timeout(Duration::from_secs(1), updated.recv())
                 .await
@@ -1198,7 +1245,7 @@ mod tests {
             .unwrap()
             .unwrap();
         response
-            .send("===CPU_DIRECT===\n87.5\n===END===".into())
+            .send(Ok("===CPU_DIRECT===\n87.5\n===END===".into()))
             .unwrap();
         tokio::time::timeout(Duration::from_secs(1), updated.recv())
             .await
@@ -1210,8 +1257,61 @@ mod tests {
         assert!(!registry.request_refresh("conn-1"));
     }
 
+    #[tokio::test]
+    async fn sampling_failures_identify_the_stage_and_clear_after_recovery() {
+        let registry = ProfilerRegistry::new();
+        let (requests, mut samples) = mpsc::unbounded_channel();
+        let (updates, mut updated) = mpsc::channel(1);
+        registry.start_with_sampler(
+            "failure-stages",
+            Arc::new(ControlledSampler {
+                requests,
+                opens: Default::default(),
+            }),
+            "Linux",
+            Some(updates),
+        );
+        for (output, failure, cpu) in [
+            (
+                Err("synthetic-private-error-content".into()),
+                Some(ProfilerFailure::ReadSample),
+                None,
+            ),
+            (
+                Ok("===END===\n".into()),
+                Some(ProfilerFailure::NoMetrics),
+                None,
+            ),
+            (
+                Ok("===CPU_DIRECT===\n42.5\n===END===\n".into()),
+                None,
+                Some(42.5),
+            ),
+        ] {
+            let response = tokio::time::timeout(Duration::from_secs(1), samples.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            response.send(output).unwrap();
+            tokio::time::timeout(Duration::from_secs(1), updated.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let snapshot = registry.snapshot("failure-stages").unwrap();
+            assert_eq!(snapshot.failure, failure);
+            assert_eq!(snapshot.metrics.unwrap().cpu_percent, cpu);
+            assert_eq!(snapshot.state, ProfilerState::Running);
+            assert!(
+                !format!("{:?}", registry.snapshot("failure-stages"))
+                    .contains("synthetic-private-error-content")
+            );
+            registry.request_refresh("failure-stages");
+        }
+        registry.stop("failure-stages");
+    }
+
     struct ControlledSampler {
-        requests: mpsc::UnboundedSender<oneshot::Sender<String>>,
+        requests: mpsc::UnboundedSender<oneshot::Sender<Result<String, String>>>,
         opens: Arc<std::sync::atomic::AtomicUsize>,
     }
 
@@ -1229,7 +1329,7 @@ mod tests {
         }
     }
 
-    struct ControlledShell(mpsc::UnboundedSender<oneshot::Sender<String>>);
+    struct ControlledShell(mpsc::UnboundedSender<oneshot::Sender<Result<String, String>>>);
 
     impl ResourceSampleShell for ControlledShell {
         fn sample_until<'a>(
@@ -1242,7 +1342,7 @@ mod tests {
             Box::pin(async move {
                 let (tx, rx) = oneshot::channel();
                 self.0.send(tx).unwrap();
-                Ok(rx.await.unwrap())
+                rx.await.unwrap()
             })
         }
 

@@ -12,6 +12,9 @@
       "source": "Source"
     },
     "panel": {
+      "session_failed": "Impossible d’ouvrir une session de surveillance. Vérifiez la connexion ; le mode à canal unique nécessite aussi l’authentification d’une connexion distincte.",
+      "sample_read_failed": "Impossible de lire un échantillon complet. Relancez la détection.",
+      "sample_unrecognized": "Un échantillon a été reçu, mais aucune mesure de l’hôte n’a été reconnue. Vérifiez la compatibilité du système distant et des commandes de collecte.",
       "detecting_system": "Identification du système distant…",
       "system_unavailable": "Impossible d’identifier le système distant. Ouvrez un terminal pour cet hôte, vérifiez que le serveur autorise des sessions shell distinctes, puis réessayez.",
       "sampling_failed": "Impossible de collecter les mesures de l’hôte. Vérifiez les autorisations des sessions shell et la disponibilité des commandes de mesure sur le serveur, puis réessayez.",

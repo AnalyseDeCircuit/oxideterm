@@ -2101,20 +2101,54 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn shell_only_server_environment_detection_keeps_sampling_on_separate_channels() {
+    async fn shell_only_otp_server_keeps_sampling_on_shared_connection_despite_command_echo() {
         use oxideterm_connection_monitor::ResourceSampler;
         use russh::{Channel, ChannelId, server};
         struct ShellOnlyPeer {
             channels: HashMap<ChannelId, Channel<server::Msg>>,
         }
+        struct OtpPrompt(Arc<std::sync::atomic::AtomicUsize>);
+        impl crate::SshPromptHandler for OtpPrompt {
+            fn keyboard_interactive(
+                &self,
+                _: crate::KeyboardInteractivePromptRequest,
+            ) -> std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = Result<
+                                crate::KeyboardInteractiveResponses,
+                                crate::SshPromptError,
+                            >,
+                        > + Send
+                        + '_,
+                >,
+            > {
+                self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Box::pin(async { Ok(zeroize::Zeroizing::new(vec!["synthetic-otp".into()])) })
+            }
+        }
         impl server::Handler for ShellOnlyPeer {
             type Error = russh::Error;
-            async fn auth_password(
-                &mut self,
+            async fn auth_keyboard_interactive<'a>(
+                &'a mut self,
                 _: &str,
                 _: &str,
+                response: Option<server::Response<'a>>,
             ) -> Result<server::Auth, Self::Error> {
-                Ok(server::Auth::Accept)
+                Ok(match response {
+                    None => server::Auth::Partial {
+                        name: "MFA".into(),
+                        instructions: "".into(),
+                        prompts: vec![("OTP Code:".into(), false)].into(),
+                    },
+                    Some(mut responses) => {
+                        if responses.next().as_deref() == Some(b"synthetic-otp".as_slice()) {
+                            server::Auth::Accept
+                        } else {
+                            server::Auth::reject()
+                        }
+                    }
+                })
             }
             async fn channel_open_session(
                 &mut self,
@@ -2154,11 +2188,19 @@ mod tests {
                 } else if command.contains("===ENV===") {
                     "===ENV===\nLinux\n===ARCH===\nx86_64\n===KERNEL===\n6.8\n===SHELL===\n/bin/bash\n===HOME===\n/home/fixture\n===ZDOTDIR===\n===XDG_CONFIG_HOME===\n===DISTRO===\nPRETTY_NAME=Ubuntu\n===END===\n"
                 } else if command.contains("sample-ok") {
+                    // A gateway can echo the command in its own SSH data message before executing it.
+                    session.data(channel, data.to_vec())?;
                     "sample-ok\n===END===\n"
+                } else if command.contains("===STAT===") {
+                    session.data(channel, data.to_vec())?;
+                    "===MEMINFO===\nMemTotal: 1024 kB\nMemAvailable: 512 kB\n===END===\n"
                 } else {
                     ""
                 };
-                session.data(channel, output.as_bytes().to_vec())
+                // End markers can span SSH messages independently of command echo.
+                let split = output.len().saturating_sub(3);
+                session.data(channel, output.as_bytes()[..split].to_vec())?;
+                session.data(channel, output.as_bytes()[split..].to_vec())
             }
         }
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2187,10 +2229,13 @@ mod tests {
             let _ = session.await;
         });
         let mut config = SshConfig::password("127.0.0.1", port, "fixture", "fixture-password");
+        config.auth = crate::AuthMethod::KeyboardInteractive;
         config.trust_host_key = Some(false);
         config.expected_host_key_fingerprint = Some(fingerprint);
         let registry = SshConnectionRegistry::default();
+        let prompts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let handle = crate::SshTransportClient::new(config)
+            .with_prompt_handler(Arc::new(OtpPrompt(prompts.clone())))
             .connect_node_with_registry(
                 registry.clone(),
                 ConnectionConsumer::NodeRouter("fixture".into()),
@@ -2213,9 +2258,34 @@ mod tests {
                 )
                 .await
                 .unwrap(),
-            "sample-ok\n===END===\n"
+            "echo sample-ok; echo '===END==='\nsample-ok\n===END===\n"
         );
         sample.close().await.unwrap();
+        let profiler = oxideterm_connection_monitor::ProfilerRegistry::new();
+        let (updates, mut updated) = tokio::sync::mpsc::channel(1);
+        profiler.start_with_sampler_on_config(
+            "fixture",
+            Arc::new(handle.clone()),
+            "Linux",
+            oxideterm_connection_monitor::ResourceSamplingConfig {
+                system: true,
+                gpu: false,
+                processes: false,
+                docker: false,
+            },
+            Some(updates),
+            tokio::runtime::Handle::current(),
+        );
+        tokio::time::timeout(Duration::from_secs(2), updated.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let metrics = profiler.latest("fixture").unwrap();
+        assert_eq!(metrics.memory_total, Some(1_048_576));
+        assert_eq!(metrics.memory_used, Some(524_288));
+        assert_eq!(profiler.failure("fixture"), None);
+        assert_eq!(prompts.load(std::sync::atomic::Ordering::SeqCst), 1);
+        profiler.stop("fixture");
         assert_eq!(
             handle.info().consumers,
             vec![ConnectionConsumer::NodeRouter("fixture".into())]
