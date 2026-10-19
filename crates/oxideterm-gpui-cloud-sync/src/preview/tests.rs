@@ -317,6 +317,54 @@ fn quick_command(id: &str, name: &str, command: &str) -> QuickCommand {
 }
 
 #[test]
+fn plugin_profiles_appear_in_upload_selection_and_field_diffs_without_secret_references() {
+    let before: SavedConnectionsSyncSnapshot = serde_json::from_value(serde_json::json!({
+        "revision":"before", "exportedAt":"2026-10-19T00:00:00Z", "records":[],
+        "pluginProfiles":[{
+            "id":"custom", "plugin_id":"missing.provider", "type_id":"new-type", "name":"Device", "group":null,
+            "config":{"future/options":{"enabled":true}}, "credential_refs":{"auth/token":"private-local-reference"},
+            "created_at":"2026-10-19T00:00:00Z", "updated_at":"2026-10-19T00:00:00Z", "last_used_at":null
+        }]
+    })).unwrap();
+    let mut after = before.clone();
+    after.plugin_profiles[0]
+        .config
+        .insert("root/host".into(), serde_json::json!("device.local"));
+    let mut changes = Vec::new();
+    push_upload_connection_field_diffs(&mut changes, Some(&before), &after);
+    assert_eq!(changes[0].item_key, "custom");
+    assert_eq!(changes[0].status, CloudSyncFieldDiffStatus::Modified);
+    assert_eq!(
+        changes[0]
+            .fields
+            .iter()
+            .map(|f| f.label_key)
+            .collect::<Vec<_>>(),
+        vec!["plugin.cloud_sync.diff_fields.plugin_configuration"]
+    );
+    let displayed: serde_json::Value =
+        serde_json::from_str(changes[0].fields[0].after.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        displayed,
+        serde_json::json!({"pluginId":"missing.provider","typeId":"new-type","config":{"future/options":{"enabled":true},"root/host":"device.local"}})
+    );
+    let local = CloudSyncLocalFieldDiffSnapshot {
+        connections: Some(after),
+        ..Default::default()
+    };
+    let mut selection = crate::selection::CloudSyncUploadSelection::from_scope_and_local_snapshot(
+        &SyncScope::default(),
+        &local,
+    );
+    assert_eq!(selection.connection_item_ids, ["custom".to_owned()].into());
+    selection.selected_connection_ids = Some(BTreeSet::new());
+    assert_eq!(
+        selection.item_filter().connection_ids,
+        Some(BTreeSet::new())
+    );
+}
+
+#[test]
 fn local_profile_icon_change_appears_in_sync_preview() {
     let before: SavedConnectionsSyncSnapshot = serde_json::from_value(serde_json::json!({
         "revision": "before", "exportedAt": "2026-09-23T00:00:00Z", "records": [],

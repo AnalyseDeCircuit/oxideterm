@@ -327,6 +327,168 @@ fn encrypted_replica_reopens_and_retries_the_exact_pending_publication() {
 }
 
 #[test]
+fn plugin_connections_sync_without_provider_registry_and_keep_unknown_configuration() {
+    use oxideterm_connections::{ConnectionStore, ConnectionStoreData, PluginConnectionProfile};
+    use oxideterm_forwarding::{ForwardingRegistry, SavedForwardStore};
+    use oxideterm_settings::SettingsStore;
+    let directory = std::env::temp_dir().join(format!("oxide-plugin-sync-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("connections.json");
+    let now = chrono::Utc::now();
+    let mut data = ConnectionStoreData::default();
+    for id in ["dynamic", "excluded"] {
+        data.plugin_profiles.push(PluginConnectionProfile {
+            id: id.into(),
+            plugin_id: "not.installed".into(),
+            type_id: "arbitrary-type".into(),
+            name: id.into(),
+            group: None,
+            config: [(
+                "future/options".into(),
+                serde_json::json!({"opaque":[true,42]}),
+            )]
+            .into(),
+            credential_refs: [("auth/token".into(), None)].into(),
+            created_at: now,
+            updated_at: now,
+            last_used_at: None,
+        });
+    }
+    std::fs::write(&path, serde_json::to_vec(&data).unwrap()).unwrap();
+    let mut connections = ConnectionStore::load(&path).unwrap();
+    let forwards = ForwardingRegistry::new_with_store(
+        SavedForwardStore::load(directory.join("forwards.json")).unwrap(),
+    );
+    let settings = SettingsStore::load_from_path(directory.join("settings.json")).unwrap();
+    let scope = crate::SyncScope::default();
+    let view = ConfigurationView::collect(&connections, &forwards, &settings, &scope).unwrap();
+    let resource = SyncResource {
+        kind: ResourceKind::PluginConnection,
+        id: "dynamic".into(),
+    };
+    let selected = view.selected(
+        std::iter::empty(),
+        &scope,
+        &crate::operation::StructuredUploadItemFilter {
+            connection_ids: Some(["dynamic".into()].into()),
+            ..Default::default()
+        },
+    );
+    assert!(selected.contains(&resource));
+    assert!(!selected.contains(&SyncResource {
+        kind: ResourceKind::PluginConnection,
+        id: "excluded".into()
+    }));
+    let configuration = SyncField {
+        resource: resource.clone(),
+        group: "configuration".into(),
+    };
+    let name = SyncField {
+        resource: resource.clone(),
+        group: "name".into(),
+    };
+    let portable = view.values[&configuration]
+        .decode::<serde_json::Value>()
+        .unwrap();
+    assert_eq!(
+        portable["credential_refs"],
+        serde_json::json!({"auth/token":null})
+    );
+    assert_eq!(portable["plugin_id"], "not.installed");
+    let mut left = SyncReplica::new(Uuid::from_u128(1));
+    left.capture_local(&SyncValues::new(), &view.values, &selected)
+        .unwrap();
+    let mut right = SyncReplica::load(left.snapshot(), Uuid::from_u128(2)).unwrap();
+    let mut local = view.values.clone();
+    local.insert(
+        name.clone(),
+        FieldValue::encode(&"Renamed locally").unwrap(),
+    );
+    let mut remote = view.values.clone();
+    let mut config = portable;
+    config["config"]["root/host"] = serde_json::json!("remote.device");
+    remote.insert(configuration, FieldValue::encode(&config).unwrap());
+    left.capture_local(&view.values, &local, &selected).unwrap();
+    right
+        .capture_local(&view.values, &remote, &selected)
+        .unwrap();
+    left.merge(right.snapshot()).unwrap();
+    let merged = left.materialize(&local, &selected).unwrap();
+    let resolved = view.resolved_connections(&merged).unwrap();
+    let profile = resolved
+        .connections
+        .plugin_profiles
+        .iter()
+        .find(|p| p.id == "dynamic")
+        .unwrap();
+    assert_eq!(profile.name, "Renamed locally");
+    assert_eq!(
+        profile.config,
+        [
+            (
+                "future/options".into(),
+                serde_json::json!({"opaque":[true,42]})
+            ),
+            ("root/host".into(), serde_json::json!("remote.device"))
+        ]
+        .into()
+    );
+    let prepared = connections
+        .prepare_resolved_configuration(resolved)
+        .unwrap();
+    let mut cleanup = connections
+        .commit_prepared_saved_connections_snapshot(prepared)
+        .unwrap();
+    connections
+        .finalize_saved_connections_sync_cleanup(&mut cleanup)
+        .unwrap();
+    assert_eq!(
+        ConnectionStore::load(&path)
+            .unwrap()
+            .plugin_profiles()
+            .iter()
+            .find(|p| p.id == "dynamic")
+            .unwrap()
+            .name,
+        "Renamed locally"
+    );
+
+    let remaining: SyncValues = merged
+        .iter()
+        .filter(|(field, _)| field.resource != resource)
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    left.capture_local(&merged, &remaining, &selected).unwrap();
+    let deleted = left.materialize(&merged, &selected).unwrap();
+    let prepared = connections
+        .prepare_resolved_configuration(view.resolved_connections(&deleted).unwrap())
+        .unwrap();
+    let mut cleanup = connections
+        .commit_prepared_saved_connections_snapshot(prepared)
+        .unwrap();
+    connections
+        .finalize_saved_connections_sync_cleanup(&mut cleanup)
+        .unwrap();
+    assert_eq!(
+        connections
+            .plugin_profiles()
+            .iter()
+            .map(|p| p.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["excluded"]
+    );
+    assert_eq!(
+        connections
+            .export_saved_connections_snapshot()
+            .unwrap()
+            .plugin_tombstones[0]
+            .id,
+        "dynamic"
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn domain_mapping_and_recovery_restore_interrupted_writes_then_keep_committed_values() {
     use oxideterm_connections::{
         ConnectionStore, ConnectionStoreData, LocalTerminalProfile, SerialProfile, TelnetProfile,

@@ -22,6 +22,17 @@ pub(crate) fn credential_selection(
 ) -> CredentialSyncSelection {
     let mut result = CredentialSyncSelection::default();
     if scope.sync_connections {
+        result.plugin_connection_ids = store
+            .plugin_profiles()
+            .iter()
+            .filter(|p| {
+                filter
+                    .connection_ids
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&p.id))
+            })
+            .map(|p| p.id.clone())
+            .collect();
         result.connection_ids = store
             .connections()
             .iter()

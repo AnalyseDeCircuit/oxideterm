@@ -283,6 +283,13 @@ impl CloudSyncOperationService {
 
         let mut credential_selection = oxideterm_connections::CredentialSyncSelection::default();
         if selection.connections {
+            credential_selection.plugin_connection_ids = preview
+                .connections_snapshot
+                .as_ref()
+                .into_iter()
+                .flat_map(|s| &s.plugin_profiles)
+                .map(|p| p.id.clone())
+                .collect();
             credential_selection.connection_ids = preview
                 .connections_snapshot
                 .as_ref()

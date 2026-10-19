@@ -25,6 +25,7 @@ pub(super) fn push_upload_connection_field_diffs(
     local: &SavedConnectionsSyncSnapshot,
 ) {
     push_local_terminal_profile_diffs(items, local, remote, None, &ConflictStrategy::Replace);
+    push_plugin_connection_diffs(items, local, remote, None, &ConflictStrategy::Replace);
     let remote_records = remote
         .into_iter()
         .flat_map(|snapshot| snapshot.records.iter())
@@ -95,6 +96,7 @@ pub(super) fn push_connection_field_diffs(
     conflict_strategy: &ConflictStrategy,
 ) {
     push_local_terminal_profile_diffs(items, remote, local, base, conflict_strategy);
+    push_plugin_connection_diffs(items, remote, local, base, conflict_strategy);
     let base_records = base
         .into_iter()
         .flat_map(|snapshot| snapshot.records.iter())
@@ -665,6 +667,95 @@ pub(super) fn push_app_settings_field_diffs(
             status,
             fields,
         );
+    }
+}
+
+fn plugin_connection_fields(
+    profile: &oxideterm_connections::PluginConnectionProfile,
+) -> [(&'static str, Option<String>); 3] {
+    [
+        ("plugin.cloud_sync.diff_fields.name", Some(profile.name.clone())),
+        ("plugin.cloud_sync.diff_fields.group", profile.group.clone()),
+        ("plugin.cloud_sync.diff_fields.plugin_configuration", Some(serde_json::json!({"pluginId":profile.plugin_id,"typeId":profile.type_id,"config":profile.config}).to_string())),
+    ]
+}
+
+fn push_plugin_connection_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    incoming: &SavedConnectionsSyncSnapshot,
+    local: Option<&SavedConnectionsSyncSnapshot>,
+    base: Option<&SavedConnectionsSyncSnapshot>,
+    strategy: &ConflictStrategy,
+) {
+    const SECTION: &str = "plugin.cloud_sync.settings.sync_connections";
+    for profile in &incoming.plugin_profiles {
+        let previous =
+            local.and_then(|snapshot| snapshot.plugin_profiles.iter().find(|p| p.id == profile.id));
+        let baseline =
+            base.and_then(|snapshot| snapshot.plugin_profiles.iter().find(|p| p.id == profile.id));
+        let merged = match (baseline, previous) {
+            (Some(base), Some(old)) => merge_structured_model_fields(base, old, profile, strategy)
+                .ok()
+                .flatten(),
+            _ => None,
+        };
+        let mut fields = Vec::new();
+        let old = previous.map(plugin_connection_fields);
+        let base = baseline.map(plugin_connection_fields);
+        let remote = plugin_connection_fields(profile);
+        for (index, (label, value)) in plugin_connection_fields(merged.as_ref().unwrap_or(profile))
+            .into_iter()
+            .enumerate()
+        {
+            if let (Some(base), Some(old)) = (&base, &old) {
+                push_merge_changed(
+                    &mut fields,
+                    label,
+                    base[index].1.clone(),
+                    old[index].1.clone(),
+                    remote[index].1.clone(),
+                    value,
+                    strategy,
+                );
+            } else {
+                push_changed(
+                    &mut fields,
+                    label,
+                    old.as_ref().and_then(|old| old[index].1.clone()),
+                    value,
+                );
+            }
+        }
+        push_non_empty_field_diff(
+            items,
+            SECTION,
+            profile.id.clone(),
+            profile.name.clone(),
+            if previous.is_some() {
+                CloudSyncFieldDiffStatus::Modified
+            } else {
+                CloudSyncFieldDiffStatus::Added
+            },
+            fields,
+        );
+    }
+    for tombstone in &incoming.plugin_tombstones {
+        let name = local
+            .and_then(|snapshot| {
+                snapshot
+                    .plugin_profiles
+                    .iter()
+                    .find(|p| p.id == tombstone.id)
+            })
+            .map(|p| p.name.clone())
+            .unwrap_or_else(|| tombstone.id.clone());
+        items.push(field_diff_item_with_key(
+            SECTION,
+            tombstone.id.clone(),
+            name,
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
     }
 }
 

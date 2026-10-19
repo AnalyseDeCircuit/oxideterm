@@ -168,6 +168,22 @@ pub(super) fn merge_connection_records(
     merged_at: &str,
 ) -> Result<bool> {
     let mut local_profiles_changed = false;
+    for profile in &mut remote.plugin_profiles {
+        let Some(base) = base.plugin_profiles.iter().find(|p| p.id == profile.id) else {
+            continue;
+        };
+        let Some(local) = local.plugin_profiles.iter().find(|p| p.id == profile.id) else {
+            continue;
+        };
+        if let Some(mut merged) =
+            merge_structured_model_fields(base, local, profile, conflict_strategy)?
+        {
+            merged.updated_at =
+                chrono::DateTime::parse_from_rfc3339(merged_at)?.with_timezone(&Utc);
+            *profile = merged.portable();
+            local_profiles_changed = true;
+        }
+    }
     for remote_profile in &mut remote.local_terminal_profiles {
         let Some(base_profile) = base
             .local_terminal_profiles
