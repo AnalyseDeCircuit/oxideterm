@@ -1797,6 +1797,37 @@ mod tests {
         assert!(store.privilege_keychain.get(&keychain_id).is_err());
     }
 
+    #[test]
+    fn privilege_save_preserves_metadata_error_when_staged_secret_cleanup_fails() {
+        let mut store = load_empty_store("privilege-save-cleanup-error");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+
+        let failed_save_path = temp_store_path("privilege-save-metadata-error");
+        fs::create_dir(&failed_save_path).unwrap();
+        let expected_path = failed_save_path.display().to_string();
+        store.path = failed_save_path.clone();
+        store.privilege_keychain.fail_next_delete_for_tests();
+
+        let error = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("new-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains(&expected_path), "{message}");
+        assert!(!message.contains("test keychain delete failure"), "{message}");
+        fs::remove_dir(failed_save_path).unwrap();
+    }
+
 
     #[test]
     fn legacy_sudo_privilege_prompt_fragments_are_displayed_as_current_defaults() {

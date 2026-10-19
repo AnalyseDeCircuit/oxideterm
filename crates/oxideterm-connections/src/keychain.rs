@@ -5,7 +5,10 @@ use oxideterm_secret_store::NativeSecretStore;
 #[cfg(test)]
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 const SERVICE_NAME: &str = "com.oxideterm.ssh";
 const PORTABLE_ACCOUNT_PREFIX: &str = "portable:v1:";
@@ -20,6 +23,8 @@ pub(crate) struct ConnectionKeychain {
     test_store: Option<Arc<Mutex<HashMap<String, SecretString>>>>,
     #[cfg(test)]
     test_max_secret_bytes: Option<usize>,
+    #[cfg(test)]
+    test_fail_next_delete: Option<Arc<AtomicBool>>,
 }
 
 /// Grants multiple reads after one operation-scoped authentication.
@@ -43,6 +48,8 @@ impl Default for ConnectionKeychain {
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
             #[cfg(test)]
             test_max_secret_bytes: None,
+            #[cfg(test)]
+            test_fail_next_delete: None,
         }
     }
 }
@@ -57,6 +64,8 @@ impl ConnectionKeychain {
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
             #[cfg(test)]
             test_max_secret_bytes: None,
+            #[cfg(test)]
+            test_fail_next_delete: None,
         }
     }
 
@@ -72,6 +81,8 @@ impl ConnectionKeychain {
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
             #[cfg(test)]
             test_max_secret_bytes: None,
+            #[cfg(test)]
+            test_fail_next_delete: None,
         }
     }
 
@@ -86,7 +97,13 @@ impl ConnectionKeychain {
             authentication_reason: None,
             test_store: Some(Arc::new(Mutex::new(HashMap::new()))),
             test_max_secret_bytes: Some(max_secret_bytes),
+            test_fail_next_delete: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fail_next_delete_for_tests(&mut self) {
+        self.test_fail_next_delete = Some(Arc::new(AtomicBool::new(true)));
     }
 
     pub(crate) fn store(&self, id: &str, secret: &SecretString) -> Result<()> {
@@ -219,6 +236,18 @@ impl ConnectionKeychain {
     pub(crate) fn delete(&self, id: &str) -> Result<()> {
         #[cfg(test)]
         if let Some(store) = &self.test_store {
+            if self
+                .test_fail_next_delete
+                .as_ref()
+                .is_some_and(|fail| fail.swap(false, Ordering::SeqCst))
+            {
+                anyhow::bail!("test keychain delete failure");
+            }
+            // Real backends reject an empty account; model that so cleanup
+            // retries cannot silently swallow a blank reference.
+            if id.is_empty() {
+                anyhow::bail!("empty keychain id");
+            }
             store
                 .lock()
                 .map_err(|error| anyhow::anyhow!("failed to lock test keychain: {error}"))?
