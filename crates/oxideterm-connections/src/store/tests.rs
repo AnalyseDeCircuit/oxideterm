@@ -1797,6 +1797,47 @@ mod tests {
         assert!(store.privilege_keychain.get(&keychain_id).is_err());
     }
 
+    #[test]
+    fn imported_privilege_replacement_removes_random_reference_secret() {
+        let mut store = load_empty_store("privilege-import-random-cleanup");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("original-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let original_keychain_id = original.keychain_id.unwrap();
+        assert!(original_keychain_id.starts_with("privilege-"));
+
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].keychain_id = None;
+        imported.privilege_credentials[0].plaintext_secret =
+            Some(SecretString::from("replacement-secret"));
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+
+        assert!(
+            store
+                .privilege_keychain
+                .get(&original_keychain_id)
+                .is_err()
+        );
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", "cred-1")
+                .unwrap(),
+            SecretString::from("replacement-secret")
+        );
+    }
 
     #[test]
     fn legacy_sudo_privilege_prompt_fragments_are_displayed_as_current_defaults() {
