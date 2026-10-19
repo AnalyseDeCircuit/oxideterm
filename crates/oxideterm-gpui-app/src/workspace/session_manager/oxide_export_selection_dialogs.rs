@@ -27,6 +27,26 @@ impl From<&SavedConnection> for OxideExportConnectionRow {
     }
 }
 
+impl From<&oxideterm_connections::PluginConnectionProfile> for OxideExportConnectionRow {
+    fn from(profile: &oxideterm_connections::PluginConnectionProfile) -> Self {
+        Self {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+            meta: format!(
+                "{} · {}{}",
+                profile.plugin_id,
+                profile.type_id,
+                profile
+                    .group
+                    .as_ref()
+                    .map(|group| format!(" [{group}]"))
+                    .unwrap_or_default()
+            ),
+            created_at_millis: profile.created_at.timestamp_millis(),
+        }
+    }
+}
+
 #[derive(Clone)]
 struct OxideExportForwardRow {
     id: String,
@@ -275,17 +295,14 @@ impl OxideExportForwardGroupRenderer {
     }
 }
 
-pub(super) fn oxide_export_connection_signature(connection: &SavedConnection) -> u64 {
+pub(super) fn oxide_export_connection_signature(connection: &OxideExportConnectionRow) -> u64 {
     let mut hasher = DefaultHasher::new();
     // Export rows are keyed by saved connection id. Other visible fields affect
     // labels/badges and should remeasure the dialog row after edits/imports.
     connection.id.hash(&mut hasher);
     connection.name.hash(&mut hasher);
-    connection.username.hash(&mut hasher);
-    connection.host.hash(&mut hasher);
-    connection.port.hash(&mut hasher);
-    connection.group.hash(&mut hasher);
-    connection.created_at.timestamp_millis().hash(&mut hasher);
+    connection.meta.hash(&mut hasher);
+    connection.created_at_millis.hash(&mut hasher);
     hasher.finish()
 }
 
@@ -326,7 +343,7 @@ pub(super) fn oxide_export_count_label(template: String, count: usize) -> String
 impl WorkspaceApp {
     pub(super) fn render_oxide_connection_selection(
         &self,
-        connections: &[SavedConnection],
+        connections: &[OxideExportConnectionRow],
         selected_count: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -352,7 +369,7 @@ impl WorkspaceApp {
             .map(|timestamp| {
                 connections
                     .iter()
-                    .filter(|connection| connection.created_at.timestamp_millis() > timestamp)
+                    .filter(|connection| connection.created_at_millis > timestamp)
                     .count()
             })
             .unwrap_or(0);
@@ -498,6 +515,12 @@ impl WorkspaceApp {
                                     .connections()
                                     .iter()
                                     .map(|connection| connection.id.clone())
+                                    .chain(
+                                        this.connection_store
+                                            .plugin_profiles()
+                                            .iter()
+                                            .map(|profile| profile.id.clone()),
+                                    )
                                     .collect::<HashSet<_>>();
                                 this.session_manager.update(cx, |manager, cx| {
                                     if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
@@ -547,7 +570,7 @@ impl WorkspaceApp {
 
     pub(super) fn sync_oxide_export_connection_list_state(
         &self,
-        connections: &[SavedConnection],
+        connections: &[OxideExportConnectionRow],
         cx: &App,
     ) {
         let signatures = connections

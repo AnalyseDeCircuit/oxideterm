@@ -194,8 +194,12 @@ fn insert_archive(
     mut payload: EncryptedPayload,
     scope: &crate::SyncScope,
 ) -> Result<()> {
-    let decoded =
+    let mut decoded =
         decode_archive_sync_connections(connections, std::mem::take(&mut payload.connections))?;
+    decoded.snapshot.plugin_profiles = std::mem::take(&mut payload.plugin_profiles)
+        .into_iter()
+        .map(|profile| profile.portable())
+        .collect();
     // Structured records carry authoritative stable metadata; the credential
     // archive may also contain a reduced copy of those same connections.
     let mut archive = ConfigurationView::empty();

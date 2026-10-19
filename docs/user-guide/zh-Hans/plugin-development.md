@@ -878,7 +878,121 @@ WebAssembly 解析器、高亮查询、各自的 SHA-256 校验值、宿主版�
 
 注册必须使用发出它的同一个插件 id。释放注册是幂等的，并由宿主执行。
 
+## 插件连接类型
+
+进程插件通过 `contributes.connections` 声明连接类型，直接进入现有的新建连接窗口和连接管理，
+支持搜索、编辑、删除、批量选择和分组。同一配置每次打开都会创建独立实例。
+此接口需要 2.2.4 之后的宿主；在 `engines.oxideterm` 中排除旧版本，并声明 `ui.write` 权限。
+
+```json
+{
+  "connections": [{
+    "id": "device",
+    "title": "设备",
+    "icon": "plug",
+    "terminalEntry": "bin/terminal",
+    "form": {
+      "controls": [
+        {"kind": "text", "id": "address", "label": "@address"},
+        {"kind": "password", "id": "token", "label": "@token"}
+      ],
+      "translations": {"zh-CN": {"address": "地址", "token": "令牌"}}
+    }
+  }]
+}
+```
+
+正式插件应提供完整的 11 语言词典。表单复用原生控件，支持 `text`、`password`、`number`、
+`checkbox`、`select`、`textarea`、`stack`、`row`、`columns` 和 `markdown`。
+名称和分组由宿主提供。区段、字段标识不得包含 `/`，`__profile` 为宿主保留区段。
+配置键采用 `sectionId/controlId`，顶层控件的区段为 `root`。数值输入框提交其文本表示。
+
+密码字段需要用户批准 `credentials.raw.read`。凭据存入宿主的安全存储，连接配置只保存引用。
+编辑时密码留空会保留原值；勾选“清除已保存的凭据”后，先移除旧凭据，再保存本次输入的新值。
+表单草稿不会发送给插件。停用或卸载插件后，配置仍然保留，名称、分组仍可编辑，也可以删除。
+插件连接纳入云同步的连接范围，也支持 `.oxide` 的选择、预览和冲突处理。
+同步按 `plugin_id` 和 `type_id` 识别提供方；接收配置不要求本机已安装对应插件。
+无法识别的配置字段会保留在存储和后续导出中，`connection.open` 只接收当前插件表单声明的字段，
+因此旧版插件编辑连接时不会删除新版设置。密码字段同样按当前表单筛选。
+
+凭据仅在开启敏感凭据同步，或加密导出时勾选包含密码后传输；导入文件还需勾选恢复已保存的凭据。
+本机安全存储引用不会跨设备复制，恢复后会生成新的本机引用。缺少插件的连接保持不可连接状态，
+安装并启用兼容插件后即可使用。两台设备的宿主都需支持插件连接。
+
+插件激活后，宿主发送 `connection.open` 命令，参数为：
+
+```json
+{
+  "instanceId": "host-generated-uuid",
+  "profileId": "saved-profile-uuid",
+  "typeId": "device",
+  "config": {"root/address": "device.local"},
+  "credentials": {"root/token": "user-provided-secret"}
+}
+```
+
+运行中的资源应按 `instanceId` 管理，不能按 `profileId` 共用。命令返回以下结果之一：
+
+- `{"kind":"workbench","schema":{...}}`：显示声明式工作台，可与终端分屏。
+  交互事件 `ui.event.surfaceId` 就是实例标识。持续刷新时发送 `tab` 注册，在元数据中提供
+  `connectionId: instanceId` 和 `schema`；每个实例使用独立的注册标识。
+- `{"kind":"terminal","args":[...]}`：用宿主原生终端直接启动声明的 `terminalEntry`。
+  可执行文件必须位于插件目录内，参数保持独立，不会在失败后改用命令解释器。
+  凭据应由插件进程持有并提供给其辅助进程，不得放入启动参数或环境变量。
+- `{"kind":"sshTerminal","shell":"posix","nodeId":"...","argv":["program","arg"]}`：
+  获得 `terminal.write` 授权后，在已连接的节点上打开终端消费者。宿主按明确选择的 POSIX
+  命令解释器逐个转义参数，拒绝能修改或提交命令行的控制字符，不另建脱离节点管理的 SSH 连接。
+
+断开连接或关闭对应工作台、终端时，宿主发送 `connection.close`，参数为
+`{"instanceId":"..."}`。此命令必须幂等，对未知实例和已取消的打开请求也应成功返回，
+回复前释放该实例的网络连接、订阅和后台任务。切换页面不会断开，移动或拆分终端也不改变其所有者。
+生命周期命令须在五秒内回复；传输超时或清理失败时，宿主停止整个提供方进程及其终端消费者。
+停用、更新插件同样会停止运行实例，但保留配置。迟到的结果和界面更新不能重新打开已关闭的实例。
+
 ## 声明式 Native 界面
+
+### 持续更新与消息工作台
+
+进程插件完成激活后，可以主动向 stdout 写入协议帧，无需等待用户操作。
+重新发送相同 `registrationId` 的 `tab` 或 `sidebar-panel` 注册即可更新界面；
+权限校验与首次注册一致。宿主持续读取输出，按有界批次交付界面更新。
+插件应合并短时间内的消息，只提交需要显示的有限数据，避免每条消息重发整个页面。
+stdout 仍只用于 JSON Lines 协议，后台任务不得混入诊断文本。
+
+切换或关闭普通注册标签页不会停止插件进程。插件负责自身网络连接和任务，提供明确的断开操作；
+停用插件、卸载或退出工作区时，宿主终止运行时及其输出读取任务，并丢弃旧运行实例的更新。
+这些新增能力需要 2.2.4 之后的宿主；依赖它们的插件应在 `engines.oxideterm` 中排除旧版本。
+
+表格声明 `id`、`selectable: true` 和 `rowKey` 后支持鼠标选择，以及获得焦点后的方向键、
+Home、End 选择。`rowKey` 指定行对象中的字段名，每行必须提供非空、唯一的字符串标识。
+`value` 可设置选中行的标识；用户选择通过 `ui.event` 返回，`type` 为 `change`，
+`value` 为该行标识。未声明选择能力的旧表格保持只读。
+
+```json
+{
+  "kind": "table",
+  "id": "messages",
+  "selectable": true,
+  "rowKey": "id",
+  "columns": ["topic", "preview"],
+  "rows": [{"id": "message-1", "topic": "devices/status", "preview": "ready"}]
+}
+```
+
+带稳定 `id` 的表格和列表在刷新时保留滚动位置。提供 `rowKey` 时，插入、删除或重排后
+继续显示原来的首个可见行；该行已删除时使用仍有效的邻近位置。选中行被删除时清除选择。
+保持插件、页面、区段和控件标识不变，才能沿用这些状态。
+
+使用 `textarea` 编辑多行消息正文：
+
+```json
+{"kind": "textarea", "id": "body", "label": "@payload", "value": "first line\nsecond line"}
+```
+
+它复用原生文本编辑器的输入法、选择、撤销、复制粘贴和滚动行为，编辑后发送
+`ui.event`（`type: "input"`，`value` 为完整文本）。无关界面刷新保留正在编辑的草稿；
+插件显式改变 `value` 时替换文本。`disabled` 禁止编辑。关闭所属页面后释放编辑器状态。
+`label`、`placeholder` 等文案继续使用插件的 11 语言翻译词典。
 
 Native 插件通过带版本的结构选择 OxideTerm 组件。插件提供数据并接收事件；
 宿主提供真正的共享组件、主题令牌、密度、字体、焦点、输入法行为、无障碍语义

@@ -326,6 +326,12 @@ fn native_plugin_all_saved_connection_ids(
         .connections()
         .iter()
         .map(|connection| connection.id.clone())
+        .chain(
+            connection_store
+                .plugin_profiles()
+                .iter()
+                .map(|profile| profile.id.clone()),
+        )
         .collect()
 }
 

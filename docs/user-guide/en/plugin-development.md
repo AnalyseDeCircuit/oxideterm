@@ -887,7 +887,141 @@ Common registration kinds:
 
 A registration must use the same plugin id as the plugin that emitted it. Disposal is idempotent and host-owned.
 
+## Connection providers
+
+Process plugins can declare connection types in `contributes.connections`. They appear in
+the existing New Connection dialog and Session Manager, including search, editing,
+deletion, batch selection and groups. Each opening creates an independent instance even
+when it uses the same saved profile. This API requires a host newer than 2.2.4; exclude
+older hosts in `engines.oxideterm` and request `ui.write`.
+
+```json
+{
+  "connections": [{
+    "id": "device",
+    "title": "Device",
+    "icon": "plug",
+    "terminalEntry": "bin/terminal",
+    "form": {
+      "controls": [
+        {"kind": "text", "id": "address", "label": "@address"},
+        {"kind": "password", "id": "token", "label": "@token"}
+      ],
+      "translations": {"en": {"address": "Address", "token": "Token"}}
+    }
+  }]
+}
+```
+
+Supply the usual eleven-locale dictionary in production. Forms reuse the native controls:
+`text`, `password`, `number`, `checkbox`, `select`, `textarea`, `stack`, `row`, `columns`
+and `markdown`. The host adds name and group fields. Section and field IDs cannot contain
+`/`; `__profile` is a reserved host section. Values use `sectionId/controlId` keys,
+with `root` for top-level controls. Numeric text fields submit their text representation.
+
+Password fields require approved `credentials.raw.read`. The host saves their values in
+its secret store, with references in the connection profile. Blank password edits preserve
+saved values; “Clear saved credentials” removes them before applying newly entered ones.
+Drafts are not sent to the plugin. Saved profiles remain available when a provider is
+disabled or removed; their metadata can still be edited and deleted. Profiles are stored
+in the connection manager and included in the connections scope of cloud sync and in
+`.oxide` selection, previews and conflict handling. Sync identifies a provider by
+`plugin_id` and `type_id`; importing metadata does not require the provider to be installed.
+Unknown configuration fields remain in storage and subsequent exports, but `connection.open`
+receives only fields declared by the installed provider's form. Editing on an older provider
+therefore does not erase newer settings. Password slots are also matched to the current form.
+
+Credentials travel only when sensitive-credential sync is enabled or passwords are included
+in an encrypted `.oxide` export. Archive import additionally requires opting into stored
+credentials. Local secret-store references never travel; restored values receive new local
+references. Missing providers keep the connection unavailable until a compatible provider is
+installed and enabled. Both devices need a host version supporting plugin connections.
+
+After activation the host dispatches `connection.open` with:
+
+```json
+{
+  "instanceId": "host-generated-uuid",
+  "profileId": "saved-profile-uuid",
+  "typeId": "device",
+  "config": {"root/address": "device.local"},
+  "credentials": {"root/token": "user-provided-secret"}
+}
+```
+
+Key all live resources by `instanceId`, not `profileId`. Reply with one of these values:
+
+- `{"kind":"workbench","schema":{...}}`: a validated declarative UI, displayed in a
+  normal plugin page that can share a split with terminals. Its `ui.event.surfaceId` is
+  the instance ID. Update it with a `tab` registration whose metadata contains
+  `connectionId: instanceId` and `schema`; use a distinct registration ID per instance.
+- `{"kind":"terminal","args":[...]}`: launch the declared `terminalEntry` directly in
+  the host's native PTY. The executable must resolve inside the plugin package. Arguments
+  retain their boundaries; the host does not fall back to a shell. Keep credentials out
+  of arguments and environment variables; the provider should retain them for its helper.
+- `{"kind":"sshTerminal","shell":"posix","nodeId":"...","argv":["program","arg"]}`:
+  with approved `terminal.write`, open a terminal consumer on an already connected node.
+  The host quotes each argument for the explicitly selected POSIX shell and rejects control
+  characters that could edit or submit its command line. No second unmanaged SSH connection is created.
+
+Disconnecting or closing the connection's page or terminal sends `connection.close` with
+`{"instanceId":"..."}`. Make this command idempotent, including for unknown IDs and
+cancelled opens. Stop the instance's sockets, subscriptions and workers before replying.
+Switching pages does not disconnect. Moving or splitting a terminal preserves its owner.
+The provider must answer lifecycle commands within five seconds. A transport timeout or
+failed cleanup retires the provider process and its terminal consumers. Disabling or
+updating a provider also stops its instances while retaining saved profiles. Late results
+and view updates cannot reopen closed instances.
+
 ## Declarative Native UI
+
+### Live updates and message workbenches
+
+After activation, process plugins can write protocol frames to stdout without waiting for
+a user action. Re-register a `tab` or `sidebar-panel` with the same `registrationId` to
+update its view. The host continuously reads output and delivers bounded batches through
+the same permission checks as initial registration. Coalesce incoming messages and submit
+only a bounded visible dataset instead of replacing the entire view for every message.
+Keep stdout exclusively for JSON Lines protocol frames.
+
+Switching or closing an ordinary contributed tab does not stop the plugin process. The plugin owns its network
+connections and should provide an explicit disconnect action. Disabling, uninstalling or
+closing the workspace stops its runtime and output readers; updates from a retired instance
+are discarded. These capabilities require a host newer than 2.2.4. Exclude older hosts in
+`engines.oxideterm` when using them.
+
+A table with `id`, `selectable: true` and `rowKey` supports mouse selection and, when focused,
+arrow keys, Home and End. `rowKey` names a field containing a unique, nonempty string in
+every row. `value` can set the selected row identity. Selection emits `ui.event` with
+`type: "change"` and the row identity as `value`. Existing tables remain read-only by default.
+
+```json
+{
+  "kind": "table",
+  "id": "messages",
+  "selectable": true,
+  "rowKey": "id",
+  "columns": ["topic", "preview"],
+  "rows": [{"id": "message-1", "topic": "devices/status", "preview": "ready"}]
+}
+```
+
+Tables and lists with stable IDs preserve their scroll position across updates. With
+`rowKey`, insertion, deletion and reordering preserve the first visible row's identity;
+if that row disappears, the host uses a nearby valid position. Removing the selected row
+clears selection. Keep the plugin, surface, section and control IDs stable to retain state.
+
+Use `textarea` for multiline message bodies:
+
+```json
+{"kind": "textarea", "id": "body", "label": "@payload", "value": "first line\nsecond line"}
+```
+
+This uses the native editor's IME, selection, undo, clipboard and scrolling behavior.
+Edits emit `ui.event` with `type: "input"` and the complete text as `value`. Unrelated view
+updates preserve the draft; explicitly changing `value` replaces it. `disabled` prevents
+editing. Closing the owning surface releases editor state. Labels and placeholders use
+the plugin's existing eleven-language translation dictionary.
 
 Native plugins select OxideTerm components through a versioned schema. The
 plugin supplies data and receives events; the host supplies the real shared

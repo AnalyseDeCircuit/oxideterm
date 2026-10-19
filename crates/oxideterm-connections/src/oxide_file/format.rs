@@ -132,6 +132,8 @@ pub struct OxideMetadata {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedPayload {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub plugin_profiles: Vec<crate::PluginConnectionProfile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub totp_credentials: Vec<crate::totp::TotpCredential>,
     pub version: u32,
     pub connections: Vec<EncryptedConnection>,
@@ -161,6 +163,7 @@ impl fmt::Debug for EncryptedPayload {
         // Debug output is often copied into bug reports; keep encrypted import
         // DTOs structural and avoid dumping user/plugin payloads.
         f.debug_struct("EncryptedPayload")
+            .field("plugin_profiles_len", &self.plugin_profiles.len())
             .field("version", &self.version)
             .field("connections_len", &self.connections.len())
             .field("has_app_settings_json", &self.app_settings_json.is_some())

@@ -87,19 +87,28 @@ fn preview_oxide_import_inner(
     };
     let file = OxideFile::from_bytes(bytes)?;
     report_progress("parsing_file", current_step);
-    let (metadata,payload) = if let Some(decryption_context) = decryption_context {
-        super::crypto::decrypt_oxide_archive_with_context_and_progress(&file, decryption_context, |stage| {
-            current_step += 1;
-            report_progress(stage, current_step);
-        })?
+    let (metadata, payload) = if let Some(decryption_context) = decryption_context {
+        super::crypto::decrypt_oxide_archive_with_context_and_progress(
+            &file,
+            decryption_context,
+            |stage| {
+                current_step += 1;
+                report_progress(stage, current_step);
+            },
+        )?
     } else {
         let password = password.ok_or(OxideFileError::CryptoError)?;
-        super::crypto::decrypt_oxide_archive_with_context_and_progress(&file, &mut OxideBatchDecryptionContext::new(password)?, |stage| {
-            current_step += 1;
-            report_progress(stage, current_step);
-        })?
+        super::crypto::decrypt_oxide_archive_with_context_and_progress(
+            &file,
+            &mut OxideBatchDecryptionContext::new(password)?,
+            |stage| {
+                current_step += 1;
+                report_progress(stage, current_step);
+            },
+        )?
     };
     let EncryptedPayload {
+        mut plugin_profiles,
         mut connections,
         app_settings_json,
         quick_commands_json,
@@ -113,6 +122,12 @@ fn preview_oxide_import_inner(
         ..
     } = payload;
     connections = filter_selected_connections(connections, options.selected_names.as_ref());
+    plugin_profiles.retain(|profile| {
+        options
+            .selected_names
+            .as_ref()
+            .is_none_or(|names| names.contains(&profile.name))
+    });
     let _forward_selection =
         filter_selected_forward_ids(&mut connections, options.selected_forward_ids.as_ref());
     if !options.import_forwards {
@@ -250,5 +265,11 @@ fn preview_oxide_import_inner(
     }
     current_step += 1;
     report_progress("analyzing_preview", current_step);
+    preview_plugin_connections(
+        &mut preview,
+        store,
+        &plugin_profiles,
+        options.conflict_strategy,
+    )?;
     Ok(preview)
 }

@@ -1145,8 +1145,10 @@ impl WorkspaceApp {
             .is_some_and(|dialog| dialog.import_portable_secrets);
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
-                format!("便携秘密项（{} 项）", preview.portable_secret_count),
-                "导入便携秘密项".to_string(),
+                self.i18n
+                    .t("modals.import.section_portable_secrets")
+                    .replace("{{count}}", &preview.portable_secret_count.to_string()),
+                self.i18n.t("modals.import.toggle_portable_secrets"),
                 checked,
                 cx.listener(|this, _event, _window, cx| {
                     this.session_manager.update(cx, |manager, cx| {
@@ -1161,10 +1163,7 @@ impl WorkspaceApp {
             ),
             self.render_oxide_tone_notice(
                 OXIDE_BLUE_500,
-                format!(
-                    "此文件还包含 {} 项便携秘密项，例如 AI 提供商密钥。",
-                    preview.portable_secret_count
-                ),
+                self.i18n.t("modals.import.preview_portable_secrets"),
                 Vec::new(),
                 cx,
             ),

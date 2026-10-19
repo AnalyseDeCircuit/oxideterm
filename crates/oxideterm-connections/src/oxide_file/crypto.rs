@@ -343,6 +343,7 @@ where
     // Connection archives can contain authentication material, so every
     // serializer supplied here must return a buffer that is wiped on drop.
     if payload.version <= 1
+        && payload.plugin_profiles.is_empty()
         && payload.app_settings_json.is_none()
         && payload.plugin_settings.is_empty()
         && payload.portable_secrets.is_empty()
@@ -381,6 +382,11 @@ where
         hasher.update(encoded.as_slice());
     }
 
+    if !payload.plugin_profiles.is_empty() {
+        hasher.update(b"plugin-connections-v1");
+        let encoded = Zeroizing::new(rmp_serde::to_vec_named(&payload.plugin_profiles)?);
+        hasher.update(encoded.as_slice());
+    }
     Ok(format!("sha256:{:x}", hasher.finalize()))
 }
 
@@ -541,6 +547,7 @@ mod tests {
 
     fn payload_with_default_ssh_algorithms() -> EncryptedPayload {
         EncryptedPayload {
+            plugin_profiles: Vec::new(),
             totp_credentials: Vec::new(),
             version: 1,
             connections: vec![EncryptedConnection {

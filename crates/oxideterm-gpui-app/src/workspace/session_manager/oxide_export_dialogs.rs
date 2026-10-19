@@ -39,7 +39,13 @@ impl WorkspaceApp {
         else {
             return div().into_any_element();
         };
-        let connections = self.connection_store.connections();
+        let connections = self
+            .session_manager
+            .read(cx)
+            .oxide_export_dialog
+            .as_ref()
+            .map(|dialog| Arc::clone(&dialog.connection_rows))
+            .unwrap_or_else(|| Arc::from([]));
         dismissible_dialog_backdrop()
             .on_mouse_down(
                 MouseButton::Left,

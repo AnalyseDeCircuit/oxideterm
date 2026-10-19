@@ -599,6 +599,12 @@ impl WorkspaceApp {
             .connections()
             .iter()
             .map(OxideExportConnectionRow::from)
+            .chain(
+                self.connection_store
+                    .plugin_profiles()
+                    .iter()
+                    .map(OxideExportConnectionRow::from),
+            )
             .collect::<Vec<_>>()
             .into();
         dialog.include_portable_secrets = portable_migration;
