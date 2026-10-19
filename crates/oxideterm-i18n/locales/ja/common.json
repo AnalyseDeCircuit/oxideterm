@@ -1142,6 +1142,8 @@
     "continue_button": "OxideTerm 2 を開始"
   },
   "onboarding": {
+    "more_features": "その他の機能を見る",
+    "less_features": "その他の機能を閉じる",
     "step_welcome": "ようこそ",
     "step_appearance": "外観",
     "step_workflow": "接続と操作",

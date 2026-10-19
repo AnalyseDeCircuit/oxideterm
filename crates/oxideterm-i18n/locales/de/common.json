@@ -1142,6 +1142,8 @@
     "continue_button": "Weiter zu OxideTerm 2"
   },
   "onboarding": {
+    "more_features": "Weitere Funktionen entdecken",
+    "less_features": "Weniger Funktionen anzeigen",
     "step_welcome": "Willkommen",
     "step_appearance": "Darstellung",
     "step_workflow": "Verbindungen & Bedienung",

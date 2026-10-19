@@ -1048,6 +1048,8 @@
     "terminal_shortcut_pending": "Phím tắt terminal của plugin đang chờ runtime"
   },
   "onboarding": {
+    "more_features": "Xem thêm tính năng",
+    "less_features": "Thu gọn tính năng",
     "step_welcome": "Chào mừng",
     "step_appearance": "Giao diện",
     "step_workflow": "Kết nối và thao tác",

@@ -59,6 +59,7 @@ pub(in crate::workspace) struct OnboardingState {
     pub(in crate::workspace) import_state: OnboardingImportState,
     pub(in crate::workspace) imported_count: usize,
     pub(in crate::workspace) host_count: Option<usize>,
+    pub(in crate::workspace) features_expanded: bool,
     pub(in crate::workspace) scroll_handle: ScrollHandle,
 }
 
@@ -74,6 +75,7 @@ impl OnboardingState {
             import_state: OnboardingImportState::Idle,
             imported_count: 0,
             host_count: None,
+            features_expanded: false,
             scroll_handle: ScrollHandle::new(),
         }
     }
@@ -88,6 +90,7 @@ impl OnboardingState {
         self.import_state = OnboardingImportState::Idle;
         self.imported_count = 0;
         self.host_count = None;
+        self.features_expanded = false;
         self.scroll_handle = ScrollHandle::new();
     }
 }

@@ -1142,6 +1142,8 @@
     "continue_button": "進入 OxideTerm 2"
   },
   "onboarding": {
+    "more_features": "查看更多功能",
+    "less_features": "收起更多功能",
     "step_welcome": "歡迎與須知",
     "step_appearance": "外觀",
     "step_workflow": "連線與操作",

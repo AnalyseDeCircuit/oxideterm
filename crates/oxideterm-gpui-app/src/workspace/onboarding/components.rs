@@ -27,20 +27,22 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .min_w_0()
+                    .flex_1()
                     .pt(px(1.0))
                     .flex()
                     .flex_col()
                     .gap(px(3.0))
                     .child(
                         div()
-                            .text_size(px(18.0))
+                            .text_size(px(22.0))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(rgb(self.tokens.ui.text))
                             .child(self.i18n.t(title_key)),
                     )
                     .child(
                         div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t(desc_key)),
                     ),
@@ -62,8 +64,8 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex()
-                    .items_center()
-                    .justify_between()
+                    .flex_col()
+                    .gap(px(4.0))
                     .child(
                         div()
                             .flex()
@@ -85,7 +87,7 @@ impl WorkspaceApp {
                     .when_some(hint_key, |row, key| {
                         row.child(
                             div()
-                                .text_size(px(10.0))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(self.tokens.ui.text_muted))
                                 .child(self.i18n.t(key)),
                         )
@@ -141,20 +143,21 @@ impl WorkspaceApp {
             .gap(px(2.0))
             .child(
                 div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(&format!("onboarding.{key}"))),
             )
             .child(
                 div()
-                    .text_size(px(11.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
             )
             .into_any_element();
         div()
-            .p(px(14.0))
+            .py(px(8.0))
+            .px(px(10.0))
             .rounded(px(self.tokens.radii.md))
             .when(highlight, |card| {
                 card.bg(rgba(
@@ -184,45 +187,54 @@ impl WorkspaceApp {
         div()
             .min_w(px(0.0))
             .flex()
-            .flex_col()
+            .items_start()
             .gap(px(12.0))
             .child(
                 div()
+                    .size(px(28.0))
+                    .flex_none()
+                    .rounded_full()
                     .flex()
                     .items_center()
-                    .gap(px(8.0))
+                    .justify_center()
+                    .bg(rgba(
+                        (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA,
+                    ))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.accent))
+                    .child(number.to_string()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
                     .child(
                         div()
-                            .size(px(28.0))
-                            .rounded_full()
                             .flex()
                             .items_center()
-                            .justify_center()
-                            .bg(rgba(
-                                (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA,
+                            .gap(px(8.0))
+                            .child(Self::render_lucide_icon(
+                                icon,
+                                16.0,
+                                rgb(self.tokens.ui.accent),
                             ))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.accent))
-                            .child(number.to_string()),
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(self.i18n.t(&format!("onboarding.{key}"))),
+                            ),
                     )
-                    .child(Self::render_lucide_icon(
-                        icon,
-                        16.0,
-                        rgb(self.tokens.ui.text_muted),
-                    )),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(&format!("onboarding.{key}"))),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
+                    ),
             )
             .into_any_element()
     }
@@ -263,12 +275,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .flex()
+            .items_start()
             .gap(px(8.0))
-            .p(px(10.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgba((self.tokens.ui.bg_card << 8) | ONBOARDING_CARD_ALPHA))
+            .py(px(6.0))
             .child(Self::render_lucide_icon(
                 icon,
                 14.0,
@@ -276,7 +285,9 @@ impl WorkspaceApp {
             ))
             .child(
                 div()
-                    .text_size(px(11.0))
+                    .flex_1()
+                    .min_w_0()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(&format!("onboarding.{key}"))),
             )
@@ -326,31 +337,18 @@ impl WorkspaceApp {
                     .min_w(px(0.0))
                     .child(
                         div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(self.tokens.ui.text))
                             .child(self.i18n.t(title_key)),
                     )
                     .child(
                         div()
-                            .text_size(px(11.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t(hint_key)),
                     ),
             )
-            .child(Self::render_lucide_icon(
-                if checked {
-                    LucideIcon::CheckCircle
-                } else {
-                    LucideIcon::Circle
-                },
-                20.0,
-                if checked {
-                    rgb(self.tokens.ui.accent)
-                } else {
-                    rgb(self.tokens.ui.text_muted)
-                },
-            ))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -386,7 +384,7 @@ impl WorkspaceApp {
         div()
             .flex()
             .gap(px(10.0))
-            .p(px(14.0))
+            .py(px(8.0))
             .rounded(px(self.tokens.radii.md))
             .when(accent, |card| {
                 card.bg(rgba(
@@ -399,12 +397,13 @@ impl WorkspaceApp {
             .child(
                 div()
                     .min_w(px(0.0))
+                    .flex_1()
                     .flex()
                     .flex_col()
                     .gap(px(3.0))
                     .child(
                         div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(self.tokens.ui.text))
                             .child(title),
@@ -412,7 +411,7 @@ impl WorkspaceApp {
                     .when(!detail.is_empty(), |column| {
                         column.child(
                             div()
-                                .text_size(px(11.0))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(self.tokens.ui.text_muted))
                                 .child(detail),
                         )

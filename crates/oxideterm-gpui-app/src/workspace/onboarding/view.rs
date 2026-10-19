@@ -22,7 +22,7 @@ impl WorkspaceApp {
         };
         let width = (f32::from(viewport.width) - margin * 2.0).max(0.0);
         let height = (f32::from(viewport.height) - margin * 2.0).max(0.0);
-        let wide = width >= 1100.0;
+        let wide = width >= 980.0;
         let step = OnboardingStep::from_index(self.onboarding.step);
         let content = match step {
             OnboardingStep::Welcome => self.onboarding_columns(
@@ -31,28 +31,21 @@ impl WorkspaceApp {
                 self.render_onboarding_disclaimer(cx),
             ),
             OnboardingStep::Appearance => self.render_onboarding_appearance(wide, cx),
-            OnboardingStep::Workflow => div()
-                .w_full()
-                .max_w(px(1440.0))
-                .mx_auto()
-                .child(self.render_onboarding_workflow(wide, cx))
-                .child(self.render_onboarding_features(wide, cx))
-                .into_any_element(),
+            OnboardingStep::Workflow => self.onboarding_columns(
+                wide,
+                self.render_onboarding_workflow(cx),
+                self.render_onboarding_features(wide, cx),
+            ),
             OnboardingStep::Tools => self.onboarding_columns(
                 wide,
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(self.render_onboarding_ai_intro(cx))
-                    .child(self.render_onboarding_ai_setup(window, cx))
-                    .into_any_element(),
+                self.render_onboarding_ai_intro(cx),
                 self.render_onboarding_cli_companion(window, cx),
             ),
             OnboardingStep::QuickStart => div()
                 .w_full()
                 .max_w(px(1100.0))
                 .mx_auto()
-                .child(self.render_onboarding_quick_start(window, cx))
+                .child(self.render_onboarding_quick_start(wide, window, cx))
                 .into_any_element(),
         };
 
@@ -100,8 +93,8 @@ impl WorkspaceApp {
                             .id(("onboarding-body", self.onboarding.step))
                             .flex_1()
                             .min_h(px(0.0))
-                            .px(px(if wide { 24.0 } else { 0.0 }))
-                            .py(px(16.0))
+                            .px(px(if wide { 40.0 } else { 20.0 }))
+                            .py(px(24.0))
                             .overflow_y_scroll()
                             .track_scroll(&self.onboarding.scroll_handle)
                             .vertical_scrollbar(&self.onboarding.scroll_handle)
@@ -112,7 +105,21 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }))
-                            .child(content),
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_h_full()
+                                    .flex()
+                                    .flex_col()
+                                    .when(
+                                        matches!(
+                                            step,
+                                            OnboardingStep::Welcome | OnboardingStep::QuickStart
+                                        ),
+                                        |body| body.justify_center(),
+                                    )
+                                    .child(content),
+                            ),
                     )
                     .when(self.onboarding.save_failed, |panel| {
                         panel.child(
@@ -142,10 +149,11 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w_full()
-            .max_w(px(1440.0))
+            .max_w(px(1200.0))
             .mx_auto()
             .grid()
             .grid_cols(if wide { 2 } else { 1 })
+            .gap(px(if wide { 40.0 } else { 28.0 }))
             .child(div().min_w(px(0.0)).child(first))
             .child(div().min_w(px(0.0)).child(second))
             .into_any_element()

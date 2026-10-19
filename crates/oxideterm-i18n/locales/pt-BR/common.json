@@ -1048,6 +1048,8 @@
     "terminal_shortcut_pending": "Atalho de terminal do plugin aguardando o runtime"
   },
   "onboarding": {
+    "more_features": "Ver mais recursos",
+    "less_features": "Ver menos recursos",
     "step_welcome": "Boas-vindas",
     "step_appearance": "Aparência",
     "step_workflow": "Conexões e uso",

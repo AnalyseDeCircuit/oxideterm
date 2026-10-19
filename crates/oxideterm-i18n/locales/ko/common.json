@@ -1142,6 +1142,8 @@
     "continue_button": "OxideTerm 2 시작"
   },
   "onboarding": {
+    "more_features": "더 많은 기능 보기",
+    "less_features": "추가 기능 접기",
     "step_welcome": "환영합니다",
     "step_appearance": "외관",
     "step_workflow": "연결과 사용 방법",
