@@ -505,7 +505,8 @@ impl Render for TerminalPane {
             )
             .on_mouse_down(
                 MouseButton::Middle,
-                cx.listener(|this, event: &MouseDownEvent, _window, cx| {
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    window.focus(&this.focus_handle, cx);
                     this.handle_mouse_down(event, cx);
                 }),
             )
@@ -514,10 +515,10 @@ impl Render for TerminalPane {
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
                     window.focus(&this.focus_handle, cx);
                     let mode = this.terminal.lock().mode();
-                    if mouse_mode(mode, event.modifiers.shift) {
-                        this.handle_mouse_down(event, cx);
-                    } else if this.right_click_paste_requested(mode, event.modifiers) {
+                    if this.right_click_paste_requested(event.modifiers) {
                         window.prevent_default();
+                        this.handle_mouse_down(event, cx);
+                    } else if mouse_mode(mode, event.modifiers.shift) {
                         this.handle_mouse_down(event, cx);
                     } else {
                         window.prevent_default();

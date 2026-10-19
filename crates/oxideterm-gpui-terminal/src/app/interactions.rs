@@ -1615,15 +1615,13 @@ impl TerminalPane {
         if selected_tmux_pane && !mouse_mode(mode, event.modifiers.shift) {
             return;
         }
-        if event.button == MouseButton::Middle
-            && self.settings.middle_click_paste
-            && !mouse_tracking_active(mode)
+        if (event.button == MouseButton::Middle && self.settings.middle_click_paste)
+            || (event.button == MouseButton::Right
+                && self.right_click_paste_requested(event.modifiers))
         {
-            return;
-        }
-        if event.button == MouseButton::Right
-            && right_click_paste_requested(self.settings.right_click_paste, mode, event.modifiers)
-        {
+            // Keep the entire gesture local, including release after modifier changes.
+            self.mouse_paste_button = Some(event.button);
+            self.last_mouse_report_point = None;
             return;
         }
 
@@ -1721,6 +1719,12 @@ impl TerminalPane {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Move(event.clone()));
             return;
+        }
+        if let Some(button) = self.mouse_paste_button {
+            if event.pressed_button == Some(button) {
+                return;
+            }
+            self.mouse_paste_button = None;
         }
         if let Some(drag) = self.horizontal_scrollbar_drag
             && event.pressed_button == Some(MouseButton::Left)
@@ -1833,23 +1837,17 @@ impl TerminalPane {
             return;
         }
 
-        let mode = self.terminal.lock().mode();
-        if event.button == MouseButton::Middle
-            && self.settings.middle_click_paste
-            && !mouse_tracking_active(mode)
-        {
+        if self.mouse_paste_button == Some(event.button) {
+            self.mouse_paste_button = None;
             self.last_mouse_report_point = None;
             self.paste_from_clipboard(cx);
             return;
         }
-        if event.button == MouseButton::Right
-            && right_click_paste_requested(self.settings.right_click_paste, mode, event.modifiers)
-        {
-            self.last_mouse_report_point = None;
-            self.paste_from_clipboard(cx);
+        if event.button == MouseButton::Right && self.context_menu.is_some() {
             return;
         }
 
+        let mode = self.terminal.lock().mode();
         if mouse_mode(mode, event.modifiers.shift) {
             let point = self.tmux_local_point(self.terminal_point_for_position(event.position));
             self.last_mouse_report_point = None;
@@ -2257,8 +2255,8 @@ impl TerminalPane {
         }
     }
 
-    pub(crate) fn right_click_paste_requested(&self, mode: TermMode, modifiers: Modifiers) -> bool {
-        right_click_paste_requested(self.settings.right_click_paste, mode, modifiers)
+    pub(crate) fn right_click_paste_requested(&self, modifiers: Modifiers) -> bool {
+        right_click_paste_requested(self.settings.right_click_paste, modifiers)
     }
 }
 
@@ -2266,10 +2264,10 @@ fn mouse_tracking_active(mode: TermMode) -> bool {
     mode.intersects(TermMode::MOUSE_MODE)
 }
 
-fn right_click_paste_requested(enabled: bool, mode: TermMode, modifiers: Modifiers) -> bool {
-    // Shift remains the local escape hatch for the context menu. Applications
-    // that requested mouse tracking continue to own unmodified right clicks.
-    enabled && !modifiers.shift && !mouse_tracking_active(mode)
+fn right_click_paste_requested(enabled: bool, modifiers: Modifiers) -> bool {
+    // Explicit paste preferences take priority over application mouse tracking;
+    // Shift keeps the context menu available.
+    enabled && !modifiers.shift
 }
 
 fn terminal_selection_autoscroll_delta_rows(
@@ -4061,29 +4059,15 @@ mod tests {
     }
 
     #[test]
-    fn right_click_paste_preserves_context_menu_and_remote_mouse_ownership() {
-        assert!(right_click_paste_requested(
-            true,
-            TermMode::NONE,
-            Modifiers::default()
-        ));
-        assert!(!right_click_paste_requested(
-            false,
-            TermMode::NONE,
-            Modifiers::default()
-        ));
+    fn right_click_paste_is_opt_in_and_preserves_shift_context_menu() {
+        assert!(right_click_paste_requested(true, Modifiers::default()));
+        assert!(!right_click_paste_requested(false, Modifiers::default()));
         assert!(!right_click_paste_requested(
             true,
-            TermMode::NONE,
             Modifiers {
                 shift: true,
                 ..Modifiers::default()
             }
-        ));
-        assert!(!right_click_paste_requested(
-            true,
-            TermMode::MOUSE_MODE,
-            Modifiers::default()
         ));
     }
 
