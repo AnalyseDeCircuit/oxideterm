@@ -154,6 +154,8 @@ The remote host needs the corresponding program installed. For a download that s
 
 For serial devices, open **Binary transfer** in the terminal control bar and choose the matching XMODEM, YMODEM, or ZMODEM upload/receive action. Put the device into its matching transfer mode first. XMODEM reception also needs a destination filename because the protocol does not carry one.
 
+XMODEM uploads use 128-byte blocks by default. For devices that support larger blocks, select 1024 bytes under **Settings → Terminal → File transfer → XMODEM**. Manual uploads and automatically detected single-file XMODEM uploads share this setting, which takes effect on the next transfer.
+
 Use SFTP when you want to browse directories and manage a transfer queue. See [transfer troubleshooting](troubleshooting.md#connection-and-transfer-checks) if a terminal transfer does not start.
 
 ## Audit and session recordings

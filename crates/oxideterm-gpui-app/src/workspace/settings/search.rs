@@ -323,6 +323,15 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             ],
         ),
         terminal_search_entry(
+            TerminalSettingsPage::Transfer,
+            2,
+            "settings_view.terminal.xmodem.title",
+            &[
+                "settings_view.terminal.xmodem.block_size",
+                "settings_view.terminal.xmodem.block_size_hint",
+            ],
+        ),
+        terminal_search_entry(
             TerminalSettingsPage::Logging,
             1,
             "settings_view.terminal.session_log_title",

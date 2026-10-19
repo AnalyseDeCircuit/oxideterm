@@ -420,6 +420,13 @@
       "delete_sequence": "Touche Suppr",
       "delete_sequence_hint": "Valeur par défaut de l’application pour Suppr. Les hôtes enregistrés peuvent la remplacer.",
       "free_type_mode_hint": "Modifiez la commande shell active avec la souris : cliquez pour déplacer le curseur, double-cliquez entre des parenthèses appariées pour sélectionner leur contenu, faites glisser le texte sélectionné pour le déplacer, maintenez Ctrl pour le copier ou Alt pour remplacer la commande. Vim, Neovim et Emacs en plein écran nécessitent le chargement explicite de l’adaptateur OxideTerm ; les autres applications plein écran ou avec suivi de souris gardent le contrôle",
+      "xmodem": {
+        "title": "XMODEM",
+        "block_size": "Taille des blocs d’envoi",
+        "block_size_hint": "Utilisez 128 octets pour la compatibilité, ou 1024 octets si l’appareil accepte des blocs plus grands. S’applique au prochain envoi manuel ou détecté automatiquement.",
+        "bytes_128": "128 octets (par défaut)",
+        "bytes_1024": "1024 octets"
+      },
       "in_band_transfer": {
         "title": "Transfert de fichiers in-band",
         "enabled": "Activer le transfert trzsz",

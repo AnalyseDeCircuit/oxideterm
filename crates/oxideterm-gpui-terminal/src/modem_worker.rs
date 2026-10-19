@@ -30,6 +30,7 @@ pub(crate) struct ModemWorkerJob {
     pub transfer: ModemTransfer,
     pub request: TerminalModemTransferRequest,
     pub selection: ModemPromptSelection,
+    pub xmodem_block_size: oxideterm_settings::XmodemBlockSize,
     pub audit: Option<oxideterm_audit::AuditOperation>,
     pub connection_lost: Arc<std::sync::atomic::AtomicBool>,
     pub payload_bytes: Arc<std::sync::atomic::AtomicU64>,
@@ -225,6 +226,11 @@ fn run_upload(
         return Err(ModemWorkerError::Cancelled);
     }
 
+    let block_mode = match job.xmodem_block_size {
+        oxideterm_settings::XmodemBlockSize::Bytes128 => XmodemBlockMode::Bytes128,
+        oxideterm_settings::XmodemBlockSize::Bytes1024 => XmodemBlockMode::Bytes1024,
+    };
+
     match job.request.protocol {
         DetectedModemProtocol::Xmodem => {
             let path = &paths[0];
@@ -238,8 +244,7 @@ fn run_upload(
                 event_tx.clone(),
                 job.payload_bytes.clone(),
             );
-            send_xmodem(&mut job.transfer, &mut file, XmodemBlockMode::Bytes1024)
-                .map_err(worker_error)?;
+            send_xmodem(&mut job.transfer, &mut file, block_mode).map_err(worker_error)?;
             job.completed_files = Some(1);
         }
         DetectedModemProtocol::XymodemNegotiation if paths.len() == 1 => {
@@ -256,8 +261,7 @@ fn run_upload(
                 event_tx.clone(),
                 job.payload_bytes.clone(),
             );
-            send_xmodem(&mut job.transfer, &mut file, XmodemBlockMode::Bytes1024)
-                .map_err(worker_error)?;
+            send_xmodem(&mut job.transfer, &mut file, block_mode).map_err(worker_error)?;
             job.completed_files = Some(1);
         }
         DetectedModemProtocol::XymodemNegotiation | DetectedModemProtocol::Ymodem => {
@@ -663,6 +667,56 @@ mod tests {
     }
 
     #[test]
+    fn manual_and_detected_xmodem_uploads_use_selected_block_size() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("firmware.bin");
+        std::fs::write(&path, b"firmware").unwrap();
+        for protocol in [
+            DetectedModemProtocol::Xmodem,
+            DetectedModemProtocol::XymodemNegotiation,
+        ] {
+            for (xmodem_block_size, bytes, marker) in [
+                (oxideterm_settings::XmodemBlockSize::default(), 128, 0x01),
+                (oxideterm_settings::XmodemBlockSize::Bytes1024, 1024, 0x02),
+            ] {
+                // CRC request, data acknowledgement, then end-of-transfer acknowledgement.
+                let transfer = ModemTransfer::new(&[0x43, 0x06, 0x06]);
+                let (sender, receiver) = std::sync::mpsc::channel();
+                run_modem_worker_job(
+                    ModemWorkerJob {
+                        transfer: transfer.clone(),
+                        request: TerminalModemTransferRequest {
+                            protocol,
+                            direction: ModemTransferDirection::Upload,
+                        },
+                        selection: ModemPromptSelection::UploadFiles(vec![path.clone()]),
+                        xmodem_block_size,
+                        audit: None,
+                        connection_lost: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                        payload_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                        completed_files: None,
+                    },
+                    sender,
+                );
+                assert!(matches!(
+                    receiver.into_iter().last().unwrap(),
+                    ModemWorkerEvent::Completed
+                ));
+                let frame = transfer.take_server_write().unwrap();
+                assert_eq!(
+                    &frame[..3],
+                    &[marker, 1, 254],
+                    "{protocol:?}, {xmodem_block_size:?}"
+                );
+                assert_eq!(frame.len(), 3 + bytes + 2);
+                assert_eq!(&frame[3..11], b"firmware");
+                assert!(frame[11..3 + bytes].iter().all(|byte| *byte == 0x1a));
+                assert_eq!(transfer.take_server_write().unwrap(), vec![0x04]);
+            }
+        }
+    }
+
+    #[test]
     fn modem_worker_distinguishes_cancel_from_connection_loss() {
         use oxideterm_audit::{
             AuditCategory, AuditContext, AuditOutcome, AuditQuery, AuditService, AuditSource,
@@ -695,6 +749,7 @@ mod tests {
                         direction: ModemTransferDirection::Upload,
                     },
                     selection: ModemPromptSelection::Cancelled,
+                    xmodem_block_size: Default::default(),
                     audit: Some(audit),
                     connection_lost: Arc::new(std::sync::atomic::AtomicBool::new(connection_lost)),
                     payload_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -795,6 +850,7 @@ mod tests {
                         direction: ModemTransferDirection::Download,
                     },
                     selection: ModemPromptSelection::DownloadRoot(root.path().into()),
+                    xmodem_block_size: Default::default(),
                     audit: None,
                     connection_lost: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     payload_bytes: Arc::new(std::sync::atomic::AtomicU64::new(0)),

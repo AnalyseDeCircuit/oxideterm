@@ -420,6 +420,13 @@
       "delete_sequence": "Tasto Canc",
       "delete_sequence_hint": "Valore predefinito dell’applicazione per Canc. Gli host salvati possono sostituirlo.",
       "free_type_mode_hint": "Modifica il comando shell attivo con il mouse: fai clic per spostare il cursore, fai doppio clic tra parentesi corrispondenti per selezionarne il contenuto, trascina il testo selezionato per spostarlo, tieni premuto Ctrl per copiarlo o Alt per sostituire il comando. Vim, Neovim ed Emacs a schermo intero richiedono il caricamento esplicito dell’adattatore OxideTerm; le altre app a schermo intero o con tracciamento del mouse mantengono il controllo",
+      "xmodem": {
+        "title": "XMODEM",
+        "block_size": "Dimensione dei blocchi di invio",
+        "block_size_hint": "Usa 128 byte per una maggiore compatibilità o 1024 byte se il dispositivo supporta blocchi più grandi. Vale dal prossimo invio manuale o rilevato automaticamente.",
+        "bytes_128": "128 byte (predefinito)",
+        "bytes_1024": "1024 byte"
+      },
       "in_band_transfer": {
         "title": "Trasferimento file in-band",
         "enabled": "Abilita trasferimento trzsz",

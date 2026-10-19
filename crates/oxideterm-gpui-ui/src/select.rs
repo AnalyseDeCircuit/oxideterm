@@ -103,6 +103,7 @@ pub enum SelectAnchorId {
     SettingsTerminalSessionLogFileMode,
     SettingsTerminalCursorStyle,
     SettingsRemoteShellIntegrationMode,
+    SettingsXmodemBlockSize,
     SettingsTerminalTriggerMatchMode,
     SettingsTerminalTriggerAction,
     SettingsTerminalTriggerProcessMode,
@@ -232,6 +233,7 @@ impl SelectAnchorId {
                 | Self::SettingsTerminalDeleteSequence
                 | Self::SettingsTerminalCursorStyle
                 | Self::SettingsRemoteShellIntegrationMode
+                | Self::SettingsXmodemBlockSize
                 | Self::SettingsTerminalTriggerMatchMode
                 | Self::SettingsTerminalTriggerAction
                 | Self::SettingsTerminalTriggerProcessMode

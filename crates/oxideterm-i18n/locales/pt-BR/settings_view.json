@@ -420,6 +420,13 @@
       "delete_sequence": "Tecla Delete",
       "delete_sequence_hint": "Padrão do aplicativo para Delete. Hosts salvos podem substituí-lo.",
       "free_type_mode_hint": "Edite o comando ativo do shell com o mouse: clique para mover o cursor, clique duas vezes dentro de parênteses correspondentes para selecionar o conteúdo, arraste o texto selecionado para movê-lo, arraste com Ctrl para copiá-lo ou com Alt para substituir o comando. Vim, Neovim e Emacs em tela cheia exigem o carregamento explícito do adaptador OxideTerm; outros aplicativos em tela cheia ou com rastreamento de mouse mantêm o controle",
+      "xmodem": {
+        "title": "XMODEM",
+        "block_size": "Tamanho do bloco de envio",
+        "block_size_hint": "Use 128 bytes para maior compatibilidade ou 1024 bytes em dispositivos que aceitam blocos maiores. Vale para o próximo envio manual ou detectado automaticamente.",
+        "bytes_128": "128 bytes (padrão)",
+        "bytes_1024": "1024 bytes"
+      },
       "in_band_transfer": {
         "title": "Transferência de arquivos in-band",
         "enabled": "Habilitar transferência trzsz",

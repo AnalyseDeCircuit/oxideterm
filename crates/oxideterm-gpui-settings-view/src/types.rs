@@ -84,6 +84,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::TerminalSessionLogFileMode => SelectAnchorId::SettingsTerminalSessionLogFileMode,
             Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
             Self::RemoteShellIntegrationMode => SelectAnchorId::SettingsRemoteShellIntegrationMode,
+            Self::XmodemBlockSize => SelectAnchorId::SettingsXmodemBlockSize,
             Self::TerminalTriggerMatchMode => SelectAnchorId::SettingsTerminalTriggerMatchMode,
             Self::TerminalTriggerAction => SelectAnchorId::SettingsTerminalTriggerAction,
             Self::TerminalTriggerProcessMode => SelectAnchorId::SettingsTerminalTriggerProcessMode,

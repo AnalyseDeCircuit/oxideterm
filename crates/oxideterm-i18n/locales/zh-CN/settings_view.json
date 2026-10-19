@@ -420,6 +420,13 @@
       "delete_sequence": "删除键",
       "delete_sequence_hint": "删除键发送序列的应用默认值；保存的主机可单独覆盖。",
       "free_type_mode_hint": "在当前 Shell 命令中使用鼠标编辑：单击移动光标，在匹配括号内双击以选择其中内容，拖动已选命令文本进行移动，按住 Ctrl 拖动进行复制，或按住 Alt 拖动以替换当前命令。全屏 Vim、Neovim 和 Emacs 需要显式加载 OxideTerm 适配器；其他全屏和鼠标追踪程序仍自行处理输入",
+      "xmodem": {
+        "title": "XMODEM",
+        "block_size": "上传块大小",
+        "block_size_hint": "128 字节兼容性更好；支持大块传输的设备可选择 1024 字节。对下一次手动或自动识别的上传生效。",
+        "bytes_128": "128 字节（默认）",
+        "bytes_1024": "1024 字节"
+      },
       "in_band_transfer": {
         "title": "带内文件传输",
         "enabled": "启用 trzsz 传输",

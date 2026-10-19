@@ -819,6 +819,32 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::XmodemBlockSize) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for size in [
+                    oxideterm_settings::XmodemBlockSize::Bytes128,
+                    oxideterm_settings::XmodemBlockSize::Bytes1024,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            xmodem_block_size_label(size, &self.i18n),
+                            size == settings.terminal.xmodem_block_size,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| settings.terminal.xmodem_block_size = size,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::RemoteShellIntegrationMode) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for mode in [

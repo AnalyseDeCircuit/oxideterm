@@ -420,6 +420,13 @@
       "delete_sequence": "Delete Key",
       "delete_sequence_hint": "Application default for the Delete sequence. Saved hosts can override it.",
       "free_type_mode_hint": "Edit the active shell command with the mouse: click to move the cursor, double-click inside matched brackets to select their contents, drag selected command text to move it, Ctrl-drag to copy it, or Alt-drag to replace the command. Full-screen Vim, Neovim, and Emacs require the explicit OxideTerm adapter; other full-screen and mouse-tracking apps keep control",
+      "xmodem": {
+        "title": "XMODEM",
+        "block_size": "Upload block size",
+        "block_size_hint": "Use 128 bytes for compatibility, or 1024 bytes on devices that support larger blocks. Applies to the next manual or automatically detected upload.",
+        "bytes_128": "128 bytes (default)",
+        "bytes_1024": "1024 bytes"
+      },
       "in_band_transfer": {
         "title": "In-Band File Transfer",
         "enabled": "Enable trzsz Transfer",

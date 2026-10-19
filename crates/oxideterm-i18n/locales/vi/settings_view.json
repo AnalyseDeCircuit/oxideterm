@@ -420,6 +420,13 @@
       "delete_sequence": "Phím Delete",
       "delete_sequence_hint": "Mặc định ứng dụng cho chuỗi Delete. Máy chủ đã lưu có thể ghi đè.",
       "free_type_mode_hint": "Chỉnh sửa lệnh shell đang hoạt động bằng chuột: nhấp để di chuyển con trỏ, nhấp đúp bên trong cặp ngoặc khớp để chọn nội dung, kéo văn bản lệnh đã chọn để di chuyển, giữ Ctrl khi kéo để sao chép hoặc giữ Alt để thay thế lệnh. Vim, Neovim và Emacs toàn màn hình cần nạp rõ ràng bộ điều hợp OxideTerm; các ứng dụng toàn màn hình hoặc theo dõi chuột khác vẫn tự xử lý đầu vào",
+      "xmodem": {
+        "title": "XMODEM",
+        "block_size": "Kích thước khối tải lên",
+        "block_size_hint": "Dùng 128 byte để tương thích tốt hơn hoặc 1024 byte nếu thiết bị hỗ trợ khối lớn hơn. Áp dụng cho lần tải lên thủ công hoặc được tự động phát hiện tiếp theo.",
+        "bytes_128": "128 byte (mặc định)",
+        "bytes_1024": "1024 byte"
+      },
       "in_band_transfer": {
         "title": "Truyền tệp trong băng",
         "enabled": "Bật truyền trzsz",

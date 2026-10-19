@@ -231,7 +231,7 @@ pub fn terminal_settings_section_count(page: TerminalSettingsPage) -> usize {
         TerminalSettingsPage::Local => 4,
         TerminalSettingsPage::CommandBar => 3,
         TerminalSettingsPage::Awareness => 3,
-        TerminalSettingsPage::Transfer => 1,
+        TerminalSettingsPage::Transfer => 2,
         TerminalSettingsPage::Logging => 1,
         TerminalSettingsPage::Highlight => 1,
     };

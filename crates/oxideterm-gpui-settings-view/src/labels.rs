@@ -57,6 +57,17 @@ pub fn remote_shell_integration_mode_label(
     }
 }
 
+pub fn xmodem_block_size_label(size: oxideterm_settings::XmodemBlockSize, i18n: &I18n) -> String {
+    match size {
+        oxideterm_settings::XmodemBlockSize::Bytes128 => {
+            i18n.t("settings_view.terminal.xmodem.bytes_128")
+        }
+        oxideterm_settings::XmodemBlockSize::Bytes1024 => {
+            i18n.t("settings_view.terminal.xmodem.bytes_1024")
+        }
+    }
+}
+
 pub fn ide_agent_label(mode: IdeAgentMode, i18n: &I18n) -> String {
     match mode {
         IdeAgentMode::Ask => i18n.t("settings_view.ide.agent_mode_ask"),

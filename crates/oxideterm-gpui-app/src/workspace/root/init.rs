@@ -1481,6 +1481,7 @@ impl WorkspaceApp {
             }),
             highlight_rules: terminal_highlight_rules(terminal.effective_highlight_rules()),
             trzsz_policy,
+            xmodem_block_size: terminal.xmodem_block_size,
             theme: TerminalUiTheme::from_tokens(self.tokens),
         }
     }

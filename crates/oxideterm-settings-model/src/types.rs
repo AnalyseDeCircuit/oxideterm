@@ -108,6 +108,7 @@ pub enum SettingsSelect {
     TerminalSessionLogFileMode,
     TerminalCursorStyle,
     RemoteShellIntegrationMode,
+    XmodemBlockSize,
     TerminalTriggerMatchMode,
     TerminalTriggerAction,
     TerminalTriggerProcessMode,
