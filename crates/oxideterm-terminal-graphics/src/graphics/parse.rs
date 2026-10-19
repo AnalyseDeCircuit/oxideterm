@@ -1,6 +1,7 @@
 fn parser_state_len(state: &ParserState) -> usize {
     match state {
-        ParserState::Osc(data)
+        ParserState::SyncStart(data)
+        | ParserState::Osc(data)
         | ParserState::OscEsc(data)
         | ParserState::Dcs(data)
         | ParserState::DcsEsc(data)

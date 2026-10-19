@@ -553,13 +553,56 @@ mod tests {
     }
 
     #[test]
+    fn synchronized_output_releases_on_deadline_or_limit_and_resets_with_stream() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let pending = ingress.advance(b"\x1b[?2026hpartial", cursor());
+        assert_eq!(pending, GraphicsAdvance::default());
+        ingress.sync_deadline = Some(std::time::Instant::now());
+        assert_eq!(ingress.advance(b"", cursor()).terminal_bytes, b"partial");
+        let mut oversized = b"\x1b[?2026h".to_vec();
+        oversized.extend(std::iter::repeat_n(b'x', SYNC_LIMIT + 5));
+        assert_eq!(
+            ingress.advance(&oversized, cursor()).terminal_bytes,
+            vec![b'x'; SYNC_LIMIT + 5]
+        );
+        ingress.advance(b"\x1b[?2026hdiscard", cursor());
+        ingress.reset_stream();
+        assert_eq!(
+            ingress.advance(b"new shell", cursor()).terminal_bytes,
+            b"new shell"
+        );
+        assert_eq!(ingress.sync_deadline(), None);
+    }
+
+    #[test]
+    fn kitty_soft_delete_keeps_uploaded_pixels_for_replacement() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let payload = BASE64.encode([0, 255, 0, 255]);
+        ingress.advance(
+            format!("\x1b_Ga=T,f=32,s=1,v=1,i=42;{payload}\x1b\\").as_bytes(),
+            cursor(),
+        );
+        ingress.advance(b"\x1b_Ga=d,d=a,q=2\x1b\\", cursor());
+        let placed = ingress.advance(b"\x1b_Ga=p,i=42,C=1,q=2\x1b\\", cursor());
+        assert!(
+            matches!(placed.events.as_slice(), [TerminalGraphicsEvent::Place(placement)] if placement.id == TerminalImageId(42))
+        );
+        ingress.advance(b"\x1b_Ga=d,d=I,i=42\x1b\\", cursor());
+        let missing = ingress.advance(b"\x1b_Ga=p,i=42,C=1\x1b\\", cursor());
+        assert!(matches!(
+            missing.events.as_slice(),
+            [TerminalGraphicsEvent::Error(_)]
+        ));
+    }
+
+    #[test]
     fn kitty_delete_and_query_emit_control_events() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
 
         let delete = ingress.advance(b"\x1b_Ga=d,i=9;\x1b\\", cursor());
         assert_eq!(
             delete.events,
-            vec![TerminalGraphicsEvent::Delete {
+            vec![TerminalGraphicsEvent::DeletePlacements {
                 id: Some(TerminalImageId(9))
             }]
         );

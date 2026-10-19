@@ -258,6 +258,8 @@ pub enum TerminalGraphicsEvent {
     ImageUpdated(TerminalImageData),
     Place(TerminalImagePlacement),
     Delete { id: Option<TerminalImageId> },
+    DeletePlacements { id: Option<TerminalImageId> },
+    Batch(Vec<TerminalGraphicsEvent>),
     Respond(Vec<u8>),
     Error(String),
 }
@@ -319,6 +321,7 @@ pub enum GraphicsError {
 enum ParserState {
     Ground,
     Esc,
+    SyncStart(Vec<u8>),
     Osc(Vec<u8>),
     OscEsc(Vec<u8>),
     Dcs(Vec<u8>),
@@ -333,6 +336,8 @@ pub struct GraphicsIngress {
     next_image_id: u64,
     kitty_chunks: HashMap<u64, KittyChunkAssembly>,
     kitty_images: HashMap<TerminalImageId, TerminalImageData>,
+    sync_buffer: Option<Zeroizing<Vec<u8>>>,
+    sync_deadline: Option<std::time::Instant>,
 }
 
 struct KittyChunkAssembly {

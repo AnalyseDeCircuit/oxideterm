@@ -1,3 +1,9 @@
+const SYNC_BEGIN: &[u8] = b"\x1b[?2026h";
+const SYNC_END: &[u8] = b"\x1b[?2026l";
+// Match the ANSI processor's bounded synchronized-update window.
+const SYNC_LIMIT: usize = 0x20_0000;
+const SYNC_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
+
 struct PlacementOptions {
     move_cursor: bool,
     cols: Option<usize>,
@@ -75,6 +81,8 @@ impl GraphicsIngress {
     pub fn reset_stream(&mut self) {
         self.state = ParserState::Ground;
         self.kitty_chunks.clear();
+        self.sync_buffer = None;
+        self.sync_deadline = None;
     }
 
     pub fn new(options: GraphicsOptions) -> Self {
@@ -84,6 +92,8 @@ impl GraphicsIngress {
             next_image_id: 1,
             kitty_chunks: HashMap::new(),
             kitty_images: HashMap::new(),
+            sync_buffer: None,
+            sync_deadline: None,
         }
     }
 
@@ -143,19 +153,44 @@ impl GraphicsIngress {
         F: FnMut(TerminalGraphicsSegment<'a>),
         C: FnMut() -> GraphicsCursor,
     {
+        self.advance_ordered_inner(bytes, &mut emit, &mut cursor);
+    }
+
+    fn advance_ordered_inner<'a>(
+        &mut self,
+        bytes: &'a [u8],
+        mut emit: &mut dyn FnMut(TerminalGraphicsSegment<'a>),
+        mut cursor: &mut dyn FnMut() -> GraphicsCursor,
+    ) {
         if !self.options.enabled {
             emit(TerminalGraphicsSegment::Terminal(bytes.into()));
             return;
         }
 
-        if !bytes.is_empty() && matches!(self.state, ParserState::Ground) {
+        if self
+            .sync_deadline
+            .is_some_and(|deadline| deadline <= std::time::Instant::now())
+        {
+            self.commit_synchronized(&mut emit, &mut cursor);
+        }
+
+        if self.sync_buffer.is_none()
+            && !bytes.is_empty()
+            && matches!(self.state, ParserState::Ground)
+        {
             // SIMD substring searches let ordinary CSI output stay borrowed. Leave
             // possible OSC/DCS/APC prefixes and split escapes to the state machine.
             if memchr::memchr(0x1b, bytes).is_none()
                 || (bytes.last() != Some(&0x1b)
                     && memchr::memmem::find(bytes, b"\x1b]").is_none()
-                    && memchr::memmem::find(bytes, b"\x1bP").is_none()
-                    && memchr::memmem::find(bytes, b"\x1b_").is_none())
+                    && !memchr::memchr2_iter(b'P', b'?', bytes).any(|index| match bytes[index] {
+                        b'P' => index > 0 && bytes[index - 1] == 0x1b,
+                        _ => index >= 2 && bytes[index - 2..].starts_with(SYNC_BEGIN),
+                    })
+                    && memchr::memmem::find(bytes, b"\x1b_").is_none()
+                    && !(2..SYNC_BEGIN.len()).any(|len| {
+                        bytes.len() >= len && SYNC_BEGIN.starts_with(&bytes[bytes.len() - len..])
+                    }))
             {
                 emit(TerminalGraphicsSegment::Terminal(bytes.into()));
                 return;
@@ -166,6 +201,22 @@ impl GraphicsIngress {
         let mut result = GraphicsAdvance::default();
         let mut index = 0;
         while index < bytes.len() {
+            if let Some(buffer) = &mut self.sync_buffer {
+                buffer.push(bytes[index]);
+                index += 1;
+                if buffer.ends_with(SYNC_BEGIN) {
+                    let len = buffer.len() - SYNC_BEGIN.len();
+                    buffer.truncate(len);
+                    self.sync_deadline = Some(std::time::Instant::now() + SYNC_TIMEOUT);
+                } else if buffer.ends_with(SYNC_END) {
+                    let len = buffer.len() - SYNC_END.len();
+                    buffer.truncate(len);
+                    self.commit_synchronized(&mut emit, &mut cursor);
+                } else if buffer.len() >= SYNC_LIMIT {
+                    self.commit_synchronized(&mut emit, &mut cursor);
+                }
+                continue;
+            }
             if matches!(self.state, ParserState::Ground) {
                 let remaining = &bytes[index..];
                 let Some(escape_offset) = memchr::memchr(0x1b, remaining) else {
@@ -207,6 +258,33 @@ impl GraphicsIngress {
         }
     }
 
+    pub fn sync_deadline(&self) -> Option<std::time::Instant> {
+        self.sync_deadline
+    }
+
+    fn commit_synchronized<'a>(
+        &mut self,
+        emit: &mut impl FnMut(TerminalGraphicsSegment<'a>),
+        cursor: &mut impl FnMut() -> GraphicsCursor,
+    ) {
+        self.sync_deadline = None;
+        let Some(buffer) = self.sync_buffer.take() else {
+            return;
+        };
+        // Replay text and graphics together only after the frame is complete. Cursor
+        // movement must reach the ANSI model before decoding each image placement.
+        self.advance_ordered_inner(
+            &buffer,
+            &mut |segment| match segment {
+                TerminalGraphicsSegment::Terminal(bytes) => {
+                    emit(TerminalGraphicsSegment::Terminal(bytes.into_owned().into()))
+                }
+                TerminalGraphicsSegment::Event(event) => emit(TerminalGraphicsSegment::Event(event)),
+            },
+            cursor,
+        );
+    }
+
     fn advance_byte<C>(&mut self, byte: u8, cursor: &mut C, result: &mut GraphicsAdvance)
     where
         C: FnMut() -> GraphicsCursor,
@@ -218,6 +296,7 @@ impl GraphicsIngress {
                 _ => result.terminal_bytes.push(byte),
             },
             ParserState::Esc => match byte {
+                b'[' => self.state = ParserState::SyncStart(b"\x1b[".to_vec()),
                 b']' => self.state = ParserState::Osc(Vec::new()),
                 b'P' => self.state = ParserState::Dcs(Vec::new()),
                 b'_' => self.state = ParserState::Apc(Vec::new()),
@@ -226,6 +305,17 @@ impl GraphicsIngress {
                     result.terminal_bytes.push(byte);
                 }
             },
+            ParserState::SyncStart(mut data) => {
+                data.push(byte);
+                if data == SYNC_BEGIN {
+                    self.sync_buffer = Some(Zeroizing::new(Vec::new()));
+                    self.sync_deadline = Some(std::time::Instant::now() + SYNC_TIMEOUT);
+                } else if SYNC_BEGIN.starts_with(&data) {
+                    self.state = ParserState::SyncStart(data);
+                } else {
+                    result.terminal_bytes.extend(data);
+                }
+            }
             ParserState::Osc(mut data) => match byte {
                 0x07 => self.dispatch_osc(data, cursor(), result),
                 0x1b => self.state = ParserState::OscEsc(data),
@@ -372,12 +462,22 @@ impl GraphicsIngress {
                     .get("i")
                     .and_then(|value| value.parse::<u64>().ok())
                     .map(TerminalImageId);
-                if let Some(id) = id {
-                    self.kitty_images.remove(&id);
+                let delete_data = params.get("d").is_some_and(|value| {
+                    value.bytes().next().is_some_and(|c| c.is_ascii_uppercase())
+                });
+                self.kitty_chunks.clear();
+                if delete_data {
+                    if let Some(id) = id {
+                        self.kitty_images.remove(&id);
+                    } else {
+                        self.kitty_images.clear();
+                    }
+                    result.events.push(TerminalGraphicsEvent::Delete { id });
                 } else {
-                    self.kitty_images.clear();
+                    result
+                        .events
+                        .push(TerminalGraphicsEvent::DeletePlacements { id });
                 }
-                result.events.push(TerminalGraphicsEvent::Delete { id });
                 return;
             }
             "q" => {

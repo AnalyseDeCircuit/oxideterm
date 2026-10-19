@@ -172,7 +172,7 @@ where
 
         let cursor = Cell::new(graphics_cursor_from_term(terminal, size));
         let mut parsed_bytes = 0usize;
-        let mut graphics_changed = false;
+        let mut graphics_events = Vec::new();
         let mut priority_writes = Vec::new();
         {
             let graphics = &mut state.graphics;
@@ -237,8 +237,7 @@ where
                         if let Some(event) =
                             LocalGraphicsState::alt_screen_clear_event(alt_screen_active, terminal)
                         {
-                            graphics_changed = true;
-                            let _ = graphics_tx.send(event);
+                            graphics_events.push(event);
                         }
                         cursor.set(graphics_cursor_from_term(terminal, size));
                     }
@@ -246,8 +245,7 @@ where
                         priority_writes.push(Cow::Owned(bytes));
                     }
                     TerminalGraphicsSegment::Event(event) => {
-                        graphics_changed = true;
-                        let _ = graphics_tx.send(event);
+                        graphics_events.push(event);
                     }
                 },
                 || cursor.get(),
@@ -255,6 +253,13 @@ where
         }
 
         state.push_priority_writes(priority_writes);
+
+        let graphics_changed = !graphics_events.is_empty();
+        if graphics_changed {
+            // Keep screen switches and graphics commands in wire order, and prevent
+            // the UI drain budget from exposing half of a frame's delete/put pair.
+            let _ = graphics_tx.send(TerminalGraphicsEvent::Batch(graphics_events));
+        }
 
         (parsed_bytes, graphics_changed)
     }
@@ -797,6 +802,10 @@ where
                         .map(|deadline| deadline.saturating_duration_since(Instant::now()));
                     let timeout = [
                         parser_timeout,
+                        state
+                            .graphics
+                            .sync_deadline()
+                            .map(|deadline| deadline.saturating_duration_since(Instant::now())),
                         recording_ready
                             .then(|| state.modem_consumer.pending_plain_output_delay())
                             .flatten(),
@@ -831,7 +840,17 @@ where
                         && !modem_output_flushed
                         && !child_exited
                     {
-                        state.parser.stop_sync(&mut *self.terminal.lock());
+                        let mut terminal = self.terminal.lock();
+                        Self::advance_guarded_bytes(
+                            &mut state,
+                            &mut terminal,
+                            &[],
+                            self.size,
+                            &self.magic_tx,
+                            &self.event_tx,
+                            &self.graphics_tx,
+                        );
+                        state.parser.stop_sync(&mut *terminal);
                         self.event_proxy.send_event(Event::Wakeup);
                         // Recording capacity can return through a poll notification
                         // without any fd events. Still refresh PTY interest below;

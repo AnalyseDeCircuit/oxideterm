@@ -70,6 +70,22 @@ impl TerminalGraphicsState {
                 }
                 None
             }
+            TerminalGraphicsEvent::DeletePlacements { id } => {
+                self.placements.retain(|placement| {
+                    placement.protocol != TerminalImageProtocol::Kitty
+                        || id.is_some_and(|id| placement.id != id)
+                });
+                None
+            }
+            TerminalGraphicsEvent::Batch(events) => {
+                let mut responses = Vec::new();
+                for event in events {
+                    if let Some(response) = self.handle_event(event) {
+                        responses.extend(response);
+                    }
+                }
+                (!responses.is_empty()).then_some(responses)
+            }
             TerminalGraphicsEvent::Respond(bytes) => Some(bytes),
             TerminalGraphicsEvent::Error(error) => {
                 tracing::debug!(%error, "terminal graphics protocol error");
