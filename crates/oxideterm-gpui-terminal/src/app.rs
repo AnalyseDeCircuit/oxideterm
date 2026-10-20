@@ -61,6 +61,9 @@ mod interactions;
 mod paste;
 mod render;
 mod scrollbar;
+mod timestamp_hover;
+
+use timestamp_hover::TerminalTimestampHover;
 
 use crate::modem_worker::{
     ModemPromptSelection, ModemWorkerEvent, ModemWorkerJob, ModemWorkerProgress,
@@ -177,6 +180,8 @@ pub enum TerminalPaneEvent {
     TriggerMatchesAvailable,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
+    // The pane retains the hovered value; Workspace owns tooltip timing and placement.
+    TimestampHoverChanged,
     // Persistence stays workspace-owned because panes do not own saved connection profiles.
     SerialLineEndingsChanged {
         input: Option<SerialLineEnding>,
@@ -493,6 +498,7 @@ pub struct TerminalPane {
     context_menu: Option<TerminalContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_action_requested: Option<TerminalContextAction>,
+    archive_path_requested: Option<Zeroizing<String>>,
     plugin_text_actions: Vec<TerminalPluginTextAction>,
     pending_plugin_text: Option<(TerminalPluginTextAction, zeroize::Zeroizing<String>)>,
     pending_trigger_matches: VecDeque<oxideterm_terminal_triggers::TriggerMatched>,
@@ -515,6 +521,7 @@ pub struct TerminalPane {
     selected_search_match: Option<usize>,
     pending_search_reveal: bool,
     hovered_link: Option<TerminalLinkRange>,
+    timestamp_hover: Option<TerminalTimestampHover>,
     hovered_command_mark_id: Option<String>,
     selecting: bool,
     free_type_drag: Option<FreeTypeDragState>,
@@ -655,6 +662,7 @@ pub enum TerminalContextAction {
     FillCommandBarFromSelection,
     OpenSearch,
     OpenSessionTriggers,
+    PreviewArchiveCommand,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1237,6 +1245,7 @@ impl TerminalPane {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_action_requested: None,
+            archive_path_requested: None,
             plugin_text_actions: Vec::new(),
             pending_plugin_text: None,
             pending_trigger_matches: VecDeque::new(),
@@ -1258,6 +1267,7 @@ impl TerminalPane {
             selected_search_match: None,
             pending_search_reveal: false,
             hovered_link: None,
+            timestamp_hover: None,
             hovered_command_mark_id: None,
             selecting: false,
             free_type_drag: None,
@@ -1915,6 +1925,10 @@ impl TerminalPane {
         self.context_action_requested.take()
     }
 
+    pub fn take_archive_path_request(&mut self) -> Option<Zeroizing<String>> {
+        self.archive_path_requested.take()
+    }
+
     pub fn set_plugin_text_actions(&mut self, actions: Vec<TerminalPluginTextAction>) {
         self.plugin_text_actions = actions;
     }
@@ -1950,6 +1964,7 @@ impl TerminalPane {
     }
 
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
+        self.clear_timestamp_hover(cx);
         let mut preferences = preferences;
         self.preference_overrides.apply_to(&mut preferences);
         if self.preferences.autosuggest_enabled != preferences.autosuggest_enabled {
@@ -2537,6 +2552,7 @@ impl TerminalPane {
     }
 
     fn mark_terminal_content_changed(&mut self, cx: &mut Context<Self>) {
+        self.clear_timestamp_hover(cx);
         self.selection_highlight_cache = None;
         self.terminal_content_revision = self.terminal_content_revision.wrapping_add(1).max(1);
         self.search_cache = None;
@@ -4402,6 +4418,9 @@ impl TerminalPane {
         scale_factor: f32,
         cx: &mut Context<Self>,
     ) {
+        if self.bounds != Some(bounds) {
+            self.clear_timestamp_hover(cx);
+        }
         self.bounds = Some(bounds);
         self.viewport_scale_factor_bits = Some(scale_factor.to_bits());
         let cell_width = self.metrics.cell_width_f32();

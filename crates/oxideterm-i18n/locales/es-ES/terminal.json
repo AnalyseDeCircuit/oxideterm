@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Extraer archivo",
+      "hint": "Revisa y edita el comando antes de añadirlo como borrador nuevo a la barra de comandos. No se ejecutará automáticamente.",
+      "source": "Archivo",
+      "destination": "Carpeta de destino",
+      "environment_hint": "La detección usa la conexión SSH o distribución WSL original. Si has entrado en otro equipo o contenedor, vuelve primero a ese entorno.",
+      "confirm_environment": "Estoy en el entorno indicado y he seleccionado el intérprete actual",
+      "probing": "Comprobando las herramientas de extracción disponibles…",
+      "fill": "Añadir a la barra de comandos",
+      "context_unavailable": "Vuelve a un intérprete inactivo antes de preparar la extracción.",
+      "probe_failed": "No se pudo comprobar este entorno. Reinténtalo desde un intérprete local o SSH normal.",
+      "choose_shell": "Selecciona el intérprete que usa este terminal.",
+      "unsupported": "Este formato de archivo no es compatible.",
+      "invalid_path": "La ruta no se puede representar de forma segura en el intérprete seleccionado.",
+      "cwd_unavailable": "Se desconoce el directorio actual. Usa una ruta absoluta para el archivo.",
+      "tool_unavailable": "No hay una herramienta de extracción adecuada. Instala tar, unzip, 7-Zip o el descompresor necesario en este entorno.",
+      "context_changed": "El terminal, la conexión o el directorio ha cambiado. Haz clic de nuevo en el archivo.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Guardar el historial en este dispositivo",
       "save_hint": "Guarda los comandos completos de conexiones SSH, Telnet, Mosh y de puerto serie guardadas en un archivo local sin cifrar, incluidas las contraseñas o los tokens en los argumentos. Se guardan desde que se activa.",

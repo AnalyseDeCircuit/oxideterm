@@ -82,6 +82,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        self.clear_timestamp_hover(cx);
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
@@ -515,6 +516,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        self.clear_timestamp_hover(cx);
         // Terminal menu payloads include row-local command marks and target
         // points; any scroll makes that semantic snapshot stale.
         if self.context_menu.take().is_some() {
@@ -1500,6 +1502,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.clear_timestamp_hover(cx);
         if self.tmux_selection_pending {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Down(event.clone()));
@@ -1533,6 +1536,14 @@ impl TerminalPane {
             match link.kind {
                 TerminalLinkKind::Url => cx.open_url(&link.target),
                 TerminalLinkKind::Path => {
+                    let path = link.target.trim_matches(['\'', '"', '`']);
+                    if oxideterm_environment::archive::is_archive_path(path) {
+                        self.archive_path_requested = Some(Zeroizing::new(path.to_string()));
+                        self.context_action_requested =
+                            Some(TerminalContextAction::PreviewArchiveCommand);
+                        cx.emit(TerminalPaneEvent::ContextActionRequested);
+                        return;
+                    }
                     if let Ok(base_dir) = env::current_dir()
                         && let Some(url) = path_link_to_file_url(&link.target, &base_dir)
                     {
@@ -1767,6 +1778,17 @@ impl TerminalPane {
         let hovered_link = can_hover_terminal_content
             .then(|| self.link_at_position(event.position))
             .flatten();
+        if can_hover_terminal_content
+            && self.preferences.timestamp_hover
+            && event.pressed_button.is_none()
+            && hovered_link.is_none()
+            && self.context_menu.is_none()
+            && !self.snapshot_dirty
+        {
+            self.update_timestamp_hover(event.position, cx);
+        } else {
+            self.clear_timestamp_hover(cx);
+        }
         let can_hover_command_marks = can_hover_terminal_content
             && command_mark_ui_available(self.settings.command_marks_enabled, mode);
         let hovered_command_mark_id = can_hover_command_marks

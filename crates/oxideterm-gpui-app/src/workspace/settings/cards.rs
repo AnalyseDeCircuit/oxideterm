@@ -229,6 +229,13 @@ impl WorkspaceApp {
                         set_detect_file_paths_as_links,
                         cx,
                     ),
+                    self.checkbox_row(
+                        "settings_view.terminal.timestamp_hover",
+                        "settings_view.terminal.timestamp_hover_hint",
+                        settings.terminal.timestamp_hover,
+                        set_timestamp_hover,
+                        cx,
+                    ),
                 ];
                 self.settings_card("settings_view.terminal.input_mouse_links", "", rows)
             }

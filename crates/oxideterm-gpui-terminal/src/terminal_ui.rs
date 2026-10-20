@@ -92,6 +92,7 @@ pub struct TerminalUiPreferences {
     pub right_click_paste: bool,
     pub open_links_with_modifier: bool,
     pub detect_file_paths_as_links: bool,
+    pub timestamp_hover: bool,
     pub semantic_coloring: bool,
     pub selection_highlighting: bool,
     pub semantic_scheme: Arc<CompiledSemanticScheme>,
@@ -215,6 +216,7 @@ impl Default for TerminalUiPreferences {
             right_click_paste: TERMINAL_RIGHT_CLICK_PASTE,
             open_links_with_modifier: TERMINAL_OPEN_LINKS_WITH_MODIFIER,
             detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
+            timestamp_hover: true,
             // Match persisted settings so standalone terminal views remain opt-in as well.
             semantic_coloring: false,
             selection_highlighting: false,

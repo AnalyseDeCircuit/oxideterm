@@ -102,6 +102,7 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
     TabRename,
+    ArchiveCommand,
     ActiveTabWindowModal {
         kind: ActiveTabWindowModalKind,
         phase: oxideterm_gpui_ui::motion::ExitPhase,
@@ -154,7 +155,7 @@ impl ActiveWindowModalOwner {
             Self::AiClearAll { .. } => 10,
             Self::AiDeleteMessage { .. } => 11,
             Self::SettingsReset { .. } => 12,
-            Self::CommandHistoryClear { .. } => 49,
+            Self::CommandHistoryClear { .. } => 50,
             Self::SettingsDataDirectory { .. } => 13,
             Self::RemoteShellIntegration => 14,
             Self::TerminalTriggerQuickCommand => 15,
@@ -172,23 +173,24 @@ impl ActiveWindowModalOwner {
             Self::HostScheduleLogs => 27,
             Self::NativePluginConfirm { .. } => 28,
             Self::TabRename => 29,
-            Self::ActiveTabWindowModal { .. } => 30,
-            Self::TerminalCastPlayer => 31,
-            Self::ThemeEditor { .. } => 32,
-            Self::SettingsSshConfigImport { .. } => 33,
-            Self::TerminalCommandSpecsEditor => 34,
-            Self::QuickCommandsManager => 35,
-            Self::AiTextEditor => 36,
-            Self::OxideImport { .. } => 37,
-            Self::OxideExport { .. } => 38,
-            Self::CommandPalette => 39,
-            Self::VersionMigration => 40,
-            Self::Onboarding => 41,
-            Self::LegalNotice { .. } => 42,
-            Self::NativeUpdateReleaseNotes { .. } => 43,
-            Self::Shortcuts => 44,
-            Self::AppLockDialog => 45,
-            Self::MermaidZoom => 46,
+            Self::ArchiveCommand => 30,
+            Self::ActiveTabWindowModal { .. } => 31,
+            Self::TerminalCastPlayer => 32,
+            Self::ThemeEditor { .. } => 33,
+            Self::SettingsSshConfigImport { .. } => 34,
+            Self::TerminalCommandSpecsEditor => 35,
+            Self::QuickCommandsManager => 36,
+            Self::AiTextEditor => 37,
+            Self::OxideImport { .. } => 38,
+            Self::OxideExport { .. } => 39,
+            Self::CommandPalette => 40,
+            Self::VersionMigration => 41,
+            Self::Onboarding => 42,
+            Self::LegalNotice { .. } => 43,
+            Self::NativeUpdateReleaseNotes { .. } => 44,
+            Self::Shortcuts => 45,
+            Self::AppLockDialog => 46,
+            Self::MermaidZoom => 47,
         }
     }
 
@@ -232,6 +234,7 @@ impl ActiveWindowModalOwner {
             | Self::HostTmuxInput
             | Self::HostScheduleLogs
             | Self::TabRename
+            | Self::ArchiveCommand
             | Self::TerminalCastPlayer
             | Self::TerminalCommandSpecsEditor
             | Self::QuickCommandsManager
@@ -263,6 +266,7 @@ impl ActiveWindowModalOwner {
                 | Self::TerminalCommandSpecsEditor
                 | Self::QuickCommandsManager
                 | Self::AiTextEditor
+                | Self::ArchiveCommand
                 | Self::OxideImport { .. }
                 | Self::OxideExport { .. }
                 | Self::CommandPalette
@@ -274,7 +278,7 @@ impl ActiveWindowModalOwner {
     fn key_route(self, key: &str) -> ActiveWindowModalKeyRoute {
         let visible = self.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let focused_child_owns_key = visible
-            && (self == Self::AiTextEditor
+            && (matches!(self, Self::AiTextEditor | Self::ArchiveCommand)
                 || matches!(
                     self,
                     Self::ActiveTabWindowModal {
@@ -330,6 +334,7 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
         Option<connection_monitor::HostToolsWindowModalSnapshot>,
     pub(in crate::workspace) native_plugin_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) tab_rename_open: bool,
+    pub(in crate::workspace) archive_command_open: bool,
     pub(in crate::workspace) active_tab_modal: Option<ActiveTabWindowModalSnapshot>,
     pub(in crate::workspace) terminal_cast_player_open: bool,
     pub(in crate::workspace) theme_editor_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
@@ -468,6 +473,9 @@ impl ActiveWindowModalProjection {
         let tab_rename_owner = self
             .tab_rename_open
             .then_some(ActiveWindowModalOwner::TabRename);
+        let archive_command_owner = self
+            .archive_command_open
+            .then_some(ActiveWindowModalOwner::ArchiveCommand);
         let active_tab_owner =
             self.active_tab_modal
                 .map(|snapshot| ActiveWindowModalOwner::ActiveTabWindowModal {
@@ -542,6 +550,7 @@ impl ActiveWindowModalProjection {
             host_tools_owner,
             native_plugin_owner,
             tab_rename_owner,
+            archive_command_owner,
             active_tab_owner,
             terminal_cast_owner,
             theme_editor_owner,
@@ -697,6 +706,7 @@ impl WorkspaceApp {
             host_tools_modal: self.host_tools.read(cx).window_modal_snapshot(),
             native_plugin_phase,
             tab_rename_open: self.tab_rename_dialog.is_some(),
+            archive_command_open: self.archive_command.is_some(),
             active_tab_modal: self.active_tab_window_modal_owner(cx),
             terminal_cast_player_open: self.terminal.read(cx).cast_player_open(),
             theme_editor_phase,
@@ -1000,6 +1010,11 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::RemoteShellIntegration => {
                 let _ = self.handle_remote_shell_integration_confirm_key(event, cx);
+            }
+            ActiveWindowModalOwner::ArchiveCommand => {
+                if event.keystroke.key == "escape" {
+                    self.close_archive_command(window, cx);
+                }
             }
             ActiveWindowModalOwner::TerminalTriggerQuickCommand => {
                 let _ = self.handle_terminal_trigger_quick_command_key(event, cx);

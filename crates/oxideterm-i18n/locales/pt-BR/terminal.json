@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Extrair arquivo",
+      "hint": "Revise e edite o comando antes de adicioná-lo como novo rascunho à barra de comandos. Nada será executado automaticamente.",
+      "source": "Arquivo",
+      "destination": "Pasta de destino",
+      "environment_hint": "A detecção usa a conexão SSH ou distribuição WSL original. Se você entrou em outro host ou contêiner, volte primeiro a esse ambiente.",
+      "confirm_environment": "Estou no ambiente indicado e selecionei o shell atual",
+      "probing": "Verificando ferramentas de extração disponíveis…",
+      "fill": "Adicionar à barra de comandos",
+      "context_unavailable": "Volte a um shell ocioso antes de preparar a extração.",
+      "probe_failed": "Não foi possível verificar este ambiente. Tente novamente em um shell local ou SSH comum.",
+      "choose_shell": "Selecione o shell usado por este terminal.",
+      "unsupported": "Este formato de arquivo não é compatível.",
+      "invalid_path": "Este caminho não pode ser representado com segurança no shell selecionado.",
+      "cwd_unavailable": "O diretório atual é desconhecido. Use um caminho absoluto para o arquivo.",
+      "tool_unavailable": "Nenhuma ferramenta de extração adequada encontrada. Instale tar, unzip, 7-Zip ou o descompactador necessário neste ambiente.",
+      "context_changed": "O terminal, a conexão ou o diretório mudou. Clique no arquivo novamente.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Salvar histórico neste dispositivo",
       "save_hint": "Salva os comandos completos das conexões SSH, Telnet, Mosh e seriais salvas em um arquivo local sem criptografia, incluindo senhas ou tokens nos argumentos. O salvamento começa ao ativar.",

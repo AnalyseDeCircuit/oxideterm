@@ -7,6 +7,7 @@
 //! probing. It deliberately avoids GPUI, terminal panes, SSH handles, and
 //! process spawning so UI/backend owners can provide their own execution path.
 
+pub mod archive;
 pub mod cwd;
 pub mod git;
 pub mod project;

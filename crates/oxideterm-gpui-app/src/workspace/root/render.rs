@@ -1309,6 +1309,9 @@ impl WorkspaceApp {
             .when_some(self.render_tab_rename_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .when_some(self.render_archive_command(cx), |root, dialog| {
+                root.child(dialog)
+            })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
             .children(active_tab_window_modals)
             .when_some(settings_select_overlay, |root, overlay| root.child(overlay))

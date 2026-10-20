@@ -256,8 +256,20 @@ fn detect_path_ranges(
             index += 1;
         }
         let start = index;
-        while index < chars.len() && !chars[index].is_whitespace() {
-            index += 1;
+        let quoted_archive_end = chars
+            .get(start)
+            .filter(|ch| matches!(ch, '\'' | '"'))
+            .and_then(|quote| {
+                let end = (start + 1..chars.len()).find(|&i| chars[i] == *quote)?;
+                let path: String = chars[start + 1..end].iter().collect();
+                oxideterm_environment::archive::is_archive_path(&path).then_some(end + 1)
+            });
+        if let Some(end) = quoted_archive_end {
+            index = end;
+        } else {
+            while index < chars.len() && !chars[index].is_whitespace() {
+                index += 1;
+            }
         }
         let end = trim_link_end(&chars, start, index);
         if end <= start {
@@ -296,6 +308,7 @@ pub(crate) fn is_path_like(token: &str) -> bool {
         || token.starts_with("../")
         || token.starts_with("~/")
         || (token.contains('/') && token.contains('.'))
+        || oxideterm_environment::archive::is_archive_path(token)
 }
 
 pub(crate) fn path_link_to_file_url(target: &str, base_dir: &Path) -> Option<String> {

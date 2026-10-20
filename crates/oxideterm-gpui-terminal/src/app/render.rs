@@ -275,6 +275,13 @@ impl Render for TerminalPane {
             self.render_stats.paint_micros = performance.paint_micros;
             self.render_stats.layout_cache_hit_percent = performance.cache_hit_percent;
         }
+        if self
+            .timestamp_hover
+            .as_ref()
+            .is_some_and(|hover| hover.generation != self.snapshot_generation)
+        {
+            self.clear_timestamp_hover(cx);
+        }
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
@@ -513,6 +520,7 @@ impl Render for TerminalPane {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    this.clear_timestamp_hover(cx);
                     window.focus(&this.focus_handle, cx);
                     let mode = this.terminal.lock().mode();
                     if this.right_click_paste_requested(event.modifiers) {
@@ -528,6 +536,11 @@ impl Render for TerminalPane {
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
                 this.handle_mouse_move(event, cx);
+            }))
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_timestamp_hover(cx);
+                }
             }))
             .on_mouse_up(
                 MouseButton::Left,

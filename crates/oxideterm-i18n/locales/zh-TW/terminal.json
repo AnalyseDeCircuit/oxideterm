@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "解壓縮檔案",
+      "hint": "檢查並編輯命令後，填入新的命令列草稿，不會自動執行。",
+      "source": "壓縮檔",
+      "destination": "解壓縮目錄",
+      "environment_hint": "偵測針對原始 SSH 連線或 WSL 發行版。如果已進入其他主機或容器，請先返回該環境。",
+      "confirm_environment": "我仍在上述環境中，並已選擇目前使用的 Shell",
+      "probing": "正在檢查可用的解壓縮工具…",
+      "fill": "填入命令列",
+      "context_unavailable": "請返回閒置的 Shell 後再產生解壓縮命令。",
+      "probe_failed": "無法偵測此環境，請在一般本機或 SSH Shell 中重試。",
+      "choose_shell": "請選擇此終端機目前使用的 Shell。",
+      "unsupported": "尚不支援此壓縮格式。",
+      "invalid_path": "所選 Shell 無法安全表示此路徑。",
+      "cwd_unavailable": "無法確認目前目錄，請使用壓縮檔的絕對路徑。",
+      "tool_unavailable": "找不到適用的解壓縮工具，請在此環境安裝 tar、unzip、7-Zip 或所需的解壓縮元件。",
+      "context_changed": "終端機、連線或目前目錄已變更，請重新點擊壓縮檔。",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "在本機儲存命令歷史",
       "save_hint": "為已儲存的 SSH、Telnet、Mosh 與序列埠連線儲存完整命令。記錄以明文儲存在本機，包括參數中的密碼或權杖。啟用後開始儲存。",

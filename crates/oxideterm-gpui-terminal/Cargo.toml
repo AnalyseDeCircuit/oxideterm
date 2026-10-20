@@ -11,6 +11,7 @@ version.workspace = true
 bench = []
 
 [dependencies]
+oxideterm-environment = { path = "../oxideterm-environment" }
 uuid.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 anyhow.workspace = true

@@ -560,6 +560,10 @@ impl TerminalSession {
         self.backend.process_info()
     }
 
+    pub fn launch_shell(&self) -> Option<crate::ShellInfo> {
+        self.backend.launch_shell()
+    }
+
     pub fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
         self.backend.process_info_probe()
     }

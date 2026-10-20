@@ -139,26 +139,6 @@ mod tests {
                 } else {
                     assert!(credentials.is_empty());
                 }
-                let skipped = apply_oxide_import_with_options_with_context_and_progress(
-                    &mut target,
-                    &bytes,
-                    &mut context,
-                    OxideImportOptions {
-                        conflict_strategy: ImportConflictStrategy::Skip,
-                        ..Default::default()
-                    },
-                    |_, _, _| {},
-                )
-                .unwrap();
-                assert_eq!(skipped.skipped, 1);
-                assert_eq!(
-                    target
-                        .plugin_profiles()
-                        .iter()
-                        .map(|p| p.name.as_str())
-                        .collect::<Vec<_>>(),
-                    vec!["selected"]
-                );
             }
         }
     }

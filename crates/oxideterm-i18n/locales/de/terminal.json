@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Archiv entpacken",
+      "hint": "Befehl prüfen und bearbeiten, dann als neuen Entwurf in die Befehlsleiste übernehmen. Es wird nichts automatisch ausgeführt.",
+      "source": "Archiv",
+      "destination": "Zielordner",
+      "environment_hint": "Die Erkennung prüft die ursprüngliche SSH-Verbindung oder WSL-Distribution. Verlassen Sie zuerst andere Hosts oder Container.",
+      "confirm_environment": "Ich bin in der angezeigten Umgebung und habe die aktuelle Shell gewählt",
+      "probing": "Verfügbare Entpackwerkzeuge werden geprüft…",
+      "fill": "In Befehlsleiste übernehmen",
+      "context_unavailable": "Kehren Sie zuerst zu einer freien Shell zurück.",
+      "probe_failed": "Diese Umgebung konnte nicht geprüft werden. Versuchen Sie es in einer normalen lokalen oder SSH-Shell erneut.",
+      "choose_shell": "Wählen Sie die aktuelle Shell dieses Terminals.",
+      "unsupported": "Dieses Archivformat wird nicht unterstützt.",
+      "invalid_path": "Dieser Pfad lässt sich in der gewählten Shell nicht sicher darstellen.",
+      "cwd_unavailable": "Das aktuelle Verzeichnis ist unbekannt. Verwenden Sie einen absoluten Archivpfad.",
+      "tool_unavailable": "Kein passendes Entpackwerkzeug gefunden. Installieren Sie tar, unzip, 7-Zip oder das benötigte Dekomprimierungsprogramm in dieser Umgebung.",
+      "context_changed": "Terminal, Verbindung oder Verzeichnis geändert. Klicken Sie erneut auf das Archiv.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Befehlsverlauf auf diesem Gerät speichern",
       "save_hint": "Vollständige Befehle gespeicherter SSH-, Telnet-, Mosh- und serieller Verbindungen werden lokal unverschlüsselt gespeichert, einschließlich Passwörtern oder Tokens in Argumenten. Die Speicherung beginnt mit der Aktivierung.",

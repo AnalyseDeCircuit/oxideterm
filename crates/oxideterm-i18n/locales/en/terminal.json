@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Extract archive",
+      "hint": "Review and edit the command, then add it to a new command-bar draft. Nothing runs automatically.",
+      "source": "Archive",
+      "destination": "Destination",
+      "environment_hint": "Detection uses the original SSH connection or WSL distribution. If you entered another host or container, return to this environment first.",
+      "confirm_environment": "I am in the environment shown above and have selected the current shell",
+      "probing": "Checking available extraction tools…",
+      "fill": "Add to command bar",
+      "context_unavailable": "Return to an idle shell before preparing an extraction command.",
+      "probe_failed": "Could not inspect this environment. Retry from a regular local or SSH shell.",
+      "choose_shell": "Select the shell currently used by this terminal.",
+      "unsupported": "This archive format is not supported.",
+      "invalid_path": "This path cannot be safely represented in the selected shell.",
+      "cwd_unavailable": "The current directory is unknown. Use an absolute archive path.",
+      "tool_unavailable": "No suitable extraction tool was found. Install tar, unzip, 7-Zip or the required decompressor in this environment.",
+      "context_changed": "The terminal, connection or current directory changed. Click the archive again.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Save command history on this device",
       "save_hint": "Save complete commands for saved SSH, Telnet, Mosh and serial connections in an unencrypted local file, including passwords or tokens in arguments. Saving starts when enabled.",

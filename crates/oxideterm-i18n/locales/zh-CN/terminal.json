@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "解压压缩包",
+      "hint": "检查并编辑命令后，填入新的命令栏草稿，不会自动执行。",
+      "source": "压缩包",
+      "destination": "解压目录",
+      "environment_hint": "探测针对原始 SSH 连接或 WSL 发行版。如果已进入其他主机或容器，请先返回该环境。",
+      "confirm_environment": "我仍在上述环境中，并已选择当前使用的 Shell",
+      "probing": "正在检查可用的解压工具…",
+      "fill": "填入命令栏",
+      "context_unavailable": "请返回空闲的 Shell 后再生成解压命令。",
+      "probe_failed": "无法检测此环境，请在普通本地或 SSH Shell 中重试。",
+      "choose_shell": "请选择此终端当前使用的 Shell。",
+      "unsupported": "暂不支持此压缩格式。",
+      "invalid_path": "所选 Shell 无法安全表示此路径。",
+      "cwd_unavailable": "无法确定当前目录，请使用压缩包的绝对路径。",
+      "tool_unavailable": "未找到适用的解压工具，请在此环境安装 tar、unzip、7-Zip 或所需的解压组件。",
+      "context_changed": "终端、连接或当前目录已变化，请重新点击压缩包。",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "在本机保存命令历史",
       "save_hint": "为已保存的 SSH、Telnet、Mosh 和串口连接保存完整命令。记录以明文存储在本机，包括参数中的密码或令牌。开启后开始保存。",

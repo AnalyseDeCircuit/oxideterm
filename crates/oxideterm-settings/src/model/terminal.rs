@@ -301,6 +301,10 @@ fn default_detect_file_paths_as_links() -> bool {
     true
 }
 
+fn default_timestamp_hover() -> bool {
+    true
+}
+
 fn default_terminal_semantic_coloring() -> bool {
     // Semantic coloring is opt-in because it changes application-provided terminal output.
     false
@@ -443,6 +447,8 @@ pub struct TerminalSettings {
     pub open_links_with_modifier: bool,
     #[serde(default = "default_detect_file_paths_as_links")]
     pub detect_file_paths_as_links: bool,
+    #[serde(default = "default_timestamp_hover")]
+    pub timestamp_hover: bool,
     // Existing installations keep the protective prompt until the user opts out.
     #[serde(default = "default_confirm_before_closing_ssh")]
     pub confirm_before_closing_ssh: bool,
@@ -616,6 +622,7 @@ impl Default for TerminalSettings {
             right_click_paste: false,
             open_links_with_modifier: true,
             detect_file_paths_as_links: true,
+            timestamp_hover: true,
             confirm_before_closing_ssh: true,
             selection_requires_shift: false,
             free_type_mode: false,

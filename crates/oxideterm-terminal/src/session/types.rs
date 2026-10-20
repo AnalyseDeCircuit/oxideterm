@@ -116,6 +116,9 @@ pub trait TerminalSessionBackend: Send {
         self.lifecycle().is_running()
     }
     fn process_info(&self) -> TerminalProcessInfo;
+    fn launch_shell(&self) -> Option<crate::ShellInfo> {
+        None
+    }
     fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
         None
     }

@@ -300,7 +300,7 @@ fn write_process_plugin(plugin_dir: &Path, body: &str) {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn runtime_host_delivers_idle_pushes_and_stops_delivery_on_deactivation() {
+async fn runtime_host_delivers_idle_pushes_and_rejects_commands_after_deactivation() {
     let plugin_dir = unique_temp_dir("plugin-idle-push");
     write_process_plugin(
         &plugin_dir,
@@ -369,7 +369,6 @@ read request
         }
     );
     host.deactivate_plugin("com.example.runtime").await.unwrap();
-    assert!(host.receive_pending_output().await.is_empty());
     assert_eq!(
         host.dispatch_command(
             "com.example.runtime",

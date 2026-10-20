@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "關閉視窗後，OxideTerm 將繼續在背景執行。"
     },
     "terminal": {
+      "timestamp_hover": "懸停顯示本地時間",
+      "timestamp_hover_hint": "滑鼠懸停在 10 位秒時間戳記或 13 位毫秒時間戳記上時，顯示系統時區對應的日期和時間",
       "bg_source_particles": "景深粒子",
       "bg_particles_size": "粒子大小",
       "bg_field_density": "密度",
