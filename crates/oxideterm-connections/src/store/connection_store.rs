@@ -3796,18 +3796,28 @@ impl ConnectionStore {
         }
         for credential in &mut connection.privilege_credentials {
             if credential.plaintext_secret.is_none() && credential.keychain_id.is_none()
-                && let Some(existing_credential) = existing
-                    .as_ref()
-                    .and_then(|connection| {
-                        connection
-                            .privilege_credentials
-                            .iter()
-                            .find(|candidate| candidate.id == credential.id)
-                    })
             {
-                // Metadata-only imports do not carry secrets. Reusing the local
-                // reference keeps the protected entry alive for the same credential.
-                credential.keychain_id = existing_credential.keychain_id.clone();
+                let credential_connection_id =
+                    privilege_credential_connection_id(&credential.connection_id, &connection.id);
+                let existing_credential = existing.as_ref().and_then(|existing_connection| {
+                    existing_connection
+                        .privilege_credentials
+                        .iter()
+                        .find(|candidate| {
+                            candidate.id == credential.id
+                                && candidate.kind == credential.kind
+                                && privilege_credential_connection_id(
+                                    &candidate.connection_id,
+                                    &existing_connection.id,
+                                ) == credential_connection_id
+                        })
+                });
+                if let Some(existing_credential) = existing_credential {
+                    // Metadata-only imports do not carry secrets. Reuse a local
+                    // reference only when the credential identity and prompt scope
+                    // still match; otherwise the old entry must be retired.
+                    credential.keychain_id = existing_credential.keychain_id.clone();
+                }
             }
         }
         let (privilege_credentials, touched_privilege_keychain_ids) =

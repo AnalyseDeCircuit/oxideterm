@@ -452,15 +452,23 @@ fn collect_imported_privilege_keychain_ids(
                 .iter()
                 .filter(|credential| credential.plaintext_secret.is_some())
                 .map(|credential| {
-                    let connection_id = if credential.connection_id.trim().is_empty() {
-                        connection.id.as_str()
-                    } else {
-                        credential.connection_id.as_str()
-                    };
+                    let connection_id =
+                        privilege_credential_connection_id(&credential.connection_id, &connection.id);
                     privilege_keychain_id(connection_id, &credential.id)
                 })
         })
         .collect()
+}
+
+fn privilege_credential_connection_id<'a>(
+    credential_connection_id: &'a str,
+    owner_connection_id: &'a str,
+) -> &'a str {
+    if credential_connection_id.trim().is_empty() {
+        owner_connection_id
+    } else {
+        credential_connection_id
+    }
 }
 
 fn collect_keychain_ids_for_parts(
