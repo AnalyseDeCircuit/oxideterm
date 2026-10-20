@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Estrai archivio",
+      "hint": "Controlla e modifica il comando, poi aggiungilo come nuova bozza nella barra dei comandi. Nulla viene eseguito automaticamente.",
+      "source": "Archivio",
+      "destination": "Cartella di destinazione",
+      "environment_hint": "Il rilevamento usa la connessione SSH o la distribuzione WSL originale. Se sei entrato in un altro host o contenitore, torna prima a quell’ambiente.",
+      "confirm_environment": "Sono nell’ambiente indicato e ho selezionato la shell attuale",
+      "probing": "Verifica degli strumenti di estrazione disponibili…",
+      "fill": "Aggiungi alla barra dei comandi",
+      "context_unavailable": "Torna a una shell inattiva prima di preparare l’estrazione.",
+      "probe_failed": "Impossibile verificare questo ambiente. Riprova da una normale shell locale o SSH.",
+      "choose_shell": "Seleziona la shell usata da questo terminale.",
+      "unsupported": "Questo formato di archivio non è supportato.",
+      "invalid_path": "Il percorso non può essere rappresentato in modo sicuro nella shell selezionata.",
+      "cwd_unavailable": "La directory attuale è sconosciuta. Usa un percorso assoluto per l’archivio.",
+      "tool_unavailable": "Nessuno strumento di estrazione adatto trovato. Installa tar, unzip, 7-Zip o il decompressore necessario in questo ambiente.",
+      "context_changed": "Il terminale, la connessione o la directory è cambiata. Fai di nuovo clic sull’archivio.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Salva la cronologia su questo dispositivo",
       "save_hint": "Salva i comandi completi delle connessioni SSH, Telnet, Mosh e seriali salvate in un file locale non cifrato, comprese password o token negli argomenti. Il salvataggio inizia all’attivazione.",

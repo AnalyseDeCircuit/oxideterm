@@ -3,16 +3,7 @@
 
 use thiserror::Error;
 
-/// Archive formats supported by remote SFTP extraction.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ArchiveKind {
-    Zip,
-    Tar,
-    TarGzip,
-    TarBzip2,
-    TarXz,
-    TarZstd,
-}
+pub use oxideterm_environment::archive::{ArchiveKind, archive_kind};
 
 /// A shell command and its recognized archive format.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,26 +17,6 @@ pub struct ArchiveExtractionPlan {
 pub enum ArchiveExtractionError {
     #[error("unsupported archive: {file_name}")]
     UnsupportedArchive { file_name: String },
-}
-
-/// Identifies an archive format from its file name.
-pub fn archive_kind(file_name: &str) -> Option<ArchiveKind> {
-    let lower = file_name.to_ascii_lowercase();
-    if lower.ends_with(".zip") {
-        Some(ArchiveKind::Zip)
-    } else if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        Some(ArchiveKind::TarGzip)
-    } else if lower.ends_with(".tar.bz2") || lower.ends_with(".tbz") || lower.ends_with(".tbz2") {
-        Some(ArchiveKind::TarBzip2)
-    } else if lower.ends_with(".tar.xz") || lower.ends_with(".txz") {
-        Some(ArchiveKind::TarXz)
-    } else if lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
-        Some(ArchiveKind::TarZstd)
-    } else if lower.ends_with(".tar") {
-        Some(ArchiveKind::Tar)
-    } else {
-        None
-    }
 }
 
 /// Builds a non-destructive remote extraction command with shell-quoted paths.

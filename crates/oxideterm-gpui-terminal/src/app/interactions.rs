@@ -1536,6 +1536,14 @@ impl TerminalPane {
             match link.kind {
                 TerminalLinkKind::Url => cx.open_url(&link.target),
                 TerminalLinkKind::Path => {
+                    let path = link.target.trim_matches(['\'', '"', '`']);
+                    if oxideterm_environment::archive::is_archive_path(path) {
+                        self.archive_path_requested = Some(Zeroizing::new(path.to_string()));
+                        self.context_action_requested =
+                            Some(TerminalContextAction::PreviewArchiveCommand);
+                        cx.emit(TerminalPaneEvent::ContextActionRequested);
+                        return;
+                    }
                     if let Ok(base_dir) = env::current_dir()
                         && let Some(url) = path_link_to_file_url(&link.target, &base_dir)
                     {

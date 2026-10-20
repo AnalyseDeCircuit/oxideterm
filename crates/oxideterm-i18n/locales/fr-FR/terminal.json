@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Extraire l’archive",
+      "hint": "Vérifiez et modifiez la commande, puis ajoutez-la comme nouveau brouillon dans la barre de commandes. Rien ne s’exécute automatiquement.",
+      "source": "Archive",
+      "destination": "Dossier de destination",
+      "environment_hint": "La détection utilise la connexion SSH ou la distribution WSL d’origine. Si vous êtes entré dans un autre hôte ou conteneur, revenez d’abord à cet environnement.",
+      "confirm_environment": "Je suis dans l’environnement indiqué et j’ai sélectionné le shell actuel",
+      "probing": "Vérification des outils d’extraction disponibles…",
+      "fill": "Ajouter à la barre de commandes",
+      "context_unavailable": "Revenez à un shell inactif avant de préparer l’extraction.",
+      "probe_failed": "Impossible de vérifier cet environnement. Réessayez depuis un shell local ou SSH classique.",
+      "choose_shell": "Sélectionnez le shell utilisé par ce terminal.",
+      "unsupported": "Ce format d’archive n’est pas pris en charge.",
+      "invalid_path": "Ce chemin ne peut pas être représenté de manière sûre dans le shell sélectionné.",
+      "cwd_unavailable": "Le répertoire actuel est inconnu. Utilisez un chemin d’archive absolu.",
+      "tool_unavailable": "Aucun outil d’extraction adapté trouvé. Installez tar, unzip, 7-Zip ou le décompresseur nécessaire dans cet environnement.",
+      "context_changed": "Le terminal, la connexion ou le répertoire a changé. Cliquez à nouveau sur l’archive.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Enregistrer l’historique sur cet appareil",
       "save_hint": "Enregistre les commandes complètes des connexions SSH, Telnet, Mosh et série enregistrées dans un fichier local non chiffré, y compris les mots de passe ou jetons dans les arguments. L’enregistrement commence à l’activation.",

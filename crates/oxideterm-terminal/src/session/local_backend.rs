@@ -19,6 +19,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::process_info(self)
     }
 
+    fn launch_shell(&self) -> Option<crate::ShellInfo> {
+        Some(LocalPtySession::launch_shell(self).clone())
+    }
+
     fn process_info_probe(&self) -> Option<TerminalProcessProbe> {
         LocalPtySession::process_info_probe(self)
     }

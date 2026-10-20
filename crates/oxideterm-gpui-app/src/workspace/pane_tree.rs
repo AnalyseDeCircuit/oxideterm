@@ -387,6 +387,7 @@ impl WorkspaceApp {
                                 }
                                 TerminalPaneInteraction::ContextAction => {
                                     pane.take_context_action_request();
+                                    pane.take_archive_path_request();
                                 }
                             });
                         }

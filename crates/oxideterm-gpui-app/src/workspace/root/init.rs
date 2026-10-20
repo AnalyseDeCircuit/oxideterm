@@ -891,6 +891,7 @@ impl WorkspaceApp {
             local_shells,
             local_shell_launcher_open: false,
             local_shell_launcher_selected_id: None,
+            archive_command: None,
             terminal,
             _terminal_subscription: terminal_subscription,
             overlay,

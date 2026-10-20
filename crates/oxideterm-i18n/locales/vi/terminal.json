@@ -1,5 +1,27 @@
 {
   "terminal": {
+    "archive": {
+      "title": "Giải nén tệp",
+      "hint": "Kiểm tra và sửa lệnh rồi thêm vào thanh lệnh dưới dạng bản nháp mới. Lệnh không tự chạy.",
+      "source": "Tệp nén",
+      "destination": "Thư mục đích",
+      "environment_hint": "Việc kiểm tra dùng kết nối SSH hoặc bản phân phối WSL ban đầu. Nếu đã vào máy khác hoặc vùng chứa, hãy quay lại môi trường ban đầu trước.",
+      "confirm_environment": "Tôi đang ở môi trường trên và đã chọn shell hiện tại",
+      "probing": "Đang kiểm tra công cụ giải nén có sẵn…",
+      "fill": "Thêm vào thanh lệnh",
+      "context_unavailable": "Hãy quay lại shell đang rảnh trước khi tạo lệnh giải nén.",
+      "probe_failed": "Không thể kiểm tra môi trường này. Hãy thử lại từ shell cục bộ hoặc SSH thông thường.",
+      "choose_shell": "Chọn shell đang dùng trong terminal này.",
+      "unsupported": "Chưa hỗ trợ định dạng tệp nén này.",
+      "invalid_path": "Không thể biểu diễn đường dẫn này an toàn trong shell đã chọn.",
+      "cwd_unavailable": "Không xác định được thư mục hiện tại. Hãy dùng đường dẫn tuyệt đối của tệp nén.",
+      "tool_unavailable": "Không tìm thấy công cụ giải nén phù hợp. Hãy cài tar, unzip, 7-Zip hoặc bộ giải nén cần thiết trong môi trường này.",
+      "context_changed": "Terminal, kết nối hoặc thư mục đã thay đổi. Hãy nhấp lại vào tệp nén.",
+      "shell_posix": "sh / Bash / Zsh",
+      "shell_fish": "Fish",
+      "shell_powershell": "PowerShell",
+      "shell_cmd": "CMD"
+    },
     "history": {
       "save": "Lưu lịch sử lệnh trên thiết bị này",
       "save_hint": "Lưu toàn bộ lệnh của các kết nối SSH, Telnet, Mosh và cổng nối tiếp đã lưu trong tệp cục bộ không mã hóa, gồm cả mật khẩu hoặc mã truy cập trong đối số. Bắt đầu lưu khi bật.",

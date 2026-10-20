@@ -498,6 +498,7 @@ pub struct TerminalPane {
     context_menu: Option<TerminalContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_action_requested: Option<TerminalContextAction>,
+    archive_path_requested: Option<Zeroizing<String>>,
     plugin_text_actions: Vec<TerminalPluginTextAction>,
     pending_plugin_text: Option<(TerminalPluginTextAction, zeroize::Zeroizing<String>)>,
     pending_trigger_matches: VecDeque<oxideterm_terminal_triggers::TriggerMatched>,
@@ -661,6 +662,7 @@ pub enum TerminalContextAction {
     FillCommandBarFromSelection,
     OpenSearch,
     OpenSessionTriggers,
+    PreviewArchiveCommand,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1243,6 +1245,7 @@ impl TerminalPane {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_action_requested: None,
+            archive_path_requested: None,
             plugin_text_actions: Vec::new(),
             pending_plugin_text: None,
             pending_trigger_matches: VecDeque::new(),
@@ -1920,6 +1923,10 @@ impl TerminalPane {
 
     pub fn take_context_action_request(&mut self) -> Option<TerminalContextAction> {
         self.context_action_requested.take()
+    }
+
+    pub fn take_archive_path_request(&mut self) -> Option<Zeroizing<String>> {
+        self.archive_path_requested.take()
     }
 
     pub fn set_plugin_text_actions(&mut self, actions: Vec<TerminalPluginTextAction>) {
