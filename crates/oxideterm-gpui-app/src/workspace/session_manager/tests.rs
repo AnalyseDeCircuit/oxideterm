@@ -1,5 +1,89 @@
 use super::*;
-use oxideterm_connections::SavedProxyHop;
+use gpui::TestAppContext;
+use oxideterm_connections::{ConnectionStoreData, SavedProxyHop};
+
+fn isolated_workspace_fixture(
+    cx: &mut TestAppContext,
+    fixture_key: &str,
+) -> Option<std::path::PathBuf> {
+    let executable = std::env::current_exe().unwrap();
+    if let Some(fixture_dir) = std::env::var_os(fixture_key) {
+        let fixture_dir = std::path::PathBuf::from(fixture_dir);
+        assert!(default_settings_path().starts_with(&fixture_dir));
+        return Some(fixture_dir);
+    }
+
+    // Workspace storage is process-wide; keep settings and connection fixtures isolated.
+    let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+    let child = directory.path().join(executable.file_name().unwrap());
+    std::fs::hard_link(&executable, &child).unwrap();
+    std::fs::write(directory.path().join("portable"), []).unwrap();
+    let output = std::process::Command::new(child)
+        .arg(cx.test_function_name().unwrap())
+        .arg("--nocapture")
+        .env(fixture_key, directory.path())
+        .env_remove("APPIMAGE")
+        .current_dir(directory.path())
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    None
+}
+
+fn workspace_with_console_profiles<'a>(
+    cx: &'a mut TestAppContext,
+    fixture_dir: &std::path::Path,
+) -> (Entity<WorkspaceApp>, &'a mut TestAppContext) {
+    let settings_path = default_settings_path();
+    let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
+    settings.settings_mut().ssh_config.auto_load_hosts = false;
+    settings.settings_mut().onboarding_completed = true;
+    settings.save().unwrap();
+
+    let mut telnet = TelnetProfile::new("Telnet", "telnet.test", 23);
+    let mut mosh = MoshProfile::new("Mosh", "mosh.test", 22, "deploy", SavedAuth::Agent);
+    let mut serial = SerialProfile::new("Serial", "COM3");
+    for id in [&mut telnet.id, &mut mosh.id, &mut serial.id] {
+        *id = "shared-profile-id".into();
+    }
+    let connections_path = fixture_dir.join("console-history-connections.json");
+    std::fs::write(
+        &connections_path,
+        serde_json::to_vec(&ConnectionStoreData {
+            telnet_profiles: vec![telnet],
+            mosh_profiles: vec![mosh],
+            serial_profiles: vec![serial],
+            ..ConnectionStoreData::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    let connections = ConnectionStore::load(connections_path).unwrap();
+
+    let (shell, cx) = cx.add_window_view(|window, cx| {
+        let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+        WorkspaceWindowShell::new(workspace, window, cx)
+    });
+    let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+    workspace.update(cx, |workspace, _cx| {
+        workspace.connection_store = connections;
+    });
+    (workspace, cx)
+}
+
+fn history_scopes(workspace: &WorkspaceApp) -> HashSet<String> {
+    workspace
+        .terminal_history_store
+        .histories()
+        .into_iter()
+        .map(|(scope, _, _)| scope)
+        .collect()
+}
 
 pub(super) fn base_form() -> NewConnectionForm {
     let mut form = NewConnectionForm::default();
@@ -986,4 +1070,75 @@ fn standalone_sftp_empty_password_roundtrip_keeps_both_endpoints_independent() {
         assert_eq!(form.empty_password, !empty);
         assert_eq!(form.standalone_sftp_secondary.empty_password, empty);
     }
+}
+
+#[gpui::test]
+fn single_console_profile_delete_retires_its_history_scope(cx: &mut TestAppContext) {
+    let Some(fixture_dir) =
+        isolated_workspace_fixture(cx, "OXIDETERM_SESSION_DELETE_SINGLE_TEST_DIR")
+    else {
+        return;
+    };
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+    let serial_scope = serde_json::json!(["serial", "shared-profile-id", "COM3"]).to_string();
+    let telnet_scope =
+        serde_json::json!(["telnet", "shared-profile-id", "telnet.test", 23]).to_string();
+
+    workspace.update(cx, |workspace, cx| {
+        let _serial_history = workspace
+            .terminal_history_store
+            .history(serial_scope.clone(), "Serial".into());
+        let _telnet_history = workspace
+            .terminal_history_store
+            .history(telnet_scope.clone(), "Telnet".into());
+
+        workspace.delete_serial_profile("shared-profile-id", cx);
+
+        assert_eq!(history_scopes(workspace), HashSet::from([telnet_scope]));
+        assert!(
+            workspace
+                .connection_store
+                .serial_profiles()
+                .iter()
+                .all(|profile| profile.id != "shared-profile-id")
+        );
+    });
+}
+
+#[gpui::test]
+fn batch_console_profile_delete_retires_its_history_scope(cx: &mut TestAppContext) {
+    let Some(fixture_dir) =
+        isolated_workspace_fixture(cx, "OXIDETERM_SESSION_DELETE_BATCH_TEST_DIR")
+    else {
+        return;
+    };
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+    let telnet_scope =
+        serde_json::json!(["telnet", "shared-profile-id", "telnet.test", 23]).to_string();
+    let serial_scope = serde_json::json!(["serial", "shared-profile-id", "COM3"]).to_string();
+
+    workspace.update(cx, |workspace, cx| {
+        let _telnet_history = workspace
+            .terminal_history_store
+            .history(telnet_scope.clone(), "Telnet".into());
+        let _serial_history = workspace
+            .terminal_history_store
+            .history(serial_scope.clone(), "Serial".into());
+
+        workspace.delete_selected_session_items(
+            vec![SessionManagerSelectionTarget::Telnet(
+                "shared-profile-id".into(),
+            )],
+            cx,
+        );
+
+        assert_eq!(history_scopes(workspace), HashSet::from([serial_scope]));
+        assert!(
+            workspace
+                .connection_store
+                .telnet_profiles()
+                .iter()
+                .all(|profile| profile.id != "shared-profile-id")
+        );
+    });
 }

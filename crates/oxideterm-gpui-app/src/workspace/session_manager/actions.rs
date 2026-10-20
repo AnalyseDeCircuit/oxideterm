@@ -4,6 +4,9 @@ use crate::workspace::new_connection::{
     form_from_telnet_profile, terminal_serial_flow_from_profile,
     terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
 };
+use crate::workspace::terminal_command_bar::{
+    SavedConsoleProfileKind, delete_saved_console_profile,
+};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
 };
@@ -817,7 +820,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn delete_serial_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        let (status, changed) = match self.connection_store.delete_serial_profile(id) {
+        let (status, changed) = match delete_saved_console_profile(
+            &mut self.connection_store,
+            &self.terminal_history_store,
+            SavedConsoleProfileKind::Serial,
+            id,
+        ) {
             Ok(true) => (self.i18n.t("sessionManager.serial_profiles.delete"), true),
             Ok(false) => (
                 self.i18n.t("sessionManager.serial_profiles.delete_failed"),
@@ -878,7 +886,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn delete_telnet_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        let (status, deleted) = match self.connection_store.delete_telnet_profile(id) {
+        let (status, deleted) = match delete_saved_console_profile(
+            &mut self.connection_store,
+            &self.terminal_history_store,
+            SavedConsoleProfileKind::Telnet,
+            id,
+        ) {
             Ok(true) => (self.i18n.t("sessionManager.telnet_profiles.delete"), true),
             Ok(false) => (
                 self.i18n.t("sessionManager.telnet_profiles.delete_failed"),
@@ -907,7 +920,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn delete_mosh_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        let (status, changed) = match self.connection_store.delete_mosh_profile(id) {
+        let (status, changed) = match delete_saved_console_profile(
+            &mut self.connection_store,
+            &self.terminal_history_store,
+            SavedConsoleProfileKind::Mosh,
+            id,
+        ) {
             Ok(true) => (self.i18n.t("sessionManager.mosh_profiles.delete"), true),
             Ok(false) => (
                 self.i18n.t("sessionManager.mosh_profiles.delete_failed"),
@@ -1366,10 +1384,13 @@ impl WorkspaceApp {
                     }
                 }
                 SessionManagerSelectionTarget::Serial(id) => {
-                    if self
-                        .connection_store
-                        .delete_serial_profile(&id)
-                        .unwrap_or(false)
+                    if delete_saved_console_profile(
+                        &mut self.connection_store,
+                        &self.terminal_history_store,
+                        SavedConsoleProfileKind::Serial,
+                        &id,
+                    )
+                    .unwrap_or(false)
                     {
                         deleted += 1;
                     }
@@ -1393,19 +1414,25 @@ impl WorkspaceApp {
                     }
                 }
                 SessionManagerSelectionTarget::Telnet(id) => {
-                    if self
-                        .connection_store
-                        .delete_telnet_profile(&id)
-                        .unwrap_or(false)
+                    if delete_saved_console_profile(
+                        &mut self.connection_store,
+                        &self.terminal_history_store,
+                        SavedConsoleProfileKind::Telnet,
+                        &id,
+                    )
+                    .unwrap_or(false)
                     {
                         deleted += 1;
                     }
                 }
                 SessionManagerSelectionTarget::Mosh(id) => {
-                    if self
-                        .connection_store
-                        .delete_mosh_profile(&id)
-                        .unwrap_or(false)
+                    if delete_saved_console_profile(
+                        &mut self.connection_store,
+                        &self.terminal_history_store,
+                        SavedConsoleProfileKind::Mosh,
+                        &id,
+                    )
+                    .unwrap_or(false)
                     {
                         deleted += 1;
                     }
