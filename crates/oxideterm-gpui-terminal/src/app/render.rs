@@ -276,13 +276,25 @@ impl Render for TerminalPane {
             self.render_stats.layout_cache_hit_percent = performance.cache_hit_percent;
         }
         if self
-            .timestamp_hover
+            .interactive_trigger_hover
             .as_ref()
             .is_some_and(|hover| hover.generation != self.snapshot_generation)
+            || self
+                .timestamp_hover
+                .as_ref()
+                .is_some_and(|hover| hover.generation != self.snapshot_generation)
         {
-            self.clear_timestamp_hover(cx);
+            self.clear_terminal_hover(cx);
         }
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
+        if self
+            .context_menu
+            .as_ref()
+            .and_then(|menu| menu.trigger.as_ref())
+            .is_some_and(|menu| menu.generation != self.snapshot_generation)
+        {
+            self.dismiss_terminal_context_menu(cx);
+        }
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
         snapshot.cursor_shape =
@@ -520,7 +532,7 @@ impl Render for TerminalPane {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.clear_timestamp_hover(cx);
+                    this.clear_terminal_hover(cx);
                     window.focus(&this.focus_handle, cx);
                     let mode = this.terminal.lock().mode();
                     if this.right_click_paste_requested(event.modifiers) {
@@ -539,7 +551,7 @@ impl Render for TerminalPane {
             }))
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 if !*hovered {
-                    this.clear_timestamp_hover(cx);
+                    this.clear_terminal_hover(cx);
                 }
             }))
             .on_mouse_up(
@@ -2037,7 +2049,22 @@ impl TerminalPane {
         let tokens = &self.theme.tokens;
         let menu_visible =
             self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let popup = if menu.serial_transfer_menu {
+        let popup = if let Some(trigger) = menu.trigger.as_ref() {
+            context_menu_event_boundary(
+                context_menu_content(tokens)
+                    .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
+                    .children(trigger.labels.iter().enumerate().map(|(index, label)| {
+                        self.render_terminal_context_menu_item(
+                            label.to_string(),
+                            !menu_visible,
+                            move |this, _, _, cx| {
+                                this.request_interactive_trigger_menu_item(index, cx)
+                            },
+                            cx,
+                        )
+                    })),
+            )
+        } else if menu.serial_transfer_menu {
             self.render_serial_transfer_menu(cx)
         } else {
             context_menu_event_boundary(

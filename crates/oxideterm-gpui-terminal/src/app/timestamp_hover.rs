@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use super::TerminalPoint;
 use chrono::{DateTime, Local};
 use gpui::{Context, Pixels, Point};
 use oxideterm_terminal::{TerminalCell, TerminalSnapshot};
@@ -16,15 +17,25 @@ pub(super) struct TerminalTimestampHover {
 }
 
 impl TerminalPane {
-    pub fn timestamp_hover_tooltip(&self) -> Option<(&str, Point<Pixels>)> {
+    pub fn hover_tooltip(&self) -> Option<(&str, Point<Pixels>)> {
+        if let Some(hover) = &self.interactive_trigger_hover {
+            return hover
+                .tooltip
+                .as_ref()
+                .map(|text| (text.as_str(), hover.position));
+        }
         self.timestamp_hover
             .as_ref()
             .map(|hover| (hover.label.as_str(), hover.position))
     }
 
-    pub fn clear_timestamp_hover(&mut self, cx: &mut Context<Self>) {
-        if self.timestamp_hover.take().is_some() {
-            cx.emit(TerminalPaneEvent::TimestampHoverChanged);
+    pub fn clear_terminal_hover(&mut self, cx: &mut Context<Self>) {
+        let custom = self.interactive_trigger_hover.take().is_some();
+        if custom {
+            self.hovered_link = None;
+        }
+        if self.timestamp_hover.take().is_some() || custom {
+            cx.emit(TerminalPaneEvent::HoverTooltipChanged);
         }
     }
 
@@ -33,10 +44,33 @@ impl TerminalPane {
         position: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        let Some(bounds) = self.bounds.filter(|bounds| bounds.contains(&position)) else {
-            self.clear_timestamp_hover(cx);
+        let Some(point) = self.hovered_text_point(position) else {
+            self.clear_terminal_hover(cx);
             return;
         };
+        if self.timestamp_hover.as_ref().is_some_and(|hover| {
+            hover.generation == self.snapshot_generation
+                && hover.row == point.row
+                && hover.columns.contains(&point.col)
+        }) {
+            return;
+        }
+        let Some((columns, label)) = timestamp_at_cell(&self.snapshot, point.row, point.col) else {
+            self.clear_terminal_hover(cx);
+            return;
+        };
+        self.timestamp_hover = Some(TerminalTimestampHover {
+            row: point.row,
+            columns,
+            generation: self.snapshot_generation,
+            label,
+            position,
+        });
+        cx.emit(TerminalPaneEvent::HoverTooltipChanged);
+    }
+
+    pub(super) fn hovered_text_point(&self, position: Point<Pixels>) -> Option<TerminalPoint> {
+        let bounds = self.bounds.filter(|bounds| bounds.contains(&position))?;
         let x = f32::from(position.x - bounds.origin.x) - self.terminal_content_padding_x()
             + f32::from(self.horizontal_scroll_offset_px);
         let y = f32::from(position.y - bounds.origin.y)
@@ -48,29 +82,9 @@ impl TerminalPane {
             || x >= self.snapshot.cols as f32 * self.metrics.cell_width_f32()
             || y >= self.snapshot.rows as f32 * self.metrics.line_height_f32()
         {
-            self.clear_timestamp_hover(cx);
-            return;
+            return None;
         }
-        let point = self.terminal_point_for_position(position);
-        if self.timestamp_hover.as_ref().is_some_and(|hover| {
-            hover.generation == self.snapshot_generation
-                && hover.row == point.row
-                && hover.columns.contains(&point.col)
-        }) {
-            return;
-        }
-        let Some((columns, label)) = timestamp_at_cell(&self.snapshot, point.row, point.col) else {
-            self.clear_timestamp_hover(cx);
-            return;
-        };
-        self.timestamp_hover = Some(TerminalTimestampHover {
-            row: point.row,
-            columns,
-            generation: self.snapshot_generation,
-            label,
-            position,
-        });
-        cx.emit(TerminalPaneEvent::TimestampHoverChanged);
+        Some(self.terminal_point_for_position(position))
     }
 }
 

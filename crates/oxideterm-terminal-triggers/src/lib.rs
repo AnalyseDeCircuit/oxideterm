@@ -15,10 +15,10 @@ pub use error::TerminalTriggerError;
 pub use model::{
     LocalProcessSpec, SavedConnectionKind, SavedConnectionRef, TERMINAL_TRIGGERS_SCHEMA_VERSION,
     TerminalTrigger, TerminalTriggerAction, TerminalTriggerDispatch, TerminalTriggerMatch,
-    TerminalTriggerMatchMode, TerminalTriggerScope, TerminalTriggerTiming,
+    TerminalTriggerMatchMode, TerminalTriggerMenuItem, TerminalTriggerScope, TerminalTriggerTiming,
     TerminalTriggersSnapshot,
 };
-pub use scanner::{TerminalTriggerStream, TriggerMatched};
+pub use scanner::{MAX_LOGICAL_LINE_BYTES, TerminalTriggerStream, TriggerMatched};
 pub use store::{
     default_snapshot, load_snapshot, new_trigger_id, now_ms, save_snapshot, terminal_triggers_path,
 };

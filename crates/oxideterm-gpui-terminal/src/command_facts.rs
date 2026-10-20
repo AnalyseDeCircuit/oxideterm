@@ -900,6 +900,8 @@ mod tests {
             start_line: 10,
             command_line: 10,
             command_line_clipped: false,
+            output_start: None,
+            output_end: None,
             end_line: closed.then_some(12),
             is_closed: closed,
             closed_by: closed.then_some(TerminalCommandMarkClosedBy::ShellIntegration),

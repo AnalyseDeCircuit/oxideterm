@@ -32,6 +32,7 @@ pub(crate) struct CompiledTrigger {
     pub(crate) dispatch: crate::TerminalTriggerDispatch,
     pub(crate) delay_ms: u64,
     pub(crate) cooldown_ms: u64,
+    pub(crate) interaction: Option<TerminalTriggerAction>,
 }
 
 /// An immutable, generation-tagged set that is safe to share across sessions.
@@ -39,6 +40,8 @@ pub struct CompiledTriggerSet {
     pub(crate) generation: u64,
     pub(crate) candidates: RegexSet,
     pub(crate) triggers: Vec<CompiledTrigger>,
+    pub(crate) interactive_candidates: RegexSet,
+    pub(crate) interactions: Vec<CompiledTrigger>,
 }
 
 impl CompiledTriggerSet {
@@ -50,6 +53,8 @@ impl CompiledTriggerSet {
 
         let mut triggers = Vec::new();
         let mut candidate_patterns = Vec::new();
+        let mut interactions = Vec::new();
+        let mut interactive_patterns = Vec::new();
         for trigger in snapshot.triggers.iter().filter(|trigger| trigger.enabled) {
             let (matcher, candidate_pattern) = compile_matcher(trigger)?;
             let capture_names = matcher
@@ -57,7 +62,7 @@ impl CompiledTriggerSet {
                 .flatten()
                 .map(str::to_owned)
                 .collect();
-            triggers.push(CompiledTrigger {
+            let compiled = CompiledTrigger {
                 id: trigger.id.clone(),
                 matcher,
                 capture_names,
@@ -65,10 +70,24 @@ impl CompiledTriggerSet {
                 dispatch: trigger.timing.dispatch,
                 delay_ms: trigger.timing.delay_ms,
                 cooldown_ms: trigger.timing.cooldown_ms,
-            });
-            candidate_patterns.push(candidate_pattern);
+                interaction: trigger
+                    .action
+                    .is_interactive()
+                    .then(|| trigger.action.clone()),
+            };
+            if compiled.interaction.is_some() {
+                interactions.push(compiled);
+                interactive_patterns.push(candidate_pattern);
+            } else {
+                triggers.push(compiled);
+                candidate_patterns.push(candidate_pattern);
+            }
         }
         let candidates = RegexSetBuilder::new(candidate_patterns)
+            .size_limit(MAX_COMPILED_REGEX_BYTES)
+            .build()
+            .map_err(|_| TerminalTriggerError::InvalidRegex)?;
+        let interactive_candidates = RegexSetBuilder::new(interactive_patterns)
             .size_limit(MAX_COMPILED_REGEX_BYTES)
             .build()
             .map_err(|_| TerminalTriggerError::InvalidRegex)?;
@@ -76,6 +95,8 @@ impl CompiledTriggerSet {
             generation,
             candidates,
             triggers,
+            interactive_candidates,
+            interactions,
         })
     }
 
@@ -84,11 +105,19 @@ impl CompiledTriggerSet {
     }
 
     pub fn len(&self) -> usize {
-        self.triggers.len()
+        self.triggers.len() + self.interactions.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.triggers.is_empty()
+        self.triggers.is_empty() && self.interactions.is_empty()
+    }
+
+    pub fn has_interactions(&self) -> bool {
+        !self.interactions.is_empty()
+    }
+
+    pub fn has_output_triggers(&self) -> bool {
+        !self.triggers.is_empty()
     }
 }
 
@@ -184,7 +213,37 @@ fn validate_action(
         TerminalTriggerAction::LaunchLocalProcess { process } => {
             validate_process(process, captures)
         }
+        TerminalTriggerAction::OpenUrl { url } => {
+            validate_template_field("action.url", url, captures)
+        }
+        TerminalTriggerAction::ShowTooltip { text } => {
+            validate_template_field("action.tooltip", text, captures)
+        }
+        TerminalTriggerAction::CustomLink { action } => validate_click_action(action, captures),
+        TerminalTriggerAction::CustomMenu { items } => {
+            ensure_collection_len("action.items", items.len(), 16)?;
+            if items.is_empty() {
+                return Err(TerminalTriggerError::EmptyField {
+                    field: "action.items",
+                });
+            }
+            for item in items {
+                validate_template_field("action.label", &item.label, captures)?;
+                validate_click_action(&item.action, captures)?;
+            }
+            Ok(())
+        }
     }
+}
+
+fn validate_click_action(
+    action: &TerminalTriggerAction,
+    captures: &HashSet<String>,
+) -> Result<(), TerminalTriggerError> {
+    if action.is_interactive() {
+        return Err(TerminalTriggerError::InvalidTemplate);
+    }
+    validate_action(action, captures)
 }
 
 fn validate_process(

@@ -82,7 +82,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
@@ -516,7 +516,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         // Terminal menu payloads include row-local command marks and target
         // points; any scroll makes that semantic snapshot stale.
         if self.context_menu.take().is_some() {
@@ -1157,7 +1157,10 @@ impl TerminalPane {
         TerminalPoint { row, col }
     }
 
-    fn link_at_position(&self, position: gpui::Point<Pixels>) -> Option<TerminalLinkRange> {
+    pub(super) fn link_at_position(
+        &self,
+        position: gpui::Point<Pixels>,
+    ) -> Option<TerminalLinkRange> {
         let point = self.terminal_point_for_position(position);
         let cell = self
             .snapshot
@@ -1502,7 +1505,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         if self.tmux_selection_pending {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Down(event.clone()));
@@ -1531,10 +1534,21 @@ impl TerminalPane {
                 event.modifiers,
                 self.settings.open_links_with_modifier,
             )
+            && self.activate_interactive_trigger(event, cx)
+        {
+            return;
+        }
+
+        if event.button == MouseButton::Left
+            && terminal_link_activation_allowed(
+                event.modifiers,
+                self.settings.open_links_with_modifier,
+            )
             && let Some(link) = self.link_at_position(event.position)
         {
             match link.kind {
                 TerminalLinkKind::Url => cx.open_url(&link.target),
+                TerminalLinkKind::Trigger => {}
                 TerminalLinkKind::Path => {
                     let path = link.target.trim_matches(['\'', '"', '`']);
                     if oxideterm_environment::archive::is_archive_path(path) {
@@ -1708,6 +1722,7 @@ impl TerminalPane {
             x: f32::from(event.position.x - bounds.origin.x),
             y: f32::from(event.position.y - bounds.origin.y),
             serial_transfer_menu: false,
+            trigger: None,
             target: self.terminal_point_for_position(event.position),
             has_selection: self.selected_text_snapshot().is_some(),
             reference_line: navigation_line,
@@ -1775,19 +1790,27 @@ impl TerminalPane {
             && self.scrollbar_drag.is_none()
             && self.horizontal_scrollbar_drag.is_none()
             && !mouse_mode(mode, event.modifiers.shift);
-        let hovered_link = can_hover_terminal_content
+        let mut hovered_link = can_hover_terminal_content
             .then(|| self.link_at_position(event.position))
             .flatten();
         if can_hover_terminal_content
-            && self.preferences.timestamp_hover
             && event.pressed_button.is_none()
             && hovered_link.is_none()
             && self.context_menu.is_none()
             && !self.snapshot_dirty
         {
-            self.update_timestamp_hover(event.position, cx);
+            if self.update_interactive_trigger_hover(event.position, cx) {
+                hovered_link = self
+                    .interactive_trigger_hover
+                    .as_ref()
+                    .and_then(|hover| hover.link.clone());
+            } else if self.preferences.timestamp_hover {
+                self.update_timestamp_hover(event.position, cx);
+            } else {
+                self.clear_terminal_hover(cx);
+            }
         } else {
-            self.clear_timestamp_hover(cx);
+            self.clear_terminal_hover(cx);
         }
         let can_hover_command_marks = can_hover_terminal_content
             && command_mark_ui_available(self.settings.command_marks_enabled, mode);

@@ -62,6 +62,7 @@ mod paste;
 mod render;
 mod scrollbar;
 mod timestamp_hover;
+mod trigger_interaction;
 
 use timestamp_hover::TerminalTimestampHover;
 
@@ -178,10 +179,11 @@ pub enum TerminalPaneEvent {
     ContextActionRequested,
     // Match payloads remain pane-owned; Workspace drains them using the source pane identity.
     TriggerMatchesAvailable,
+    TriggerInteractionRequested,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
     // The pane retains the hovered value; Workspace owns tooltip timing and placement.
-    TimestampHoverChanged,
+    HoverTooltipChanged,
     // Persistence stays workspace-owned because panes do not own saved connection profiles.
     SerialLineEndingsChanged {
         input: Option<SerialLineEnding>,
@@ -522,6 +524,10 @@ pub struct TerminalPane {
     pending_search_reveal: bool,
     hovered_link: Option<TerminalLinkRange>,
     timestamp_hover: Option<TerminalTimestampHover>,
+    interactive_trigger_rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+    interactive_trigger_hover: Option<trigger_interaction::TriggerHover>,
+    trigger_interaction_requested:
+        Option<(oxideterm_terminal_triggers::TriggerMatched, Option<usize>)>,
     hovered_command_mark_id: Option<String>,
     selecting: bool,
     free_type_drag: Option<FreeTypeDragState>,
@@ -629,6 +635,7 @@ pub(crate) struct TerminalContextMenu {
     pub x: f32,
     pub y: f32,
     pub serial_transfer_menu: bool,
+    pub trigger: Option<trigger_interaction::TriggerMenu>,
     pub target: TerminalPoint,
     pub has_selection: bool,
     pub reference_line: usize,
@@ -1268,6 +1275,9 @@ impl TerminalPane {
             pending_search_reveal: false,
             hovered_link: None,
             timestamp_hover: None,
+            interactive_trigger_rules: None,
+            interactive_trigger_hover: None,
+            trigger_interaction_requested: None,
             hovered_command_mark_id: None,
             selecting: false,
             free_type_drag: None,
@@ -1964,7 +1974,7 @@ impl TerminalPane {
     }
 
     pub fn set_preferences(&mut self, preferences: TerminalUiPreferences, cx: &mut Context<Self>) {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         let mut preferences = preferences;
         self.preference_overrides.apply_to(&mut preferences);
         if self.preferences.autosuggest_enabled != preferences.autosuggest_enabled {
@@ -2552,7 +2562,7 @@ impl TerminalPane {
     }
 
     fn mark_terminal_content_changed(&mut self, cx: &mut Context<Self>) {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_interactions(cx);
         self.selection_highlight_cache = None;
         self.terminal_content_revision = self.terminal_content_revision.wrapping_add(1).max(1);
         self.search_cache = None;
@@ -2817,9 +2827,14 @@ impl TerminalPane {
     pub fn set_trigger_rules(
         &mut self,
         rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
+        cx: &mut Context<Self>,
     ) {
+        self.clear_terminal_interactions(cx);
+        self.interactive_trigger_rules = rules.clone().filter(|rules| rules.has_interactions());
         self.pending_trigger_matches.clear();
-        self.terminal.lock().set_trigger_rules(rules);
+        self.terminal
+            .lock()
+            .set_trigger_rules(rules.filter(|rules| rules.has_output_triggers()));
     }
 
     pub fn take_trigger_matches(&mut self) -> Vec<oxideterm_terminal_triggers::TriggerMatched> {
@@ -4419,7 +4434,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         if self.bounds != Some(bounds) {
-            self.clear_timestamp_hover(cx);
+            self.clear_terminal_interactions(cx);
         }
         self.bounds = Some(bounds);
         self.viewport_scale_factor_bits = Some(scale_factor.to_bits());

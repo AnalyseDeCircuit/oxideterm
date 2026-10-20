@@ -2957,9 +2957,10 @@ fn should_install_remote_shell_integration(
     mode: RemoteShellIntegrationMode,
     state: oxideterm_terminal::RemoteShellIntegrationState,
 ) -> bool {
-    force_install
-        || (mode == RemoteShellIntegrationMode::Enabled
-            && state != oxideterm_terminal::RemoteShellIntegrationState::Installed)
+    state != oxideterm_terminal::RemoteShellIntegrationState::NewerVersion
+        && (force_install
+            || (mode == RemoteShellIntegrationMode::Enabled
+                && state != oxideterm_terminal::RemoteShellIntegrationState::Installed))
 }
 
 fn reconnect_error_is_non_retryable(error: &str) -> bool {

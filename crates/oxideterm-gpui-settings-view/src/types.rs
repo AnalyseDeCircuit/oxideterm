@@ -87,6 +87,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::XmodemBlockSize => SelectAnchorId::SettingsXmodemBlockSize,
             Self::TerminalTriggerMatchMode => SelectAnchorId::SettingsTerminalTriggerMatchMode,
             Self::TerminalTriggerAction => SelectAnchorId::SettingsTerminalTriggerAction,
+            Self::TerminalTriggerClickAction => SelectAnchorId::SettingsTerminalTriggerClickAction,
             Self::TerminalTriggerProcessMode => SelectAnchorId::SettingsTerminalTriggerProcessMode,
             Self::TerminalTriggerQuickCommand => {
                 SelectAnchorId::SettingsTerminalTriggerQuickCommand

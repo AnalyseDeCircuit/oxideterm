@@ -101,6 +101,8 @@ impl TerminalPane {
             start_line,
             command_line,
             command_line_clipped: false,
+            output_start: None,
+            output_end: None,
             end_line: None,
             is_closed: false,
             closed_by: None,

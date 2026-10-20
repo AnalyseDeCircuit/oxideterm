@@ -1399,7 +1399,7 @@ mod tests {
         integration.advance(
             &mut parser,
             &mut term,
-            b"\x1b]633;A\x07$ \x1b]633;B\x07echo hi\r\n\x1b]633;E;echo%20hi\x07hi\r\n\x1b]633;D;0\x07",
+            b"\x1b]633;A\x07$ \x1b]633;B\x07echo hi\r\n\x1b]633;E;echo\\x20hi\x07\x1b]633;C\x07hi\r\n\x1b]633;D;0\x07",
             |event| events.push(event),
         );
 
@@ -1437,7 +1437,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(!visible_text.contains("633;"));
-        assert!(!visible_text.contains("echo%20hi"));
+        assert!(!visible_text.contains("echo\\x20hi"));
     }
 
     #[test]
@@ -1623,7 +1623,7 @@ mod tests {
         integration.advance(
             &mut parser,
             &mut term,
-            b"\x1b]633;A\x07PS> \x1b]633;B\x07Clear-Host\r\n\x1b]633;E;Clear-Host\x07\x1b[2J\x1b[3J",
+            b"\x1b]633;A\x07PS> \x1b]633;B\x07Clear-Host\r\n\x1b]633;E;Clear-Host\x07\x1b]633;C\x07\x1b[2J\x1b[3J",
             |event| events.push(event),
         );
 
@@ -1812,7 +1812,7 @@ mod tests {
             events.push(event)
         });
         assert!(integration.command_marks().is_empty());
-        integration.advance(&mut parser, &mut term, b"\x07/home\r\n", |event| {
+        integration.advance(&mut parser, &mut term, b"\x07\x1b]633;C\x07/home\r\n", |event| {
             events.push(event)
         });
 
