@@ -84,11 +84,11 @@ pub use transport::kerberos_credentials_available;
 pub use transport::{
     BoxedSshForwardStream, KeyboardInteractivePrompt, KeyboardInteractivePromptRequest,
     KeyboardInteractiveResponses, ManagedKeyMaterial, ManagedKeyResolver, RemoteForwardHandler,
-    RemoteForwardedTcpIp, SshCommandOutput, SshForwardStream, SshOutputBoundary,
-    SshOutputCancellation, SshOutputChunk, SshPasswordPrompt, SshPasswordResponse, SshPromptError,
-    SshPromptHandler, SshPtyHandle, SshSecretCommandOutput, SshShellChannel, SshTransportClient,
-    SshTransportCommand, SshTransportError, X11ForwardHandler, X11ForwardedChannel,
-    X11ForwardingFailure, X11ForwardingStatus,
+    RemoteForwardedTcpIp, SshCommandChannel, SshCommandExecution, SshCommandOutput,
+    SshForwardStream, SshOutputBoundary, SshOutputCancellation, SshOutputChunk, SshPasswordPrompt,
+    SshPasswordResponse, SshPromptError, SshPromptHandler, SshPtyHandle, SshSecretCommandOutput,
+    SshShellChannel, SshTransportClient, SshTransportCommand, SshTransportError, X11ForwardHandler,
+    X11ForwardedChannel, X11ForwardingFailure, X11ForwardingStatus,
 };
 pub use upstream_proxy::{
     UpstreamProxyAuth, UpstreamProxyConfig, UpstreamProxyError, UpstreamProxyProtocol,

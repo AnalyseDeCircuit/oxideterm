@@ -2941,6 +2941,15 @@ fn output_page(bytes: &[u8], offset: usize, limit: usize) -> String {
 fn public_command_error(error: SshTransportError) -> String {
     // Public errors expose an actionable category without forwarding transport internals.
     match error {
+        SshTransportError::CommandChannelUnavailable => {
+            "No verified SSH command channel is available".to_owned()
+        }
+        SshTransportError::CommandRejected => {
+            "The server rejected the command request".to_owned()
+        }
+        SshTransportError::CommandOutcomeUnknown => {
+            "The command may have executed, but its result could not be confirmed; check the remote state before retrying".to_owned()
+        }
         SshTransportError::Timeout => "The remote command timed out".to_owned(),
         SshTransportError::DnsResolution { .. } => {
             "The SSH host name could not be resolved".to_owned()

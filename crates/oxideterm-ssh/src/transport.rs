@@ -98,6 +98,8 @@ pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
 ];
 
 const NONE_AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const SHELL_OPEN_TIMEOUT: Duration = Duration::from_secs(8);
+const SHELL_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PASSWORD_RETRY_DELAY: Duration = Duration::from_millis(500);
 const PASSWORD_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const GSSAPI_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -196,6 +198,12 @@ pub enum SshTransportError {
     DnsResolution { address: String, message: String },
     #[error("SSH connection timed out")]
     Timeout,
+    #[error("No verified SSH command channel is available")]
+    CommandChannelUnavailable,
+    #[error("The server rejected the command request")]
+    CommandRejected,
+    #[error("The command may have executed, but its result could not be confirmed")]
+    CommandOutcomeUnknown,
     #[error("SSH connection failed: {0}")]
     ConnectionFailed(String),
     #[error("SSH connection failed: {0}")]
@@ -777,6 +785,7 @@ impl Drop for RegistryConsumerGuard {
 
 pub struct SshShellChannel {
     channel: Channel<client::Msg>,
+    with_pty: bool,
 }
 
 impl SshShellChannel {
@@ -787,8 +796,14 @@ impl SshShellChannel {
         timeout: Duration,
         max_output_size: usize,
     ) -> Result<String, SshTransportError> {
+        // PTY gateways consume terminal Enter (CR), while pipe shells consume LF.
+        let input: std::borrow::Cow<'_, str> = if self.with_pty {
+            std::borrow::Cow::Owned(command.replace("\r\n", "\n").replace('\n', "\r"))
+        } else {
+            std::borrow::Cow::Borrowed(command)
+        };
         self.channel
-            .data(command.as_bytes())
+            .data(input.as_bytes())
             .await
             .map_err(|error| SshTransportError::Channel(error.to_string()))?;
 
@@ -804,12 +819,17 @@ impl SshShellChannel {
                         }
                         if let Ok(text) = std::str::from_utf8(&output)
                             // Gateways may echo the command itself, including its quoted marker.
-                            && text.lines().any(|line| line == end_marker)
+                            && text.split(['\r', '\n']).any(|line| line == end_marker)
                         {
                             break;
                         }
                     }
                     Some(ChannelMsg::ExtendedData { .. }) => {}
+                    Some(ChannelMsg::Failure) => {
+                        return Err(SshTransportError::Channel(
+                            "persistent shell request rejected".to_string(),
+                        ));
+                    }
                     Some(ChannelMsg::Eof) | Some(ChannelMsg::Close) => {
                         return Err(SshTransportError::Channel(
                             "persistent shell channel closed".to_string(),
@@ -828,9 +848,18 @@ impl SshShellChannel {
         .await
         .map_err(|_| SshTransportError::Timeout)??;
 
-        String::from_utf8(output).map_err(|error| {
-            SshTransportError::Channel(format!("remote shell output was not UTF-8: {error}"))
-        })
+        String::from_utf8(output)
+            .map(|output| {
+                if self.with_pty {
+                    // Keep terminal Enter/echo framing out of the line-based metrics parser.
+                    output.replace("\r\n", "\n").replace('\r', "\n")
+                } else {
+                    output
+                }
+            })
+            .map_err(|error| {
+                SshTransportError::Channel(format!("remote shell output was not UTF-8: {error}"))
+            })
     }
 
     pub async fn close(&mut self) -> Result<(), SshTransportError> {
@@ -879,6 +908,9 @@ pub struct SshTransportClient {
     managed_key_resolver: Option<ManagedKeyResolver>,
     connection_progress: Option<ConnectionProgressReporter>,
 }
+
+mod command;
+pub use command::{SshCommandChannel, SshCommandExecution};
 
 include!("transport/connection.rs");
 include!("transport/signers.rs");

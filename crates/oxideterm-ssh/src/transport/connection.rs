@@ -1,6 +1,7 @@
 struct PooledSshConnection {
     audit: Option<oxideterm_audit::AuditContext>,
     target: client::Handle<NativeClientHandler>,
+    command_channel: tokio::sync::Mutex<Option<SshCommandChannel>>,
     _jump_handles: Vec<client::Handle<NativeClientHandler>>,
     remote_forward_handler: RemoteForwardHandlerSlot,
     x11_forward_handler: X11ForwardHandlerSlot,
@@ -44,6 +45,7 @@ impl PooledSshConnection {
         Self {
             audit,
             target: handle,
+            command_channel: tokio::sync::Mutex::new(None),
             _jump_handles: Vec::new(),
             remote_forward_handler,
             x11_forward_handler,
@@ -66,6 +68,7 @@ impl PooledSshConnection {
         Self {
             audit,
             target,
+            command_channel: tokio::sync::Mutex::new(None),
             _jump_handles: jump_handles,
             remote_forward_handler,
             x11_forward_handler,
@@ -383,15 +386,10 @@ impl SshConnectionHandle {
         timeout: Duration,
         max_output_size: usize,
     ) -> Result<SshCommandOutput, SshTransportError> {
-        let output = self
-            .run_command_capture_bytes(command, timeout, max_output_size)
-            .await?;
-        Ok(SshCommandOutput {
-            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
-            exit_code: output.exit_code,
-            truncated: output.truncated,
-        })
+        Ok(self
+            .execute_command(command, timeout, max_output_size)
+            .await?
+            .output)
     }
 
     pub async fn run_secret_command_capture(
@@ -465,38 +463,46 @@ impl SshConnectionHandle {
             ));
         }
 
-        let mut channel = {
-            let handle = &pooled.target;
-            handle
-                .channel_open_session()
-                .await
-                .map_err(|error| SshTransportError::Channel(error.to_string()))?
-        };
-        if let Some((columns, rows)) = pty_size {
-            channel
-                .request_pty(
-                    false,
-                    "xterm-256color",
-                    columns,
-                    rows,
-                    0,
-                    0,
-                    DEFAULT_PTY_MODES,
-                )
-                .await
-                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
-        }
-        channel
-            .exec(true, command)
-            .await
-            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        Self::capture_exec_on(&pooled, command, timeout, max_output_size, pty_size).await
+    }
 
+    async fn capture_exec_on(
+        pooled: &PooledSshConnection,
+        command: &str,
+        timeout: Duration,
+        max_output_size: usize,
+        pty_size: Option<(u32, u32)>,
+    ) -> Result<SshCommandCaptureBytes, SshTransportError> {
+        let mut channel = tokio::time::timeout(timeout, pooled.target.channel_open_session())
+            .await
+            .map_err(|_| SshTransportError::Timeout)?
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
         let mut stdout = Vec::new();
         let mut stderr = Vec::new();
         let mut exit_status = None;
         let mut total_output_size = 0;
         let mut truncated = false;
-        tokio::time::timeout(timeout, async {
+        let mut rejected = false;
+        let captured = tokio::time::timeout(timeout, async {
+            if let Some((columns, rows)) = pty_size {
+                channel
+                    .request_pty(
+                        false,
+                        "xterm-256color",
+                        columns,
+                        rows,
+                        0,
+                        0,
+                        DEFAULT_PTY_MODES,
+                    )
+                    .await
+                    .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+            }
+            channel
+                .exec(true, command)
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+
             while let Some(message) = channel.wait().await {
                 match message {
                     ChannelMsg::Data { data } => {
@@ -526,14 +532,23 @@ impl SshConnectionHandle {
                     // Keep the capture channel alive until Close so successful
                     // host-tool probes are not reported with an unknown status.
                     ChannelMsg::Eof => {}
+                    ChannelMsg::Failure => {
+                        rejected = true;
+                        break;
+                    }
                     ChannelMsg::Close => break,
                     _ => {}
                 }
             }
+            Ok::<(), SshTransportError>(())
         })
-        .await
-        .map_err(|_| SshTransportError::Timeout)?;
-        let _ = channel.close().await;
+        .await;
+        let _ = tokio::time::timeout(timeout, channel.close()).await;
+        captured.map_err(|_| SshTransportError::Timeout)??;
+
+        if rejected {
+            return Err(SshTransportError::CommandRejected);
+        }
 
         Ok(SshCommandCaptureBytes {
             stdout,
@@ -568,19 +583,119 @@ impl SshConnectionHandle {
         &self,
         init_command: &str,
     ) -> Result<SshShellChannel, SshTransportError> {
-        let channel = self.open_session_channel().await?;
-        channel
-            .request_shell(false)
+        self.open_sampling_shell_channel(init_command, false, SHELL_OPEN_TIMEOUT)
+            .await
+    }
+
+    pub(crate) async fn open_sampling_shell_channel(
+        &self,
+        init_command: &str,
+        with_pty: bool,
+        timeout: Duration,
+    ) -> Result<SshShellChannel, SshTransportError> {
+        let pooled = self.physical::<PooledSshConnection>().ok_or_else(|| {
+            SshTransportError::ConnectionFailed("no active SSH connection is available".into())
+        })?;
+        Self::open_sampling_shell_on(&pooled, init_command, with_pty, timeout).await
+    }
+
+    async fn open_sampling_shell_on(
+        pooled: &PooledSshConnection,
+        init_command: &str,
+        with_pty: bool,
+        timeout: Duration,
+    ) -> Result<SshShellChannel, SshTransportError> {
+        let deadline = Instant::now() + timeout;
+        let channel = tokio::time::timeout_at(deadline, pooled.target.channel_open_session())
+            .await
+            .map_err(|_| SshTransportError::Timeout)?
+            .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        // Keep ownership outside initialization's timeout so cancellation can close the channel.
+        let mut shell = SshShellChannel { channel, with_pty };
+        let initialized = tokio::time::timeout_at(
+            deadline,
+            Self::initialize_sampling_shell(&mut shell, init_command),
+        )
+        .await
+        .map_err(|_| SshTransportError::Timeout)
+        .and_then(|result| result);
+        if let Err(error) = initialized {
+            let _ = tokio::time::timeout(SHELL_CLOSE_TIMEOUT, shell.close()).await;
+            return Err(error);
+        }
+        Ok(shell)
+    }
+
+    async fn initialize_sampling_shell(
+        shell: &mut SshShellChannel,
+        init_command: &str,
+    ) -> Result<(), SshTransportError> {
+        let with_pty = shell.with_pty;
+        if with_pty {
+            // Sampling scripts can exceed the terminal's canonical input limit.
+            shell
+                .channel
+                .request_pty(
+                    true,
+                    "xterm",
+                    120,
+                    40,
+                    0,
+                    0,
+                    &[(Pty::ECHO, 0), (Pty::ICANON, 0)],
+                )
+                .await
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        }
+        shell
+            .channel
+            .request_shell(with_pty)
             .await
             .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        if with_pty {
+            // A gateway may finish target login after accepting the shell request.
+            // Confirm initialization before sending a script that can exceed 4 KiB.
+            let initialization = if init_command.is_empty() {
+                // Environment detection has not selected a shell dialect yet.
+                "echo __OXIDE_MONITOR_READY__\r\n".to_string()
+            } else if init_command.starts_with("set PROMPT=") {
+                format!("{init_command}echo __OXIDE_MONITOR_READY__\r\n")
+            } else {
+                format!(
+                    "stty -echo -icanon 2>/dev/null; {init_command}\nprintf '\\n%s\\n' '__OXIDE_MONITOR_READY__'\n"
+                )
+            };
+            let mut attempt = 1;
+            loop {
+                match shell
+                    .sample_until(
+                        &initialization,
+                        "__OXIDE_MONITOR_READY__",
+                        Duration::from_secs(2),
+                        64 * 1024,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        return Ok(());
+                    }
+                    Err(SshTransportError::Timeout) if attempt < 3 => {
+                        // Retry only this idempotent probe: early gateway input can be lost.
+                        attempt += 1;
+                    }
+                    Err(error) => return Err(error),
+                }
+            }
+        }
         if !init_command.is_empty() {
-            channel
+            shell
+                .channel
                 .data(init_command.as_bytes())
                 .await
                 .map_err(|error| SshTransportError::Channel(error.to_string()))?;
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        Ok(SshShellChannel { channel })
+        Ok(())
     }
 
     pub fn set_remote_forward_handler(
