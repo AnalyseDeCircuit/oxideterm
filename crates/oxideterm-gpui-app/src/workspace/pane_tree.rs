@@ -246,11 +246,16 @@ impl WorkspaceApp {
             TerminalPaneEvent::OutputActivity => {}
             TerminalPaneEvent::TimestampHoverChanged => {
                 let id = format!("terminal-timestamp-{}", pane_id.0);
-                let tooltip = self.tab_host.read(cx).panes().get(&pane_id).and_then(|pane| {
-                    pane.read(cx)
-                        .timestamp_hover_tooltip()
-                        .map(|(label, position)| (label.to_string(), position))
-                });
+                let tooltip = self
+                    .tab_host
+                    .read(cx)
+                    .panes()
+                    .get(&pane_id)
+                    .and_then(|pane| {
+                        pane.read(cx)
+                            .timestamp_hover_tooltip()
+                            .map(|(label, position)| (label.to_string(), position))
+                    });
                 // Discard pending text before replacing the target; IDs isolate split panes.
                 self.clear_workspace_tooltip(&id, cx);
                 if let Some((label, position)) = tooltip {
