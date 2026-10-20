@@ -45,6 +45,7 @@ struct ScopedHistory {
 struct StoreState {
     histories: Mutex<HashMap<String, ScopedHistory>>,
     dirty: Mutex<HashSet<String>>,
+    removed_scopes: Mutex<HashSet<String>>,
     clear_all: AtomicBool,
     loaded: AtomicBool,
     enabled: AtomicBool,
@@ -68,6 +69,7 @@ impl TerminalHistoryStore {
         let state = Arc::new(StoreState {
             histories: Mutex::new(HashMap::new()),
             dirty: Mutex::new(HashSet::new()),
+            removed_scopes: Mutex::new(HashSet::new()),
             clear_all: AtomicBool::new(false),
             loaded: AtomicBool::new(false),
             enabled: AtomicBool::new(false),
@@ -117,6 +119,13 @@ impl TerminalHistoryStore {
         for (_, _, history) in self.histories() {
             history.clear();
         }
+        let _ = self.state.wake.try_send(());
+    }
+
+    pub fn remove_scope(&self, scope: &str) {
+        forget_scope(&self.state, scope);
+        self.state.dirty.lock().remove(scope);
+        self.state.removed_scopes.lock().insert(scope.to_string());
         let _ = self.state.wake.try_send(());
     }
 
@@ -231,7 +240,28 @@ fn forget_pruned(store: &StoreState, removed: Vec<(String, String)>) {
     }
 }
 
+fn forget_scope(store: &StoreState, scope: &str) {
+    let history = store
+        .histories
+        .lock()
+        .remove(scope)
+        .map(|entry| entry.history);
+    if let Some(history) = history {
+        let mut state = history.state.lock();
+        for record in &mut state.records {
+            record.command.zeroize();
+        }
+        state.records.clear();
+        state.persistent_ids.clear();
+        for mut command in state.removed_before_restore.drain() {
+            command.zeroize();
+        }
+        state.restore_cleared = true;
+    }
+}
+
 fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
+    let removed_scopes = store.removed_scopes.lock().clone();
     let mut statement = db.prepare(
         "SELECT scope, id, label, command, started_at, finished_at
         FROM commands ORDER BY finished_at, id",
@@ -250,6 +280,10 @@ fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
     })?;
     for row in rows {
         let (scope, label, mut record) = row?;
+        if removed_scopes.contains(&scope) {
+            record.command.zeroize();
+            continue;
+        }
         let existing = store
             .histories
             .lock()
@@ -269,6 +303,9 @@ fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
         }
     }
     store.loaded.store(true, Ordering::Relaxed);
+    for scope in &removed_scopes {
+        forget_scope(store, scope);
+    }
     for entry in store.histories.lock().values() {
         let mut state = entry.history.state.lock();
         state.records.sort_by_key(|record| record.finished_at);
@@ -283,11 +320,15 @@ fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
 
 fn save_dirty(db: &mut Connection, store: &StoreState) -> rusqlite::Result<()> {
     let scopes = std::mem::take(&mut *store.dirty.lock());
-    if scopes.is_empty() {
+    let removed_scopes = std::mem::take(&mut *store.removed_scopes.lock());
+    if scopes.is_empty() && removed_scopes.is_empty() {
         return Ok(());
     }
     let result = (|| {
         let tx = db.transaction()?;
+        for scope in &removed_scopes {
+            tx.execute("DELETE FROM commands WHERE scope = ?1", [scope])?;
+        }
         for scope in &scopes {
             let (label, history) = {
                 let histories = store.histories.lock();
@@ -343,6 +384,7 @@ fn save_dirty(db: &mut Connection, store: &StoreState) -> rusqlite::Result<()> {
     })();
     if result.is_err() {
         store.dirty.lock().extend(scopes);
+        store.removed_scopes.lock().extend(removed_scopes);
     }
     result
 }
@@ -357,6 +399,7 @@ fn run_worker(path: PathBuf, store: Arc<StoreState>, wake: mpsc::Receiver<()>) {
         let should_open = store.enabled.load(Ordering::Relaxed)
             || path.is_file()
             || !store.dirty.lock().is_empty()
+            || !store.removed_scopes.lock().is_empty()
             || store.clear_all.load(Ordering::Relaxed);
         if database.is_none() && !should_open {
             if store.stopping.load(Ordering::Relaxed) {
@@ -391,7 +434,9 @@ fn run_worker(path: PathBuf, store: Arc<StoreState>, wake: mpsc::Receiver<()>) {
         if store.stopping.load(Ordering::Relaxed) {
             // A final mutation may arrive while the current transaction is in flight.
             if result.is_err()
-                || (store.dirty.lock().is_empty() && !store.clear_all.load(Ordering::Relaxed))
+                || (store.dirty.lock().is_empty()
+                    && store.removed_scopes.lock().is_empty()
+                    && !store.clear_all.load(Ordering::Relaxed))
             {
                 break;
             }
@@ -508,6 +553,44 @@ mod tests {
                 .flat_map(|(_, _, history)| history.records())
                 .collect::<Vec<_>>(),
             vec![]
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_removal_scrubs_memory_and_persists_without_affecting_other_scopes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite");
+        let (store, updates) = TerminalHistoryStore::new(path.clone()).unwrap();
+        store.configure(true, 90);
+        updated(&updates).await;
+        let replaced = store.history("saved-a".into(), "Old endpoint".into());
+        replaced.record("replaced command");
+        let retained = store.history("saved-b".into(), "Retained endpoint".into());
+        retained.record("retained command");
+        updated(&updates).await;
+
+        store.remove_scope("saved-a");
+
+        assert!(replaced.records().is_empty());
+        drop(store);
+
+        let (store, updates) = TerminalHistoryStore::new(path).unwrap();
+        store.configure(true, 90);
+        updated(&updates).await;
+        assert_eq!(
+            store
+                .history("saved-a".into(), "Old endpoint".into())
+                .records(),
+            vec![]
+        );
+        assert_eq!(
+            store
+                .history("saved-b".into(), "Retained endpoint".into())
+                .records()
+                .iter()
+                .map(|record| record.command.as_str())
+                .collect::<Vec<_>>(),
+            ["retained command"]
         );
     }
 
