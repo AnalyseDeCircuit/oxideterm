@@ -516,6 +516,7 @@ mod tests {
     fn restore_does_not_resurrect_a_scope_retired_while_rows_are_loading() {
         let directory = tempfile::tempdir().unwrap();
         let mut db = open_database(&directory.path().join("history.sqlite")).unwrap();
+        let timestamp = now_millis();
         db.execute(
             "INSERT INTO commands VALUES (?, ?, ?, ?, ?, ?)",
             params![
@@ -523,8 +524,8 @@ mod tests {
                 "command-id",
                 "Retired endpoint",
                 "must stay deleted",
-                1,
-                1
+                timestamp,
+                timestamp
             ],
         )
         .unwrap();
