@@ -3,7 +3,9 @@
 
 use std::{sync::Arc, time::Duration};
 
-use oxideterm_connection_monitor::{ResourceSampleShell, ResourceSampler, ResourceSamplerFuture};
+use oxideterm_connection_monitor::{
+    RESOURCE_CHANNEL_OPEN_TIMEOUT, ResourceSampleShell, ResourceSampler, ResourceSamplerFuture,
+};
 
 use crate::{
     ConnectionConsumer, DedicatedConnectionLease, ManagedKeyResolver, NodeId, NodeRouter,
@@ -62,6 +64,8 @@ impl ResourceSampler for DedicatedNodeResourceSampler {
                 Ok(Ok(shell)) => Ok(Box::new(SshResourceSampleShell {
                     shell,
                     fallback: None,
+                    init_command: init_command.to_owned(),
+                    pty_attempted: false,
                     _connection_owner: Some(lease),
                 }) as Box<dyn ResourceSampleShell>),
                 Ok(Err(_)) | Err(_) => Ok(Box::new(SshExecResourceSampleShell {
@@ -86,6 +90,8 @@ impl ResourceSampler for SshConnectionHandle {
                 Ok(Ok(shell)) => Ok(Box::new(SshResourceSampleShell {
                     shell,
                     fallback: Some(self.clone()),
+                    init_command: init_command.to_owned(),
+                    pty_attempted: false,
                     _connection_owner: None,
                 }) as Box<dyn ResourceSampleShell>),
                 Ok(Err(_error)) => Ok(Box::new(SshExecResourceSampleShell {
@@ -104,6 +110,8 @@ impl ResourceSampler for SshConnectionHandle {
 struct SshResourceSampleShell {
     shell: SshShellChannel,
     fallback: Option<SshConnectionHandle>,
+    init_command: String,
+    pty_attempted: bool,
     _connection_owner: Option<Arc<DedicatedConnectionLease>>,
 }
 
@@ -124,13 +132,38 @@ impl ResourceSampleShell for SshResourceSampleShell {
                 Ok(output) => Ok(output),
                 // Multiplexed servers may fall back to one-shot exec. A
                 // single-channel lease fails instead of opening a second channel.
-                Err(error) => match self.fallback.as_ref() {
-                    Some(fallback) => fallback
-                        .run_command(command, timeout, max_output_size)
+                Err(error) => {
+                    // Replace only this sampler's channel on the authenticated transport.
+                    // Dedicated single-channel leases must not open another channel.
+                    if !self.pty_attempted
+                        && let Some(connection) = self.fallback.as_ref()
+                    {
+                        self.pty_attempted = true;
+                        let _ = tokio::time::timeout(timeout, self.shell.close()).await;
+                        if let Ok(Ok(shell)) = tokio::time::timeout(
+                            RESOURCE_CHANNEL_OPEN_TIMEOUT,
+                            connection.open_persistent_pty_shell_channel(&self.init_command),
+                        )
                         .await
-                        .map_err(|error| error.to_string()),
-                    None => Err(error.to_string()),
-                },
+                        {
+                            self.shell = shell;
+                            if let Ok(output) = self
+                                .shell
+                                .sample_until(command, end_marker, timeout, max_output_size)
+                                .await
+                            {
+                                return Ok(output);
+                            }
+                        }
+                    }
+                    match self.fallback.as_ref() {
+                        Some(fallback) => fallback
+                            .run_command(command, timeout, max_output_size)
+                            .await
+                            .map_err(|error| error.to_string()),
+                        None => Err(error.to_string()),
+                    }
+                }
             }
         })
     }
