@@ -45,6 +45,46 @@ fn saved_console_history_identity(
     Some((scope.to_string(), label.clone()))
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SavedConsoleProfileKind {
+    Telnet,
+    Mosh,
+    Serial,
+}
+
+impl SavedConsoleProfileKind {
+    fn connection_kind(self) -> SavedConnectionKind {
+        match self {
+            Self::Telnet => SavedConnectionKind::Telnet,
+            Self::Mosh => SavedConnectionKind::Mosh,
+            Self::Serial => SavedConnectionKind::Serial,
+        }
+    }
+}
+
+pub(in crate::workspace) fn delete_saved_console_profile(
+    connections: &mut ConnectionStore,
+    terminal_history_store: &TerminalHistoryStore,
+    profile_kind: SavedConsoleProfileKind,
+    id: &str,
+) -> anyhow::Result<bool> {
+    let connection = SavedConnectionRef {
+        kind: profile_kind.connection_kind(),
+        id: id.to_owned(),
+    };
+    let history_scope =
+        saved_console_history_identity(connections, &connection).map(|(scope, _)| scope);
+    let deleted = match profile_kind {
+        SavedConsoleProfileKind::Telnet => connections.delete_telnet_profile(id),
+        SavedConsoleProfileKind::Mosh => connections.delete_mosh_profile(id),
+        SavedConsoleProfileKind::Serial => connections.delete_serial_profile(id),
+    }?;
+    if deleted && let Some(history_scope) = history_scope {
+        terminal_history_store.remove_scope(&history_scope);
+    }
+    Ok(deleted)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +160,84 @@ mod tests {
             identity(&changed, SavedConnectionKind::Serial).0,
             serial_scope
         );
+    }
+
+    #[test]
+    fn deleting_a_saved_console_profile_retires_only_its_history_scope() {
+        let kinds = [
+            SavedConsoleProfileKind::Telnet,
+            SavedConsoleProfileKind::Mosh,
+            SavedConsoleProfileKind::Serial,
+        ];
+        for (deleted_index, deleted_kind) in kinds.into_iter().enumerate() {
+            let directory = tempfile::tempdir().unwrap();
+            let connections_path = directory.path().join("connections.json");
+            let mut telnet = TelnetProfile::new("Telnet", "telnet.test", 23);
+            let mut mosh = MoshProfile::new("Mosh", "mosh.test", 22, "deploy", SavedAuth::Agent);
+            let mut serial = SerialProfile::new("Serial", "COM3");
+            for id in [&mut telnet.id, &mut mosh.id, &mut serial.id] {
+                *id = "shared-profile-id".into();
+            }
+            let data = ConnectionStoreData {
+                telnet_profiles: vec![telnet],
+                mosh_profiles: vec![mosh],
+                serial_profiles: vec![serial],
+                ..ConnectionStoreData::default()
+            };
+            std::fs::write(&connections_path, serde_json::to_vec(&data).unwrap()).unwrap();
+            let mut connections = ConnectionStore::load(connections_path).unwrap();
+            let (terminal_history_store, _updates) =
+                TerminalHistoryStore::new(directory.path().join("history.sqlite")).unwrap();
+            let scopes = kinds.map(|kind| {
+                let scope = saved_console_history_identity(
+                    &connections,
+                    &SavedConnectionRef {
+                        kind: kind.connection_kind(),
+                        id: "shared-profile-id".into(),
+                    },
+                )
+                .unwrap()
+                .0;
+                let _history = terminal_history_store
+                    .history(scope.clone(), format!("{:?}", kind.connection_kind()));
+                scope
+            });
+
+            assert!(
+                delete_saved_console_profile(
+                    &mut connections,
+                    &terminal_history_store,
+                    deleted_kind,
+                    "shared-profile-id",
+                )
+                .unwrap()
+            );
+            assert!(match deleted_kind {
+                SavedConsoleProfileKind::Telnet => connections
+                    .telnet_profiles()
+                    .iter()
+                    .all(|profile| profile.id != "shared-profile-id"),
+                SavedConsoleProfileKind::Mosh =>
+                    connections.get_mosh_profile("shared-profile-id").is_none(),
+                SavedConsoleProfileKind::Serial => connections
+                    .serial_profiles()
+                    .iter()
+                    .all(|profile| profile.id != "shared-profile-id"),
+            });
+
+            let remaining_scopes = terminal_history_store
+                .histories()
+                .into_iter()
+                .map(|(scope, _, _)| scope)
+                .collect::<HashSet<_>>();
+            let expected_scopes = scopes
+                .iter()
+                .enumerate()
+                .filter(|(scope_index, _)| *scope_index != deleted_index)
+                .map(|(_, scope)| scope.clone())
+                .collect::<HashSet<_>>();
+            assert_eq!(remaining_scopes, expected_scopes);
+        }
     }
 }
 
