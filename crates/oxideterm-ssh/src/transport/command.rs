@@ -1,7 +1,6 @@
 use super::*;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
-const SHELL_OPEN_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SshCommandChannel {
@@ -88,12 +87,8 @@ impl SshConnectionHandle {
         } else {
             "unset HISTFILE; export PS1='' PS2=''; stty -echo 2>/dev/null\n"
         };
-        let mut shell = tokio::time::timeout(
-            SHELL_OPEN_TIMEOUT,
-            Self::open_sampling_shell_on(&pooled, init, with_pty),
-        )
-        .await
-        .map_err(|_| SshTransportError::Timeout)??;
+        let mut shell =
+            Self::open_sampling_shell_on(&pooled, init, with_pty, SHELL_OPEN_TIMEOUT).await?;
         if !with_pty {
             let ready = format!("__OXIDE_READY_{}__", uuid::Uuid::new_v4().simple());
             let initialized = shell
@@ -178,12 +173,10 @@ async fn select_channel(
         return Ok(SshCommandChannel::Exec);
     }
     for with_pty in [false, true] {
-        let opened = tokio::time::timeout(
-            SHELL_OPEN_TIMEOUT,
-            SshConnectionHandle::open_sampling_shell_on(pooled, "", with_pty),
-        )
-        .await;
-        let Ok(Ok(mut shell)) = opened else { continue };
+        let opened =
+            SshConnectionHandle::open_sampling_shell_on(pooled, "", with_pty, SHELL_OPEN_TIMEOUT)
+                .await;
+        let Ok(mut shell) = opened else { continue };
         let sampled = shell
             .sample_until(&format!("{probe}\n"), &marker, PROBE_TIMEOUT, 8192)
             .await;
@@ -273,6 +266,8 @@ struct FramedCapture {
     line: Zeroizing<Vec<u8>>,
     stdout: Zeroizing<Vec<u8>>,
     stderr: Zeroizing<Vec<u8>>,
+    stdout_tail: Zeroizing<Vec<u8>>,
+    stderr_tail: Zeroizing<Vec<u8>>,
     stderr_line: Zeroizing<Vec<u8>>,
     stderr_long_line: bool,
     stderr_done: bool,
@@ -295,6 +290,8 @@ impl FramedCapture {
             line: Zeroizing::new(Vec::new()),
             stdout: Zeroizing::new(Vec::new()),
             stderr: Zeroizing::new(Vec::new()),
+            stdout_tail: Zeroizing::new(Vec::new()),
+            stderr_tail: Zeroizing::new(Vec::new()),
             stderr_line: Zeroizing::new(Vec::new()),
             stderr_long_line: false,
             stderr_done: false,
@@ -311,23 +308,42 @@ impl FramedCapture {
     }
 
     fn stdout(&mut self, data: &[u8]) {
+        self.stdout_tail.extend_from_slice(data);
+        let payload_len = self
+            .stdout_tail
+            .len()
+            .saturating_sub(if self.crlf_separator { 2 } else { 1 });
+        if payload_len == 0 {
+            return;
+        }
+        // Hold back the framing newline so it never consumes the payload budget.
         append_limited_command_output(
             &mut self.stdout,
-            data,
+            &self.stdout_tail[..payload_len],
             self.limit,
             &mut self.total,
             &mut self.truncated,
         );
+        self.stdout_tail.drain(..payload_len);
     }
 
     fn stderr(&mut self, data: &[u8]) {
+        self.stderr_tail.extend_from_slice(data);
+        let payload_len = self
+            .stderr_tail
+            .len()
+            .saturating_sub(if self.crlf_separator { 2 } else { 1 });
+        if payload_len == 0 {
+            return;
+        }
         append_limited_command_output(
             &mut self.stderr,
-            data,
+            &self.stderr_tail[..payload_len],
             self.limit,
             &mut self.total,
             &mut self.truncated,
         );
+        self.stderr_tail.drain(..payload_len);
     }
 
     fn complete(&self) -> bool {
@@ -345,12 +361,7 @@ impl FramedCapture {
                 if !self.stderr_long_line
                     && line.strip_suffix(b"\r").unwrap_or(&line) == marker.as_bytes()
                 {
-                    if !self.truncated && self.stderr.last() == Some(&b'\n') {
-                        self.stderr.pop();
-                        if self.crlf_separator && self.stderr.last() == Some(&b'\r') {
-                            self.stderr.pop();
-                        }
-                    }
+                    self.stderr_tail.clear();
                     self.stderr_done = true;
                 } else {
                     self.stderr(&line);
@@ -412,12 +423,7 @@ impl FramedCapture {
                 .and_then(|value| value.strip_prefix(':'))
                 .and_then(|value| value.parse::<i32>().ok());
             if let Some(status) = status {
-                if !self.truncated && self.stdout.last() == Some(&b'\n') {
-                    self.stdout.pop();
-                    if self.crlf_separator && self.stdout.last() == Some(&b'\r') {
-                        self.stdout.pop();
-                    }
-                }
+                self.stdout_tail.clear();
                 self.exit_code = Some(status);
             } else {
                 self.stdout(&line);

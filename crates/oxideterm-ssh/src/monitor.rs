@@ -55,20 +55,18 @@ impl ResourceSampler for DedicatedNodeResourceSampler {
                     .map_err(|error| error.to_string())?,
             );
             let connection = lease.handle().clone();
-            match tokio::time::timeout(
-                timeout,
-                connection.open_persistent_shell_channel(init_command),
-            )
-            .await
+            match connection
+                .open_sampling_shell_channel(init_command, false, timeout)
+                .await
             {
-                Ok(Ok(shell)) => Ok(Box::new(SshResourceSampleShell {
+                Ok(shell) => Ok(Box::new(SshResourceSampleShell {
                     shell,
                     fallback: None,
                     init_command: init_command.to_owned(),
                     pty_attempted: false,
                     _connection_owner: Some(lease),
                 }) as Box<dyn ResourceSampleShell>),
-                Ok(Err(_)) | Err(_) => Ok(Box::new(SshExecResourceSampleShell {
+                Err(_) => Ok(Box::new(SshExecResourceSampleShell {
                     connection,
                     _connection_owner: Some(lease),
                 }) as Box<dyn ResourceSampleShell>),
@@ -84,18 +82,15 @@ impl ResourceSampler for SshConnectionHandle {
         timeout: Duration,
     ) -> ResourceSamplerFuture<'a, Result<Box<dyn ResourceSampleShell>, String>> {
         Box::pin(async move {
-            match tokio::time::timeout(timeout, self.open_persistent_shell_channel(init_command))
+            match self
+                .open_sampling_shell_channel(init_command, false, timeout)
                 .await
             {
-                Ok(Ok(shell)) => Ok(Box::new(SshResourceSampleShell {
+                Ok(shell) => Ok(Box::new(SshResourceSampleShell {
                     shell,
                     fallback: Some(self.clone()),
                     init_command: init_command.to_owned(),
                     pty_attempted: false,
-                    _connection_owner: None,
-                }) as Box<dyn ResourceSampleShell>),
-                Ok(Err(_error)) => Ok(Box::new(SshExecResourceSampleShell {
-                    connection: self.clone(),
                     _connection_owner: None,
                 }) as Box<dyn ResourceSampleShell>),
                 Err(_) => Ok(Box::new(SshExecResourceSampleShell {
@@ -140,11 +135,13 @@ impl ResourceSampleShell for SshResourceSampleShell {
                     {
                         self.pty_attempted = true;
                         let _ = tokio::time::timeout(timeout, self.shell.close()).await;
-                        if let Ok(Ok(shell)) = tokio::time::timeout(
-                            RESOURCE_CHANNEL_OPEN_TIMEOUT,
-                            connection.open_persistent_pty_shell_channel(&self.init_command),
-                        )
-                        .await
+                        if let Ok(shell) = connection
+                            .open_sampling_shell_channel(
+                                &self.init_command,
+                                true,
+                                RESOURCE_CHANNEL_OPEN_TIMEOUT,
+                            )
+                            .await
                         {
                             self.shell = shell;
                             if let Ok(output) = self

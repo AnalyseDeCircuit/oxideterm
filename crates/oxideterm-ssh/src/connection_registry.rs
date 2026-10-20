@@ -1813,15 +1813,10 @@ pub(crate) async fn detect_remote_env_for_handle(handle: &SshConnectionHandle) -
     // Probe through registry-owned channels so gateways can require a PTY
     // without borrowing terminal input or triggering another authentication.
     for with_pty in [false, true] {
-        let opened = tokio::time::timeout(REMOTE_ENV_TOTAL_TIMEOUT, async {
-            if with_pty {
-                handle.open_persistent_pty_shell_channel("").await
-            } else {
-                handle.open_persistent_shell_channel("").await
-            }
-        })
-        .await;
-        let Ok(Ok(mut shell)) = opened else {
+        let opened = handle
+            .open_sampling_shell_channel("", with_pty, REMOTE_ENV_TOTAL_TIMEOUT)
+            .await;
+        let Ok(mut shell) = opened else {
             continue;
         };
         let detected = tokio::time::timeout(

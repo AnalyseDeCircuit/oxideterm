@@ -98,6 +98,8 @@ pub const DEFAULT_PTY_MODES: &[(Pty, u32)] = &[
 ];
 
 const NONE_AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const SHELL_OPEN_TIMEOUT: Duration = Duration::from_secs(8);
+const SHELL_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const PASSWORD_RETRY_DELAY: Duration = Duration::from_millis(500);
 const PASSWORD_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 const GSSAPI_AUTH_TIMEOUT: Duration = Duration::from_secs(30);

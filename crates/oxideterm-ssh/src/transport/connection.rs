@@ -583,40 +583,58 @@ impl SshConnectionHandle {
         &self,
         init_command: &str,
     ) -> Result<SshShellChannel, SshTransportError> {
-        self.open_sampling_shell_channel(init_command, false).await
+        self.open_sampling_shell_channel(init_command, false, SHELL_OPEN_TIMEOUT)
+            .await
     }
 
-    pub(crate) async fn open_persistent_pty_shell_channel(
-        &self,
-        init_command: &str,
-    ) -> Result<SshShellChannel, SshTransportError> {
-        self.open_sampling_shell_channel(init_command, true).await
-    }
-
-    async fn open_sampling_shell_channel(
+    pub(crate) async fn open_sampling_shell_channel(
         &self,
         init_command: &str,
         with_pty: bool,
+        timeout: Duration,
     ) -> Result<SshShellChannel, SshTransportError> {
         let pooled = self.physical::<PooledSshConnection>().ok_or_else(|| {
             SshTransportError::ConnectionFailed("no active SSH connection is available".into())
         })?;
-        Self::open_sampling_shell_on(&pooled, init_command, with_pty).await
+        Self::open_sampling_shell_on(&pooled, init_command, with_pty, timeout).await
     }
 
     async fn open_sampling_shell_on(
         pooled: &PooledSshConnection,
         init_command: &str,
         with_pty: bool,
+        timeout: Duration,
     ) -> Result<SshShellChannel, SshTransportError> {
-        let channel = pooled
-            .target
-            .channel_open_session()
+        let deadline = Instant::now() + timeout;
+        let channel = tokio::time::timeout_at(deadline, pooled.target.channel_open_session())
             .await
+            .map_err(|_| SshTransportError::Timeout)?
             .map_err(|error| SshTransportError::Channel(error.to_string()))?;
+        // Keep ownership outside initialization's timeout so cancellation can close the channel.
+        let mut shell = SshShellChannel { channel, with_pty };
+        let initialized = tokio::time::timeout_at(
+            deadline,
+            Self::initialize_sampling_shell(&mut shell, init_command),
+        )
+        .await
+        .map_err(|_| SshTransportError::Timeout)
+        .and_then(|result| result);
+        if let Err(error) = initialized {
+            let _ = tokio::time::timeout(SHELL_CLOSE_TIMEOUT, shell.close()).await;
+            return Err(error);
+        }
+        Ok(shell)
+    }
+
+    async fn initialize_sampling_shell(
+        shell: &mut SshShellChannel,
+        init_command: &str,
+    ) -> Result<(), SshTransportError> {
+        let with_pty = shell.with_pty;
         if with_pty {
             // Sampling scripts can exceed the terminal's canonical input limit.
-            if let Err(error) = channel
+            shell
+                .channel
                 .request_pty(
                     true,
                     "xterm",
@@ -627,17 +645,14 @@ impl SshConnectionHandle {
                     &[(Pty::ECHO, 0), (Pty::ICANON, 0)],
                 )
                 .await
-            {
-                let _ = channel.close().await;
-                return Err(SshTransportError::Channel(error.to_string()));
-            }
+                .map_err(|error| SshTransportError::Channel(error.to_string()))?;
         }
-        channel
+        shell
+            .channel
             .request_shell(with_pty)
             .await
             .map_err(|error| SshTransportError::Channel(error.to_string()))?;
         if with_pty {
-            let mut shell = SshShellChannel { channel, with_pty };
             // A gateway may finish target login after accepting the shell request.
             // Confirm initialization before sending a script that can exceed 4 KiB.
             let initialization = if init_command.is_empty() {
@@ -662,27 +677,25 @@ impl SshConnectionHandle {
                     .await
                 {
                     Ok(_) => {
-                        return Ok(shell);
+                        return Ok(());
                     }
                     Err(SshTransportError::Timeout) if attempt < 3 => {
                         // Retry only this idempotent probe: early gateway input can be lost.
                         attempt += 1;
                     }
-                    Err(error) => {
-                        let _ = shell.close().await;
-                        return Err(error);
-                    }
+                    Err(error) => return Err(error),
                 }
             }
         }
         if !init_command.is_empty() {
-            channel
+            shell
+                .channel
                 .data(init_command.as_bytes())
                 .await
                 .map_err(|error| SshTransportError::Channel(error.to_string()))?;
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        Ok(SshShellChannel { channel, with_pty })
+        Ok(())
     }
 
     pub fn set_remote_forward_handler(
