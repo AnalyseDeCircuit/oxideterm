@@ -3794,6 +3794,22 @@ impl ConnectionStore {
         } else if connection.created_at.timestamp() <= 0 {
             connection.created_at = now;
         }
+        for credential in &mut connection.privilege_credentials {
+            if credential.plaintext_secret.is_none() && credential.keychain_id.is_none()
+                && let Some(existing_credential) = existing
+                    .as_ref()
+                    .and_then(|connection| {
+                        connection
+                            .privilege_credentials
+                            .iter()
+                            .find(|candidate| candidate.id == credential.id)
+                    })
+            {
+                // Metadata-only imports do not carry secrets. Reusing the local
+                // reference keeps the protected entry alive for the same credential.
+                credential.keychain_id = existing_credential.keychain_id.clone();
+            }
+        }
         let (privilege_credentials, touched_privilege_keychain_ids) =
             self.materialize_privilege_credentials(&connection.id, connection.privilege_credentials)?;
         connection.privilege_credentials = privilege_credentials;
