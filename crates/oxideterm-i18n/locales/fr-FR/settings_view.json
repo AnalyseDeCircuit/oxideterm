@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "Après la fermeture de la fenêtre, OxideTerm continue de s’exécuter en arrière-plan."
     },
     "terminal": {
+      "timestamp_hover": "Afficher l’heure locale au survol",
+      "timestamp_hover_hint": "Survolez un horodatage de 10 chiffres en secondes ou de 13 chiffres en millisecondes pour afficher la date et l’heure dans le fuseau horaire du système",
       "bg_source_particles": "Particules en profondeur",
       "bg_particles_size": "Taille des particules",
       "bg_field_density": "Densité",

@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "Closing the window keeps OxideTerm running in the background."
     },
     "terminal": {
+      "timestamp_hover": "Show Local Time on Hover",
+      "timestamp_hover_hint": "Hover over a 10-digit seconds or 13-digit milliseconds timestamp to see the date and time in your system time zone",
       "bg_source_particles": "Depth particles",
       "bg_particles_size": "Particle size",
       "bg_field_density": "Density",

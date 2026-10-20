@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "Sau khi đóng cửa sổ, OxideTerm sẽ tiếp tục chạy trong nền."
     },
     "terminal": {
+      "timestamp_hover": "Hiển thị giờ địa phương khi di chuột",
+      "timestamp_hover_hint": "Di chuột lên dấu thời gian 10 chữ số tính bằng giây hoặc 13 chữ số tính bằng mili giây để xem ngày giờ theo múi giờ hệ thống",
       "bg_source_particles": "Hạt có chiều sâu",
       "bg_particles_size": "Kích thước hạt",
       "bg_field_density": "Mật độ",

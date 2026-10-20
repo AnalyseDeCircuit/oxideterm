@@ -244,6 +244,25 @@ impl WorkspaceApp {
             }
             // TabHost consumes this signal before ordinary pane delivery.
             TerminalPaneEvent::OutputActivity => {}
+            TerminalPaneEvent::TimestampHoverChanged => {
+                let id = format!("terminal-timestamp-{}", pane_id.0);
+                let tooltip = self.tab_host.read(cx).panes().get(&pane_id).and_then(|pane| {
+                    pane.read(cx)
+                        .timestamp_hover_tooltip()
+                        .map(|(label, position)| (label.to_string(), position))
+                });
+                // Discard pending text before replacing the target; IDs isolate split panes.
+                self.clear_workspace_tooltip(&id, cx);
+                if let Some((label, position)) = tooltip {
+                    self.queue_workspace_tooltip(
+                        id,
+                        label,
+                        f32::from(position.x) + 12.0,
+                        f32::from(position.y) + 16.0,
+                        cx,
+                    );
+                }
+            }
             TerminalPaneEvent::TriggerMatchesAvailable => {
                 let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
                     return;
@@ -426,6 +445,7 @@ impl WorkspaceApp {
         pane_id: &PaneId,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
+        self.clear_workspace_tooltip(&format!("terminal-timestamp-{}", pane_id.0), cx);
         if let Some(terminal) = self
             .tab_host
             .read(cx)

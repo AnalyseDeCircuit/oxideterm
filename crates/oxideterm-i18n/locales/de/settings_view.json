@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "Nach dem Schließen des Fensters wird OxideTerm im Hintergrund weiter ausgeführt."
     },
     "terminal": {
+      "timestamp_hover": "Ortszeit beim Darüberfahren anzeigen",
+      "timestamp_hover_hint": "Mit dem Mauszeiger über einen 10-stelligen Sekunden- oder 13-stelligen Millisekunden-Zeitstempel fahren, um Datum und Uhrzeit in der Systemzeitzone zu sehen",
       "bg_source_particles": "Tiefenpartikel",
       "bg_particles_size": "Partikelgröße",
       "bg_field_density": "Dichte",

@@ -82,6 +82,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
+        self.clear_timestamp_hover(cx);
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
@@ -515,6 +516,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        self.clear_timestamp_hover(cx);
         // Terminal menu payloads include row-local command marks and target
         // points; any scroll makes that semantic snapshot stale.
         if self.context_menu.take().is_some() {
@@ -1500,6 +1502,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
+        self.clear_timestamp_hover(cx);
         if self.tmux_selection_pending {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Down(event.clone()));
@@ -1767,6 +1770,17 @@ impl TerminalPane {
         let hovered_link = can_hover_terminal_content
             .then(|| self.link_at_position(event.position))
             .flatten();
+        if can_hover_terminal_content
+            && self.preferences.timestamp_hover
+            && event.pressed_button.is_none()
+            && hovered_link.is_none()
+            && self.context_menu.is_none()
+            && !self.snapshot_dirty
+        {
+            self.update_timestamp_hover(event.position, cx);
+        } else {
+            self.clear_timestamp_hover(cx);
+        }
         let can_hover_command_marks = can_hover_terminal_content
             && command_mark_ui_available(self.settings.command_marks_enabled, mode);
         let hovered_command_mark_id = can_hover_command_marks

@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "창을 닫아도 OxideTerm은 백그라운드에서 계속 실행됩니다."
     },
     "terminal": {
+      "timestamp_hover": "마우스를 올리면 현지 시간 표시",
+      "timestamp_hover_hint": "10자리 초 단위 또는 13자리 밀리초 단위 타임스탬프에 마우스를 올리면 시스템 시간대의 날짜와 시간을 표시합니다",
       "bg_source_particles": "깊이감 있는 입자",
       "bg_particles_size": "입자 크기",
       "bg_field_density": "밀도",

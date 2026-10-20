@@ -65,6 +65,10 @@ pub fn set_detect_file_paths_as_links(settings: &mut PersistedSettings, value: b
     settings.terminal.detect_file_paths_as_links = value;
 }
 
+pub fn set_timestamp_hover(settings: &mut PersistedSettings, value: bool) {
+    settings.terminal.timestamp_hover = value;
+}
+
 pub fn set_selection_requires_shift(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.selection_requires_shift = value;
 }

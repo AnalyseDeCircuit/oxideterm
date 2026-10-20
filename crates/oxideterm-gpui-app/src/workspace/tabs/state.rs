@@ -76,6 +76,18 @@ impl WorkspaceApp {
         cx: &mut App,
     ) {
         if previous_active_tab_id != active_tab_id {
+            let mut previous_panes = Vec::new();
+            if let Some(root) = previous_active_tab_id
+                .and_then(|id| self.tab_by_id(id, cx))
+                .and_then(|tab| tab.root_pane.as_ref())
+            {
+                root.collect_pane_ids(&mut previous_panes);
+            }
+            for pane_id in previous_panes {
+                if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
+                    pane.update(cx, |pane, cx| pane.clear_timestamp_hover(cx));
+                }
+            }
             if let Some(tab_id) = previous_active_tab_id {
                 self.sync_ide_surface_mount(tab_id, cx);
                 self.sync_remote_desktop_frame_visibility(tab_id, cx);

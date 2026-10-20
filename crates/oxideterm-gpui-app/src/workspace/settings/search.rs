@@ -207,6 +207,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.open_links_with_modifier_hint",
                 "settings_view.terminal.detect_file_paths_as_links",
                 "settings_view.terminal.detect_file_paths_as_links_hint",
+                "settings_view.terminal.timestamp_hover",
+                "settings_view.terminal.timestamp_hover_hint",
             ],
         ),
         terminal_search_entry(

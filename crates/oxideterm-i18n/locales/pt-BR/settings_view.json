@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "Ao fechar a janela, o OxideTerm continuará em execução em segundo plano."
     },
     "terminal": {
+      "timestamp_hover": "Mostrar hora local ao passar o cursor",
+      "timestamp_hover_hint": "Passe o cursor sobre um carimbo de data/hora de 10 dígitos em segundos ou de 13 dígitos em milissegundos para ver a data e a hora no fuso horário do sistema",
       "bg_source_particles": "Partículas com profundidade",
       "bg_particles_size": "Tamanho das partículas",
       "bg_field_density": "Densidade",

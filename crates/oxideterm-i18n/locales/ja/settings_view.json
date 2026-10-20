@@ -257,6 +257,8 @@
       "keep_running_on_close_hint": "ウィンドウを閉じても、OxideTerm はバックグラウンドで実行し続けます。"
     },
     "terminal": {
+      "timestamp_hover": "ホバーで現地時刻を表示",
+      "timestamp_hover_hint": "10 桁の秒単位または 13 桁のミリ秒単位のタイムスタンプにマウスを合わせると、システムのタイムゾーンで日時を表示します",
       "bg_source_particles": "奥行きのある粒子",
       "bg_particles_size": "粒子の大きさ",
       "bg_field_density": "密度",

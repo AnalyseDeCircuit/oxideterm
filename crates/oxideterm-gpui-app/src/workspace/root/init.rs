@@ -1224,6 +1224,7 @@ impl WorkspaceApp {
             right_click_paste: terminal.right_click_paste,
             open_links_with_modifier: terminal.open_links_with_modifier,
             detect_file_paths_as_links: terminal.detect_file_paths_as_links,
+            timestamp_hover: terminal.timestamp_hover,
             semantic_coloring: terminal.semantic_coloring,
             selection_highlighting: terminal.selection_highlighting,
             semantic_scheme: resolved_terminal_semantic_scheme(
