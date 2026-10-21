@@ -562,7 +562,12 @@ fn ssh_recording_pressure_preserves_output_and_services_input_and_close() {
         resume.send(()).unwrap();
         if !cancel {
             fixture.runtime.block_on(producer).unwrap();
-            wait_until(|| !fixture.terminal.lifecycle().is_running());
+            wait_until(|| {
+                // History trimming emits UI events too. Drain them so this test
+                // exercises recording pressure rather than a stalled UI consumer.
+                fixture.terminal.take_events();
+                !fixture.terminal.lifecycle().is_running()
+            });
         }
         wait_until(|| {
             runtime
