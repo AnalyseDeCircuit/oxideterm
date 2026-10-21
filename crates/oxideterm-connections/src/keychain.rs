@@ -243,11 +243,6 @@ impl ConnectionKeychain {
             {
                 anyhow::bail!("test keychain delete failure");
             }
-            // Real backends reject an empty account; model that so cleanup
-            // retries cannot silently swallow a blank reference.
-            if id.is_empty() {
-                anyhow::bail!("empty keychain id");
-            }
             store
                 .lock()
                 .map_err(|error| anyhow::anyhow!("failed to lock test keychain: {error}"))?

@@ -2340,7 +2340,7 @@ impl ConnectionStore {
                 .pending_privilege_keychain_cleanup
                 .contains(&reference)
         {
-            // Keep cleanup durable when the keychain backend is temporarily unavailable.
+            // Retain the request in memory even if persisting it also fails.
             self.data
                 .pending_privilege_keychain_cleanup
                 .push(reference);
@@ -2711,8 +2711,13 @@ impl ConnectionStore {
             candidate.touch_privilege_scope(&credential.connection_id);
             if let Err(error) = candidate.save() {
                 // A failed cleanup must not replace the metadata persistence error.
-                if let Some(reference) = new_reference {
-                    let _ = self.delete_or_queue_privilege_keychain_entry(reference);
+                if let Some(reference) = new_reference
+                    && let Err(cleanup_error) =
+                        self.delete_or_queue_privilege_keychain_entry(reference)
+                {
+                    return Err(anyhow::anyhow!(
+                        "{error:#}; staged privilege secret cleanup remains in memory because its retry record could not be saved: {cleanup_error:#}"
+                    ));
                 }
                 return Err(error);
             }
