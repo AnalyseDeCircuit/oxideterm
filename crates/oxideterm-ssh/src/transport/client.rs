@@ -310,17 +310,16 @@ async fn open_interactive_shell_channel(
         }
     }
     if agent_forwarding {
-        if let Err(error) = request_agent_forwarding_for_shell(&mut channel).await {
-            // A rejected request leaves no usable shell channel. Close it
-            // explicitly so pooled transports do not retain a failed channel.
-            let _ = channel.close().await;
-            return Err(("request-agent-forwarding", error));
+        // OpenSSH accepts Agent forwarding once per physical connection. Serialize
+        // first-time requests so concurrently opened PTYs also reuse that acceptance.
+        let _request = pooled.agent_forwarding_request.lock().await;
+        if !pooled.agent_forwarding_accepted.load(Ordering::Acquire) {
+            if let Err(error) = request_agent_forwarding_for_shell(&mut channel).await {
+                let _ = channel.close().await;
+                return Err(("request-agent-forwarding", error));
+            }
+            pooled.agent_forwarding_accepted.store(true, Ordering::Release);
         }
-        // No later forwarding setup can fail after the connection-wide Agent
-        // admission flag becomes visible to server-opened channels.
-        pooled
-            .agent_forwarding_accepted
-            .store(true, Ordering::Release);
     }
     Ok((channel, x11_route_guard, x11_status))
 }

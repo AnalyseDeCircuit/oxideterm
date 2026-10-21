@@ -8,6 +8,7 @@ struct PooledSshConnection {
     x11_dispatcher: X11ForwardDispatcher,
     auth_banners: AuthBannerSink,
     agent_forwarding_accepted: Arc<AtomicBool>,
+    agent_forwarding_request: tokio::sync::Mutex<()>,
 }
 
 fn append_limited_command_output(
@@ -52,6 +53,7 @@ impl PooledSshConnection {
             x11_dispatcher,
             auth_banners,
             agent_forwarding_accepted,
+            agent_forwarding_request: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -75,6 +77,7 @@ impl PooledSshConnection {
             x11_dispatcher,
             auth_banners,
             agent_forwarding_accepted,
+            agent_forwarding_request: tokio::sync::Mutex::new(()),
         }
     }
 
