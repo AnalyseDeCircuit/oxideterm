@@ -9,7 +9,10 @@ use super::terminal_git::{
     terminal_git_repository_action_label_key,
 };
 use super::*;
-use oxideterm_connections::{LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, SSH_COMMON_PRIVILEGE_SCOPE_ID};
+use oxideterm_connections::{
+    LOCAL_SHELL_PRIVILEGE_CONNECTION_ID, SSH_COMMON_PRIVILEGE_SCOPE_ID,
+    privilege_host_scope_matches,
+};
 use oxideterm_environment::{
     CurrentDirectoryScope, CurrentDirectorySnapshot, CurrentDirectorySource, GitChangedPath,
     GitRepositoryStatus, ProjectSnapshot, ProjectTask, ProjectTaskGroup,
@@ -81,6 +84,17 @@ pub(super) struct PrivilegeCredentialPicker {
     prompt_generation: u64,
     state: PrivilegePromptHelperState,
     selected: usize,
+}
+
+pub(super) struct PendingPrivilegeTotp {
+    pub(super) pane_id: PaneId,
+    pub(super) session_id: TerminalSessionId,
+    pub(super) totp_credential_id: String,
+    pub(super) first_prompt_text: String,
+    pub(super) second_factor_patterns: Vec<String>,
+    pub(super) second_factor_user_hint: Option<String>,
+    pub(super) expires_at: std::time::Instant,
+    pub(super) require_click_to_send: bool,
 }
 
 impl PrivilegeCredentialPicker {
@@ -263,58 +277,42 @@ fn privilege_credential_matches_prompt(
     if !credential.enabled {
         return false;
     }
+    // Response mode is deliberately absent here: two-stage credentials must
+    // match the same sudo/su/custom prompts as password-only credentials.
     match prompt {
-        PrivilegePromptMatch::Sudo { username, .. } => {
-            if !matches!(
-                credential.kind,
-                PrivilegeCredentialKind::SudoPassword | PrivilegeCredentialKind::CustomPrompt
-            ) {
-                return false;
-            }
-            if credential.kind == PrivilegeCredentialKind::CustomPrompt {
-                return privilege_prompt_matches_custom_patterns(
-                    prompt,
-                    &credential.prompt_patterns,
-                );
-            }
-            username.as_ref().is_none_or(|prompt_username| {
+        PrivilegePromptMatch::Sudo { username, .. } => match credential.prompt_type {
+            PrivilegePromptType::Sudo => username.as_ref().is_none_or(|prompt_username| {
                 credential
                     .username_hint
                     .as_ref()
                     .is_none_or(|hint| prompt_username == hint)
-            })
-        }
-        PrivilegePromptMatch::Su { target_user, .. } => {
-            if !matches!(
-                credential.kind,
-                PrivilegeCredentialKind::SuPassword | PrivilegeCredentialKind::CustomPrompt
-            ) {
-                return false;
+            }),
+            PrivilegePromptType::Custom => {
+                privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
             }
-            match credential.kind {
-                PrivilegeCredentialKind::SuPassword => {
-                    target_user.as_ref().is_none_or(|prompt_user| {
-                        credential
-                            .username_hint
-                            .as_ref()
-                            .is_none_or(|hint| prompt_user == hint)
-                    })
-                }
-                PrivilegeCredentialKind::CustomPrompt => {
-                    privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
-                }
-                PrivilegeCredentialKind::SudoPassword => false,
+            PrivilegePromptType::Su => false,
+        },
+        PrivilegePromptMatch::Su { target_user, .. } => match credential.prompt_type {
+            PrivilegePromptType::Su => target_user.as_ref().is_none_or(|prompt_user| {
+                credential
+                    .username_hint
+                    .as_ref()
+                    .is_none_or(|hint| prompt_user == hint)
+            }),
+            PrivilegePromptType::Custom => {
+                privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
             }
-        }
+            PrivilegePromptType::Sudo => false,
+        },
         PrivilegePromptMatch::Custom { .. } => {
-            credential.kind == PrivilegeCredentialKind::CustomPrompt
+            credential.prompt_type == PrivilegePromptType::Custom
                 && privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
         }
-        PrivilegePromptMatch::GenericPassword { .. } => match credential.kind {
+        PrivilegePromptMatch::GenericPassword { .. } => match credential.prompt_type {
             // Bare `Password:` carries no reliable sudo/su identity. Offer only
             // scoped, click-to-send candidates and never infer a command kind.
-            PrivilegeCredentialKind::SudoPassword | PrivilegeCredentialKind::SuPassword => true,
-            PrivilegeCredentialKind::CustomPrompt => {
+            PrivilegePromptType::Sudo | PrivilegePromptType::Su => true,
+            PrivilegePromptType::Custom => {
                 privilege_prompt_matches_custom_patterns(prompt, &credential.prompt_patterns)
             }
         },
@@ -401,6 +399,42 @@ fn terminal_cwd_chip_tooltip(
     lines.join("\n")
 }
 
+/// Credential sources for one terminal scope. Precedence is resolved after
+/// prompt matching so a disabled or non-matching connection-specific
+/// credential cannot hide a shared credential that does match.
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PrivilegeCredentialScope {
+    connection_id: Option<String>,
+    host: String,
+    exact: Vec<SavedPrivilegeCredential>,
+    common: Vec<SavedPrivilegeCredential>,
+}
+
+impl PrivilegeCredentialScope {
+    fn common_credential_applies(&self, credential: &SavedPrivilegeCredential) -> bool {
+        !privilege_host_patterns_are_specific(&credential.host_patterns)
+            || privilege_host_scope_matches(&self.host, &credential.host_patterns)
+    }
+
+    /// Prompt classification must not inspect a shared credential that its
+    /// host restriction excludes from this connection.
+    fn credentials(&self) -> impl Iterator<Item = &SavedPrivilegeCredential> {
+        self.exact.iter().chain(
+            self.common
+                .iter()
+                .filter(|c| self.common_credential_applies(c)),
+        )
+    }
+
+    fn is_empty(&self) -> bool {
+        self.exact.is_empty()
+            && !self
+                .common
+                .iter()
+                .any(|c| self.common_credential_applies(c))
+    }
+}
+
 #[cfg(test)]
 fn build_privilege_prompt_helper_state(
     connection_id: String,
@@ -410,45 +444,126 @@ fn build_privilege_prompt_helper_state(
     // Pure helper tests synthesize the semantic session event from their text
     // fixture; production code receives the equivalent tracked prompt.
     let tracked_prompt = oxideterm_gpui_terminal::detect_privilege_prompt(visible_text);
-    let prompt = choose_privilege_prompt(credentials, visible_text, tracked_prompt)?;
-    build_privilege_prompt_helper_state_from_prompt(connection_id, credentials, prompt)
+    let scope = PrivilegeCredentialScope {
+        connection_id: Some(connection_id),
+        host: String::new(),
+        exact: credentials.to_vec(),
+        common: Vec::new(),
+    };
+    build_privilege_prompt_helper_state_with_tracked_prompt(scope, visible_text, tracked_prompt)
 }
 
 fn build_privilege_prompt_helper_state_with_tracked_prompt(
-    connection_id: String,
-    credentials: &[SavedPrivilegeCredential],
+    scope: PrivilegeCredentialScope,
     visible_text: &str,
     tracked_prompt: Option<PrivilegePromptMatch>,
 ) -> Option<PrivilegePromptHelperState> {
-    let prompt = choose_privilege_prompt(credentials, visible_text, tracked_prompt)?;
-    build_privilege_prompt_helper_state_from_prompt(connection_id, credentials, prompt)
+    let prompt = choose_privilege_prompt(scope.credentials(), visible_text, tracked_prompt)?;
+    Some(build_privilege_prompt_helper_state_from_prompt(
+        scope, prompt,
+    ))
+}
+
+fn latest_visible_prompt_line(text: &str) -> Option<&str> {
+    text.lines()
+        .map(str::trim)
+        .rev()
+        .find(|line| !line.is_empty())
+}
+
+fn privilege_line_matches_patterns(line: &str, patterns: &[String]) -> bool {
+    let line = line.to_ascii_lowercase();
+    patterns
+        .iter()
+        .map(|pattern| pattern.trim().to_ascii_lowercase())
+        .any(|pattern| !pattern.is_empty() && line.contains(&pattern))
+}
+
+fn privilege_prompt_text(prompt: &PrivilegePromptMatch) -> &str {
+    match prompt {
+        PrivilegePromptMatch::Sudo { prompt_text, .. }
+        | PrivilegePromptMatch::Su { prompt_text, .. }
+        | PrivilegePromptMatch::Custom { prompt_text, .. }
+        | PrivilegePromptMatch::GenericPassword { prompt_text } => prompt_text,
+    }
+}
+
+fn privilege_host_patterns_are_specific(patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        let pattern = pattern.trim();
+        !pattern.is_empty() && pattern != "*"
+    })
+}
+
+fn select_privilege_candidates(
+    scope: &PrivilegeCredentialScope,
+    prompt: &PrivilegePromptMatch,
+) -> (String, Vec<SavedPrivilegeCredential>) {
+    let exact = scope
+        .exact
+        .iter()
+        .filter(|credential| privilege_credential_matches_prompt(credential, prompt))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !exact.is_empty() {
+        return (
+            scope
+                .connection_id
+                .clone()
+                .unwrap_or_else(|| SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string()),
+            exact,
+        );
+    }
+
+    let mut host_matched = Vec::new();
+    let mut generic = Vec::new();
+    for credential in &scope.common {
+        if !privilege_credential_matches_prompt(credential, prompt) {
+            continue;
+        }
+        if privilege_host_patterns_are_specific(&credential.host_patterns) {
+            if privilege_host_scope_matches(&scope.host, &credential.host_patterns) {
+                host_matched.push(credential.clone());
+            }
+        } else {
+            generic.push(credential.clone());
+        }
+    }
+    if !host_matched.is_empty() {
+        return (SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string(), host_matched);
+    }
+    if generic.is_empty() {
+        // Keep the terminal's own scope even when nothing matched so prompt
+        // state and picker invalidation remain tied to the active session.
+        return (
+            scope
+                .connection_id
+                .clone()
+                .unwrap_or_else(|| SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string()),
+            generic,
+        );
+    }
+    (SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string(), generic)
 }
 
 fn build_privilege_prompt_helper_state_from_prompt(
-    connection_id: String,
-    credentials: &[SavedPrivilegeCredential],
+    scope: PrivilegeCredentialScope,
     prompt: PrivilegePromptMatch,
-) -> Option<PrivilegePromptHelperState> {
-    let mut matches = credentials
-        .iter()
-        .filter(|credential| privilege_credential_matches_prompt(credential, &prompt))
+) -> PrivilegePromptHelperState {
+    let (connection_id, credentials) = select_privilege_candidates(&scope, &prompt);
+    let matches = credentials
+        .into_iter()
         .map(|credential| MatchedPrivilegeCredential {
-            connection_id: credential.connection_id.clone(),
-            credential_id: credential.id.clone(),
-            label: credential.label.clone(),
+            connection_id: credential.connection_id,
+            credential_id: credential.id,
+            label: credential.label,
         })
         .collect::<Vec<_>>();
-    if matches
-        .iter()
-        .any(|candidate| candidate.connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID)
-    {
-        matches.retain(|candidate| candidate.connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID);
-    }
-    Some(PrivilegePromptHelperState {
+    PrivilegePromptHelperState {
         connection_id,
         prompt,
         matches,
-    })
+    }
 }
 
 fn privilege_prompt_state_allows_confirmed_fill(state: &PrivilegePromptHelperState) -> bool {
@@ -458,8 +573,18 @@ fn privilege_prompt_state_allows_confirmed_fill(state: &PrivilegePromptHelperSta
     state.matches.len() == 1
 }
 
-fn choose_privilege_prompt(
-    credentials: &[SavedPrivilegeCredential],
+fn privilege_prompt_allows_automatic_fill(
+    prompt: &PrivilegePromptMatch,
+    credential: &SavedPrivilegeCredential,
+) -> bool {
+    // An unclassified password prompt may belong to another application,
+    // even when only one sudo/su credential exists in this scope.
+    !matches!(prompt, PrivilegePromptMatch::GenericPassword { .. })
+        && !credential.require_click_to_send
+}
+
+fn choose_privilege_prompt<'a>(
+    credentials: impl IntoIterator<Item = &'a SavedPrivilegeCredential>,
     visible_text: &str,
     tracked_prompt: Option<PrivilegePromptMatch>,
 ) -> Option<PrivilegePromptMatch> {
@@ -478,17 +603,17 @@ fn choose_privilege_prompt(
     }
 }
 
-fn detect_custom_prompt_from_credentials(
-    credentials: &[SavedPrivilegeCredential],
+fn detect_custom_prompt_from_credentials<'a>(
+    credentials: impl IntoIterator<Item = &'a SavedPrivilegeCredential>,
     visible_text: &str,
 ) -> Option<PrivilegePromptMatch> {
-    credentials.iter().find_map(|credential| {
-        if !credential.enabled || credential.kind != PrivilegeCredentialKind::CustomPrompt {
+    credentials.into_iter().find_map(|credential| {
+        if !credential.enabled || credential.prompt_type != PrivilegePromptType::Custom {
             return None;
         }
         // Custom privilege prompts are user-authored fragments. They must be
         // allowed to trigger even when the prompt is not a built-in `Password:`
-        // shape; otherwise the "custom" kind silently behaves like a no-op.
+        // shape; otherwise the "custom" prompt type behaves like a no-op.
         detect_custom_privilege_prompt(visible_text, &credential.id, &credential.prompt_patterns)
     })
 }
@@ -551,26 +676,117 @@ mod privilege_prompt_helper_tests {
     use chrono::Utc;
 
     #[test]
+    fn second_factor_prompt_matches_only_the_latest_visible_line() {
+        let text = "First Factor:\r\nSecond Factor:";
+        let line = latest_visible_prompt_line(text).expect("latest line");
+        assert_eq!(line, "Second Factor:");
+        let patterns = vec!["Second Factor:".to_string()];
+        assert!(privilege_line_matches_patterns(line, &patterns));
+        assert!(!privilege_line_matches_patterns("First Factor:", &patterns));
+    }
+
+    #[test]
+    fn ssh_privilege_scope_prefers_connection_then_host_group_then_generic() {
+        let exact = saved_privilege_credential_for_connection(
+            "conn-1",
+            "exact",
+            PrivilegePromptType::Sudo,
+            None,
+        );
+        let mut group = saved_privilege_credential_for_connection(
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+            "group",
+            PrivilegePromptType::Sudo,
+            None,
+        );
+        group.host_patterns = vec!["hktkosl*".into()];
+        let mut other_group = group.clone();
+        other_group.id = "other-group".into();
+        other_group.host_patterns = vec!["i-*".into()];
+        let mut generic = saved_privilege_credential_for_connection(
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+            "generic",
+            PrivilegePromptType::Sudo,
+            None,
+        );
+        generic.host_patterns = vec!["*".into()];
+
+        let prompt = PrivilegePromptMatch::Sudo {
+            username: Some("deploy".into()),
+            prompt_text: "[sudo] password for deploy:".into(),
+        };
+
+        let scope = PrivilegeCredentialScope {
+            connection_id: Some("conn-1".into()),
+            host: "hktkosl1102".into(),
+            exact: vec![exact.clone()],
+            common: vec![group.clone(), other_group.clone(), generic.clone()],
+        };
+        let (scope_id, selected) = select_privilege_candidates(&scope, &prompt);
+        assert_eq!(scope_id, "conn-1");
+        assert_eq!(
+            selected.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["exact"]
+        );
+
+        let scope = PrivilegeCredentialScope {
+            connection_id: None,
+            host: "HKTKOSL1102".into(),
+            exact: Vec::new(),
+            common: vec![group.clone(), other_group.clone(), generic.clone()],
+        };
+        let (scope_id, selected) = select_privilege_candidates(&scope, &prompt);
+        assert_eq!(scope_id, SSH_COMMON_PRIVILEGE_SCOPE_ID);
+        assert_eq!(
+            selected.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["group"]
+        );
+
+        let scope = PrivilegeCredentialScope {
+            connection_id: Some("conn-1".into()),
+            host: "unknown-host".into(),
+            exact: Vec::new(),
+            common: vec![group, other_group, generic.clone()],
+        };
+        let (scope_id, selected) = select_privilege_candidates(&scope, &prompt);
+        assert_eq!(scope_id, SSH_COMMON_PRIVILEGE_SCOPE_ID);
+        assert_eq!(
+            selected.iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+            ["generic"]
+        );
+    }
+
+    #[test]
     fn ssh_common_privilege_candidates_preserve_scope_and_specific_priority() {
         let common = saved_privilege_credential_for_connection(
             SSH_COMMON_PRIVILEGE_SCOPE_ID,
             "shared",
-            PrivilegeCredentialKind::SudoPassword,
+            PrivilegePromptType::Sudo,
             None,
         );
         let specific = saved_privilege_credential_for_connection(
             "conn-1",
             "shared",
-            PrivilegeCredentialKind::SudoPassword,
+            PrivilegePromptType::Sudo,
             Some("deploy"),
         );
-        let credentials = [common, specific];
-        for (prompt, expected_scope) in [
-            ("[sudo] password for deploy:", "conn-1"),
-            ("[sudo] password for other:", SSH_COMMON_PRIVILEGE_SCOPE_ID),
+        for (username, expected_scope) in [
+            ("deploy", "conn-1"),
+            ("other", SSH_COMMON_PRIVILEGE_SCOPE_ID),
         ] {
+            let prompt = PrivilegePromptMatch::Sudo {
+                username: Some(username.into()),
+                prompt_text: format!("[sudo] password for {username}:"),
+            };
+            let scope = PrivilegeCredentialScope {
+                connection_id: Some("conn-1".into()),
+                host: "prod-01".into(),
+                exact: vec![specific.clone()],
+                common: vec![common.clone()],
+            };
             let state =
-                build_privilege_prompt_helper_state("conn-1".into(), &credentials, prompt).unwrap();
+                build_privilege_prompt_helper_state_with_tracked_prompt(scope, "", Some(prompt))
+                    .unwrap();
             assert_eq!(
                 state.matches,
                 vec![MatchedPrivilegeCredential {
@@ -583,7 +799,7 @@ mod privilege_prompt_helper_tests {
         let mut first = saved_privilege_credential_for_connection(
             SSH_COMMON_PRIVILEGE_SCOPE_ID,
             "first",
-            PrivilegeCredentialKind::CustomPrompt,
+            PrivilegePromptType::Custom,
             None,
         );
         first.prompt_patterns = vec!["approval token".into()];
@@ -607,12 +823,59 @@ mod privilege_prompt_helper_tests {
     }
 
     #[test]
+    fn prompt_matching_precedes_scope_and_ignores_response_mode() {
+        let mut exact_su = saved_privilege_credential("exact-su", PrivilegePromptType::Su, None);
+        exact_su.response_mode = PrivilegeResponseMode::PasswordThenTotp;
+        let mut disabled_exact =
+            saved_privilege_credential("disabled-exact", PrivilegePromptType::Sudo, None);
+        disabled_exact.enabled = false;
+        let mut staged_sudo = saved_privilege_credential_for_connection(
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+            "staged-sudo",
+            PrivilegePromptType::Sudo,
+            None,
+        );
+        staged_sudo.response_mode = PrivilegeResponseMode::PasswordThenTotp;
+        let mut staged_custom = saved_privilege_credential_for_connection(
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+            "staged-custom",
+            PrivilegePromptType::Custom,
+            None,
+        );
+        staged_custom.response_mode = PrivilegeResponseMode::PasswordThenTotp;
+        staged_custom.prompt_patterns = vec!["[sudo]".into()];
+
+        let scope = PrivilegeCredentialScope {
+            connection_id: Some("conn-1".into()),
+            host: "prod-01".into(),
+            exact: vec![exact_su, disabled_exact],
+            common: vec![staged_sudo, staged_custom],
+        };
+        let prompt = PrivilegePromptMatch::Sudo {
+            username: Some("deploy".into()),
+            prompt_text: "[sudo] password for deploy:".into(),
+        };
+        let state =
+            build_privilege_prompt_helper_state_with_tracked_prompt(scope, "", Some(prompt))
+                .unwrap();
+
+        assert_eq!(
+            state
+                .matches
+                .iter()
+                .map(|candidate| candidate.credential_id.as_str())
+                .collect::<Vec<_>>(),
+            ["staged-sudo", "staged-custom"]
+        );
+    }
+
+    #[test]
     fn privilege_picker_expires_when_target_prompt_or_candidates_change() {
         let state = build_privilege_prompt_helper_state(
             "conn-1".into(),
             &[saved_privilege_credential(
                 "sudo",
-                PrivilegeCredentialKind::SudoPassword,
+                PrivilegePromptType::Sudo,
                 None,
             )],
             "Password:",
@@ -641,7 +904,7 @@ mod privilege_prompt_helper_tests {
     fn saved_privilege_credential_for_connection(
         connection_id: &str,
         id: &str,
-        kind: PrivilegeCredentialKind,
+        prompt_type: PrivilegePromptType,
         username_hint: Option<&str>,
     ) -> SavedPrivilegeCredential {
         let now = Utc::now();
@@ -649,9 +912,14 @@ mod privilege_prompt_helper_tests {
             id: id.to_string(),
             connection_id: connection_id.to_string(),
             label: id.to_string(),
-            kind,
+            prompt_type,
+            response_mode: PrivilegeResponseMode::PasswordOnly,
             username_hint: username_hint.map(str::to_string),
             prompt_patterns: Vec::new(),
+            host_patterns: Vec::new(),
+            second_factor_patterns: Vec::new(),
+            second_factor_user_hint: None,
+            totp_credential_id: None,
             keychain_id: Some(format!("privilege:v1:{connection_id}:{id}")),
             plaintext_secret: None,
             enabled: true,
@@ -663,28 +931,27 @@ mod privilege_prompt_helper_tests {
 
     fn saved_privilege_credential(
         id: &str,
-        kind: PrivilegeCredentialKind,
+        prompt_type: PrivilegePromptType,
         username_hint: Option<&str>,
     ) -> SavedPrivilegeCredential {
-        saved_privilege_credential_for_connection("conn-1", id, kind, username_hint)
+        saved_privilege_credential_for_connection("conn-1", id, prompt_type, username_hint)
     }
 
     fn local_privilege_credential(
         id: &str,
-        kind: PrivilegeCredentialKind,
+        prompt_type: PrivilegePromptType,
         username_hint: Option<&str>,
     ) -> SavedPrivilegeCredential {
         saved_privilege_credential_for_connection(
             LOCAL_SHELL_PRIVILEGE_CONNECTION_ID,
             id,
-            kind,
+            prompt_type,
             username_hint,
         )
     }
 
     fn custom_privilege_credential(id: &str, patterns: &[&str]) -> SavedPrivilegeCredential {
-        let mut credential =
-            saved_privilege_credential(id, PrivilegeCredentialKind::CustomPrompt, None);
+        let mut credential = saved_privilege_credential(id, PrivilegePromptType::Custom, None);
         credential.prompt_patterns = patterns.iter().map(|pattern| pattern.to_string()).collect();
         credential
     }
@@ -759,16 +1026,8 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn prompt_state_matches_enabled_username_hint() {
         let credentials = vec![
-            saved_privilege_credential(
-                "other-sudo",
-                PrivilegeCredentialKind::SudoPassword,
-                Some("other"),
-            ),
-            saved_privilege_credential(
-                "matching-sudo",
-                PrivilegeCredentialKind::SudoPassword,
-                Some("lipsc"),
-            ),
+            saved_privilege_credential("other-sudo", PrivilegePromptType::Sudo, Some("other")),
+            saved_privilege_credential("matching-sudo", PrivilegePromptType::Sudo, Some("lipsc")),
         ];
         let state = build_privilege_prompt_helper_state(
             "conn-1".to_string(),
@@ -790,8 +1049,8 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn generic_password_after_sudo_command_matches_sudo_credentials_only() {
         let credentials = vec![
-            local_privilege_credential("local-sudo", PrivilegeCredentialKind::SudoPassword, None),
-            local_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
+            local_privilege_credential("local-sudo", PrivilegePromptType::Sudo, None),
+            local_privilege_credential("local-su", PrivilegePromptType::Su, None),
         ];
         let state = build_privilege_prompt_helper_state(
             "local-shell:default".to_string(),
@@ -813,16 +1072,8 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn generic_password_after_su_command_matches_target_hint() {
         let credentials = vec![
-            local_privilege_credential(
-                "root-su",
-                PrivilegeCredentialKind::SuPassword,
-                Some("root"),
-            ),
-            local_privilege_credential(
-                "postgres-su",
-                PrivilegeCredentialKind::SuPassword,
-                Some("postgres"),
-            ),
+            local_privilege_credential("root-su", PrivilegePromptType::Su, Some("root")),
+            local_privilege_credential("postgres-su", PrivilegePromptType::Su, Some("postgres")),
         ];
         let state = build_privilege_prompt_helper_state(
             "local-shell:default".to_string(),
@@ -845,7 +1096,7 @@ mod privilege_prompt_helper_tests {
     fn single_generic_password_candidate_allows_confirmed_fill() {
         let credentials = vec![local_privilege_credential(
             "local-sudo",
-            PrivilegeCredentialKind::SudoPassword,
+            PrivilegePromptType::Sudo,
             None,
         )];
         let state = build_privilege_prompt_helper_state(
@@ -860,17 +1111,28 @@ mod privilege_prompt_helper_tests {
             PrivilegePromptMatch::GenericPassword { .. }
         ));
         assert!(privilege_prompt_state_allows_confirmed_fill(&state));
+        let mut automatic = credentials[0].clone();
+        automatic.require_click_to_send = false;
+        assert!(!privilege_prompt_allows_automatic_fill(
+            &state.prompt,
+            &automatic
+        ));
+        let sudo = PrivilegePromptMatch::Sudo {
+            username: None,
+            prompt_text: "Password:".into(),
+        };
+        assert!(privilege_prompt_allows_automatic_fill(&sudo, &automatic));
+        assert!(!privilege_prompt_allows_automatic_fill(
+            &sudo,
+            &credentials[0]
+        ));
     }
 
     #[test]
     fn generic_password_prompt_offers_scoped_click_only_candidates() {
         let credentials = vec![
-            local_privilege_credential(
-                "local-sudo",
-                PrivilegeCredentialKind::SudoPassword,
-                Some("dominical"),
-            ),
-            local_privilege_credential("local-su", PrivilegeCredentialKind::SuPassword, None),
+            local_privilege_credential("local-sudo", PrivilegePromptType::Sudo, Some("dominical")),
+            local_privilege_credential("local-su", PrivilegePromptType::Su, None),
         ];
         let state = build_privilege_prompt_helper_state(
             "local-shell:default".to_string(),
@@ -900,7 +1162,7 @@ mod privilege_prompt_helper_tests {
     #[test]
     fn custom_prompt_patterns_create_prompt_state_without_password_label() {
         let credentials = vec![
-            saved_privilege_credential("local-sudo", PrivilegeCredentialKind::SudoPassword, None),
+            saved_privilege_credential("local-sudo", PrivilegePromptType::Sudo, None),
             custom_privilege_credential("deploy-token", &["approval token"]),
         ];
         let state = build_privilege_prompt_helper_state(

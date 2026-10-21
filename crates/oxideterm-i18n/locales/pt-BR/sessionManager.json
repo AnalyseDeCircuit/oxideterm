@@ -174,7 +174,8 @@
       "delete": "Excluir",
       "label": "Rótulo",
       "label_placeholder": "senha sudo",
-      "kind_label": "Tipo",
+      "prompt_type_label": "Tipo de prompt",
+      "response_mode_label": "Modo de resposta",
       "username_hint": "Dica de usuário",
       "secret": "Segredo",
       "secret_placeholder": "Digite a senha a salvar",
@@ -182,14 +183,35 @@
       "prompt_patterns": "Padrões de prompt",
       "prompt_patterns_placeholder": "Um padrão por linha",
       "prompt_patterns_hint": "Prompts personalizados correspondem a esses fragmentos. Prompts sudo/su integrados também usam padrões seguros.",
+      "second_factor_patterns": "Padrões do segundo estágio",
+      "second_factor_patterns_placeholder": "Um padrão por linha",
+      "second_factor_patterns_hint": "Depois da senha, estes fragmentos identificam o prompt do segundo estágio.",
+      "second_factor_user_hint": "Dica de usuário do segundo estágio",
+      "second_factor_user_hint_placeholder": "Opcional",
+      "two_stage_combined_hint": "Senha + TOTP envia a senha e o código de verificação juntos; os padrões do segundo estágio não são usados.",
+      "host_patterns": "Padrões de host",
+      "host_patterns_placeholder": "Um padrão por linha, por exemplo hktkosl*",
+      "host_patterns_hint": "Usado apenas por credenciais SSH comuns. Aceita * e ?; * corresponde a todos os hosts.",
+      "totp_credential": "Credencial de código de verificação",
+      "totp_none": "Nenhuma",
+      "totp_hint": "Depois de preencher a senha, a credencial de código selecionada fornece o segundo fator.",
+      "auto_submit": "Preencher automaticamente e pressionar Enter",
+      "auto_submit_hint": "Aplica-se apenas quando exatamente uma credencial corresponde. Credenciais SSH comuns também precisam definir um padrão de host.",
+      "auto_requires_host_patterns": "O preenchimento automático em SSH comum exige pelo menos um padrão de host.",
+      "two_stage_requires_totp": "Modos de resposta TOTP exigem uma credencial de código de verificação.",
       "enabled": "Ativado",
       "cancel_edit": "Cancelar edição",
       "saving": "Salvando...",
       "save": "Salvar credencial",
-      "kind": {
-        "sudo_password": "senha sudo",
-        "su_password": "senha su",
-        "custom_prompt": "Prompt personalizado"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "Prompt personalizado"
+      },
+      "response_mode": {
+        "password_only": "Somente senha",
+        "password_then_totp": "Senha e depois prompt TOTP",
+        "password_with_totp": "Senha + TOTP em uma resposta"
       }
     },
     "views": {

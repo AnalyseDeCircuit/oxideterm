@@ -19,18 +19,38 @@ impl ConnectionStore {
             .flat_map(|connection| connection.privilege_credentials.iter())
             .chain(self.data.ssh_common_privilege_credentials.iter()
                 .filter(|_| connection_ids.contains(SSH_COMMON_PRIVILEGE_SCOPE_ID)))
-            .map(|credential| {
-                let secret = if let Some(reference) = &credential.keychain_id {
-                    Some(self.privilege_keychain.get(reference)?)
-                } else {
-                    credential.plaintext_secret.clone()
-                };
-                let mut metadata = credential.clone();
-                metadata.keychain_id = None;
-                metadata.plaintext_secret = None;
-                Ok(PrivilegeCredentialSyncRecord { metadata, secret })
-            })
+            .map(|credential| self.export_privilege_sync_record(credential))
             .collect()
+    }
+
+    pub(crate) fn export_connection_privilege_records(
+        &self,
+        connection: &SavedConnection,
+    ) -> Result<Vec<PrivilegeCredentialSyncRecord>> {
+        // Select metadata before accessing the keychain: an excluded host's
+        // credentials must neither prompt for authentication nor block export.
+        connection.privilege_credentials.iter()
+            .chain(self.data.ssh_common_privilege_credentials.iter()
+                .filter(|credential| privilege_host_scope_matches(
+                    &connection.host, &credential.host_patterns,
+                )))
+            .map(|credential| self.export_privilege_sync_record(credential))
+            .collect()
+    }
+
+    fn export_privilege_sync_record(
+        &self,
+        credential: &SavedPrivilegeCredential,
+    ) -> Result<PrivilegeCredentialSyncRecord> {
+        let secret = if let Some(reference) = &credential.keychain_id {
+            Some(self.privilege_keychain.get(reference)?)
+        } else {
+            credential.plaintext_secret.clone()
+        };
+        let mut metadata = credential.clone();
+        metadata.keychain_id = None;
+        metadata.plaintext_secret = None;
+        Ok(PrivilegeCredentialSyncRecord { metadata, secret })
     }
 
     pub fn prepare_privilege_sync(
@@ -52,6 +72,36 @@ impl ConnectionStore {
         for mut record in records {
             if !owners.contains(&record.metadata.connection_id) {
                 continue;
+            }
+            record.metadata.host_patterns =
+                normalize_privilege_host_patterns(record.metadata.host_patterns);
+            record.metadata.second_factor_patterns = normalize_privilege_second_factor_patterns(
+                record.metadata.response_mode,
+                record.metadata.second_factor_patterns,
+            );
+            record.metadata.second_factor_user_hint =
+                if record.metadata.response_mode.waits_for_totp() {
+                    record
+                        .metadata
+                        .second_factor_user_hint
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|hint| !hint.is_empty())
+                        .map(ToOwned::to_owned)
+                } else {
+                    None
+                };
+            if !record.metadata.response_mode.uses_totp() {
+                record.metadata.totp_credential_id = None;
+            }
+            if record.metadata.connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID {
+                record.metadata.host_patterns.clear();
+            } else if !record.metadata.require_click_to_send
+                && record.metadata.host_patterns.is_empty()
+            {
+                // A synced snapshot must not turn a generic shared credential
+                // into an automatic sender for every SSH host.
+                record.metadata.require_click_to_send = true;
             }
             let old = self.privilege_credentials_for_scope(&record.metadata.connection_id)?
                 .iter()

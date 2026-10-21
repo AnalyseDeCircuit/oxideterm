@@ -424,6 +424,19 @@ impl ConnectionStore {
         &self.data.totp_credentials
     }
 
+    pub(crate) fn privilege_credential_uses_totp(&self, id: &str) -> bool {
+        self.data
+            .connections
+            .iter()
+            .flat_map(|connection| &connection.privilege_credentials)
+            .chain(&self.data.local_privilege_credentials)
+            .chain(&self.data.ssh_common_privilege_credentials)
+            .any(|credential| {
+                credential.response_mode.uses_totp()
+                    && credential.totp_credential_id.as_deref() == Some(id)
+            })
+    }
+
     pub fn totp_resolver(&self) -> TotpResolver {
         TotpResolver {
             path: self.path.clone(),
@@ -617,7 +630,7 @@ impl ConnectionStore {
                     .collect(),
                 ..Default::default()
             };
-            if self.totp_selected(id, &all) {
+            if self.totp_selected(id, &all) || self.privilege_credential_uses_totp(id) {
                 return Err(TotpError::InUse);
             }
             let previous = self
@@ -645,24 +658,40 @@ impl ConnectionStore {
     }
 
     pub(crate) fn totp_selected(&self, id: &str, selection: &CredentialSyncSelection) -> bool {
+        // Exporters that already resolved the referenced seeds can select them
+        // directly, e.g. privilege copies filtered by the exported host.
+        if selection.totp_ids.contains(id) {
+            return true;
+        }
         let hops_use = |hops: &[SavedProxyHop]| {
             hops.iter()
                 .any(|h| h.totp_credential_id.as_deref() == Some(id))
+        };
+        let privilege_credentials_use = |credentials: &[SavedPrivilegeCredential]| {
+            credentials.iter().any(|credential| {
+                credential.response_mode.uses_totp()
+                    && credential.totp_credential_id.as_deref() == Some(id)
+            })
         };
         self.data.connections.iter().any(|p| {
             selection.connection_ids.contains(&p.id)
                 && (p.options.totp_credential_id.as_deref() == Some(id)
                     || hops_use(&p.proxy_chain)
+                    || privilege_credentials_use(&p.privilege_credentials)
                     || p.options
                         .jump_host
                         .as_deref()
                         .and_then(|jump| self.get(jump))
                         .is_some_and(|jump| jump.options.totp_credential_id.as_deref() == Some(id)))
-        }) || self
-            .data
-            .mosh_profiles
-            .iter()
-            .any(|p| selection.mosh_ids.contains(&p.id) && hops_use(&p.proxy_chain))
+        }) || (selection
+            .connection_ids
+            .contains(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+            && privilege_credentials_use(&self.data.ssh_common_privilege_credentials))
+            || self
+                .data
+                .mosh_profiles
+                .iter()
+                .any(|p| selection.mosh_ids.contains(&p.id) && hops_use(&p.proxy_chain))
             || self.data.standalone_sftp_profiles.iter().any(|p| {
                 selection.sftp_ids.contains(&p.id)
                     && (hops_use(&p.proxy_chain)

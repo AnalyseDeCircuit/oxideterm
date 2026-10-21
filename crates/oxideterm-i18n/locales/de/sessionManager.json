@@ -174,7 +174,8 @@
       "delete": "Löschen",
       "label": "Label",
       "label_placeholder": "sudo-Passwort",
-      "kind_label": "Typ",
+      "prompt_type_label": "Prompt-Typ",
+      "response_mode_label": "Antwortmodus",
       "username_hint": "Benutzerhinweis",
       "secret": "Secret",
       "secret_placeholder": "Zu speicherndes Passwort eingeben",
@@ -182,14 +183,35 @@
       "prompt_patterns": "Prompt-Muster",
       "prompt_patterns_placeholder": "Ein Muster pro Zeile",
       "prompt_patterns_hint": "Benutzerdefinierte Prompts passen auf diese Textfragmente. Eingebaute sudo/su-Prompts verwenden sichere Standardwerte.",
+      "second_factor_patterns": "Muster für die zweite Stufe",
+      "second_factor_patterns_placeholder": "Ein Muster pro Zeile",
+      "second_factor_patterns_hint": "Nach dem Passwort identifizieren diese Textfragmente die Aufforderung der zweiten Stufe.",
+      "second_factor_user_hint": "Benutzerhinweis der zweiten Stufe",
+      "second_factor_user_hint_placeholder": "Optional",
+      "two_stage_combined_hint": "Passwort + TOTP sendet Passwort und Verifizierungscode zusammen; Muster für die zweite Stufe werden nicht verwendet.",
+      "host_patterns": "Host-Muster",
+      "host_patterns_placeholder": "Ein Muster pro Zeile, z. B. hktkosl*",
+      "host_patterns_hint": "Gilt nur für SSH-Common-Anmeldedaten. Unterstützt * und ?; * trifft alle Hosts.",
+      "totp_credential": "Bestätigungscode-Anmeldedaten",
+      "totp_none": "Keine",
+      "totp_hint": "Nach dem Passwort liefert die ausgewählte Bestätigungscode-Anmeldedaten den zweiten Faktor.",
+      "auto_submit": "Automatisch ausfüllen und Enter drücken",
+      "auto_submit_hint": "Gilt nur bei genau einer passenden Anmeldedaten. SSH-Common-Anmeldedaten benötigen zusätzlich ein Host-Muster.",
+      "auto_requires_host_patterns": "Automatisches Ausfüllen in SSH-Common erfordert mindestens ein Host-Muster.",
+      "two_stage_requires_totp": "TOTP-Antwortmodi erfordern eine Verifizierungscode-Anmeldedaten.",
       "enabled": "Aktiviert",
       "cancel_edit": "Bearbeitung abbrechen",
       "saving": "Speichert...",
       "save": "Anmeldedaten speichern",
-      "kind": {
-        "sudo_password": "sudo-Passwort",
-        "su_password": "su-Passwort",
-        "custom_prompt": "Benutzerdefinierter Prompt"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "Benutzerdefinierter Prompt"
+      },
+      "response_mode": {
+        "password_only": "Nur Passwort",
+        "password_then_totp": "Passwort, dann TOTP-Prompt",
+        "password_with_totp": "Passwort + TOTP in einer Antwort"
       }
     },
     "views": {

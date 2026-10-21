@@ -601,6 +601,8 @@ impl WorkspaceApp {
             search: actions::TerminalSearchState::default(),
             terminal_recording_menu_open: false,
             privilege_credential_picker: None,
+            pending_privilege_totp: None,
+            privilege_prompt_sync_task: None,
             terminal_highlight_popover_open: false,
             terminal_trigger_settings_pane: None,
             terminal_trigger_shell_confirmation_pending: false,

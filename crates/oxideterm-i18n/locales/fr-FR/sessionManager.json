@@ -174,7 +174,8 @@
       "delete": "Supprimer",
       "label": "Libellé",
       "label_placeholder": "mot de passe sudo",
-      "kind_label": "Type",
+      "prompt_type_label": "Type d'invite",
+      "response_mode_label": "Mode de réponse",
       "username_hint": "Indice utilisateur",
       "secret": "Secret",
       "secret_placeholder": "Saisir le mot de passe à enregistrer",
@@ -182,14 +183,35 @@
       "prompt_patterns": "Motifs d’invite",
       "prompt_patterns_placeholder": "Un motif par ligne",
       "prompt_patterns_hint": "Les invites personnalisées correspondent à ces fragments. Les invites sudo/su intégrées utilisent aussi des valeurs sûres par défaut.",
+      "second_factor_patterns": "Motifs de la seconde étape",
+      "second_factor_patterns_placeholder": "Un motif par ligne",
+      "second_factor_patterns_hint": "Après le mot de passe, ces fragments identifient l’invite de la seconde étape.",
+      "second_factor_user_hint": "Indice utilisateur de la seconde étape",
+      "second_factor_user_hint_placeholder": "Facultatif",
+      "two_stage_combined_hint": "Mot de passe + TOTP envoie le mot de passe et le code de vérification ensemble ; les motifs de deuxième étape ne sont pas utilisés.",
+      "host_patterns": "Motifs d’hôte",
+      "host_patterns_placeholder": "Un motif par ligne, par exemple hktkosl*",
+      "host_patterns_hint": "Utilisé uniquement par les identifiants SSH communs. Prend en charge * et ? ; * correspond à tous les hôtes.",
+      "totp_credential": "Identifiant de code de vérification",
+      "totp_none": "Aucun",
+      "totp_hint": "Après le mot de passe, l’identifiant de code sélectionné fournit le second facteur.",
+      "auto_submit": "Remplir automatiquement et appuyer sur Entrée",
+      "auto_submit_hint": "S’applique uniquement lorsqu’un seul identifiant correspond. Les identifiants SSH communs doivent aussi définir un motif d’hôte.",
+      "auto_requires_host_patterns": "Le remplissage automatique en SSH commun nécessite au moins un motif d’hôte.",
+      "two_stage_requires_totp": "Les modes de réponse TOTP nécessitent un identifiant de code de vérification.",
       "enabled": "Activé",
       "cancel_edit": "Annuler la modification",
       "saving": "Enregistrement...",
       "save": "Enregistrer l’identifiant",
-      "kind": {
-        "sudo_password": "mot de passe sudo",
-        "su_password": "mot de passe su",
-        "custom_prompt": "Invite personnalisée"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "Invite personnalisée"
+      },
+      "response_mode": {
+        "password_only": "Mot de passe seul",
+        "password_then_totp": "Mot de passe, puis invite TOTP",
+        "password_with_totp": "Mot de passe + TOTP en une réponse"
       }
     },
     "views": {

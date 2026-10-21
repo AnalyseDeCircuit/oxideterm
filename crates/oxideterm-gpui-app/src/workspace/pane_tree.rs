@@ -237,13 +237,20 @@ impl WorkspaceApp {
                 self.push_workspace_notice(x11_forwarding_notice(status, &self.i18n), cx);
             }
             TerminalPaneEvent::InputActivity => {
+                if self.active_pane_id(cx) == Some(pane_id) {
+                    self.cancel_pending_privilege_totp();
+                }
                 oxideterm_gpui_background::note_input_activity(window_handle.window_id(), cx);
             }
             TerminalPaneEvent::Exited { .. } => {
                 self.queue_auto_close_terminal_session(session_id, cx);
             }
             // TabHost consumes this signal before ordinary pane delivery.
-            TerminalPaneEvent::OutputActivity => {}
+            TerminalPaneEvent::OutputActivity => {
+                if self.active_pane_id(cx) == Some(pane_id) {
+                    self.schedule_privilege_prompt_sync(cx);
+                }
+            }
             TerminalPaneEvent::HoverTooltipChanged => {
                 let id = format!("terminal-timestamp-{}", pane_id.0);
                 let tooltip = self

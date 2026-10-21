@@ -174,7 +174,8 @@
       "delete": "삭제",
       "label": "라벨",
       "label_placeholder": "sudo 비밀번호",
-      "kind_label": "유형",
+      "prompt_type_label": "프롬프트 유형",
+      "response_mode_label": "응답 모드",
       "username_hint": "사용자 힌트",
       "secret": "비밀 값",
       "secret_placeholder": "저장할 비밀번호 입력",
@@ -182,14 +183,35 @@
       "prompt_patterns": "프롬프트 패턴",
       "prompt_patterns_placeholder": "한 줄에 하나의 패턴",
       "prompt_patterns_hint": "사용자 지정 프롬프트는 이 텍스트 조각과 일치합니다. 내장 sudo/su 프롬프트도 안전한 기본값을 사용합니다.",
+      "second_factor_patterns": "2단계 프롬프트 패턴",
+      "second_factor_patterns_placeholder": "줄마다 하나씩",
+      "second_factor_patterns_hint": "비밀번호 입력 후 이 조각으로 2단계 프롬프트를 식별합니다.",
+      "second_factor_user_hint": "2단계 사용자 힌트",
+      "second_factor_user_hint_placeholder": "선택 사항",
+      "two_stage_combined_hint": "비밀번호 + TOTP는 비밀번호와 확인 코드를 함께 전송하며 2단계 프롬프트 패턴은 사용하지 않습니다.",
+      "host_patterns": "호스트 패턴",
+      "host_patterns_placeholder": "줄마다 하나씩, 예: hktkosl*",
+      "host_patterns_hint": "SSH 공통 자격 증명에만 사용됩니다. * 및 ?를 지원하며 *는 모든 호스트와 일치합니다.",
+      "totp_credential": "확인 코드 자격 증명",
+      "totp_none": "없음",
+      "totp_hint": "비밀번호를 입력한 뒤 선택한 확인 코드 자격 증명으로 두 번째 요소를 생성합니다.",
+      "auto_submit": "자동 입력 후 Enter 전송",
+      "auto_submit_hint": "정확히 하나의 자격 증명이 일치할 때만 적용됩니다. SSH 공통 자격 증명은 호스트 패턴도 설정해야 합니다.",
+      "auto_requires_host_patterns": "SSH 공통에서 자동 입력을 사용하려면 호스트 패턴이 하나 이상 필요합니다.",
+      "two_stage_requires_totp": "TOTP 응답 모드에는 확인 코드 자격 증명이 필요합니다.",
       "enabled": "사용",
       "cancel_edit": "편집 취소",
       "saving": "저장 중...",
       "save": "자격 증명 저장",
-      "kind": {
-        "sudo_password": "sudo 비밀번호",
-        "su_password": "su 비밀번호",
-        "custom_prompt": "사용자 지정 프롬프트"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "사용자 지정 프롬프트"
+      },
+      "response_mode": {
+        "password_only": "비밀번호만",
+        "password_then_totp": "비밀번호 후 TOTP 프롬프트",
+        "password_with_totp": "비밀번호 + TOTP를 한 번에 전송"
       }
     },
     "views": {

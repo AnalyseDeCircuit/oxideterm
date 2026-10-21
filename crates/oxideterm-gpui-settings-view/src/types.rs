@@ -99,7 +99,11 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::LocalShellSemanticScheme(index) => {
                 SelectAnchorId::SettingsLocalShellSemanticScheme(index)
             }
-            Self::LocalPrivilegeKind => SelectAnchorId::SettingsLocalPrivilegeKind,
+            Self::LocalPrivilegePromptType => SelectAnchorId::SettingsLocalPrivilegePromptType,
+            Self::LocalPrivilegeResponseMode => SelectAnchorId::SettingsLocalPrivilegeResponseMode,
+            Self::LocalPrivilegeTotpCredential => {
+                SelectAnchorId::SettingsLocalPrivilegeTotpCredential
+            }
             Self::ConnectionIdleTimeout => SelectAnchorId::SettingsConnectionIdleTimeout,
             Self::ReconnectMaxAttempts => SelectAnchorId::SettingsReconnectMaxAttempts,
             Self::ReconnectBaseDelay => SelectAnchorId::SettingsReconnectBaseDelay,

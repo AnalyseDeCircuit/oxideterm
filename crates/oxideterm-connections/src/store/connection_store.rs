@@ -2705,6 +2705,62 @@ impl ConnectionStore {
             } else {
                 "credential:created"
             });
+            let host_patterns = if connection_id == SSH_COMMON_PRIVILEGE_SCOPE_ID {
+                let mut patterns = normalize_privilege_host_patterns(request.host_patterns);
+                // `*` is the canonical all-host marker. Keep click-only shared
+                // credentials in that form so a reload does not report an empty
+                // scope that the UI renders as `*` anyway.
+                if patterns.is_empty() && request.require_click_to_send {
+                    patterns.push("*".to_string());
+                }
+                patterns
+            } else {
+                // Host patterns only partition the shared SSH scope. A
+                // connection-specific credential already has an exact owner.
+                Vec::new()
+            };
+            if connection_id == SSH_COMMON_PRIVILEGE_SCOPE_ID
+                && !request.require_click_to_send
+                && host_patterns.is_empty()
+            {
+                bail!("Automatic privilege fill requires a host pattern or a connection scope");
+            }
+            let second_factor_patterns = normalize_privilege_second_factor_patterns(
+                request.response_mode,
+                request.second_factor_patterns,
+            );
+            let second_factor_user_hint = if request.response_mode.waits_for_totp() {
+                request
+                    .second_factor_user_hint
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|hint| !hint.is_empty())
+                    .map(ToOwned::to_owned)
+            } else {
+                None
+            };
+            let totp_credential_id = if request.response_mode.uses_totp() {
+                request
+                    .totp_credential_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|id| !id.is_empty())
+                    .map(ToOwned::to_owned)
+            } else {
+                None
+            };
+            if request.response_mode.uses_totp() && totp_credential_id.is_none() {
+                bail!("TOTP response modes require a verification code credential");
+            }
+            if let Some(totp_credential_id) = totp_credential_id.as_deref()
+                && !self
+                    .data
+                    .totp_credentials
+                    .iter()
+                    .any(|credential| credential.id == totp_credential_id)
+            {
+                bail!("TOTP credential not found");
+            }
             let new_reference = request
                 .secret
                 .as_ref()
@@ -2718,7 +2774,8 @@ impl ConnectionStore {
                 id: credential_id,
                 connection_id,
                 label,
-                kind: request.kind,
+                prompt_type: request.prompt_type,
+                response_mode: request.response_mode,
                 username_hint: request
                     .username_hint
                     .as_deref()
@@ -2726,9 +2783,13 @@ impl ConnectionStore {
                     .filter(|hint| !hint.is_empty())
                     .map(ToOwned::to_owned),
                 prompt_patterns: normalize_privilege_prompt_patterns(
-                    request.kind,
+                    request.prompt_type,
                     request.prompt_patterns,
                 ),
+                host_patterns,
+                second_factor_patterns,
+                second_factor_user_hint,
+                totp_credential_id,
                 keychain_id: new_reference
                     .clone()
                     .or_else(|| existing.as_ref().and_then(|old| old.keychain_id.clone())),
@@ -3887,7 +3948,8 @@ impl ConnectionStore {
                         .iter()
                         .find(|candidate| {
                             candidate.id == credential.id
-                                && candidate.kind == credential.kind
+                                && candidate.prompt_type == credential.prompt_type
+                                && candidate.response_mode == credential.response_mode
                                 && privilege_credential_connection_id(
                                     &candidate.connection_id,
                                     &existing_connection.id,

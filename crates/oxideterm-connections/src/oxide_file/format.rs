@@ -7,7 +7,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
-use crate::{ConnectionOptions, PrivilegeCredentialKind, SavedUpstreamProxyProtocol};
+use crate::store::LegacyPrivilegeCredentialKind;
+use crate::{
+    ConnectionOptions, PrivilegePromptType, PrivilegeResponseMode, SavedUpstreamProxyProtocol,
+};
 
 use super::OxideFileError;
 
@@ -292,17 +295,26 @@ impl fmt::Debug for EncryptedConnection {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedPrivilegeCredential {
     pub id: String,
     pub connection_id: String,
     pub label: String,
-    pub kind: PrivilegeCredentialKind,
+    pub prompt_type: PrivilegePromptType,
+    pub response_mode: PrivilegeResponseMode,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub username_hint: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub prompt_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub second_factor_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second_factor_user_hint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub totp_credential_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret: Option<Zeroizing<String>>,
     #[serde(default = "default_true")]
@@ -313,15 +325,96 @@ pub struct EncryptedPrivilegeCredential {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Archives written before the prompt/response split stored a single `kind`.
+/// Keep that shape readable so an older `.oxide` file still imports.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EncryptedPrivilegeCredentialWire {
+    id: String,
+    connection_id: String,
+    label: String,
+    #[serde(default)]
+    prompt_type: Option<PrivilegePromptType>,
+    #[serde(default)]
+    response_mode: Option<PrivilegeResponseMode>,
+    #[serde(default)]
+    kind: Option<LegacyPrivilegeCredentialKind>,
+    #[serde(default)]
+    username_hint: Option<String>,
+    #[serde(default)]
+    prompt_patterns: Vec<String>,
+    #[serde(default)]
+    host_patterns: Vec<String>,
+    #[serde(default)]
+    second_factor_patterns: Vec<String>,
+    #[serde(default)]
+    second_factor_user_hint: Option<String>,
+    #[serde(default)]
+    totp_credential_id: Option<String>,
+    #[serde(default)]
+    secret: Option<Zeroizing<String>>,
+    #[serde(default = "default_true")]
+    enabled: bool,
+    #[serde(default = "default_true")]
+    require_click_to_send: bool,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+impl<'de> Deserialize<'de> for EncryptedPrivilegeCredential {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+
+        let wire = EncryptedPrivilegeCredentialWire::deserialize(deserializer)?;
+        let legacy = wire.kind.map(LegacyPrivilegeCredentialKind::into_parts);
+        let prompt_type = wire
+            .prompt_type
+            .or_else(|| legacy.map(|(prompt_type, _)| prompt_type))
+            .ok_or_else(|| D::Error::missing_field("promptType"))?;
+        // A credential that already identifies its prompt but predates the
+        // split answered with a password only.
+        let response_mode = wire
+            .response_mode
+            .or_else(|| legacy.map(|(_, response_mode)| response_mode))
+            .unwrap_or_default();
+        Ok(Self {
+            id: wire.id,
+            connection_id: wire.connection_id,
+            label: wire.label,
+            prompt_type,
+            response_mode,
+            username_hint: wire.username_hint,
+            prompt_patterns: wire.prompt_patterns,
+            host_patterns: wire.host_patterns,
+            second_factor_patterns: wire.second_factor_patterns,
+            second_factor_user_hint: wire.second_factor_user_hint,
+            totp_credential_id: wire.totp_credential_id,
+            secret: wire.secret,
+            enabled: wire.enabled,
+            require_click_to_send: wire.require_click_to_send,
+            created_at: wire.created_at,
+            updated_at: wire.updated_at,
+        })
+    }
+}
+
 impl fmt::Debug for EncryptedPrivilegeCredential {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EncryptedPrivilegeCredential")
             .field("id", &self.id)
             .field("connection_id", &self.connection_id)
             .field("label", &self.label)
-            .field("kind", &self.kind)
+            .field("prompt_type", &self.prompt_type)
+            .field("response_mode", &self.response_mode)
             .field("username_hint", &self.username_hint)
             .field("prompt_patterns", &self.prompt_patterns)
+            .field("host_patterns", &self.host_patterns)
+            .field("second_factor_patterns", &self.second_factor_patterns)
+            .field("second_factor_user_hint", &self.second_factor_user_hint)
+            .field("totp_credential_id", &self.totp_credential_id)
             .field("secret", &self.secret.as_ref().map(|_| "<redacted>"))
             .field("enabled", &self.enabled)
             .field("require_click_to_send", &self.require_click_to_send)

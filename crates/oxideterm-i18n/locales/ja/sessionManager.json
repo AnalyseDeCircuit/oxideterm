@@ -174,7 +174,8 @@
       "delete": "削除",
       "label": "ラベル",
       "label_placeholder": "sudo パスワード",
-      "kind_label": "種類",
+      "prompt_type_label": "プロンプト種別",
+      "response_mode_label": "応答モード",
       "username_hint": "ユーザーヒント",
       "secret": "シークレット",
       "secret_placeholder": "保存するパスワードを入力",
@@ -182,14 +183,35 @@
       "prompt_patterns": "プロンプトパターン",
       "prompt_patterns_placeholder": "1 行に 1 パターン",
       "prompt_patterns_hint": "カスタムプロンプトはこれらの断片に一致します。組み込みの sudo/su プロンプトも安全な既定値を使います。",
+      "second_factor_patterns": "第二段階のプロンプトパターン",
+      "second_factor_patterns_placeholder": "1 行に 1 パターン",
+      "second_factor_patterns_hint": "パスワード入力後、これらの断片で第二段階のプロンプトを識別します。",
+      "second_factor_user_hint": "第二段階のユーザーヒント",
+      "second_factor_user_hint_placeholder": "任意",
+      "two_stage_combined_hint": "パスワード + TOTP はパスワードと確認コードをまとめて送信します。第2段階のプロンプトパターンは使用しません。",
+      "host_patterns": "ホストパターン",
+      "host_patterns_placeholder": "1 行に 1 パターン、例: hktkosl*",
+      "host_patterns_hint": "SSH 共通の資格情報でのみ使用します。* と ? に対応し、* はすべてのホストに一致します。",
+      "totp_credential": "確認コード資格情報",
+      "totp_none": "なし",
+      "totp_hint": "パスワード入力後、選択した確認コード資格情報で第二要素を生成します。",
+      "auto_submit": "自動入力して Enter を送信",
+      "auto_submit_hint": "一致する資格情報が 1 件だけの場合に適用されます。SSH 共通の資格情報ではホストパターンも必要です。",
+      "auto_requires_host_patterns": "SSH 共通で自動入力を有効にするには、少なくとも 1 つのホストパターンが必要です。",
+      "two_stage_requires_totp": "TOTP 応答モードには確認コードの認証情報が必要です。",
       "enabled": "有効",
       "cancel_edit": "編集をキャンセル",
       "saving": "保存中...",
       "save": "認証情報を保存",
-      "kind": {
-        "sudo_password": "sudo パスワード",
-        "su_password": "su パスワード",
-        "custom_prompt": "カスタムプロンプト"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "カスタムプロンプト"
+      },
+      "response_mode": {
+        "password_only": "パスワードのみ",
+        "password_then_totp": "パスワード後に TOTP プロンプト",
+        "password_with_totp": "パスワードと TOTP を1回で送信"
       }
     },
     "views": {

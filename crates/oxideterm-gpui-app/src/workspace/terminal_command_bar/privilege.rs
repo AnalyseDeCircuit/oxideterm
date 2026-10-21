@@ -7,7 +7,7 @@ impl WorkspaceApp {
     pub(super) fn active_privilege_scope_credentials(
         &self,
         cx: &App,
-    ) -> Option<(String, Vec<SavedPrivilegeCredential>)> {
+    ) -> Option<PrivilegeCredentialScope> {
         match self.active_terminal_kind(cx)? {
             oxideterm_terminal::TerminalSessionKind::LocalPty => {
                 // Local shell sudo/su prompts have no SavedConnection owner. Use a
@@ -22,7 +22,12 @@ impl WorkspaceApp {
                     "scope resolved: scope=local credentials_count={}",
                     credentials.len()
                 ));
-                Some((connection_id, credentials))
+                Some(PrivilegeCredentialScope {
+                    connection_id: Some(connection_id),
+                    host: String::new(),
+                    exact: credentials,
+                    common: Vec::new(),
+                })
             }
             oxideterm_terminal::TerminalSessionKind::SshPty => {
                 let Some(session_id) = self.active_terminal_session_id(cx) else {
@@ -43,24 +48,32 @@ impl WorkspaceApp {
                 };
                 let connection_id = self
                     .ssh_privilege_scope_id_for_node(&node_id)
-                    .filter(|id| self.connection_store.get(id).is_some())
-                    .unwrap_or_else(|| SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string());
-                let mut credentials = self
-                    .connection_store
-                    .list_privilege_credentials(&connection_id)
+                    .filter(|id| self.connection_store.get(id).is_some());
+                let exact = connection_id
+                    .as_ref()
+                    .and_then(|id| self.connection_store.list_privilege_credentials(id).ok())
                     .unwrap_or_default();
-                if connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID {
-                    credentials.extend(
-                        self.connection_store
-                            .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
-                            .unwrap_or_default(),
-                    );
-                }
+                let host = self
+                    .node_router
+                    .node_metadata(&node_id)
+                    .map(|snapshot| snapshot.host)
+                    .unwrap_or_default();
+                let common = self
+                    .connection_store
+                    .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                    .unwrap_or_default();
                 log_privilege_prompt_helper(format_args!(
-                    "scope resolved: scope=ssh credentials_count={}",
-                    credentials.len()
+                    "scope resolved: scope=ssh connection_specific={} credentials_count={} has_host={}",
+                    connection_id.is_some(),
+                    exact.len() + common.len(),
+                    !host.is_empty()
                 ));
-                Some((connection_id, credentials))
+                Some(PrivilegeCredentialScope {
+                    connection_id,
+                    host,
+                    exact,
+                    common,
+                })
             }
             _ => None,
         }
@@ -138,16 +151,16 @@ impl WorkspaceApp {
         // Tauri keeps the prompt state alive even when credential metadata
         // cannot be loaded. Do not let a missing credential row or transient
         // keychain/config error suppress the detected sudo/su prompt.
-        let Some((connection_id, credentials)) = self.active_privilege_scope_credentials(cx) else {
+        let Some(scope) = self.active_privilege_scope_credentials(cx) else {
             log_privilege_prompt_helper(format_args!(
                 "state unavailable: no credential scope tracked_prompt={} visible_chars={}",
                 tracked_prompt_kind, visible_shape.chars
             ));
             return None;
         };
+        let credentials_count = scope.exact.len() + scope.common.len();
         let state = build_privilege_prompt_helper_state_with_tracked_prompt(
-            connection_id,
-            &credentials,
+            scope,
             &visible_text,
             tracked_prompt,
         );
@@ -156,13 +169,13 @@ impl WorkspaceApp {
                 "state ready: prompt_kind={} matches_count={} credentials_count={} tracked_prompt={} visible_chars={}",
                 privilege_prompt_kind_name(&state.prompt),
                 state.matches.len(),
-                credentials.len(),
+                credentials_count,
                 tracked_prompt_kind,
                 visible_shape.chars
             )),
             None => log_privilege_prompt_helper(format_args!(
                 "state unavailable: no prompt match credentials_count={} tracked_prompt={} visible_chars={} visible_lines={} has_ascii_colon={} has_fullwidth_colon={} ends_colon={} contains_sudo_marker={} starts_sudo_marker={} contains_password_word={} contains_cjk_password={} contains_escape={}",
-                credentials.len(),
+                credentials_count,
                 tracked_prompt_kind,
                 visible_shape.chars,
                 visible_shape.lines,
@@ -179,52 +192,109 @@ impl WorkspaceApp {
         state
     }
 
+    pub(in crate::workspace) fn cancel_pending_privilege_totp(&mut self) {
+        // Manual typing wins over the pending second-factor automation.
+        self.pending_privilege_totp = None;
+    }
+
+    pub(in crate::workspace) fn schedule_privilege_prompt_sync(&mut self, cx: &mut Context<Self>) {
+        if self.privilege_prompt_sync_task.is_some() {
+            return;
+        }
+        let has_candidates = self.pending_privilege_totp.is_some()
+            || self
+                .active_privilege_scope_credentials(cx)
+                .is_some_and(|scope| !scope.is_empty());
+        if !has_candidates {
+            return;
+        }
+        // Custom privilege prompts are user-authored text, so the terminal
+        // cannot emit a semantic prompt event for them. Debounce ordinary
+        // output and let the workspace inspect the current input block.
+        self.privilege_prompt_sync_task = Some(cx.spawn(async move |workspace, cx| {
+            gpui::Timer::after(std::time::Duration::from_millis(150)).await;
+            let _ = workspace.update(cx, |workspace, cx| {
+                workspace.privilege_prompt_sync_task = None;
+                if workspace.sync_active_privilege_prompt_inline_hint(cx) {
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
     pub(in crate::workspace) fn sync_active_privilege_prompt_inline_hint(
         &mut self,
         cx: &mut App,
     ) -> bool {
-        let Some(active_pane) = self.active_pane(cx) else {
+        let Some(pane_id) = self.active_pane_id(cx) else {
+            self.pending_privilege_totp = None;
             return false;
         };
+        let Some(session_id) = self.active_terminal_session_id(cx) else {
+            self.pending_privilege_totp = None;
+            return false;
+        };
+        self.clear_stale_pending_totp(pane_id, session_id);
         if self.privilege_credential_picker.is_some()
             && !self.privilege_credential_picker_is_current(cx)
         {
             self.dismiss_privilege_credential_picker();
         }
-        let hint = self.active_privilege_prompt_inline_hint(cx);
-        let custom_prompt = self
-            .active_privilege_prompt_state(cx)
+        if let Some((prompt, auto_submit)) = self.active_pending_totp_prompt(cx) {
+            if auto_submit {
+                return self.fill_pending_privilege_totp(prompt, cx);
+            }
+            let Some(active_pane) = self.active_pane(cx) else {
+                return false;
+            };
+            let hint = self.i18n.t("terminal.privilege_helper.totp_fill_hint");
+            return active_pane.update(cx, |pane, cx| {
+                pane.set_privilege_prompt_inline_hint(Some(hint), Some(prompt), cx)
+            });
+        }
+        if self.pending_privilege_totp.is_some() {
+            // The first factor was accepted and the second prompt has not
+            // arrived yet. Do not offer the password again while waiting.
+            return false;
+        }
+
+        let state = self.active_privilege_prompt_state(cx);
+        if let Some(state) = state.as_ref()
+            && state.matches.len() == 1
+            && self
+                .matched_privilege_credential(&state.matches[0])
+                .is_some_and(|credential| {
+                    privilege_prompt_allows_automatic_fill(&state.prompt, &credential)
+                })
+        {
+            log_privilege_prompt_helper(format_args!("auto submit: single privilege match"));
+            return self.fill_privilege_prompt_match(
+                state.matches[0].clone(),
+                state.prompt.clone(),
+                None,
+                cx,
+            );
+        }
+        let hint = state.as_ref().and_then(|state| {
+            if state.matches.is_empty() {
+                None
+            } else {
+                Some(self.i18n.t(if state.matches.len() == 1 {
+                    "terminal.privilege_helper.inline_fill_hint"
+                } else {
+                    "terminal.privilege_helper.choose_hint"
+                }))
+            }
+        });
+        let custom_prompt = state
             .map(|state| state.prompt)
             .filter(|prompt| matches!(prompt, PrivilegePromptMatch::Custom { .. }));
+        let Some(active_pane) = self.active_pane(cx) else {
+            return false;
+        };
         active_pane.update(cx, |pane, cx| {
             pane.set_privilege_prompt_inline_hint(hint, custom_prompt, cx)
         })
-    }
-
-    pub(super) fn active_privilege_prompt_inline_hint(&self, cx: &App) -> Option<String> {
-        let Some(state) = self.active_privilege_prompt_state(cx) else {
-            log_privilege_prompt_helper(format_args!("hint unavailable: no prompt state"));
-            return None;
-        };
-        let prompt_kind = privilege_prompt_kind_name(&state.prompt);
-        if state.matches.is_empty() {
-            log_privilege_prompt_helper(format_args!(
-                "hint suppressed: prompt_kind={} matches_count={}",
-                prompt_kind,
-                state.matches.len()
-            ));
-            return None;
-        }
-        log_privilege_prompt_helper(format_args!(
-            "hint ready: prompt_kind={} matches_count={}",
-            prompt_kind,
-            state.matches.len()
-        ));
-        Some(self.i18n.t(if state.matches.len() == 1 {
-            "terminal.privilege_helper.inline_fill_hint"
-        } else {
-            "terminal.privilege_helper.choose_hint"
-        }))
     }
 
     pub(in crate::workspace) fn handle_privilege_prompt_helper_key(
@@ -254,6 +324,9 @@ impl WorkspaceApp {
         }
 
         log_privilege_prompt_helper(format_args!("root enter: evaluating privilege helper"));
+        if let Some((prompt, _)) = self.active_pending_totp_prompt(cx) {
+            return self.fill_pending_privilege_totp(prompt, cx);
+        }
         let Some(state) = self.active_privilege_prompt_state(cx) else {
             log_privilege_prompt_helper(format_args!("root enter: no prompt state"));
             return false;
@@ -278,6 +351,9 @@ impl WorkspaceApp {
         log_privilege_prompt_helper(format_args!(
             "terminal submit request: evaluating privilege helper"
         ));
+        if let Some((prompt, _)) = self.active_pending_totp_prompt(cx) {
+            return self.fill_pending_privilege_totp(prompt, cx);
+        }
         let Some(state) = self.active_privilege_prompt_state(cx) else {
             log_privilege_prompt_helper(format_args!("terminal submit request: no prompt state"));
             return false;
@@ -292,7 +368,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if privilege_prompt_state_allows_confirmed_fill(&state) {
-            self.fill_privilege_prompt_match(state.matches[0].clone(), state.prompt, window, cx);
+            self.fill_privilege_prompt_match(
+                state.matches[0].clone(),
+                state.prompt,
+                Some(window),
+                cx,
+            );
         } else if !state.matches.is_empty() {
             let (Some(pane_id), Some(session_id), Some(pane)) = (
                 self.active_pane_id(cx),
@@ -358,7 +439,12 @@ impl WorkspaceApp {
             return;
         };
         if let Some(matched) = picker.state.matches.get(index) {
-            self.fill_privilege_prompt_match(matched.clone(), picker.state.prompt, window, cx);
+            self.fill_privilege_prompt_match(
+                matched.clone(),
+                picker.state.prompt,
+                Some(window),
+                cx,
+            );
         }
         cx.notify();
     }
@@ -451,7 +537,7 @@ impl WorkspaceApp {
                 .into_iter()
                 .find(|credential| credential.id == matched.credential_id);
             let kind = credential
-                .map(|credential| self.settings_privilege_kind_label(credential.kind))
+                .map(|credential| self.settings_privilege_prompt_type_label(credential.prompt_type))
                 .unwrap_or_default();
             rows = rows.child(
                 oxideterm_gpui_ui::select::select_option(
@@ -499,22 +585,184 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn matched_privilege_credential(
+        &self,
+        matched: &MatchedPrivilegeCredential,
+    ) -> Option<SavedPrivilegeCredential> {
+        self.connection_store
+            .list_privilege_credentials(&matched.connection_id)
+            .ok()?
+            .into_iter()
+            .find(|credential| credential.id == matched.credential_id)
+    }
+
+    fn clear_stale_pending_totp(&mut self, pane_id: PaneId, session_id: TerminalSessionId) {
+        let now = std::time::Instant::now();
+        if self.pending_privilege_totp.as_ref().is_some_and(|pending| {
+            pending.expires_at <= now
+                || pending.pane_id != pane_id
+                || pending.session_id != session_id
+        }) {
+            self.pending_privilege_totp = None;
+        }
+    }
+
+    fn active_pending_totp_prompt(&self, cx: &App) -> Option<(PrivilegePromptMatch, bool)> {
+        let pending = self.pending_privilege_totp.as_ref()?;
+        if pending.expires_at <= std::time::Instant::now() {
+            return None;
+        }
+        if self.active_pane_id(cx)? != pending.pane_id
+            || self.active_terminal_session_id(cx)? != pending.session_id
+        {
+            return None;
+        }
+        let pane = self.active_pane(cx)?;
+        let pane = pane.read(cx);
+        if pane.ai_screen_is_alternate_buffer() {
+            return None;
+        }
+        let visible_text = pane.privilege_prompt_text_snapshot();
+        let line = latest_visible_prompt_line(&visible_text)?;
+        if line == pending.first_prompt_text {
+            return None;
+        }
+        if !privilege_line_matches_patterns(line, &pending.second_factor_patterns) {
+            return None;
+        }
+        if let Some(hint) = pending.second_factor_user_hint.as_deref() {
+            let hint = hint.trim().to_ascii_lowercase();
+            if !hint.is_empty() && !line.to_ascii_lowercase().contains(&hint) {
+                return None;
+            }
+        }
+        Some((
+            PrivilegePromptMatch::Custom {
+                credential_id: pending.totp_credential_id.clone(),
+                prompt_text: line.to_string(),
+            },
+            !pending.require_click_to_send,
+        ))
+    }
+
+    fn begin_pending_privilege_totp(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        credential: &SavedPrivilegeCredential,
+        first_prompt: &PrivilegePromptMatch,
+    ) {
+        self.pending_privilege_totp = None;
+        if !credential.response_mode.waits_for_totp() {
+            return;
+        }
+        let Some(totp_credential_id) = credential.totp_credential_id.as_deref() else {
+            return;
+        };
+        if credential.second_factor_patterns.is_empty() {
+            return;
+        }
+        if !self
+            .connection_store
+            .totp_credentials()
+            .iter()
+            .any(|totp| totp.id == totp_credential_id && totp.enabled)
+        {
+            return;
+        }
+        // A second factor follows immediately, but a stale prompt must not be
+        // reused after the user starts another command.
+        self.pending_privilege_totp = Some(PendingPrivilegeTotp {
+            pane_id,
+            session_id,
+            totp_credential_id: totp_credential_id.to_string(),
+            first_prompt_text: privilege_prompt_text(first_prompt).to_string(),
+            second_factor_patterns: credential.second_factor_patterns.clone(),
+            second_factor_user_hint: credential.second_factor_user_hint.clone(),
+            expires_at: std::time::Instant::now() + std::time::Duration::from_secs(60),
+            require_click_to_send: credential.require_click_to_send,
+        });
+    }
+
+    fn privilege_totp_code(&self, credential_id: &str) -> Option<zeroize::Zeroizing<String>> {
+        let (_, generator) = self
+            .connection_store
+            .totp_binding(Some(credential_id))
+            .and_then(|binding| binding.resolve().ok())?;
+        let unix_seconds = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_secs())
+            .unwrap_or_default();
+        Some(generator.generate(unix_seconds))
+    }
+
+    fn fill_pending_privilege_totp(
+        &mut self,
+        confirmed_prompt: PrivilegePromptMatch,
+        cx: &mut App,
+    ) -> bool {
+        let Some(pending) = self.pending_privilege_totp.take() else {
+            return false;
+        };
+        let Some(pane_id) = self.active_pane_id(cx) else {
+            return false;
+        };
+        let Some(session_id) = self.active_terminal_session_id(cx) else {
+            return false;
+        };
+        if pane_id != pending.pane_id || session_id != pending.session_id {
+            return false;
+        }
+        let Some(pane) = self.active_pane(cx) else {
+            return false;
+        };
+        let generation = pane.read(cx).privilege_prompt_generation();
+        let Some(code) = self.privilege_totp_code(&pending.totp_credential_id) else {
+            self.push_command_palette_toast(
+                self.i18n.t("terminal.privilege_helper.totp_load_failed"),
+                None,
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return true;
+        };
+        let code_line = zeroize::Zeroizing::new(format!("{}\n", code.as_str()));
+        let sent = pane.update(cx, |pane, cx| {
+            pane.send_privilege_secret_input_bytes(
+                code_line.as_bytes(),
+                confirmed_prompt,
+                generation,
+                cx,
+            )
+        });
+        if !sent {
+            self.push_command_palette_toast(
+                self.i18n.t("terminal.privilege_helper.totp_send_failed"),
+                None,
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+        }
+        true
+    }
+
     pub(super) fn fill_privilege_prompt_match(
         &mut self,
         matched: MatchedPrivilegeCredential,
         confirmed_prompt: PrivilegePromptMatch,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+        window: Option<&mut Window>,
+        cx: &mut App,
+    ) -> bool {
         let Some(pane_id) = self.active_pane_id(cx) else {
-            return;
+            return false;
         };
         let Some(session_id) = self.active_terminal_session_id(cx) else {
-            return;
+            return false;
         };
         let Some(pane) = self.active_pane(cx) else {
-            return;
+            return false;
         };
+        let credential = self.matched_privilege_credential(&matched);
         let generation = pane.read(cx).privilege_prompt_generation();
         log_privilege_prompt_helper(format_args!("fill: loading scoped credential secret"));
         let secret = match self
@@ -530,15 +778,46 @@ impl WorkspaceApp {
                     TerminalNoticeVariant::Error,
                     cx,
                 );
-                cx.notify();
-                return;
+                return false;
             }
         };
         log_privilege_prompt_helper(format_args!("fill: secret loaded"));
+        let combined_code = if credential.as_ref().is_some_and(|credential| {
+            credential.response_mode == PrivilegeResponseMode::PasswordWithTotp
+        }) {
+            let Some(totp_credential_id) = credential
+                .as_ref()
+                .and_then(|credential| credential.totp_credential_id.as_deref())
+            else {
+                self.push_command_palette_toast(
+                    self.i18n.t("terminal.privilege_helper.totp_load_failed"),
+                    None,
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                return false;
+            };
+            let Some(code) = self.privilege_totp_code(totp_credential_id) else {
+                self.push_command_palette_toast(
+                    self.i18n.t("terminal.privilege_helper.totp_load_failed"),
+                    None,
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                return false;
+            };
+            Some(code)
+        } else {
+            None
+        };
         // The newline-bearing buffer is the only owned cleartext copy in the
         // GPUI layer. It is zeroized after the PTY write attempt, matching the
         // Tauri click-only secret handoff without involving command history.
-        let secret_line = zeroize::Zeroizing::new(format!("{}\n", secret.expose_secret()));
+        let secret_line = zeroize::Zeroizing::new(match combined_code {
+            Some(code) => format!("{}{}\n", secret.expose_secret(), code.as_str()),
+            None => format!("{}\n", secret.expose_secret()),
+        });
+        let pending_prompt = confirmed_prompt.clone();
         let sent = self.active_pane_id(cx) == Some(pane_id)
             && self.active_terminal_session_id(cx) == Some(session_id)
             && pane.update(cx, |pane, cx| {
@@ -550,7 +829,18 @@ impl WorkspaceApp {
                 )
             });
         log_privilege_prompt_helper(format_args!("fill: write attempted sent={sent}"));
-        if !sent {
+        if sent {
+            if let Some(credential) = credential
+                && credential.response_mode.waits_for_totp()
+            {
+                self.begin_pending_privilege_totp(
+                    pane_id,
+                    session_id,
+                    &credential,
+                    &pending_prompt,
+                );
+            }
+        } else {
             self.push_command_palette_toast(
                 self.i18n.t("terminal.privilege_helper.send_failed"),
                 None,
@@ -558,8 +848,10 @@ impl WorkspaceApp {
                 cx,
             );
         }
-        self.focus_active_pane(window, cx);
-        cx.notify();
+        if let Some(window) = window {
+            self.focus_active_pane(window, cx);
+        }
+        sent
     }
 
     pub(in crate::workspace) fn render_terminal_surface(
