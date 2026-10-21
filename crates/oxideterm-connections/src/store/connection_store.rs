@@ -188,12 +188,16 @@ impl ConnectionStore {
             return Ok(());
         }
 
+        // Imports can reuse a slot whose earlier deletion was deferred. A live
+        // reference retires that cleanup request rather than its current secret.
+        let active_privilege_ids = collect_active_privilege_keychain_ids(&self.data);
         self.data.pending_keychain_cleanup = original_connection_ids
             .into_iter()
             .filter(|id| self.keychain.delete(id).is_err())
             .collect();
         self.data.pending_privilege_keychain_cleanup = original_privilege_ids
             .into_iter()
+            .filter(|id| !active_privilege_ids.contains(id))
             .filter(|id| self.privilege_keychain.delete(id).is_err())
             .collect();
         self.save()
@@ -2486,18 +2490,8 @@ impl ConnectionStore {
         let original_keychain = self.snapshot_keychain_entries(&original_data)?;
         let imported_privilege_keychain_ids =
             collect_imported_privilege_keychain_ids(&connections);
-        let existing_privilege_keychain_ids = original_data
-            .connections
-            .iter()
-            .flat_map(collect_privilege_keychain_ids)
-            .chain(
-                original_data
-                    .local_privilege_credentials
-                    .iter()
-                    .chain(&original_data.ssh_common_privilege_credentials)
-                    .filter_map(|credential| credential.keychain_id.clone()),
-            )
-            .collect::<HashSet<_>>();
+        let existing_privilege_keychain_ids =
+            collect_active_privilege_keychain_ids(&original_data);
         let overwritten_privilege_keychain_ids = imported_privilege_keychain_ids
             .intersection(&existing_privilege_keychain_ids)
             .cloned()
@@ -2510,6 +2504,7 @@ impl ConnectionStore {
         let mut touched_managed_secret_ids = HashSet::new();
         let mut created_managed_secret_config_key = false;
         let mut stale_old_keychain_ids = HashSet::new();
+        let mut stale_old_privilege_keychain_ids = HashSet::new();
         let mut imported_ids = Vec::new();
 
         let result = (|| {
@@ -2528,7 +2523,21 @@ impl ConnectionStore {
                 touched_keychain_ids.extend(staged.touched_keychain_ids);
                 touched_privilege_keychain_ids.extend(staged.touched_privilege_keychain_ids);
                 stale_old_keychain_ids.extend(staged.stale_old_keychain_ids);
+                stale_old_privilege_keychain_ids
+                    .extend(staged.stale_old_privilege_keychain_ids);
                 imported_ids.push(staged.id);
+            }
+            for keychain_id in stale_old_privilege_keychain_ids {
+                if !self
+                    .data
+                    .pending_privilege_keychain_cleanup
+                    .contains(&keychain_id)
+                {
+                    // Persist cleanup in the same transaction that retires the reference.
+                    self.data
+                        .pending_privilege_keychain_cleanup
+                        .push(keychain_id);
+                }
             }
             self.normalize();
             self.save()?;
@@ -2573,6 +2582,7 @@ impl ConnectionStore {
         for keychain_id in &stale_old_keychain_ids {
             let _ = self.keychain.delete(keychain_id);
         }
+        let _ = self.retry_persisted_keychain_cleanup();
 
         Ok(imported_ids
             .iter()
@@ -3725,6 +3735,10 @@ impl ConnectionStore {
             .as_ref()
             .map(collect_connection_keychain_ids)
             .unwrap_or_default();
+        let old_privilege_keychain_ids = existing
+            .as_ref()
+            .map(collect_privilege_keychain_ids)
+            .unwrap_or_default();
         let existing_auth = existing.as_ref().map(|conn| conn.auth.clone());
 
         connection.version = CONFIG_VERSION;
@@ -3794,9 +3808,44 @@ impl ConnectionStore {
         } else if connection.created_at.timestamp() <= 0 {
             connection.created_at = now;
         }
+        for credential in &mut connection.privilege_credentials {
+            if credential.plaintext_secret.is_none() && credential.keychain_id.is_none()
+            {
+                let credential_connection_id =
+                    privilege_credential_connection_id(&credential.connection_id, &connection.id);
+                let existing_credential = existing.as_ref().and_then(|existing_connection| {
+                    existing_connection
+                        .privilege_credentials
+                        .iter()
+                        .find(|candidate| {
+                            candidate.id == credential.id
+                                && candidate.kind == credential.kind
+                                && privilege_credential_connection_id(
+                                    &candidate.connection_id,
+                                    &existing_connection.id,
+                                ) == credential_connection_id
+                        })
+                });
+                if let Some(existing_credential) = existing_credential {
+                    // Metadata-only imports do not carry secrets. Reuse a local
+                    // reference only when the credential identity and prompt scope
+                    // still match; otherwise the old entry must be retired.
+                    credential.keychain_id = existing_credential.keychain_id.clone();
+                }
+            }
+        }
         let (privilege_credentials, touched_privilege_keychain_ids) =
             self.materialize_privilege_credentials(&connection.id, connection.privilege_credentials)?;
         connection.privilege_credentials = privilege_credentials;
+        let next_privilege_keychain_ids = connection
+            .privilege_credentials
+            .iter()
+            .filter_map(|credential| credential.keychain_id.clone())
+            .collect::<HashSet<_>>();
+        let stale_old_privilege_keychain_ids = old_privilege_keychain_ids
+            .into_iter()
+            .filter(|keychain_id| !next_privilege_keychain_ids.contains(keychain_id))
+            .collect::<Vec<_>>();
         connection.updated_at = Some(now);
 
         let next_keychain_ids = collect_keychain_ids_for_parts(
@@ -3829,6 +3878,7 @@ impl ConnectionStore {
             touched_keychain_ids,
             touched_privilege_keychain_ids,
             stale_old_keychain_ids,
+            stale_old_privilege_keychain_ids,
         })
     }
 

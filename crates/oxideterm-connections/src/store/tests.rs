@@ -1797,6 +1797,47 @@ mod tests {
         assert!(store.privilege_keychain.get(&keychain_id).is_err());
     }
 
+    #[test]
+    fn imported_privilege_replacement_removes_random_reference_secret() {
+        let mut store = load_empty_store("privilege-import-random-cleanup");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("original-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let original_keychain_id = original.keychain_id.unwrap();
+        assert!(original_keychain_id.starts_with("privilege-"));
+
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].keychain_id = None;
+        imported.privilege_credentials[0].plaintext_secret =
+            Some(SecretString::from("replacement-secret"));
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+
+        assert!(
+            store
+                .privilege_keychain
+                .get(&original_keychain_id)
+                .is_err()
+        );
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", "cred-1")
+                .unwrap(),
+            SecretString::from("replacement-secret")
+        );
+    }
 
     #[test]
     fn legacy_sudo_privilege_prompt_fragments_are_displayed_as_current_defaults() {
@@ -2071,6 +2112,157 @@ mod tests {
         );
     }
 
+    #[test]
+    fn imported_privilege_secret_survives_a_reused_pending_cleanup_reference() {
+        let mut store = load_empty_store("privilege-import-pending-cleanup");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".into(),
+                credential_id: Some("cred-1".into()),
+                label: "sudo".into(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: None,
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        // A prior import retired this slot while the credential backend was
+        // temporarily unable to delete it. The next import reuses that slot.
+        let reference = privilege_keychain_id("conn-1", "cred-1");
+        store
+            .privilege_keychain
+            .store(&reference, &SecretString::from("retired-fixture"))
+            .unwrap();
+        store.data.pending_privilege_keychain_cleanup.push(reference);
+        store.save().unwrap();
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].plaintext_secret =
+            Some(SecretString::from("replacement-fixture"));
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", "cred-1")
+                .unwrap(),
+            SecretString::from("replacement-fixture")
+        );
+        let persisted: ConnectionStoreData =
+            serde_json::from_slice(&fs::read(&store.path).unwrap()).unwrap();
+        assert!(persisted.pending_privilege_keychain_cleanup.is_empty());
+    }
+
+    #[test]
+    fn imported_privilege_metadata_preserves_existing_secret() {
+        let mut store = load_empty_store("privilege-import-metadata");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let original_keychain_id = original.keychain_id.unwrap();
+
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].label = "renamed sudo".to_string();
+        imported.privilege_credentials[0].connection_id.clear();
+        imported.privilege_credentials[0].keychain_id = None;
+        imported.privilege_credentials[0].plaintext_secret = None;
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+
+        let credential = &store.get("conn-1").unwrap().privilege_credentials[0];
+        assert_eq!(credential.connection_id, "conn-1");
+        assert_eq!(credential.label, "renamed sudo");
+        assert_eq!(
+            credential.keychain_id.as_deref(),
+            Some(original_keychain_id.as_str())
+        );
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", "cred-1")
+                .unwrap(),
+            SecretString::from("sudo-secret")
+        );
+    }
+
+    #[test]
+    fn imported_privilege_metadata_does_not_inherit_secret_for_a_different_kind() {
+        let mut store = load_empty_store("privilege-import-kind-mismatch");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let original_keychain_id = original.keychain_id.unwrap();
+
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].kind = PrivilegeCredentialKind::SuPassword;
+        imported.privilege_credentials[0].keychain_id = None;
+        imported.privilege_credentials[0].plaintext_secret = None;
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+
+        let credential = &store.get("conn-1").unwrap().privilege_credentials[0];
+        assert_eq!(credential.kind, PrivilegeCredentialKind::SuPassword);
+        assert_eq!(credential.keychain_id, None);
+        assert!(store.privilege_keychain.get(&original_keychain_id).is_err());
+    }
+
+    #[test]
+    fn imported_privilege_metadata_does_not_inherit_secret_for_a_different_scope() {
+        let mut store = load_empty_store("privilege-import-scope-mismatch");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("sudo-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        let original_keychain_id = original.keychain_id.unwrap();
+
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].connection_id = "other-scope".to_string();
+        imported.privilege_credentials[0].keychain_id = None;
+        imported.privilege_credentials[0].plaintext_secret = None;
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+
+        let credential = &store.get("conn-1").unwrap().privilege_credentials[0];
+        assert_eq!(credential.connection_id, "other-scope");
+        assert_eq!(credential.keychain_id, None);
+        assert!(store.privilege_keychain.get(&original_keychain_id).is_err());
+    }
 
     #[test]
     fn proxy_hop_key_passphrase_survives_copy_and_is_removed_by_explicit_clear() {
@@ -2537,6 +2729,36 @@ mod tests {
             "deferred-secret"
         );
 
+        target.upsert(request("conn-live", SavedAuth::Agent)).unwrap();
+        let live_scopes = [
+            "conn-live",
+            LOCAL_SHELL_PRIVILEGE_CONNECTION_ID,
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+        ];
+        let live_references = live_scopes
+            .iter()
+            .map(|scope| {
+                target
+                    .save_privilege_credential(SavePrivilegeCredentialRequest {
+                        connection_id: (*scope).into(),
+                        credential_id: Some("live-credential".into()),
+                        label: "sudo".into(),
+                        kind: PrivilegeCredentialKind::SudoPassword,
+                        username_hint: None,
+                        prompt_patterns: Vec::new(),
+                        secret: Some(SecretString::from("live-privilege-fixture")),
+                        enabled: true,
+                        require_click_to_send: true,
+                    })
+                    .unwrap()
+                    .keychain_id
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        target
+            .data
+            .pending_privilege_keychain_cleanup
+            .extend(live_references);
         target
             .finalize_saved_connections_sync_cleanup(&mut cleanup)
             .unwrap();
@@ -2549,6 +2771,16 @@ mod tests {
                 .get(&privilege_keychain_id)
                 .is_err()
         );
+        for scope in live_scopes {
+            assert_eq!(
+                target
+                    .get_privilege_credential_secret(scope, "live-credential")
+                    .unwrap(),
+                SecretString::from("live-privilege-fixture"),
+                "{scope}"
+            );
+        }
+        assert!(target.data.pending_privilege_keychain_cleanup.is_empty());
     }
 
     #[test]

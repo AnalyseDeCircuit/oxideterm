@@ -511,9 +511,12 @@ impl ConnectionStore {
         pending_privilege_keychain_ids.append(&mut self.data.pending_privilege_keychain_cleanup);
         pending_privilege_keychain_ids.sort();
         pending_privilege_keychain_ids.dedup();
+        let active_privilege_ids = collect_active_privilege_keychain_ids(&self.data);
         let mut failed_privilege_keychain_ids = Vec::new();
         for keychain_id in pending_privilege_keychain_ids {
-            if self.privilege_keychain.delete(&keychain_id).is_err() {
+            if !active_privilege_ids.contains(&keychain_id)
+                && self.privilege_keychain.delete(&keychain_id).is_err()
+            {
                 failed_privilege_keychain_ids.push(keychain_id);
             }
         }
