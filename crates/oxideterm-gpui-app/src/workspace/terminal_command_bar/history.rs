@@ -68,19 +68,17 @@ pub(in crate::workspace) fn delete_saved_console_profile(
     profile_kind: SavedConsoleProfileKind,
     id: &str,
 ) -> anyhow::Result<bool> {
-    let connection = SavedConnectionRef {
-        kind: profile_kind.connection_kind(),
-        id: id.to_owned(),
-    };
-    let history_scope =
-        saved_console_history_identity(connections, &connection).map(|(scope, _)| scope);
+    let mut history_prefix = serde_json::to_string(&(profile_kind.connection_kind(), id))?;
+    // Keep the JSON field boundary so similar IDs cannot match; targets may have changed.
+    history_prefix.pop();
+    history_prefix.push(',');
     let deleted = match profile_kind {
         SavedConsoleProfileKind::Telnet => connections.delete_telnet_profile(id),
         SavedConsoleProfileKind::Mosh => connections.delete_mosh_profile(id),
         SavedConsoleProfileKind::Serial => connections.delete_serial_profile(id),
     }?;
-    if deleted && let Some(history_scope) = history_scope {
-        terminal_history_store.remove_scope(&history_scope);
+    if deleted {
+        terminal_history_store.remove_scopes_with_prefix(&history_prefix);
     }
     Ok(deleted)
 }
@@ -163,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn deleting_a_saved_console_profile_retires_only_its_history_scope() {
+    fn deleting_a_saved_console_profile_retires_all_its_target_histories() {
         let kinds = [
             SavedConsoleProfileKind::Telnet,
             SavedConsoleProfileKind::Mosh,
@@ -202,6 +200,21 @@ mod tests {
                     .history(scope.clone(), format!("{:?}", kind.connection_kind()));
                 scope
             });
+            let previous_scopes = [
+                r#"["telnet","shared-profile-id","previous.test",2323]"#,
+                r#"["mosh","shared-profile-id","previous.test",2222,"previous-user"]"#,
+                r#"["serial","shared-profile-id","COM2"]"#,
+            ];
+            for scope in previous_scopes {
+                terminal_history_store.history(scope.into(), "Previous target".into());
+            }
+            let other_profile_scope = serde_json::json!([
+                deleted_kind.connection_kind(),
+                "shared-profile-id-extra",
+                "other-target"
+            ])
+            .to_string();
+            terminal_history_store.history(other_profile_scope.clone(), "Other profile".into());
 
             assert!(
                 delete_saved_console_profile(
@@ -234,7 +247,10 @@ mod tests {
                 .iter()
                 .enumerate()
                 .filter(|(scope_index, _)| *scope_index != deleted_index)
-                .map(|(_, scope)| scope.clone())
+                .flat_map(|(scope_index, scope)| {
+                    [scope.clone(), previous_scopes[scope_index].to_owned()]
+                })
+                .chain([other_profile_scope])
                 .collect::<HashSet<_>>();
             assert_eq!(remaining_scopes, expected_scopes);
         }
