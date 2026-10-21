@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "Chuyển tiếp cổng qua máy chủ SSH đã lưu.",
     "title": "Đường hầm SSH",
     "name": "Tên đường hầm",
     "group": "Nhóm",

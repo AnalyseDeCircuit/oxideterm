@@ -606,6 +606,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
+        self.ssh_tunnels.form = None;
         let mut form = NewConnectionForm::default();
         form.group = self.i18n.t("ssh.form.ungrouped");
         form.agent_available = detect_ssh_agent_available(&form.identity_agent);

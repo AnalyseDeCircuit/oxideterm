@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "透過已儲存的 SSH 主機轉送連接埠。",
     "title": "SSH 通道",
     "name": "通道名稱",
     "group": "群組",

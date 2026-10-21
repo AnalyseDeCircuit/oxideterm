@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "Redirigez des ports via un hôte SSH enregistré.",
     "title": "Tunnel SSH",
     "name": "Nom du tunnel",
     "group": "Groupe",

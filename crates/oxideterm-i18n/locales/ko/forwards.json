@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "저장된 SSH 호스트를 통해 포트를 전달합니다.",
     "title": "SSH 터널",
     "name": "터널 이름",
     "group": "그룹",

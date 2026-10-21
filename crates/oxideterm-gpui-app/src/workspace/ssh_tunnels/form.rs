@@ -1,37 +1,39 @@
 use super::*;
+use crate::workspace::new_connection::NewConnectionField;
 use gpui::prelude::*;
 use oxideterm_gpui_ui::{
-    button::{ButtonOptions, ButtonSize, ButtonVariant, button_with},
+    SectionHeaderOptions,
+    button::{ButtonOptions, ButtonVariant, button_with},
     checkbox::checkbox,
-    modal::{modal_body, modal_container, modal_footer, modal_header, modal_overlay},
-    scroll::ScrollableElement,
+    form_field,
+    modal::{dismissible_dialog_backdrop, modal_body, modal_container, modal_footer, modal_header},
+    section_header, segmented_tab, segmented_tabs,
 };
 
 impl WorkspaceApp {
-    fn tunnel_input(&self, label: &str, editor: &Entity<TextEditorView>) -> AnyElement {
-        div()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .flex_1()
-            .min_w_0()
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .child(self.i18n.t(label)),
-            )
-            .child(
-                div()
-                    .h(px(self.tokens.metrics.form_input_height))
-                    .px_3()
-                    .py_2()
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgb(self.tokens.ui.bg))
-                    .child(editor.clone()),
-            )
-            .into_any_element()
+    pub(in crate::workspace) fn ssh_tunnel_input_fields(&self) -> Option<Vec<NewConnectionField>> {
+        let form = self.ssh_tunnels.form.as_ref()?;
+        let mut fields = vec![NewConnectionField::Name];
+        if form.saved.is_none() {
+            fields.extend([NewConnectionField::Host, NewConnectionField::Port]);
+            if form.kind != ForwardType::Dynamic {
+                fields.extend([
+                    NewConnectionField::TunnelTargetHost,
+                    NewConnectionField::TunnelTargetPort,
+                ]);
+            }
+        }
+        Some(fields)
+    }
+
+    fn tunnel_input(
+        &self,
+        label: &str,
+        value: &str,
+        field: NewConnectionField,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_connection_field(self.i18n.t(label), value, String::new(), field, false, cx)
     }
 
     pub(in crate::workspace) fn render_ssh_tunnel_form(
@@ -40,141 +42,136 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let form = self.ssh_tunnels.form.as_ref()?;
-        let host = form
-            .host_id
-            .as_deref()
-            .and_then(|id| self.connection_store.get(id));
-        let host_label = host
-            .map(|host| format!("{} · {}@{}", host.name, host.username, host.host))
-            .unwrap_or_else(|| self.i18n.t("ssh_tunnel.choose_host"));
+        let (name, group, bind_host, bind_port, target_host, target_port, error) = {
+            let draft = self.connection_form_state(cx).form.as_ref()?;
+            (
+                draft.name.clone(),
+                draft.group.clone(),
+                draft.host.clone(),
+                draft.port.clone(),
+                draft.tunnel_target_host.clone(),
+                draft.tunnel_target_port.clone(),
+                draft.error.clone(),
+            )
+        };
+        let valid_port = |value: &str| value.trim().parse::<u16>().is_ok_and(|port| port > 0);
+        let can_save = !name.trim().is_empty()
+            && form
+                .host_id
+                .as_deref()
+                .is_some_and(|id| self.connection_store.get(id).is_some())
+            && (form.saved.is_some()
+                || (!bind_host.trim().is_empty()
+                    && valid_port(&bind_port)
+                    && (form.kind == ForwardType::Dynamic
+                        || (!target_host.trim().is_empty() && valid_port(&target_port)))));
+        let gap = self.tokens.metrics.modal_section_gap;
         let mut body = div()
             .flex()
             .flex_col()
-            .gap_4()
-            .child(self.tunnel_input("ssh_tunnel.name", &form.name))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(self.i18n.t("ssh_tunnel.host"))
-                    .child(
-                        button_with(
-                            &self.tokens,
-                            host_label,
-                            ButtonOptions {
-                                disabled: form.saved.is_some(),
-                                ..Default::default()
-                            },
-                        )
+            .gap(px(gap))
+            .child(section_header(
+                &self.tokens,
+                self.i18n.t("ssh.form.basic_information"),
+                SectionHeaderOptions::new().compact(),
+                None,
+                None,
+            ))
+            .child(self.tunnel_input("ssh_tunnel.name", &name, NewConnectionField::Name, cx))
+            .child(self.render_connection_group_select(self.i18n.t("ssh_tunnel.group"), &group, cx))
+            .child(self.render_tunnel_host_select(
+                form.host_id.as_deref(),
+                form.saved.is_some(),
+                cx,
+            ));
+        if form.saved.is_none() {
+            let types = segmented_tabs(&self.tokens).children(
+                [
+                    (ForwardType::Local, "forwards.form.type_local"),
+                    (ForwardType::Remote, "forwards.form.type_remote"),
+                    (ForwardType::Dynamic, "forwards.form.type_dynamic"),
+                ]
+                .into_iter()
+                .map(|(kind, label)| {
+                    segmented_tab(&self.tokens, self.i18n.t(label), form.kind == kind)
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _, _, cx| {
-                                if let Some(form) = this.ssh_tunnels.form.as_mut()
-                                    && form.saved.is_none()
-                                {
-                                    form.choosing_host = !form.choosing_host;
-                                    cx.notify();
+                            cx.listener(move |this, _, _, cx| {
+                                this.close_new_connection_select(cx);
+                                if let Some(form) = this.ssh_tunnels.form.as_mut() {
+                                    form.kind = kind;
                                 }
+                                this.update_connection_form_state(cx, |state| {
+                                    if let Some(form) = state.form.as_mut() {
+                                        form.field_focused = false;
+                                        form.selected_field = None;
+                                        form.focused_field = NewConnectionField::Host;
+                                        form.error = None;
+                                    }
+                                });
+                                this.ime_marked_text = None;
                                 cx.stop_propagation();
+                                cx.notify();
                             }),
-                        ),
-                    ),
+                        )
+                }),
             );
-        if form.choosing_host {
-            let choices = self.connection_store.connection_infos();
-            body = body.child(
-                div().max_h(px(160.0)).overflow_y_scrollbar().child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .when(choices.is_empty(), |list| {
-                            list.child(self.i18n.t("ssh_tunnel.choose_host"))
-                        })
-                        .children(choices.into_iter().map(|host| {
-                            button_with(
-                                &self.tokens,
-                                format!("{} · {}@{}", host.name, host.username, host.host),
-                                ButtonOptions {
-                                    size: ButtonSize::Sm,
-                                    variant: ButtonVariant::Ghost,
-                                    ..Default::default()
-                                },
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, _, cx| {
-                                    if let Some(form) = this.ssh_tunnels.form.as_mut() {
-                                        form.host_id = Some(host.id.clone());
-                                        form.choosing_host = false;
-                                        cx.notify();
-                                    }
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        })),
-                ),
-            );
-        }
-        body = body.child(self.tunnel_input("ssh_tunnel.group", &form.group));
-        if form.saved.is_none() {
-            body = body
-                .child(
-                    div().flex().gap_2().children(
-                        [
-                            (ForwardType::Local, "forwards.form.type_local"),
-                            (ForwardType::Remote, "forwards.form.type_remote"),
-                            (ForwardType::Dynamic, "forwards.form.type_dynamic"),
-                        ]
-                        .into_iter()
-                        .map(|(kind, label)| {
-                            button_with(
-                                &self.tokens,
-                                self.i18n.t(label),
-                                ButtonOptions {
-                                    size: ButtonSize::Sm,
-                                    variant: if form.kind == kind {
-                                        ButtonVariant::Default
-                                    } else {
-                                        ButtonVariant::Outline
-                                    },
-                                    ..Default::default()
-                                },
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, _, cx| {
-                                    if let Some(form) = this.ssh_tunnels.form.as_mut() {
-                                        form.kind = kind;
-                                        cx.notify();
-                                    }
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        }),
-                    ),
-                )
+            let mut rule = div()
+                .flex()
+                .flex_col()
+                .gap(px(gap))
+                .pt(px(gap))
+                .border_t_1()
+                .border_color(rgb(self.tokens.ui.border))
+                .child(section_header(
+                    &self.tokens,
+                    self.i18n.t("forwards.table.title"),
+                    SectionHeaderOptions::new().compact(),
+                    None,
+                    None,
+                ))
+                .child(form_field(
+                    &self.tokens,
+                    self.i18n.t("forwards.form.type"),
+                    types,
+                ))
                 .child(
                     div()
                         .flex()
-                        .gap_3()
-                        .child(self.tunnel_input("forwards.form.bind_address", &form.bind_host))
-                        .child(
-                            self.tunnel_input("forwards.form.port_placeholder", &form.bind_port),
-                        ),
+                        .gap(px(gap))
+                        .child(div().flex_1().min_w_0().child(self.tunnel_input(
+                            "forwards.form.bind_address",
+                            &bind_host,
+                            NewConnectionField::Host,
+                            cx,
+                        )))
+                        .child(div().w(px(112.0)).flex_none().child(self.tunnel_input(
+                            "forwards.form.port_placeholder",
+                            &bind_port,
+                            NewConnectionField::Port,
+                            cx,
+                        ))),
                 );
             if form.kind != ForwardType::Dynamic {
-                body = body.child(
+                rule = rule.child(
                     div()
                         .flex()
-                        .gap_3()
-                        .child(self.tunnel_input("forwards.form.target_address", &form.target_host))
-                        .child(
-                            self.tunnel_input("forwards.form.port_placeholder", &form.target_port),
-                        ),
+                        .gap(px(gap))
+                        .child(div().flex_1().min_w_0().child(self.tunnel_input(
+                            "forwards.form.target_address",
+                            &target_host,
+                            NewConnectionField::TunnelTargetHost,
+                            cx,
+                        )))
+                        .child(div().w(px(112.0)).flex_none().child(self.tunnel_input(
+                            "forwards.form.port_placeholder",
+                            &target_port,
+                            NewConnectionField::TunnelTargetPort,
+                            cx,
+                        ))),
                 );
             }
+            body = body.child(rule);
         }
         body = body.child(
             checkbox(
@@ -187,67 +184,66 @@ impl WorkspaceApp {
                 cx.listener(|this, _, _, cx| {
                     if let Some(form) = this.ssh_tunnels.form.as_mut() {
                         form.startup = !form.startup;
-                        cx.notify();
                     }
                     cx.stop_propagation();
+                    cx.notify();
                 }),
             ),
         );
-        if let Some(error) = &form.error {
+        if let Some(error) = error {
             body = body.child(
                 div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.error))
-                    .child(error.clone()),
+                    .child(error),
             );
         }
+        let width = self.tokens.metrics.modal_width
+            + crate::workspace::new_connection::NEW_CONNECTION_TYPE_SIDEBAR_WIDTH
+            + gap;
+        let height = f32::from(window.viewport_size().height)
+            * self.tokens.metrics.modal_max_viewport_height_ratio;
         let dialog = modal_container(&self.tokens)
             .bg(rgb(self.tokens.ui.bg_elevated))
-            .w(px(600.0_f32.min(
-                (f32::from(window.viewport_size().width) - 32.0).max(0.0),
+            .w(px(width.min(
+                (f32::from(window.viewport_size().width) - 64.0).max(0.0),
             )))
-            .max_h(px(
-                (f32::from(window.viewport_size().height) - 32.0).max(0.0)
-            ))
+            .h(px(height))
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
-                if event.keystroke.key != "tab" {
-                    return;
-                }
-                let Some(form) = this.ssh_tunnels.form.as_ref() else {
-                    return;
-                };
-                let mut inputs = vec![&form.name, &form.group];
-                if form.saved.is_none() {
-                    inputs.extend([&form.bind_host, &form.bind_port]);
-                    if form.kind != ForwardType::Dynamic {
-                        inputs.extend([&form.target_host, &form.target_port]);
-                    }
-                }
-                let current = inputs
-                    .iter()
-                    .position(|input| input.read(cx).focus_handle(cx).is_focused(window))
-                    .unwrap_or(0);
-                let next = if event.keystroke.modifiers.shift {
-                    (current + inputs.len() - 1) % inputs.len()
-                } else {
-                    (current + 1) % inputs.len()
-                };
-                window.focus(&inputs[next].read(cx).focus_handle(cx), cx);
-                window.prevent_default();
-                cx.stop_propagation();
-            }))
             .child(modal_header(
                 &self.tokens,
                 self.i18n.t("ssh_tunnel.title"),
-                String::new(),
+                self.i18n.t("ssh_tunnel.description"),
             ))
             .child(
-                modal_body(&self.tokens)
-                    .min_h_0()
-                    .overflow_y_scrollbar()
-                    .child(body),
+                modal_body(&self.tokens).flex_1().min_h_0().child(
+                    div()
+                        .size_full()
+                        .min_h_0()
+                        .flex()
+                        .gap(px(gap))
+                        .child(self.render_transport_selector(cx))
+                        .child(
+                            div()
+                                .id("ssh-tunnel-form-scroll")
+                                .flex_1()
+                                .min_w_0()
+                                .min_h_0()
+                                .selectable_overflow_y_scroll(
+                                    &self.selectable_text_scroll_handle("ssh-tunnel-form-scroll"),
+                                )
+                                .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+                                    if this.connection_form_state(cx).open_select.is_some() {
+                                        this.close_new_connection_select(cx);
+                                        this.clear_new_connection_select_anchor(cx);
+                                        cx.notify();
+                                    }
+                                }))
+                                .child(body),
+                        ),
+                ),
             )
             .child(
                 modal_footer(&self.tokens)
@@ -269,12 +265,17 @@ impl WorkspaceApp {
                         button_with(
                             &self.tokens,
                             self.i18n.t("ssh.form.save"),
-                            ButtonOptions::default(),
+                            ButtonOptions {
+                                disabled: !can_save,
+                                ..Default::default()
+                            },
                         )
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _, window, cx| {
-                                this.save_ssh_tunnel(false, window, cx)
+                            cx.listener(move |this, _, window, cx| {
+                                if can_save {
+                                    this.save_ssh_tunnel(false, window, cx);
+                                }
                             }),
                         ),
                     )
@@ -284,17 +285,31 @@ impl WorkspaceApp {
                             self.i18n.t("forwards.form.save_and_start"),
                             ButtonOptions {
                                 variant: ButtonVariant::Default,
+                                disabled: !can_save,
                                 ..Default::default()
                             },
                         )
                         .on_mouse_down(
                             MouseButton::Left,
-                            cx.listener(|this, _, window, cx| {
-                                this.save_ssh_tunnel(true, window, cx)
+                            cx.listener(move |this, _, window, cx| {
+                                if can_save {
+                                    this.save_ssh_tunnel(true, window, cx);
+                                }
                             }),
                         ),
                     ),
             );
-        Some(modal_overlay(&self.tokens, dialog))
+        Some(
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        this.close_ssh_tunnel_form(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(dialog)
+                .into_any_element(),
+        )
     }
 }

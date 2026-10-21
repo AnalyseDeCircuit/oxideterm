@@ -525,6 +525,7 @@ impl WorkspaceApp {
             NewConnectionSelect::Totp => SelectAnchorId::NewConnectionTotp,
             NewConnectionSelect::JumpTotp => SelectAnchorId::NewConnectionJumpTotp,
             NewConnectionSelect::Group => SelectAnchorId::NewConnectionGroup,
+            NewConnectionSelect::TunnelHost => SelectAnchorId::NewConnectionTunnelHost,
             NewConnectionSelect::KeyAuthSource => SelectAnchorId::NewConnectionKeyAuthSource,
             NewConnectionSelect::ManagedKey => SelectAnchorId::NewConnectionManagedKey,
             NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource => {
@@ -661,7 +662,7 @@ impl WorkspaceApp {
         self.update_connection_form_state(cx, ConnectionFormState::close_select);
     }
 
-    pub(super) fn clear_new_connection_select_anchor(&mut self, cx: &App) {
+    pub(in crate::workspace) fn clear_new_connection_select_anchor(&mut self, cx: &App) {
         // Every entry in this store belongs to the moving form viewport, so a
         // scroll can invalidate the entire set without enumerating anchor IDs.
         self.connection_flow.read(cx).select_anchor_store().clear();
@@ -747,7 +748,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_connection_field(
+    pub(in crate::workspace) fn render_connection_field(
         &self,
         label: String,
         value: &str,
@@ -1190,7 +1191,7 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_connection_group_select(
+    pub(in crate::workspace) fn render_connection_group_select(
         &self,
         label: String,
         value: &str,
@@ -1461,6 +1462,57 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    pub(in crate::workspace) fn render_tunnel_host_select(
+        &self,
+        selected_id: Option<&str>,
+        disabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let label = selected_id
+            .and_then(|id| self.connection_store.get(id))
+            .map(|host| {
+                format!(
+                    "{} · {}@{}:{}",
+                    host.name, host.username, host.host, host.port
+                )
+            })
+            .unwrap_or_else(|| self.i18n.t("ssh_tunnel.choose_host"));
+        let trigger = self
+            .new_connection_select_trigger(
+                NewConnectionSelect::TunnelHost,
+                label,
+                selected_id.is_none(),
+                disabled,
+                cx,
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    if !disabled {
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.field_focused = false;
+                                clear_connection_selection(form);
+                            }
+                        });
+                        this.ime_marked_text = None;
+                        this.open_new_connection_select_from_pointer(
+                            NewConnectionSelect::TunnelHost,
+                            cx,
+                        );
+                        window.focus(&this.focus_handle, cx);
+                        cx.notify();
+                    }
+                    cx.stop_propagation();
+                }),
+            );
+        form_field(
+            &self.tokens,
+            self.i18n.t("ssh_tunnel.host"),
+            self.track_new_connection_select_anchor(NewConnectionSelect::TunnelHost, trigger, cx),
+        )
+    }
+
     pub(super) fn render_remote_desktop_ssh_gateway_select(
         &self,
         selected_id: Option<&str>,
@@ -1564,6 +1616,7 @@ impl WorkspaceApp {
                     | NewConnectionSelect::KeyAuthSource
                     | NewConnectionSelect::StandaloneSftpSecondaryKeyAuthSource
                     | NewConnectionSelect::JumpSavedConnection
+                    | NewConnectionSelect::TunnelHost
                     | NewConnectionSelect::RemoteDesktopSshGateway
                     | NewConnectionSelect::JumpKeyAuthSource
                     | NewConnectionSelect::UpstreamProxyPolicy
@@ -2781,8 +2834,12 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn render_transport_selector(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::workspace) fn render_transport_selector(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let tunnel_active = self.ssh_tunnels.form.is_some();
         let (active_transport, advanced_connections_expanded) = self
             .connection_form_state(cx)
             .form
@@ -2927,7 +2984,7 @@ impl WorkspaceApp {
             if advanced && !advanced_connections_expanded {
                 continue;
             }
-            let active = active_transport == transport;
+            let active = !tunnel_active && active_transport == transport;
             let transport_index = new_connection_transport_index(transport);
             let row_text = if active {
                 theme.text_heading
@@ -3019,7 +3076,15 @@ impl WorkspaceApp {
                 .child(div().min_w(px(0.0)).truncate().child(label))
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
+                    cx.listener(move |this, _event, window, cx| {
+                        if this.ssh_tunnels.form.take().is_some() {
+                            this.open_new_connection_form(window, cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.advanced_connections_expanded = true;
+                                }
+                            });
+                        }
                         let mut should_refresh_ports = false;
                         let mut selection_offset = None;
                         this.update_connection_form_state(cx, |state| {     if let Some(form) = state.form.as_mut() {
@@ -3084,18 +3149,39 @@ impl WorkspaceApp {
                     .px_2()
                     .cursor_pointer()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(theme.text))
-                    .hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
+                    .text_color(rgb(if tunnel_active {
+                        theme.text_heading
+                    } else {
+                        theme.text
+                    }))
+                    .when(tunnel_active, |row| {
+                        oxideterm_gpui_ui::theme_card_surface_shadow(
+                            row.rounded(px(self.tokens.radii.md))
+                                .border_1()
+                                .border_color(rgb(theme.border))
+                                .bg(self.settings_panel_background(theme.bg_panel)),
+                            &self.tokens,
+                        )
+                    })
+                    .when(!tunnel_active, |row| {
+                        row.hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
+                    })
                     .child(Self::render_lucide_icon(
                         LucideIcon::Network,
                         14.0,
-                        rgb(theme.text_muted),
+                        rgb(if tunnel_active {
+                            theme.accent
+                        } else {
+                            theme.text_muted
+                        }),
                     ))
                     .child(self.i18n.t("ssh_tunnel.title"))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| {
-                            this.open_ssh_tunnel_form(None, window, cx);
+                            if this.ssh_tunnels.form.is_none() {
+                                this.open_ssh_tunnel_form(None, window, cx);
+                            }
                             cx.stop_propagation();
                         }),
                     ),
@@ -3124,6 +3210,8 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, window, cx| {
+                            this.ssh_tunnels.form = None;
+                            this.close_new_connection_select(cx);
                             this.open_plugin_connection_form(
                                 &plugin,
                                 &definition.id,

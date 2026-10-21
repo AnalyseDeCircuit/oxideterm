@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "Encaminhe portas por um host SSH salvo.",
     "title": "Túnel SSH",
     "name": "Nome do túnel",
     "group": "Grupo",

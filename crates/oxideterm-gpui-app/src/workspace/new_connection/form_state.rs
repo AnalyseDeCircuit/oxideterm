@@ -159,6 +159,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     StandaloneSftpSecondaryKeyAuthSource,
     StandaloneSftpSecondaryManagedKey,
     JumpSavedConnection,
+    TunnelHost,
     JumpKeyAuthSource,
     JumpManagedKey,
     UpstreamProxyPolicy,
@@ -267,6 +268,8 @@ pub(in crate::workspace) enum NewConnectionField {
     MoshUdpHost,
     MoshUdpPort,
     MoshLocale,
+    TunnelTargetHost,
+    TunnelTargetPort,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -773,6 +776,8 @@ impl Drop for StandaloneSftpSecondaryForm {
 }
 
 pub(in crate::workspace) struct NewConnectionForm {
+    pub(in crate::workspace) tunnel_target_host: String,
+    pub(in crate::workspace) tunnel_target_port: String,
     pub(in crate::workspace) totp_credential_id: Option<String>,
     // Reauthentication submits into the existing logical session, never a second sidebar row.
     pub(in crate::workspace) standalone_connection_id: Option<String>,
@@ -1092,6 +1097,8 @@ impl fmt::Debug for NewConnectionForm {
 impl Default for NewConnectionForm {
     fn default() -> Self {
         Self {
+            tunnel_target_host: String::new(),
+            tunnel_target_port: String::new(),
             totp_credential_id: None,
             standalone_connection_id: None,
             transport: NewConnectionTransport::Ssh,
@@ -2056,6 +2063,8 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::Name => &mut form.name,
         NewConnectionField::LocalCwd => &mut form.local_cwd,
         NewConnectionField::Host => &mut form.host,
+        NewConnectionField::TunnelTargetHost => &mut form.tunnel_target_host,
+        NewConnectionField::TunnelTargetPort => &mut form.tunnel_target_port,
         NewConnectionField::Port => &mut form.port,
         NewConnectionField::Username => &mut form.username,
         NewConnectionField::Password => password_draft_mut(form),
@@ -2214,6 +2223,8 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::Name => &form.name,
         NewConnectionField::LocalCwd => &form.local_cwd,
         NewConnectionField::Host => &form.host,
+        NewConnectionField::TunnelTargetHost => &form.tunnel_target_host,
+        NewConnectionField::TunnelTargetPort => &form.tunnel_target_port,
         NewConnectionField::Port => &form.port,
         NewConnectionField::Username => &form.username,
         NewConnectionField::Password => &form.password,

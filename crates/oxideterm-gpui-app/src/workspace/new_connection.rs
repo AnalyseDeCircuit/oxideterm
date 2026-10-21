@@ -2,6 +2,7 @@ mod entity;
 mod form_entity;
 mod form_state;
 mod form_view;
+pub(super) use form_view::NEW_CONNECTION_TYPE_SIDEBAR_WIDTH;
 mod ftp;
 mod host_key_dialog;
 mod kbi_dialog;

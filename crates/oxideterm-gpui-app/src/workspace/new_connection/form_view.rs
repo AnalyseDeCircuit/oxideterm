@@ -99,7 +99,7 @@ const TAURI_PROXY_CHAIN_LINE_WIDTH: f32 = 32.0; // Tauri w-8
 const TAURI_PROXY_CHAIN_CONNECTOR_THICKNESS: f32 = 2.0; // Tauri w-0.5 h-0.5
 const TAURI_PROXY_CHAIN_CARD_PADDING: f32 = 12.0; // Tauri p-3
 const TAURI_SERIAL_GRID_GAP: f32 = 16.0; // Tauri serial grid gap-4
-const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
+pub(in crate::workspace) const NEW_CONNECTION_TYPE_SIDEBAR_WIDTH: f32 = 160.0;
 const SSH_ALGORITHM_CATEGORY_COLUMN_WIDTH: f32 = 208.0;
 const SSH_ALGORITHM_DETAIL_COLUMN_WIDTH: f32 = 420.0;
 const NEW_CONNECTION_MODAL_VIEWPORT_MARGIN: f32 = 32.0;
@@ -185,6 +185,7 @@ impl WorkspaceApp {
         }
 
         let caret_was_visible = self.input_caret.visible();
+        let tunnel_fields = self.ssh_tunnel_input_fields();
         let uses_text_edit_modifier = keystroke_uses_text_edit_modifier(&event.keystroke);
         let (result, show_caret) = self.connection_flow.update(cx, |connection_flow, cx| {
             let Some(form) = connection_flow.form.form.as_mut() else {
@@ -227,6 +228,7 @@ impl WorkspaceApp {
             let focused_field_accepts_ime = matches!(
                 form.focused_field,
                 NewConnectionField::Name
+                    | NewConnectionField::TunnelTargetHost
                     | NewConnectionField::Host
                     | NewConnectionField::Username
                     | NewConnectionField::Group
@@ -294,7 +296,14 @@ impl WorkspaceApp {
                 }
                 "enter" => (ConnectionFormKeyResult::Submit, false),
                 "tab" => {
-                    form.focused_field = if let Some(jump_form) = form.jump_server_form.as_ref() {
+                    form.focused_field = if let Some(fields) = tunnel_fields.as_ref() {
+                        let current = fields
+                            .iter()
+                            .position(|field| *field == form.focused_field)
+                            .unwrap_or(0);
+                        fields[(current + if modifiers.shift { fields.len() - 1 } else { 1 })
+                            % fields.len()]
+                    } else if let Some(jump_form) = form.jump_server_form.as_ref() {
                         next_jump_connection_field(
                             form.focused_field,
                             jump_form.auth_tab,
@@ -362,7 +371,11 @@ impl WorkspaceApp {
             ConnectionFormKeyResult::NotHandled => false,
             ConnectionFormKeyResult::Handled => true,
             ConnectionFormKeyResult::CloseForm => {
-                self.close_new_connection_form(window, cx);
+                if self.ssh_tunnels.form.is_some() {
+                    self.close_ssh_tunnel_form(window, cx);
+                } else {
+                    self.close_new_connection_form(window, cx);
+                }
                 true
             }
             ConnectionFormKeyResult::CloseJumpForm => {
@@ -370,7 +383,11 @@ impl WorkspaceApp {
                 true
             }
             ConnectionFormKeyResult::Submit => {
-                self.submit_new_connection_form(window, cx);
+                if self.ssh_tunnels.form.is_some() {
+                    self.save_ssh_tunnel(true, window, cx);
+                } else {
+                    self.submit_new_connection_form(window, cx);
+                }
                 true
             }
             ConnectionFormKeyResult::AddJumpServer => {

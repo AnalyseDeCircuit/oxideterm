@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "Ports über einen gespeicherten SSH-Host weiterleiten.",
     "title": "SSH-Tunnel",
     "name": "Tunnelname",
     "group": "Gruppe",

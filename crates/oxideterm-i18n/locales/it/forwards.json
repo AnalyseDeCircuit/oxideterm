@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "Inoltra le porte tramite un host SSH salvato.",
     "title": "Tunnel SSH",
     "name": "Nome del tunnel",
     "group": "Gruppo",

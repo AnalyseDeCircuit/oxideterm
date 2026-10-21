@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "Reenvía puertos a través de un host SSH guardado.",
     "title": "Túnel SSH",
     "name": "Nombre del túnel",
     "group": "Grupo",

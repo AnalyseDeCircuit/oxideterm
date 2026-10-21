@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "通过已保存的 SSH 主机转发端口。",
     "title": "SSH 隧道",
     "name": "隧道名称",
     "group": "分组",

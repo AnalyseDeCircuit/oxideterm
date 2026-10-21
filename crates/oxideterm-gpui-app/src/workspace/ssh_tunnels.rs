@@ -1,8 +1,8 @@
+use super::new_connection::{ConnectionFormState, NewConnectionForm};
 use super::*;
 use oxideterm_forwarding::{
     ForwardRule, ForwardStatus, ForwardType, PersistedForward, SshTunnelProfile,
 };
-use oxideterm_gpui_editor::{EditorPresentation, EditorSettings, TextEditorView};
 
 mod form;
 
@@ -17,18 +17,10 @@ pub(in crate::workspace) struct SshTunnels {
 }
 
 pub(in crate::workspace) struct TunnelForm {
-    saved: Option<PersistedForward>,
-    host_id: Option<String>,
-    choosing_host: bool,
-    name: Entity<TextEditorView>,
-    group: Entity<TextEditorView>,
-    bind_host: Entity<TextEditorView>,
-    bind_port: Entity<TextEditorView>,
-    target_host: Entity<TextEditorView>,
-    target_port: Entity<TextEditorView>,
+    pub(in crate::workspace) saved: Option<PersistedForward>,
+    pub(in crate::workspace) host_id: Option<String>,
     kind: ForwardType,
     startup: bool,
-    error: Option<String>,
 }
 
 impl WorkspaceApp {
@@ -48,48 +40,31 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
-        self.update_connection_form_state(cx, |state| state.form = None);
+        self.update_connection_form_state(cx, ConnectionFormState::clear);
         let saved = id.and_then(|id| {
             self.saved_ssh_tunnels()
                 .into_iter()
                 .find(|rule| rule.id == id)
         });
         let profile = saved.as_ref().and_then(|rule| rule.tunnel.as_ref());
-        let tokens = self.tokens;
-        let mut input = |value: String| {
-            cx.new(|cx| {
-                let mut editor = TextEditorView::new_verbatim(value, &tokens, cx);
-                editor.set_presentation(EditorPresentation::Inline, cx);
-                editor.set_settings(
-                    EditorSettings {
-                        highlight_current_line: false,
-                        highlight_special_chars: false,
-                        indentation_markers: false,
-                        placeholder: None,
-                        ..Default::default()
-                    },
-                    cx,
-                );
-                editor
-            })
-        };
+        let mut draft = NewConnectionForm::default();
+        draft.name = profile.map(|p| p.name.clone()).unwrap_or_default();
+        draft.group = profile.and_then(|p| p.group.clone()).unwrap_or_default();
+        draft.host = "127.0.0.1".into();
+        draft.port.clear();
+        draft.tunnel_target_host = "127.0.0.1".into();
+        draft.advanced_connections_expanded = true;
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(draft));
         let form = TunnelForm {
             host_id: saved
                 .as_ref()
                 .and_then(|rule| rule.owner_connection_id.clone()),
-            choosing_host: saved.is_none(),
-            name: input(profile.map(|p| p.name.clone()).unwrap_or_default()),
-            group: input(profile.and_then(|p| p.group.clone()).unwrap_or_default()),
-            bind_host: input("127.0.0.1".into()),
-            bind_port: input(String::new()),
-            target_host: input("127.0.0.1".into()),
-            target_port: input(String::new()),
             kind: ForwardType::Local,
             startup: profile.is_some_and(|p| p.connect_on_startup),
             saved,
-            error: None,
         };
-        window.focus(&form.name.read(cx).focus_handle(cx), cx);
+        window.focus(&self.focus_handle, cx);
+        self.show_active_input_caret(cx);
         self.ssh_tunnels.form = Some(form);
         cx.notify();
     }
@@ -100,18 +75,29 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.ssh_tunnels.form = None;
+        self.update_connection_form_state(cx, ConnectionFormState::clear);
         self.focus_active_pane(window, cx);
         cx.notify();
     }
 
-    fn save_ssh_tunnel(&mut self, start: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn save_ssh_tunnel(
+        &mut self,
+        start: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(form) = self.ssh_tunnels.form.as_ref() else {
             return;
         };
-        let text =
-            |input: &Entity<TextEditorView>| input.read(cx).buffer().text().trim().to_string();
-        let name = text(&form.name);
-        let group = text(&form.group);
+        let Some(draft) = self.connection_form_state(cx).form.as_ref() else {
+            return;
+        };
+        let name = draft.name.trim().to_string();
+        let group = if self.connection_form_group_is_ungrouped(&draft.group) {
+            String::new()
+        } else {
+            draft.group.trim().to_string()
+        };
         let host = form
             .host_id
             .clone()
@@ -128,15 +114,16 @@ impl WorkspaceApp {
                 // Rule edits remain on the existing forwarding page, with its stopped-rule contract.
                 saved.clone()
             } else {
-                let port = |input: &Entity<TextEditorView>| {
-                    text(input)
+                let port = |input: &str| {
+                    input
+                        .trim()
                         .parse::<u16>()
                         .ok()
                         .filter(|p| *p > 0)
                         .ok_or_else(|| self.i18n.t("forwards.form.port_invalid"))
                 };
-                let bind = text(&form.bind_host);
-                let target = text(&form.target_host);
+                let bind = draft.host.trim().to_string();
+                let target = draft.tunnel_target_host.trim().to_string();
                 if bind.is_empty()
                     || bind.chars().any(char::is_whitespace)
                     || (form.kind != ForwardType::Dynamic
@@ -147,17 +134,17 @@ impl WorkspaceApp {
                 let rule = match form.kind {
                     ForwardType::Local => ForwardRule::local(
                         bind,
-                        port(&form.bind_port)?,
+                        port(&draft.port)?,
                         target,
-                        port(&form.target_port)?,
+                        port(&draft.tunnel_target_port)?,
                     ),
                     ForwardType::Remote => ForwardRule::remote(
                         bind,
-                        port(&form.bind_port)?,
+                        port(&draft.port)?,
                         target,
-                        port(&form.target_port)?,
+                        port(&draft.tunnel_target_port)?,
                     ),
-                    ForwardType::Dynamic => ForwardRule::dynamic(bind, port(&form.bind_port)?),
+                    ForwardType::Dynamic => ForwardRule::dynamic(bind, port(&draft.port)?),
                 };
                 PersistedForward::new(
                     rule.id.clone(),
@@ -193,6 +180,7 @@ impl WorkspaceApp {
         match outcome {
             Ok(saved) => {
                 self.ssh_tunnels.form = None;
+                self.update_connection_form_state(cx, ConnectionFormState::clear);
                 self.queue_cloud_sync_dirty_refresh(cx);
                 if start {
                     self.open_ssh_tunnel(&saved.id, false, window, cx);
@@ -201,9 +189,11 @@ impl WorkspaceApp {
                 }
             }
             Err(error) => {
-                if let Some(form) = self.ssh_tunnels.form.as_mut() {
-                    form.error = Some(error);
-                }
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.error = Some(error);
+                    }
+                });
             }
         }
         cx.notify();

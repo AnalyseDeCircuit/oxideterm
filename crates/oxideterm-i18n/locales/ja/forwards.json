@@ -1,5 +1,6 @@
 {
   "ssh_tunnel": {
+    "description": "保存済みの SSH ホストを経由してポートを転送します。",
     "title": "SSH トンネル",
     "name": "トンネル名",
     "group": "グループ",

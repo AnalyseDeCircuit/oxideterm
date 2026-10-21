@@ -1156,8 +1156,12 @@ impl WorkspaceApp {
             .when_some(self.render_session_sort_menu(cx), |root, menu| {
                 root.child(menu)
             })
-            .when(self.connection_form_state(cx).form.is_some(), |root| {
-                root.child(self.render_new_connection_modal(window, cx))
+            .when(
+                self.connection_form_state(cx).form.is_some() && self.ssh_tunnels.form.is_none(),
+                |root| root.child(self.render_new_connection_modal(window, cx)),
+            )
+            .when_some(self.render_ssh_tunnel_form(window, cx), |root, dialog| {
+                root.child(dialog)
             })
             .when_some(
                 self.render_plugin_connection_form(window, cx),
@@ -1310,9 +1314,6 @@ impl WorkspaceApp {
                 root.child(dialog)
             })
             .when_some(self.render_archive_command(window, cx), |root, dialog| {
-                root.child(dialog)
-            })
-            .when_some(self.render_ssh_tunnel_form(window, cx), |root, dialog| {
                 root.child(dialog)
             })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
