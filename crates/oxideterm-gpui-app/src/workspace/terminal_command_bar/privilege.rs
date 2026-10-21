@@ -263,7 +263,9 @@ impl WorkspaceApp {
             && state.matches.len() == 1
             && self
                 .matched_privilege_credential(&state.matches[0])
-                .is_some_and(|credential| !credential.require_click_to_send)
+                .is_some_and(|credential| {
+                    privilege_prompt_allows_automatic_fill(&state.prompt, &credential)
+                })
         {
             log_privilege_prompt_helper(format_args!("auto submit: single privilege match"));
             return self.fill_privilege_prompt_match(

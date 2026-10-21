@@ -1953,6 +1953,51 @@ mod tests {
     }
 
     #[test]
+    fn archive_export_skips_unreadable_privilege_secrets_outside_the_host_scope() {
+        use crate::oxide_file::*;
+        let mut store = load_empty_store("privilege-export-filter-before-read");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let mut references = Vec::new();
+        for (id, host, secret) in [
+            ("excluded", "prod-*", "prod-secret"),
+            ("included", "192.168.1.2", "dev-secret"),
+        ] {
+            let saved = store.save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
+                credential_id: Some(id.into()),
+                label: id.into(),
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                host_patterns: vec![host.into()],
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
+                secret: Some(SecretString::from(secret)),
+                enabled: true,
+                require_click_to_send: true,
+            }).unwrap();
+            references.push(saved.keychain_id.unwrap());
+        }
+        store.privilege_keychain.delete(&references[0]).unwrap();
+        let export = |store: &ConnectionStore| export_connections_to_oxide(
+            store, &["conn-1".into()], "archive-password",
+            OxideExportOptions { include_passwords: true, ..Default::default() },
+        );
+        let bytes = export(&store).expect("an excluded credential must never block this archive");
+        let file = OxideFile::from_bytes(&bytes).unwrap();
+        let payload = decrypt_oxide_file(&file, "archive-password").unwrap();
+        let credentials = &payload.connections[0].privilege_credentials;
+        assert_eq!(credentials.iter().map(|credential| credential.id.as_str()).collect::<Vec<_>>(),
+            ["ssh-common:included"]);
+        assert_eq!(credentials[0].secret.as_deref().map(String::as_str), Some("dev-secret"));
+        // A missing included secret must still fail rather than silently disappear.
+        store.privilege_keychain.delete(&references[1]).unwrap();
+        assert!(export(&store).is_err());
+    }
+
+    #[test]
     fn legacy_privilege_kind_deserializes_into_prompt_type_and_response_mode() {
         for (kind, expected_prompt_type, expected_response_mode) in [
             (

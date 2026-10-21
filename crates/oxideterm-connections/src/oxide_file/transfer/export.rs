@@ -468,20 +468,8 @@ fn export_privilege_credentials(
         return Ok(Vec::new());
     }
 
-    let owners = [conn.id.clone(), crate::SSH_COMMON_PRIVILEGE_SCOPE_ID.to_string()]
-        .into_iter().collect();
-    store.export_privilege_sync_records(&owners)?
+    store.export_connection_privilege_records(conn)?
         .into_iter()
-        // A shared credential restricted to another host must not become an
-        // unscoped copy on this connection, because import cannot restore a
-        // host restriction that the archive dropped.
-        .filter(|record| {
-            record.metadata.connection_id != crate::SSH_COMMON_PRIVILEGE_SCOPE_ID
-                || crate::privilege_host_scope_matches(
-                    &conn.host,
-                    &record.metadata.host_patterns,
-                )
-        })
         .map(|record| {
             let credential = record.metadata;
             Ok(EncryptedPrivilegeCredential {

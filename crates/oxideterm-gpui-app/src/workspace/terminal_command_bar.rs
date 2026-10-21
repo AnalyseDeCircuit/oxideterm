@@ -573,6 +573,16 @@ fn privilege_prompt_state_allows_confirmed_fill(state: &PrivilegePromptHelperSta
     state.matches.len() == 1
 }
 
+fn privilege_prompt_allows_automatic_fill(
+    prompt: &PrivilegePromptMatch,
+    credential: &SavedPrivilegeCredential,
+) -> bool {
+    // An unclassified password prompt may belong to another application,
+    // even when only one sudo/su credential exists in this scope.
+    !matches!(prompt, PrivilegePromptMatch::GenericPassword { .. })
+        && !credential.require_click_to_send
+}
+
 fn choose_privilege_prompt<'a>(
     credentials: impl IntoIterator<Item = &'a SavedPrivilegeCredential>,
     visible_text: &str,
@@ -1101,6 +1111,21 @@ mod privilege_prompt_helper_tests {
             PrivilegePromptMatch::GenericPassword { .. }
         ));
         assert!(privilege_prompt_state_allows_confirmed_fill(&state));
+        let mut automatic = credentials[0].clone();
+        automatic.require_click_to_send = false;
+        assert!(!privilege_prompt_allows_automatic_fill(
+            &state.prompt,
+            &automatic
+        ));
+        let sudo = PrivilegePromptMatch::Sudo {
+            username: None,
+            prompt_text: "Password:".into(),
+        };
+        assert!(privilege_prompt_allows_automatic_fill(&sudo, &automatic));
+        assert!(!privilege_prompt_allows_automatic_fill(
+            &sudo,
+            &credentials[0]
+        ));
     }
 
     #[test]
