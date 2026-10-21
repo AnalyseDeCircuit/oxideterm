@@ -62,6 +62,7 @@ mod session_manager;
 mod settings;
 mod sftp;
 mod sidebar;
+mod ssh_tunnels;
 mod standalone_connections;
 mod tabs;
 mod terminal_archive;
@@ -982,6 +983,7 @@ pub(crate) struct WorkspaceApp {
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,
     archive_command: Option<terminal_archive::ArchiveCommandPreview>,
+    ssh_tunnels: ssh_tunnels::SshTunnels,
     terminal: Entity<WorkspaceTerminalEntity>,
     _terminal_subscription: Subscription,
     overlay: Entity<WorkspaceOverlayEntity>,

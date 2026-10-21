@@ -2250,4 +2250,5 @@ struct StagedImportedConnection {
     touched_keychain_ids: Vec<String>,
     touched_privilege_keychain_ids: Vec<String>,
     stale_old_keychain_ids: Vec<String>,
+    stale_old_privilege_keychain_ids: Vec<String>,
 }

@@ -500,7 +500,7 @@
         "auto_upload_interval": "Khoảng thời gian tải lên tự động (phút)",
         "default_conflict_strategy": "Chiến lược xử lý xung đột mặc định",
         "sync_connections": "Đồng bộ kết nối",
-        "sync_forwards": "Đồng bộ chuyển tiếp đã lưu",
+        "sync_forwards": "Đồng bộ chuyển tiếp cổng và đường hầm SSH",
         "sync_quick_commands": "Đồng bộ lệnh nhanh",
         "sync_serial_profiles": "Đồng bộ hồ sơ serial",
         "sync_telnet_profiles": "Đồng bộ hồ sơ Telnet",

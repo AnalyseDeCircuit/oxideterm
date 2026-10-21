@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "SSH トンネル",
+    "name": "トンネル名",
+    "group": "グループ",
+    "group_invalid": "グループのパスに空の階層を含めることはできません。",
+    "host": "SSH ホスト",
+    "choose_host": "保存済みの SSH ホストを選択",
+    "startup": "アプリの起動時に接続",
+    "missing_host": "保存済みの SSH ホストが見つかりません。",
+    "name_required": "トンネル名を入力してください。名前とグループに改行は使用できません。",
+    "address_required": "有効な待ち受けアドレスと転送先アドレスを入力してください。",
+    "save_failed": "SSH トンネルを更新できませんでした。"
+  },
   "copy_address": "アドレスをコピー",
   "copied": "コピーしました",
   "forwards": {

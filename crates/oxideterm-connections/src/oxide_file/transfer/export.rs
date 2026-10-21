@@ -694,6 +694,7 @@ fn export_forward(forward: &OxideForwardRecord) -> EncryptedForward {
         target_port: forward.target_port,
         description: forward.description.clone(),
         auto_start: forward.auto_start,
+        tunnel: forward.tunnel.clone(),
     }
 }
 

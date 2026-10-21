@@ -236,6 +236,7 @@ impl WorkspaceApp {
                 &self.tokens,
                 "standalone-sftp-form-enter",
                 modal_container(&self.tokens)
+                    .bg(rgb(self.tokens.ui.bg_elevated))
                     .w(px(modal_width))
                     .max_h(px(modal_max_height))
                     .flex()

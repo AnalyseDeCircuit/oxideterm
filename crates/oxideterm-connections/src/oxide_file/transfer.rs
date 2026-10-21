@@ -48,6 +48,8 @@ pub struct OxideForwardRecord {
     pub target_port: u16,
     pub description: Option<String>,
     pub auto_start: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel: Option<super::format::OxideTunnelProfile>,
 }
 
 #[derive(Debug, Clone)]

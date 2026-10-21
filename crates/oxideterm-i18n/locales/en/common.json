@@ -492,7 +492,7 @@
         "auto_upload_interval": "Auto upload interval (minutes)",
         "default_conflict_strategy": "Default conflict strategy",
         "sync_connections": "Sync connections",
-        "sync_forwards": "Sync saved forwards",
+        "sync_forwards": "Sync port forwards and SSH tunnels",
         "sync_quick_commands": "Sync quick commands",
         "sync_serial_profiles": "Sync serial profiles",
         "sync_telnet_profiles": "Sync Telnet profiles",

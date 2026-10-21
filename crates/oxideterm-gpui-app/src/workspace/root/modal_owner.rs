@@ -103,6 +103,7 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
     },
     TabRename,
     ArchiveCommand,
+    SshTunnel,
     ActiveTabWindowModal {
         kind: ActiveTabWindowModalKind,
         phase: oxideterm_gpui_ui::motion::ExitPhase,
@@ -174,6 +175,7 @@ impl ActiveWindowModalOwner {
             Self::NativePluginConfirm { .. } => 28,
             Self::TabRename => 29,
             Self::ArchiveCommand => 30,
+            Self::SshTunnel => 30,
             Self::ActiveTabWindowModal { .. } => 31,
             Self::TerminalCastPlayer => 32,
             Self::ThemeEditor { .. } => 33,
@@ -235,6 +237,7 @@ impl ActiveWindowModalOwner {
             | Self::HostScheduleLogs
             | Self::TabRename
             | Self::ArchiveCommand
+            | Self::SshTunnel
             | Self::TerminalCastPlayer
             | Self::TerminalCommandSpecsEditor
             | Self::QuickCommandsManager
@@ -267,6 +270,7 @@ impl ActiveWindowModalOwner {
                 | Self::QuickCommandsManager
                 | Self::AiTextEditor
                 | Self::ArchiveCommand
+                | Self::SshTunnel
                 | Self::OxideImport { .. }
                 | Self::OxideExport { .. }
                 | Self::CommandPalette
@@ -278,14 +282,16 @@ impl ActiveWindowModalOwner {
     fn key_route(self, key: &str) -> ActiveWindowModalKeyRoute {
         let visible = self.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let focused_child_owns_key = visible
-            && (matches!(self, Self::AiTextEditor | Self::ArchiveCommand)
-                || matches!(
-                    self,
-                    Self::ActiveTabWindowModal {
-                        kind: ActiveTabWindowModalKind::SftpEditor,
-                        ..
-                    }
-                ))
+            && (matches!(
+                self,
+                Self::AiTextEditor | Self::ArchiveCommand | Self::SshTunnel
+            ) || matches!(
+                self,
+                Self::ActiveTabWindowModal {
+                    kind: ActiveTabWindowModalKind::SftpEditor,
+                    ..
+                }
+            ))
             && key != "escape";
         ActiveWindowModalKeyRoute {
             // Document editors must receive navigation and mutation keys at
@@ -335,6 +341,7 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) native_plugin_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) tab_rename_open: bool,
     pub(in crate::workspace) archive_command_open: bool,
+    pub(in crate::workspace) ssh_tunnel_open: bool,
     pub(in crate::workspace) active_tab_modal: Option<ActiveTabWindowModalSnapshot>,
     pub(in crate::workspace) terminal_cast_player_open: bool,
     pub(in crate::workspace) theme_editor_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
@@ -476,6 +483,9 @@ impl ActiveWindowModalProjection {
         let archive_command_owner = self
             .archive_command_open
             .then_some(ActiveWindowModalOwner::ArchiveCommand);
+        let ssh_tunnel_owner = self
+            .ssh_tunnel_open
+            .then_some(ActiveWindowModalOwner::SshTunnel);
         let active_tab_owner =
             self.active_tab_modal
                 .map(|snapshot| ActiveWindowModalOwner::ActiveTabWindowModal {
@@ -551,6 +561,7 @@ impl ActiveWindowModalProjection {
             native_plugin_owner,
             tab_rename_owner,
             archive_command_owner,
+            ssh_tunnel_owner,
             active_tab_owner,
             terminal_cast_owner,
             theme_editor_owner,
@@ -707,6 +718,7 @@ impl WorkspaceApp {
             native_plugin_phase,
             tab_rename_open: self.tab_rename_dialog.is_some(),
             archive_command_open: self.archive_command.is_some(),
+            ssh_tunnel_open: self.ssh_tunnels.form.is_some(),
             active_tab_modal: self.active_tab_window_modal_owner(cx),
             terminal_cast_player_open: self.terminal.read(cx).cast_player_open(),
             theme_editor_phase,
@@ -1014,6 +1026,11 @@ impl WorkspaceApp {
             ActiveWindowModalOwner::ArchiveCommand => {
                 if event.keystroke.key == "escape" {
                     self.close_archive_command(window, cx);
+                }
+            }
+            ActiveWindowModalOwner::SshTunnel => {
+                if event.keystroke.key.as_str() == "escape" {
+                    self.close_ssh_tunnel_form(window, cx);
                 }
             }
             ActiveWindowModalOwner::TerminalTriggerQuickCommand => {

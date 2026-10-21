@@ -6,8 +6,8 @@ use oxideterm_quick_commands::{QuickCommandRisk, prepare_quick_command};
 use oxideterm_terminal::TerminalSessionKind;
 use oxideterm_terminal_triggers::{
     ExpandedLocalProcessSpec, ExpandedTriggerAction, SavedConnectionKind, SavedConnectionRef,
-    TerminalTrigger, TerminalTriggerScope, TerminalTriggersSnapshot, TriggerMatched,
-    compile_active, expand_template,
+    TerminalTrigger, TerminalTriggerAction, TerminalTriggerScope, TerminalTriggersSnapshot,
+    TriggerMatched, compile_active, expand_template,
 };
 use tokio::process::Command;
 use zeroize::Zeroizing;
@@ -20,6 +20,12 @@ use super::{
 #[cfg(windows)]
 const TERMINAL_TRIGGER_PROCESS_CREATE_NO_WINDOW: u32 = 0x08000000;
 const MAX_PENDING_TRIGGER_ACTIONS: usize = 128;
+
+enum TriggerActivation {
+    Output,
+    Link,
+    Menu(usize),
+}
 
 pub(super) struct TerminalTriggerRuntimeState {
     generation: u64,
@@ -105,7 +111,12 @@ impl WorkspaceApp {
                 continue;
             }
             if matched.delay_ms() == 0 {
-                self.execute_terminal_trigger_match(target.clone(), matched, cx);
+                self.execute_terminal_trigger_match(
+                    target.clone(),
+                    matched,
+                    TriggerActivation::Output,
+                    cx,
+                );
                 continue;
             }
             if self.terminal_trigger_runtime.delayed_tasks.len() >= MAX_PENDING_TRIGGER_ACTIONS {
@@ -117,7 +128,12 @@ impl WorkspaceApp {
             let task = cx.spawn(async move |weak, cx| {
                 Timer::after(delay).await;
                 let _ = weak.update(cx, |workspace, cx| {
-                    workspace.execute_terminal_trigger_match(target, matched, cx);
+                    workspace.execute_terminal_trigger_match(
+                        target,
+                        matched,
+                        TriggerActivation::Output,
+                        cx,
+                    );
                     workspace
                         .terminal_trigger_runtime
                         .delayed_tasks
@@ -140,6 +156,7 @@ impl WorkspaceApp {
         &mut self,
         target: TerminalTriggerActionTarget,
         matched: TriggerMatched,
+        activation: TriggerActivation,
         cx: &mut Context<Self>,
     ) {
         if !self.terminal_trigger_target_is_live(&target, cx)
@@ -163,10 +180,39 @@ impl WorkspaceApp {
         {
             return;
         }
-        let Ok(action) = trigger.action.expand(&matched) else {
+        let configured_action = match (&trigger.action, activation) {
+            (TerminalTriggerAction::CustomLink { action }, TriggerActivation::Link) => {
+                action.as_ref()
+            }
+            (TerminalTriggerAction::CustomMenu { items }, TriggerActivation::Menu(index)) => {
+                let Some(item) = items.get(index) else { return };
+                &item.action
+            }
+            (action, TriggerActivation::Output) if !action.is_interactive() => action,
+            _ => return,
+        };
+        let Ok(action) = configured_action.expand(&matched) else {
             return;
         };
         match action {
+            ExpandedTriggerAction::OpenUrl { url } => {
+                if url::Url::parse(&url)
+                    .is_ok_and(|parsed| matches!(parsed.scheme(), "http" | "https" | "mailto"))
+                {
+                    cx.open_url(&url);
+                } else {
+                    self.push_workspace_notice(
+                        TerminalNotice {
+                            title: self.i18n.t("settings_view.terminal.triggers.invalid_url"),
+                            description: None,
+                            status_text: None,
+                            progress: None,
+                            variant: TerminalNoticeVariant::Error,
+                        },
+                        cx,
+                    );
+                }
+            }
             ExpandedTriggerAction::SendText { text, append_enter } => {
                 let _ = target.pane.update(cx, |pane, cx| {
                     pane.send_trigger_text(&text, append_enter, cx)
@@ -186,6 +232,27 @@ impl WorkspaceApp {
                 self.launch_terminal_trigger_process(process, cx);
             }
         }
+    }
+
+    pub(in crate::workspace) fn handle_terminal_trigger_interaction(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        pane: WeakEntity<TerminalPane>,
+        matched: TriggerMatched,
+        item: Option<usize>,
+        cx: &mut Context<Self>,
+    ) {
+        self.execute_terminal_trigger_match(
+            TerminalTriggerActionTarget {
+                pane_id,
+                session_id,
+                pane,
+            },
+            matched,
+            item.map_or(TriggerActivation::Link, TriggerActivation::Menu),
+            cx,
+        );
     }
 
     fn terminal_trigger_target_is_live(
@@ -374,7 +441,7 @@ impl WorkspaceApp {
         let rules = compile_active(&snapshot, self.terminal_trigger_runtime.generation)
             .ok()
             .flatten();
-        pane.update(cx, |pane, _cx| pane.set_trigger_rules(rules));
+        pane.update(cx, |pane, cx| pane.set_trigger_rules(rules, cx));
     }
 
     pub(in crate::workspace) fn toggle_terminal_trigger_for_pane(

@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "SSH 通道",
+    "name": "通道名稱",
+    "group": "群組",
+    "group_invalid": "群組路徑不能包含空的層級。",
+    "host": "SSH 主機",
+    "choose_host": "選擇已儲存的 SSH 主機",
+    "startup": "應用程式啟動時連線",
+    "missing_host": "找不到關聯的 SSH 主機。",
+    "name_required": "請填寫通道名稱，名稱和群組不能包含換行。",
+    "address_required": "請填寫有效的監聽位址和目標位址。",
+    "save_failed": "無法更新 SSH 通道。"
+  },
   "copy_address": "複製地址",
   "copied": "已複製",
   "forwards": {

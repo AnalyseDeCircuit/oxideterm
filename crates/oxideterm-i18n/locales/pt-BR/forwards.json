@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "Túnel SSH",
+    "name": "Nome do túnel",
+    "group": "Grupo",
+    "group_invalid": "O caminho do grupo não pode conter segmentos vazios.",
+    "host": "Host SSH",
+    "choose_host": "Escolha um host SSH salvo",
+    "startup": "Conectar ao iniciar o aplicativo",
+    "missing_host": "O host SSH salvo não está disponível.",
+    "name_required": "Informe um nome para o túnel. O nome e o grupo devem ocupar uma única linha.",
+    "address_required": "Informe endereços de escuta e destino válidos.",
+    "save_failed": "Não foi possível atualizar o túnel SSH."
+  },
   "copy_address": "Copiar endereço",
   "copied": "Copiado!",
   "forwards": {

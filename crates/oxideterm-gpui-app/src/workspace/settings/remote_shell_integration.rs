@@ -182,7 +182,11 @@ impl RemoteShellIntegrationRuntimeState {
         self.terminal_checking_nodes.remove(&node_id);
         match result {
             Ok((status, _))
-                if status.state == oxideterm_terminal::RemoteShellIntegrationState::Installed =>
+                if matches!(
+                    status.state,
+                    oxideterm_terminal::RemoteShellIntegrationState::Installed
+                        | oxideterm_terminal::RemoteShellIntegrationState::NewerVersion
+                ) =>
             {
                 self.terminal_ready_nodes.insert(node_id.clone());
                 self.terminal_prompt_nodes
@@ -660,7 +664,7 @@ impl WorkspaceApp {
                         ))
                         .child(self.remote_shell_integration_detail_row(
                             "settings_view.connections.shell_integration.startup_file",
-                            status.startup_file,
+                            status.startup_files.join("\n"),
                         ))
                 })
                 .when_some(failure, |content, failure| {
@@ -831,6 +835,9 @@ impl WorkspaceApp {
             oxideterm_terminal::RemoteShellIntegrationState::NeedsUpdate => {
                 "settings_view.connections.shell_integration.state_needs_update"
             }
+            oxideterm_terminal::RemoteShellIntegrationState::NewerVersion => {
+                "settings_view.connections.shell_integration.newer_version"
+            }
         };
         self.i18n.t(key)
     }
@@ -997,6 +1004,9 @@ impl RemoteShellIntegrationFailure {
             }
             Self::Integration(RemoteShellIntegrationError::RemoveFailed) => {
                 "settings_view.connections.shell_integration.remove_failed"
+            }
+            Self::Integration(RemoteShellIntegrationError::NewerVersion) => {
+                "settings_view.connections.shell_integration.newer_version"
             }
             Self::InstallationIncomplete => {
                 "settings_view.connections.shell_integration.installation_incomplete"

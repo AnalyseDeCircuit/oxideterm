@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "SSH-Tunnel",
+    "name": "Tunnelname",
+    "group": "Gruppe",
+    "group_invalid": "Gruppenpfade dürfen keine leeren Abschnitte enthalten.",
+    "host": "SSH-Host",
+    "choose_host": "Gespeicherten SSH-Host auswählen",
+    "startup": "Beim Anwendungsstart verbinden",
+    "missing_host": "Der gespeicherte SSH-Host ist nicht verfügbar.",
+    "name_required": "Geben Sie einen Tunnelnamen ein. Name und Gruppe dürfen keine Zeilenumbrüche enthalten.",
+    "address_required": "Geben Sie gültige Bindungs- und Zieladressen ein.",
+    "save_failed": "Der SSH-Tunnel konnte nicht aktualisiert werden."
+  },
   "copy_address": "Adresse kopieren",
   "copied": "Kopiert!",
   "forwards": {

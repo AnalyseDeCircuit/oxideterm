@@ -27,6 +27,7 @@ pub(crate) struct TerminalLinkRange {
 pub(crate) enum TerminalLinkKind {
     Url,
     Path,
+    Trigger,
 }
 
 pub(crate) fn link_should_be_styled(
@@ -35,6 +36,13 @@ pub(crate) fn link_should_be_styled(
     row: usize,
     col: usize,
 ) -> bool {
+    if hovered.is_some_and(|link| {
+        link.kind == TerminalLinkKind::Trigger
+            && link.row == row
+            && (link.start_col..link.end_col).contains(&col)
+    }) {
+        return true;
+    }
     ranges
         .iter()
         .find(|range| range.row == row && col >= range.start_col && col < range.end_col)

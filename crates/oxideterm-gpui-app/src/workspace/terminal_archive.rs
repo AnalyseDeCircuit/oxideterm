@@ -2,8 +2,10 @@ use super::*;
 use oxideterm_environment::archive::{
     ArchiveCapabilities, ArchiveCommandError, ArchiveShell, plan_archive_command,
 };
-use oxideterm_gpui_editor::{EditorContextMenuLabels, EditorPresentation, TextEditorView};
-use oxideterm_gpui_ui::button::{ButtonOptions, ButtonVariant, button_with};
+use oxideterm_gpui_editor::{
+    EditorContextMenuLabels, EditorPresentation, EditorSettings, TextEditorView,
+};
+use oxideterm_gpui_ui::button::{ButtonOptions, ButtonSize, ButtonVariant, button_with};
 use oxideterm_gpui_ui::modal::{
     modal_body, modal_container, modal_footer, modal_header, modal_overlay,
 };
@@ -27,8 +29,7 @@ pub(super) struct ArchiveCommandPreview {
     summary: Option<(String, String)>,
     error: Option<&'static str>,
     loading: bool,
-    confirm_environment: bool,
-    environment_confirmed: bool,
+    choosing_shell: bool,
     job: Option<tokio::task::AbortHandle>,
     delivery: Option<Task<()>>,
 }
@@ -106,10 +107,6 @@ impl WorkspaceApp {
             || (source.shell_integration_status().detected
                 && source.shell_integration_status().state
                     == oxideterm_terminal::ShellIntegrationLifecycleState::Output);
-        let confirm_environment = connection.is_some()
-            || launch_shell
-                .as_ref()
-                .is_some_and(|shell| shell.id.starts_with("wsl"));
         let prompt_at = source.shell_integration_status().last_seen_at;
         let target = source.title().to_string();
         let tokens = self.tokens;
@@ -122,6 +119,18 @@ impl WorkspaceApp {
         let editor = cx.new(|cx| {
             let mut editor = TextEditorView::new_verbatim(String::new(), &tokens, cx);
             editor.set_presentation(EditorPresentation::Inline, cx);
+            editor.set_settings(
+                EditorSettings {
+                    soft_wrap: true,
+                    soft_wrap_column: None,
+                    indentation_markers: false,
+                    highlight_special_chars: false,
+                    highlight_current_line: false,
+                    placeholder: None,
+                    ..Default::default()
+                },
+                cx,
+            );
             editor.set_context_menu_labels(labels);
             editor.set_read_only(true);
             editor
@@ -143,8 +152,7 @@ impl WorkspaceApp {
             summary: None,
             error: invalid_context.then_some("terminal.archive.context_unavailable"),
             loading: !invalid_context,
-            confirm_environment,
-            environment_confirmed: !confirm_environment,
+            choosing_shell: false,
             job: None,
             delivery: None,
         };
@@ -252,7 +260,7 @@ impl WorkspaceApp {
         let Some(preview) = self.archive_command.as_ref() else {
             return;
         };
-        if preview.loading || preview.error.is_some() || !preview.environment_confirmed {
+        if preview.loading || preview.error.is_some() {
             return;
         }
         let valid = preview.pane.upgrade().is_some_and(|pane| {
@@ -288,19 +296,58 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn render_archive_command(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn render_archive_command(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let preview = self.archive_command.as_ref()?;
-        let mut body = modal_body(&self.tokens)
-            .id("archive-command-body")
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scrollbar()
-            .child(
+        let mut body = div()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .text_size(px(self.tokens.metrics.ui_text_sm));
+        if let Some((archive, destination)) = &preview.summary {
+            body = body.child(
+                div().flex().flex_col().gap_2().children(
+                    [
+                        ("terminal.archive.source", archive),
+                        ("terminal.archive.destination", destination),
+                    ]
+                    .into_iter()
+                    .map(|(label, value)| {
+                        div()
+                            .flex()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .w(px(80.0))
+                                    .flex_shrink_0()
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(self.i18n.t(label)),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .whitespace_normal()
+                                    .child(value.clone()),
+                            )
+                    }),
+                ),
+            );
+        }
+        if preview.loading {
+            body = body.child(
                 div()
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(preview.target.clone()),
-            )
-            .child(
+                    .child(self.i18n.t("terminal.archive.probing")),
+            );
+        } else if preview.choosing_shell
+            || preview.shell.is_none()
+            || (preview.error.is_some() && preview.capabilities.is_some())
+        {
+            body = body.child(
                 div().flex().flex_wrap().gap_2().children(
                     [
                         (ArchiveShell::Posix, "terminal.archive.shell_posix"),
@@ -312,7 +359,7 @@ impl WorkspaceApp {
                         (ArchiveShell::Cmd, "terminal.archive.shell_cmd"),
                     ]
                     .into_iter()
-                    .map(|(shell, label)| {
+                    .filter_map(|(shell, label)| {
                         let supported_platform =
                             preview.capabilities.as_ref().is_some_and(|caps| {
                                 if caps.windows {
@@ -321,107 +368,142 @@ impl WorkspaceApp {
                                     shell != ArchiveShell::Cmd
                                 }
                             });
-                        button_with(
-                            &self.tokens,
-                            self.i18n.t(label),
-                            ButtonOptions {
-                                variant: if preview.shell == Some(shell) {
-                                    ButtonVariant::Default
-                                } else {
-                                    ButtonVariant::Outline
+                        if !supported_platform {
+                            return None;
+                        }
+                        Some(
+                            button_with(
+                                &self.tokens,
+                                self.i18n.t(label),
+                                ButtonOptions {
+                                    variant: if preview.shell == Some(shell) {
+                                        ButtonVariant::Default
+                                    } else {
+                                        ButtonVariant::Outline
+                                    },
+                                    disabled: preview.loading || !supported_platform,
+                                    size: ButtonSize::Sm,
+                                    ..Default::default()
                                 },
-                                disabled: preview.loading || !supported_platform,
-                                ..Default::default()
-                            },
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                if let Some(preview) = this.archive_command.as_mut()
-                                    && !preview.loading
-                                    && supported_platform
-                                    && preview.capabilities.is_some()
-                                {
-                                    preview.shell = Some(shell);
-                                    this.refresh_archive_command(cx);
-                                }
-                                cx.stop_propagation();
-                            }),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    if let Some(preview) = this.archive_command.as_mut()
+                                        && !preview.loading
+                                        && supported_platform
+                                        && preview.capabilities.is_some()
+                                    {
+                                        preview.shell = Some(shell);
+                                        preview.choosing_shell = false;
+                                        this.refresh_archive_command(cx);
+                                    }
+                                    cx.stop_propagation();
+                                }),
+                            ),
                         )
                     }),
                 ),
             );
-        if let Some((archive, destination)) = &preview.summary {
-            body = body
-                .child(div().child(format!(
-                    "{}: {archive}",
-                    self.i18n.t("terminal.archive.source")
-                )))
-                .child(div().child(format!(
-                    "{}: {destination}",
-                    self.i18n.t("terminal.archive.destination")
-                )));
         }
-        if preview.confirm_environment {
-            body = body
-                .child(
-                    div()
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("terminal.archive.environment_hint")),
-                )
-                .child(
-                    oxideterm_gpui_ui::checkbox::checkbox(
-                        &self.tokens,
-                        self.i18n.t("terminal.archive.confirm_environment"),
-                        preview.environment_confirmed,
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, _, _, cx| {
-                            if let Some(preview) = this.archive_command.as_mut() {
-                                preview.environment_confirmed = !preview.environment_confirmed;
-                                cx.notify();
-                            }
-                            cx.stop_propagation();
-                        }),
-                    ),
-                );
-        }
-        if preview.loading {
-            body = body.child(self.i18n.t("terminal.archive.probing"));
-        } else if let Some(error) = preview.error {
+        if let Some(error) = preview.error {
             body = body.child(
                 div()
                     .text_color(rgb(self.tokens.ui.error))
                     .child(self.i18n.t(error)),
             );
         }
-        let body = body.child(
-            div()
-                .h(px(132.0))
-                .min_w_0()
-                .border_1()
-                .border_color(rgb(self.tokens.ui.border))
-                .rounded(px(self.tokens.radii.sm))
-                .child(preview.editor.clone()),
-        );
-        let disabled = preview.loading || preview.error.is_some() || !preview.environment_confirmed;
+        if preview.summary.is_some() {
+            let shell_label = match preview.shell {
+                Some(ArchiveShell::Posix) => "terminal.archive.shell_posix",
+                Some(ArchiveShell::Fish) => "terminal.archive.shell_fish",
+                Some(ArchiveShell::PowerShell) => "terminal.archive.shell_powershell",
+                Some(ArchiveShell::Cmd) => "terminal.archive.shell_cmd",
+                None => "terminal.archive.choose_shell",
+            };
+            body = body.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(self.i18n.t("terminal.archive.command"))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap_2()
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(self.i18n.t(shell_label))
+                                    .child(
+                                        button_with(
+                                            &self.tokens,
+                                            self.i18n.t("terminal.archive.change_shell"),
+                                            ButtonOptions {
+                                                variant: ButtonVariant::Ghost,
+                                                size: ButtonSize::Sm,
+                                                ..Default::default()
+                                            },
+                                        )
+                                        .on_mouse_down(
+                                            MouseButton::Left,
+                                            cx.listener(|this, _, _, cx| {
+                                                if let Some(preview) = this.archive_command.as_mut()
+                                                {
+                                                    preview.choosing_shell =
+                                                        !preview.choosing_shell;
+                                                    cx.notify();
+                                                }
+                                                cx.stop_propagation();
+                                            }),
+                                        ),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .h(px(120.0))
+                            .flex_shrink_0()
+                            .min_w_0()
+                            .p_3()
+                            .border_1()
+                            .border_color(rgb(self.tokens.ui.border))
+                            .rounded(px(self.tokens.radii.sm))
+                            .child(preview.editor.clone()),
+                    ),
+            );
+        }
+        let disabled = preview.loading || preview.error.is_some();
         let dialog = modal_container(&self.tokens)
-            .w(px(680.0))
-            .max_w_full()
-            .h(px(600.0))
-            .max_h_full()
+            .w(px(640.0_f32.min(
+                (f32::from(window.viewport_size().width) - 32.0).max(0.0),
+            )))
+            .max_h(px(
+                (f32::from(window.viewport_size().height) - 32.0).max(0.0)
+            ))
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(modal_header(
                 &self.tokens,
                 self.i18n.t("terminal.archive.title"),
-                self.i18n.t("terminal.archive.hint"),
+                preview.target.clone(),
             ))
-            .child(body)
+            .child(
+                modal_body(&self.tokens)
+                    .id("archive-command-body")
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .child(body),
+            )
             .child(
                 modal_footer(&self.tokens)
+                    .flex_shrink_0()
                     .child(
                         button_with(
                             &self.tokens,
@@ -441,6 +523,7 @@ impl WorkspaceApp {
                             self.i18n.t("terminal.archive.fill"),
                             ButtonOptions {
                                 disabled,
+                                variant: ButtonVariant::Default,
                                 ..Default::default()
                             },
                         )

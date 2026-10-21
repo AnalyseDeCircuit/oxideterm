@@ -181,6 +181,8 @@ fn default_command_bar_show_current_directory() -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCommandMarksSettings {
     pub enabled: bool,
+    #[serde(default)]
+    pub folding_enabled: bool,
     pub user_input_observed: bool,
     pub heuristic_detection: bool,
     pub show_hover_actions: bool,
@@ -192,6 +194,7 @@ impl Default for TerminalCommandMarksSettings {
     fn default() -> Self {
         Self {
             enabled: true,
+            folding_enabled: false,
             user_input_observed: false,
             heuristic_detection: false,
             show_hover_actions: true,

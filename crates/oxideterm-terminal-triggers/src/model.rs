@@ -109,6 +109,38 @@ pub enum TerminalTriggerAction {
     SendText { text: String, append_enter: bool },
     RunQuickCommand { quick_command_id: String },
     LaunchLocalProcess { process: LocalProcessSpec },
+    OpenUrl { url: String },
+    CustomLink { action: Box<TerminalTriggerAction> },
+    CustomMenu { items: Vec<TerminalTriggerMenuItem> },
+    ShowTooltip { text: String },
+}
+
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct TerminalTriggerMenuItem {
+    pub label: String,
+    pub action: TerminalTriggerAction,
+}
+
+impl TerminalTriggerAction {
+    pub fn is_interactive(&self) -> bool {
+        matches!(
+            self,
+            Self::CustomLink { .. } | Self::CustomMenu { .. } | Self::ShowTooltip { .. }
+        )
+    }
+
+    pub fn uses_explicit_shell(&self) -> bool {
+        match self {
+            Self::LaunchLocalProcess {
+                process: LocalProcessSpec::ExplicitShell { .. },
+            } => true,
+            Self::CustomLink { action } => action.uses_explicit_shell(),
+            Self::CustomMenu { items } => {
+                items.iter().any(|item| item.action.uses_explicit_shell())
+            }
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Debug for TerminalTriggerAction {
@@ -117,6 +149,10 @@ impl std::fmt::Debug for TerminalTriggerAction {
             Self::SendText { .. } => "send_text",
             Self::RunQuickCommand { .. } => "run_quick_command",
             Self::LaunchLocalProcess { .. } => "launch_local_process",
+            Self::OpenUrl { .. } => "open_url",
+            Self::CustomLink { .. } => "custom_link",
+            Self::CustomMenu { .. } => "custom_menu",
+            Self::ShowTooltip { .. } => "show_tooltip",
         };
         formatter
             .debug_struct("TerminalTriggerAction")

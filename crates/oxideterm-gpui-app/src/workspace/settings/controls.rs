@@ -901,19 +901,40 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Terminal, SettingsSelect::TerminalTriggerAction) => {
+            (
+                SettingsTab::Terminal,
+                SettingsSelect::TerminalTriggerAction | SettingsSelect::TerminalTriggerClickAction,
+            ) => {
                 let draft = self.terminal_trigger_draft()?;
-                let current = match &draft.action {
+                let nested = open_select == SettingsSelect::TerminalTriggerClickAction;
+                let action = if nested {
+                    self.terminal_trigger_draft_action()?
+                } else {
+                    &draft.action
+                };
+                let current = match action {
                     TerminalTriggerAction::SendText { .. } => 0,
                     TerminalTriggerAction::RunQuickCommand { .. } => 1,
                     TerminalTriggerAction::LaunchLocalProcess { .. } => 2,
+                    TerminalTriggerAction::OpenUrl { .. } => 3,
+                    TerminalTriggerAction::CustomLink { .. } => 4,
+                    TerminalTriggerAction::CustomMenu { .. } => 5,
+                    TerminalTriggerAction::ShowTooltip { .. } => 6,
                 };
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                for action_index in 0..3 {
+                for action_index in if nested {
+                    vec![0, 1, 2, 3]
+                } else {
+                    vec![0, 1, 2, 4, 5, 6]
+                } {
                     let label_key = match action_index {
                         0 => "settings_view.terminal.triggers.action_send_text",
                         1 => "settings_view.terminal.triggers.action_quick_command",
-                        _ => "settings_view.terminal.triggers.action_local_process",
+                        2 => "settings_view.terminal.triggers.action_local_process",
+                        3 => "settings_view.terminal.triggers.open_url",
+                        4 => "settings_view.terminal.triggers.custom_link",
+                        5 => "settings_view.terminal.triggers.custom_menu",
+                        _ => "settings_view.terminal.triggers.show_tooltip",
                     };
                     popup = popup.child(select_option_action(
                         select_option(
@@ -942,15 +963,38 @@ impl WorkspaceApp {
                                         .unwrap_or_default();
                                     TerminalTriggerAction::RunQuickCommand { quick_command_id }
                                 }
-                                _ => TerminalTriggerAction::LaunchLocalProcess {
+                                2 => TerminalTriggerAction::LaunchLocalProcess {
                                     process: LocalProcessSpec::DirectProgram {
                                         executable: String::new(),
                                         arguments: Vec::new(),
                                         working_directory: None,
                                     },
                                 },
+                                3 => TerminalTriggerAction::OpenUrl { url: String::new() },
+                                4 => TerminalTriggerAction::CustomLink {
+                                    action: Box::new(TerminalTriggerAction::OpenUrl {
+                                        url: String::new(),
+                                    }),
+                                },
+                                5 => TerminalTriggerAction::CustomMenu {
+                                    items: vec![
+                                        oxideterm_terminal_triggers::TerminalTriggerMenuItem {
+                                            label: String::new(),
+                                            action: TerminalTriggerAction::OpenUrl {
+                                                url: String::new(),
+                                            },
+                                        },
+                                    ],
+                                },
+                                _ => TerminalTriggerAction::ShowTooltip {
+                                    text: String::new(),
+                                },
                             };
-                            this.select_terminal_trigger_action(action);
+                            if nested {
+                                this.select_terminal_trigger_click_action(action);
+                            } else {
+                                this.select_terminal_trigger_action(action);
+                            }
                             cx.stop_propagation();
                             cx.notify();
                         }),
@@ -959,9 +1003,9 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (SettingsTab::Terminal, SettingsSelect::TerminalTriggerProcessMode) => {
-                let draft = self.terminal_trigger_draft()?;
+                let action = self.terminal_trigger_draft_action()?;
                 let current_shell = matches!(
-                    &draft.action,
+                    action,
                     TerminalTriggerAction::LaunchLocalProcess {
                         process: LocalProcessSpec::ExplicitShell { .. }
                     }
@@ -991,8 +1035,7 @@ impl WorkspaceApp {
                 Some(popup)
             }
             (SettingsTab::Terminal, SettingsSelect::TerminalTriggerQuickCommand) => {
-                let draft = self.terminal_trigger_draft()?;
-                let current = match &draft.action {
+                let current = match self.terminal_trigger_draft_action()? {
                     TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
                         quick_command_id.clone()
                     }

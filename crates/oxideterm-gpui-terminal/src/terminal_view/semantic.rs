@@ -435,6 +435,8 @@ mod tests {
             start_line: 0,
             command_line: 0,
             command_line_clipped: false,
+            output_start: None,
+            output_end: None,
             end_line: Some(1),
             is_closed: true,
             closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),

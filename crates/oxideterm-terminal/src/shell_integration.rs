@@ -4,10 +4,12 @@ use alacritty_terminal::{
     event::EventListener,
     grid::Dimensions,
     index::Line,
-    term::{Term, cell::Flags},
+    term::{Term, TermMode, cell::Flags},
     vte::ansi::Processor,
 };
 use zeroize::Zeroizing;
+
+mod reflow;
 
 const MAX_COMMAND_TEXT_LENGTH: usize = 4096;
 const MAX_MARKS: usize = 2000;
@@ -90,6 +92,9 @@ pub struct TerminalCommandMark {
     pub command_line: usize,
     /// A clipped command still owns retained output, but no longer has an input row.
     pub command_line_clipped: bool,
+    pub output_start: Option<TerminalCommandPosition>,
+    /// Exclusive end of the output, before any following prompt.
+    pub output_end: Option<TerminalCommandPosition>,
     pub end_line: Option<usize>,
     pub is_closed: bool,
     pub closed_by: Option<TerminalCommandMarkClosedBy>,
@@ -104,12 +109,23 @@ pub struct TerminalCommandMark {
     pub finished_at: Option<u64>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TerminalCommandPosition {
+    pub line: usize,
+    pub column: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TerminalCommandMarkEvent {
     Created(TerminalCommandMark),
     Closed(TerminalCommandMark),
     HistoryTrimmed {
         lines: usize,
+    },
+    Reflowed {
+        cols: usize,
+        rows: usize,
+        marks: Vec<TerminalCommandMark>,
     },
     /// The terminal cleared saved history, so existing visual line coordinates are invalid.
     Reset,
@@ -125,11 +141,22 @@ impl TerminalCommandMark {
         self.command_line = self.command_line.saturating_sub(lines);
         self.start_line = self.start_line.saturating_sub(lines);
         self.end_line = self.end_line.map(|end| end.saturating_sub(lines));
+        for position in [&mut self.output_start, &mut self.output_end]
+            .into_iter()
+            .flatten()
+        {
+            if position.line < lines {
+                position.column = 0;
+            }
+            position.line = position.line.saturating_sub(lines);
+        }
         true
     }
 
     pub fn output_start_line(&self) -> usize {
-        if self.command_line_clipped {
+        if let Some(start) = self.output_start {
+            start.line
+        } else if self.command_line_clipped {
             0
         } else {
             self.command_line.saturating_add(1)
@@ -146,18 +173,14 @@ pub struct ShellIntegrationStatus {
 }
 
 #[derive(Clone, Debug)]
-struct CursorPosition {
-    line: usize,
-    at: u64,
-}
-
-#[derive(Clone, Debug)]
 struct ShellIntegrationState {
     lifecycle: ShellIntegrationLifecycleState,
     integration_source: Option<ShellIntegrationSource>,
+    injected: bool,
+    secondary_prompt: bool,
     last_seen_at: Option<u64>,
-    prompt_start: Option<CursorPosition>,
-    command_start: Option<CursorPosition>,
+    prompt_start: Option<TerminalCommandPosition>,
+    command_start: Option<TerminalCommandPosition>,
     pending_command_text: Option<String>,
     pending_command_text_from_protocol: bool,
     active_command_id: Option<String>,
@@ -170,6 +193,8 @@ impl Default for ShellIntegrationState {
         Self {
             lifecycle: ShellIntegrationLifecycleState::Idle,
             integration_source: None,
+            injected: false,
+            secondary_prompt: false,
             last_seen_at: None,
             prompt_start: None,
             command_start: None,
@@ -312,6 +337,7 @@ pub(crate) struct TerminalShellIntegration {
     pending_escape: bool,
     next_command_sequence: u64,
     saved_history_clear_detector: SavedHistoryClearDetector,
+    reflow: reflow::ShellReflow,
 }
 
 impl TerminalShellIntegration {
@@ -348,6 +374,7 @@ impl TerminalShellIntegration {
         mut recordable: Option<&mut Vec<u8>>,
         emit: &mut impl FnMut(crate::TerminalEvent),
     ) -> bool {
+        self.reflow_command_marks(term, &mut *emit);
         let mut changed = false;
         let mut index = 0usize;
         let mut normal_start = 0usize;
@@ -438,6 +465,7 @@ impl TerminalShellIntegration {
         if normal_start < bytes.len() {
             self.advance_terminal_bytes(parser, term, &bytes[normal_start..], recordable, emit);
         }
+        self.capture_prompt_anchors(term);
 
         changed
     }
@@ -490,15 +518,6 @@ impl TerminalShellIntegration {
         self.reset_command_marks_for_coordinate_epoch(emit);
     }
 
-    pub(crate) fn reset_command_marks_for_grid_reflow(
-        &mut self,
-        mut emit: impl FnMut(crate::TerminalEvent),
-    ) {
-        // Column and row changes can reflow grid content, invalidating every
-        // absolute line coordinate retained by command marks.
-        self.reset_command_marks_for_coordinate_epoch(&mut emit);
-    }
-
     fn reset_command_marks_for_coordinate_epoch(
         &mut self,
         emit: &mut impl FnMut(crate::TerminalEvent),
@@ -517,6 +536,8 @@ impl TerminalShellIntegration {
                 mark.is_closed = true;
                 mark.closed_by = Some(TerminalCommandMarkClosedBy::TerminalReset);
                 mark.output_confidence = TerminalCommandMarkConfidence::Unknown;
+                mark.output_start = None;
+                mark.output_end = None;
                 mark.end_line = Some(mark.start_line);
                 mark.finished_at = Some(now);
                 mark.duration_ms = Some(now.saturating_sub(mark.started_at));
@@ -532,7 +553,9 @@ impl TerminalShellIntegration {
         }
 
         self.marks.clear();
+        self.reflow.clear_anchors();
         self.state.lifecycle = ShellIntegrationLifecycleState::Closed;
+        self.state.secondary_prompt = false;
         self.state.prompt_start = None;
         self.state.command_start = None;
         self.state.pending_command_text = None;
@@ -700,11 +723,94 @@ impl TerminalShellIntegration {
             "633" => ShellIntegrationSource::Osc633,
             _ => return false,
         };
-        let Some(event) = parse_shell_integration_event(source, data, cursor_position(term)) else {
+        if term.mode().contains(TermMode::ALT_SCREEN) {
+            return true;
+        }
+        let sequence = data.split(';').next().unwrap_or_default();
+        let injected = source == ShellIntegrationSource::Osc133
+            && data
+                .split(';')
+                .skip(1)
+                .any(|field| field == "aid=oxideterm");
+        let same_producer =
+            self.state.integration_source == Some(source) && self.state.injected == injected;
+        let position = cursor_position(term);
+        // Duplicate execution/end marks and prompt repaints cannot mutate a
+        // running command. A new prompt below its output can be a nested shell.
+        if (sequence == "C" && self.state.active_command_id.is_some())
+            || (sequence == "D" && self.state.active_command_id.is_none())
+        {
+            return true;
+        }
+        if matches!(sequence, "A" | "B")
+            && self.state.active_command_id.is_some()
+            && self
+                .marks
+                .last()
+                .is_some_and(|mark| mark.output_start.is_some_and(|start| position < start))
+        {
+            return true;
+        }
+        if sequence == "A" && data.split(';').skip(1).any(|field| field == "k=s") {
+            if same_producer {
+                self.state.secondary_prompt = true;
+            }
+            return true;
+        }
+        if sequence == "B" && same_producer && self.state.secondary_prompt {
+            return true;
+        }
+        // Native producers take precedence while the prompt is being drawn.
+        // The aid tag distinguishes our hooks even when both emit OSC 133.
+        let native_takeover = self.state.injected
+            && !injected
+            && matches!(sequence, "A" | "B")
+            && matches!(
+                self.state.lifecycle,
+                ShellIntegrationLifecycleState::Prompt | ShellIntegrationLifecycleState::Command
+            );
+        if self.state.integration_source.is_some()
+            && !same_producer
+            && !native_takeover
+            && !matches!(
+                self.state.lifecycle,
+                ShellIntegrationLifecycleState::Idle | ShellIntegrationLifecycleState::Closed
+            )
+            && !(self.state.lifecycle == ShellIntegrationLifecycleState::Output
+                && matches!(sequence, "A" | "B"))
+        {
+            return true;
+        }
+        if source == ShellIntegrationSource::Osc633
+            && let Some(arguments) = data.strip_prefix("E;")
+        {
+            // E supplies text only; C is the execution boundary. The optional
+            // nonce is neither command text nor authenticated by this receiver.
+            if self.state.active_command_id.is_none() {
+                self.state.pending_command_text = arguments
+                    .split(';')
+                    .next()
+                    .and_then(decode_osc633_text)
+                    .and_then(sanitize_shell_integration_command_text);
+                self.state.pending_command_text_from_protocol = true;
+            }
+            return true;
+        }
+        let Some(event) = parse_shell_integration_event(source, data, position) else {
             return true;
         };
-
-        for command_event in self.handle_shell_event(term, &event) {
+        if native_takeover {
+            self.state.lifecycle = ShellIntegrationLifecycleState::Idle;
+            self.state.prompt_start = None;
+            self.state.command_start = None;
+        }
+        self.state.injected = injected;
+        if matches!(sequence, "A" | "C" | "D") {
+            self.state.secondary_prompt = false;
+        }
+        let command_events = self.handle_shell_event(term, &event);
+        self.capture_command_anchors(term, &command_events);
+        for command_event in command_events {
             emit(crate::TerminalEvent::CommandMark(command_event));
         }
         emit(crate::TerminalEvent::ShellIntegration(event));
@@ -731,15 +837,18 @@ impl TerminalShellIntegration {
             ShellIntegrationEventKind::PromptStart => {
                 let prompt_start = prompt_block_start_line(term, event.line);
                 if let Some(closed) = self.close_active_mark_before(
-                    prompt_start,
+                    TerminalCommandPosition {
+                        line: event.line,
+                        column: event.col,
+                    },
                     TerminalCommandMarkClosedBy::NextCommand,
                     None,
                 ) {
                     command_events.push(TerminalCommandMarkEvent::Closed(closed));
                 }
-                self.state.prompt_start = Some(CursorPosition {
+                self.state.prompt_start = Some(TerminalCommandPosition {
                     line: prompt_start,
-                    at: now_millis(),
+                    column: event.col,
                 });
                 self.state.command_start = None;
                 self.state.pending_command_text = None;
@@ -749,25 +858,28 @@ impl TerminalShellIntegration {
             ShellIntegrationEventKind::CommandStart => {
                 let prompt_start = prompt_block_start_line(term, event.line);
                 if let Some(closed) = self.close_active_mark_before(
-                    prompt_start,
+                    TerminalCommandPosition {
+                        line: event.line,
+                        column: event.col,
+                    },
                     TerminalCommandMarkClosedBy::NextCommand,
                     None,
                 ) {
                     command_events.push(TerminalCommandMarkEvent::Closed(closed));
                 }
                 if previous != ShellIntegrationLifecycleState::Prompt {
-                    self.state.prompt_start = Some(CursorPosition {
+                    self.state.prompt_start = Some(TerminalCommandPosition {
                         line: prompt_start,
-                        at: now_millis(),
+                        column: event.col,
                     });
                 }
-                self.state.command_start = Some(CursorPosition {
+                self.state.command_start = Some(TerminalCommandPosition {
                     line: event.line,
-                    at: now_millis(),
+                    column: event.col,
                 });
                 self.state.pending_command_text = None;
                 self.state.pending_command_text_from_protocol = false;
-                self.state.started_at = Some(now_millis());
+                self.state.started_at = None;
             }
             ShellIntegrationEventKind::OutputStart => {
                 if event.command.is_some() {
@@ -777,6 +889,7 @@ impl TerminalShellIntegration {
                 if self.state.active_command_id.is_some() {
                     return command_events;
                 }
+                self.state.started_at = Some(now_millis());
 
                 let start_line = self
                     .state
@@ -810,28 +923,43 @@ impl TerminalShellIntegration {
                 } else {
                     extract_command_from_visible_buffer(
                         term,
-                        self.state
-                            .command_start
-                            .as_ref()
-                            .map(|position| position.line),
-                        event.line,
+                        self.state.command_start,
+                        TerminalCommandPosition {
+                            line: event.line,
+                            column: event.col,
+                        },
                     )
                 };
-                let mark = self.create_shell_integrated_mark(command, start_line, command_line);
+                let mark = self.create_shell_integrated_mark(
+                    command,
+                    start_line,
+                    command_line,
+                    TerminalCommandPosition {
+                        line: event.line,
+                        column: event.col,
+                    },
+                );
                 self.state.active_command_id = Some(mark.command_id.clone());
                 self.state.active_start_line = Some(start_line);
                 self.state.prompt_start = None;
                 command_events.push(TerminalCommandMarkEvent::Created(mark));
             }
             ShellIntegrationEventKind::CommandEnd => {
-                let end_boundary = prompt_block_start_line(term, event.line);
                 if let Some(closed) = self.close_active_mark_before(
-                    end_boundary,
+                    TerminalCommandPosition {
+                        line: event.line,
+                        column: event.col,
+                    },
                     TerminalCommandMarkClosedBy::ShellIntegration,
                     event.exit_code,
                 ) {
                     command_events.push(TerminalCommandMarkEvent::Closed(closed));
                 }
+                self.state.prompt_start = None;
+                self.state.command_start = None;
+                self.state.pending_command_text = None;
+                self.state.pending_command_text_from_protocol = false;
+                self.state.started_at = None;
             }
         }
 
@@ -868,6 +996,7 @@ impl TerminalShellIntegration {
         command: Option<String>,
         start_line: usize,
         command_line: usize,
+        output_start: TerminalCommandPosition,
     ) -> TerminalCommandMark {
         self.next_command_sequence = self.next_command_sequence.saturating_add(1);
         let now = now_millis();
@@ -877,6 +1006,8 @@ impl TerminalShellIntegration {
             start_line,
             command_line: command_line.max(start_line),
             command_line_clipped: false,
+            output_start: Some(output_start),
+            output_end: None,
             end_line: None,
             is_closed: false,
             closed_by: None,
@@ -887,11 +1018,7 @@ impl TerminalShellIntegration {
             confidence: TerminalCommandMarkConfidence::High,
             output_confidence: TerminalCommandMarkConfidence::Unknown,
             stale: false,
-            started_at: self
-                .state
-                .started_at
-                .or_else(|| self.state.prompt_start.as_ref().map(|position| position.at))
-                .unwrap_or(now),
+            started_at: self.state.started_at.unwrap_or(now),
             finished_at: None,
         };
         self.marks.push(mark.clone());
@@ -903,7 +1030,7 @@ impl TerminalShellIntegration {
 
     fn close_active_mark_before(
         &mut self,
-        next_block_start_line: usize,
+        boundary: TerminalCommandPosition,
         closed_by: TerminalCommandMarkClosedBy,
         exit_code: Option<i32>,
     ) -> Option<TerminalCommandMark> {
@@ -917,8 +1044,11 @@ impl TerminalShellIntegration {
                     .as_ref()
                     .map(|position| position.line)
             })
-            .unwrap_or(next_block_start_line);
-        let close_line = next_block_start_line.saturating_sub(1).max(fallback_start);
+            .unwrap_or(boundary.line);
+        let close_line = boundary
+            .line
+            .saturating_sub(usize::from(boundary.column == 0))
+            .max(fallback_start);
         let now = now_millis();
         let mark = self
             .marks
@@ -926,7 +1056,14 @@ impl TerminalShellIntegration {
             .find(|mark| mark.command_id == command_id && !mark.is_closed)?;
         mark.is_closed = true;
         mark.closed_by = Some(closed_by);
-        mark.output_confidence = TerminalCommandMarkConfidence::High;
+        let valid_range = mark.output_start.is_some_and(|start| boundary >= start);
+        mark.output_end = valid_range.then_some(boundary);
+        mark.output_confidence =
+            if valid_range && closed_by == TerminalCommandMarkClosedBy::ShellIntegration {
+                TerminalCommandMarkConfidence::High
+            } else {
+                TerminalCommandMarkConfidence::Unknown
+            };
         mark.end_line = Some(close_line);
         mark.exit_code = exit_code;
         mark.finished_at = Some(now);
@@ -947,7 +1084,7 @@ fn is_absolute_remote_cwd(path: &str) -> bool {
 fn parse_shell_integration_event(
     source: ShellIntegrationSource,
     data: &str,
-    position: (usize, usize),
+    position: TerminalCommandPosition,
 ) -> Option<ShellIntegrationEvent> {
     let (sequence, args) = split_sequence(data);
     let kind = match (source, sequence.as_str()) {
@@ -955,7 +1092,7 @@ fn parse_shell_integration_event(
         (_, "B") => ShellIntegrationEventKind::CommandStart,
         (ShellIntegrationSource::Osc133, "C") => ShellIntegrationEventKind::OutputStart,
         (ShellIntegrationSource::Osc133, "D") => ShellIntegrationEventKind::CommandEnd,
-        (ShellIntegrationSource::Osc633, "C" | "E") => ShellIntegrationEventKind::OutputStart,
+        (ShellIntegrationSource::Osc633, "C") => ShellIntegrationEventKind::OutputStart,
         (ShellIntegrationSource::Osc633, "D") => ShellIntegrationEventKind::CommandEnd,
         _ => return None,
     };
@@ -964,11 +1101,8 @@ fn parse_shell_integration_event(
         (ShellIntegrationSource::Osc133, "C") => args
             .iter()
             .find_map(|arg| arg.strip_prefix("cmdline_url="))
+            .and_then(percent_decode)
             .and_then(sanitize_shell_integration_command_text),
-        // OSC 633 E carries the submitted command directly in its arguments.
-        (ShellIntegrationSource::Osc633, "E") => {
-            sanitize_shell_integration_command_text(&args.join(";"))
-        }
         _ => None,
     };
     let exit_code = (kind == ShellIntegrationEventKind::CommandEnd)
@@ -978,8 +1112,8 @@ fn parse_shell_integration_event(
     Some(ShellIntegrationEvent {
         kind,
         source,
-        line: position.0,
-        col: position.1,
+        line: position.line,
+        col: position.column,
         sequence,
         raw: data.to_string(),
         command,
@@ -1059,14 +1193,11 @@ fn parse_key_value_fields(data: &str) -> Vec<(&str, &str)> {
 }
 
 fn parse_exit_code(args: &[String]) -> Option<i32> {
-    args.iter().find_map(|part| part.trim().parse::<i32>().ok())
+    args.first()?.trim().parse::<i32>().ok()
 }
 
-fn sanitize_shell_integration_command_text(raw: &str) -> Option<String> {
-    if raw.is_empty() || raw.len() > MAX_COMMAND_TEXT_LENGTH * 4 {
-        return None;
-    }
-    let mut value = percent_decode(raw)?;
+fn sanitize_shell_integration_command_text(value: String) -> Option<String> {
+    let mut value = Zeroizing::new(value);
     value.retain(|ch| {
         let code = ch as u32;
         !(code <= 0x08
@@ -1077,6 +1208,30 @@ fn sanitize_shell_integration_command_text(raw: &str) -> Option<String> {
     });
     let value = value.trim().to_string();
     (!value.is_empty() && value.len() <= MAX_COMMAND_TEXT_LENGTH).then_some(value)
+}
+
+fn decode_osc633_text(raw: &str) -> Option<String> {
+    if raw.len() > MAX_COMMAND_TEXT_LENGTH * 4 {
+        return None;
+    }
+    let mut bytes = Zeroizing::new(Vec::with_capacity(raw.len()));
+    let mut input = raw.bytes();
+    while let Some(byte) = input.next() {
+        if byte != b'\\' {
+            bytes.push(byte);
+            continue;
+        }
+        match input.next()? {
+            b'\\' => bytes.push(b'\\'),
+            b'x' => {
+                let hi = (input.next()? as char).to_digit(16)?;
+                let lo = (input.next()? as char).to_digit(16)?;
+                bytes.push(((hi << 4) | lo) as u8);
+            }
+            _ => return None,
+        }
+    }
+    std::str::from_utf8(&bytes).ok().map(str::to_owned)
 }
 
 fn percent_decode(raw: &str) -> Option<String> {
@@ -1099,11 +1254,16 @@ fn percent_decode(raw: &str) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-fn cursor_position<T: EventListener>(term: &Term<T>) -> (usize, usize) {
+pub(crate) fn cursor_position<T: EventListener>(term: &Term<T>) -> TerminalCommandPosition {
     let content = term.renderable_content();
     let scrollback = term.total_lines().saturating_sub(term.screen_lines());
     let line = (content.cursor.point.line.0).max(0) as usize + scrollback;
-    (line, content.cursor.point.column.0)
+    TerminalCommandPosition {
+        line,
+        // A pending wrap leaves the emulator cursor on the last occupied cell.
+        // Semantic boundaries sit after that cell until the next write wraps.
+        column: content.cursor.point.column.0 + usize::from(term.grid().cursor.input_needs_wrap),
+    }
 }
 
 fn prompt_block_start_line<T: EventListener>(term: &Term<T>, command_line: usize) -> usize {
@@ -1124,16 +1284,78 @@ fn prompt_block_start_line<T: EventListener>(term: &Term<T>, command_line: usize
 
 fn extract_command_from_visible_buffer<T: EventListener>(
     term: &Term<T>,
-    command_start: Option<usize>,
-    output_start: usize,
+    command_start: Option<TerminalCommandPosition>,
+    output_start: TerminalCommandPosition,
 ) -> Option<String> {
-    let start_line = command_start.unwrap_or(output_start);
-    let end_line = output_start.max(start_line);
-    let mut lines = Vec::new();
-    for line in start_line..=end_line {
-        lines.push(line_text(term, line));
+    let start = command_start?;
+    sanitize_shell_integration_command_text(text_between_positions(
+        term,
+        start,
+        output_start,
+        MAX_COMMAND_TEXT_LENGTH,
+        MAX_COMMAND_TEXT_LENGTH + 1,
+    ))
+}
+
+pub(crate) fn text_between_positions<T: EventListener>(
+    term: &Term<T>,
+    start: TerminalCommandPosition,
+    end: TerminalCommandPosition,
+    max_lines: usize,
+    max_bytes: usize,
+) -> String {
+    if end <= start {
+        return String::new();
     }
-    sanitize_shell_integration_command_text(strip_prompt_prefix(&lines.join("\n")))
+    let scrollback = term.total_lines().saturating_sub(term.screen_lines());
+    let last_line = end
+        .line
+        .saturating_sub(usize::from(end.column == 0))
+        .min(term.total_lines().saturating_sub(1));
+    let mut text = String::new();
+    for line in start.line..=last_line {
+        if line - start.line >= max_lines || text.len() >= max_bytes {
+            break;
+        }
+        let row = &term.grid()[Line(line as i32 - scrollback as i32)];
+        let first_col = if line == start.line { start.column } else { 0 };
+        let last_col = if line == end.line {
+            end.column
+        } else {
+            term.columns()
+        };
+        let mut segment = Zeroizing::new(String::new());
+        for cell in row[..].iter().take(last_col).skip(first_col) {
+            if cell
+                .flags
+                .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+            {
+                continue;
+            }
+            segment.push(if cell.c == '\0' { ' ' } else { cell.c });
+            for ch in cell.zerowidth().into_iter().flatten() {
+                segment.push(*ch);
+            }
+        }
+        let wrapped = row[alacritty_terminal::index::Column(term.columns() - 1)]
+            .flags
+            .contains(Flags::WRAPLINE);
+        let segment = if wrapped {
+            segment.as_str()
+        } else {
+            segment.trim_end()
+        };
+        for ch in segment.chars() {
+            if text.len() + ch.len_utf8() > max_bytes {
+                return text;
+            }
+            text.push(ch);
+        }
+        if line < last_line && !wrapped && text.len() < max_bytes {
+            text.push('\n');
+        }
+    }
+    text
 }
 
 pub(crate) fn line_text<T: EventListener>(term: &Term<T>, absolute_line: usize) -> String {
@@ -1161,16 +1383,6 @@ pub(crate) fn line_text<T: EventListener>(term: &Term<T>, absolute_line: usize) 
         }
     }
     text.trim_end().to_string()
-}
-
-fn strip_prompt_prefix(text: &str) -> &str {
-    text.trim_start_matches(|ch: char| {
-        ch.is_whitespace()
-            || matches!(
-                ch,
-                '❯' | '➜' | 'λ' | '>' | '$' | '#' | '%' | '❮' | '›' | '»'
-            )
-    })
 }
 
 fn is_likely_prompt_input_line(text: &str) -> bool {

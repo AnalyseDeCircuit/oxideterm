@@ -925,6 +925,7 @@ fn import_forwards(
             target_port: forward.target_port,
             description: forward.description,
             auto_start: forward.auto_start,
+            tunnel: forward.tunnel,
         })
         .collect()
 }

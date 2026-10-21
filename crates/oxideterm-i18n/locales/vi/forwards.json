@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "Đường hầm SSH",
+    "name": "Tên đường hầm",
+    "group": "Nhóm",
+    "group_invalid": "Đường dẫn nhóm không được chứa thành phần trống.",
+    "host": "Máy chủ SSH",
+    "choose_host": "Chọn máy chủ SSH đã lưu",
+    "startup": "Kết nối khi khởi động ứng dụng",
+    "missing_host": "Không tìm thấy máy chủ SSH đã lưu.",
+    "name_required": "Nhập tên đường hầm. Tên và nhóm phải nằm trên một dòng.",
+    "address_required": "Nhập địa chỉ lắng nghe và địa chỉ đích hợp lệ.",
+    "save_failed": "Không thể cập nhật đường hầm SSH."
+  },
   "copy_address": "Sao chép địa chỉ",
   "copied": "Đã sao chép!",
   "forwards": {

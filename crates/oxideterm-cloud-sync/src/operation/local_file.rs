@@ -158,6 +158,13 @@ impl CloudSyncOperationService {
                         target_port: forward.rule.target_port,
                         description: Some(forward.rule.description),
                         auto_start: forward.auto_start,
+                        tunnel: forward.tunnel.map(|profile| {
+                            oxideterm_connections::oxide_file::OxideTunnelProfile {
+                                name: profile.name,
+                                group: profile.group,
+                                connect_on_startup: profile.connect_on_startup,
+                            }
+                        }),
                     })
                 })
                 .collect();

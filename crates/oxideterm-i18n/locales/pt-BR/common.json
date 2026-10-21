@@ -500,7 +500,7 @@
         "auto_upload_interval": "Intervalo de envio automático (minutos)",
         "default_conflict_strategy": "Estratégia de conflito padrão",
         "sync_connections": "Sincronizar conexões",
-        "sync_forwards": "Sincronizar encaminhamentos salvos",
+        "sync_forwards": "Sincronizar encaminhamentos de portas e túneis SSH",
         "sync_quick_commands": "Sincronizar comandos rápidos",
         "sync_serial_profiles": "Sincronizar perfis seriais",
         "sync_telnet_profiles": "Sincronizar perfis Telnet",

@@ -60,7 +60,7 @@ pub use saved::{
     ApplySavedForwardsSyncSnapshotResult, DeletedPersistedForwardTombstone,
     FORWARD_TOMBSTONE_RETENTION_DAYS, OwnedForwardImportRecord, PersistedForward,
     PersistedForwardDto, SavedForwardCheckpoint, SavedForwardError, SavedForwardStore,
-    SavedForwardSyncRecord, SavedForwardsSyncSnapshot,
+    SavedForwardSyncRecord, SavedForwardsSyncSnapshot, SshTunnelProfile,
 };
 #[cfg(feature = "runtime")]
 pub use x11::X11ForwardBridge;

@@ -917,10 +917,6 @@ impl SshParser {
 
     pub(super) fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()> {
         let grid_changed = self.resize.cols != resize.cols || self.resize.rows != resize.rows;
-        if grid_changed {
-            self.shell_integration
-                .reset_command_marks_for_grid_reflow(|event| self.pending_events.push(event));
-        }
         self.resize = resize;
         let size = TerminalSize {
             cols: resize.cols,
@@ -928,7 +924,12 @@ impl SshParser {
             cell_width: resize.cell_width,
             cell_height: resize.cell_height,
         };
-        self.term.lock().resize(size);
+        {
+            let mut term = self.term.lock();
+            term.resize(size);
+            self.shell_integration
+                .reflow_command_marks(&term, |event| self.pending_events.push(event));
+        }
         if grid_changed {
             if let Some(pending) = &self.recording_pending {
                 pending

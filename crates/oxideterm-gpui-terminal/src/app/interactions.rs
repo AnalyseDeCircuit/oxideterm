@@ -22,7 +22,6 @@ use super::{
     PendingTerminalEditorClipboard, ScrollbarDrag, ScrollbarGeometry, SelectionHighlightCache,
     SmoothScrollAnimation, TerminalContextAction, TerminalContextMenu, TerminalKeybindings,
     TerminalPane, TerminalPaneEvent, TerminalShortcut, TmuxSeparatorDirection, TmuxSeparatorDrag,
-    command_mark_ui_available,
 };
 use crate::command_facts::TerminalAutosuggestInputState;
 use crate::terminal_ui::*;
@@ -82,7 +81,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
 
@@ -516,7 +515,7 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         // Terminal menu payloads include row-local command marks and target
         // points; any scroll makes that semantic snapshot stale.
         if self.context_menu.take().is_some() {
@@ -573,13 +572,22 @@ impl TerminalPane {
             return;
         }
 
-        let previous_offset = self.snapshot.display_offset;
+        let previous_offset = self.visible_scroll_offset();
         let snapshot_was_dirty = self.snapshot_dirty;
         let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
         let snapshot = {
+            let folded_offset = self.folding_active().then(|| {
+                let offset = previous_offset
+                    .saturating_add_signed(terminal_scroll_delta(scroll_delta.rows) as isize)
+                    .min(self.visible_scroll_history());
+                self.physical_scroll_offset(offset)
+            });
             let mut terminal = self.terminal.lock();
             let delta = terminal_scroll_delta(scroll_delta.rows);
-            if self.snapshot_dirty {
+            if let Some(offset) = folded_offset {
+                terminal.scroll_to_display_offset(offset);
+                terminal.snapshot()
+            } else if self.snapshot_dirty {
                 terminal.scroll_lines(delta);
                 terminal.snapshot()
             } else {
@@ -597,7 +605,8 @@ impl TerminalPane {
             self.render_stats.scroll_snapshot_count =
                 self.render_stats.scroll_snapshot_count.saturating_add(1);
         }
-        if snapshot.display_offset == previous_offset {
+        let next_offset = self.command_folding.offset(&snapshot);
+        if next_offset == previous_offset {
             if snapshot_was_dirty {
                 self.snapshot = self.stamp_snapshot(snapshot);
                 self.snapshot_dirty = false;
@@ -608,13 +617,14 @@ impl TerminalPane {
             }
             return;
         }
-        let applied_rows = if snapshot.display_offset >= previous_offset {
-            (snapshot.display_offset - previous_offset) as f32
+        let applied_rows = if next_offset >= previous_offset {
+            (next_offset - previous_offset) as f32
         } else {
-            -((previous_offset - snapshot.display_offset) as f32)
+            -((previous_offset - next_offset) as f32)
         };
         self.snapshot_dirty = false;
         self.snapshot = self.stamp_snapshot(snapshot);
+        self.refresh_command_folding();
         if scroll_delta.animate_rows {
             self.start_smooth_scroll_row_animation(applied_rows);
         }
@@ -684,8 +694,8 @@ impl TerminalPane {
 
     pub(super) fn clamp_smooth_scroll_remainder_to_bounds(&mut self) -> bool {
         let remainder = f32::from(self.smooth_scroll_offset_px);
-        let at_bottom = self.snapshot.display_offset == 0;
-        let at_top = self.snapshot.display_offset >= self.snapshot.scrollback_lines;
+        let at_bottom = self.visible_scroll_offset() == 0;
+        let at_top = self.visible_scroll_offset() >= self.visible_scroll_history();
         if (at_bottom && remainder < 0.0) || (at_top && remainder > 0.0) {
             return self.clear_smooth_scroll_remainder();
         }
@@ -1138,7 +1148,7 @@ impl TerminalPane {
             self.snapshot.rows,
         );
         let logical_col = self
-            .snapshot
+            .displayed_snapshot()
             .lines
             .get(row)
             .map(visual_line_for_row)
@@ -1157,10 +1167,16 @@ impl TerminalPane {
         TerminalPoint { row, col }
     }
 
-    fn link_at_position(&self, position: gpui::Point<Pixels>) -> Option<TerminalLinkRange> {
+    pub(super) fn link_at_position(
+        &self,
+        position: gpui::Point<Pixels>,
+    ) -> Option<TerminalLinkRange> {
+        if self.command_gutter_contains(position) {
+            return None;
+        }
         let point = self.terminal_point_for_position(position);
         let cell = self
-            .snapshot
+            .displayed_snapshot()
             .lines
             .get(point.row)
             .and_then(|row| row.cells.get(point.col))?;
@@ -1168,7 +1184,7 @@ impl TerminalPane {
         // Pointer hover needs links only for the row under the cursor. Scanning the full
         // viewport here repeats URL and path detection for every mouse-move event.
         display_link_ranges_for_rows_with_path_detection(
-            &self.snapshot,
+            self.displayed_snapshot(),
             point.row..point.row.saturating_add(1),
             self.settings.detect_file_paths_as_links,
         )
@@ -1183,7 +1199,7 @@ impl TerminalPane {
 
     fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
         terminal_scrollbar_for_viewport_display_offset(
-            &self.snapshot,
+            self.displayed_snapshot(),
             &self.metrics,
             self.snapshot.rows,
             self.smooth_scroll_display_offset(),
@@ -1259,8 +1275,9 @@ impl TerminalPane {
         let available = (geometry.track_height - geometry.height).max(px(1.0));
         let y = (position.y - geometry.y - thumb_offset_y).clamp(px(0.0), available);
         let scroll_fraction = y / available;
-        let history = self.snapshot.scrollback_lines;
+        let history = self.visible_scroll_history();
         let offset = ((1.0 - scroll_fraction) * history as f32).round() as usize;
+        let offset = self.physical_scroll_offset(offset);
         let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.scroll_to_display_offset(offset);
@@ -1278,7 +1295,7 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) {
         let point = self.terminal_point_for_position(position);
-        let Some(point) = grid_point_for_viewport_point(&self.snapshot, point) else {
+        let Some(point) = self.physical_grid_point(point) else {
             return;
         };
         self.set_selection(Some(TerminalSelection {
@@ -1294,7 +1311,8 @@ impl TerminalPane {
 
     fn select_word(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let point = self.terminal_point_for_position(position);
-        if let Some(selection) = word_selection_at_point(&self.snapshot, point) {
+        if let Some(selection) = word_selection_at_point(self.displayed_snapshot(), point) {
+            let selection = self.physical_selection(selection);
             self.set_selection(Some(selection));
             self.selecting = false;
             cx.notify();
@@ -1309,10 +1327,11 @@ impl TerminalPane {
         cx: &mut Context<Self>,
     ) -> bool {
         let point = self.terminal_point_for_position(position);
-        let Some(selection) = matching_pair_selection_at_point(&self.snapshot, point) else {
+        let Some(selection) = matching_pair_selection_at_point(self.displayed_snapshot(), point)
+        else {
             return false;
         };
-
+        let selection = self.physical_selection(selection);
         self.set_selection(Some(selection));
         self.selecting = false;
         cx.notify();
@@ -1321,7 +1340,8 @@ impl TerminalPane {
 
     fn select_line(&mut self, position: gpui::Point<Pixels>, cx: &mut Context<Self>) {
         let point = self.terminal_point_for_position(position);
-        if let Some(selection) = line_selection_at_point(&self.snapshot, point) {
+        if let Some(selection) = line_selection_at_point(self.displayed_snapshot(), point) {
+            let selection = self.physical_selection(selection);
             self.set_selection(Some(selection));
             self.selecting = false;
             cx.notify();
@@ -1336,8 +1356,9 @@ impl TerminalPane {
         }
 
         let point = self.terminal_point_for_position(position);
+        let point = self.physical_grid_point(point);
         if let Some(selection) = &mut self.selection {
-            if let Some(point) = grid_point_for_viewport_point(&self.snapshot, point) {
+            if let Some(point) = point {
                 selection.head = point;
             }
         }
@@ -1397,13 +1418,13 @@ impl TerminalPane {
             return;
         }
 
-        let current_offset = self.snapshot.display_offset;
+        let current_offset = self.visible_scroll_offset();
         let target_offset = if delta_rows > 0 {
             current_offset.saturating_add(delta_rows as usize)
         } else {
             current_offset.saturating_sub(delta_rows.unsigned_abs() as usize)
         }
-        .min(self.snapshot.scrollback_lines);
+        .min(self.visible_scroll_history());
 
         if target_offset == current_offset {
             return;
@@ -1411,6 +1432,7 @@ impl TerminalPane {
 
         self.pending_search_reveal = false;
 
+        let target_offset = self.physical_scroll_offset(target_offset);
         let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.scroll_to_display_offset(target_offset);
@@ -1418,6 +1440,7 @@ impl TerminalPane {
         };
         self.clear_smooth_scroll_remainder();
         self.snapshot = self.stamp_snapshot(snapshot);
+        self.refresh_command_folding();
         self.update_selection(position, cx);
         self.schedule_selection_autoscroll(cx);
     }
@@ -1431,15 +1454,32 @@ impl TerminalPane {
 
     fn apply_scroll_action(&mut self, action: TerminalScrollAction, cx: &mut Context<Self>) {
         self.pending_search_reveal = false;
+        let folded_offset = self.folding_active().then(|| {
+            let current = self.visible_scroll_offset();
+            let page = self.snapshot.rows.saturating_sub(1).max(1);
+            let target = match action {
+                TerminalScrollAction::PageUp => current.saturating_add(page),
+                TerminalScrollAction::PageDown => current.saturating_sub(page),
+                TerminalScrollAction::LineUp => current.saturating_add(1),
+                TerminalScrollAction::LineDown => current.saturating_sub(1),
+                TerminalScrollAction::Top => self.visible_scroll_history(),
+                TerminalScrollAction::Bottom => 0,
+            };
+            self.physical_scroll_offset(target.min(self.visible_scroll_history()))
+        });
         let snapshot = {
             let mut terminal = self.terminal.lock();
-            match action {
-                TerminalScrollAction::PageUp => terminal.page_up(),
-                TerminalScrollAction::PageDown => terminal.page_down(),
-                TerminalScrollAction::LineUp => terminal.scroll_lines(1),
-                TerminalScrollAction::LineDown => terminal.scroll_lines(-1),
-                TerminalScrollAction::Top => terminal.scroll_to_top(),
-                TerminalScrollAction::Bottom => terminal.scroll_to_bottom(),
+            if let Some(offset) = folded_offset {
+                terminal.scroll_to_display_offset(offset);
+            } else {
+                match action {
+                    TerminalScrollAction::PageUp => terminal.page_up(),
+                    TerminalScrollAction::PageDown => terminal.page_down(),
+                    TerminalScrollAction::LineUp => terminal.scroll_lines(1),
+                    TerminalScrollAction::LineDown => terminal.scroll_lines(-1),
+                    TerminalScrollAction::Top => terminal.scroll_to_top(),
+                    TerminalScrollAction::Bottom => terminal.scroll_to_bottom(),
+                }
             }
             terminal.snapshot()
         };
@@ -1489,20 +1529,18 @@ impl TerminalPane {
         search_match: &TerminalSearchMatch,
         cx: &mut Context<Self>,
     ) {
-        let desired_row = (self.snapshot.rows / 3).max(1) as i32;
-        let target_offset = desired_row.saturating_sub(search_match.line).max(0) as usize;
-        let snapshot = {
-            let mut terminal = self.terminal.lock();
-            terminal.scroll_to_display_offset(target_offset);
-            terminal.snapshot()
-        };
-        self.clear_smooth_scroll_remainder();
+        // Search reads the live buffer, which can be ahead of the painted frame.
+        // Refresh its history origin before translating relative result lines.
+        let snapshot = self.terminal.lock().snapshot();
         self.snapshot = self.stamp_snapshot(snapshot);
-        cx.notify();
+        self.expand_folds_for_search(search_match);
+        let line =
+            (self.snapshot.scrollback_lines as i64 + i64::from(search_match.line)).max(0) as usize;
+        self.scroll_to_absolute_line(line, cx);
     }
 
     pub(crate) fn handle_mouse_down(&mut self, event: &MouseDownEvent, cx: &mut Context<Self>) {
-        self.clear_timestamp_hover(cx);
+        self.clear_terminal_hover(cx);
         if self.tmux_selection_pending {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Down(event.clone()));
@@ -1526,6 +1564,26 @@ impl TerminalPane {
             return;
         }
 
+        if event.button == MouseButton::Left && self.command_gutter_contains(event.position) {
+            self.set_selection(None);
+            self.selecting = false;
+            self.selection_autoscroll_position = None;
+            self.selected_command_mark_id = self
+                .command_mark_id_at_absolute_line(self.absolute_line_for_position(event.position));
+            cx.notify();
+            return;
+        }
+
+        if event.button == MouseButton::Left
+            && terminal_link_activation_allowed(
+                event.modifiers,
+                self.settings.open_links_with_modifier,
+            )
+            && self.activate_interactive_trigger(event, cx)
+        {
+            return;
+        }
+
         if event.button == MouseButton::Left
             && terminal_link_activation_allowed(
                 event.modifiers,
@@ -1535,6 +1593,7 @@ impl TerminalPane {
         {
             match link.kind {
                 TerminalLinkKind::Url => cx.open_url(&link.target),
+                TerminalLinkKind::Trigger => {}
                 TerminalLinkKind::Path => {
                     let path = link.target.trim_matches(['\'', '"', '`']);
                     if oxideterm_environment::archive::is_archive_path(path) {
@@ -1690,8 +1749,7 @@ impl TerminalPane {
 
         let reference_line = self.absolute_line_for_position(event.position);
         let terminal_mode = self.terminal.lock().mode();
-        let command_mark_ui_visible =
-            command_mark_ui_available(self.settings.command_marks_enabled, terminal_mode);
+        let command_mark_ui_visible = self.command_actions_available(terminal_mode);
         let command_mark_id = command_mark_ui_visible
             .then(|| self.command_mark_id_at_absolute_line(reference_line))
             .flatten();
@@ -1708,6 +1766,7 @@ impl TerminalPane {
             x: f32::from(event.position.x - bounds.origin.x),
             y: f32::from(event.position.y - bounds.origin.y),
             serial_transfer_menu: false,
+            trigger: None,
             target: self.terminal_point_for_position(event.position),
             has_selection: self.selected_text_snapshot().is_some(),
             reference_line: navigation_line,
@@ -1775,22 +1834,39 @@ impl TerminalPane {
             && self.scrollbar_drag.is_none()
             && self.horizontal_scrollbar_drag.is_none()
             && !mouse_mode(mode, event.modifiers.shift);
-        let hovered_link = can_hover_terminal_content
+        let mut hovered_link = can_hover_terminal_content
             .then(|| self.link_at_position(event.position))
             .flatten();
         if can_hover_terminal_content
-            && self.preferences.timestamp_hover
             && event.pressed_button.is_none()
-            && hovered_link.is_none()
             && self.context_menu.is_none()
             && !self.snapshot_dirty
         {
-            self.update_timestamp_hover(event.position, cx);
+            if let Some(link) = hovered_link.as_ref() {
+                if link.kind == TerminalLinkKind::Path
+                    && oxideterm_environment::archive::is_archive_path(
+                        link.target.trim_matches(['\'', '"', '`']),
+                    )
+                {
+                    self.update_archive_hover(link, event.position, cx);
+                } else {
+                    self.clear_terminal_hover(cx);
+                }
+            } else if self.update_interactive_trigger_hover(event.position, cx) {
+                hovered_link = self
+                    .interactive_trigger_hover
+                    .as_ref()
+                    .and_then(|hover| hover.link.clone());
+            } else if self.preferences.timestamp_hover {
+                self.update_timestamp_hover(event.position, cx);
+            } else {
+                self.clear_terminal_hover(cx);
+            }
         } else {
-            self.clear_timestamp_hover(cx);
+            self.clear_terminal_hover(cx);
         }
-        let can_hover_command_marks = can_hover_terminal_content
-            && command_mark_ui_available(self.settings.command_marks_enabled, mode);
+        let can_hover_command_marks =
+            can_hover_terminal_content && self.command_actions_available(mode);
         let hovered_command_mark_id = can_hover_command_marks
             .then(|| {
                 let absolute_line = self.absolute_line_for_position(event.position);
@@ -1817,6 +1893,9 @@ impl TerminalPane {
         }
 
         if mouse_mode(mode, event.modifiers.shift) {
+            if self.command_gutter_contains(event.position) {
+                return;
+            }
             let point = self.tmux_local_point(self.terminal_point_for_position(event.position));
             if self.last_mouse_report_point == Some(point) {
                 return;
@@ -1866,6 +1945,15 @@ impl TerminalPane {
             return;
         }
         if event.button == MouseButton::Right && self.context_menu.is_some() {
+            return;
+        }
+        if event.button == MouseButton::Left
+            && self.command_gutter_contains(event.position)
+            && self.last_mouse_report_point.is_none()
+        {
+            if self.selecting {
+                self.finish_selection(event.position, cx);
+            }
             return;
         }
 
@@ -1922,7 +2010,7 @@ impl TerminalPane {
         }
 
         let target = self.terminal_point_for_position(event.position);
-        let Some(point) = grid_point_for_viewport_point(&self.snapshot, target) else {
+        let Some(point) = self.physical_grid_point(target) else {
             return false;
         };
         if !selection_contains_grid_point(selection, point) {
@@ -2015,6 +2103,9 @@ impl TerminalPane {
         selection: TerminalSelection,
         cx: &mut Context<Self>,
     ) -> bool {
+        let Some(target) = self.physical_terminal_point(target) else {
+            return false;
+        };
         if !self.terminal_accepts_input() {
             return false;
         }
@@ -2067,6 +2158,9 @@ impl TerminalPane {
         }
 
         let target = self.terminal_point_for_position(position);
+        let Some(target) = self.physical_terminal_point(target) else {
+            return false;
+        };
         let input_state = self.input_tracker.tracked_state();
         if input_state.is_none()
             && let Some(range) = history_search_command_range(&self.snapshot)
@@ -2190,6 +2284,7 @@ impl TerminalPane {
         text: &str,
         replace_current_command: bool,
     ) -> Option<Vec<u8>> {
+        let target = self.physical_terminal_point(target)?;
         if !self.terminal_accepts_input() {
             return None;
         }
@@ -2258,7 +2353,7 @@ impl TerminalPane {
         mode: TermMode,
         cx: &mut Context<Self>,
     ) {
-        if !command_mark_ui_available(self.settings.command_marks_enabled, mode) {
+        if !self.command_actions_available(mode) {
             return;
         }
         let absolute_line = self.absolute_line_for_position(position);

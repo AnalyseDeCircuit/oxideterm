@@ -429,6 +429,8 @@ fn test_command_mark(
         start_line,
         command_line: start_line,
         command_line_clipped: false,
+        output_start: None,
+        output_end: None,
         end_line,
         is_closed: end_line.is_some(),
         closed_by: end_line.map(|_| TerminalCommandMarkClosedBy::ShellIntegration),

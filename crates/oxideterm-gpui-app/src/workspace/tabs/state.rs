@@ -85,7 +85,7 @@ impl WorkspaceApp {
             }
             for pane_id in previous_panes {
                 if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
-                    pane.update(cx, |pane, cx| pane.clear_timestamp_hover(cx));
+                    pane.update(cx, |pane, cx| pane.clear_terminal_interactions(cx));
                 }
             }
             if let Some(tab_id) = previous_active_tab_id {
