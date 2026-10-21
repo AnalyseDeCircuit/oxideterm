@@ -1,8 +1,9 @@
 use oxideterm_ssh::{RemoteEnvInfo, SftpError, SftpSession};
+use zeroize::Zeroizing;
 
 use crate::{EMACS_FREE_TYPE_INTEGRATION_SOURCE, VIM_FREE_TYPE_INTEGRATION_SOURCE};
 
-pub const REMOTE_SHELL_INTEGRATION_VERSION: u32 = 4;
+pub const REMOTE_SHELL_INTEGRATION_VERSION: u32 = 5;
 pub const REMOTE_SHELL_INTEGRATION_RELATIVE_DIR: &str = ".oxideterm/shell-integration";
 
 const MANAGED_BLOCK_START: &str = ">>> OxideTerm remote shell integration >>>";
@@ -45,6 +46,7 @@ pub enum RemoteShellIntegrationState {
     FilesOnly,
     Installed,
     NeedsUpdate,
+    NewerVersion,
 }
 
 // Errors carry only categories: remote paths, configuration content, and
@@ -58,6 +60,7 @@ pub enum RemoteShellIntegrationError {
     InvalidText,
     WriteFailed,
     RemoveFailed,
+    NewerVersion,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,7 +69,7 @@ pub struct RemoteShellIntegrationStatus {
     pub state: RemoteShellIntegrationState,
     pub integration_directory: String,
     pub integration_file: String,
-    pub startup_file: String,
+    pub startup_files: Vec<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -78,53 +81,98 @@ struct RemoteShellIntegrationLayout {
     startup_file: String,
 }
 
+struct RemoteShellStartupFile {
+    path: String,
+    content: Option<Zeroizing<String>>,
+}
+
 /// Inspects the integration without changing any remote files.
 pub async fn inspect_remote_shell_integration(
     sftp: &SftpSession,
     remote_env: Option<&RemoteEnvInfo>,
 ) -> Result<RemoteShellIntegrationStatus, RemoteShellIntegrationError> {
     let layout = integration_layout(sftp.home(), remote_env)?;
-    let startup_content = read_optional_text(sftp, &layout.startup_file).await?;
-    let expected_reference = startup_reference(layout.shell);
-    let reference_matches = startup_content.as_deref().is_some_and(|content| {
-        complete_managed_blocks(content)
-            .iter()
-            .any(|span| content[span.start..span.end].trim_end() == expected_reference)
+    let startup_files = read_startup_files(sftp, &layout, false).await?;
+    let mut newer_version = startup_files.iter().any(|file| {
+        file.content.as_ref().is_some_and(|content| {
+            complete_managed_blocks(content)
+                .iter()
+                .any(|span| has_newer_integration_version(&content[span.start..span.end]))
+        })
     });
-    let has_reference = startup_content
-        .as_deref()
-        .is_some_and(|content| !complete_managed_blocks(content).is_empty());
+    let expected_reference = startup_reference(layout.shell);
+    let reference_matches = startup_files.iter().all(|file| {
+        file.content.as_ref().is_some_and(|content| {
+            complete_managed_blocks(content)
+                .iter()
+                .any(|span| content[span.start..span.end].trim_end() == expected_reference)
+        })
+    });
+    let has_reference = startup_files.iter().any(|file| {
+        file.content
+            .as_ref()
+            .is_some_and(|content| !complete_managed_blocks(content).is_empty())
+    });
     let mut has_package_file = false;
     let mut package_matches = true;
     // The status covers the complete owned package, including editor adapters,
     // so a partial or legacy installation can be repaired deterministically.
     for (name, expected_content) in integration_files() {
         let path = join_remote(&layout.integration_directory, name);
-        let content = read_optional_text(sftp, &path).await?;
+        let content = match read_optional_text(sftp, &path).await {
+            // Owned package files may be repaired even when their bytes are
+            // invalid UTF-8. The user's startup file still requires valid text.
+            Err(RemoteShellIntegrationError::InvalidText) => {
+                has_package_file = true;
+                package_matches = false;
+                continue;
+            }
+            result => result?,
+        };
+        newer_version |= content
+            .as_deref()
+            .is_some_and(has_newer_integration_version);
         has_package_file |= content.is_some();
         package_matches &= content
             .as_deref()
             .is_some_and(|content| content == expected_content);
     }
-    let state = match (
-        has_reference,
-        reference_matches,
-        has_package_file,
-        package_matches,
-    ) {
-        (true, true, true, true) => RemoteShellIntegrationState::Installed,
-        (true, _, _, _) => RemoteShellIntegrationState::NeedsUpdate,
-        (false, _, true, _) => RemoteShellIntegrationState::FilesOnly,
-        (false, _, false, _) => RemoteShellIntegrationState::NotInstalled,
+    let state = if newer_version {
+        RemoteShellIntegrationState::NewerVersion
+    } else {
+        match (
+            has_reference,
+            reference_matches,
+            has_package_file,
+            package_matches,
+        ) {
+            (true, true, true, true) => RemoteShellIntegrationState::Installed,
+            (true, _, _, _) => RemoteShellIntegrationState::NeedsUpdate,
+            (false, _, true, _) => RemoteShellIntegrationState::FilesOnly,
+            (false, _, false, _) => RemoteShellIntegrationState::NotInstalled,
+        }
     };
-    Ok(status_from_layout(layout, state))
+    Ok(status_from_layout(
+        layout,
+        state,
+        startup_files.into_iter().map(|file| file.path).collect(),
+    ))
 }
 
-/// Writes inspectable shell files and adds one clearly marked startup reference.
+/// Writes inspectable shell files and clearly marked startup references.
 pub async fn install_remote_shell_integration(
     sftp: &SftpSession,
     remote_env: Option<&RemoteEnvInfo>,
 ) -> Result<RemoteShellIntegrationStatus, RemoteShellIntegrationError> {
+    // Recheck at the write boundary, including explicit repair requests from
+    // an older client. Never replace an integration this client cannot manage.
+    if inspect_remote_shell_integration(sftp, remote_env)
+        .await?
+        .state
+        == RemoteShellIntegrationState::NewerVersion
+    {
+        return Err(RemoteShellIntegrationError::NewerVersion);
+    }
     let layout = integration_layout(sftp.home(), remote_env)?;
     ensure_remote_directory(sftp, &join_remote(&layout.home, ".oxideterm")).await?;
     ensure_remote_directory(sftp, &layout.integration_directory).await?;
@@ -136,20 +184,24 @@ pub async fn install_remote_shell_integration(
             .map_err(|_| RemoteShellIntegrationError::WriteFailed)?;
     }
 
-    if let Some(parent) = remote_parent(&layout.startup_file) {
-        ensure_remote_directory(sftp, &parent).await?;
+    let startup_files = read_startup_files(sftp, &layout, false).await?;
+    for file in &startup_files {
+        if let Some(parent) = remote_parent(&file.path) {
+            ensure_remote_directory(sftp, &parent).await?;
+        }
+        let updated = Zeroizing::new(install_managed_block(
+            file.content.as_ref().map_or("", |content| content.as_str()),
+            &startup_reference(layout.shell),
+        ));
+        sftp.replace_config_content(&file.path, updated.as_bytes())
+            .await
+            .map_err(|_| RemoteShellIntegrationError::WriteFailed)?;
     }
-    let current = read_optional_text(sftp, &layout.startup_file)
-        .await?
-        .unwrap_or_default();
-    let updated = install_managed_block(&current, &startup_reference(layout.shell));
-    sftp.replace_config_content(&layout.startup_file, updated.as_bytes())
-        .await
-        .map_err(|_| RemoteShellIntegrationError::WriteFailed)?;
 
     Ok(status_from_layout(
         layout,
         RemoteShellIntegrationState::Installed,
+        startup_files.into_iter().map(|file| file.path).collect(),
     ))
 }
 
@@ -160,10 +212,14 @@ pub async fn remove_remote_shell_integration(
     delete_owned_files: bool,
 ) -> Result<RemoteShellIntegrationStatus, RemoteShellIntegrationError> {
     let layout = integration_layout(sftp.home(), remote_env)?;
-    if let Some(current) = read_optional_text(sftp, &layout.startup_file).await? {
-        let updated = remove_managed_block(&current);
-        if updated != current {
-            sftp.replace_config_content(&layout.startup_file, updated.as_bytes())
+    let startup_files = read_startup_files(sftp, &layout, true).await?;
+    for file in &startup_files {
+        if let Some(current) = &file.content {
+            let updated = Zeroizing::new(remove_managed_block(current));
+            if updated.as_str() == current.as_str() {
+                continue;
+            }
+            sftp.replace_config_content(&file.path, updated.as_bytes())
                 .await
                 .map_err(|_| RemoteShellIntegrationError::WriteFailed)?;
         }
@@ -183,7 +239,11 @@ pub async fn remove_remote_shell_integration(
     } else {
         RemoteShellIntegrationState::FilesOnly
     };
-    Ok(status_from_layout(layout, state))
+    Ok(status_from_layout(
+        layout,
+        state,
+        startup_files.into_iter().map(|file| file.path).collect(),
+    ))
 }
 
 fn integration_layout(
@@ -222,19 +282,34 @@ fn integration_layout(
 fn status_from_layout(
     layout: RemoteShellIntegrationLayout,
     state: RemoteShellIntegrationState,
+    startup_files: Vec<String>,
 ) -> RemoteShellIntegrationStatus {
     RemoteShellIntegrationStatus {
         shell: layout.shell,
         state,
         integration_directory: layout.integration_directory,
         integration_file: layout.integration_file,
-        startup_file: layout.startup_file,
+        startup_files,
     }
+}
+
+fn has_newer_integration_version(content: &str) -> bool {
+    content.lines().any(|line| {
+        let line = line.trim();
+        let version = line
+            .strip_prefix("# oxideterm-shell-integration-version: ")
+            .or_else(|| line.strip_prefix("# OxideTerm remote shell integration v"))
+            .or_else(|| line.strip_prefix("Version: "));
+        version
+            .and_then(|version| version.trim_end_matches('.').trim().parse::<u32>().ok())
+            .is_some_and(|version| version > REMOTE_SHELL_INTEGRATION_VERSION)
+    })
 }
 
 fn detect_remote_shell(shell: Option<&str>) -> Option<RemoteShellKind> {
     let shell = shell?.trim().to_ascii_lowercase().replace('\\', "/");
     let executable = shell.rsplit('/').next().unwrap_or(&shell);
+    let executable = executable.trim_end_matches(".exe");
     if executable.starts_with("powershell") || executable.starts_with("pwsh") {
         Some(RemoteShellKind::PowerShell)
     } else if executable == "bash" || executable.starts_with("bash ") {
@@ -250,6 +325,34 @@ fn detect_remote_shell(shell: Option<&str>) -> Option<RemoteShellKind> {
     }
 }
 
+async fn read_startup_files(
+    sftp: &SftpSession,
+    layout: &RemoteShellIntegrationLayout,
+    removing: bool,
+) -> Result<Vec<RemoteShellStartupFile>, RemoteShellIntegrationError> {
+    let mut files = vec![RemoteShellStartupFile {
+        path: layout.startup_file.clone(),
+        content: read_optional_text(sftp, &layout.startup_file)
+            .await?
+            .map(Zeroizing::new),
+    }];
+    if layout.shell == RemoteShellKind::Bash {
+        // sshd starts a login shell. Bash reads the first existing login file,
+        // not .bashrc, unless the user's profile happens to source it.
+        for name in [".bash_profile", ".bash_login", ".profile"] {
+            let path = join_remote(&layout.home, name);
+            let content = read_optional_text(sftp, &path).await?.map(Zeroizing::new);
+            if content.is_some() || (!removing && name == ".profile") {
+                files.push(RemoteShellStartupFile { path, content });
+                if !removing {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(files)
+}
+
 fn startup_file_path(shell: RemoteShellKind, remote_env: &RemoteEnvInfo, home: &str) -> String {
     match shell {
         RemoteShellKind::Bash => join_remote(home, ".bashrc"),
@@ -261,9 +364,18 @@ fn startup_file_path(shell: RemoteShellKind, remote_env: &RemoteEnvInfo, home: &
             |config_home| join_remote(config_home, "fish/config.fish"),
         ),
         RemoteShellKind::Nushell if remote_env.os_type.eq_ignore_ascii_case("macos") => {
-            join_remote(home, "Library/Application Support/nushell/config.nu")
+            remote_env.xdg_config_home.as_deref().map_or_else(
+                || join_remote(home, "Library/Application Support/nushell/config.nu"),
+                |config_home| join_remote(config_home, "nushell/config.nu"),
+            )
         }
-        RemoteShellKind::Nushell => join_remote(home, ".config/nushell/config.nu"),
+        RemoteShellKind::Nushell if remote_env.os_type.to_ascii_lowercase().contains("windows") => {
+            join_remote(home, "AppData/Roaming/nushell/config.nu")
+        }
+        RemoteShellKind::Nushell => remote_env.xdg_config_home.as_deref().map_or_else(
+            || join_remote(home, ".config/nushell/config.nu"),
+            |config_home| join_remote(config_home, "nushell/config.nu"),
+        ),
         RemoteShellKind::PowerShell
             if remote_env.os_type.to_ascii_lowercase().contains("windows") =>
         {
@@ -451,15 +563,16 @@ fn remote_parent(path: &str) -> Option<String> {
 const REMOTE_INTEGRATION_README: &str = r#"OxideTerm Remote Shell Integration
 =====================================
 
-Version: 4
+Version: 5
 Directory protocol: OSC 7
+Command boundary protocol: OSC 133
 Private editor protocol: OSC 7719 v3
 
-These readable shell hooks report only the current working directory and host
-name through standard OSC 7. They do not run commands, read command text, or
-contain credentials. An application running in the shell can emit the same
-control sequence, so this metadata is a terminal integration signal rather
-than an authentication boundary.
+These readable shell hooks report the working directory, host, command boundaries,
+and exit status. Fish 4 and Nushell use their native command markers. Other
+supported shells use prompt and execution hooks without saving command text or
+credentials. Applications can emit the same control sequences; these signals
+are not an authentication boundary.
 
 The active shell startup file contains a clearly marked OxideTerm reference.
 Use OxideTerm Settings > Terminal > Awareness & Integration to inspect, repair,
@@ -473,7 +586,8 @@ terminal client. Load the matching adapter explicitly from your editor
 configuration to enable full-screen editor integration.
 "#;
 
-const BASH_INTEGRATION: &str = r#"# OxideTerm remote shell integration v4.
+const BASH_INTEGRATION: &str = concat!(
+    r#"# OxideTerm remote shell integration v5.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 if [ -n "${LC_OXIDETERM_SESSION:-}" ] || [ "${OXIDETERM_PRIVATE_OSC:-}" = 1 ]; then
   export OXIDETERM_PRIVATE_OSC=1
@@ -481,6 +595,7 @@ if [ -n "${LC_OXIDETERM_SESSION:-}" ] || [ "${OXIDETERM_PRIVATE_OSC:-}" = 1 ]; t
   export OXIDETERM_EMACS_INTEGRATION="$HOME/.oxideterm/shell-integration/oxideterm-free-type.el"
 fi
 unset LC_OXIDETERM_SESSION
+if [[ ${__oxideterm_cwd_hooks:-0} != 1 ]]; then
 __oxideterm_pct() {
   printf '%s' "$1" | od -An -tx1 -v | tr -d ' \n' | sed 's/../%&/g'
 }
@@ -520,20 +635,26 @@ else
   esac
 fi
 unset __oxideterm_hook_name
-"#;
+__oxideterm_cwd_hooks=1
+fi
+"#,
+    include_str!("shell_integration/bash.sh")
+);
 
 const ZSH_INTEGRATION: &str = concat!(
-    "# OxideTerm remote shell integration v4.\n",
+    "# OxideTerm remote shell integration v5.\n",
     "# Reports cwd and host through standard OSC 7 and gates private editor adapters.\n",
     "if [ -n \"${LC_OXIDETERM_SESSION:-}\" ] || [ \"${OXIDETERM_PRIVATE_OSC:-}\" = 1 ]; then\n  export OXIDETERM_PRIVATE_OSC=1\n  export OXIDETERM_VIM_INTEGRATION=\"$HOME/.oxideterm/shell-integration/oxideterm-free-type.vim\"\n  export OXIDETERM_EMACS_INTEGRATION=\"$HOME/.oxideterm/shell-integration/oxideterm-free-type.el\"\nfi\n",
     "unset LC_OXIDETERM_SESSION\n",
     "__oxideterm_pct() {\n  printf '%s' \"$1\" | od -An -tx1 -v | tr -d ' \\n' | sed 's/../%&/g'\n}\n",
     "__oxideterm_pct_path() {\n  __oxideterm_pct \"$1\" | sed 's|%2f|/|g'\n}\n",
     "__oxideterm_emit_remote_metadata() {\n  __oxideterm_cwd=$(pwd -P 2>/dev/null || pwd 2>/dev/null) || return\n  __oxideterm_host=${HOSTNAME:-$(hostname 2>/dev/null || printf '')}\n  __oxideterm_host=$(printf '%s' \"$__oxideterm_host\" | tr -cd 'A-Za-z0-9._-')\n  [ -n \"$__oxideterm_host\" ] || __oxideterm_host=localhost\n  printf '\\033]7;file://%s%s\\007' \"$__oxideterm_host\" \"$(__oxideterm_pct_path \"$__oxideterm_cwd\")\"\n}\n",
-    "autoload -Uz add-zsh-hook\nadd-zsh-hook -d precmd __oxideterm_emit_remote_metadata 2>/dev/null\nadd-zsh-hook precmd __oxideterm_emit_remote_metadata\n"
+    "autoload -Uz add-zsh-hook\nadd-zsh-hook -d precmd __oxideterm_emit_remote_metadata 2>/dev/null\nadd-zsh-hook precmd __oxideterm_emit_remote_metadata\n",
+    include_str!("shell_integration/zsh.zsh"),
 );
 
-const FISH_INTEGRATION: &str = r#"# OxideTerm remote shell integration v4.
+const FISH_INTEGRATION: &str = concat!(
+    r#"# OxideTerm remote shell integration v5.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 set -l __oxideterm_private_session 0
 if set -q LC_OXIDETERM_SESSION; and test -n "$LC_OXIDETERM_SESSION"
@@ -562,9 +683,12 @@ function __oxideterm_emit_remote_metadata --on-event fish_prompt
     test -n "$__oxideterm_host"; or set __oxideterm_host localhost
     command printf '\033]7;file://%s%s\007' "$__oxideterm_host" (__oxideterm_pct_path "$__oxideterm_cwd")
 end
-"#;
+"#,
+    include_str!("shell_integration/fish.fish")
+);
 
-const NUSHELL_INTEGRATION: &str = r#"# OxideTerm remote shell integration v4.
+const NUSHELL_INTEGRATION: &str = concat!(
+    r#"# OxideTerm remote shell integration v5.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 let __oxideterm_private_session = (($env.LC_OXIDETERM_SESSION? | default '') != '') or (($env.OXIDETERM_PRIVATE_OSC? | default '') == '1')
 if $__oxideterm_private_session {
@@ -573,29 +697,12 @@ if $__oxideterm_private_session {
     $env.OXIDETERM_EMACS_INTEGRATION = ($nu.home-path | path join '.oxideterm' 'shell-integration' 'oxideterm-free-type.el')
 }
 hide-env --ignore-errors LC_OXIDETERM_SESSION
-def __oxideterm_pct [value: string] {
-    $value | url encode --all
-}
-def __oxideterm_pct_path [value: string] {
-    let __oxideterm_path = ($value | str replace --all '\' '/')
-    let __oxideterm_uri_path = if ($__oxideterm_path | str contains --regex '^[A-Za-z]:/') {
-        '/' + $__oxideterm_path
-    } else {
-        $__oxideterm_path
-    }
-    __oxideterm_pct $__oxideterm_uri_path | str replace --all '%2F' '/'
-}
-def __oxideterm_emit_remote_metadata [] {
-    let __oxideterm_host = ($env.HOSTNAME? | default ($env.COMPUTERNAME? | default 'localhost') | default --empty 'localhost')
-    print --no-newline $"\u{1b}]7;file://(__oxideterm_pct $__oxideterm_host)(__oxideterm_pct_path (pwd | into string))\u{07}"
-}
-if (($env.OXIDETERM_SHELL_INTEGRATION_VERSION? | default 0) != 4) {
-    $env.OXIDETERM_SHELL_INTEGRATION_VERSION = 4
-    $env.config = ($env.config | upsert hooks.pre_prompt (($env.config.hooks.pre_prompt? | default []) | append {|| __oxideterm_emit_remote_metadata }))
-}
-"#;
+"#,
+    include_str!("shell_integration/nushell.nu")
+);
 
-const POWERSHELL_INTEGRATION: &str = r#"# OxideTerm remote shell integration v4.
+const POWERSHELL_INTEGRATION: &str = concat!(
+    r#"# OxideTerm remote shell integration v5.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 if ($env:LC_OXIDETERM_SESSION -or $env:OXIDETERM_PRIVATE_OSC -eq '1') {
     $env:OXIDETERM_PRIVATE_OSC = '1'
@@ -629,11 +736,17 @@ if (-not $global:__oxideterm_shell_integration_v4) {
         [Console]::Out.Write("$([char]27)]7;file://$hostName$(__oxideterm_pct_path $uriPath)$([char]7)")
     }
     function global:prompt {
+        $lastSucceeded = $?
         __oxideterm_emit_remote_metadata
-        if ($script:__oxideterm_v4_original_prompt) { & $script:__oxideterm_v4_original_prompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " }
+        if ($script:__oxideterm_v4_original_prompt) {
+            if (-not $lastSucceeded) { Write-Error 'Command failed.' -ErrorAction Ignore }
+            $script:__oxideterm_v4_original_prompt.Invoke()
+        } else { "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) " }
     }
 }
-"#;
+"#,
+    include_str!("shell_integration/powershell.ps1")
+);
 
 #[cfg(test)]
 mod tests {
@@ -733,7 +846,7 @@ mod tests {
             ),
         ] {
             let block = startup_reference(shell);
-            assert!(block.contains("oxideterm-shell-integration-version: 4"));
+            assert!(block.contains("oxideterm-shell-integration-version: 5"));
             let expected = format!("{prefix}{block}\n{suffix}");
             let installed = install_managed_block(&original, &block);
             assert_eq!(installed, expected, "{original:?}");
@@ -794,7 +907,9 @@ function global:prompt {{
     if ($script:legacyCalls -gt 2) {{ throw 'recursive prompt wrapper' }}
     & $script:__oxideterm_original_prompt
 }}
+. {{
 {POWERSHELL_INTEGRATION}
+}}
 prompt
 "#
         );
@@ -833,7 +948,7 @@ prompt
     #[test]
     fn bash_source_exposes_private_adapters_only_for_marked_sessions() {
         let unmarked_script = format!(
-            "unset LC_OXIDETERM_SESSION OXIDETERM_PRIVATE_OSC OXIDETERM_VIM_INTEGRATION OXIDETERM_EMACS_INTEGRATION\n{BASH_INTEGRATION}\nprintf '%s|%s|%s' \"${{OXIDETERM_PRIVATE_OSC-}}\" \"${{OXIDETERM_VIM_INTEGRATION-}}\" \"${{LC_OXIDETERM_SESSION-}}\""
+            "unset LC_OXIDETERM_SESSION OXIDETERM_PRIVATE_OSC OXIDETERM_VIM_INTEGRATION OXIDETERM_EMACS_INTEGRATION\n. /dev/stdin <<'OXIDETERM_INTEGRATION'\n{BASH_INTEGRATION}\nOXIDETERM_INTEGRATION\nprintf '%s|%s|%s' \"${{OXIDETERM_PRIVATE_OSC-}}\" \"${{OXIDETERM_VIM_INTEGRATION-}}\" \"${{LC_OXIDETERM_SESSION-}}\""
         );
         let unmarked = std::process::Command::new("bash")
             .args(["--noprofile", "--norc", "-c", &unmarked_script])
@@ -843,7 +958,7 @@ prompt
         assert_eq!(String::from_utf8_lossy(&unmarked.stdout), "||");
 
         let marked_script = format!(
-            "HOME=/home/alice\nLC_OXIDETERM_SESSION=1\n{BASH_INTEGRATION}\nprintf '%s|%s|%s' \"${{OXIDETERM_PRIVATE_OSC-}}\" \"${{OXIDETERM_VIM_INTEGRATION-}}\" \"${{LC_OXIDETERM_SESSION-}}\""
+            "HOME=/home/alice\nLC_OXIDETERM_SESSION=1\n. /dev/stdin <<'OXIDETERM_INTEGRATION'\n{BASH_INTEGRATION}\nOXIDETERM_INTEGRATION\nprintf '%s|%s|%s' \"${{OXIDETERM_PRIVATE_OSC-}}\" \"${{OXIDETERM_VIM_INTEGRATION-}}\" \"${{LC_OXIDETERM_SESSION-}}\""
         );
         let marked = std::process::Command::new("bash")
             .args(["--noprofile", "--norc", "-c", &marked_script])
@@ -860,7 +975,7 @@ prompt
     #[test]
     fn bash_source_emits_standard_osc7_with_encoded_path() {
         let script = format!(
-            "HOSTNAME='build host'\n{BASH_INTEGRATION}\ncd /tmp\n__oxideterm_emit_remote_metadata"
+            "HOSTNAME='build host'\n. /dev/stdin <<'OXIDETERM_INTEGRATION'\n{BASH_INTEGRATION}\nOXIDETERM_INTEGRATION\ncd /tmp\n__oxideterm_emit_remote_metadata"
         );
         let output = std::process::Command::new("bash")
             .args(["--noprofile", "--norc", "-c", &script])
@@ -878,7 +993,7 @@ prompt
     #[test]
     fn bash_source_keeps_existing_prompt_commands_when_executed() {
         let scalar_script = format!(
-            "PROMPT_COMMAND='existing-command'\n{BASH_INTEGRATION}\nprintf '%s' \"$PROMPT_COMMAND\""
+            "PROMPT_COMMAND='existing-command'\n. /dev/stdin <<'OXIDETERM_INTEGRATION'\n{BASH_INTEGRATION}\nOXIDETERM_INTEGRATION\nprintf '%s' \"$PROMPT_COMMAND\""
         );
         let scalar = std::process::Command::new("bash")
             .args(["--noprofile", "--norc", "-c", &scalar_script])
@@ -891,7 +1006,7 @@ prompt
         );
 
         let array_script = format!(
-            "PROMPT_COMMAND=(first-command second-command)\n{BASH_INTEGRATION}\nprintf '%s\\n' \"${{PROMPT_COMMAND[@]}}\""
+            "PROMPT_COMMAND=(first-command second-command)\n. /dev/stdin <<'OXIDETERM_INTEGRATION'\n{BASH_INTEGRATION}\nOXIDETERM_INTEGRATION\nprintf '%s\\n' \"${{PROMPT_COMMAND[@]}}\""
         );
         let array = std::process::Command::new("bash")
             .args(["--noprofile", "--norc", "-c", &array_script])

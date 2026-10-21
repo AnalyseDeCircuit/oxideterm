@@ -63,7 +63,7 @@ impl TerminalPane {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
-        let mut bounds = ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics)?;
+        let mut bounds = ime_cursor_bounds_for_snapshot(self.displayed_snapshot(), &self.metrics)?;
         bounds.origin += element_bounds.origin
             + point(
                 px(

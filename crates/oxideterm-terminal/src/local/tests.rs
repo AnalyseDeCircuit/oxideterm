@@ -669,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_resize_resets_command_mark_coordinates_only_when_grid_changes() {
+    fn ssh_resize_rebases_command_mark_coordinates_only_when_grid_changes() {
         let mut session = crate::session::SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
@@ -684,7 +684,7 @@ mod tests {
             .expect("cell-only resize should succeed");
         assert!(!session.take_events().iter().any(|event| matches!(
             event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reflowed { .. })
         )));
 
         session
@@ -692,7 +692,7 @@ mod tests {
             .expect("grid resize should succeed");
         assert!(session.take_events().iter().any(|event| matches!(
             event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reflowed { cols: 100, rows: 24, .. })
         )));
     }
 
@@ -1399,7 +1399,7 @@ mod tests {
         integration.advance(
             &mut parser,
             &mut term,
-            b"\x1b]633;A\x07$ \x1b]633;B\x07echo hi\r\n\x1b]633;E;echo%20hi\x07hi\r\n\x1b]633;D;0\x07",
+            b"\x1b]633;A\x07$ \x1b]633;B\x07echo hi\r\n\x1b]633;E;echo\\x20hi\x07\x1b]633;C\x07hi\r\n\x1b]633;D;0\x07",
             |event| events.push(event),
         );
 
@@ -1437,7 +1437,112 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(!visible_text.contains("633;"));
-        assert!(!visible_text.contains("echo%20hi"));
+        assert!(!visible_text.contains("echo\\x20hi"));
+    }
+
+    #[test]
+    fn shell_integration_keeps_native_boundaries_when_injected_hooks_also_emit() {
+        for protocol in ["133", "633"] {
+            let size = TerminalSize {
+                cols: 80,
+                rows: 8,
+                cell_width: 8,
+                cell_height: 17,
+            };
+            let mut term = Term::new(Config::default(), &size, VoidListener);
+            let mut parser = Processor::<StdSyncHandler>::new();
+            let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+            let bytes = format!(
+                "\x1b]133;A;aid=oxideterm\x07\
+                 \x1b]{protocol};A\x07$ \x1b]{protocol};B\x07\
+                 \x1b]133;B;aid=oxideterm\x07echo hi\r\n\
+                 \x1b]133;C;aid=oxideterm\x07\
+                 \x1b]{protocol};C\x07hi\r\n\
+                 \x1b]133;D;9;aid=oxideterm\x07\
+                 \x1b]{protocol};D;0\x07"
+            );
+            for byte in bytes.as_bytes().chunks(1) {
+                integration.advance(&mut parser, &mut term, byte, |_| {});
+            }
+            let marks = integration.command_marks();
+            assert_eq!(marks.len(), 1, "{protocol}");
+            assert_eq!(marks[0].command.as_deref(), Some("echo hi"), "{protocol}");
+            assert_eq!(marks[0].exit_code, Some(0), "{protocol}");
+            assert_eq!(
+                marks[0].output_start,
+                Some(crate::TerminalCommandPosition { line: 1, column: 0 }),
+                "{protocol}"
+            );
+            assert_eq!(
+                marks[0].output_end,
+                Some(crate::TerminalCommandPosition { line: 2, column: 0 }),
+                "{protocol}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_integration_secondary_prompt_and_redraw_preserve_output_boundaries() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A\x07$ \x1b]133;B\x07echo \\\r\n\
+              \x1b]133;A;k=s\x07> \x1b]133;B\x07hi\r\n\
+              \x1b]133;C;cmdline_url=echo%20hi\x07hi\r\n\
+              \x1b7\x1b[1;1H\x1b]133;A\x07$ \x1b]133;B\x07\x1b8\
+              \x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;D;9\x07",
+            |_| {},
+        );
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].command.as_deref(), Some("echo hi"));
+        assert_eq!(marks[0].command_line, 0);
+        assert_eq!(marks[0].exit_code, Some(0));
+        assert_eq!(
+            marks[0].output_start,
+            Some(crate::TerminalCommandPosition { line: 2, column: 0 })
+        );
+        assert_eq!(
+            marks[0].output_end,
+            Some(crate::TerminalCommandPosition { line: 3, column: 0 })
+        );
+        assert_eq!(
+            marks[0].output_confidence,
+            crate::TerminalCommandMarkConfidence::High
+        );
+        // A theme replaced the prompt function while executing. The next line
+        // editor entry can recover B, but cannot invent the missing D.
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A;aid=oxideterm\x07$ \x1b]133;B;aid=oxideterm\x07theme\r\n\
+              \x1b]133;C;aid=oxideterm\x07NEW> \x1b]133;B;aid=oxideterm\x07echo ok\r\n\
+              \x1b]133;C;aid=oxideterm\x07ok\r\n\x1b]133;D;0;aid=oxideterm\x07",
+            |_| {},
+        );
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 3);
+        assert_eq!(marks[1].command.as_deref(), Some("theme"));
+        assert_eq!(marks[1].exit_code, None);
+        assert_eq!(
+            marks[1].output_confidence,
+            crate::TerminalCommandMarkConfidence::Unknown
+        );
+        assert_eq!(marks[2].command.as_deref(), Some("echo ok"));
+        assert_eq!(marks[2].exit_code, Some(0));
+        assert_eq!(
+            marks[2].output_confidence,
+            crate::TerminalCommandMarkConfidence::High
+        );
     }
 
     #[test]
@@ -1474,6 +1579,7 @@ mod tests {
                                 projected.retain_mut(|mark| mark.trim_history(lines))
                             }
                             TerminalCommandMarkEvent::Reset => projected.clear(),
+                            TerminalCommandMarkEvent::Reflowed { marks, .. } => projected = marks,
                         }
                     }
                 });
@@ -1559,55 +1665,6 @@ mod tests {
     }
 
     #[test]
-    fn shell_integration_grid_reflow_closes_and_clears_active_command_mark() {
-        let size = TerminalSize {
-            cols: 80,
-            rows: 8,
-            cell_width: 8,
-            cell_height: 17,
-        };
-        let mut term = Term::new(Config::default(), &size, VoidListener);
-        let mut parser = Processor::<StdSyncHandler>::new();
-        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
-        let mut events = Vec::new();
-
-        integration.advance(
-            &mut parser,
-            &mut term,
-            b"\x1b]133;A;click_events=1\x07$ long-command\r\n\x1b]133;C;cmdline_url=long-command\x07output",
-            |event| events.push(event),
-        );
-        assert_eq!(integration.command_marks().len(), 1);
-
-        integration.reset_command_marks_for_grid_reflow(|event| events.push(event));
-
-        assert!(integration.command_marks().is_empty());
-        assert!(events.iter().any(|event| matches!(
-            event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(mark))
-                if mark.command.as_deref() == Some("long-command")
-                    && mark.closed_by == Some(TerminalCommandMarkClosedBy::TerminalReset)
-                    && mark.stale
-        )));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
-        )));
-
-        integration.advance(
-            &mut parser,
-            &mut term,
-            b"\r\n$ next-command\r\n\x1b]133;C;cmdline_url=next-command\x07done\r\n\x1b]133;D;0\x07",
-            |event| events.push(event),
-        );
-        let marks = integration.command_marks();
-        assert_eq!(marks.len(), 1);
-        assert_eq!(marks[0].command.as_deref(), Some("next-command"));
-        assert_eq!(marks[0].command_line, marks[0].start_line);
-        assert!(marks[0].is_closed);
-    }
-
-    #[test]
     fn shell_integration_osc633_clear_saved_history_uses_shared_reset_path() {
         let size = TerminalSize {
             cols: 80,
@@ -1623,7 +1680,7 @@ mod tests {
         integration.advance(
             &mut parser,
             &mut term,
-            b"\x1b]633;A\x07PS> \x1b]633;B\x07Clear-Host\r\n\x1b]633;E;Clear-Host\x07\x1b[2J\x1b[3J",
+            b"\x1b]633;A\x07PS> \x1b]633;B\x07Clear-Host\r\n\x1b]633;E;Clear-Host\x07\x1b]633;C\x07\x1b[2J\x1b[3J",
             |event| events.push(event),
         );
 
@@ -1812,7 +1869,7 @@ mod tests {
             events.push(event)
         });
         assert!(integration.command_marks().is_empty());
-        integration.advance(&mut parser, &mut term, b"\x07/home\r\n", |event| {
+        integration.advance(&mut parser, &mut term, b"\x07\x1b]633;C\x07/home\r\n", |event| {
             events.push(event)
         });
 

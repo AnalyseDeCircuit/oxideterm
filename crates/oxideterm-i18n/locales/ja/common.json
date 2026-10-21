@@ -500,7 +500,7 @@
         "auto_upload_interval": "自動アップロード間隔（分）",
         "default_conflict_strategy": "デフォルトのコンフリクト解決方法",
         "sync_connections": "接続を同期",
-        "sync_forwards": "保存済みフォワードを同期",
+        "sync_forwards": "ポート転送と SSH トンネルを同期",
         "sync_quick_commands": "クイックコマンドを同期",
         "sync_serial_profiles": "シリアルプロファイルを同期",
         "sync_telnet_profiles": "Telnet プロファイルを同期",

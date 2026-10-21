@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "Giải nén tệp",
-      "hint": "Kiểm tra và sửa lệnh rồi thêm vào thanh lệnh dưới dạng bản nháp mới. Lệnh không tự chạy.",
+      "command": "Lệnh giải nén",
+      "change_shell": "Đổi",
+      "open_hint": "Nhấp để tạo lệnh giải nén",
+      "open_modifier_hint": "{{modifier}} + nhấp để tạo lệnh giải nén",
       "source": "Tệp nén",
       "destination": "Thư mục đích",
-      "environment_hint": "Việc kiểm tra dùng kết nối SSH hoặc bản phân phối WSL ban đầu. Nếu đã vào máy khác hoặc vùng chứa, hãy quay lại môi trường ban đầu trước.",
-      "confirm_environment": "Tôi đang ở môi trường trên và đã chọn shell hiện tại",
       "probing": "Đang kiểm tra công cụ giải nén có sẵn…",
       "fill": "Thêm vào thanh lệnh",
       "context_unavailable": "Hãy quay lại shell đang rảnh trước khi tạo lệnh giải nén.",
@@ -124,6 +125,10 @@
       "find": "Tìm...",
       "manage_triggers": "Quản lý trình kích hoạt cho phiên này...",
       "select_command": "Chọn lệnh",
+      "collapse_output": "Thu gọn đầu ra",
+      "expand_output": "Mở rộng đầu ra",
+      "folded_output": "Đã thu gọn {{count}} dòng đầu ra",
+      "folded_exit_code": "Mã thoát {{code}}",
       "previous_command": "Lệnh trước",
       "next_command": "Lệnh tiếp theo",
       "clear_screen": "Xóa màn hình"

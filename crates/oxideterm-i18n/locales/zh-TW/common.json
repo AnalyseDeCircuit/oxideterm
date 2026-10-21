@@ -500,7 +500,7 @@
         "auto_upload_interval": "自動上傳間隔（分鐘）",
         "default_conflict_strategy": "預設衝突策略",
         "sync_connections": "同步連線",
-        "sync_forwards": "同步已儲存的轉送",
+        "sync_forwards": "同步連接埠轉送與 SSH 通道",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步序列埠設定",
         "sync_telnet_profiles": "同步 Telnet 設定",

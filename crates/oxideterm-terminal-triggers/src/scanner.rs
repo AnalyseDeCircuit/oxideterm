@@ -11,7 +11,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::{CompiledTriggerSet, TerminalTriggerDispatch};
 
-const MAX_LOGICAL_LINE_BYTES: usize = 16 * 1024;
+pub const MAX_LOGICAL_LINE_BYTES: usize = 16 * 1024;
 const RETAINED_LOGICAL_LINE_BYTES: usize = 8 * 1024;
 const MAX_RETAINED_MATCH_RANGES: usize = 512;
 const MAX_PENDING_MATCHES: usize = 128;
@@ -480,6 +480,65 @@ impl TerminalTriggerStream {
         self.scanned_line_bytes = 0;
         self.emitted_ranges.clear();
         self.emitted_range_order.clear();
+    }
+}
+
+impl CompiledTriggerSet {
+    /// Pointer interactions inspect only the bounded visible logical line under the cursor.
+    pub fn interaction_at(
+        &self,
+        text: &str,
+        byte: usize,
+    ) -> Option<(
+        std::ops::Range<usize>,
+        TriggerMatched,
+        &crate::TerminalTriggerAction,
+    )> {
+        if text.len() > MAX_LOGICAL_LINE_BYTES {
+            return None;
+        }
+        for index in self.interactive_candidates.matches(text).iter() {
+            let rule = &self.interactions[index];
+            let Some(action) = rule.interaction.as_ref() else {
+                continue;
+            };
+            for captures in rule.matcher.captures_iter(text) {
+                let matched = captures.get(0)?;
+                if !(matched.start()..matched.end()).contains(&byte)
+                    || !whole_word_matches(
+                        text,
+                        matched.start(),
+                        matched.end(),
+                        true,
+                        rule.whole_word,
+                    )
+                {
+                    continue;
+                }
+                return Some((
+                    matched.range(),
+                    TriggerMatched {
+                        trigger_id: rule.id.clone(),
+                        generation: self.generation,
+                        delay_ms: 0,
+                        full_match: Zeroizing::new(matched.as_str().to_owned()),
+                        captures: Zeroizing::new(
+                            rule.capture_names
+                                .iter()
+                                .map(|name| TriggerCapture {
+                                    name: name.clone(),
+                                    value: captures.name(name).map_or_else(String::new, |value| {
+                                        value.as_str().to_owned()
+                                    }),
+                                })
+                                .collect(),
+                        ),
+                    },
+                    action,
+                ));
+            }
+        }
+        None
     }
 }
 

@@ -382,6 +382,15 @@ fn default_true() -> bool {
     true
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OxideTunnelProfile {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub connect_on_startup: bool,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct EncryptedForward {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -393,6 +402,8 @@ pub struct EncryptedForward {
     pub target_port: u16,
     pub description: Option<String>,
     pub auto_start: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel: Option<OxideTunnelProfile>,
 }
 
 impl fmt::Debug for EncryptedForward {

@@ -21,6 +21,8 @@ fn benchmark_semantic_history(
     preferences.cursor_blink = false;
     preferences.semantic_coloring = enabled;
     preferences.command_marks_enabled = true;
+    preferences.command_folding_enabled =
+        std::env::var("OXIDE_BENCH_COMMAND_FOLDING").as_deref() != Ok("0");
     if let Some(scrollback) = scrollback {
         preferences.scrollback_lines = scrollback;
     }
@@ -332,6 +334,7 @@ fn benchmark_background(
                 roughness: 0.6,
                 direction: 25.0,
                 particle_count: 12,
+                preview_viewport: None,
             },
         );
         let readability = reading_overlay.then_some(oxideterm_gpui_background::ReadingOverlay {

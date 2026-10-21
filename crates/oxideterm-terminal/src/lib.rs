@@ -110,7 +110,7 @@ pub use shell_integration::{
     ShellIntegrationEvent, ShellIntegrationEventKind, ShellIntegrationLifecycleState,
     ShellIntegrationSource, ShellIntegrationStatus, TerminalCommandMark,
     TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource,
-    TerminalCommandMarkEvent,
+    TerminalCommandMarkEvent, TerminalCommandPosition,
 };
 
 pub use color::TerminalPalette;

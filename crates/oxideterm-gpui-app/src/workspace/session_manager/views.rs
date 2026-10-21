@@ -23,6 +23,7 @@ impl Render for SessionManagerDrag {
 
 #[derive(Clone)]
 pub(super) enum SessionManagerDisplayItem {
+    Tunnel(TunnelDisplayItem),
     Plugin(oxideterm_connections::PluginConnectionProfile),
     Connection(ConnectionInfo),
     SshConfig(SessionManagerSshConfigDisplayItem),
@@ -33,6 +34,13 @@ pub(super) enum SessionManagerDisplayItem {
     Mosh(MoshProfile),
     StandaloneSftp(oxideterm_connections::StandaloneSftpProfile),
     RemoteDesktop(RemoteDesktopProfile),
+}
+
+#[derive(Clone)]
+pub(super) struct TunnelDisplayItem {
+    forward: oxideterm_forwarding::PersistedForward,
+    profile: oxideterm_forwarding::SshTunnelProfile,
+    host: Option<ConnectionInfo>,
 }
 
 #[derive(Clone)]
@@ -59,6 +67,7 @@ impl From<&SshConfigHost> for SessionManagerSshConfigDisplayItem {
 
 #[derive(Clone)]
 pub(super) enum SessionManagerOpenTarget {
+    Tunnel(String),
     Plugin(String),
     Connection(String),
     SshConfig(String),
@@ -122,6 +131,7 @@ pub(super) fn session_manager_item_pointer_action(
 impl SessionManagerDisplayItem {
     pub(super) fn id(&self) -> &str {
         match self {
+            Self::Tunnel(item) => &item.forward.id,
             Self::Connection(connection) => &connection.id,
             Self::SshConfig(host) => &host.alias,
             Self::Serial(profile) => &profile.id,
@@ -138,6 +148,9 @@ impl SessionManagerDisplayItem {
     pub(super) fn selection_target(&self) -> Option<SessionManagerSelectionTarget> {
         // Only SSH config discoveries are transient; every saved profile can use batch actions.
         match self {
+            Self::Tunnel(item) => Some(SessionManagerSelectionTarget::Tunnel(
+                item.forward.id.clone(),
+            )),
             Self::Plugin(profile) => {
                 Some(SessionManagerSelectionTarget::Plugin(profile.id.clone()))
             }
@@ -168,6 +181,9 @@ impl SessionManagerDisplayItem {
     pub(super) fn row_action_target(&self) -> Option<SessionManagerRowActionTarget> {
         // SSH config discoveries are not persisted rows and therefore have no delete menu.
         match self {
+            Self::Tunnel(item) => Some(SessionManagerRowActionTarget::Tunnel(
+                item.forward.id.clone(),
+            )),
             Self::Plugin(profile) => {
                 Some(SessionManagerRowActionTarget::Plugin(profile.id.clone()))
             }
@@ -197,6 +213,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn open_target(&self) -> SessionManagerOpenTarget {
         match self {
+            Self::Tunnel(item) => SessionManagerOpenTarget::Tunnel(item.forward.id.clone()),
             Self::Plugin(profile) => SessionManagerOpenTarget::Plugin(profile.id.clone()),
             Self::Connection(connection) => {
                 SessionManagerOpenTarget::Connection(connection.id.clone())
@@ -220,6 +237,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn name(&self) -> &str {
         match self {
+            Self::Tunnel(item) => &item.profile.name,
             Self::Plugin(profile) => &profile.name,
             Self::Connection(connection) => &connection.name,
             Self::SshConfig(host) => &host.alias,
@@ -235,6 +253,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn group(&self) -> Option<&str> {
         match self {
+            Self::Tunnel(item) => item.profile.group.as_deref(),
             Self::Plugin(profile) => profile.group.as_deref(),
             Self::Connection(connection) => connection.group.as_deref(),
             Self::SshConfig(_) => None,
@@ -250,6 +269,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn last_used(&self) -> Option<String> {
         match self {
+            Self::Tunnel(_) => None,
             Self::Plugin(profile) => profile.last_used_at.map(|time| time.to_rfc3339()),
             Self::Connection(connection) => connection.last_used_at.clone(),
             Self::SshConfig(_) => None,
@@ -265,6 +285,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn host(&self) -> &str {
         match self {
+            Self::Tunnel(item) => item.host.as_ref().map_or("", |host| host.host.as_str()),
             Self::Plugin(profile) => &profile.plugin_id,
             Self::Connection(connection) => &connection.host,
             Self::SshConfig(host) => host.hostname.as_deref().unwrap_or(&host.alias),
@@ -280,6 +301,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn port_sort_key(&self) -> u32 {
         match self {
+            Self::Tunnel(item) => u32::from(item.forward.rule.bind_port),
             Self::Plugin(_) => 0,
             Self::Connection(connection) => u32::from(connection.port),
             Self::SshConfig(host) => u32::from(host.port.unwrap_or(22)),
@@ -295,6 +317,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn username(&self) -> &str {
         match self {
+            Self::Tunnel(item) => item.host.as_ref().map_or("", |host| host.username.as_str()),
             Self::Plugin(_) => "",
             Self::Connection(connection) => &connection.username,
             Self::SshConfig(host) => host.user.as_deref().unwrap_or_default(),
@@ -309,6 +332,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn auth_sort_key(&self) -> String {
         match self {
+            Self::Tunnel(_) => "ssh tunnel".into(),
             Self::Plugin(profile) => profile.type_id.clone(),
             Self::Connection(connection) => auth_label(connection.auth_type).to_lowercase(),
             Self::SshConfig(_) => "ssh config".to_string(),
@@ -324,6 +348,17 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn subtitle(&self) -> String {
         match self {
+            Self::Tunnel(item) => {
+                let rule = &item.forward.rule;
+                if rule.forward_type == oxideterm_forwarding::ForwardType::Dynamic {
+                    format!("SOCKS5 · {}:{}", rule.bind_address, rule.bind_port)
+                } else {
+                    format!(
+                        "{}:{} → {}:{}",
+                        rule.bind_address, rule.bind_port, rule.target_host, rule.target_port
+                    )
+                }
+            }
             Self::Plugin(profile) => format!("{} · {}", profile.plugin_id, profile.type_id),
             Self::Connection(connection) => {
                 format!(
@@ -367,6 +402,13 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn search_text(&self) -> String {
         match self {
+            Self::Tunnel(item) => format!(
+                "{}\n{}\n{}\n{}\nssh tunnel",
+                item.profile.name,
+                self.subtitle(),
+                self.host(),
+                item.profile.group.as_deref().unwrap_or_default()
+            ),
             Self::Plugin(profile) => format!(
                 "{}\n{}\n{}\n{}",
                 profile.name,
@@ -438,6 +480,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn icon(&self) -> session_icons::SessionIcon {
         match self {
+            Self::Tunnel(_) => LucideIcon::Network.into(),
             Self::Plugin(_) => LucideIcon::Puzzle.into(),
             Self::Connection(connection) => {
                 session_icons::session_icon_from_id(connection.icon.as_deref())
@@ -469,6 +512,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn icon_color(&self) -> Option<&str> {
         match self {
+            Self::Tunnel(_) => None,
             Self::Plugin(_) => None,
             Self::Connection(connection) => connection.color.as_deref(),
             Self::Serial(profile) => profile.color.as_deref(),
@@ -484,6 +528,7 @@ impl SessionManagerDisplayItem {
 
     pub(super) fn icon_background_color(&self) -> Option<&str> {
         match self {
+            Self::Tunnel(_) => None,
             Self::Plugin(_) => None,
             Self::Connection(connection) => connection.icon_background_color.as_deref(),
             Self::Serial(profile) => profile.icon_background_color.as_deref(),
@@ -514,6 +559,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn session_manager_display_items(&self, cx: &App) -> Vec<SessionManagerDisplayItem> {
+        let tunnel_hosts = self.connection_store.connection_infos();
         let query = self
             .session_manager
             .read(cx)
@@ -525,6 +571,17 @@ impl WorkspaceApp {
             .connection_infos()
             .into_iter()
             .map(SessionManagerDisplayItem::Connection)
+            .chain(self.saved_ssh_tunnels().into_iter().filter_map(|forward| {
+                let profile = forward.tunnel.clone()?;
+                let host = tunnel_hosts
+                    .iter()
+                    .find(|host| Some(host.id.as_str()) == forward.owner_connection_id.as_deref());
+                Some(SessionManagerDisplayItem::Tunnel(TunnelDisplayItem {
+                    forward,
+                    profile,
+                    host: host.cloned(),
+                }))
+            }))
             .chain(
                 self.connection_store
                     .plugin_profiles()
@@ -1819,6 +1876,7 @@ impl WorkspaceApp {
     ) -> Div {
         let (default_background, default_foreground) = match item {
             SessionManagerDisplayItem::Connection(_)
+            | SessionManagerDisplayItem::Tunnel(_)
             | SessionManagerDisplayItem::RemoteDesktop(_) => (0x0ea5e933, 0x7dd3fc),
             SessionManagerDisplayItem::SshConfig(_) => (0x8b5cf633, 0xc4b5fd),
             SessionManagerDisplayItem::Plugin(_) => (0x8b5cf633, 0xc4b5fd),
@@ -1864,6 +1922,73 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Div {
         match item {
+            SessionManagerDisplayItem::Tunnel(item) => {
+                let id = item.forward.id.clone();
+                let edit = id.clone();
+                let menu = id.clone();
+                let running = matches!(
+                    self.ssh_tunnel_status(&id),
+                    oxideterm_forwarding::ForwardStatus::Active
+                        | oxideterm_forwarding::ForwardStatus::Starting
+                        | oxideterm_forwarding::ForwardStatus::Suspended
+                );
+                div()
+                    .w(px(MANAGER_ROW_ACTIONS_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(MANAGER_ROW_ACTION_GAP))
+                    .child(self.render_row_icon_button(
+                        if running {
+                            LucideIcon::Square
+                        } else {
+                            LucideIcon::Play
+                        },
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.accent),
+                        has_background,
+                        move |this, _, window, cx| {
+                            if running {
+                                this.stop_ssh_tunnel(&id, false, cx);
+                            } else {
+                                this.open_ssh_tunnel(&id, false, window, cx);
+                            }
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::Pencil,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, _, window, cx| {
+                            this.open_ssh_tunnel_form(Some(&edit), window, cx);
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+                    .child(self.render_row_icon_button(
+                        LucideIcon::MoreVertical,
+                        MANAGER_ROW_ACTION_BUTTON,
+                        MANAGER_ROW_ACTION_ICON_SIZE,
+                        rgb(self.tokens.ui.text),
+                        has_background,
+                        move |this, event, _, cx| {
+                            this.open_session_manager_row_action_menu(
+                                SessionManagerRowActionTarget::Tunnel(menu.clone()),
+                                f32::from(event.position.x),
+                                f32::from(event.position.y),
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        },
+                        cx,
+                    ))
+            }
             SessionManagerDisplayItem::Plugin(profile) => {
                 let open = profile.id.clone();
                 let edit = profile.id.clone();
@@ -2352,6 +2477,7 @@ impl WorkspaceApp {
                 MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT
             }
             SessionManagerRowActionTarget::Serial(_)
+            | SessionManagerRowActionTarget::Tunnel(_)
             | SessionManagerRowActionTarget::Plugin(_)
             | SessionManagerRowActionTarget::LocalTerminal(_)
             | SessionManagerRowActionTarget::Telnet(_)
@@ -2654,7 +2780,32 @@ impl WorkspaceApp {
                 ))
                 .child(dropdown_menu_separator(&self.tokens));
         }
+        if let SessionManagerRowActionTarget::Tunnel(id) = &menu.target {
+            let id = id.clone();
+            popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.actions.edit"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _, window, cx| {
+                        this.open_ssh_tunnel_form(Some(&id), window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .child(dropdown_menu_separator(&self.tokens));
+        }
         let delete_action = match &menu.target {
+            SessionManagerRowActionTarget::Tunnel(id) => {
+                Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
+            }
             SessionManagerRowActionTarget::Plugin(id) => {
                 Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
             }
@@ -2712,6 +2863,17 @@ impl WorkspaceApp {
                     has_background,
                     move |this, _event, _window, cx| {
                         match &delete_target {
+                            SessionManagerRowActionTarget::Tunnel(_) => {
+                                this.session_manager.update(cx, |state, cx| {
+                                    state.delete_confirm =
+                                        Some(SessionManagerDeleteConfirm::Batch {
+                                            targets: vec![SessionManagerSelectionTarget::Tunnel(
+                                                delete_id.clone(),
+                                            )],
+                                        });
+                                    cx.notify();
+                                });
+                            }
                             SessionManagerRowActionTarget::Plugin(_) => {
                                 this.session_manager.update(cx, |state, cx| {
                                     state.delete_confirm =
@@ -2830,6 +2992,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match target {
+            SessionManagerOpenTarget::Tunnel(id) => self.open_ssh_tunnel(&id, false, window, cx),
             SessionManagerOpenTarget::Plugin(id) => self.open_plugin_connection(&id, cx),
             SessionManagerOpenTarget::Ftp(id) => self.open_saved_ftp_profile(&id, window, cx),
             SessionManagerOpenTarget::Connection(connection_id) => {

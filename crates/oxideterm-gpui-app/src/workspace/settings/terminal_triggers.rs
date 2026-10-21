@@ -2,8 +2,8 @@ use super::*;
 use oxideterm_terminal_triggers::{
     LocalProcessSpec, SavedConnectionKind, SavedConnectionRef, TerminalTrigger,
     TerminalTriggerAction, TerminalTriggerDispatch, TerminalTriggerMatch, TerminalTriggerMatchMode,
-    TerminalTriggerScope, TerminalTriggerTiming, TerminalTriggersSnapshot, default_snapshot,
-    load_snapshot, new_trigger_id, now_ms, save_snapshot, validate_snapshot,
+    TerminalTriggerMenuItem, TerminalTriggerScope, TerminalTriggerTiming, TerminalTriggersSnapshot,
+    default_snapshot, load_snapshot, new_trigger_id, now_ms, save_snapshot, validate_snapshot,
 };
 
 // Terminal settings reserve section zero for the page switcher before page cards.
@@ -15,6 +15,48 @@ const TERMINAL_TRIGGER_FIELD_BASIS: f32 = 280.0;
 const TERMINAL_TRIGGER_COMPACT_FIELD_BASIS: f32 = 180.0;
 const TERMINAL_TRIGGER_SIDEBAR_WIDTH: f32 = 260.0;
 const TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT: f32 = 520.0;
+
+fn editable_trigger_action(action: &TerminalTriggerAction, index: usize) -> &TerminalTriggerAction {
+    match action {
+        TerminalTriggerAction::CustomLink { action } => action,
+        TerminalTriggerAction::CustomMenu { items } if !items.is_empty() => {
+            &items[index.min(items.len() - 1)].action
+        }
+        _ => action,
+    }
+}
+
+fn editable_trigger_action_mut(
+    action: &mut TerminalTriggerAction,
+    index: usize,
+) -> &mut TerminalTriggerAction {
+    match action {
+        TerminalTriggerAction::CustomLink { action } => action,
+        TerminalTriggerAction::CustomMenu { items } => {
+            let index = index.min(items.len() - 1);
+            &mut items[index].action
+        }
+        _ => action,
+    }
+}
+
+fn trigger_action_label(action: &TerminalTriggerAction) -> &'static str {
+    match action {
+        TerminalTriggerAction::SendText { .. } => {
+            "settings_view.terminal.triggers.action_send_text"
+        }
+        TerminalTriggerAction::RunQuickCommand { .. } => {
+            "settings_view.terminal.triggers.action_quick_command"
+        }
+        TerminalTriggerAction::LaunchLocalProcess { .. } => {
+            "settings_view.terminal.triggers.action_local_process"
+        }
+        TerminalTriggerAction::OpenUrl { .. } => "settings_view.terminal.triggers.open_url",
+        TerminalTriggerAction::CustomLink { .. } => "settings_view.terminal.triggers.custom_link",
+        TerminalTriggerAction::CustomMenu { .. } => "settings_view.terminal.triggers.custom_menu",
+        TerminalTriggerAction::ShowTooltip { .. } => "settings_view.terminal.triggers.show_tooltip",
+    }
+}
 
 fn terminal_trigger_connection_list(
     rows: Vec<AnyElement>,
@@ -58,6 +100,8 @@ fn is_terminal_trigger_input(input: SettingsInput) -> bool {
             | SettingsInput::TerminalTriggerDescription
             | SettingsInput::TerminalTriggerPattern
             | SettingsInput::TerminalTriggerActionValue
+            | SettingsInput::TerminalTriggerMenuLabel
+            | SettingsInput::TerminalTriggerTooltipText
             | SettingsInput::TerminalTriggerExecutable
             | SettingsInput::TerminalTriggerArguments
             | SettingsInput::TerminalTriggerWorkingDirectory
@@ -71,6 +115,7 @@ pub(in crate::workspace) struct TerminalTriggersSettingsState {
     settings_path: PathBuf,
     pub(in crate::workspace) snapshot: TerminalTriggersSnapshot,
     editor: Option<TerminalTrigger>,
+    menu_item: usize,
     scope_picker_open: bool,
     scope_picker_query: String,
     scope_picker_scroll: gpui::ScrollHandle,
@@ -86,6 +131,7 @@ impl TerminalTriggersSettingsState {
                     settings_path: settings_path.to_path_buf(),
                     snapshot,
                     editor,
+                    menu_item: 0,
                     scope_picker_open: false,
                     scope_picker_query: String::new(),
                     scope_picker_scroll: gpui::ScrollHandle::new(),
@@ -96,6 +142,7 @@ impl TerminalTriggersSettingsState {
                 settings_path: settings_path.to_path_buf(),
                 snapshot: default_snapshot(),
                 editor: None,
+                menu_item: 0,
                 scope_picker_open: false,
                 scope_picker_query: String::new(),
                 scope_picker_scroll: gpui::ScrollHandle::new(),
@@ -105,6 +152,7 @@ impl TerminalTriggersSettingsState {
     }
 
     fn new_rule(&mut self) {
+        self.menu_item = 0;
         let timestamp = now_ms();
         self.editor = Some(TerminalTrigger {
             id: new_trigger_id(),
@@ -135,6 +183,7 @@ impl TerminalTriggersSettingsState {
     }
 
     fn edit_rule(&mut self, trigger_id: &str) {
+        self.menu_item = 0;
         self.editor = self
             .snapshot
             .triggers
@@ -146,6 +195,7 @@ impl TerminalTriggersSettingsState {
     }
 
     fn duplicate_rule(&mut self, trigger_id: &str, copy_suffix: &str) {
+        self.menu_item = 0;
         let Some(mut trigger) = self
             .snapshot
             .triggers
@@ -166,6 +216,7 @@ impl TerminalTriggersSettingsState {
     }
 
     pub(in crate::workspace) fn cancel_edit(&mut self) {
+        self.menu_item = 0;
         self.editor = self
             .editor
             .as_ref()
@@ -203,13 +254,7 @@ impl TerminalTriggersSettingsState {
         let Some(mut trigger) = self.editor.clone() else {
             return false;
         };
-        if matches!(
-            trigger.action,
-            TerminalTriggerAction::LaunchLocalProcess {
-                process: LocalProcessSpec::ExplicitShell { .. }
-            }
-        ) && !explicit_shell_enabled
-        {
+        if trigger.action.uses_explicit_shell() && !explicit_shell_enabled {
             self.error_key = Some("settings_view.terminal.triggers.shell_execution_hint");
             return false;
         }
@@ -292,20 +337,30 @@ impl TerminalTriggersSettingsState {
             return Some(self.scope_picker_query.clone());
         }
         let trigger = self.editor.as_ref()?;
+        let action = editable_trigger_action(&trigger.action, self.menu_item);
         match input {
+            SettingsInput::TerminalTriggerMenuLabel => match &trigger.action {
+                TerminalTriggerAction::CustomMenu { items } => {
+                    items.get(self.menu_item).map(|item| item.label.clone())
+                }
+                _ => None,
+            },
             SettingsInput::TerminalTriggerName => Some(trigger.name.clone()),
             SettingsInput::TerminalTriggerDescription => {
                 Some(trigger.description.clone().unwrap_or_default())
             }
             SettingsInput::TerminalTriggerPattern => Some(trigger.matcher.pattern.clone()),
-            SettingsInput::TerminalTriggerActionValue => match &trigger.action {
+            SettingsInput::TerminalTriggerActionValue
+            | SettingsInput::TerminalTriggerTooltipText => match action {
                 TerminalTriggerAction::SendText { text, .. } => Some(text.clone()),
+                TerminalTriggerAction::ShowTooltip { text } => Some(text.clone()),
+                TerminalTriggerAction::OpenUrl { url } => Some(url.clone()),
                 TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
                     Some(quick_command_id.clone())
                 }
-                TerminalTriggerAction::LaunchLocalProcess { .. } => Some(String::new()),
+                _ => Some(String::new()),
             },
-            SettingsInput::TerminalTriggerExecutable => match &trigger.action {
+            SettingsInput::TerminalTriggerExecutable => match action {
                 TerminalTriggerAction::LaunchLocalProcess { process } => match process {
                     LocalProcessSpec::DirectProgram { executable, .. } => Some(executable.clone()),
                     LocalProcessSpec::ExplicitShell {
@@ -314,7 +369,7 @@ impl TerminalTriggersSettingsState {
                 },
                 _ => Some(String::new()),
             },
-            SettingsInput::TerminalTriggerArguments => match &trigger.action {
+            SettingsInput::TerminalTriggerArguments => match action {
                 TerminalTriggerAction::LaunchLocalProcess { process } => match process {
                     LocalProcessSpec::DirectProgram { arguments, .. }
                     | LocalProcessSpec::ExplicitShell { arguments, .. } => {
@@ -323,7 +378,7 @@ impl TerminalTriggersSettingsState {
                 },
                 _ => Some(String::new()),
             },
-            SettingsInput::TerminalTriggerWorkingDirectory => match &trigger.action {
+            SettingsInput::TerminalTriggerWorkingDirectory => match action {
                 TerminalTriggerAction::LaunchLocalProcess { process } => match process {
                     LocalProcessSpec::DirectProgram {
                         working_directory, ..
@@ -354,20 +409,33 @@ impl TerminalTriggersSettingsState {
         let Some(trigger) = self.editor.as_mut() else {
             return false;
         };
+        if input == SettingsInput::TerminalTriggerMenuLabel {
+            if let TerminalTriggerAction::CustomMenu { items } = &mut trigger.action
+                && let Some(item) = items.get_mut(self.menu_item)
+            {
+                item.label = value.to_string();
+                return true;
+            }
+            return false;
+        }
+        let action = editable_trigger_action_mut(&mut trigger.action, self.menu_item);
         match input {
             SettingsInput::TerminalTriggerName => trigger.name = value.to_string(),
             SettingsInput::TerminalTriggerDescription => {
                 trigger.description = (!value.is_empty()).then(|| value.to_string());
             }
             SettingsInput::TerminalTriggerPattern => trigger.matcher.pattern = value.to_string(),
-            SettingsInput::TerminalTriggerActionValue => match &mut trigger.action {
+            SettingsInput::TerminalTriggerActionValue
+            | SettingsInput::TerminalTriggerTooltipText => match action {
                 TerminalTriggerAction::SendText { text, .. } => *text = value.to_string(),
+                TerminalTriggerAction::ShowTooltip { text } => *text = value.to_string(),
+                TerminalTriggerAction::OpenUrl { url } => *url = value.to_string(),
                 TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
                     *quick_command_id = value.to_string();
                 }
-                TerminalTriggerAction::LaunchLocalProcess { .. } => return false,
+                _ => return false,
             },
-            SettingsInput::TerminalTriggerExecutable => match &mut trigger.action {
+            SettingsInput::TerminalTriggerExecutable => match action {
                 TerminalTriggerAction::LaunchLocalProcess { process } => match process {
                     LocalProcessSpec::DirectProgram { executable, .. } => {
                         *executable = value.to_string()
@@ -378,7 +446,7 @@ impl TerminalTriggersSettingsState {
                 },
                 _ => return false,
             },
-            SettingsInput::TerminalTriggerArguments => match &mut trigger.action {
+            SettingsInput::TerminalTriggerArguments => match action {
                 TerminalTriggerAction::LaunchLocalProcess { process } => {
                     let arguments = value.lines().map(str::to_string).collect();
                     match process {
@@ -392,7 +460,7 @@ impl TerminalTriggersSettingsState {
                 }
                 _ => return false,
             },
-            SettingsInput::TerminalTriggerWorkingDirectory => match &mut trigger.action {
+            SettingsInput::TerminalTriggerWorkingDirectory => match action {
                 TerminalTriggerAction::LaunchLocalProcess { process } => {
                     let directory = (!value.trim().is_empty()).then(|| value.to_string());
                     match process {
@@ -490,6 +558,28 @@ impl WorkspaceApp {
         self.terminal_triggers.editor.as_ref()
     }
 
+    pub(in crate::workspace) fn terminal_trigger_draft_action(
+        &self,
+    ) -> Option<&TerminalTriggerAction> {
+        self.terminal_trigger_draft().map(|trigger| {
+            editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
+        })
+    }
+
+    pub(in crate::workspace) fn select_terminal_trigger_click_action(
+        &mut self,
+        action: TerminalTriggerAction,
+    ) {
+        self.clear_terminal_trigger_input_focus();
+        if let Some(trigger) = self.terminal_triggers.editor.as_mut() {
+            let current =
+                editable_trigger_action_mut(&mut trigger.action, self.terminal_triggers.menu_item);
+            if std::mem::discriminant(current) != std::mem::discriminant(&action) {
+                *current = action;
+            }
+        }
+    }
+
     pub(in crate::workspace) fn select_terminal_trigger_match_mode(
         &mut self,
         mode: TerminalTriggerMatchMode,
@@ -503,40 +593,26 @@ impl WorkspaceApp {
         &mut self,
         action: TerminalTriggerAction,
     ) {
+        self.clear_terminal_trigger_input_focus();
         let Some(trigger) = self.terminal_triggers.editor.as_mut() else {
             return;
         };
-        let same_kind = matches!(
-            (&trigger.action, &action),
-            (
-                TerminalTriggerAction::SendText { .. },
-                TerminalTriggerAction::SendText { .. }
-            ) | (
-                TerminalTriggerAction::RunQuickCommand { .. },
-                TerminalTriggerAction::RunQuickCommand { .. }
-            ) | (
-                TerminalTriggerAction::LaunchLocalProcess { .. },
-                TerminalTriggerAction::LaunchLocalProcess { .. }
-            )
-        );
+        let same_kind = std::mem::discriminant(&trigger.action) == std::mem::discriminant(&action);
         if !same_kind {
             trigger.action = action;
+            self.terminal_triggers.menu_item = 0;
         }
     }
 
     pub(in crate::workspace) fn select_terminal_trigger_process_mode(&mut self, shell: bool) {
-        let current_shell = self
-            .terminal_triggers
-            .editor
-            .as_ref()
-            .is_some_and(|trigger| {
-                matches!(
-                    trigger.action,
-                    TerminalTriggerAction::LaunchLocalProcess {
-                        process: LocalProcessSpec::ExplicitShell { .. }
-                    }
-                )
-            });
+        let current_shell = self.terminal_trigger_draft_action().is_some_and(|action| {
+            matches!(
+                action,
+                TerminalTriggerAction::LaunchLocalProcess {
+                    process: LocalProcessSpec::ExplicitShell { .. }
+                }
+            )
+        });
         if current_shell != shell {
             self.toggle_terminal_trigger_process_mode();
         }
@@ -549,7 +625,8 @@ impl WorkspaceApp {
         if let Some(trigger) = self.terminal_triggers.editor.as_mut()
             && let TerminalTriggerAction::RunQuickCommand {
                 quick_command_id: selected_id,
-            } = &mut trigger.action
+            } =
+                editable_trigger_action_mut(&mut trigger.action, self.terminal_triggers.menu_item)
         {
             *selected_id = quick_command_id;
         }
@@ -1106,17 +1183,7 @@ impl WorkspaceApp {
         trigger: &TerminalTrigger,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let action_label = match &trigger.action {
-            TerminalTriggerAction::SendText { .. } => {
-                "settings_view.terminal.triggers.action_send_text"
-            }
-            TerminalTriggerAction::RunQuickCommand { .. } => {
-                "settings_view.terminal.triggers.action_quick_command"
-            }
-            TerminalTriggerAction::LaunchLocalProcess { .. } => {
-                "settings_view.terminal.triggers.action_local_process"
-            }
-        };
+        let action_label = trigger_action_label(&trigger.action);
         let editor_title = if trigger.name.trim().is_empty() {
             self.i18n.t("settings_view.terminal.triggers.add_rule")
         } else {
@@ -1210,103 +1277,142 @@ impl WorkspaceApp {
             ),
         );
 
-        action_fields = match &trigger.action {
-            TerminalTriggerAction::SendText { append_enter, .. } => action_fields
-                .child(
-                    self.terminal_trigger_labeled_input(
-                        "settings_view.terminal.triggers.text",
+        if let TerminalTriggerAction::CustomMenu { items } = &trigger.action {
+            action_fields = action_fields.child(self.terminal_trigger_menu_editor(items, cx));
+        }
+        if matches!(
+            trigger.action,
+            TerminalTriggerAction::CustomLink { .. } | TerminalTriggerAction::CustomMenu { .. }
+        ) {
+            action_fields = action_fields.child(self.terminal_trigger_select_field(
+                self.i18n.t("settings_view.terminal.triggers.click_action"),
+                self.i18n.t(trigger_action_label(editable_trigger_action(
+                    &trigger.action,
+                    self.terminal_triggers.menu_item,
+                ))),
+                SettingsSelect::TerminalTriggerClickAction,
+                cx,
+            ));
+        }
+        action_fields =
+            match editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item) {
+                TerminalTriggerAction::OpenUrl { url } => {
+                    action_fields.child(self.terminal_trigger_labeled_input(
+                        "settings_view.terminal.triggers.url",
                         SettingsInput::TerminalTriggerActionValue,
-                        self.terminal_triggers
-                            .editor_input_value(SettingsInput::TerminalTriggerActionValue)
-                            .unwrap_or_default(),
+                        url.clone(),
                         cx,
-                    ),
-                )
-                .child(self.terminal_trigger_bool_option(
-                    "settings_view.terminal.triggers.append_enter",
-                    *append_enter,
-                    cx.listener(|this, _event, _window, cx| {
-                        if let Some(trigger) = this.terminal_triggers.editor.as_mut()
-                            && let TerminalTriggerAction::SendText { append_enter, .. } =
-                                &mut trigger.action
-                        {
-                            *append_enter = !*append_enter;
-                        }
-                        cx.notify();
-                    }),
-                )),
-            TerminalTriggerAction::RunQuickCommand { .. } => {
-                action_fields.child(self.terminal_trigger_quick_command_option(cx))
-            }
-            TerminalTriggerAction::LaunchLocalProcess { process } => {
-                let shell_mode = matches!(process, LocalProcessSpec::ExplicitShell { .. });
-                action_fields
-                    .child(
-                        self.terminal_trigger_compact_field(
-                            TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                            self.terminal_trigger_select_field(
-                                self.i18n
-                                    .t("settings_view.terminal.triggers.action_local_process"),
-                                self.i18n.t(if shell_mode {
-                                    "settings_view.terminal.triggers.explicit_shell"
-                                } else {
-                                    "settings_view.terminal.triggers.direct_program"
-                                }),
-                                SettingsSelect::TerminalTriggerProcessMode,
-                                cx,
-                            ),
-                        ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .gap(px(12.0))
-                            .child(
-                                self.terminal_trigger_responsive_field(
-                                    TERMINAL_TRIGGER_FIELD_BASIS,
-                                    self.terminal_trigger_labeled_input(
-                                        "settings_view.terminal.triggers.executable",
-                                        SettingsInput::TerminalTriggerExecutable,
-                                        self.terminal_triggers
-                                            .editor_input_value(
-                                                SettingsInput::TerminalTriggerExecutable,
-                                            )
-                                            .unwrap_or_default(),
-                                        cx,
-                                    ),
-                                ),
-                            )
-                            .child(
-                                self.terminal_trigger_responsive_field(
-                                    TERMINAL_TRIGGER_FIELD_BASIS,
-                                    self.terminal_trigger_labeled_input(
-                                        "settings_view.terminal.triggers.working_directory",
-                                        SettingsInput::TerminalTriggerWorkingDirectory,
-                                        self.terminal_triggers
-                                            .editor_input_value(
-                                                SettingsInput::TerminalTriggerWorkingDirectory,
-                                            )
-                                            .unwrap_or_default(),
-                                        cx,
-                                    ),
-                                ),
-                            ),
-                    )
+                    ))
+                }
+                TerminalTriggerAction::ShowTooltip { text } => {
+                    action_fields.child(self.terminal_trigger_labeled_input(
+                        "settings_view.terminal.triggers.tooltip_text",
+                        SettingsInput::TerminalTriggerTooltipText,
+                        text.clone(),
+                        cx,
+                    ))
+                }
+                TerminalTriggerAction::CustomLink { .. }
+                | TerminalTriggerAction::CustomMenu { .. } => action_fields,
+                TerminalTriggerAction::SendText { append_enter, .. } => action_fields
                     .child(
                         self.terminal_trigger_labeled_input(
-                            "settings_view.terminal.triggers.arguments",
-                            SettingsInput::TerminalTriggerArguments,
+                            "settings_view.terminal.triggers.text",
+                            SettingsInput::TerminalTriggerActionValue,
                             self.terminal_triggers
-                                .editor_input_value(SettingsInput::TerminalTriggerArguments)
+                                .editor_input_value(SettingsInput::TerminalTriggerActionValue)
                                 .unwrap_or_default(),
                             cx,
                         ),
                     )
-            }
-        };
+                    .child(self.terminal_trigger_bool_option(
+                        "settings_view.terminal.triggers.append_enter",
+                        *append_enter,
+                        cx.listener(|this, _event, _window, cx| {
+                            if let Some(trigger) = this.terminal_triggers.editor.as_mut()
+                                && let TerminalTriggerAction::SendText { append_enter, .. } =
+                                    editable_trigger_action_mut(
+                                        &mut trigger.action,
+                                        this.terminal_triggers.menu_item,
+                                    )
+                            {
+                                *append_enter = !*append_enter;
+                            }
+                            cx.notify();
+                        }),
+                    )),
+                TerminalTriggerAction::RunQuickCommand { .. } => {
+                    action_fields.child(self.terminal_trigger_quick_command_option(cx))
+                }
+                TerminalTriggerAction::LaunchLocalProcess { process } => {
+                    let shell_mode = matches!(process, LocalProcessSpec::ExplicitShell { .. });
+                    action_fields
+                        .child(
+                            self.terminal_trigger_compact_field(
+                                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
+                                self.terminal_trigger_select_field(
+                                    self.i18n
+                                        .t("settings_view.terminal.triggers.action_local_process"),
+                                    self.i18n.t(if shell_mode {
+                                        "settings_view.terminal.triggers.explicit_shell"
+                                    } else {
+                                        "settings_view.terminal.triggers.direct_program"
+                                    }),
+                                    SettingsSelect::TerminalTriggerProcessMode,
+                                    cx,
+                                ),
+                            ),
+                        )
+                        .child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .flex_row()
+                                .flex_wrap()
+                                .gap(px(12.0))
+                                .child(
+                                    self.terminal_trigger_responsive_field(
+                                        TERMINAL_TRIGGER_FIELD_BASIS,
+                                        self.terminal_trigger_labeled_input(
+                                            "settings_view.terminal.triggers.executable",
+                                            SettingsInput::TerminalTriggerExecutable,
+                                            self.terminal_triggers
+                                                .editor_input_value(
+                                                    SettingsInput::TerminalTriggerExecutable,
+                                                )
+                                                .unwrap_or_default(),
+                                            cx,
+                                        ),
+                                    ),
+                                )
+                                .child(
+                                    self.terminal_trigger_responsive_field(
+                                        TERMINAL_TRIGGER_FIELD_BASIS,
+                                        self.terminal_trigger_labeled_input(
+                                            "settings_view.terminal.triggers.working_directory",
+                                            SettingsInput::TerminalTriggerWorkingDirectory,
+                                            self.terminal_triggers
+                                                .editor_input_value(
+                                                    SettingsInput::TerminalTriggerWorkingDirectory,
+                                                )
+                                                .unwrap_or_default(),
+                                            cx,
+                                        ),
+                                    ),
+                                ),
+                        )
+                        .child(
+                            self.terminal_trigger_labeled_input(
+                                "settings_view.terminal.triggers.arguments",
+                                SettingsInput::TerminalTriggerArguments,
+                                self.terminal_triggers
+                                    .editor_input_value(SettingsInput::TerminalTriggerArguments)
+                                    .unwrap_or_default(),
+                                cx,
+                            ),
+                        )
+                }
+            };
 
         let timing_fields = div()
             .w_full()
@@ -1379,8 +1485,20 @@ impl WorkspaceApp {
             .child(match_options)
             .child(self.card_separator())
             .child(action_fields)
-            .child(self.card_separator())
-            .child(timing_fields)
+            .when(!trigger.action.is_interactive(), |editor| {
+                editor.child(self.card_separator()).child(timing_fields)
+            })
+            .when(trigger.action.is_interactive(), |editor| {
+                editor.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(
+                            self.i18n
+                                .t("settings_view.terminal.triggers.interaction_hint"),
+                        ),
+                )
+            })
             .child(self.terminal_trigger_scope_editor(trigger, cx))
             .child(
                 div()
@@ -1449,6 +1567,100 @@ impl WorkspaceApp {
                     .child(self.i18n.t(label_key)),
             )
             .child(self.settings_text_input_control_fill(input, value, self.i18n.t(label_key), cx))
+            .into_any_element()
+    }
+
+    fn terminal_trigger_menu_editor(
+        &self,
+        items: &[TerminalTriggerMenuItem],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let selected = self
+            .terminal_triggers
+            .menu_item
+            .min(items.len().saturating_sub(1));
+        let mut choices = div().w_full().flex().flex_wrap().gap(px(6.0));
+        for (index, item) in items.iter().enumerate() {
+            let label = if item.label.is_empty() {
+                format!(
+                    "{} {}",
+                    self.i18n.t("settings_view.terminal.triggers.menu_item"),
+                    index + 1
+                )
+            } else {
+                item.label.clone()
+            };
+            choices = choices.child(self.terminal_trigger_button(
+                label,
+                if index == selected {
+                    ButtonVariant::Default
+                } else {
+                    ButtonVariant::Outline
+                },
+                cx.listener(move |this, _, _, cx| {
+                    this.clear_terminal_trigger_input_focus();
+                    this.terminal_triggers.menu_item = index;
+                    cx.notify();
+                }),
+            ));
+        }
+        let mut tools = div().flex().flex_wrap().gap(px(6.0));
+        if items.len() < 16 {
+            tools = tools.child(self.terminal_trigger_button(
+                self.i18n.t("settings_view.terminal.triggers.add_item"),
+                ButtonVariant::Outline,
+                cx.listener(|this, _, _, cx| {
+                    this.clear_terminal_trigger_input_focus();
+                    if let Some(trigger) = this.terminal_triggers.editor.as_mut()
+                        && let TerminalTriggerAction::CustomMenu { items } = &mut trigger.action
+                        && items.len() < 16
+                    {
+                        items.push(TerminalTriggerMenuItem {
+                            label: String::new(),
+                            action: TerminalTriggerAction::OpenUrl { url: String::new() },
+                        });
+                        this.terminal_triggers.menu_item = items.len() - 1;
+                    }
+                    cx.notify();
+                }),
+            ));
+        }
+        if items.len() > 1 {
+            tools = tools.child(self.terminal_trigger_button(
+                self.i18n.t("settings_view.terminal.triggers.remove_item"),
+                ButtonVariant::Outline,
+                cx.listener(move |this, _, _, cx| {
+                    this.clear_terminal_trigger_input_focus();
+                    if let Some(trigger) = this.terminal_triggers.editor.as_mut()
+                        && let TerminalTriggerAction::CustomMenu { items } = &mut trigger.action
+                        && items.len() > 1
+                        && selected < items.len()
+                    {
+                        items.remove(selected);
+                        this.terminal_triggers.menu_item = selected.min(items.len() - 1);
+                    }
+                    cx.notify();
+                }),
+            ));
+        }
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(choices)
+            .child(tools)
+            .child(
+                self.terminal_trigger_labeled_input(
+                    "settings_view.terminal.triggers.menu_label",
+                    SettingsInput::TerminalTriggerMenuLabel,
+                    items
+                        .get(selected)
+                        .map(|item| item.label.clone())
+                        .unwrap_or_default(),
+                    cx,
+                ),
+            )
             .into_any_element()
     }
 
@@ -1536,7 +1748,9 @@ impl WorkspaceApp {
         let Some(trigger) = self.terminal_triggers.editor.as_mut() else {
             return;
         };
-        let TerminalTriggerAction::LaunchLocalProcess { process } = &mut trigger.action else {
+        let TerminalTriggerAction::LaunchLocalProcess { process } =
+            editable_trigger_action_mut(&mut trigger.action, self.terminal_triggers.menu_item)
+        else {
             return;
         };
         let replacement = match &mut *process {
@@ -1568,11 +1782,13 @@ impl WorkspaceApp {
             .terminal_triggers
             .editor
             .as_ref()
-            .and_then(|trigger| match &trigger.action {
-                TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
-                    Some(quick_command_id.as_str())
+            .and_then(|trigger| {
+                match editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item) {
+                    TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
+                        Some(quick_command_id.as_str())
+                    }
+                    _ => None,
                 }
-                _ => None,
             })
             .unwrap_or_default();
         let selected_label = quick_commands

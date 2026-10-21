@@ -458,11 +458,12 @@ where
                         cell_height: window_size.cell_height,
                     };
                     if grid_changed {
-                        state
-                            .shell_integration
-                            .reset_command_marks_for_grid_reflow(|event| {
+                        state.shell_integration.reflow_command_marks(
+                            &self.terminal.lock(),
+                            |event| {
                                 let _ = self.event_tx.send(event);
-                            });
+                            },
+                        );
                     }
                     self.pty.on_resize(window_size);
                     if grid_changed {

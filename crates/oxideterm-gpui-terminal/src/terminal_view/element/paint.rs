@@ -143,7 +143,7 @@ pub(crate) fn paint_command_mark_overlay(
     origin: gpui::Point<Pixels>,
     cols: usize,
     metrics: &TerminalMetrics,
-    command_mark_gutter_width: f32,
+    decorations: bool,
     window: &mut Window,
 ) {
     let x = 0.0;
@@ -154,29 +154,17 @@ pub(crate) fn paint_command_mark_overlay(
     let accent = command_mark_accent(overlay);
     let bounds = Bounds::new(origin + point(px(x), px(y)), size(px(width), px(height)));
 
-    if let Some(fill_color) = command_mark_fill(overlay) {
+    if decorations && let Some(fill_color) = command_mark_fill(overlay) {
         window.paint_quad(fill(bounds, fill_color));
     }
 
-    if command_mark_gutter_width > 0.0 {
-        let edge_width = if overlay.selected { 3.0 } else { 2.0 };
-        let edge_x = command_mark_edge_x(command_mark_gutter_width, edge_width);
-        window.paint_quad(fill(
-            Bounds::new(
-                origin + point(px(edge_x), px(y)),
-                size(px(edge_width), px(height)),
-            ),
-            accent,
-        ));
-    }
-
-    if overlay.selected && overlay.has_top {
+    if decorations && overlay.selected && overlay.has_top {
         window.paint_quad(fill(
             Bounds::new(origin + point(px(x), px(y)), size(px(width), px(1.0))),
             accent,
         ));
     }
-    if overlay.selected && overlay.has_bottom {
+    if decorations && overlay.selected && overlay.has_bottom {
         window.paint_quad(fill(
             Bounds::new(
                 origin + point(px(x), px((y + height - 1.0).max(y))),
@@ -187,11 +175,103 @@ pub(crate) fn paint_command_mark_overlay(
     }
 }
 
-fn command_mark_edge_x(gutter_width: f32, edge_width: f32) -> f32 {
-    if gutter_width <= edge_width {
-        return 0.0;
+pub(super) fn paint_command_gutter(
+    overlay: &TerminalCommandMarkOverlay,
+    origin: Point<Pixels>,
+    metrics: &TerminalMetrics,
+    width: f32,
+    theme: &TerminalUiTheme,
+    window: &mut Window,
+) {
+    let line_height = metrics.line_height_f32();
+    let stroke = 1.0;
+    let box_size = (width - 2.0 * stroke).max(2.0).min(line_height * 0.55);
+    let center_x = -width / 2.0;
+    let center_y = (overlay.start_row as f32 + 0.5) * line_height;
+    let left = center_x - box_size / 2.0;
+    let top = center_y - box_size / 2.0;
+    let right = left + box_size;
+    let bottom = top + box_size;
+    let scale = window.scale_factor();
+    let color = if overlay.exit_code.is_some_and(|code| code != 0) && !overlay.stale {
+        rgba((theme.tokens.ui.error << 8) | 0xcc)
+    } else if overlay.hovered || overlay.selected {
+        rgba((theme.tokens.ui.accent << 8) | 0xe6)
+    } else {
+        rgba((theme.foreground << 8) | 0x70)
+    };
+    // Snap every edge in window coordinates so the thin outline stays crisp
+    // at fractional font sizes and display scale factors.
+    let mut rect = |x: f32, y: f32, w: f32, h: f32| {
+        if w <= 0.0 || h <= 0.0 {
+            return;
+        }
+        let x0 = ((f32::from(origin.x) + x) * scale).round() / scale;
+        let y0 = ((f32::from(origin.y) + y) * scale).round() / scale;
+        let x1 = ((f32::from(origin.x) + x + w) * scale).round() / scale;
+        let y1 = ((f32::from(origin.y) + y + h) * scale).round() / scale;
+        window.paint_quad(fill(
+            Bounds::new(point(px(x0), px(y0)), size(px(x1 - x0), px(y1 - y0))),
+            color,
+        ));
+    };
+
+    // Avoid overlapping translucent strokes, which would darken corners and joins.
+    if overlay.has_top {
+        rect(left, top, box_size, stroke);
+        rect(left, bottom - stroke, box_size, stroke);
+        rect(left, top + stroke, stroke, box_size - 2.0 * stroke);
+        rect(
+            right - stroke,
+            top + stroke,
+            stroke,
+            box_size - 2.0 * stroke,
+        );
+        if overlay.collapsed && box_size >= 5.0 {
+            let arm = (box_size * 0.5)
+                .max(3.0 * stroke)
+                .min(box_size - 2.0 * stroke);
+            rect(center_x - arm / 2.0, center_y - stroke / 2.0, arm, stroke);
+            rect(
+                center_x - stroke / 2.0,
+                center_y - arm / 2.0,
+                stroke,
+                (arm - stroke) / 2.0,
+            );
+            rect(
+                center_x - stroke / 2.0,
+                center_y + stroke / 2.0,
+                stroke,
+                (arm - stroke) / 2.0,
+            );
+        }
     }
-    -gutter_width + (gutter_width - edge_width) / 2.0
+
+    let line_top = if overlay.has_top {
+        bottom
+    } else {
+        overlay.start_row as f32 * line_height
+    };
+    let finished = overlay.has_bottom && !overlay.running;
+    let line_bottom = if finished {
+        ((overlay.end_row as f32 + 0.5) * line_height).max(line_top + 2.0 * stroke)
+    } else {
+        (overlay.end_row + 1) as f32 * line_height
+    };
+    rect(
+        center_x - stroke / 2.0,
+        line_top,
+        stroke,
+        line_bottom - line_top - if finished { stroke } else { 0.0 },
+    );
+    if finished {
+        rect(
+            center_x - stroke / 2.0,
+            line_bottom - stroke,
+            right - center_x + stroke / 2.0,
+            stroke,
+        );
+    }
 }
 
 fn command_mark_accent(overlay: &TerminalCommandMarkOverlay) -> Rgba {

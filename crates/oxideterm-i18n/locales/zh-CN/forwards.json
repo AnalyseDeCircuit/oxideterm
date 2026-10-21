@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "SSH 隧道",
+    "name": "隧道名称",
+    "group": "分组",
+    "group_invalid": "分组路径不能包含空的层级。",
+    "host": "SSH 主机",
+    "choose_host": "选择已保存的 SSH 主机",
+    "startup": "应用启动时连接",
+    "missing_host": "找不到关联的 SSH 主机。",
+    "name_required": "请填写隧道名称，名称和分组不能包含换行。",
+    "address_required": "请填写有效的监听地址和目标地址。",
+    "save_failed": "无法更新 SSH 隧道。"
+  },
   "copy_address": "复制地址",
   "copied": "已复制",
   "forwards": {

@@ -342,6 +342,7 @@ impl WorkspaceApp {
         state: &NodeReadiness,
         cx: &mut Context<Self>,
     ) {
+        self.resume_ssh_tunnel_starts(node_id, state, cx);
         if !matches!(
             state,
             NodeReadiness::Ready | NodeReadiness::Error | NodeReadiness::Disconnected
@@ -643,6 +644,10 @@ impl WorkspaceApp {
                                 );
                             }
                         }
+                    }
+                    self.flush_ssh_tunnel_stops(cx);
+                    if let Some(node) = self.forwarding.read(cx).node_for_tab(tab_id) {
+                        self.resume_ssh_tunnel_starts(&node, &NodeReadiness::Ready, cx);
                     }
                 }
                 ForwardingDeliveryIntent::Binding { binding } => {

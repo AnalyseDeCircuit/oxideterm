@@ -121,12 +121,32 @@ impl WorkspaceApp {
             + mosh_count
             + standalone_sftp_count
             + remote_desktop_count
+            + self
+                .saved_ssh_tunnels()
+                .iter()
+                .filter(|saved| {
+                    saved
+                        .tunnel
+                        .as_ref()
+                        .and_then(|profile| profile.group.as_deref())
+                        .is_some_and(|candidate| session_group_path_is_within(candidate, group))
+                })
+                .count()
     }
 
     pub(super) fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
         let mut paths = HashSet::new();
         for group in self.connection_store.groups() {
             add_group_path_segments(group, &mut paths);
+        }
+        for saved in self.saved_ssh_tunnels() {
+            if let Some(group) = saved
+                .tunnel
+                .as_ref()
+                .and_then(|profile| profile.group.as_deref())
+            {
+                add_group_path_segments(group, &mut paths);
+            }
         }
         for conn in self.connection_store.connections() {
             if let Some(group) = conn.group.as_deref() {
@@ -462,6 +482,15 @@ impl WorkspaceApp {
     }
 
     fn rename_session_group(&mut self, old_name: &str, new_name: String, cx: &mut Context<Self>) {
+        let previous_tunnel_groups = match self.change_tunnel_group_path(old_name, Some(&new_name))
+        {
+            Ok(groups) => groups,
+            Err(error) => {
+                self.session_manager
+                    .update(cx, |state, cx| state.set_status(Some(error), cx));
+                return;
+            }
+        };
         match self
             .connection_store
             .rename_group(old_name, new_name.clone())
@@ -497,6 +526,10 @@ impl WorkspaceApp {
                     "{}: {error}",
                     self.i18n.t("sessionManager.toast.rename_group_failed")
                 );
+                let status = match self.apply_tunnel_groups(&previous_tunnel_groups) {
+                    Ok(_) => status,
+                    Err(rollback) => format!("{status}: {rollback}"),
+                };
                 self.session_manager.update(cx, |session_manager, cx| {
                     session_manager.group_editor_error = Some(status);
                     cx.notify();
@@ -537,6 +570,14 @@ impl WorkspaceApp {
     }
 
     fn delete_session_group(&mut self, group: &str, cx: &mut Context<Self>) {
+        let previous_tunnel_groups = match self.change_tunnel_group_path(group, None) {
+            Ok(groups) => groups,
+            Err(error) => {
+                self.session_manager
+                    .update(cx, |state, cx| state.set_status(Some(error), cx));
+                return;
+            }
+        };
         match self.connection_store.delete_group(group) {
             Ok(()) => {
                 self.session_manager.update(cx, |session_manager, cx| {
@@ -564,6 +605,10 @@ impl WorkspaceApp {
                     "{}: {error}",
                     self.i18n.t("sessionManager.toast.delete_group_failed")
                 );
+                let status = match self.apply_tunnel_groups(&previous_tunnel_groups) {
+                    Ok(_) => status,
+                    Err(rollback) => format!("{status}: {rollback}"),
+                };
                 self.session_manager.update(cx, |session_manager, cx| {
                     let reopen_manager = session_manager.reopen_group_manager_after_delete;
                     session_manager.show_group_manager = reopen_manager;
@@ -1335,6 +1380,9 @@ impl WorkspaceApp {
         let mut deleted = 0;
         for target in targets {
             match target {
+                SessionManagerSelectionTarget::Tunnel(id) => {
+                    self.stop_ssh_tunnel(&id, true, cx);
+                }
                 SessionManagerSelectionTarget::Plugin(id) => {
                     match self.connection_store.delete_plugin_profile(&id) {
                         Ok(true) => deleted += 1,
@@ -1430,11 +1478,11 @@ impl WorkspaceApp {
                 }
             }
         }
-        let status = connections_deleted_label(&self.i18n, deleted);
+        let status = (deleted > 0).then(|| connections_deleted_label(&self.i18n, deleted));
         self.session_manager.update(cx, |session_manager, cx| {
             session_manager.selected_items.clear();
             session_manager.show_batch_move = false;
-            session_manager.status = Some(status);
+            session_manager.status = status;
             cx.notify();
         });
         if deleted > 0 {
@@ -1558,12 +1606,14 @@ impl WorkspaceApp {
         let mut standalone_sftp_profile_ids = Vec::new();
         let mut remote_desktop_ids = Vec::new();
         let mut plugin_ids = Vec::new();
+        let mut tunnel_ids = Vec::new();
         for target in targets.iter().filter(|target| {
             // Drop evaluation never writes metadata; only assets whose group changes reach storage.
             self.session_target_group(target)
-                .is_some_and(|current_group| current_group != group)
+                .is_some_and(|current_group| current_group.as_deref() != group)
         }) {
             match target {
+                SessionManagerSelectionTarget::Tunnel(id) => tunnel_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Plugin(id) => plugin_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
@@ -1582,6 +1632,7 @@ impl WorkspaceApp {
             }
         }
         let has_group_changes = !connection_ids.is_empty()
+            || !tunnel_ids.is_empty()
             || !plugin_ids.is_empty()
             || !ftp_profile_ids.is_empty()
             || !serial_profile_ids.is_empty()
@@ -1600,6 +1651,14 @@ impl WorkspaceApp {
             }
             return;
         }
+        let previous_tunnel_groups = match self.move_ssh_tunnels_to_group(&tunnel_ids, group) {
+            Ok(groups) => groups,
+            Err(error) => {
+                self.session_manager
+                    .update(cx, |state, cx| state.set_status(Some(error), cx));
+                return;
+            }
+        };
         match self.connection_store.move_session_assets_to_group(
             &connection_ids,
             &serial_profile_ids,
@@ -1613,6 +1672,7 @@ impl WorkspaceApp {
             group,
         ) {
             Ok(count) => {
+                let count = count + tunnel_ids.len();
                 self.session_manager.update(cx, |session_manager, cx| {
                     match interaction {
                         SessionManagerMoveInteraction::BatchMenu => {
@@ -1639,6 +1699,10 @@ impl WorkspaceApp {
             }
             Err(error) => {
                 let status = error.to_string();
+                let status = match self.apply_tunnel_groups(&previous_tunnel_groups) {
+                    Ok(_) => status,
+                    Err(rollback) => format!("{status}: {rollback}"),
+                };
                 self.session_manager.update(cx, |session_manager, cx| {
                     session_manager.set_status(Some(status), cx)
                 });
@@ -1646,12 +1710,20 @@ impl WorkspaceApp {
         }
     }
 
-    fn session_target_group<'a>(
-        &'a self,
+    fn session_target_group(
+        &self,
         target: &SessionManagerSelectionTarget,
-    ) -> Option<Option<&'a str>> {
+    ) -> Option<Option<String>> {
         // Returning an outer Option distinguishes missing assets from the ungrouped root.
         match target {
+            SessionManagerSelectionTarget::Tunnel(id) => {
+                return self
+                    .saved_ssh_tunnels()
+                    .into_iter()
+                    .find(|saved| &saved.id == id)
+                    .and_then(|saved| saved.tunnel)
+                    .map(|profile| profile.group);
+            }
             SessionManagerSelectionTarget::Plugin(id) => self
                 .connection_store
                 .plugin_profiles()
@@ -1697,6 +1769,7 @@ impl WorkspaceApp {
                 .get_remote_desktop_profile(id)
                 .map(|profile| profile.group.as_deref()),
         }
+        .map(|group| group.map(str::to_string))
     }
 }
 

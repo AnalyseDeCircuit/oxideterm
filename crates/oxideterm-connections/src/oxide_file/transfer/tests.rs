@@ -493,6 +493,9 @@ mod tests {
                     target_port: 80,
                     description: Some("web".to_string()),
                     auto_start: true,
+                    tunnel: Some(super::super::format::OxideTunnelProfile {
+                        name: "Web tunnel".into(), group: Some("Services".into()), connect_on_startup: true,
+                    }),
                 }],
                 ..OxideExportOptions::default()
             },
@@ -542,6 +545,9 @@ mod tests {
         assert_eq!(result.imported_forwards, 1);
         assert_eq!(result.forward_records.len(), 1);
         assert_eq!(result.forward_records[0].forward_type, "local");
+        let tunnel = result.forward_records[0].tunnel.as_ref().unwrap();
+        assert_eq!((&*tunnel.name, tunnel.group.as_deref(), tunnel.connect_on_startup),
+            ("Web tunnel", Some("Services"), true));
         assert!(result.quick_commands_json.is_some());
 
         let imported = target.connections().first().unwrap();
@@ -1678,6 +1684,7 @@ mod tests {
                         target_port: 80,
                         description: Some("prod".to_string()),
                         auto_start: true,
+                        tunnel: None,
                     },
                     OxideForwardRecord {
                         id: Some("forward-staging".to_string()),
@@ -1689,6 +1696,7 @@ mod tests {
                         target_port: 90,
                         description: Some("staging".to_string()),
                         auto_start: false,
+                        tunnel: None,
                     },
                 ],
                 ..OxideExportOptions::default()
@@ -1742,6 +1750,7 @@ mod tests {
                     target_port: 80,
                     description: None,
                     auto_start: true,
+                    tunnel: None,
                 }],
                 ..OxideExportOptions::default()
             },

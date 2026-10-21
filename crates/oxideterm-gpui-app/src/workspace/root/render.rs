@@ -1309,7 +1309,10 @@ impl WorkspaceApp {
             .when_some(self.render_tab_rename_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
-            .when_some(self.render_archive_command(cx), |root, dialog| {
+            .when_some(self.render_archive_command(window, cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_ssh_tunnel_form(window, cx), |root, dialog| {
                 root.child(dialog)
             })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.

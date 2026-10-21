@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "Archiv entpacken",
-      "hint": "Befehl prüfen und bearbeiten, dann als neuen Entwurf in die Befehlsleiste übernehmen. Es wird nichts automatisch ausgeführt.",
+      "command": "Entpackbefehl",
+      "change_shell": "Ändern",
+      "open_hint": "Klicken, um einen Entpackbefehl vorzubereiten",
+      "open_modifier_hint": "{{modifier}} + Klicken, um einen Entpackbefehl vorzubereiten",
       "source": "Archiv",
       "destination": "Zielordner",
-      "environment_hint": "Die Erkennung prüft die ursprüngliche SSH-Verbindung oder WSL-Distribution. Verlassen Sie zuerst andere Hosts oder Container.",
-      "confirm_environment": "Ich bin in der angezeigten Umgebung und habe die aktuelle Shell gewählt",
       "probing": "Verfügbare Entpackwerkzeuge werden geprüft…",
       "fill": "In Befehlsleiste übernehmen",
       "context_unavailable": "Kehren Sie zuerst zu einer freien Shell zurück.",
@@ -124,6 +125,10 @@
       "find": "Suchen...",
       "manage_triggers": "Auslöser für diese Sitzung verwalten...",
       "select_command": "Befehl auswählen",
+      "collapse_output": "Ausgabe einklappen",
+      "expand_output": "Ausgabe ausklappen",
+      "folded_output": "{{count}} Ausgabezeilen eingeklappt",
+      "folded_exit_code": "Exit-Code {{code}}",
       "previous_command": "Vorheriger Befehl",
       "next_command": "Nächster Befehl",
       "clear_screen": "Bildschirm leeren"

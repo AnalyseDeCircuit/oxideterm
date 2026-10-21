@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "SSH tunnel",
+    "name": "Tunnel name",
+    "group": "Group",
+    "group_invalid": "Group paths cannot contain empty segments.",
+    "host": "SSH host",
+    "choose_host": "Choose a saved SSH host",
+    "startup": "Connect when the application starts",
+    "missing_host": "The saved SSH host is unavailable.",
+    "name_required": "Enter a tunnel name. Names and groups must be on one line.",
+    "address_required": "Enter valid bind and destination addresses.",
+    "save_failed": "Could not update the SSH tunnel."
+  },
   "copy_address": "Copy address",
   "copied": "Copied!",
   "forwards": {

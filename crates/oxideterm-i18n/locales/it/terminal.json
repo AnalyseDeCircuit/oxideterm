@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "Estrai archivio",
-      "hint": "Controlla e modifica il comando, poi aggiungilo come nuova bozza nella barra dei comandi. Nulla viene eseguito automaticamente.",
+      "command": "Comando di estrazione",
+      "change_shell": "Cambia",
+      "open_hint": "Fai clic per preparare il comando di estrazione",
+      "open_modifier_hint": "{{modifier}} + clic per preparare il comando di estrazione",
       "source": "Archivio",
       "destination": "Cartella di destinazione",
-      "environment_hint": "Il rilevamento usa la connessione SSH o la distribuzione WSL originale. Se sei entrato in un altro host o contenitore, torna prima a quell’ambiente.",
-      "confirm_environment": "Sono nell’ambiente indicato e ho selezionato la shell attuale",
       "probing": "Verifica degli strumenti di estrazione disponibili…",
       "fill": "Aggiungi alla barra dei comandi",
       "context_unavailable": "Torna a una shell inattiva prima di preparare l’estrazione.",
@@ -124,6 +125,10 @@
       "find": "Trova...",
       "manage_triggers": "Gestisci i trigger per questa sessione...",
       "select_command": "Seleziona comando",
+      "collapse_output": "Comprimi output",
+      "expand_output": "Espandi output",
+      "folded_output": "{{count}} righe di output compresse",
+      "folded_exit_code": "Codice di uscita {{code}}",
       "previous_command": "Comando precedente",
       "next_command": "Comando successivo",
       "clear_screen": "Pulisci schermo"

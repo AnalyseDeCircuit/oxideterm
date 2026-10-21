@@ -2825,12 +2825,14 @@ impl WorkspaceApp {
             .connection_form_state(cx)
             .form
             .as_ref()
-            .filter(|form| form.save_password && action == SavedConnectionPromptAction::Connect)
+            .filter(|form| form.save_password && action != SavedConnectionPromptAction::Test)
             .and_then(|_| self.connection_store.get(&id))
             .map(super::super::password_prompt::SavedAuthSaveTarget::new);
         let secret_handoff = match action {
             SavedConnectionPromptAction::Test => RuntimeSecretHandoff::CopyForTest,
-            SavedConnectionPromptAction::Connect => RuntimeSecretHandoff::Move,
+            SavedConnectionPromptAction::Connect | SavedConnectionPromptAction::Tunnel => {
+                RuntimeSecretHandoff::Move
+            }
         };
         let Some((mut config, title)) = self.build_new_connection_config(secret_handoff, cx) else {
             return;
@@ -2862,6 +2864,15 @@ impl WorkspaceApp {
         }
 
         match action {
+            SavedConnectionPromptAction::Tunnel => {
+                if let Some(tunnel_id) = self.ssh_tunnels.pending_auth.take() {
+                    self.update_connection_form_state(cx, |state| state.form = None);
+                    self.connect_ssh_tunnel_with_config(&tunnel_id, config, window, cx);
+                    if let Some(node) = self.saved_ssh_nodes.get(&id).cloned() {
+                        self.arm_saved_auth_save(&node, auth_save_target);
+                    }
+                }
+            }
             SavedConnectionPromptAction::Connect => {
                 self.update_connection_form_state(cx, |state| {
                     if let Some(form) = state.form.as_mut() {

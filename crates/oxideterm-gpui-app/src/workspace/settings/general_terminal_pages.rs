@@ -937,6 +937,14 @@ impl WorkspaceApp {
                     ),
                     self.card_separator(),
                     self.bool_row(
+                        "settings_view.terminal.command_folding",
+                        "settings_view.terminal.command_folding_hint",
+                        settings.terminal.command_marks.folding_enabled,
+                        set_command_folding_enabled,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.bool_row(
                         "settings_view.terminal.command_marks_hover_actions",
                         "settings_view.terminal.command_marks_hover_actions_hint",
                         settings.terminal.command_marks.show_hover_actions,
