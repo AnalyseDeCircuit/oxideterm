@@ -395,6 +395,9 @@ impl WorkspaceApp {
                     config: current_profile.map_or_else(
                         || config.clone(),
                         |profile| TelnetSessionConfig {
+                            line_endings: new_connection::terminal_telnet_line_endings_from_profile(
+                                profile,
+                            ),
                             host: profile.host.clone(),
                             port: profile.port,
                         },
@@ -512,6 +515,33 @@ impl StandaloneConnectionRegistry {
 
     pub(super) fn record_mut(&mut self, id: &str) -> Option<&mut StandaloneConnectionRecord> {
         self.records.iter_mut().find(|record| record.id == id)
+    }
+
+    pub(super) fn set_telnet_line_endings(
+        &mut self,
+        session_id: TerminalSessionId,
+        input: Option<oxideterm_terminal::SerialLineEnding>,
+        output: Option<oxideterm_terminal::SerialLineEnding>,
+    ) {
+        // Only this surface's launch defaults change; sibling live sessions retain theirs.
+        let Some(record) = self.records.iter_mut().find(|record| {
+            record.surface == Some(StandaloneConnectionSurface::Terminal(session_id))
+        }) else {
+            return;
+        };
+        match &mut record.launch {
+            StandaloneConnectionLaunch::Telnet { config, .. }
+            | StandaloneConnectionLaunch::SavedTelnet { config, .. } => {
+                if let Some(value) = input {
+                    config.line_endings.input = value;
+                }
+                if let Some(value) = output {
+                    config.line_endings.output = value;
+                }
+            }
+            _ => return,
+        }
+        self.persist();
     }
 
     pub(super) fn connection_id_for_surface(

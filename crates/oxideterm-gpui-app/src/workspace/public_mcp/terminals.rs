@@ -578,6 +578,10 @@ impl WorkspaceApp {
             };
             let title = requested_title.unwrap_or_else(|| profile.name.clone());
             let config = TelnetSessionConfig {
+                line_endings:
+                    crate::workspace::new_connection::terminal_telnet_line_endings_from_profile(
+                        &profile,
+                    ),
                 host: profile.host,
                 port: profile.port,
             };

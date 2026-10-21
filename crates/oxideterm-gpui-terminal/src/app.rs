@@ -190,6 +190,10 @@ pub enum TerminalPaneEvent {
         input: Option<SerialLineEnding>,
         output: Option<SerialLineEnding>,
     },
+    TelnetLineEndingsChanged {
+        input: Option<SerialLineEnding>,
+        output: Option<SerialLineEnding>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2503,6 +2507,42 @@ impl TerminalPane {
         self.set_serial_runtime_options(options, cx);
     }
 
+    fn cycle_telnet_line_ending(&mut self, output: bool, cx: &mut Context<Self>) {
+        let mut terminal = self.terminal.lock();
+        let Some(mut options) = terminal.telnet_line_endings() else {
+            return;
+        };
+        let value = if output {
+            &mut options.output
+        } else {
+            &mut options.input
+        };
+        *value = match *value {
+            SerialLineEnding::None => SerialLineEnding::Lf,
+            SerialLineEnding::Lf => SerialLineEnding::CrLf,
+            SerialLineEnding::CrLf => SerialLineEnding::Cr,
+            SerialLineEnding::Cr => SerialLineEnding::None,
+        };
+        if let Err(error) = terminal.set_telnet_line_endings(options) {
+            if let Some(sink) = &self.preferences.notice_sink {
+                sink(TerminalNotice {
+                    title: self.preferences.serial_control_labels.line_ending.clone(),
+                    description: Some(error.to_string()),
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Error,
+                });
+            }
+            return;
+        }
+        drop(terminal);
+        cx.emit(TerminalPaneEvent::TelnetLineEndingsChanged {
+            input: (!output).then_some(options.input),
+            output: output.then_some(options.output),
+        });
+        cx.notify();
+    }
+
     fn cycle_serial_output_line_ending(&mut self, cx: &mut Context<Self>) {
         let Some(mut options) = self.terminal.lock().serial_runtime_options() else {
             return;
@@ -4067,11 +4107,29 @@ impl TerminalPane {
     }
 
     fn send_protocol_bytes(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
+        self.send_terminal_bytes(bytes, false, cx)
+    }
+
+    fn send_terminal_bytes(
+        &mut self,
+        bytes: &[u8],
+        user_input: bool,
+        cx: &mut Context<Self>,
+    ) -> bool {
         if !self.terminal_accepts_input() {
             return false;
         }
 
-        if self.terminal.lock().write_protocol_bytes(bytes).is_ok() {
+        let result = {
+            let mut terminal = self.terminal.lock();
+            // Telnet's user newline policy must not rewrite mouse reports or protocol replies.
+            if user_input && terminal.kind() == TerminalSessionKind::Telnet {
+                terminal.write_input(bytes)
+            } else {
+                terminal.write_protocol_bytes(bytes)
+            }
+        };
+        if result.is_ok() {
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record_input(&String::from_utf8_lossy(bytes));
             }
@@ -4119,7 +4177,7 @@ impl TerminalPane {
         } else {
             &bytes
         };
-        if self.send_protocol_bytes(wire_bytes, cx) {
+        if self.send_terminal_bytes(wire_bytes, true, cx) {
             if bytes.as_slice() == semantic_bytes
                 && let Some((key, _)) = encoded_key
             {
@@ -4372,7 +4430,7 @@ impl TerminalPane {
         let bytes = Zeroizing::new(bytes);
         let mode = self.terminal.lock().mode();
         self.delete_free_type_selection_if_active(mode, cx);
-        if self.send_protocol_bytes(&bytes, cx) {
+        if self.send_terminal_bytes(&bytes, true, cx) {
             self.observe_user_input("text", &bytes, cx);
             self.restore_live_output_after_user_input();
             return true;

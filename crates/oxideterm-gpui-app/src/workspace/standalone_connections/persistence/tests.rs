@@ -157,6 +157,7 @@ fn temporary_sessions_persist_metadata_and_reauthenticate_into_the_same_record()
                 },
             },
             config: TelnetSessionConfig {
+                line_endings: Default::default(),
                 host: "switch.test".into(),
                 port: 2323,
             },

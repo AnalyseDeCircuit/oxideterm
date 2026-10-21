@@ -1156,6 +1156,7 @@ impl WorkspaceApp {
             return;
         };
         let config = oxideterm_terminal::TelnetSessionConfig {
+            line_endings: new_connection::terminal_telnet_line_endings_from_profile(&profile),
             host: profile.host.clone(),
             port: profile.port,
         };

@@ -941,6 +941,53 @@ impl WorkspaceApp {
                     ));
                 }
             }
+            NewConnectionSelect::TelnetInputLineEnding
+            | NewConnectionSelect::TelnetOutputLineEnding => {
+                use oxideterm_connections::SerialLineEnding;
+                let output = select_id == NewConnectionSelect::TelnetOutputLineEnding;
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| {
+                        if output {
+                            form.telnet_output_line_ending
+                        } else {
+                            form.telnet_input_line_ending
+                        }
+                    })
+                    .unwrap_or_default();
+                for value in [
+                    SerialLineEnding::None,
+                    SerialLineEnding::Lf,
+                    SerialLineEnding::CrLf,
+                    SerialLineEnding::Cr,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.connection_line_ending_label(value),
+                            selected == value,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    if output {
+                                        form.telnet_output_line_ending = value;
+                                    } else {
+                                        form.telnet_input_line_ending = value;
+                                    }
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
             NewConnectionSelect::SerialFlowControl => {
                 let selected = self
                     .connection_form_state(cx)

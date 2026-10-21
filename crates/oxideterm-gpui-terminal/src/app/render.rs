@@ -2101,6 +2101,7 @@ impl TerminalPane {
         let tokens = &self.theme.tokens;
         let menu_visible =
             self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        let telnet_line_endings = self.terminal.lock().telnet_line_endings();
         let popup = if let Some(trigger) = menu.trigger.as_ref() {
             context_menu_event_boundary(
                 context_menu_content(tokens)
@@ -2299,7 +2300,29 @@ impl TerminalPane {
                             this.clear_buffer(cx);
                         },
                         cx,
-                    )),
+                    ))
+                    .when_some(telnet_line_endings, |menu, options| {
+                        let labels = &self.preferences.serial_control_labels;
+                        menu.child(context_menu_separator(tokens)).children(
+                            [
+                                (false, &labels.line_ending, options.input),
+                                (true, &labels.output_line_ending, options.output),
+                            ]
+                            .into_iter()
+                            .map(|(output, label, value)| {
+                                self.render_terminal_context_menu_item(
+                                    format!(
+                                        "{}: {}",
+                                        label,
+                                        serial_line_ending_label(value, labels)
+                                    ),
+                                    false,
+                                    move |this, _, _, cx| this.cycle_telnet_line_ending(output, cx),
+                                    cx,
+                                )
+                            }),
+                        )
+                    }),
             )
         }
         .debug_selector(|| "terminal-context-menu".into());

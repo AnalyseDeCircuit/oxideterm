@@ -22,6 +22,7 @@ pub(super) use form_state::{
     password_draft_mut, refresh_connection_timeout_seconds, refresh_identity_agent_availability,
     ssh_auth_tab_from_saved_auth, terminal_serial_flow_from_profile,
     terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
+    terminal_telnet_line_endings_from_profile,
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;

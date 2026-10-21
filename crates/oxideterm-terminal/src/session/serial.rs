@@ -186,7 +186,7 @@ pub struct SerialSession {
     modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
     serial_console_ingress: SerialConsoleIngress,
-    serial_line_ending_ingress: SerialLineEndingIngress,
+    serial_line_ending_ingress: LineEndingIngress,
     control_state: SerialControlState,
     runtime_options: SerialRuntimeOptions,
     hexdump_offset: u64,
@@ -230,48 +230,6 @@ const SERIAL_STRING_CONTROL_MARKER: &[u8] = b"?";
 #[derive(Debug, Default)]
 struct SerialConsoleIngress {
     pending_escape: bool,
-}
-
-#[derive(Debug, Default)]
-struct SerialLineEndingIngress {
-    previous_was_carriage_return: bool,
-}
-
-impl SerialLineEndingIngress {
-    fn normalize(&mut self, bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
-        if matches!(line_ending, SerialLineEnding::None) {
-            self.previous_was_carriage_return = false;
-            return bytes.to_vec();
-        }
-
-        let replacement = serial_line_ending_bytes(line_ending);
-        let mut normalized = Vec::with_capacity(bytes.len() + 4);
-        for &byte in bytes {
-            match byte {
-                b'\r' => {
-                    normalized.extend_from_slice(replacement);
-                    self.previous_was_carriage_return = true;
-                }
-                b'\n' if self.previous_was_carriage_return => {
-                    // The preceding CR already emitted one normalized line ending.
-                    self.previous_was_carriage_return = false;
-                }
-                b'\n' => {
-                    normalized.extend_from_slice(replacement);
-                    self.previous_was_carriage_return = false;
-                }
-                _ => {
-                    normalized.push(byte);
-                    self.previous_was_carriage_return = false;
-                }
-            }
-        }
-        normalized
-    }
-
-    fn reset(&mut self) {
-        self.previous_was_carriage_return = false;
-    }
 }
 
 impl SerialConsoleIngress {
@@ -435,7 +393,7 @@ impl SerialSession {
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
             serial_console_ingress: SerialConsoleIngress::default(),
-            serial_line_ending_ingress: SerialLineEndingIngress::default(),
+            serial_line_ending_ingress: LineEndingIngress::default(),
             control_state: SerialControlState::default(),
             runtime_options,
             hexdump_offset: 0,
@@ -845,7 +803,7 @@ impl SerialSession {
 
     fn encode_user_input(&self, bytes: &[u8]) -> Result<Vec<u8>> {
         match self.runtime_options.send_mode {
-            SerialSendMode::Text => Ok(encode_serial_text_input(
+            SerialSendMode::Text => Ok(encode_text_line_endings(
                 bytes,
                 self.runtime_options.line_ending,
             )),
@@ -1705,40 +1663,6 @@ fn map_serial_io_error(
     SerialError::new(code, error.to_string(), Some(port_path.to_string()), true)
 }
 
-fn encode_serial_text_input(bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
-    if matches!(line_ending, SerialLineEnding::None) {
-        return bytes.to_vec();
-    }
-
-    let replacement = serial_line_ending_bytes(line_ending);
-
-    let mut encoded = Vec::with_capacity(bytes.len() + 4);
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\r' => {
-                if bytes.get(index + 1) == Some(&b'\n') {
-                    index += 1;
-                }
-                encoded.extend_from_slice(replacement);
-            }
-            b'\n' => encoded.extend_from_slice(replacement),
-            byte => encoded.push(byte),
-        }
-        index += 1;
-    }
-    encoded
-}
-
-fn serial_line_ending_bytes(line_ending: SerialLineEnding) -> &'static [u8] {
-    match line_ending {
-        SerialLineEnding::Lf => b"\n",
-        SerialLineEnding::CrLf => b"\r\n",
-        SerialLineEnding::Cr => b"\r",
-        SerialLineEnding::None => b"",
-    }
-}
-
 fn parse_serial_hex_input(bytes: &[u8]) -> Result<Vec<u8>> {
     let text = std::str::from_utf8(bytes).context("Serial hex input must be UTF-8 text")?;
     let mut nibbles = Vec::new();
@@ -1953,7 +1877,7 @@ mod serial_tests {
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
             serial_console_ingress: SerialConsoleIngress::default(),
-            serial_line_ending_ingress: SerialLineEndingIngress::default(),
+            serial_line_ending_ingress: LineEndingIngress::default(),
             control_state: SerialControlState::default(),
             runtime_options: SerialRuntimeOptions::default(),
             hexdump_offset: 0,
@@ -2451,22 +2375,22 @@ mod serial_tests {
     #[test]
     fn serial_text_input_maps_line_endings() {
         assert_eq!(
-            encode_serial_text_input(b"show\n", SerialLineEnding::CrLf),
+            encode_text_line_endings(b"show\n", SerialLineEnding::CrLf),
             b"show\r\n"
         );
         assert_eq!(
-            encode_serial_text_input(b"a\r\nb\r", SerialLineEnding::Lf),
+            encode_text_line_endings(b"a\r\nb\r", SerialLineEnding::Lf),
             b"a\nb\n"
         );
         assert_eq!(
-            encode_serial_text_input(b"a\n", SerialLineEnding::None),
+            encode_text_line_endings(b"a\n", SerialLineEnding::None),
             b"a\n"
         );
     }
 
     #[test]
     fn serial_output_line_endings_normalize_split_crlf_once() {
-        let mut ingress = SerialLineEndingIngress::default();
+        let mut ingress = LineEndingIngress::default();
 
         assert_eq!(
             ingress.normalize(b"first\r", SerialLineEnding::CrLf),

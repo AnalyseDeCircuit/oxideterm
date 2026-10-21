@@ -989,6 +989,10 @@ pub struct TelnetProfile {
     pub icon_background_color: Option<String>,
     pub host: String,
     pub port: u16,
+    #[serde(default)]
+    pub input_line_ending: SerialLineEnding,
+    #[serde(default)]
+    pub output_line_ending: SerialLineEnding,
     #[serde(default = "default_telnet_upstream_proxy")]
     pub upstream_proxy: SavedUpstreamProxyPolicy,
     #[serde(
@@ -1015,6 +1019,8 @@ pub struct SaveTelnetProfileRequest {
     pub icon_background_color: Option<String>,
     pub host: String,
     pub port: u16,
+    pub input_line_ending: Option<SerialLineEnding>,
+    pub output_line_ending: Option<SerialLineEnding>,
     pub upstream_proxy: Option<SavedUpstreamProxyPolicy>,
     pub terminal: ConnectionTerminalOptions,
     pub connect_on_open: Option<bool>,
@@ -1565,6 +1571,8 @@ impl TelnetProfile {
             icon_background_color: None,
             host: host.into(),
             port,
+            input_line_ending: SerialLineEnding::None,
+            output_line_ending: SerialLineEnding::None,
             upstream_proxy: SavedUpstreamProxyPolicy::Direct,
             terminal: ConnectionTerminalOptions::default(),
             connect_on_open: false,

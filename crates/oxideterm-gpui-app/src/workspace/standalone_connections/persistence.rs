@@ -282,6 +282,9 @@ impl LaunchSnapshot {
                         profile_id,
                         upstream_proxy: profile.upstream_proxy.clone(),
                         config: TelnetSessionConfig {
+                            line_endings: new_connection::terminal_telnet_line_endings_from_profile(
+                                profile,
+                            ),
                             host: profile.host.clone(),
                             port: profile.port,
                         },

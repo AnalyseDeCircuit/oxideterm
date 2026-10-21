@@ -177,6 +177,8 @@ pub enum SelectAnchorId {
     NewConnectionTerminalEncoding,
     NewConnectionTerminalBackspaceSequence,
     NewConnectionTerminalDeleteSequence,
+    NewConnectionTelnetInputLineEnding,
+    NewConnectionTelnetOutputLineEnding,
     NewConnectionTerminalSemanticScheme,
     NewConnectionTerminalHighlightRuleSet,
     NewConnectionTerminalSessionLogPolicy,
@@ -309,6 +311,8 @@ impl SelectAnchorId {
                 | Self::NewConnectionTerminalEncoding
                 | Self::NewConnectionTerminalBackspaceSequence
                 | Self::NewConnectionTerminalDeleteSequence
+                | Self::NewConnectionTelnetInputLineEnding
+                | Self::NewConnectionTelnetOutputLineEnding
                 | Self::NewConnectionTerminalSemanticScheme
                 | Self::NewConnectionTerminalHighlightRuleSet
         )

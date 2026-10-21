@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use crate::workspace::new_connection::form_state::terminal_serial_line_ending_from_profile;
 use crate::workspace::{
     WorkspaceNotificationKind, WorkspaceNotificationScope, WorkspaceNotificationSeverity,
     new_connection::terminal_serial_runtime_options_from_profile,
@@ -1635,6 +1636,8 @@ impl WorkspaceApp {
                 let should_save_profile =
                     editing_profile_id.is_some() || action != NewConnectionSubmitAction::Connect;
                 let save_request = should_save_profile.then(|| SaveTelnetProfileRequest {
+                    input_line_ending: Some(form.telnet_input_line_ending),
+                    output_line_ending: Some(form.telnet_output_line_ending),
                     upstream_proxy: Some(upstream_proxy.clone()),
                     id: editing_profile_id,
                     name: telnet_profile_name_or_endpoint(&form.telnet_profile_name, &host, port),
@@ -1648,7 +1651,18 @@ impl WorkspaceApp {
                     terminal: form.terminal.clone(),
                     connect_on_open: existing_connect_on_open,
                 });
-                let config = TelnetSessionConfig { host, port };
+                let config = TelnetSessionConfig {
+                    host,
+                    port,
+                    line_endings: oxideterm_terminal::TelnetLineEndings {
+                        input: terminal_serial_line_ending_from_profile(
+                            form.telnet_input_line_ending,
+                        ),
+                        output: terminal_serial_line_ending_from_profile(
+                            form.telnet_output_line_ending,
+                        ),
+                    },
+                };
                 let terminal_options = form.terminal.clone();
                 form.pending = true;
                 form.error = None;

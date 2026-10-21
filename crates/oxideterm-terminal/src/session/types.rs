@@ -81,6 +81,12 @@ pub struct SerialRuntimeOptions {
     pub local_echo: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct TelnetLineEndings {
+    pub input: SerialLineEnding,
+    pub output: SerialLineEnding,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalResize {
     pub cols: usize,
@@ -177,6 +183,12 @@ pub trait TerminalSessionBackend: Send {
     }
     fn send_telnet_control(&mut self, _command: TelnetControlCommand) -> Result<()> {
         bail!("Telnet controls are only supported by Telnet sessions")
+    }
+    fn telnet_line_endings(&self) -> Option<TelnetLineEndings> {
+        None
+    }
+    fn set_telnet_line_endings(&mut self, _options: TelnetLineEndings) -> Result<()> {
+        bail!("Telnet line endings are only supported by Telnet sessions")
     }
     fn mosh_connection_status(&self) -> Option<MoshConnectionStatus> {
         None

@@ -214,6 +214,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> plugin_runtime::PluginResponse {
         let config = TelnetSessionConfig {
+            line_endings: Default::default(),
             host: host.clone(),
             port,
         };

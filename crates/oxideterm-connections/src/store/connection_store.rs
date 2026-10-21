@@ -1359,6 +1359,12 @@ impl ConnectionStore {
             profile.icon_background_color = normalize_optional_text(request.icon_background_color);
             profile.host = request.host.trim().to_string();
             profile.port = request.port;
+            if let Some(value) = request.input_line_ending {
+                profile.input_line_ending = value;
+            }
+            if let Some(value) = request.output_line_ending {
+                profile.output_line_ending = value;
+            }
             profile.upstream_proxy = self.materialize_upstream_proxy_policy(
                 request
                     .upstream_proxy
@@ -1402,6 +1408,46 @@ impl ConnectionStore {
         })();
         audit.result(&audit_result);
         audit_result
+    }
+
+    pub fn set_telnet_profile_line_endings(
+        &mut self,
+        id: &str,
+        input: Option<SerialLineEnding>,
+        output: Option<SerialLineEnding>,
+    ) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            Some(id),
+            Some("telnet_line_endings"),
+        );
+        let result = (|| {
+            let Some(profile) = self
+                .data
+                .telnet_profiles
+                .iter_mut()
+                .find(|profile| profile.id == id)
+            else {
+                return Ok(false);
+            };
+            if !input.is_some_and(|value| profile.input_line_ending != value)
+                && !output.is_some_and(|value| profile.output_line_ending != value)
+            {
+                return Ok(false);
+            }
+            if let Some(value) = input {
+                profile.input_line_ending = value;
+            }
+            if let Some(value) = output {
+                profile.output_line_ending = value;
+            }
+            profile.updated_at = Utc::now();
+            self.save()?;
+            Ok(true)
+        })();
+        audit.changed(&result);
+        result
     }
 
     pub fn delete_telnet_profile(&mut self, id: &str) -> Result<bool> {

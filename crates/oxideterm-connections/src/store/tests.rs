@@ -3214,6 +3214,8 @@ mod tests {
     fn telnet_profile_metadata_round_trips_without_ssh_fields() {
         let now = Utc::now();
         let profile = TelnetProfile {
+            input_line_ending: SerialLineEnding::None,
+            output_line_ending: SerialLineEnding::None,
             upstream_proxy: SavedUpstreamProxyPolicy::Direct,
             id: "telnet-1".to_string(),
             name: "Router console".to_string(),

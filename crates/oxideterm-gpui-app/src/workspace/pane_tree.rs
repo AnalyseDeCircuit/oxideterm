@@ -326,6 +326,9 @@ impl WorkspaceApp {
             TerminalPaneEvent::SerialLineEndingsChanged { input, output } => {
                 self.persist_serial_line_endings(session_id, input, output, cx);
             }
+            TerminalPaneEvent::TelnetLineEndingsChanged { input, output } => {
+                self.persist_telnet_line_endings(session_id, input, output, cx);
+            }
             TerminalPaneEvent::PrivilegePromptStateChanged => {
                 if self.active_pane_id(cx) == Some(pane_id)
                     && self.sync_active_privilege_prompt_inline_hint(cx)
@@ -346,6 +349,36 @@ impl WorkspaceApp {
                 TerminalPaneInteraction::ContextAction,
                 cx,
             ),
+        }
+    }
+
+    fn persist_telnet_line_endings(
+        &mut self,
+        session_id: TerminalSessionId,
+        input: Option<oxideterm_terminal::SerialLineEnding>,
+        output: Option<oxideterm_terminal::SerialLineEnding>,
+        cx: &mut Context<Self>,
+    ) {
+        self.standalone_connections
+            .set_telnet_line_endings(session_id, input, output);
+        let Some(saved) = self
+            .terminal_saved_connection_refs
+            .get(&session_id)
+            .filter(|saved| saved.kind == SavedConnectionKind::Telnet)
+        else {
+            return;
+        };
+        let profile_id = saved.id.clone();
+        match self.connection_store.set_telnet_profile_line_endings(
+            &profile_id,
+            input.map(serial_profile_line_ending),
+            output.map(serial_profile_line_ending),
+        ) {
+            Ok(true) => self.queue_cloud_sync_dirty_refresh(cx),
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(%profile_id, %error, "failed to persist Telnet line endings")
+            }
         }
     }
 

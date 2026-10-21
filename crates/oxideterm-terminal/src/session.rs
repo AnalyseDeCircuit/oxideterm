@@ -165,6 +165,7 @@ fn apply_terminal_output_processor<'a>(
 // facade, local PTY adapter, and SSH PTY owner keep their existing API and
 // private access while avoiding another thousand-line implementation file.
 include!("session/types.rs");
+include!("session/line_endings.rs");
 include!("session/facade.rs");
 include!("session/playback.rs");
 include!("session/local_backend.rs");
@@ -199,6 +200,7 @@ mod tests {
         let (worker_tx, events) = crate::backpressure::byte_bounded_channel(1024);
         let worker = run_telnet_worker(
             TelnetSessionConfig {
+                line_endings: Default::default(),
                 host: "telnet.invalid".into(),
                 port: 2323,
             },

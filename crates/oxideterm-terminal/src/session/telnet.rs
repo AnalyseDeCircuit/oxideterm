@@ -54,6 +54,7 @@ pub struct TelnetSession {
     output_events_enabled: bool,
     trigger_stream: Option<oxideterm_terminal_triggers::TerminalTriggerStream>,
     input_encoder: TerminalInputEncoder,
+    line_ending_ingress: LineEndingIngress,
     encoding_detector: EncodingMismatchDetector,
     modem_consumer: ModemConsumer,
     shell_integration: TerminalShellIntegration,
@@ -319,6 +320,7 @@ impl TelnetSession {
             output_events_enabled: false,
             trigger_stream: None,
             input_encoder: TerminalInputEncoder::new(encoding),
+            line_ending_ingress: LineEndingIngress::default(),
             encoding_detector: EncodingMismatchDetector::new(encoding),
             modem_consumer: ModemConsumer::new(),
             shell_integration: TerminalShellIntegration::default(),
@@ -520,6 +522,15 @@ impl TelnetSession {
                         self.pending_events.push(TerminalEvent::EncodingHint(hint));
                     }
                     let decoded = self.output_decoder.decode_to_utf8_bytes(&terminal_bytes);
+                    // Transfer and graphics payloads have already been separated from text.
+                    let decoded = if self.config.line_endings.output == SerialLineEnding::None {
+                        decoded
+                    } else {
+                        std::borrow::Cow::Owned(self.line_ending_ingress.normalize(
+                            decoded.as_ref(),
+                            self.config.line_endings.output,
+                        ))
+                    };
                     if let Some(stream) = self.trigger_stream.as_mut() {
                         stream.observe_bytes(decoded.as_ref(), |matched| {
                             self.pending_events
@@ -793,7 +804,15 @@ impl TerminalSessionBackend for TelnetSession {
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
-        self.write_protocol_bytes(bytes)
+        if self.config.line_endings.input == SerialLineEnding::None {
+            self.write_protocol_bytes(bytes)
+        } else {
+            let bytes = zeroize::Zeroizing::new(encode_text_line_endings(
+                bytes,
+                self.config.line_endings.input,
+            ));
+            self.write_protocol_bytes(&bytes)
+        }
     }
 
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
@@ -812,14 +831,26 @@ impl TerminalSessionBackend for TelnetSession {
 
     fn write_text(&mut self, text: &str) -> Result<()> {
         let encoded = self.input_encoder.encode_text(text);
-        self.write_protocol_bytes(encoded.as_ref())
+        self.write_input(encoded.as_ref())
     }
 
     fn paste_text(&mut self, text: &str) -> Result<()> {
         let bytes = self
             .input_encoder
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));
-        self.write_protocol_bytes(&bytes)
+        self.write_input(&bytes)
+    }
+
+    fn telnet_line_endings(&self) -> Option<TelnetLineEndings> {
+        Some(self.config.line_endings)
+    }
+
+    fn set_telnet_line_endings(&mut self, options: TelnetLineEndings) -> Result<()> {
+        if self.config.line_endings.output != options.output {
+            self.line_ending_ingress.reset();
+        }
+        self.config.line_endings = options;
+        Ok(())
     }
 
     fn set_palette(&mut self, palette: TerminalPalette) {
@@ -1413,6 +1444,7 @@ mod telnet_tests {
         };
         let mut session = TelnetSession::new_with_login(
             TelnetSessionConfig {
+                line_endings: Default::default(),
                 host: "127.0.0.1".to_string(),
                 port,
             },
@@ -1577,6 +1609,7 @@ mod telnet_tests {
                 .session("telnet", "pressure-fixture");
             let mut session = TelnetSession::new_with_login(
                 TelnetSessionConfig {
+                    line_endings: Default::default(),
                     host: "127.0.0.1".into(),
                     port,
                 },
@@ -1690,6 +1723,7 @@ mod telnet_tests {
             .session("telnet", &format!("127.0.0.1:{port}"));
         let mut session = TelnetSession::new_with_login(
             TelnetSessionConfig {
+                line_endings: Default::default(),
                 host: "127.0.0.1".to_string(),
                 port,
             },
@@ -1751,6 +1785,7 @@ mod telnet_tests {
             .session("telnet", &format!("127.0.0.1:{port}"));
         let mut session = TelnetSession::new_with_login(
             TelnetSessionConfig {
+                line_endings: Default::default(),
                 host: "127.0.0.1".to_string(),
                 port,
             },
