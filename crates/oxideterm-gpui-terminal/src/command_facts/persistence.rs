@@ -42,9 +42,18 @@ struct ScopedHistory {
     history: SharedTerminalCommandHistory,
 }
 
+/// Scope creation and retirement share this lock so restore cannot recreate a retired entry.
+#[derive(Default)]
+struct HistoryRegistry {
+    histories: HashMap<String, ScopedHistory>,
+    removed_scope_prefixes: HashSet<String>,
+}
+
 struct StoreState {
-    histories: Mutex<HashMap<String, ScopedHistory>>,
+    registry: Mutex<HistoryRegistry>,
     dirty: Mutex<HashSet<String>>,
+    #[cfg(test)]
+    restore_row_hook: Mutex<Option<Box<dyn FnOnce(&StoreState, &str) + Send>>>,
     clear_all: AtomicBool,
     loaded: AtomicBool,
     enabled: AtomicBool,
@@ -66,8 +75,10 @@ impl TerminalHistoryStore {
         let (wake, rx) = mpsc::sync_channel(1);
         let (updates, update_rx) = async_channel::bounded(1);
         let state = Arc::new(StoreState {
-            histories: Mutex::new(HashMap::new()),
+            registry: Mutex::new(HistoryRegistry::default()),
             dirty: Mutex::new(HashSet::new()),
+            #[cfg(test)]
+            restore_row_hook: Mutex::new(None),
             clear_all: AtomicBool::new(false),
             loaded: AtomicBool::new(false),
             enabled: AtomicBool::new(false),
@@ -103,8 +114,9 @@ impl TerminalHistoryStore {
     pub fn histories(&self) -> Vec<(String, String, SharedTerminalCommandHistory)> {
         let mut histories = self
             .state
-            .histories
+            .registry
             .lock()
+            .histories
             .iter()
             .map(|(scope, entry)| (scope.clone(), entry.label.clone(), entry.history.clone()))
             .collect::<Vec<_>>();
@@ -118,6 +130,10 @@ impl TerminalHistoryStore {
             history.clear();
         }
         let _ = self.state.wake.try_send(());
+    }
+
+    pub fn remove_scopes_with_prefix(&self, prefix: &str) {
+        retire_scopes_with_prefix(&self.state, prefix);
     }
 
     pub fn failed(&self) -> bool {
@@ -140,8 +156,17 @@ fn scoped_history(
     scope: String,
     label: String,
 ) -> SharedTerminalCommandHistory {
-    let mut histories = store.histories.lock();
-    let entry = histories.entry(scope.clone()).or_insert_with(|| {
+    let mut registry = store.registry.lock();
+    scoped_history_locked(&mut registry, store, scope, label)
+}
+
+fn scoped_history_locked(
+    registry: &mut HistoryRegistry,
+    store: &Arc<StoreState>,
+    scope: String,
+    label: String,
+) -> SharedTerminalCommandHistory {
+    let entry = registry.histories.entry(scope.clone()).or_insert_with(|| {
         let history = SharedTerminalCommandHistory::default();
         {
             let mut state = history.state.lock();
@@ -212,8 +237,9 @@ fn forget_pruned(store: &StoreState, removed: Vec<(String, String)>) {
     }
     for (scope, ids) in by_scope {
         let history = store
-            .histories
+            .registry
             .lock()
+            .histories
             .get(&scope)
             .map(|entry| entry.history.clone());
         if let Some(history) = history {
@@ -229,6 +255,44 @@ fn forget_pruned(store: &StoreState, removed: Vec<(String, String)>) {
             state.persistent_ids.retain(|id| !ids.contains(id));
         }
     }
+}
+
+fn clear_scope_history(history: &SharedTerminalCommandHistory) {
+    let mut state = history.state.lock();
+    for record in &mut state.records {
+        record.command.zeroize();
+    }
+    state.records.clear();
+    state.persistent_ids.clear();
+    for mut command in state.removed_before_restore.drain() {
+        command.zeroize();
+    }
+    state.restore_cleared = true;
+}
+
+fn retire_scopes_with_prefix(store: &StoreState, prefix: &str) {
+    let histories = {
+        let mut registry = store.registry.lock();
+        registry.removed_scope_prefixes.insert(prefix.to_string());
+        let mut histories = Vec::new();
+        registry.histories.retain(|scope, entry| {
+            if scope.starts_with(prefix) {
+                histories.push(entry.history.clone());
+                false
+            } else {
+                true
+            }
+        });
+        histories
+    };
+    for history in histories {
+        clear_scope_history(&history);
+    }
+    store
+        .dirty
+        .lock()
+        .retain(|scope| !scope.starts_with(prefix));
+    let _ = store.wake.try_send(());
 }
 
 fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
@@ -250,12 +314,26 @@ fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
     })?;
     for row in rows {
         let (scope, label, mut record) = row?;
-        let existing = store
-            .histories
-            .lock()
-            .get(&scope)
-            .map(|entry| entry.history.clone());
-        let history = existing.unwrap_or_else(|| scoped_history(store, scope, label));
+        #[cfg(test)]
+        if let Some(hook) = store.restore_row_hook.lock().take() {
+            hook(store, &scope);
+        }
+        let history = {
+            let mut registry = store.registry.lock();
+            if registry
+                .removed_scope_prefixes
+                .iter()
+                .any(|prefix| scope.starts_with(prefix))
+            {
+                None
+            } else {
+                Some(scoped_history_locked(&mut registry, store, scope, label))
+            }
+        };
+        let Some(history) = history else {
+            record.command.zeroize();
+            continue;
+        };
         let mut state = history.state.lock();
         if !store.clear_all.load(Ordering::Relaxed)
             && !state.restore_cleared
@@ -269,8 +347,15 @@ fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
         }
     }
     store.loaded.store(true, Ordering::Relaxed);
-    for entry in store.histories.lock().values() {
-        let mut state = entry.history.state.lock();
+    let histories = store
+        .registry
+        .lock()
+        .histories
+        .values()
+        .map(|entry| entry.history.clone())
+        .collect::<Vec<_>>();
+    for history in histories {
+        let mut state = history.state.lock();
         state.records.sort_by_key(|record| record.finished_at);
         super::trim_autosuggest_records(&mut state.records);
         state.restored = true;
@@ -283,15 +368,26 @@ fn restore(db: &Connection, store: &Arc<StoreState>) -> rusqlite::Result<()> {
 
 fn save_dirty(db: &mut Connection, store: &StoreState) -> rusqlite::Result<()> {
     let scopes = std::mem::take(&mut *store.dirty.lock());
-    if scopes.is_empty() {
+    let removed_scope_prefixes = {
+        let mut registry = store.registry.lock();
+        std::mem::take(&mut registry.removed_scope_prefixes)
+    };
+    if scopes.is_empty() && removed_scope_prefixes.is_empty() {
         return Ok(());
     }
     let result = (|| {
         let tx = db.transaction()?;
+        for prefix in &removed_scope_prefixes {
+            // Match literal prefixes, including scopes not loaded into memory yet.
+            tx.execute(
+                "DELETE FROM commands WHERE substr(scope, 1, length(?1)) = ?1",
+                [prefix],
+            )?;
+        }
         for scope in &scopes {
             let (label, history) = {
-                let histories = store.histories.lock();
-                let Some(entry) = histories.get(scope) else {
+                let registry = store.registry.lock();
+                let Some(entry) = registry.histories.get(scope) else {
                     continue;
                 };
                 (entry.label.clone(), entry.history.clone())
@@ -343,6 +439,11 @@ fn save_dirty(db: &mut Connection, store: &StoreState) -> rusqlite::Result<()> {
     })();
     if result.is_err() {
         store.dirty.lock().extend(scopes);
+        store
+            .registry
+            .lock()
+            .removed_scope_prefixes
+            .extend(removed_scope_prefixes);
     }
     result
 }
@@ -357,6 +458,7 @@ fn run_worker(path: PathBuf, store: Arc<StoreState>, wake: mpsc::Receiver<()>) {
         let should_open = store.enabled.load(Ordering::Relaxed)
             || path.is_file()
             || !store.dirty.lock().is_empty()
+            || !store.registry.lock().removed_scope_prefixes.is_empty()
             || store.clear_all.load(Ordering::Relaxed);
         if database.is_none() && !should_open {
             if store.stopping.load(Ordering::Relaxed) {
@@ -391,7 +493,9 @@ fn run_worker(path: PathBuf, store: Arc<StoreState>, wake: mpsc::Receiver<()>) {
         if store.stopping.load(Ordering::Relaxed) {
             // A final mutation may arrive while the current transaction is in flight.
             if result.is_err()
-                || (store.dirty.lock().is_empty() && !store.clear_all.load(Ordering::Relaxed))
+                || (store.dirty.lock().is_empty()
+                    && store.registry.lock().removed_scope_prefixes.is_empty()
+                    && !store.clear_all.load(Ordering::Relaxed))
             {
                 break;
             }
@@ -404,11 +508,86 @@ fn run_worker(path: PathBuf, store: Arc<StoreState>, wake: mpsc::Receiver<()>) {
 mod tests {
     use super::*;
 
+    fn detached_store() -> TerminalHistoryStore {
+        let (wake, _) = mpsc::sync_channel(1);
+        let (updates, _) = async_channel::bounded(1);
+        TerminalHistoryStore {
+            state: Arc::new(StoreState {
+                registry: Mutex::new(HistoryRegistry::default()),
+                dirty: Mutex::new(HashSet::new()),
+                restore_row_hook: Mutex::new(None),
+                clear_all: AtomicBool::new(false),
+                loaded: AtomicBool::new(false),
+                enabled: AtomicBool::new(true),
+                retention_days: Mutex::new(90),
+                stopping: AtomicBool::new(false),
+                failed: AtomicBool::new(false),
+                wake,
+                updates,
+            }),
+            worker: None,
+        }
+    }
+
     async fn updated(rx: &async_channel::Receiver<()>) {
         tokio::time::timeout(Duration::from_secs(2), rx.recv())
             .await
             .unwrap()
             .unwrap();
+    }
+
+    #[test]
+    fn restore_does_not_resurrect_scopes_retired_while_rows_are_loading() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut db = open_database(&directory.path().join("history.sqlite")).unwrap();
+        let timestamp = now_millis();
+        for scope in ["retired/old", "retired/new", "retired-other"] {
+            db.execute(
+                "INSERT INTO commands VALUES (?, ?, ?, ?, ?, ?)",
+                params![
+                    scope,
+                    "command-id",
+                    "Endpoint",
+                    "saved command",
+                    timestamp,
+                    timestamp
+                ],
+            )
+            .unwrap();
+        }
+        let store = Arc::new(detached_store());
+        *store.state.restore_row_hook.lock() = Some(Box::new(|store, _| {
+            retire_scopes_with_prefix(store, "retired/");
+        }));
+
+        restore(&db, &store.state).unwrap();
+        save_dirty(&mut db, &store.state).unwrap();
+
+        assert_eq!(
+            store
+                .histories()
+                .into_iter()
+                .flat_map(|(scope, _, history)| {
+                    history
+                        .records()
+                        .into_iter()
+                        .map(move |record| (scope.clone(), record.command))
+                })
+                .collect::<Vec<_>>(),
+            [("retired-other".into(), "saved command".into())]
+        );
+        assert_eq!(
+            db.prepare("SELECT scope, command FROM commands ORDER BY scope")
+                .unwrap()
+                .query_map([], |row| Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?
+                )))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap(),
+            [("retired-other".into(), "saved command".into())]
+        );
     }
 
     #[tokio::test]
@@ -508,6 +687,45 @@ mod tests {
                 .flat_map(|(_, _, history)| history.records())
                 .collect::<Vec<_>>(),
             vec![]
+        );
+    }
+
+    #[tokio::test]
+    async fn scope_removal_scrubs_memory_and_persists_without_affecting_other_scopes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite");
+        let (store, updates) = TerminalHistoryStore::new(path.clone()).unwrap();
+        store.configure(true, 90);
+        updated(&updates).await;
+        let replaced = store.history("saved_%/old".into(), "Old endpoint".into());
+        replaced.record("replaced command");
+        let current = store.history("saved_%/new".into(), "Current endpoint".into());
+        current.record("current command");
+        let retained = store.history("saved-xx/old".into(), "Retained endpoint".into());
+        retained.record("retained command");
+        updated(&updates).await;
+
+        store.remove_scopes_with_prefix("saved_%/");
+
+        assert!(replaced.records().is_empty());
+        assert!(current.records().is_empty());
+        drop(store);
+
+        let (store, updates) = TerminalHistoryStore::new(path).unwrap();
+        store.configure(true, 90);
+        updated(&updates).await;
+        assert_eq!(
+            store
+                .histories()
+                .into_iter()
+                .flat_map(|(scope, _, history)| {
+                    history
+                        .records()
+                        .into_iter()
+                        .map(move |record| (scope.clone(), record.command))
+                })
+                .collect::<Vec<_>>(),
+            [("saved-xx/old".into(), "retained command".into())]
         );
     }
 

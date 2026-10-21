@@ -33,6 +33,10 @@ use super::{
     CONNECTION_KEY_SSH_PREFIX, CONNECTION_KEY_TELNET_PREFIX, PublicMcpWorkspaceBridge,
     WorkspaceApp, finish_serialized,
 };
+use crate::workspace::TerminalHistoryStore;
+use crate::workspace::terminal_command_bar::{
+    SavedConsoleProfileKind, delete_saved_console_profile,
+};
 
 impl WorkspaceApp {
     pub(super) fn handle_public_mcp_save_connection(
@@ -128,7 +132,11 @@ impl WorkspaceApp {
             ));
             return;
         }
-        let removed = match remove_profile(&mut self.connection_store, &connection_key) {
+        let removed = match remove_profile(
+            &mut self.connection_store,
+            &self.terminal_history_store,
+            &connection_key,
+        ) {
             Ok(removed) => removed,
             Err(error) => {
                 request.finish(ToolEnvelope::failed(error));
@@ -822,19 +830,38 @@ fn remote_desktop_options(options: &PublicRemoteDesktopOptions) -> RemoteDesktop
 
 fn remove_profile(
     store: &mut oxideterm_connections::ConnectionStore,
+    terminal_history_store: &TerminalHistoryStore,
     key: &str,
 ) -> Result<bool, String> {
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_SSH_PREFIX) {
         return store.delete(id).map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX) {
-        return store.delete_serial_profile(id).map_err(public_store_error);
+        return delete_saved_console_profile(
+            store,
+            terminal_history_store,
+            SavedConsoleProfileKind::Serial,
+            id,
+        )
+        .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX) {
-        return store.delete_telnet_profile(id).map_err(public_store_error);
+        return delete_saved_console_profile(
+            store,
+            terminal_history_store,
+            SavedConsoleProfileKind::Telnet,
+            id,
+        )
+        .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX) {
-        return store.delete_mosh_profile(id).map_err(public_store_error);
+        return delete_saved_console_profile(
+            store,
+            terminal_history_store,
+            SavedConsoleProfileKind::Mosh,
+            id,
+        )
+        .map_err(public_store_error);
     }
     if let Some(id) = key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX) {
         return store
