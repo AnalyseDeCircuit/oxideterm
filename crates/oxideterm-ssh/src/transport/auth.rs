@@ -701,22 +701,28 @@ async fn authenticate_agent(
     );
 
     let server_rsa_preference = resolve_server_rsa_preference(handle).await;
+    let rsa_algorithms = auth_algorithm_attempt_order(true, server_rsa_preference);
     let mut last_result = None;
     let mut failure_reason = None;
     let mut publickey_exhausted = false;
-    for (identity_index, identity) in identities.into_iter().enumerate() {
-        let public_key = identity.public_key().into_owned();
-        if matches!(&identity, AgentIdentity::PublicKey { .. }) {
-            // A certificate and its underlying public key are distinct SSH
-            // identities. Keep the plain key eligible for disk fallback when
-            // the agent only offered the certificate form.
-            offered_public_keys.insert(public_key.public_key_base64());
-        }
-        let algorithms = auth_algorithm_attempt_order(
-            matches!(public_key.algorithm(), Algorithm::Rsa { .. }),
-            server_rsa_preference,
-        );
-        for hash_alg in algorithms {
+    // Give every identity a chance before RSA compatibility retries consume
+    // the server's authentication budget on a rejected key.
+    for (algorithm_round, rsa_hash_alg) in rsa_algorithms.into_iter().enumerate() {
+        for (identity_index, identity) in identities.iter().enumerate() {
+            let public_key = identity.public_key().into_owned();
+            let hash_alg = if matches!(public_key.algorithm(), Algorithm::Rsa { .. }) {
+                rsa_hash_alg
+            } else if algorithm_round == 0 {
+                None
+            } else {
+                continue;
+            };
+            if matches!(identity, AgentIdentity::PublicKey { .. }) {
+                // A certificate and its underlying public key are distinct SSH
+                // identities. Keep the plain key eligible for disk fallback when
+                // the agent only offered the certificate form.
+                offered_public_keys.insert(public_key.public_key_base64());
+            }
             tracing::debug!(
                 identity_index,
                 key_algorithm = public_key.algorithm().to_string(),
@@ -725,7 +731,7 @@ async fn authenticate_agent(
             );
             let result = audit
                 .authenticate("agent", Some(public_key.algorithm().as_str()), async {
-                    match &identity {
+                    match identity {
                         AgentIdentity::PublicKey { .. } => {
                             handle
                                 .authenticate_publickey_with(
