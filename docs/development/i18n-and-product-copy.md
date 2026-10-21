@@ -22,6 +22,8 @@ python scripts/quality/audit_i18n.py
 
 The audit checks JSON parsing, duplicate flattened keys, missing files, missing keys, source-used keys, and placeholder mismatches. It can also report copied English strings; treat those warnings as translation work, not as a reason to remove the key.
 
+English-copy warnings show only a count by default. Add `--show-english-copies` to list up to 30 entries, or `--show-all` to print every finding without truncation.
+
 ## Product Copy Rules
 
 - Describe what the action does and its scope. Prefer “Reconnect node” to an ambiguous “Retry”.
