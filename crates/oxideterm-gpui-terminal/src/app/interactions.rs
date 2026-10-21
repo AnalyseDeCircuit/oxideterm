@@ -1529,6 +1529,10 @@ impl TerminalPane {
         search_match: &TerminalSearchMatch,
         cx: &mut Context<Self>,
     ) {
+        // Search reads the live buffer, which can be ahead of the painted frame.
+        // Refresh its history origin before translating relative result lines.
+        let snapshot = self.terminal.lock().snapshot();
+        self.snapshot = self.stamp_snapshot(snapshot);
         self.expand_folds_for_search(search_match);
         let line =
             (self.snapshot.scrollback_lines as i64 + i64::from(search_match.line)).max(0) as usize;
