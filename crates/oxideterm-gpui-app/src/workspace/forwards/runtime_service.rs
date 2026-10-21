@@ -164,6 +164,7 @@ pub(in crate::workspace) struct ForwardingRuntimeService {
     single_channel_forwarding_error: Arc<String>,
     bindings: Arc<Mutex<ForwardingBindingState>>,
     remote_desktop_tunnels: Arc<Mutex<RemoteDesktopTunnelState>>,
+    suppressed_tunnel_restores: Arc<Mutex<HashSet<String>>>,
 }
 
 impl ForwardingRuntimeService {
@@ -182,6 +183,7 @@ impl ForwardingRuntimeService {
             single_channel_forwarding_error: Arc::new(single_channel_forwarding_error),
             bindings: Arc::new(Mutex::new(ForwardingBindingState::default())),
             remote_desktop_tunnels: Arc::new(Mutex::new(RemoteDesktopTunnelState::default())),
+            suppressed_tunnel_restores: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -206,6 +208,104 @@ impl ForwardingRuntimeService {
 
     pub(in crate::workspace) fn registry(&self) -> &ForwardingRegistry {
         &self.registry
+    }
+
+    pub(in crate::workspace) fn set_tunnel_start_requested(&self, id: &str, running: bool) {
+        let mut stopped = self
+            .suppressed_tunnel_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if running {
+            stopped.remove(id);
+        } else {
+            stopped.insert(id.to_string());
+        }
+    }
+
+    fn tunnel_restore_allowed(&self, id: &str) -> bool {
+        !self
+            .suppressed_tunnel_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(id)
+    }
+
+    fn persist_started_rule(
+        &self,
+        session: &str,
+        owner: Option<String>,
+        rule: ForwardRule,
+    ) -> Result<bool, String> {
+        // Serialize the final durable write with a user's stop/delete intent.
+        // A reconnect snapshot captured earlier cannot recreate the saved entry.
+        let stopped = self
+            .suppressed_tunnel_restores
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if stopped.contains(&rule.id) {
+            return Ok(false);
+        }
+        self.persist_rule(session, owner, rule)?;
+        Ok(true)
+    }
+
+    pub(in crate::workspace) async fn stop_saved_tunnel(
+        &self,
+        id: &str,
+        delete: bool,
+    ) -> Result<(), String> {
+        self.set_tunnel_start_requested(id, false);
+        // Stopping a saved entry must not connect its host or disturb sibling consumers.
+        for session in self.registry.session_ids() {
+            if let Some(manager) = self.registry.get(&session)
+                && manager.has_rule(id)
+            {
+                if delete {
+                    manager
+                        .delete_forward(id)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                } else {
+                    manager.stop_forward(id).await.map_err(|e| e.to_string())?;
+                }
+            }
+        }
+        if delete {
+            self.registry
+                .delete_persisted_forward(id)
+                .map_err(|e| e.to_string())
+        } else if self
+            .registry
+            .list_all_saved_forwards()
+            .iter()
+            .any(|rule| rule.id == id)
+        {
+            self.registry
+                .update_auto_start(id, false)
+                .map_err(|e| e.to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(in crate::workspace) async fn start_saved_tunnel(
+        &self,
+        node: NodeId,
+        owner: String,
+        id: String,
+    ) -> Result<(), String> {
+        if !self.tunnel_restore_allowed(&id) {
+            return Ok(());
+        }
+        let (binding, result) = self
+            .execute_operation(
+                node,
+                Some(owner),
+                ForwardingRuntimeOperation::Restart { forward_id: id },
+            )
+            .await;
+        self.remember_binding(binding, false);
+        result
     }
 
     async fn shutdown_session_runtime(
@@ -737,6 +837,22 @@ impl ForwardingRuntimeService {
         operation: ForwardingRuntimeOperation,
         worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     ) {
+        let intent = match &operation {
+            ForwardingRuntimeOperation::Create { rule, .. } => Some((&rule.id, true)),
+            ForwardingRuntimeOperation::Restart { forward_id } => Some((forward_id, true)),
+            ForwardingRuntimeOperation::Stop { forward_id }
+            | ForwardingRuntimeOperation::Delete { forward_id } => Some((forward_id, false)),
+            _ => None,
+        };
+        if let Some((id, running)) = intent
+            && self
+                .registry
+                .list_all_saved_forwards()
+                .iter()
+                .any(|saved| &saved.id == id && saved.tunnel.is_some())
+        {
+            self.set_tunnel_start_requested(id, running);
+        }
         let service = self.clone();
         self.task_runtime.spawn(async move {
             let (binding, result) = service
@@ -797,6 +913,13 @@ impl ForwardingRuntimeService {
                         .registry
                         .restore_session(&session_id, resolved.handle)
                         .await;
+                    if let Some(manager) = service.registry.get(&session_id) {
+                        for rule in manager.list_forwards() {
+                            if !service.tunnel_restore_allowed(&rule.id) {
+                                let _ = manager.stop_forward(&rule.id).await;
+                            }
+                        }
+                    }
                     Some((session_id, connection_id, consumer))
                 }
                 Err(_) => None,
@@ -886,6 +1009,9 @@ impl ForwardingRuntimeService {
                     .map(|rule| forward_restore_key_for_rule(&rule))
                     .collect::<HashSet<_>>();
                 for snapshot_rule in entry.rules {
+                    if !service.tunnel_restore_allowed(&snapshot_rule.id) {
+                        continue;
+                    }
                     let remote_desktop_lease_id = snapshot_rule
                         .description
                         .strip_prefix(REMOTE_DESKTOP_TUNNEL_DESCRIPTION_PREFIX)
@@ -920,6 +1046,10 @@ impl ForwardingRuntimeService {
                     };
                     match manager.create_forward_with_health_check(rule, true).await {
                         Ok(created) => {
+                            if !service.tunnel_restore_allowed(&created.id) {
+                                let _ = manager.delete_forward(&created.id).await;
+                                continue;
+                            }
                             live_keys.insert(forward_restore_key_for_rule(&created));
                             if let Some(lease_id) = remote_desktop_lease_id {
                                 if !service.restore_remote_desktop_tunnel_binding(
@@ -934,14 +1064,20 @@ impl ForwardingRuntimeService {
                                 owner_connection_ids.get(&entry.node_id).cloned().flatten()
                             {
                                 let created_id = created.id.clone();
-                                if let Err(error) = service.registry.sync_persisted_forward_rule(
-                                    &created_id,
+                                match service.persist_started_rule(
                                     &session_id,
                                     Some(owner_connection_id),
                                     created.clone(),
                                 ) {
-                                    failures += 1;
-                                    failure_details.push(format!("{failure_label}: {error}"));
+                                    Ok(true) => {}
+                                    Ok(false) => {
+                                        let _ = manager.delete_forward(&created_id).await;
+                                        continue;
+                                    }
+                                    Err(error) => {
+                                        failures += 1;
+                                        failure_details.push(format!("{failure_label}: {error}"));
+                                    }
                                 }
                             }
                             restored += 1;
@@ -1210,14 +1346,23 @@ impl ForwardingRuntimeService {
         };
         let result = match result {
             Ok(rule) => {
-                let result = self.persist_rule(&session_id, owner_connection_id, rule.clone());
+                let result =
+                    self.persist_started_rule(&session_id, owner_connection_id, rule.clone());
+                if matches!(result, Ok(false)) {
+                    let result = manager
+                        .stop_forward(&rule.id)
+                        .await
+                        .map(|_| ())
+                        .map_err(|e| e.to_string());
+                    return (binding, result);
+                }
                 if let Err(save_error) = &result {
                     // Do not leave an unrecorded listener running after a failed durable save.
                     if let Err(stop_error) = manager.stop_forward(&rule.id).await {
                         return (binding, Err(format!("{save_error}; {stop_error}")));
                     }
                 }
-                result
+                result.map(|_| ())
             }
             Err(error) => Err(error),
         };
@@ -1335,7 +1480,7 @@ impl ForwardingRuntimeService {
         };
         for mut rule in saved_forwards
             .into_iter()
-            .filter(|forward| forward.auto_start)
+            .filter(|forward| forward.auto_start && forward.tunnel.is_none())
             .map(|forward| forward.rule)
         {
             rule.status = ForwardStatus::Starting;
@@ -1553,6 +1698,16 @@ mod tests {
         run(ForwardingRuntimeOperation::Delete {
             forward_id: rule.id.clone(),
         });
+        service.set_tunnel_start_requested(&rule.id, false);
+        assert!(
+            !service
+                .persist_started_rule(
+                    &ForwardingRuntimeService::session_id_for_node(&node),
+                    Some("saved-host".into()),
+                    rule.clone(),
+                )
+                .unwrap()
+        );
         assert!(
             oxideterm_forwarding::SavedForwardStore::load(&path)
                 .unwrap()

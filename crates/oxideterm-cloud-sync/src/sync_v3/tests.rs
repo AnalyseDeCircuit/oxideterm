@@ -489,6 +489,76 @@ fn plugin_connections_sync_without_provider_registry_and_keep_unknown_configurat
 }
 
 #[test]
+fn ssh_tunnel_policy_survives_cloud_field_mapping_and_forward_scope_filtering() {
+    use oxideterm_connections::ConnectionStore;
+    use oxideterm_forwarding::{
+        ForwardRule, ForwardingRegistry, PersistedForward, SavedForwardStore, SshTunnelProfile,
+    };
+    use oxideterm_settings::SettingsStore;
+    let directory = std::env::temp_dir().join(format!("oxide-tunnel-sync-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let connections = ConnectionStore::load(directory.join("connections.json")).unwrap();
+    let store = SavedForwardStore::load(directory.join("forwards.json")).unwrap();
+    let rule = ForwardRule::local("127.0.0.1", 15432, "localhost", 5432);
+    let id = rule.id.clone();
+    let mut saved = PersistedForward::new(
+        id.clone(),
+        "node:local".into(),
+        Some("host-1".into()),
+        rule.forward_type,
+        rule,
+        false,
+    );
+    saved.tunnel = Some(SshTunnelProfile {
+        name: "Database".into(),
+        group: Some("Work/Production".into()),
+        connect_on_startup: true,
+    });
+    store.persist_forward(saved).unwrap();
+    let forwards = ForwardingRegistry::new_with_store(store);
+    let settings = SettingsStore::load_from_path(directory.join("settings.json")).unwrap();
+    let mut scope = crate::SyncScope::default();
+    let view = ConfigurationView::collect(&connections, &forwards, &settings, &scope).unwrap();
+    let decoded = view.resolved_forwards(&view.values).unwrap();
+    let saved = decoded.iter().find(|rule| rule.id == id).unwrap();
+    let tunnel = saved.tunnel.as_ref().unwrap();
+    assert_eq!(
+        (
+            &*tunnel.name,
+            tunnel.group.as_deref(),
+            tunnel.connect_on_startup
+        ),
+        ("Database", Some("Work/Production"), true)
+    );
+    assert_eq!(
+        (
+            saved.owner_connection_id.as_deref(),
+            saved.bind_port,
+            saved.target_port,
+            saved.auto_start
+        ),
+        (Some("host-1"), 15432, 5432, false)
+    );
+    let resource = SyncResource {
+        kind: ResourceKind::Forward,
+        id,
+    };
+    let filter = crate::operation::StructuredUploadItemFilter::default();
+    scope.sync_forwards = true;
+    assert!(
+        view.selected(std::iter::empty(), &scope, &filter)
+            .contains(&resource)
+    );
+    scope.sync_forwards = false;
+    assert!(
+        !view
+            .selected(std::iter::empty(), &scope, &filter)
+            .contains(&resource)
+    );
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn domain_mapping_and_recovery_restore_interrupted_writes_then_keep_committed_values() {
     use oxideterm_connections::{
         ConnectionStore, ConnectionStoreData, LocalTerminalProfile, SerialProfile, TelnetProfile,

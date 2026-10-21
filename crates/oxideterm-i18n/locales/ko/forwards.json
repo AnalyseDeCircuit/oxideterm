@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "SSH 터널",
+    "name": "터널 이름",
+    "group": "그룹",
+    "group_invalid": "그룹 경로에는 빈 구간을 포함할 수 없습니다.",
+    "host": "SSH 호스트",
+    "choose_host": "저장된 SSH 호스트 선택",
+    "startup": "앱 시작 시 연결",
+    "missing_host": "저장된 SSH 호스트를 찾을 수 없습니다.",
+    "name_required": "터널 이름을 입력하세요. 이름과 그룹은 한 줄이어야 합니다.",
+    "address_required": "올바른 수신 주소와 대상 주소를 입력하세요.",
+    "save_failed": "SSH 터널을 업데이트하지 못했습니다."
+  },
   "copy_address": "주소 복사",
   "copied": "복사됨!",
   "forwards": {

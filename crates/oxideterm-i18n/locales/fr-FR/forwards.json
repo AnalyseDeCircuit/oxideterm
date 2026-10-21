@@ -1,4 +1,17 @@
 {
+  "ssh_tunnel": {
+    "title": "Tunnel SSH",
+    "name": "Nom du tunnel",
+    "group": "Groupe",
+    "group_invalid": "Le chemin du groupe ne peut pas contenir de segments vides.",
+    "host": "Hôte SSH",
+    "choose_host": "Choisir un hôte SSH enregistré",
+    "startup": "Se connecter au démarrage de l’application",
+    "missing_host": "L’hôte SSH enregistré est indisponible.",
+    "name_required": "Saisissez un nom de tunnel. Le nom et le groupe doivent tenir sur une seule ligne.",
+    "address_required": "Saisissez des adresses d’écoute et de destination valides.",
+    "save_failed": "Impossible de mettre à jour le tunnel SSH."
+  },
   "copy_address": "Copier l'adresse",
   "copied": "Copié !",
   "forwards": {

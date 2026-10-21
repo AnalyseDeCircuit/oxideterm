@@ -310,6 +310,7 @@ pub(super) enum SessionManagerDeleteConfirm {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(super) enum SessionManagerSelectionTarget {
+    Tunnel(String),
     Plugin(String),
     Connection(String),
     Serial(String),
@@ -342,6 +343,7 @@ impl SessionManagerDrag {
 
 #[derive(Clone, Debug)]
 pub(super) enum SessionManagerRowActionTarget {
+    Tunnel(String),
     Plugin(String),
     Connection(String),
     Serial(String),

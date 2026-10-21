@@ -892,6 +892,7 @@ impl WorkspaceApp {
             local_shell_launcher_open: false,
             local_shell_launcher_selected_id: None,
             archive_command: None,
+            ssh_tunnels: ssh_tunnels::SshTunnels::default(),
             terminal,
             _terminal_subscription: terminal_subscription,
             overlay,
@@ -923,6 +924,7 @@ impl WorkspaceApp {
         workspace.sync_ssh_config_sync_service();
         workspace.start_audit_delivery(cx);
         workspace.restore_session_tree_snapshot();
+        workspace.start_startup_ssh_tunnels(window, cx);
         workspace.standalone_connections =
             standalone_connections::StandaloneConnectionRegistry::restore(
                 default_session_tree_path().with_file_name("standalone_sessions.json"),

@@ -24,7 +24,7 @@ pub use format::{
     EncryptedPayload, EncryptedPluginSetting, EncryptedPortableSecret,
     EncryptedPrivilegeCredential, EncryptedProxyHop, EncryptedUpstreamProxyAuth,
     EncryptedUpstreamProxyConfig, EncryptedUpstreamProxyPolicy, FileHeader, MAGIC, NONCE_LEN,
-    OxideFile, OxideMetadata, SALT_LEN, TAG_LEN, VERSION, kdf_flags,
+    OxideFile, OxideMetadata, OxideTunnelProfile, SALT_LEN, TAG_LEN, VERSION, kdf_flags,
 };
 pub use transfer::{
     AppSettingsSectionPreview, DecodedSyncArchiveConnections, ExportPreflightResult, ForwardDetail,

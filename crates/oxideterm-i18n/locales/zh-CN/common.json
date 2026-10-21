@@ -492,7 +492,7 @@
         "auto_upload_interval": "自动上传间隔（分钟）",
         "default_conflict_strategy": "默认冲突策略",
         "sync_connections": "同步连接",
-        "sync_forwards": "同步已保存的转发",
+        "sync_forwards": "同步端口转发与 SSH 隧道",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步串口配置",
         "sync_telnet_profiles": "同步 Telnet 配置",

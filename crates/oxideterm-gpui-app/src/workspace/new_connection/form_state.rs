@@ -97,6 +97,7 @@ pub(in crate::workspace) fn default_auth_tab_for_family(family: SshAuthFamily) -
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum SavedConnectionPromptAction {
     Connect,
+    Tunnel,
     Test,
 }
 

@@ -3064,6 +3064,35 @@ impl WorkspaceApp {
                 );
             sidebar = sidebar.child(row);
         }
+        if advanced_connections_expanded {
+            sidebar = sidebar.child(
+                div()
+                    .w_full()
+                    .h(px(NEW_CONNECTION_TRANSPORT_ROW_HEIGHT))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .cursor_pointer()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.text))
+                    .hover(|row| row.bg(rgba((theme.bg_hover << 8) | 0x80)))
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Network,
+                        14.0,
+                        rgb(theme.text_muted),
+                    ))
+                    .child(self.i18n.t("ssh_tunnel.title"))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            this.open_ssh_tunnel_form(None, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
+        }
         for (plugin, definition) in plugin_types {
             sidebar = sidebar.child(
                 div()

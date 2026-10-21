@@ -1925,6 +1925,13 @@ impl WorkspaceApp {
                         target_port: forward.rule.target_port,
                         description: Some(forward.rule.description),
                         auto_start: forward.auto_start,
+                        tunnel: forward.tunnel.map(|profile| {
+                            oxideterm_connections::oxide_file::OxideTunnelProfile {
+                                name: profile.name,
+                                group: profile.group,
+                                connect_on_startup: profile.connect_on_startup,
+                            }
+                        }),
                     })
                 })
                 .collect()
@@ -2191,6 +2198,14 @@ pub(super) fn owned_forward_import_record(record: &OxideForwardRecord) -> OwnedF
         target_port: record.target_port,
         description: record.description.clone(),
         auto_start: record.auto_start,
+        tunnel: record
+            .tunnel
+            .as_ref()
+            .map(|profile| oxideterm_forwarding::SshTunnelProfile {
+                name: profile.name.clone(),
+                group: profile.group.clone(),
+                connect_on_startup: profile.connect_on_startup,
+            }),
     }
 }
 
@@ -2209,6 +2224,9 @@ pub(super) fn plugin_id_from_setting_storage_key(storage_key: &str) -> Option<St
 }
 
 pub(super) fn oxide_forward_export_identity(forward: &PersistedForward) -> String {
+    if forward.tunnel.is_some() {
+        return format!("tunnel:{}", forward.id);
+    }
     format!(
         "{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}\u{1f}{}",
         forward.owner_connection_id.as_deref().unwrap_or_default(),

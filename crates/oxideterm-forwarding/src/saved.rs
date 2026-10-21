@@ -51,6 +51,16 @@ thread_local! {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SshTunnelProfile {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group: Option<String>,
+    #[serde(default)]
+    pub connect_on_startup: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedForward {
     pub id: String,
     pub session_id: String,
@@ -62,6 +72,8 @@ pub struct PersistedForward {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<DateTime<Utc>>,
     pub auto_start: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel: Option<SshTunnelProfile>,
     #[serde(default = "persisted_forward_version")]
     pub version: u32,
 }
@@ -88,6 +100,8 @@ pub struct PersistedForwardDto {
     pub target_host: String,
     pub target_port: u16,
     pub auto_start: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tunnel: Option<SshTunnelProfile>,
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -103,6 +117,7 @@ pub struct OwnedForwardImportRecord {
     pub target_port: u16,
     pub description: Option<String>,
     pub auto_start: bool,
+    pub tunnel: Option<SshTunnelProfile>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -199,6 +214,7 @@ impl PersistedForward {
             created_at: now,
             updated_at: Some(now),
             auto_start,
+            tunnel: None,
             version: persisted_forward_version(),
         }
     }
@@ -406,6 +422,49 @@ impl SavedForwardStore {
             None,
         );
         result
+    }
+
+    pub fn update_tunnel_profile(
+        &self,
+        id: &str,
+        profile: SshTunnelProfile,
+    ) -> Result<PersistedForward, SavedForwardError> {
+        self.commit_update(|data| {
+            let saved = data
+                .forwards
+                .iter_mut()
+                .find(|saved| saved.id == id)
+                .ok_or_else(|| SavedForwardError::NotFound(id.to_string()))?;
+            saved.tunnel = Some(profile);
+            saved.mark_updated();
+            Ok(saved.clone())
+        })
+    }
+
+    pub fn update_tunnel_groups(
+        &self,
+        groups: &[(String, Option<String>)],
+    ) -> Result<(), SavedForwardError> {
+        self.commit_update_if(|data| {
+            let mut changed = false;
+            for (id, group) in groups {
+                let saved = data
+                    .forwards
+                    .iter_mut()
+                    .find(|saved| &saved.id == id)
+                    .ok_or_else(|| SavedForwardError::NotFound(id.clone()))?;
+                let profile = saved
+                    .tunnel
+                    .as_mut()
+                    .ok_or_else(|| SavedForwardError::NotFound(id.clone()))?;
+                if &profile.group != group {
+                    profile.group = group.clone();
+                    saved.mark_updated();
+                    changed = true;
+                }
+            }
+            Ok(((), changed))
+        })
     }
 
     pub fn load_owned_forwards(&self, owner_connection_id: &str) -> Vec<PersistedForward> {
@@ -792,6 +851,7 @@ fn persisted_forward_to_dto(
         target_host: forward.rule.target_host,
         target_port: forward.rule.target_port,
         auto_start: forward.auto_start,
+        tunnel: forward.tunnel,
         created_at: forward.created_at.to_rfc3339(),
         description: (!forward.rule.description.is_empty()).then_some(forward.rule.description),
     }
@@ -882,6 +942,7 @@ fn persisted_forward_from_sync_payload(
         created_at,
         updated_at: Some(record_updated_at),
         auto_start: payload.auto_start,
+        tunnel: payload.tunnel,
         version: persisted_forward_version(),
     })
 }
@@ -906,6 +967,7 @@ fn sha256_hex<T: Serialize>(value: &T) -> Result<String, SavedForwardError> {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct ForwardIdentity {
+    tunnel: Option<(String, Option<String>)>,
     forward_type: String,
     bind_address: String,
     bind_port: u16,
@@ -916,6 +978,10 @@ struct ForwardIdentity {
 impl ForwardIdentity {
     fn from_import(record: &OwnedForwardImportRecord) -> Self {
         Self {
+            tunnel: record
+                .tunnel
+                .as_ref()
+                .map(|profile| (profile.name.clone(), profile.group.clone())),
             forward_type: record.forward_type.clone(),
             bind_address: record.bind_address.clone(),
             bind_port: record.bind_port,
@@ -926,6 +992,10 @@ impl ForwardIdentity {
 
     fn from_persisted(forward: &PersistedForward) -> Self {
         Self {
+            tunnel: forward
+                .tunnel
+                .as_ref()
+                .map(|profile| (profile.name.clone(), profile.group.clone())),
             forward_type: forward.forward_type.as_str().to_string(),
             bind_address: forward.rule.bind_address.clone(),
             bind_port: forward.rule.bind_port,
@@ -1012,6 +1082,7 @@ fn merge_imported_owner_forwards(
         if let Some(index) = existing_by_identity.get(&identity).copied() {
             if let Some(existing) = forwards.get_mut(index) {
                 existing.auto_start = record.auto_start;
+                existing.tunnel = record.tunnel.clone();
                 existing.rule.description = record.description.clone().unwrap_or_default();
                 existing.owner_connection_id = Some(owner_connection_id.to_string());
                 existing.updated_at = Some(merged_at);
@@ -1049,6 +1120,7 @@ fn import_record_to_persisted(
         created_at: persisted_at,
         updated_at: Some(persisted_at),
         auto_start: record.auto_start,
+        tunnel: record.tunnel.clone(),
         version: persisted_forward_version(),
     })
 }
@@ -1140,6 +1212,7 @@ mod tests {
             target_port: 3000,
             description: Some(description.to_string()),
             auto_start: true,
+            tunnel: None,
         }
     }
 
@@ -1308,6 +1381,16 @@ mod tests {
         );
         store.update_auto_start("forward-1", true).unwrap();
         store
+            .update_tunnel_profile(
+                "forward-1",
+                SshTunnelProfile {
+                    name: "Database".into(),
+                    group: Some("Work".into()),
+                    connect_on_startup: true,
+                },
+            )
+            .unwrap();
+        store
             .sync_persisted_forward_rule(
                 "forward-1",
                 "session-2",
@@ -1321,6 +1404,23 @@ mod tests {
         assert!(saved[0].auto_start);
         assert_eq!(saved[0].session_id, "session-2");
         assert_eq!(saved[0].rule.bind_port, 9090);
+        store.update_auto_start("forward-1", false).unwrap();
+        store
+            .update_tunnel_groups(&[("forward-1".into(), Some("Work/Production".into()))])
+            .unwrap();
+        let reloaded = SavedForwardStore::load(&path)
+            .unwrap()
+            .load_owned_forwards("connection-1");
+        assert!(!reloaded[0].auto_start);
+        let tunnel = reloaded[0].tunnel.as_ref().unwrap();
+        assert_eq!(
+            (
+                &*tunnel.name,
+                tunnel.group.as_deref(),
+                tunnel.connect_on_startup
+            ),
+            ("Database", Some("Work/Production"), true)
+        );
     }
 
     #[test]
@@ -1428,12 +1528,19 @@ mod tests {
             .unwrap();
         let mut merge = HashSet::new();
         merge.insert("connection-1".to_string());
+        let mut tunnel = import_record("connection-1", 8080, "named tunnel");
+        tunnel.tunnel = Some(SshTunnelProfile {
+            name: "Web".into(),
+            group: Some("Work".into()),
+            connect_on_startup: true,
+        });
 
         store
             .apply_owned_forward_import_records(
                 &[
                     import_record("connection-1", 8080, "merged"),
                     import_record("connection-1", 9090, "new"),
+                    tunnel,
                 ],
                 &HashSet::new(),
                 &merge,
@@ -1441,10 +1548,10 @@ mod tests {
             .unwrap();
         let saved = store.load_owned_forwards("connection-1");
 
-        assert_eq!(saved.len(), 2);
+        assert_eq!(saved.len(), 3);
         let merged = saved
             .iter()
-            .find(|forward| forward.rule.bind_port == 8080)
+            .find(|forward| forward.rule.bind_port == 8080 && forward.tunnel.is_none())
             .unwrap();
         assert_eq!(merged.id, "forward-1");
         assert_eq!(merged.rule.description, "merged");
@@ -1454,6 +1561,14 @@ mod tests {
                 .iter()
                 .any(|forward| forward.rule.bind_port == 9090 && forward.rule.description == "new")
         );
+        let tunnel = saved
+            .iter()
+            .find(|forward| forward.tunnel.is_some())
+            .unwrap();
+        assert_ne!(tunnel.id, "forward-1");
+        assert_eq!(tunnel.rule.bind_port, 8080);
+        assert_eq!(tunnel.rule.description, "named tunnel");
+        assert_eq!(tunnel.tunnel.as_ref().unwrap().name, "Web");
     }
 
     #[test]
