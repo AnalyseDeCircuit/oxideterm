@@ -46,6 +46,7 @@ pub enum RemoteShellIntegrationState {
     FilesOnly,
     Installed,
     NeedsUpdate,
+    NeedsRepair,
     NewerVersion,
 }
 
@@ -113,6 +114,14 @@ pub async fn inspect_remote_shell_integration(
             .as_ref()
             .is_some_and(|content| !complete_managed_blocks(content).is_empty())
     });
+    let mut older_version = startup_files.iter().any(|file| {
+        file.content.as_ref().is_some_and(|content| {
+            complete_managed_blocks(content).iter().any(|span| {
+                integration_versions(&content[span.start..span.end])
+                    .all(|version| version < REMOTE_SHELL_INTEGRATION_VERSION)
+            })
+        })
+    });
     let mut has_package_file = false;
     let mut package_matches = true;
     // The status covers the complete owned package, including editor adapters,
@@ -132,6 +141,9 @@ pub async fn inspect_remote_shell_integration(
         newer_version |= content
             .as_deref()
             .is_some_and(has_newer_integration_version);
+        older_version |= content.as_deref().is_some_and(|content| {
+            integration_versions(content).any(|version| version < REMOTE_SHELL_INTEGRATION_VERSION)
+        });
         has_package_file |= content.is_some();
         package_matches &= content
             .as_deref()
@@ -147,7 +159,8 @@ pub async fn inspect_remote_shell_integration(
             package_matches,
         ) {
             (true, true, true, true) => RemoteShellIntegrationState::Installed,
-            (true, _, _, _) => RemoteShellIntegrationState::NeedsUpdate,
+            (true, _, _, _) if older_version => RemoteShellIntegrationState::NeedsUpdate,
+            (true, _, _, _) => RemoteShellIntegrationState::NeedsRepair,
             (false, _, true, _) => RemoteShellIntegrationState::FilesOnly,
             (false, _, false, _) => RemoteShellIntegrationState::NotInstalled,
         }
@@ -294,15 +307,17 @@ fn status_from_layout(
 }
 
 fn has_newer_integration_version(content: &str) -> bool {
-    content.lines().any(|line| {
+    integration_versions(content).any(|version| version > REMOTE_SHELL_INTEGRATION_VERSION)
+}
+
+fn integration_versions(content: &str) -> impl Iterator<Item = u32> + '_ {
+    content.lines().filter_map(|line| {
         let line = line.trim();
         let version = line
             .strip_prefix("# oxideterm-shell-integration-version: ")
             .or_else(|| line.strip_prefix("# OxideTerm remote shell integration v"))
             .or_else(|| line.strip_prefix("Version: "));
-        version
-            .and_then(|version| version.trim_end_matches('.').trim().parse::<u32>().ok())
-            .is_some_and(|version| version > REMOTE_SHELL_INTEGRATION_VERSION)
+        version.and_then(|version| version.trim_end_matches('.').trim().parse::<u32>().ok())
     })
 }
 
@@ -808,6 +823,17 @@ mod tests {
 
     #[test]
     fn managed_startup_blocks_preserve_user_content_during_install_upgrade_and_removal() {
+        for (content, expected) in [
+            (
+                "# oxideterm-shell-integration-version: 4\nsource old",
+                vec![4],
+            ),
+            ("# OxideTerm remote shell integration v5.\n", vec![5]),
+            ("Version: 6\n", vec![6]),
+            ("source old\n", vec![]),
+        ] {
+            assert_eq!(integration_versions(content).collect::<Vec<_>>(), expected);
+        }
         let incomplete = format!(
             "echo '# {MANAGED_BLOCK_START}'\n# {MANAGED_BLOCK_START}\nlegacy without end\n"
         );

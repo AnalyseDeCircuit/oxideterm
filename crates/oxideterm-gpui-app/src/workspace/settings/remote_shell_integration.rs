@@ -1,5 +1,23 @@
 use super::*;
 
+fn integration_install_label(
+    state: Option<oxideterm_terminal::RemoteShellIntegrationState>,
+) -> &'static str {
+    use oxideterm_terminal::RemoteShellIntegrationState;
+    match state {
+        Some(RemoteShellIntegrationState::NeedsUpdate) => {
+            "settings_view.connections.shell_integration.update"
+        }
+        Some(RemoteShellIntegrationState::NeedsRepair | RemoteShellIntegrationState::FilesOnly) => {
+            "settings_view.connections.shell_integration.repair"
+        }
+        Some(RemoteShellIntegrationState::Installed) => {
+            "settings_view.connections.shell_integration.reinstall"
+        }
+        _ => "settings_view.connections.shell_integration.install",
+    }
+}
+
 pub(in crate::workspace) struct RemoteShellIntegrationRuntimeState {
     node_id: Option<NodeId>,
     status: Option<RemoteShellIntegrationStatus>,
@@ -9,6 +27,8 @@ pub(in crate::workspace) struct RemoteShellIntegrationRuntimeState {
     terminal_ready_nodes: HashSet<NodeId>,
     terminal_checking_nodes: HashMap<NodeId, (u64, bool)>,
     terminal_prompt_nodes: VecDeque<NodeId>,
+    terminal_statuses: HashMap<NodeId, oxideterm_terminal::RemoteShellIntegrationState>,
+    deferred: std::collections::BTreeMap<String, u32>,
     suppress_future_terminal_prompts: bool,
     mode: RemoteShellIntegrationMode,
     awareness_enabled: bool,
@@ -35,6 +55,7 @@ pub(in crate::workspace) struct RemoteShellIntegrationConfirmSnapshot {
     pub(in crate::workspace) node_id: NodeId,
     pub(in crate::workspace) source: RemoteShellIntegrationConfirmSource,
     pub(in crate::workspace) suppress_future_prompts: bool,
+    pub(in crate::workspace) state: Option<oxideterm_terminal::RemoteShellIntegrationState>,
 }
 
 #[derive(Clone)]
@@ -46,15 +67,16 @@ pub(in crate::workspace) struct RemoteShellIntegrationCardSnapshot {
 
 pub(in crate::workspace) enum RemoteShellIntegrationGateOutcome {
     Applied,
+    Configured(NodeId, oxideterm_terminal::RemoteShellIntegrationState),
     RetryInstall(NodeId),
     Failed(RemoteShellIntegrationFailure),
     Stale,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum RemoteShellIntegrationNotice {
     Inspected,
-    Installed,
+    Configured(NodeId, oxideterm_terminal::RemoteShellIntegrationState),
     ReferenceRemoved,
     AllRemoved,
     CheckFailed(RemoteShellIntegrationFailure),
@@ -80,6 +102,8 @@ impl Default for RemoteShellIntegrationRuntimeState {
             terminal_ready_nodes: HashSet::new(),
             terminal_checking_nodes: HashMap::new(),
             terminal_prompt_nodes: VecDeque::new(),
+            terminal_statuses: HashMap::new(),
+            deferred: Default::default(),
             suppress_future_terminal_prompts: false,
             mode: RemoteShellIntegrationMode::Disabled,
             awareness_enabled: false,
@@ -115,12 +139,26 @@ impl RemoteShellIntegrationRuntimeState {
         self.mode
     }
 
+    pub(in crate::workspace) fn set_deferred(
+        &mut self,
+        deferred: std::collections::BTreeMap<String, u32>,
+    ) {
+        self.deferred = deferred;
+    }
+
+    pub(in crate::workspace) fn is_deferred(&self, host: &str) -> bool {
+        self.mode == RemoteShellIntegrationMode::Ask
+            && self.deferred.get(host)
+                == Some(&oxideterm_terminal::REMOTE_SHELL_INTEGRATION_VERSION)
+    }
+
     pub(in crate::workspace) fn cancel_terminal_gates(&mut self) {
         self.terminal_checking_nodes.clear();
     }
 
     pub(in crate::workspace) fn cancel_node(&mut self, node_id: &NodeId) {
         self.terminal_checking_nodes.remove(node_id);
+        self.terminal_statuses.remove(node_id);
         self.terminal_ready_nodes.remove(node_id);
         self.terminal_prompt_nodes
             .retain(|queued| queued != node_id);
@@ -167,7 +205,10 @@ impl RemoteShellIntegrationRuntimeState {
         node_id: NodeId,
         generation: u64,
         result: std::result::Result<
-            (RemoteShellIntegrationStatus, bool),
+            (
+                RemoteShellIntegrationStatus,
+                Option<oxideterm_terminal::RemoteShellIntegrationState>,
+            ),
             RemoteShellIntegrationFailure,
         >,
     ) -> RemoteShellIntegrationGateOutcome {
@@ -180,8 +221,11 @@ impl RemoteShellIntegrationRuntimeState {
             return RemoteShellIntegrationGateOutcome::Stale;
         }
         self.terminal_checking_nodes.remove(&node_id);
+        if let Ok((status, _)) = &result {
+            self.terminal_statuses.insert(node_id.clone(), status.state);
+        }
         match result {
-            Ok((status, _))
+            Ok((status, previous))
                 if matches!(
                     status.state,
                     oxideterm_terminal::RemoteShellIntegrationState::Installed
@@ -191,10 +235,15 @@ impl RemoteShellIntegrationRuntimeState {
                 self.terminal_ready_nodes.insert(node_id.clone());
                 self.terminal_prompt_nodes
                     .retain(|queued| queued != &node_id);
-                self.node_id = Some(node_id);
+                self.node_id = Some(node_id.clone());
                 self.status = Some(status);
                 self.failure = None;
-                RemoteShellIntegrationGateOutcome::Applied
+                match previous {
+                    Some(previous) => {
+                        RemoteShellIntegrationGateOutcome::Configured(node_id, previous)
+                    }
+                    None => RemoteShellIntegrationGateOutcome::Applied,
+                }
             }
             Ok((status, _)) if self.mode == RemoteShellIntegrationMode::Ask => {
                 self.node_id = Some(node_id.clone());
@@ -214,7 +263,7 @@ impl RemoteShellIntegrationRuntimeState {
                 self.failure = None;
                 RemoteShellIntegrationGateOutcome::Applied
             }
-            Ok((_, false)) if self.mode == RemoteShellIntegrationMode::Enabled => {
+            Ok((_, None)) if self.mode == RemoteShellIntegrationMode::Enabled => {
                 RemoteShellIntegrationGateOutcome::RetryInstall(node_id)
             }
             Ok((status, _)) => {
@@ -252,6 +301,10 @@ impl RemoteShellIntegrationRuntimeState {
             node_id: self.confirm_node_id.clone()?,
             source: self.confirm_source?,
             suppress_future_prompts: self.suppress_future_terminal_prompts,
+            state: self
+                .terminal_statuses
+                .get(self.confirm_node_id.as_ref()?)
+                .copied(),
         })
     }
 
@@ -336,8 +389,14 @@ impl RemoteShellIntegrationRuntimeState {
         self.maintenance = None;
         match result {
             Ok(status) => {
+                let previous = self
+                    .status
+                    .as_ref()
+                    .map(|status| status.state)
+                    .unwrap_or(oxideterm_terminal::RemoteShellIntegrationState::NotInstalled);
+                self.terminal_statuses.insert(node_id.clone(), status.state);
                 if action == RemoteShellIntegrationAction::Install {
-                    self.terminal_ready_nodes.insert(node_id);
+                    self.terminal_ready_nodes.insert(node_id.clone());
                 } else if matches!(
                     action,
                     RemoteShellIntegrationAction::RemoveReference
@@ -352,7 +411,7 @@ impl RemoteShellIntegrationRuntimeState {
                         RemoteShellIntegrationNotice::Inspected
                     }
                     RemoteShellIntegrationAction::Install => {
-                        RemoteShellIntegrationNotice::Installed
+                        RemoteShellIntegrationNotice::Configured(node_id, previous)
                     }
                     RemoteShellIntegrationAction::RemoveReference => {
                         RemoteShellIntegrationNotice::ReferenceRemoved
@@ -401,6 +460,7 @@ impl WorkspaceApp {
         }
         match self.handle_standard_confirm_key(event, cx) {
             Some(ConfirmKeyboardAction::Cancel) => {
+                self.defer_remote_shell_integration_prompt(cx);
                 let disable_future_prompts = self.workspace_runtime.update(cx, |runtime, _cx| {
                     runtime.cancel_remote_shell_integration_confirm()
                 });
@@ -453,8 +513,14 @@ impl WorkspaceApp {
             .terminal
             .command_bar
             .current_directory_awareness;
+        let deferred = self
+            .settings_store
+            .settings()
+            .terminal
+            .remote_shell_integration_deferred
+            .clone();
         self.workspace_runtime.update(cx, |runtime, _cx| {
-            runtime.configure_remote_shell_integration(mode, awareness_enabled);
+            runtime.configure_remote_shell_integration(mode, awareness_enabled, deferred);
         });
         cx.notify();
     }
@@ -499,6 +565,28 @@ impl WorkspaceApp {
         }
     }
 
+    fn defer_remote_shell_integration_prompt(&mut self, cx: &mut Context<Self>) {
+        let runtime = self.workspace_runtime.read(cx);
+        let Some(confirm) = runtime.remote_shell_integration_confirm_snapshot() else {
+            return;
+        };
+        if confirm.source != RemoteShellIntegrationConfirmSource::TerminalOpen {
+            return;
+        }
+        let Some(key) = runtime.remote_shell_integration_host_key(&confirm.node_id) else {
+            return;
+        };
+        self.edit_settings(
+            |settings| {
+                settings
+                    .terminal
+                    .remote_shell_integration_deferred
+                    .insert(key, oxideterm_terminal::REMOTE_SHELL_INTEGRATION_VERSION);
+            },
+            cx,
+        );
+    }
+
     pub(in crate::workspace) fn render_remote_shell_integration_confirm(
         &self,
         cx: &mut Context<Self>,
@@ -513,11 +601,27 @@ impl WorkspaceApp {
             .get(node_id)
             .map(|node| node.title.clone())
             .unwrap_or_else(|| node_id.0.clone());
-        let description_key = if confirm.source == RemoteShellIntegrationConfirmSource::TerminalOpen
-        {
-            "settings_view.connections.shell_integration.confirm_description_terminal"
-        } else {
-            "settings_view.connections.shell_integration.confirm_description"
+        let mut description_key =
+            if confirm.source == RemoteShellIntegrationConfirmSource::TerminalOpen {
+                "settings_view.connections.shell_integration.confirm_description_terminal"
+            } else {
+                "settings_view.connections.shell_integration.confirm_description"
+            };
+        let title_key = match confirm.state {
+            Some(oxideterm_terminal::RemoteShellIntegrationState::NeedsUpdate) => {
+                description_key =
+                    "settings_view.connections.shell_integration.confirm_update_description";
+                "settings_view.connections.shell_integration.confirm_update_title"
+            }
+            Some(
+                oxideterm_terminal::RemoteShellIntegrationState::NeedsRepair
+                | oxideterm_terminal::RemoteShellIntegrationState::FilesOnly,
+            ) => {
+                description_key =
+                    "settings_view.connections.shell_integration.confirm_repair_description";
+                "settings_view.connections.shell_integration.confirm_repair_title"
+            }
+            _ => "settings_view.connections.shell_integration.confirm_title",
         };
         let description = self.i18n.t(description_key).replace("{{host}}", &host);
         let show_suppression = confirm.source == RemoteShellIntegrationConfirmSource::TerminalOpen;
@@ -529,7 +633,7 @@ impl WorkspaceApp {
                 title: div()
                     .child(
                         self.i18n
-                            .t("settings_view.connections.shell_integration.confirm_title"),
+                            .t(title_key),
                     )
                     .into_any_element(),
                 description: Some(
@@ -564,16 +668,19 @@ impl WorkspaceApp {
                         .into_any_element(),
                 ),
                 cancel_label: div()
-                    .child(self.i18n.t("common.actions.cancel"))
+                    .child(self.i18n.t(if show_suppression {
+                        "settings_view.connections.shell_integration.later"
+                    } else { "common.actions.cancel" }))
                     .into_any_element(),
                 confirm_label: div()
                     .child(
                         self.i18n
-                            .t("settings_view.connections.shell_integration.install"),
+                            .t(integration_install_label(confirm.state)),
                     )
                     .into_any_element(),
             },
             cx.listener(|this, _event, _window, cx| {
+                this.defer_remote_shell_integration_prompt(cx);
                 let disable_future_prompts = this.workspace_runtime.update(cx, |runtime, _cx| {
                     runtime.cancel_remote_shell_integration_confirm()
                 });
@@ -702,14 +809,9 @@ impl WorkspaceApp {
                                 cx,
                             ),
                             self.remote_shell_integration_action_button(
-                                if status.as_ref().is_some_and(|status| {
-                                    status.state
-                                        == oxideterm_terminal::RemoteShellIntegrationState::Installed
-                                }) {
-                                    "settings_view.connections.shell_integration.reinstall"
-                                } else {
-                                    "settings_view.connections.shell_integration.install"
-                                },
+                                integration_install_label(
+                                    status.as_ref().map(|status| status.state),
+                                ),
                                 LucideIcon::Download,
                                 ButtonVariant::Secondary,
                                 pending,
@@ -835,6 +937,9 @@ impl WorkspaceApp {
             oxideterm_terminal::RemoteShellIntegrationState::NeedsUpdate => {
                 "settings_view.connections.shell_integration.state_needs_update"
             }
+            oxideterm_terminal::RemoteShellIntegrationState::NeedsRepair => {
+                "settings_view.connections.shell_integration.state_needs_repair"
+            }
             oxideterm_terminal::RemoteShellIntegrationState::NewerVersion => {
                 "settings_view.connections.shell_integration.newer_version"
             }
@@ -914,18 +1019,32 @@ impl WorkspaceApp {
         notice: RemoteShellIntegrationNotice,
         cx: &mut Context<Self>,
     ) {
-        self.push_workspace_notice(notice.terminal_notice(&self.i18n), cx);
+        let mut message = notice.terminal_notice(&self.i18n);
+        if let RemoteShellIntegrationNotice::Configured(node_id, _) = notice {
+            message.description = self.ssh_nodes.get(&node_id).map(|node| node.title.clone());
+            self.apply_workspace_overlay_intent(
+                WorkspaceOverlayIntent::ShellIntegrationReady {
+                    notice: message,
+                    node_id,
+                    label: self.i18n.t("sessions.tree.actions.new_terminal"),
+                    workspace: cx.entity().downgrade(),
+                },
+                cx,
+            );
+        } else {
+            self.push_workspace_notice(message, cx);
+        }
     }
 }
 
 impl RemoteShellIntegrationNotice {
-    fn terminal_notice(self, i18n: &oxideterm_i18n::I18n) -> TerminalNotice {
+    fn terminal_notice(&self, i18n: &oxideterm_i18n::I18n) -> TerminalNotice {
         if let Self::CheckFailed(failure) | Self::Failed(failure) = self {
             return TerminalNotice {
                 title: i18n.t("settings_view.connections.shell_integration.unavailable"),
                 description: Some(i18n.t(failure.message_key())),
                 status_text: (matches!(self, Self::CheckFailed(_))
-                    && failure != RemoteShellIntegrationFailure::ConnectionUnavailable)
+                    && *failure != RemoteShellIntegrationFailure::ConnectionUnavailable)
                     .then(|| {
                         i18n.t("settings_view.connections.shell_integration.terminal_unaffected")
                     }),
@@ -944,7 +1063,22 @@ impl RemoteShellIntegrationNotice {
                 "settings_view.connections.shell_integration.inspect_complete",
                 TerminalNoticeVariant::Success,
             ),
-            RemoteShellIntegrationNotice::Installed => (
+            RemoteShellIntegrationNotice::Configured(
+                _,
+                oxideterm_terminal::RemoteShellIntegrationState::NeedsUpdate,
+            ) => (
+                "settings_view.connections.shell_integration.update_complete",
+                TerminalNoticeVariant::Success,
+            ),
+            RemoteShellIntegrationNotice::Configured(
+                _,
+                oxideterm_terminal::RemoteShellIntegrationState::NeedsRepair
+                | oxideterm_terminal::RemoteShellIntegrationState::FilesOnly,
+            ) => (
+                "settings_view.connections.shell_integration.repair_complete",
+                TerminalNoticeVariant::Success,
+            ),
+            RemoteShellIntegrationNotice::Configured(_, _) => (
                 "settings_view.connections.shell_integration.install_complete",
                 TerminalNoticeVariant::Success,
             ),
@@ -1018,6 +1152,77 @@ impl RemoteShellIntegrationFailure {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_shell_prompts_keep_each_hosts_installation_state() {
+        use oxideterm_terminal::{RemoteShellIntegrationState as State, RemoteShellKind};
+        let mut runtime = RemoteShellIntegrationRuntimeState::default();
+        runtime.configure(RemoteShellIntegrationMode::Ask, true);
+        let states = [State::NeedsUpdate, State::NeedsRepair, State::NotInstalled];
+        for (index, state) in states.into_iter().enumerate() {
+            let node = NodeId(format!("host-{index}"));
+            let generation = runtime.begin_terminal_gate(&node, false).unwrap();
+            runtime.finish_terminal_gate(
+                node,
+                generation,
+                Ok((
+                    RemoteShellIntegrationStatus {
+                        shell: RemoteShellKind::Zsh,
+                        state,
+                        integration_directory: "/home/user/.oxideterm/shell-integration".into(),
+                        integration_file: "/home/user/.oxideterm/shell-integration/zsh.zsh".into(),
+                        startup_files: vec!["/home/user/.zshrc".into()],
+                    },
+                    None,
+                )),
+            );
+        }
+        for (index, state) in states.into_iter().enumerate() {
+            let prompt = runtime.confirm_snapshot().unwrap();
+            assert_eq!(
+                (prompt.node_id, prompt.state),
+                (NodeId(format!("host-{index}")), Some(state))
+            );
+            runtime.cancel_confirm();
+        }
+        assert!(runtime.confirm_snapshot().is_none());
+    }
+
+    #[test]
+    fn remote_shell_deferrals_survive_settings_reload_and_expire_for_new_versions() {
+        let key = r#"[["server",22,"alice"]]"#;
+        let mut settings = oxideterm_settings::TerminalSettings::default();
+        settings
+            .remote_shell_integration_deferred
+            .insert(key.into(), 5);
+        let saved = serde_json::to_string(&settings).unwrap();
+        let restored: oxideterm_settings::TerminalSettings = serde_json::from_str(&saved).unwrap();
+        let mut runtime = RemoteShellIntegrationRuntimeState::default();
+        runtime.configure(RemoteShellIntegrationMode::Ask, true);
+        runtime.set_deferred(restored.remote_shell_integration_deferred);
+        assert!(runtime.is_deferred(key));
+        assert!(!runtime.is_deferred(r#"[["server",22,"bob"]]"#));
+        runtime.set_deferred([(key.into(), 4)].into());
+        assert!(!runtime.is_deferred(key));
+    }
+
+    #[test]
+    fn remote_shell_success_notice_distinguishes_install_update_and_repair() {
+        use oxideterm_terminal::RemoteShellIntegrationState as State;
+        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
+        for (state, expected) in [
+            (State::NeedsUpdate, "Shell 集成已更新，打开新终端后生效。"),
+            (State::NeedsRepair, "Shell 集成已修复，打开新终端后生效。"),
+            (
+                State::NotInstalled,
+                "远程 Shell 集成已安装，请打开新终端启用。",
+            ),
+        ] {
+            let notice = RemoteShellIntegrationNotice::Configured(NodeId("server".into()), state)
+                .terminal_notice(&i18n);
+            assert_eq!(notice.title, expected);
+        }
+    }
 
     #[test]
     fn shell_integration_failure_notice_identifies_the_optional_feature() {

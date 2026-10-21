@@ -1172,9 +1172,11 @@ impl WorkspaceRuntimeEntity {
         &mut self,
         mode: RemoteShellIntegrationMode,
         awareness_enabled: bool,
+        deferred: std::collections::BTreeMap<String, u32>,
     ) {
         self.remote_shell_integration
             .configure(mode, awareness_enabled);
+        self.remote_shell_integration.set_deferred(deferred);
         if mode == RemoteShellIntegrationMode::Disabled || !awareness_enabled {
             for (_, (_, abort_handle)) in self.remote_shell_gate_tasks.drain() {
                 abort_handle.abort();
@@ -1225,12 +1227,42 @@ impl WorkspaceRuntimeEntity {
         self.remote_shell_integration.accept_confirm()
     }
 
+    pub(in crate::workspace) fn remote_shell_integration_host_key(
+        &self,
+        node_id: &NodeId,
+    ) -> Option<String> {
+        let store = self.node_router.runtime_store();
+        let mut route = Vec::new();
+        for node in store.path_to_node(node_id).ok()? {
+            let snapshot = store.snapshot(&node)?;
+            if let Some(hops) = snapshot.config.proxy_chain.as_ref() {
+                for hop in hops {
+                    route.push((hop.host.clone(), hop.port, hop.username.clone()));
+                }
+            }
+            route.push((
+                snapshot.config.host,
+                snapshot.config.port,
+                snapshot.config.username,
+            ));
+        }
+        // Only endpoint identity is persisted, never authentication or agent settings.
+        serde_json::to_string(&route).ok()
+    }
+
     pub(in crate::workspace) fn start_remote_shell_integration_gate(
         &mut self,
         node_id: NodeId,
         force_install: bool,
     ) -> bool {
         use settings::RemoteShellIntegrationFailure;
+        if !force_install
+            && self
+                .remote_shell_integration_host_key(&node_id)
+                .is_some_and(|key| self.remote_shell_integration.is_deferred(&key))
+        {
+            return false;
+        }
         let Some(generation) = self
             .remote_shell_integration
             .begin_terminal_gate(&node_id, force_install)
@@ -1274,10 +1306,10 @@ impl WorkspaceRuntimeEntity {
                 if should_install_remote_shell_integration(force_install, mode, status.state) {
                     oxideterm_terminal::install_remote_shell_integration(&sftp, Some(&remote_env))
                         .await
-                        .map(|status| (status, true))
+                        .map(|installed| (installed, Some(status.state)))
                         .map_err(RemoteShellIntegrationFailure::Integration)
                 } else {
-                    Ok((status, false))
+                    Ok((status, None))
                 }
             }
             .await;
@@ -2755,6 +2787,13 @@ impl WorkspaceRuntimeEntity {
                     .remote_shell_integration
                     .finish_terminal_gate(node_id, generation, result);
                 match outcome {
+                    settings::RemoteShellIntegrationGateOutcome::Configured(node_id, previous) => {
+                        Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
+                            notice: Some(settings::RemoteShellIntegrationNotice::Configured(
+                                node_id, previous,
+                            )),
+                        })
+                    }
                     settings::RemoteShellIntegrationGateOutcome::Applied => {
                         Some(ReconnectRuntimeEffect::RemoteShellIntegrationGateFinished {
                             notice: None,
@@ -3087,6 +3126,20 @@ mod tests {
     #[test]
     fn remote_shell_gate_installs_only_when_requested_or_enabled_and_missing() {
         use oxideterm_terminal::RemoteShellIntegrationState;
+
+        for mode in [
+            RemoteShellIntegrationMode::Ask,
+            RemoteShellIntegrationMode::Enabled,
+            RemoteShellIntegrationMode::Disabled,
+        ] {
+            for force in [false, true] {
+                assert!(!should_install_remote_shell_integration(
+                    force,
+                    mode,
+                    RemoteShellIntegrationState::NewerVersion
+                ));
+            }
+        }
 
         assert!(should_install_remote_shell_integration(
             true,

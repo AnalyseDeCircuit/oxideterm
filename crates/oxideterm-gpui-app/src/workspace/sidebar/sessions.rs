@@ -499,7 +499,7 @@ impl WorkspaceApp {
         )
     }
 
-    fn queue_ssh_terminal_tab_for_sidebar_node(
+    pub(in crate::workspace) fn queue_ssh_terminal_tab_for_sidebar_node(
         &mut self,
         node_id: NodeId,
         window: &mut Window,

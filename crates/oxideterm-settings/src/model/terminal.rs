@@ -469,6 +469,8 @@ pub struct TerminalSettings {
     pub triggers: TerminalTriggerSettings,
     #[serde(default)]
     pub remote_shell_integration_mode: RemoteShellIntegrationMode,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub remote_shell_integration_deferred: std::collections::BTreeMap<String, u32>,
     pub command_marks: TerminalCommandMarksSettings,
     pub background_enabled: bool,
     pub background_image: Option<String>,
@@ -635,6 +637,7 @@ impl Default for TerminalSettings {
             session_log: TerminalSessionLogSettings::default(),
             triggers: TerminalTriggerSettings::default(),
             remote_shell_integration_mode: RemoteShellIntegrationMode::Ask,
+            remote_shell_integration_deferred: Default::default(),
             command_marks: TerminalCommandMarksSettings::default(),
             background_enabled: true,
             background_image: None,

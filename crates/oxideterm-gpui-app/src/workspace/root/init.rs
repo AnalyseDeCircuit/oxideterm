@@ -283,6 +283,7 @@ impl WorkspaceApp {
             runtime.configure_remote_shell_integration(
                 settings.terminal.remote_shell_integration_mode,
                 settings.terminal.command_bar.current_directory_awareness,
+                settings.terminal.remote_shell_integration_deferred.clone(),
             );
         });
         let ssh_consumer_prompt_handler = workspace_runtime.read(cx).native_ssh_prompt_handler();

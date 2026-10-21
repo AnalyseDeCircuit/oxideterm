@@ -1390,6 +1390,7 @@ impl WorkspaceApp {
             runtime.configure_remote_shell_integration(
                 settings.terminal.remote_shell_integration_mode,
                 settings.terminal.command_bar.current_directory_awareness,
+                settings.terminal.remote_shell_integration_deferred.clone(),
             );
         });
         self.tab_host.update(cx, |tab_host, _cx| {

@@ -100,7 +100,10 @@ pub(in crate::workspace) enum ReconnectWorkerResult {
         node_id: NodeId,
         generation: u64,
         result: std::result::Result<
-            (RemoteShellIntegrationStatus, bool),
+            (
+                RemoteShellIntegrationStatus,
+                Option<oxideterm_terminal::RemoteShellIntegrationState>,
+            ),
             settings::RemoteShellIntegrationFailure,
         >,
     },
