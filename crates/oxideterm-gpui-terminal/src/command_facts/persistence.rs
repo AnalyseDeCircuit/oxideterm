@@ -132,6 +132,10 @@ impl TerminalHistoryStore {
         let _ = self.state.wake.try_send(());
     }
 
+    /// Retires every history scope beginning with `prefix`.
+    ///
+    /// Prefix matching is literal, and callers must end the prefix at an identity
+    /// field boundary. An empty prefix is ignored; use `clear` to remove all history.
     pub fn remove_scopes_with_prefix(&self, prefix: &str) {
         retire_scopes_with_prefix(&self.state, prefix);
     }
@@ -271,6 +275,9 @@ fn clear_scope_history(history: &SharedTerminalCommandHistory) {
 }
 
 fn retire_scopes_with_prefix(store: &StoreState, prefix: &str) {
+    if prefix.is_empty() {
+        return;
+    }
     let histories = {
         let mut registry = store.registry.lock();
         registry.removed_scope_prefixes.insert(prefix.to_string());
@@ -726,6 +733,44 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             [("saved-xx/old".into(), "retained command".into())]
+        );
+    }
+
+    #[tokio::test]
+    async fn empty_prefix_preserves_memory_and_persisted_history() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite");
+        let (store, updates) = TerminalHistoryStore::new(path.clone()).unwrap();
+        store.configure(true, 90);
+        let first = store.history("saved-a".into(), "First host".into());
+        first.record("first command");
+        let second = store.history("saved-b".into(), "Second host".into());
+        second.record("second command");
+        updated(&updates).await;
+
+        store.remove_scopes_with_prefix("");
+
+        let in_memory_commands = |history: &SharedTerminalCommandHistory| {
+            history
+                .records()
+                .into_iter()
+                .map(|record| record.command)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(in_memory_commands(&first), ["first command"]);
+        assert_eq!(in_memory_commands(&second), ["second command"]);
+        drop(store);
+
+        let (store, updates) = TerminalHistoryStore::new(path).unwrap();
+        store.configure(true, 90);
+        updated(&updates).await;
+        assert_eq!(
+            in_memory_commands(&store.history("saved-a".into(), "First host".into())),
+            ["first command"]
+        );
+        assert_eq!(
+            in_memory_commands(&store.history("saved-b".into(), "Second host".into())),
+            ["second command"]
         );
     }
 
