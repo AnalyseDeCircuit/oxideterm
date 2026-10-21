@@ -213,6 +213,10 @@
       "find": "Find...",
       "manage_triggers": "Manage triggers for this session...",
       "select_command": "Select command",
+      "collapse_output": "Collapse output",
+      "expand_output": "Expand output",
+      "folded_output": "{{count}} output lines collapsed",
+      "folded_exit_code": "Exit code {{code}}",
       "previous_command": "Previous command",
       "next_command": "Next command",
       "clear_screen": "Clear screen"

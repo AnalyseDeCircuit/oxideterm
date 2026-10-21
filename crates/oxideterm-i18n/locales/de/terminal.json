@@ -125,6 +125,10 @@
       "find": "Suchen...",
       "manage_triggers": "Auslöser für diese Sitzung verwalten...",
       "select_command": "Befehl auswählen",
+      "collapse_output": "Ausgabe einklappen",
+      "expand_output": "Ausgabe ausklappen",
+      "folded_output": "{{count}} Ausgabezeilen eingeklappt",
+      "folded_exit_code": "Exit-Code {{code}}",
       "previous_command": "Vorheriger Befehl",
       "next_command": "Nächster Befehl",
       "clear_screen": "Bildschirm leeren"

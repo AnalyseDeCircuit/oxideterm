@@ -213,6 +213,10 @@
       "find": "查找...",
       "manage_triggers": "管理此会话的触发器...",
       "select_command": "选择命令",
+      "collapse_output": "收起输出",
+      "expand_output": "展开输出",
+      "folded_output": "已收起 {{count}} 行输出",
+      "folded_exit_code": "退出码 {{code}}",
       "previous_command": "上一个命令",
       "next_command": "下一个命令",
       "clear_screen": "清屏"

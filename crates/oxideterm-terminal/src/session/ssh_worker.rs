@@ -629,6 +629,16 @@ fn event_bytes(event: &TerminalEvent) -> usize {
             crate::TerminalCommandMarkEvent::Created(mark)
             | crate::TerminalCommandMarkEvent::Closed(mark),
         ) => mark.command_id.capacity() + mark.command.as_ref().map_or(0, String::capacity),
+        TerminalEvent::CommandMark(crate::TerminalCommandMarkEvent::Reflowed { marks, .. }) => {
+            marks.capacity() * std::mem::size_of::<crate::TerminalCommandMark>()
+                + marks
+                    .iter()
+                    .map(|mark| {
+                        mark.command_id.capacity()
+                            + mark.command.as_ref().map_or(0, String::capacity)
+                    })
+                    .sum::<usize>()
+        }
         TerminalEvent::TriggerMatched(event) => event.retained_bytes(),
         // Prompt text is bounded by its scanner, and the remaining variants
         // carry fixed metadata or shared protocol handles.

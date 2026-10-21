@@ -669,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn ssh_resize_resets_command_mark_coordinates_only_when_grid_changes() {
+    fn ssh_resize_rebases_command_mark_coordinates_only_when_grid_changes() {
         let mut session = crate::session::SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("127.0.0.1", 9, "nobody"),
             80,
@@ -684,7 +684,7 @@ mod tests {
             .expect("cell-only resize should succeed");
         assert!(!session.take_events().iter().any(|event| matches!(
             event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reflowed { .. })
         )));
 
         session
@@ -692,7 +692,7 @@ mod tests {
             .expect("grid resize should succeed");
         assert!(session.take_events().iter().any(|event| matches!(
             event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
+            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reflowed { cols: 100, rows: 24, .. })
         )));
     }
 
@@ -1579,6 +1579,7 @@ mod tests {
                                 projected.retain_mut(|mark| mark.trim_history(lines))
                             }
                             TerminalCommandMarkEvent::Reset => projected.clear(),
+                            TerminalCommandMarkEvent::Reflowed { marks, .. } => projected = marks,
                         }
                     }
                 });
@@ -1660,55 +1661,6 @@ mod tests {
         let marks = integration.command_marks();
         assert_eq!(marks.len(), 1);
         assert_eq!(marks[0].command.as_deref(), Some("pwd"));
-        assert!(marks[0].is_closed);
-    }
-
-    #[test]
-    fn shell_integration_grid_reflow_closes_and_clears_active_command_mark() {
-        let size = TerminalSize {
-            cols: 80,
-            rows: 8,
-            cell_width: 8,
-            cell_height: 17,
-        };
-        let mut term = Term::new(Config::default(), &size, VoidListener);
-        let mut parser = Processor::<StdSyncHandler>::new();
-        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
-        let mut events = Vec::new();
-
-        integration.advance(
-            &mut parser,
-            &mut term,
-            b"\x1b]133;A;click_events=1\x07$ long-command\r\n\x1b]133;C;cmdline_url=long-command\x07output",
-            |event| events.push(event),
-        );
-        assert_eq!(integration.command_marks().len(), 1);
-
-        integration.reset_command_marks_for_grid_reflow(|event| events.push(event));
-
-        assert!(integration.command_marks().is_empty());
-        assert!(events.iter().any(|event| matches!(
-            event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Closed(mark))
-                if mark.command.as_deref() == Some("long-command")
-                    && mark.closed_by == Some(TerminalCommandMarkClosedBy::TerminalReset)
-                    && mark.stale
-        )));
-        assert!(events.iter().any(|event| matches!(
-            event,
-            TerminalEvent::CommandMark(TerminalCommandMarkEvent::Reset)
-        )));
-
-        integration.advance(
-            &mut parser,
-            &mut term,
-            b"\r\n$ next-command\r\n\x1b]133;C;cmdline_url=next-command\x07done\r\n\x1b]133;D;0\x07",
-            |event| events.push(event),
-        );
-        let marks = integration.command_marks();
-        assert_eq!(marks.len(), 1);
-        assert_eq!(marks[0].command.as_deref(), Some("next-command"));
-        assert_eq!(marks[0].command_line, marks[0].start_line);
         assert!(marks[0].is_closed);
     }
 

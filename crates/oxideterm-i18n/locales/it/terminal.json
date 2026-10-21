@@ -125,6 +125,10 @@
       "find": "Trova...",
       "manage_triggers": "Gestisci i trigger per questa sessione...",
       "select_command": "Seleziona comando",
+      "collapse_output": "Comprimi output",
+      "expand_output": "Espandi output",
+      "folded_output": "{{count}} righe di output compresse",
+      "folded_exit_code": "Codice di uscita {{code}}",
       "previous_command": "Comando precedente",
       "next_command": "Comando successivo",
       "clear_screen": "Pulisci schermo"

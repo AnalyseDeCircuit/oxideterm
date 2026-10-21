@@ -125,6 +125,10 @@
       "find": "Buscar...",
       "manage_triggers": "Administrar activadores de esta sesión...",
       "select_command": "Seleccionar comando",
+      "collapse_output": "Contraer salida",
+      "expand_output": "Expandir salida",
+      "folded_output": "{{count}} líneas de salida contraídas",
+      "folded_exit_code": "Código de salida {{code}}",
       "previous_command": "Comando anterior",
       "next_command": "Comando siguiente",
       "clear_screen": "Limpiar pantalla"

@@ -254,9 +254,10 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         };
         let grid_changed = next.cols != self.size.cols || next.rows != self.size.rows;
         if grid_changed {
+            let mut term = self.term.lock();
+            term.resize(next);
             self.shell_integration
-                .reset_command_marks_for_grid_reflow(|event| self.pending_events.push(event));
-            self.term.lock().resize(next);
+                .reflow_command_marks(&term, |event| self.pending_events.push(event));
         }
         self.size = next;
         Ok(())

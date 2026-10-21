@@ -125,6 +125,10 @@
       "find": "Tìm...",
       "manage_triggers": "Quản lý trình kích hoạt cho phiên này...",
       "select_command": "Chọn lệnh",
+      "collapse_output": "Thu gọn đầu ra",
+      "expand_output": "Mở rộng đầu ra",
+      "folded_output": "Đã thu gọn {{count}} dòng đầu ra",
+      "folded_exit_code": "Mã thoát {{code}}",
       "previous_command": "Lệnh trước",
       "next_command": "Lệnh tiếp theo",
       "clear_screen": "Xóa màn hình"

@@ -9,6 +9,8 @@ use alacritty_terminal::{
 };
 use zeroize::Zeroizing;
 
+mod reflow;
+
 const MAX_COMMAND_TEXT_LENGTH: usize = 4096;
 const MAX_MARKS: usize = 2000;
 // Private editor clipboard responses can contain 64 KiB of percent-encoded
@@ -119,6 +121,11 @@ pub enum TerminalCommandMarkEvent {
     Closed(TerminalCommandMark),
     HistoryTrimmed {
         lines: usize,
+    },
+    Reflowed {
+        cols: usize,
+        rows: usize,
+        marks: Vec<TerminalCommandMark>,
     },
     /// The terminal cleared saved history, so existing visual line coordinates are invalid.
     Reset,
@@ -330,6 +337,7 @@ pub(crate) struct TerminalShellIntegration {
     pending_escape: bool,
     next_command_sequence: u64,
     saved_history_clear_detector: SavedHistoryClearDetector,
+    reflow: reflow::ShellReflow,
 }
 
 impl TerminalShellIntegration {
@@ -366,6 +374,7 @@ impl TerminalShellIntegration {
         mut recordable: Option<&mut Vec<u8>>,
         emit: &mut impl FnMut(crate::TerminalEvent),
     ) -> bool {
+        self.reflow_command_marks(term, &mut *emit);
         let mut changed = false;
         let mut index = 0usize;
         let mut normal_start = 0usize;
@@ -456,6 +465,7 @@ impl TerminalShellIntegration {
         if normal_start < bytes.len() {
             self.advance_terminal_bytes(parser, term, &bytes[normal_start..], recordable, emit);
         }
+        self.capture_prompt_anchors(term);
 
         changed
     }
@@ -508,15 +518,6 @@ impl TerminalShellIntegration {
         self.reset_command_marks_for_coordinate_epoch(emit);
     }
 
-    pub(crate) fn reset_command_marks_for_grid_reflow(
-        &mut self,
-        mut emit: impl FnMut(crate::TerminalEvent),
-    ) {
-        // Column and row changes can reflow grid content, invalidating every
-        // absolute line coordinate retained by command marks.
-        self.reset_command_marks_for_coordinate_epoch(&mut emit);
-    }
-
     fn reset_command_marks_for_coordinate_epoch(
         &mut self,
         emit: &mut impl FnMut(crate::TerminalEvent),
@@ -552,6 +553,7 @@ impl TerminalShellIntegration {
         }
 
         self.marks.clear();
+        self.reflow.clear_anchors();
         self.state.lifecycle = ShellIntegrationLifecycleState::Closed;
         self.state.secondary_prompt = false;
         self.state.prompt_start = None;
@@ -806,7 +808,9 @@ impl TerminalShellIntegration {
         if matches!(sequence, "A" | "C" | "D") {
             self.state.secondary_prompt = false;
         }
-        for command_event in self.handle_shell_event(term, &event) {
+        let command_events = self.handle_shell_event(term, &event);
+        self.capture_command_anchors(term, &command_events);
+        for command_event in command_events {
             emit(crate::TerminalEvent::CommandMark(command_event));
         }
         emit(crate::TerminalEvent::ShellIntegration(event));

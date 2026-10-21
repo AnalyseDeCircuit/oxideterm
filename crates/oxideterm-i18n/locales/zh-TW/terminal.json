@@ -125,6 +125,10 @@
       "find": "尋找...",
       "manage_triggers": "管理此工作階段的觸發器...",
       "select_command": "選取命令",
+      "collapse_output": "收合輸出",
+      "expand_output": "展開輸出",
+      "folded_output": "已收合 {{count}} 行輸出",
+      "folded_exit_code": "結束代碼 {{code}}",
       "previous_command": "上一個命令",
       "next_command": "下一個命令",
       "clear_screen": "清除螢幕"

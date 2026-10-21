@@ -125,6 +125,10 @@
       "find": "Buscar...",
       "manage_triggers": "Gerenciar gatilhos desta sessão...",
       "select_command": "Selecionar comando",
+      "collapse_output": "Recolher saída",
+      "expand_output": "Expandir saída",
+      "folded_output": "{{count}} linhas de saída recolhidas",
+      "folded_exit_code": "Código de saída {{code}}",
       "previous_command": "Comando anterior",
       "next_command": "Próximo comando",
       "clear_screen": "Limpar tela"

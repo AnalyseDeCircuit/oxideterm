@@ -163,6 +163,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             "settings_view.terminal.command_marks",
             &[
                 "settings_view.terminal.command_marks_hint",
+                "settings_view.terminal.command_folding",
+                "settings_view.terminal.command_folding_hint",
                 "settings_view.terminal.command_marks_hover_actions",
             ],
         ),

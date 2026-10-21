@@ -183,14 +183,11 @@ impl TerminalPane {
 
     pub(crate) fn absolute_line_for_position(&self, position: Point<Pixels>) -> usize {
         let point = self.terminal_point_for_position(position);
-        self.snapshot
-            .scrollback_lines
-            .saturating_add(point.row)
-            .saturating_sub(self.snapshot.display_offset)
+        self.displayed_absolute_line(point.row)
     }
 
     pub(crate) fn command_mark_id_at_absolute_line(&self, absolute_line: usize) -> Option<String> {
-        if !self.settings.command_marks_enabled {
+        if !self.command_actions_available(self.render_mode) {
             return None;
         }
         self.command_marks
@@ -225,7 +222,7 @@ impl TerminalPane {
         &self,
         absolute_line: usize,
     ) -> Option<String> {
-        if !self.settings.command_marks_enabled {
+        if !self.command_actions_available(self.render_mode) {
             return None;
         }
         self.command_marks
@@ -239,7 +236,7 @@ impl TerminalPane {
         &self,
         absolute_line: usize,
     ) -> Option<String> {
-        if !self.settings.command_marks_enabled {
+        if !self.command_actions_available(self.render_mode) {
             return None;
         }
         self.command_marks
@@ -312,11 +309,11 @@ impl TerminalPane {
     fn scroll_to_absolute_line(&mut self, absolute_line: usize, cx: &mut Context<Self>) {
         let desired_row = (self.snapshot.rows / 3).max(1);
         let target_offset = self
-            .snapshot
-            .scrollback_lines
+            .visible_scroll_history()
             .saturating_add(desired_row)
-            .saturating_sub(absolute_line)
-            .min(self.snapshot.scrollback_lines);
+            .saturating_sub(self.command_folding.visible_line(absolute_line))
+            .min(self.visible_scroll_history());
+        let target_offset = self.physical_scroll_offset(target_offset);
         let snapshot = {
             let mut terminal = self.terminal.lock();
             terminal.scroll_to_display_offset(target_offset);
@@ -372,13 +369,6 @@ impl TerminalPane {
         self.clear_visual_command_marks();
     }
 
-    pub(crate) fn reset_command_marks_while_awaiting_backend_reset(&mut self) {
-        self.close_open_command_marks_for_terminal_reset();
-        // Preserve shell-to-frontend aliases until the backend's ordered
-        // Closed -> Reset events finish updating the durable fact ledger.
-        self.clear_visual_command_mark_ranges();
-    }
-
     fn close_open_command_marks_for_terminal_reset(&mut self) {
         let now = now_millis();
         let fallback_end_line = self.absolute_cursor_line();
@@ -407,6 +397,8 @@ impl TerminalPane {
     }
 
     fn clear_visual_command_mark_ranges(&mut self) {
+        self.command_reflow_pending = false;
+        self.command_folding = command_folding::CommandFolding::default();
         self.command_marks.clear();
         self.command_marks_render_cache_dirty = true;
         self.selected_command_mark_id = None;
@@ -467,6 +459,7 @@ impl TerminalPane {
                     .any(|mark| &mark.command_id == hovered)
             });
         self.command_marks.drain(..remove_count);
+        self.prune_command_mark_aliases();
         self.command_marks_render_cache_dirty = true;
         if removed_selected {
             self.selected_command_mark_id = None;
@@ -476,6 +469,59 @@ impl TerminalPane {
         }
     }
 
+}
+impl TerminalPane {
+    fn prune_command_mark_aliases(&mut self) {
+        let retained: HashSet<&str> = self.command_marks
+            .iter().map(|mark| mark.command_id.as_str()).collect();
+        self.command_mark_id_aliases
+            .retain(|_, id| retained.contains(id.as_str()));
+    }
+
+    fn apply_reflowed_command_marks(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        mut marks: Vec<TerminalCommandMark>,
+    ) {
+        let submitted_by: HashMap<&str, _> = self.command_marks
+            .iter().map(|mark| (mark.command_id.as_str(), mark.submitted_by)).collect();
+        for mark in &mut marks {
+            if let Some(id) = self.command_mark_id_aliases.get(&mark.command_id) {
+                mark.command_id = id.clone();
+            }
+            if let Some(source) = submitted_by.get(mark.command_id.as_str()) {
+                mark.submitted_by = *source;
+            }
+        }
+        // Heuristic ranges have no terminal anchors. Preserve their durable facts
+        // while retiring only the visual coordinates that cannot be rebased.
+        let retained: HashSet<&str> = marks.iter().map(|mark| mark.command_id.as_str()).collect();
+        for old in &mut self.command_marks {
+            if !old.is_closed && !retained.contains(old.command_id.as_str()) {
+                old.is_closed = true;
+                old.stale = true;
+                old.closed_by = Some(TerminalCommandMarkClosedBy::TerminalReset);
+                old.output_confidence = TerminalCommandMarkConfidence::Unknown;
+                old.finished_at = Some(now_millis());
+                self.command_fact_ledger.close_from_mark(old);
+            }
+        }
+        self.command_fact_ledger.reflow_visual_ranges(&marks);
+        if let Some(prompt) = &mut self.ai_command_prompt
+            && let Some(mark) = marks.iter().find(|mark| mark.command_id == prompt.command_id)
+        {
+            prompt.start_line = mark.command_line;
+        }
+        self.command_marks = marks;
+        self.command_reflow_pending = self.last_pty_resize
+            .is_some_and(|(expected_cols, expected_rows, _, _)| {
+                (cols, rows) != (expected_cols, expected_rows)
+            });
+        self.command_marks_render_cache_dirty = true;
+        self.snapshot_dirty = true;
+        self.clear_smooth_scroll_remainder();
+    }
 }
 fn now_millis() -> u64 {
     SystemTime::now()

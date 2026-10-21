@@ -545,6 +545,31 @@ impl CommandFactLedger {
         }
     }
 
+    pub(crate) fn reflow_visual_ranges(&mut self, marks: &[TerminalCommandMark]) {
+        if let Some(fact) = self.facts.last_mut()
+            && fact.status == TerminalCommandFactStatus::Open
+            && let Some(mark) = marks
+                .iter()
+                .find(|mark| mark.command_id == fact.client_mark_id)
+        {
+            fact.start_global_line = mark.start_line;
+            fact.command_global_line = mark.command_line;
+            fact.output_start_global_line = mark.output_start_line();
+            fact.end_global_line = mark.end_line;
+        }
+        if let Some(highlight) = &mut self.transient_command_highlight {
+            if let Some(mark) = marks
+                .iter()
+                .find(|mark| mark.command_id == highlight.command_id.as_ref() && !mark.stale)
+            {
+                highlight.output_start_global_line = mark.output_start_line();
+                highlight.output_end_global_line = mark.end_line;
+            } else {
+                self.transient_command_highlight = None;
+            }
+        }
+    }
+
     pub(crate) fn close_from_mark(&mut self, mark: &TerminalCommandMark) {
         if let Some(operation) = self.audit_commands.remove(&mark.command_id) {
             use oxideterm_audit::{AuditEvidence, AuditOutcome};

@@ -44,20 +44,21 @@ impl TerminalPane {
         if self.link_at_position(position).is_some() {
             return None;
         }
-        let row = self.snapshot.lines.get(point.row)?;
+        let snapshot = self.displayed_snapshot();
+        let row = snapshot.lines.get(point.row)?;
         let cell = row.cells.get(point.col)?;
         if row.active_input || !is_link_interactive_cell(cell) {
             return None;
         }
         let mut start_row = point.row;
-        while start_row > 0 && self.snapshot.lines[start_row - 1].wrapped {
+        while start_row > 0 && snapshot.lines[start_row - 1].wrapped {
             start_row -= 1;
         }
         let mut text = Zeroizing::new(String::new());
         let mut cells = Vec::new();
         let mut hit_byte = None;
-        for row_index in start_row..self.snapshot.lines.len() {
-            let row = &self.snapshot.lines[row_index];
+        for row_index in start_row..snapshot.lines.len() {
+            let row = &snapshot.lines[row_index];
             if row.active_input {
                 return None;
             }

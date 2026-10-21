@@ -125,6 +125,10 @@
       "find": "Rechercher...",
       "manage_triggers": "Gérer les déclencheurs de cette session...",
       "select_command": "Sélectionner la commande",
+      "collapse_output": "Replier la sortie",
+      "expand_output": "Déplier la sortie",
+      "folded_output": "{{count}} lignes de sortie repliées",
+      "folded_exit_code": "Code de sortie {{code}}",
       "previous_command": "Commande précédente",
       "next_command": "Commande suivante",
       "clear_screen": "Effacer l'écran"

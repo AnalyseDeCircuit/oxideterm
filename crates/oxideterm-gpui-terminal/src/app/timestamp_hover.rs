@@ -94,7 +94,9 @@ impl TerminalPane {
         }) {
             return;
         }
-        let Some((columns, label)) = timestamp_at_cell(&self.snapshot, point.row, point.col) else {
+        let Some((columns, label)) =
+            timestamp_at_cell(self.displayed_snapshot(), point.row, point.col)
+        else {
             self.clear_terminal_hover(cx);
             return;
         };
