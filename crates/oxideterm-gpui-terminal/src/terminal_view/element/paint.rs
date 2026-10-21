@@ -184,8 +184,9 @@ pub(super) fn paint_command_gutter(
     window: &mut Window,
 ) {
     let line_height = metrics.line_height_f32();
-    let stroke = 1.0;
-    let box_size = (width - 2.0 * stroke).max(2.0).min(line_height * 0.55);
+    let box_size = (width - 2.0).max(2.0).min(line_height * 0.55);
+    // Thicken inside the existing cell while keeping the start box hollow at small sizes.
+    let stroke = (box_size / 4.0).clamp(1.0, 2.0);
     let center_x = -width / 2.0;
     let center_y = (overlay.start_row as f32 + 0.5) * line_height;
     let left = center_x - box_size / 2.0;
@@ -198,9 +199,9 @@ pub(super) fn paint_command_gutter(
     } else if overlay.hovered || overlay.selected {
         rgba((theme.tokens.ui.accent << 8) | 0xe6)
     } else {
-        rgba((theme.foreground << 8) | 0x70)
+        rgba((theme.foreground << 8) | 0xb0)
     };
-    // Snap every edge in window coordinates so the thin outline stays crisp
+    // Snap every edge in window coordinates so the outline stays crisp
     // at fractional font sizes and display scale factors.
     let mut rect = |x: f32, y: f32, w: f32, h: f32| {
         if w <= 0.0 || h <= 0.0 {
@@ -228,9 +229,10 @@ pub(super) fn paint_command_gutter(
             box_size - 2.0 * stroke,
         );
         if overlay.collapsed && box_size >= 5.0 {
-            let arm = (box_size * 0.5)
-                .max(3.0 * stroke)
-                .min(box_size - 2.0 * stroke);
+            // The plus must remain distinct from the thicker surrounding outline.
+            let inner_size = box_size - 2.0 * stroke;
+            let stroke = (stroke * 0.5).max(1.0).min(inner_size / 3.0);
+            let arm = (box_size * 0.5).max(3.0 * stroke).min(inner_size);
             rect(center_x - arm / 2.0, center_y - stroke / 2.0, arm, stroke);
             rect(
                 center_x - stroke / 2.0,
