@@ -169,6 +169,8 @@ pub struct ShellIntegrationStatus {
 struct ShellIntegrationState {
     lifecycle: ShellIntegrationLifecycleState,
     integration_source: Option<ShellIntegrationSource>,
+    injected: bool,
+    secondary_prompt: bool,
     last_seen_at: Option<u64>,
     prompt_start: Option<TerminalCommandPosition>,
     command_start: Option<TerminalCommandPosition>,
@@ -184,6 +186,8 @@ impl Default for ShellIntegrationState {
         Self {
             lifecycle: ShellIntegrationLifecycleState::Idle,
             integration_source: None,
+            injected: false,
+            secondary_prompt: false,
             last_seen_at: None,
             prompt_start: None,
             command_start: None,
@@ -549,6 +553,7 @@ impl TerminalShellIntegration {
 
         self.marks.clear();
         self.state.lifecycle = ShellIntegrationLifecycleState::Closed;
+        self.state.secondary_prompt = false;
         self.state.prompt_start = None;
         self.state.command_start = None;
         self.state.pending_command_text = None;
@@ -719,17 +724,58 @@ impl TerminalShellIntegration {
         if term.mode().contains(TermMode::ALT_SCREEN) {
             return true;
         }
-        // One producer owns a prompt/command cycle. Mixing two integrations
-        // must not splice their input and output boundaries together.
-        if self.state.integration_source.is_some_and(|current| current != source)
+        let sequence = data.split(';').next().unwrap_or_default();
+        let injected = source == ShellIntegrationSource::Osc133
+            && data
+                .split(';')
+                .skip(1)
+                .any(|field| field == "aid=oxideterm");
+        let same_producer =
+            self.state.integration_source == Some(source) && self.state.injected == injected;
+        let position = cursor_position(term);
+        // Duplicate execution/end marks and prompt repaints cannot mutate a
+        // running command. A new prompt below its output can be a nested shell.
+        if (sequence == "C" && self.state.active_command_id.is_some())
+            || (sequence == "D" && self.state.active_command_id.is_none())
+        {
+            return true;
+        }
+        if matches!(sequence, "A" | "B")
+            && self.state.active_command_id.is_some()
+            && self
+                .marks
+                .last()
+                .is_some_and(|mark| mark.output_start.is_some_and(|start| position < start))
+        {
+            return true;
+        }
+        if sequence == "A" && data.split(';').skip(1).any(|field| field == "k=s") {
+            if same_producer {
+                self.state.secondary_prompt = true;
+            }
+            return true;
+        }
+        if sequence == "B" && same_producer && self.state.secondary_prompt {
+            return true;
+        }
+        // Native producers take precedence while the prompt is being drawn.
+        // The aid tag distinguishes our hooks even when both emit OSC 133.
+        let native_takeover = self.state.injected
+            && !injected
+            && matches!(sequence, "A" | "B")
+            && matches!(
+                self.state.lifecycle,
+                ShellIntegrationLifecycleState::Prompt | ShellIntegrationLifecycleState::Command
+            );
+        if self.state.integration_source.is_some()
+            && !same_producer
+            && !native_takeover
             && !matches!(
                 self.state.lifecycle,
                 ShellIntegrationLifecycleState::Idle | ShellIntegrationLifecycleState::Closed
             )
-            // A nested shell may use a different protocol. Its first prompt
-            // ends the outer visual range without claiming an execution result.
             && !(self.state.lifecycle == ShellIntegrationLifecycleState::Output
-                && data.split(';').next() == Some("A"))
+                && matches!(sequence, "A" | "B"))
         {
             return true;
         }
@@ -748,10 +794,18 @@ impl TerminalShellIntegration {
             }
             return true;
         }
-        let Some(event) = parse_shell_integration_event(source, data, cursor_position(term)) else {
+        let Some(event) = parse_shell_integration_event(source, data, position) else {
             return true;
         };
-
+        if native_takeover {
+            self.state.lifecycle = ShellIntegrationLifecycleState::Idle;
+            self.state.prompt_start = None;
+            self.state.command_start = None;
+        }
+        self.state.injected = injected;
+        if matches!(sequence, "A" | "C" | "D") {
+            self.state.secondary_prompt = false;
+        }
         for command_event in self.handle_shell_event(term, &event) {
             emit(crate::TerminalEvent::CommandMark(command_event));
         }

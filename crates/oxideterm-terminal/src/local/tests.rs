@@ -1441,6 +1441,111 @@ mod tests {
     }
 
     #[test]
+    fn shell_integration_keeps_native_boundaries_when_injected_hooks_also_emit() {
+        for protocol in ["133", "633"] {
+            let size = TerminalSize {
+                cols: 80,
+                rows: 8,
+                cell_width: 8,
+                cell_height: 17,
+            };
+            let mut term = Term::new(Config::default(), &size, VoidListener);
+            let mut parser = Processor::<StdSyncHandler>::new();
+            let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+            let bytes = format!(
+                "\x1b]133;A;aid=oxideterm\x07\
+                 \x1b]{protocol};A\x07$ \x1b]{protocol};B\x07\
+                 \x1b]133;B;aid=oxideterm\x07echo hi\r\n\
+                 \x1b]133;C;aid=oxideterm\x07\
+                 \x1b]{protocol};C\x07hi\r\n\
+                 \x1b]133;D;9;aid=oxideterm\x07\
+                 \x1b]{protocol};D;0\x07"
+            );
+            for byte in bytes.as_bytes().chunks(1) {
+                integration.advance(&mut parser, &mut term, byte, |_| {});
+            }
+            let marks = integration.command_marks();
+            assert_eq!(marks.len(), 1, "{protocol}");
+            assert_eq!(marks[0].command.as_deref(), Some("echo hi"), "{protocol}");
+            assert_eq!(marks[0].exit_code, Some(0), "{protocol}");
+            assert_eq!(
+                marks[0].output_start,
+                Some(crate::TerminalCommandPosition { line: 1, column: 0 }),
+                "{protocol}"
+            );
+            assert_eq!(
+                marks[0].output_end,
+                Some(crate::TerminalCommandPosition { line: 2, column: 0 }),
+                "{protocol}"
+            );
+        }
+    }
+
+    #[test]
+    fn shell_integration_secondary_prompt_and_redraw_preserve_output_boundaries() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 8,
+            cell_width: 8,
+            cell_height: 17,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut integration = crate::shell_integration::TerminalShellIntegration::default();
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A\x07$ \x1b]133;B\x07echo \\\r\n\
+              \x1b]133;A;k=s\x07> \x1b]133;B\x07hi\r\n\
+              \x1b]133;C;cmdline_url=echo%20hi\x07hi\r\n\
+              \x1b7\x1b[1;1H\x1b]133;A\x07$ \x1b]133;B\x07\x1b8\
+              \x1b]133;C\x07\x1b]133;D;0\x07\x1b]133;D;9\x07",
+            |_| {},
+        );
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 1);
+        assert_eq!(marks[0].command.as_deref(), Some("echo hi"));
+        assert_eq!(marks[0].command_line, 0);
+        assert_eq!(marks[0].exit_code, Some(0));
+        assert_eq!(
+            marks[0].output_start,
+            Some(crate::TerminalCommandPosition { line: 2, column: 0 })
+        );
+        assert_eq!(
+            marks[0].output_end,
+            Some(crate::TerminalCommandPosition { line: 3, column: 0 })
+        );
+        assert_eq!(
+            marks[0].output_confidence,
+            crate::TerminalCommandMarkConfidence::High
+        );
+        // A theme replaced the prompt function while executing. The next line
+        // editor entry can recover B, but cannot invent the missing D.
+        integration.advance(
+            &mut parser,
+            &mut term,
+            b"\x1b]133;A;aid=oxideterm\x07$ \x1b]133;B;aid=oxideterm\x07theme\r\n\
+              \x1b]133;C;aid=oxideterm\x07NEW> \x1b]133;B;aid=oxideterm\x07echo ok\r\n\
+              \x1b]133;C;aid=oxideterm\x07ok\r\n\x1b]133;D;0;aid=oxideterm\x07",
+            |_| {},
+        );
+        let marks = integration.command_marks();
+        assert_eq!(marks.len(), 3);
+        assert_eq!(marks[1].command.as_deref(), Some("theme"));
+        assert_eq!(marks[1].exit_code, None);
+        assert_eq!(
+            marks[1].output_confidence,
+            crate::TerminalCommandMarkConfidence::Unknown
+        );
+        assert_eq!(marks[2].command.as_deref(), Some("echo ok"));
+        assert_eq!(marks[2].exit_code, Some(0));
+        assert_eq!(
+            marks[2].output_confidence,
+            crate::TerminalCommandMarkConfidence::High
+        );
+    }
+
+    #[test]
     fn shell_command_ranges_follow_history_eviction_including_chunked_output() {
         for chunk_size in [1, 4096] {
             let size = TerminalSize {
