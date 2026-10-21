@@ -174,7 +174,8 @@
       "delete": "刪除",
       "label": "標籤",
       "label_placeholder": "sudo 密碼",
-      "kind_label": "類型",
+      "prompt_type_label": "提示類型",
+      "response_mode_label": "回應模式",
       "username_hint": "使用者提示",
       "secret": "密碼",
       "secret_placeholder": "輸入要儲存的密碼",
@@ -182,14 +183,35 @@
       "prompt_patterns": "提示匹配",
       "prompt_patterns_placeholder": "每行一個匹配片段",
       "prompt_patterns_hint": "自訂提示會匹配這些文字片段。內建 sudo/su 提示也會使用安全預設值。",
+      "second_factor_patterns": "二階段提示匹配",
+      "second_factor_patterns_placeholder": "每行一個匹配片段",
+      "second_factor_patterns_hint": "密碼填入後，匹配這些文字片段以辨識第二階段提示。",
+      "second_factor_user_hint": "二階段使用者提示",
+      "second_factor_user_hint_placeholder": "選填",
+      "two_stage_combined_hint": "密碼 + TOTP 會將密碼與驗證碼一起傳送；不使用第二階段提示模式。",
+      "host_patterns": "主機匹配",
+      "host_patterns_placeholder": "每行一個模式，例如 hktkosl*",
+      "host_patterns_hint": "僅用於 SSH 通用憑證。支援 * 和 ?；* 匹配所有主機。",
+      "totp_credential": "動態驗證碼憑證",
+      "totp_none": "無",
+      "totp_hint": "密碼填入後，使用所選動態驗證碼憑證產生第二因素。",
+      "auto_submit": "自動填入並按 Enter",
+      "auto_submit_hint": "僅在唯一匹配憑證時生效。SSH 通用憑證還必須填寫主機匹配。",
+      "auto_requires_host_patterns": "SSH 通用憑證啟用自動填入時至少需要一個主機匹配模式。",
+      "two_stage_requires_totp": "TOTP 回應模式需要驗證碼憑證。",
       "enabled": "啟用",
       "cancel_edit": "取消編輯",
       "saving": "儲存中...",
       "save": "儲存憑證",
-      "kind": {
-        "sudo_password": "sudo 密碼",
-        "su_password": "su 密碼",
-        "custom_prompt": "自訂提示"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "自訂提示"
+      },
+      "response_mode": {
+        "password_only": "僅密碼",
+        "password_then_totp": "密碼後單獨輸入 TOTP",
+        "password_with_totp": "密碼與 TOTP 合併為一次回應"
       }
     },
     "views": {

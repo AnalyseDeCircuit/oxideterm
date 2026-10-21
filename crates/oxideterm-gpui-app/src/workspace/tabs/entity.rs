@@ -824,11 +824,10 @@ impl WorkspaceTabHostEntity {
             },
         );
         let subscription = cx.subscribe(&pane, move |tab_host, _pane, event, cx| {
-            if *event == TerminalPaneEvent::OutputActivity {
-                if tab_host.mark_terminal_output_unread(session_id).is_some() {
-                    cx.emit(WorkspaceTabHostEvent::TerminalOutputUnread);
-                }
-                return;
+            if *event == TerminalPaneEvent::OutputActivity
+                && tab_host.mark_terminal_output_unread(session_id).is_some()
+            {
+                cx.emit(WorkspaceTabHostEvent::TerminalOutputUnread);
             }
             let Some(window_handle) = tab_host
                 .pane_window_affinities

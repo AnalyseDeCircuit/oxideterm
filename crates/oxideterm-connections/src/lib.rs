@@ -53,8 +53,8 @@ pub use store::{
     ManagedSshKeyInfo, ManagedSshKeyOrigin, ManagedSshKeySyncRecord, ManagedSshKeyUsage,
     MoshIpFamily, MoshPredictionMode, MoshProfile, MoshProfilesSyncSnapshot, MoshUdpPortSelection,
     PROFILE_CREDENTIAL_KIND, PluginConnectionProfile, PreparedProfileCredentials,
-    PreparedSavedConnectionsSync, PrivilegeCredentialKind, PrivilegeCredentialSyncRecord,
-    ProfileCredentialRestoreSummary, ProxyHopInfo, RemoteDesktopProfile,
+    PreparedSavedConnectionsSync, PrivilegeCredentialSyncRecord, PrivilegePromptType,
+    PrivilegeResponseMode, ProfileCredentialRestoreSummary, ProxyHopInfo, RemoteDesktopProfile,
     RemoteDesktopProfilesSyncSnapshot, ResolvedConnectionConfiguration, SaveConnectionRequest,
     SaveFtpProfileRequest, SaveLocalTerminalProfileRequest, SaveMoshProfileRequest,
     SavePrivilegeCredentialRequest, SaveRemoteDesktopProfileRequest, SaveSerialProfileRequest,
@@ -68,6 +68,7 @@ pub use store::{
     SerialProfilesSyncSnapshot, SshAlgorithmPreferences, SshChannelStrategy,
     StandaloneSftpEndpoint, StandaloneSftpProfile, StandaloneSftpProfilesSyncSnapshot,
     StandaloneSftpTransferMode, TelnetProfile, TelnetProfilesSyncSnapshot,
-    default_telnet_upstream_proxy, is_profile_credential, validate_group_name,
+    default_telnet_upstream_proxy, is_profile_credential, privilege_host_pattern_matches,
+    privilege_host_scope_matches, validate_group_name,
 };
 pub use store::{SSH_COMMON_PRIVILEGE_SCOPE_ID, TotpBinding, TotpResolver};

@@ -1759,9 +1759,14 @@ mod tests {
             connection_id: "conn-1".to_string(),
             credential_id: None,
             label: "sudo".to_string(),
-            kind: PrivilegeCredentialKind::SudoPassword,
+            prompt_type: PrivilegePromptType::Sudo,
+            response_mode: PrivilegeResponseMode::PasswordOnly,
             username_hint: Some("root".to_string()),
             prompt_patterns: Vec::new(),
+            host_patterns: Vec::new(),
+            second_factor_patterns: Vec::new(),
+            second_factor_user_hint: None,
+            totp_credential_id: None,
             secret: Some(SecretString::from("sudo-secret")),
             enabled: true,
             require_click_to_send: true,
@@ -1814,9 +1819,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("new-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -1874,9 +1884,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("original-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -1908,6 +1923,188 @@ mod tests {
     }
 
     #[test]
+    fn privilege_host_patterns_match_case_insensitively_with_globs() {
+        for (host, pattern, expected) in [
+            ("hktkosl1102", "hktkosl*", true),
+            ("HKTKOSL1102", "hktkosl*", true),
+            ("i-0123456789abcdef0", "i-*", true),
+            ("hktkosl1102.example.com", "hktkosl*", true),
+            ("hktkosl1102", "i-*", false),
+            ("prod-db-01", "prod-??-0?", true),
+            ("prod-db-01", "prod-*-0", false),
+            ("anything", "*", true),
+            ("anything", "", false),
+        ] {
+            assert_eq!(
+                privilege_host_pattern_matches(host, pattern),
+                expected,
+                "host={host} pattern={pattern}"
+            );
+        }
+        assert_eq!(
+            normalize_privilege_host_patterns(vec![
+                " hktkosl* ".into(),
+                "HKTKOSL*".into(),
+                String::new(),
+                " i-* ".into(),
+            ]),
+            vec!["hktkosl*".to_string(), "i-*".to_string()]
+        );
+    }
+
+    #[test]
+    fn legacy_privilege_kind_deserializes_into_prompt_type_and_response_mode() {
+        for (kind, expected_prompt_type, expected_response_mode) in [
+            (
+                "sudo_password",
+                PrivilegePromptType::Sudo,
+                PrivilegeResponseMode::PasswordOnly,
+            ),
+            (
+                "su_password",
+                PrivilegePromptType::Su,
+                PrivilegeResponseMode::PasswordOnly,
+            ),
+            (
+                "custom_prompt",
+                PrivilegePromptType::Custom,
+                PrivilegeResponseMode::PasswordOnly,
+            ),
+            (
+                "two_stage_separate_input",
+                PrivilegePromptType::Custom,
+                PrivilegeResponseMode::PasswordThenTotp,
+            ),
+            (
+                "two_stage_combined_input",
+                PrivilegePromptType::Custom,
+                PrivilegeResponseMode::PasswordWithTotp,
+            ),
+        ] {
+            let credential: SavedPrivilegeCredential = serde_json::from_value(serde_json::json!({
+                "id": "legacy",
+                "connection_id": SSH_COMMON_PRIVILEGE_SCOPE_ID,
+                "label": "Legacy",
+                "kind": kind,
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+            }))
+            .unwrap();
+            assert_eq!(credential.prompt_type, expected_prompt_type, "{kind}");
+            assert_eq!(
+                credential.response_mode, expected_response_mode,
+                "{kind}"
+            );
+            assert_eq!(credential.host_patterns, vec!["*".to_string()], "{kind}");
+        }
+    }
+
+    #[test]
+    fn missing_response_mode_defaults_to_password_only() {
+        let credential: SavedPrivilegeCredential = serde_json::from_value(serde_json::json!({
+            "id": "legacy",
+            "connection_id": "conn-1",
+            "label": "Legacy",
+            "prompt_type": "sudo",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }))
+        .unwrap();
+
+        assert_eq!(credential.response_mode, PrivilegeResponseMode::PasswordOnly);
+        assert!(credential.host_patterns.is_empty());
+    }
+
+
+    #[test]
+    fn two_stage_privilege_requires_totp_and_keeps_second_stage_patterns() {
+        let mut store = load_empty_store("privilege-two-stage");
+        let request = |totp_credential_id: Option<String>| SavePrivilegeCredentialRequest {
+            connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
+            credential_id: Some("two-stage".into()),
+            label: "Two stage".into(),
+            prompt_type: PrivilegePromptType::Sudo,
+            response_mode: PrivilegeResponseMode::PasswordThenTotp,
+            username_hint: None,
+            prompt_patterns: vec!["First Factor:".into()],
+            host_patterns: vec!["hktkosl*".into()],
+            second_factor_patterns: vec!["Second Factor:".into()],
+            second_factor_user_hint: Some("deploy".into()),
+            totp_credential_id,
+            secret: Some(SecretString::from("first-factor-secret")),
+            enabled: true,
+            require_click_to_send: true,
+        };
+        assert!(store.save_privilege_credential(request(None)).is_err());
+        let totp_credential_id = store
+            .save_totp_credential(
+                None,
+                "otp",
+                Some(&SecretString::from("JBSWY3DPEHPK3PXP")),
+                Default::default(),
+                crate::totp::DEFAULT_TOTP_PROMPT,
+                true,
+            )
+            .unwrap();
+        let saved = store
+            .save_privilege_credential(request(Some(totp_credential_id.clone())))
+            .unwrap();
+        assert_eq!(saved.prompt_type, PrivilegePromptType::Sudo);
+        assert_eq!(saved.response_mode, PrivilegeResponseMode::PasswordThenTotp);
+        assert_eq!(saved.prompt_patterns, vec!["First Factor:".to_string()]);
+        assert_eq!(
+            saved.second_factor_patterns,
+            vec!["Second Factor:".to_string()]
+        );
+        assert_eq!(saved.second_factor_user_hint.as_deref(), Some("deploy"));
+        assert_eq!(
+            saved.totp_credential_id.as_deref(),
+            Some(totp_credential_id.as_str())
+        );
+        assert_eq!(
+            store.delete_totp_credential(&totp_credential_id),
+            Err(crate::totp::TotpError::InUse)
+        );
+    }
+
+    #[test]
+    fn ssh_common_automatic_fill_requires_host_pattern() {
+        let mut store = load_empty_store("privilege-auto-host-pattern");
+        let request = |host_patterns: Vec<String>| SavePrivilegeCredentialRequest {
+            connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
+            credential_id: Some("group-sudo".into()),
+            label: "Group sudo".into(),
+            prompt_type: PrivilegePromptType::Sudo,
+            response_mode: PrivilegeResponseMode::PasswordOnly,
+            username_hint: None,
+            prompt_patterns: Vec::new(),
+            host_patterns,
+            second_factor_patterns: Vec::new(),
+            second_factor_user_hint: None,
+            totp_credential_id: None,
+            secret: Some(SecretString::from("group-secret")),
+            enabled: true,
+            require_click_to_send: false,
+        };
+        assert!(
+            store
+                .save_privilege_credential(request(Vec::new()))
+                .is_err()
+        );
+        assert!(
+            store
+                .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
+                .unwrap()
+                .is_empty()
+        );
+        let saved = store
+            .save_privilege_credential(request(vec!["hktkosl*".into()]))
+            .unwrap();
+        assert_eq!(saved.host_patterns, vec!["hktkosl*".to_string()]);
+        assert!(!saved.require_click_to_send);
+    }
+
+    #[test]
     fn legacy_sudo_privilege_prompt_fragments_are_displayed_as_current_defaults() {
         let mut store = load_empty_store("privilege-legacy-sudo-patterns");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
@@ -1919,12 +2116,17 @@ mod tests {
                 id: "cred-legacy".to_string(),
                 connection_id: "conn-1".to_string(),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: vec![
                     "[sudo] password for".to_string(),
                     "sudo password".to_string(),
                 ],
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 keychain_id: None,
                 plaintext_secret: None,
                 enabled: true,
@@ -1954,9 +2156,14 @@ mod tests {
                 connection_id: LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string(),
                 credential_id: Some("local-sudo".to_string()),
                 label: "local sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: Some("deploy".to_string()),
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("local-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -1991,9 +2198,14 @@ mod tests {
             connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
             credential_id: Some("shared-sudo".into()),
             label: "Shared sudo".into(),
-            kind: PrivilegeCredentialKind::SudoPassword,
+            prompt_type: PrivilegePromptType::Sudo,
+            response_mode: PrivilegeResponseMode::PasswordOnly,
             username_hint: None,
             prompt_patterns: Vec::new(),
+            host_patterns: Vec::new(),
+            second_factor_patterns: Vec::new(),
+            second_factor_user_hint: None,
+            totp_credential_id: None,
             secret: Some(SecretString::from(secret)),
             enabled: true,
             require_click_to_send: true,
@@ -2077,9 +2289,14 @@ mod tests {
                 connection_id: SSH_COMMON_PRIVILEGE_SCOPE_ID.into(),
                 credential_id: Some("shared".into()),
                 label: "Shared sudo".into(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("shared-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -2147,9 +2364,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: Some("deploy".to_string()),
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("sudo-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -2162,9 +2384,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "renamed sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: Some("deploy".to_string()),
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: None,
                 enabled: true,
                 require_click_to_send: true,
@@ -2189,9 +2416,14 @@ mod tests {
                 connection_id: "conn-1".into(),
                 credential_id: Some("cred-1".into()),
                 label: "sudo".into(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: None,
                 enabled: true,
                 require_click_to_send: true,
@@ -2232,9 +2464,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("sudo-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -2267,7 +2504,7 @@ mod tests {
     }
 
     #[test]
-    fn imported_privilege_metadata_does_not_inherit_secret_for_a_different_kind() {
+    fn imported_privilege_metadata_does_not_inherit_secret_for_a_different_prompt_type() {
         let mut store = load_empty_store("privilege-import-kind-mismatch");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
         let original = store
@@ -2275,9 +2512,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("sudo-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -2286,7 +2528,7 @@ mod tests {
         let original_keychain_id = original.keychain_id.unwrap();
 
         let mut imported = store.get("conn-1").unwrap().clone();
-        imported.privilege_credentials[0].kind = PrivilegeCredentialKind::SuPassword;
+        imported.privilege_credentials[0].prompt_type = PrivilegePromptType::Su;
         imported.privilege_credentials[0].keychain_id = None;
         imported.privilege_credentials[0].plaintext_secret = None;
         store
@@ -2294,7 +2536,7 @@ mod tests {
             .unwrap();
 
         let credential = &store.get("conn-1").unwrap().privilege_credentials[0];
-        assert_eq!(credential.kind, PrivilegeCredentialKind::SuPassword);
+        assert_eq!(credential.prompt_type, PrivilegePromptType::Su);
         assert_eq!(credential.keychain_id, None);
         assert!(store.privilege_keychain.get(&original_keychain_id).is_err());
     }
@@ -2308,9 +2550,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: Some("cred-1".to_string()),
                 label: "sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("sudo-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -2470,9 +2717,14 @@ mod tests {
                 id: "preserved".to_string(),
                 connection_id: imported.id.clone(),
                 label: "Preserved".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 keychain_id: Some(privilege_keychain_id(&imported.id, "preserved")),
                 plaintext_secret: None,
                 enabled: true,
@@ -2484,9 +2736,14 @@ mod tests {
                 id: "replaced".to_string(),
                 connection_id: imported.id.clone(),
                 label: "Replaced".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 keychain_id: None,
                 plaintext_secret: Some(SecretString::from("replacement")),
                 enabled: true,
@@ -2768,9 +3025,14 @@ mod tests {
                 connection_id: "conn-1".to_string(),
                 credential_id: None,
                 label: "Sudo".to_string(),
-                kind: PrivilegeCredentialKind::SudoPassword,
+                prompt_type: PrivilegePromptType::Sudo,
+                response_mode: PrivilegeResponseMode::PasswordOnly,
                 username_hint: None,
                 prompt_patterns: Vec::new(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: Vec::new(),
+                second_factor_user_hint: None,
+                totp_credential_id: None,
                 secret: Some(SecretString::from("deferred-privilege-secret")),
                 enabled: true,
                 require_click_to_send: true,
@@ -2811,9 +3073,14 @@ mod tests {
                         connection_id: (*scope).into(),
                         credential_id: Some("live-credential".into()),
                         label: "sudo".into(),
-                        kind: PrivilegeCredentialKind::SudoPassword,
+                        prompt_type: PrivilegePromptType::Sudo,
+                        response_mode: PrivilegeResponseMode::PasswordOnly,
                         username_hint: None,
                         prompt_patterns: Vec::new(),
+                        host_patterns: Vec::new(),
+                        second_factor_patterns: Vec::new(),
+                        second_factor_user_hint: None,
+                        totp_credential_id: None,
                         secret: Some(SecretString::from("live-privilege-fixture")),
                         enabled: true,
                         require_click_to_send: true,

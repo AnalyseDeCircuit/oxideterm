@@ -53,6 +53,36 @@ impl ConnectionStore {
             if !owners.contains(&record.metadata.connection_id) {
                 continue;
             }
+            record.metadata.host_patterns =
+                normalize_privilege_host_patterns(record.metadata.host_patterns);
+            record.metadata.second_factor_patterns = normalize_privilege_second_factor_patterns(
+                record.metadata.response_mode,
+                record.metadata.second_factor_patterns,
+            );
+            record.metadata.second_factor_user_hint =
+                if record.metadata.response_mode.waits_for_totp() {
+                    record
+                        .metadata
+                        .second_factor_user_hint
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|hint| !hint.is_empty())
+                        .map(ToOwned::to_owned)
+                } else {
+                    None
+                };
+            if !record.metadata.response_mode.uses_totp() {
+                record.metadata.totp_credential_id = None;
+            }
+            if record.metadata.connection_id != SSH_COMMON_PRIVILEGE_SCOPE_ID {
+                record.metadata.host_patterns.clear();
+            } else if !record.metadata.require_click_to_send
+                && record.metadata.host_patterns.is_empty()
+            {
+                // A synced snapshot must not turn a generic shared credential
+                // into an automatic sender for every SSH host.
+                record.metadata.require_click_to_send = true;
+            }
             let old = self.privilege_credentials_for_scope(&record.metadata.connection_id)?
                 .iter()
                 .find(|credential| credential.id == record.metadata.id);

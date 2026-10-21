@@ -165,7 +165,7 @@ use oxideterm_connection_monitor::{
 use oxideterm_connections::{
     ConnectionStore, ConnectionTerminalOptions, ConnectionTerminalSessionLogPolicy,
     MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
-    MoshUdpPortSelection as SavedMoshUdpPortSelection, PrivilegeCredentialKind,
+    MoshUdpPortSelection as SavedMoshUdpPortSelection, PrivilegePromptType, PrivilegeResponseMode,
     SaveConnectionRequest, SavedPrivilegeCredential, SshConfigSyncService,
 };
 use oxideterm_forwarding::{
@@ -772,6 +772,8 @@ pub(crate) struct WorkspaceApp {
     search: actions::TerminalSearchState,
     terminal_recording_menu_open: bool,
     privilege_credential_picker: Option<terminal_command_bar::PrivilegeCredentialPicker>,
+    pending_privilege_totp: Option<terminal_command_bar::PendingPrivilegeTotp>,
+    privilege_prompt_sync_task: Option<Task<()>>,
     terminal_highlight_popover_open: bool,
     // Settings keep the source pane stable while editing session-only trigger overrides.
     terminal_trigger_settings_pane: Option<PaneId>,

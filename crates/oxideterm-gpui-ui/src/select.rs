@@ -114,7 +114,9 @@ pub enum SelectAnchorId {
     SettingsIdeAgentMode,
     SettingsLocalShell,
     SettingsLocalShellSemanticScheme(usize),
-    SettingsLocalPrivilegeKind,
+    SettingsLocalPrivilegePromptType,
+    SettingsLocalPrivilegeResponseMode,
+    SettingsLocalPrivilegeTotpCredential,
     SettingsConnectionIdleTimeout,
     SettingsReconnectMaxAttempts,
     SettingsReconnectBaseDelay,
@@ -247,7 +249,8 @@ impl SelectAnchorId {
                 | Self::SettingsIdeAgentMode
                 | Self::SettingsLocalShell
                 | Self::SettingsLocalShellSemanticScheme(_)
-                | Self::SettingsLocalPrivilegeKind
+                | Self::SettingsLocalPrivilegePromptType
+                | Self::SettingsLocalPrivilegeResponseMode
                 | Self::SettingsConnectionIdleTimeout
                 | Self::SettingsReconnectMaxAttempts
                 | Self::SettingsReconnectBaseDelay

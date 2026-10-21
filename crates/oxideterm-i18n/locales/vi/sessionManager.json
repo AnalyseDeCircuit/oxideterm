@@ -174,7 +174,8 @@
       "delete": "Xóa",
       "label": "Nhãn",
       "label_placeholder": "mật khẩu sudo",
-      "kind_label": "Loại",
+      "prompt_type_label": "Loại lời nhắc",
+      "response_mode_label": "Chế độ phản hồi",
       "username_hint": "Gợi ý người dùng",
       "secret": "Bí mật",
       "secret_placeholder": "Nhập mật khẩu để lưu",
@@ -182,14 +183,35 @@
       "prompt_patterns": "Mẫu lời nhắc",
       "prompt_patterns_placeholder": "Mỗi dòng một mẫu",
       "prompt_patterns_hint": "Lời nhắc tùy chỉnh khớp với các đoạn văn bản này. Lời nhắc sudo/su tích hợp cũng dùng mặc định an toàn.",
+      "second_factor_patterns": "Mẫu lời nhắc giai đoạn hai",
+      "second_factor_patterns_placeholder": "Mỗi dòng một mẫu",
+      "second_factor_patterns_hint": "Sau khi nhập mật khẩu, các đoạn này xác định lời nhắc giai đoạn hai.",
+      "second_factor_user_hint": "Gợi ý người dùng giai đoạn hai",
+      "second_factor_user_hint_placeholder": "Tùy chọn",
+      "two_stage_combined_hint": "Mật khẩu + TOTP gửi mật khẩu và mã xác minh cùng lúc; không dùng mẫu lời nhắc giai đoạn hai.",
+      "host_patterns": "Mẫu máy chủ",
+      "host_patterns_placeholder": "Mỗi dòng một mẫu, ví dụ hktkosl*",
+      "host_patterns_hint": "Chỉ dùng cho thông tin xác thực SSH chung. Hỗ trợ * và ?; * khớp mọi máy chủ.",
+      "totp_credential": "Thông tin xác thực mã xác minh",
+      "totp_none": "Không có",
+      "totp_hint": "Sau khi điền mật khẩu, thông tin xác thực mã đã chọn cung cấp yếu tố thứ hai.",
+      "auto_submit": "Tự động điền và nhấn Enter",
+      "auto_submit_hint": "Chỉ áp dụng khi có đúng một thông tin xác thực khớp. Thông tin xác thực SSH chung cũng cần đặt mẫu máy chủ.",
+      "auto_requires_host_patterns": "Tự động điền trong SSH chung cần ít nhất một mẫu máy chủ.",
+      "two_stage_requires_totp": "Chế độ phản hồi TOTP cần thông tin xác thực mã xác minh.",
       "enabled": "Bật",
       "cancel_edit": "Hủy sửa",
       "saving": "Đang lưu...",
       "save": "Lưu thông tin xác thực",
-      "kind": {
-        "sudo_password": "mật khẩu sudo",
-        "su_password": "mật khẩu su",
-        "custom_prompt": "Lời nhắc tùy chỉnh"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "Lời nhắc tùy chỉnh"
+      },
+      "response_mode": {
+        "password_only": "Chỉ mật khẩu",
+        "password_then_totp": "Mật khẩu, sau đó lời nhắc TOTP",
+        "password_with_totp": "Mật khẩu + TOTP trong một phản hồi"
       }
     },
     "views": {

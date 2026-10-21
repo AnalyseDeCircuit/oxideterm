@@ -174,7 +174,8 @@
       "delete": "Delete",
       "label": "Label",
       "label_placeholder": "sudo password",
-      "kind_label": "Type",
+      "prompt_type_label": "Prompt type",
+      "response_mode_label": "Response mode",
       "username_hint": "User hint",
       "secret": "Secret",
       "secret_placeholder": "Enter password to save",
@@ -182,14 +183,35 @@
       "prompt_patterns": "Prompt patterns",
       "prompt_patterns_placeholder": "One pattern per line",
       "prompt_patterns_hint": "Custom prompts match these text fragments. Built-in sudo/su prompts also use safe defaults.",
+      "second_factor_patterns": "Second-stage prompt patterns",
+      "second_factor_patterns_placeholder": "One pattern per line",
+      "second_factor_patterns_hint": "After the password, these text fragments identify the second-stage prompt.",
+      "second_factor_user_hint": "Second-stage user hint",
+      "second_factor_user_hint_placeholder": "Optional",
+      "two_stage_combined_hint": "Password + TOTP sends the password and verification code together; second-stage prompt patterns are not used.",
+      "host_patterns": "Host patterns",
+      "host_patterns_placeholder": "One pattern per line, for example hktkosl*",
+      "host_patterns_hint": "Used only by SSH common credentials. Supports * and ?; * matches every host.",
+      "totp_credential": "Verification code credential",
+      "totp_none": "None",
+      "totp_hint": "After the password is filled, the selected verification code credential supplies the second factor.",
+      "auto_submit": "Fill automatically and press Enter",
+      "auto_submit_hint": "Applies only when exactly one credential matches. SSH common credentials must also set a host pattern.",
+      "auto_requires_host_patterns": "Automatic fill in SSH common requires at least one host pattern.",
+      "two_stage_requires_totp": "TOTP response modes require a verification code credential.",
       "enabled": "Enabled",
       "cancel_edit": "Cancel edit",
       "saving": "Saving...",
       "save": "Save credential",
-      "kind": {
-        "sudo_password": "sudo password",
-        "su_password": "su password",
-        "custom_prompt": "Custom prompt"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "Custom prompt"
+      },
+      "response_mode": {
+        "password_only": "Password only",
+        "password_then_totp": "Password, then TOTP prompt",
+        "password_with_totp": "Password + TOTP in one response"
       }
     },
     "views": {

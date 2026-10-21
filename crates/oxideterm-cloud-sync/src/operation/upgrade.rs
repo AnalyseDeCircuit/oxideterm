@@ -292,7 +292,7 @@ mod tests {
                 "source_connection_id":"legacy-id","name":"Legacy server","group":null,"host":"legacy.test","port":22,"username":"ops",
                 "auth":{"type":"password","password":"ssh-fixture"},"tags":[],"options":{},
                 "proxy_chain":[{"host":"jump.test","port":22,"username":"jump","auth":{"type":"password","password":"hop-fixture"}}],
-                "privilege_credentials":[{"id":"sudo-id","connectionId":"legacy-id","label":"Administrator","kind":"sudo_password","secret":"sudo-fixture","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],
+                "privilege_credentials":[{"id":"sudo-id","connectionId":"legacy-id","label":"Administrator","promptType":"sudo","responseMode":"password_only","secret":"sudo-fixture","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}],
                 "forwards":[{"id":"forward-id","forward_type":"local","bind_address":"127.0.0.1","bind_port":5433,"target_host":"db.internal","target_port":5432,"auto_start":false}]
             }]
         })).unwrap();

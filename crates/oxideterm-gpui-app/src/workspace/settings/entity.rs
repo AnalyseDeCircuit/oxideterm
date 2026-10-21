@@ -8,7 +8,7 @@ use std::{
 use gpui::{AppContext, Context, Entity, EventEmitter, KeyDownEvent, Task, Timer};
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
-    PrivilegeCredentialKind,
+    PrivilegePromptType, PrivilegeResponseMode,
 };
 use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
 use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
@@ -139,11 +139,17 @@ pub(in crate::workspace) struct NetworkProxyTestSnapshot {
 pub(in crate::workspace) struct PrivilegeCredentialDraft {
     pub(super) credential_id: Option<String>,
     pub(super) label: String,
-    pub(super) kind: PrivilegeCredentialKind,
+    pub(super) prompt_type: PrivilegePromptType,
+    pub(super) response_mode: PrivilegeResponseMode,
     pub(super) username_hint: String,
     pub(super) prompt_patterns: String,
+    pub(super) host_patterns: String,
+    pub(super) second_factor_patterns: String,
+    pub(super) second_factor_user_hint: String,
+    pub(super) totp_credential_id: Option<String>,
     pub(super) secret: Zeroizing<String>,
     pub(super) enabled: bool,
+    pub(super) require_click_to_send: bool,
 }
 
 impl Default for PrivilegeCredentialDraft {
@@ -151,11 +157,17 @@ impl Default for PrivilegeCredentialDraft {
         Self {
             credential_id: None,
             label: String::new(),
-            kind: PrivilegeCredentialKind::SudoPassword,
+            prompt_type: PrivilegePromptType::Sudo,
+            response_mode: PrivilegeResponseMode::PasswordOnly,
             username_hint: String::new(),
             prompt_patterns: String::new(),
+            host_patterns: "*".to_string(),
+            second_factor_patterns: String::new(),
+            second_factor_user_hint: String::new(),
+            totp_credential_id: None,
             secret: Zeroizing::new(String::new()),
             enabled: true,
+            require_click_to_send: true,
         }
     }
 }
@@ -163,10 +175,16 @@ impl Default for PrivilegeCredentialDraft {
 pub(in crate::workspace) struct PrivilegeCredentialSnapshot {
     pub(in crate::workspace) credential_id: Option<String>,
     pub(in crate::workspace) label: String,
-    pub(in crate::workspace) kind: PrivilegeCredentialKind,
+    pub(in crate::workspace) prompt_type: PrivilegePromptType,
+    pub(in crate::workspace) response_mode: PrivilegeResponseMode,
     pub(in crate::workspace) username_hint: String,
     pub(in crate::workspace) prompt_patterns: String,
+    pub(in crate::workspace) host_patterns: String,
+    pub(in crate::workspace) second_factor_patterns: String,
+    pub(in crate::workspace) second_factor_user_hint: String,
+    pub(in crate::workspace) totp_credential_id: Option<String>,
     pub(in crate::workspace) enabled: bool,
+    pub(in crate::workspace) require_click_to_send: bool,
     pub(in crate::workspace) error: Option<String>,
 }
 
@@ -2330,6 +2348,13 @@ impl SettingsWorkspaceEntity {
             SettingsInput::LocalPrivilegePromptPatterns => {
                 Some(&self.privilege_draft.prompt_patterns)
             }
+            SettingsInput::LocalPrivilegeHostPatterns => Some(&self.privilege_draft.host_patterns),
+            SettingsInput::LocalPrivilegeSecondFactorPatterns => {
+                Some(&self.privilege_draft.second_factor_patterns)
+            }
+            SettingsInput::LocalPrivilegeSecondFactorUserHint => {
+                Some(&self.privilege_draft.second_factor_user_hint)
+            }
             SettingsInput::ConnectionImportTargetGroup => {
                 Some(&self.connection_import_target_group)
             }
@@ -2381,7 +2406,10 @@ impl SettingsWorkspaceEntity {
             | SettingsInput::TotpPeriod
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
-            | SettingsInput::LocalPrivilegePromptPatterns => true,
+            | SettingsInput::LocalPrivilegePromptPatterns
+            | SettingsInput::LocalPrivilegeHostPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorUserHint => true,
             SettingsInput::ConnectionImportTargetGroup => true,
             _ => false,
         };
@@ -2470,7 +2498,10 @@ impl SettingsWorkspaceEntity {
             SettingsInput::LocalPrivilegeLabel
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
-            | SettingsInput::LocalPrivilegePromptPatterns => self.privilege_error = None,
+            | SettingsInput::LocalPrivilegePromptPatterns
+            | SettingsInput::LocalPrivilegeHostPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorUserHint => self.privilege_error = None,
             SettingsInput::TotpName
             | SettingsInput::TotpSecret
             | SettingsInput::TotpPattern
@@ -2527,6 +2558,15 @@ impl SettingsWorkspaceEntity {
             SettingsInput::LocalPrivilegeSecret => Some(&mut self.privilege_draft.secret),
             SettingsInput::LocalPrivilegePromptPatterns => {
                 Some(&mut self.privilege_draft.prompt_patterns)
+            }
+            SettingsInput::LocalPrivilegeHostPatterns => {
+                Some(&mut self.privilege_draft.host_patterns)
+            }
+            SettingsInput::LocalPrivilegeSecondFactorPatterns => {
+                Some(&mut self.privilege_draft.second_factor_patterns)
+            }
+            SettingsInput::LocalPrivilegeSecondFactorUserHint => {
+                Some(&mut self.privilege_draft.second_factor_user_hint)
             }
             SettingsInput::ConnectionImportTargetGroup => {
                 Some(&mut self.connection_import_target_group)

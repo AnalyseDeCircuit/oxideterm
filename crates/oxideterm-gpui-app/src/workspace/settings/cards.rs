@@ -1483,7 +1483,10 @@ impl WorkspaceApp {
             | SettingsInput::TotpPeriod
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
-            | SettingsInput::LocalPrivilegePromptPatterns => String::new(),
+            | SettingsInput::LocalPrivilegePromptPatterns
+            | SettingsInput::LocalPrivilegeHostPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorUserHint => String::new(),
             SettingsInput::PluginSetting(index) => self
                 .plugin_entity
                 .read(cx)
@@ -1641,7 +1644,10 @@ impl WorkspaceApp {
             | SettingsInput::TotpPeriod
             | SettingsInput::LocalPrivilegeUsernameHint
             | SettingsInput::LocalPrivilegeSecret
-            | SettingsInput::LocalPrivilegePromptPatterns => {}
+            | SettingsInput::LocalPrivilegePromptPatterns
+            | SettingsInput::LocalPrivilegeHostPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorPatterns
+            | SettingsInput::LocalPrivilegeSecondFactorUserHint => {}
             SettingsInput::NetworkProxyPassword
             | SettingsInput::NetworkProxyTestHost
             | SettingsInput::NetworkProxyTestPort => {}

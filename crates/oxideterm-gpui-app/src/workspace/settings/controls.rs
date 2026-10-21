@@ -1528,26 +1528,108 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeKind) => {
+            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegePromptType) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
-                let current_kind = self.settings_workspace.read(cx).privilege_kind();
-                for kind in [
-                    PrivilegeCredentialKind::SudoPassword,
-                    PrivilegeCredentialKind::SuPassword,
-                    PrivilegeCredentialKind::CustomPrompt,
+                let current = self.settings_workspace.read(cx).privilege_prompt_type();
+                for prompt_type in [
+                    PrivilegePromptType::Sudo,
+                    PrivilegePromptType::Su,
+                    PrivilegePromptType::Custom,
                 ] {
                     popup = popup.child(select_option_action(
                         select_option(
                             &self.tokens,
-                            self.settings_privilege_kind_label(kind),
-                            current_kind == kind,
+                            self.settings_privilege_prompt_type_label(prompt_type),
+                            current == prompt_type,
                         ),
                         false,
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
                             this.settings_workspace.update(cx, |settings, cx| {
-                                settings.set_privilege_kind(kind, cx);
+                                settings.set_privilege_prompt_type(prompt_type, cx);
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeResponseMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = self.settings_workspace.read(cx).privilege_response_mode();
+                for response_mode in [
+                    PrivilegeResponseMode::PasswordOnly,
+                    PrivilegeResponseMode::PasswordThenTotp,
+                    PrivilegeResponseMode::PasswordWithTotp,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.settings_privilege_response_mode_label(response_mode),
+                            current == response_mode,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_privilege_response_mode(response_mode, cx);
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeTotpCredential) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let selected = self
+                    .settings_workspace
+                    .read(cx)
+                    .privilege_snapshot()
+                    .totp_credential_id;
+                popup = popup.child(select_option_action(
+                    select_option(
+                        &self.tokens,
+                        self.i18n
+                            .t("sessionManager.privilege_credentials.totp_none"),
+                        selected.is_none(),
+                    ),
+                    false,
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_settings_select();
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.set_privilege_totp_credential(None, cx);
+                        });
+                        cx.stop_propagation();
+                    }),
+                ));
+                for credential in self.connection_store.totp_credentials() {
+                    let credential_id = credential.id.clone();
+                    let label = if credential.enabled {
+                        credential.name.clone()
+                    } else {
+                        format!(
+                            "{} ({})",
+                            credential.name,
+                            self.i18n.t("settings_view.privilege_credentials.disabled")
+                        )
+                    };
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            label,
+                            selected.as_deref() == Some(credential_id.as_str()),
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            let credential_id = credential_id.clone();
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_privilege_totp_credential(Some(credential_id), cx);
                             });
                             cx.stop_propagation();
                         }),

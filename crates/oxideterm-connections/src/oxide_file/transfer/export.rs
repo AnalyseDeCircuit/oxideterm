@@ -207,10 +207,24 @@ fn export_connections_to_oxide_inner(
     }
     report_progress("collecting_portable_secrets");
 
-    let credential_selection = crate::CredentialSyncSelection {
+    let mut credential_selection = crate::CredentialSyncSelection {
         connection_ids: connection_ids.iter().cloned().collect(),
         ..Default::default()
     };
+    // Only TOTP seeds referenced by the privilege copies that actually appear
+    // in this archive should travel; excluded shared credentials must not leak
+    // their verification-code credential.
+    for connection in &encrypted_connections {
+        for credential in &connection.privilege_credentials {
+            if credential.response_mode.uses_totp()
+                && let Some(totp_credential_id) = credential.totp_credential_id.as_deref()
+            {
+                credential_selection
+                    .totp_ids
+                    .insert(totp_credential_id.to_string());
+            }
+        }
+    }
     let selected_totp = store
         .totp_credentials()
         .iter()
@@ -458,6 +472,16 @@ fn export_privilege_credentials(
         .into_iter().collect();
     store.export_privilege_sync_records(&owners)?
         .into_iter()
+        // A shared credential restricted to another host must not become an
+        // unscoped copy on this connection, because import cannot restore a
+        // host restriction that the archive dropped.
+        .filter(|record| {
+            record.metadata.connection_id != crate::SSH_COMMON_PRIVILEGE_SCOPE_ID
+                || crate::privilege_host_scope_matches(
+                    &conn.host,
+                    &record.metadata.host_patterns,
+                )
+        })
         .map(|record| {
             let credential = record.metadata;
             Ok(EncryptedPrivilegeCredential {
@@ -469,9 +493,22 @@ fn export_privilege_credentials(
                 },
                 connection_id: conn.id.clone(),
                 label: credential.label.clone(),
-                kind: credential.kind,
+                prompt_type: credential.prompt_type,
+                response_mode: credential.response_mode,
                 username_hint: credential.username_hint.clone(),
                 prompt_patterns: credential.prompt_patterns.clone(),
+                host_patterns: Vec::new(),
+                second_factor_patterns: if credential.response_mode.waits_for_totp() {
+                    credential.second_factor_patterns.clone()
+                } else {
+                    Vec::new()
+                },
+                second_factor_user_hint: if credential.response_mode.waits_for_totp() {
+                    credential.second_factor_user_hint.clone()
+                } else {
+                    None
+                },
+                totp_credential_id: credential.totp_credential_id.clone(),
                 secret: record.secret.map(SecretString::into_zeroizing),
                 enabled: credential.enabled,
                 require_click_to_send: credential.require_click_to_send,

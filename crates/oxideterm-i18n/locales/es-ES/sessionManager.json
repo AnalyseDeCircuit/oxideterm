@@ -174,7 +174,8 @@
       "delete": "Eliminar",
       "label": "Etiqueta",
       "label_placeholder": "contraseña sudo",
-      "kind_label": "Tipo",
+      "prompt_type_label": "Tipo de prompt",
+      "response_mode_label": "Modo de respuesta",
       "username_hint": "Pista de usuario",
       "secret": "Secreto",
       "secret_placeholder": "Introduce la contraseña a guardar",
@@ -182,14 +183,35 @@
       "prompt_patterns": "Patrones de prompt",
       "prompt_patterns_placeholder": "Un patrón por línea",
       "prompt_patterns_hint": "Los prompts personalizados coinciden con estos fragmentos. Los prompts sudo/su integrados usan valores seguros por defecto.",
+      "second_factor_patterns": "Patrones del segundo paso",
+      "second_factor_patterns_placeholder": "Un patrón por línea",
+      "second_factor_patterns_hint": "Tras la contraseña, estos fragmentos identifican el prompt del segundo paso.",
+      "second_factor_user_hint": "Indicación de usuario del segundo paso",
+      "second_factor_user_hint_placeholder": "Opcional",
+      "two_stage_combined_hint": "Contraseña + TOTP envía la contraseña y el código de verificación juntos; no se usan los patrones del segundo paso.",
+      "host_patterns": "Patrones de host",
+      "host_patterns_placeholder": "Un patrón por línea, por ejemplo hktkosl*",
+      "host_patterns_hint": "Solo se usa en credenciales comunes SSH. Admite * y ?; * coincide con cualquier host.",
+      "totp_credential": "Credencial de código de verificación",
+      "totp_none": "Ninguna",
+      "totp_hint": "Después de rellenar la contraseña, la credencial de código seleccionada aporta el segundo factor.",
+      "auto_submit": "Rellenar automáticamente y pulsar Enter",
+      "auto_submit_hint": "Solo se aplica cuando coincide exactamente una credencial. Las credenciales comunes SSH también deben definir un patrón de host.",
+      "auto_requires_host_patterns": "El relleno automático en SSH común requiere al menos un patrón de host.",
+      "two_stage_requires_totp": "Los modos de respuesta TOTP requieren una credencial de código de verificación.",
       "enabled": "Activado",
       "cancel_edit": "Cancelar edición",
       "saving": "Guardando...",
       "save": "Guardar credencial",
-      "kind": {
-        "sudo_password": "contraseña sudo",
-        "su_password": "contraseña su",
-        "custom_prompt": "Prompt personalizado"
+      "prompt_type": {
+        "sudo": "sudo",
+        "su": "su",
+        "custom": "Prompt personalizado"
+      },
+      "response_mode": {
+        "password_only": "Solo contraseña",
+        "password_then_totp": "Contraseña y luego prompt TOTP",
+        "password_with_totp": "Contraseña + TOTP en una sola respuesta"
       }
     },
     "views": {
