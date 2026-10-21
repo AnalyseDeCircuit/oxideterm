@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "用於渲染中、日、韓字元的備用字型。Auto 會繼續使用內建與系統備用鏈。",
       "cjk_font_auto": "Auto · 智慧備用",
       "font_preview": "字型預覽",
+      "font_unavailable": "無法載入字型：{{fonts}}。目前主要字型：{{font}}。",
       "font_size": "字型大小",
       "font_size_hint": "終端機字元的大小",
       "font_weight": "字重",

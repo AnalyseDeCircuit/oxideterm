@@ -4,11 +4,26 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn terminal_preview(
         &self,
         settings: &PersistedSettings,
+        cx: &App,
     ) -> AnyElement {
         let family = settings
             .terminal
             .font_family
             .terminal_family_name(&settings.terminal.custom_font_family);
+        let cjk_family = terminal_cjk_font_family_preference(&settings.terminal.cjk_font_family);
+        let resolved = oxideterm_gpui_terminal::terminal_ui::resolve_terminal_font(
+            cx.text_system(),
+            &family,
+            cjk_family.as_deref(),
+            settings.terminal.font_ligatures,
+            settings.terminal.font_weight as f32,
+        );
+        let unavailable_message = (!resolved.unavailable_families.is_empty()).then(|| {
+            self.i18n
+                .t("settings_view.terminal.font_unavailable")
+                .replace("{{fonts}}", &resolved.unavailable_families.join(", "))
+                .replace("{{font}}", &resolved.font.family)
+        });
         let preview_line_height =
             px(settings.terminal.font_size as f32 * settings.terminal.line_height as f32);
         div()
@@ -20,6 +35,15 @@ impl WorkspaceApp {
             .p(px(self.tokens.metrics.settings_font_preview_padding))
             .flex()
             .flex_col()
+            .when_some(unavailable_message, |preview, message| {
+                preview.child(
+                    div()
+                        .mb(px(self.tokens.spacing.two))
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(self.tokens.ui.warning))
+                        .child(message),
+                )
+            })
             .child(
                 div()
                     .mb(px(self
@@ -34,8 +58,7 @@ impl WorkspaceApp {
                 div()
                     .flex()
                     .flex_col()
-                    .font_family(&family)
-                    .font_weight(gpui::FontWeight(settings.terminal.font_weight as f32))
+                    .font(resolved.font)
                     .text_size(px(settings.terminal.font_size as f32))
                     .text_color(rgb(self.tokens.ui.text))
                     .child(

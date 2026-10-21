@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "Fallback font used for Chinese, Japanese, and Korean glyphs. Auto keeps the bundled and system fallback chain.",
       "cjk_font_auto": "Auto · Smart fallback",
       "font_preview": "Font Preview",
+      "font_unavailable": "Unavailable fonts: {{fonts}}. Current primary font: {{font}}.",
       "font_size": "Font Size",
       "font_size_hint": "Size of terminal characters",
       "font_weight": "Font Weight",

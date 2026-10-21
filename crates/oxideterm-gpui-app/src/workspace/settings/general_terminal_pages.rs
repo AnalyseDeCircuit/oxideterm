@@ -838,7 +838,7 @@ impl WorkspaceApp {
                         settings.terminal.font_weight.to_string(),
                         cx,
                     ),
-                    self.terminal_preview(settings),
+                    self.terminal_preview(settings, cx),
                     self.card_separator(),
                     self.checkbox_row(
                         "settings_view.terminal.font_ligatures",

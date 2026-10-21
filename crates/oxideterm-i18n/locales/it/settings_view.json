@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "Font di fallback per glifi cinesi, giapponesi e coreani. Auto mantiene la catena di fallback inclusa e di sistema.",
       "cjk_font_auto": "Auto · fallback intelligente",
       "font_preview": "Anteprima font",
+      "font_unavailable": "Caratteri non disponibili: {{fonts}}. Carattere principale attuale: {{font}}.",
       "font_size": "Dimensione Font",
       "font_size_hint": "Dimensione dei caratteri del terminale",
       "font_weight": "Peso del carattere",

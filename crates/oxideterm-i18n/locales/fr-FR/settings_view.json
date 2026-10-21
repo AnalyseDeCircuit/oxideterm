@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "Police de secours pour les glyphes chinois, japonais et coréens. Auto conserve la chaîne de secours intégrée et système.",
       "cjk_font_auto": "Auto · Police de secours intelligente",
       "font_preview": "Aperçu de la police",
+      "font_unavailable": "Polices indisponibles : {{fonts}}. Police principale actuelle : {{font}}.",
       "font_size": "Taille de police",
       "font_size_hint": "Taille des caractères du terminal",
       "font_weight": "Graisse de police",

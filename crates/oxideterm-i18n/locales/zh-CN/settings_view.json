@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "用于渲染中、日、韩字符的备用字体。Auto 会继续使用内置与系统回退链。",
       "cjk_font_auto": "Auto · 智能回退",
       "font_preview": "字体预览",
+      "font_unavailable": "无法加载字体：{{fonts}}。当前主字体：{{font}}。",
       "font_size": "字号",
       "font_size_hint": "终端字符大小",
       "font_weight": "字重",

@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "中国語・日本語・韓国語の字形に使うフォールバックフォント。Auto はバンドル済みおよびシステムのフォールバックチェーンを使います。",
       "cjk_font_auto": "Auto · 自動フォールバック",
       "font_preview": "フォントプレビュー",
+      "font_unavailable": "読み込めないフォント：{{fonts}}。現在のメインフォント：{{font}}。",
       "font_size": "フォントサイズ",
       "font_size_hint": "ターミナル文字のサイズ",
       "font_weight": "フォントの太さ",

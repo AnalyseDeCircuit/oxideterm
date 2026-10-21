@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "Fallback-Schrift für chinesische, japanische und koreanische Zeichen. Auto verwendet weiter die gebündelte und System-Fallback-Kette.",
       "cjk_font_auto": "Auto · Intelligenter Fallback",
       "font_preview": "Schriftartvorschau",
+      "font_unavailable": "Nicht verfügbare Schriftarten: {{fonts}}. Aktuelle Hauptschriftart: {{font}}.",
       "font_size": "Schriftgröße",
       "font_size_hint": "Größe der Terminalzeichen",
       "font_weight": "Schriftstärke",

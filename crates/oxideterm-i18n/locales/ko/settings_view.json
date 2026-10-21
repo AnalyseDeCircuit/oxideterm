@@ -361,6 +361,7 @@
       "cjk_font_family_hint": "중국어, 일본어, 한국어 글리프에 사용할 폴백 글꼴입니다. Auto는 번들 및 시스템 폴백 체인을 계속 사용합니다.",
       "cjk_font_auto": "Auto · 스마트 폴백",
       "font_preview": "글꼴 미리보기",
+      "font_unavailable": "불러올 수 없는 글꼴: {{fonts}}. 현재 기본 글꼴: {{font}}.",
       "font_size": "글꼴 크기",
       "font_size_hint": "터미널 문자 크기",
       "font_weight": "글꼴 굵기",
