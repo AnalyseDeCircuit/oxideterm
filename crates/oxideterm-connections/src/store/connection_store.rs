@@ -2333,6 +2333,22 @@ impl ConnectionStore {
         Ok(())
     }
 
+    fn delete_or_queue_privilege_keychain_entry(&mut self, reference: String) -> Result<()> {
+        if self.privilege_keychain.delete(&reference).is_err()
+            && !self
+                .data
+                .pending_privilege_keychain_cleanup
+                .contains(&reference)
+        {
+            // Retain the request in memory even if persisting it also fails.
+            self.data
+                .pending_privilege_keychain_cleanup
+                .push(reference);
+            self.save()?;
+        }
+        Ok(())
+    }
+
     pub fn import_ssh_connection(
         &mut self,
         mut connection: SavedConnection,
@@ -2694,8 +2710,14 @@ impl ConnectionStore {
             }
             candidate.touch_privilege_scope(&credential.connection_id);
             if let Err(error) = candidate.save() {
-                if let Some(reference) = new_reference {
-                    self.privilege_keychain.delete(&reference)?;
+                // A failed cleanup must not replace the metadata persistence error.
+                if let Some(reference) = new_reference
+                    && let Err(cleanup_error) =
+                        self.delete_or_queue_privilege_keychain_entry(reference)
+                {
+                    return Err(anyhow::anyhow!(
+                        "{error:#}; staged privilege secret cleanup remains in memory because its retry record could not be saved: {cleanup_error:#}"
+                    ));
                 }
                 return Err(error);
             }

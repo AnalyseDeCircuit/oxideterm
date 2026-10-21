@@ -1798,6 +1798,74 @@ mod tests {
     }
 
     #[test]
+    fn privilege_save_preserves_metadata_error_when_staged_secret_cleanup_fails() {
+        let mut store = load_empty_store("privilege-save-cleanup-error");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        let original_path = store.path.clone();
+
+        let failed_save_path = temp_store_path("privilege-save-metadata-error");
+        fs::create_dir(&failed_save_path).unwrap();
+        let expected_path = failed_save_path.display().to_string();
+        store.path = failed_save_path.clone();
+        store.privilege_keychain.fail_next_delete_for_tests();
+
+        let error = store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".to_string(),
+                credential_id: Some("cred-1".to_string()),
+                label: "sudo".to_string(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: Some(SecretString::from("new-secret")),
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap_err();
+
+        let message = format!("{error:#}");
+        assert!(message.contains(&expected_path), "{message}");
+        assert!(!message.contains("test keychain delete failure"), "{message}");
+        assert!(
+            message.find(&expected_path).unwrap()
+                < message
+                    .find("cleanup remains in memory")
+                    .expect("secondary cleanup error"),
+            "{message}"
+        );
+        assert!(!message.contains("new-secret"));
+        assert!(
+            store
+                .list_privilege_credentials("conn-1")
+                .unwrap()
+                .is_empty()
+        );
+        let [staged_reference] = store.data.pending_privilege_keychain_cleanup.as_slice() else {
+            panic!("the staged secret must have exactly one cleanup request");
+        };
+        let staged_reference = staged_reference.clone();
+        assert_eq!(
+            store.privilege_keychain.get(&staged_reference).unwrap(),
+            "new-secret"
+        );
+
+        store.path = original_path;
+        store.save().unwrap();
+        let persisted: ConnectionStoreData =
+            serde_json::from_slice(&fs::read(&store.path).unwrap()).unwrap();
+        assert_eq!(
+            persisted.pending_privilege_keychain_cleanup,
+            vec![staged_reference.clone()]
+        );
+        store.retry_persisted_keychain_cleanup().unwrap();
+        assert!(store.privilege_keychain.get(&staged_reference).is_err());
+        let persisted: ConnectionStoreData =
+            serde_json::from_slice(&fs::read(&store.path).unwrap()).unwrap();
+        assert!(persisted.pending_privilege_keychain_cleanup.is_empty());
+        fs::remove_dir(failed_save_path).unwrap();
+    }
+
+    #[test]
     fn imported_privilege_replacement_removes_random_reference_secret() {
         let mut store = load_empty_store("privilege-import-random-cleanup");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
