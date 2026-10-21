@@ -243,6 +243,29 @@ class LinuxMetadataTests(unittest.TestCase):
             )
 
 
+class MacosCompatibilityTests(unittest.TestCase):
+    def test_linked_sdk_and_deployment_target_are_checked_independently(self) -> None:
+        for minimum, sdk, error in [
+            ("11.0", "14.5", "SDK 26.0 or newer"),
+            ("13.0", "26.2", None),
+            ("11.0", "27.0", None),
+            ("13.0.1", "26.2", "exceeding the supported 13.0 baseline"),
+        ]:
+            with self.subTest(minimum=minimum, sdk=sdk), patch.object(
+                verify_native_package,
+                "run_checked",
+                return_value=(
+                    "Load command 10\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n"
+                    f" platform MACOS\n    minos {minimum}\n      sdk {sdk}\n   ntools 1\n"
+                ),
+            ):
+                if error:
+                    with self.assertRaisesRegex(RuntimeError, error):
+                        verify_native_package.verify_macos_build_version(Path("oxideterm-native"))
+                else:
+                    verify_native_package.verify_macos_build_version(Path("oxideterm-native"))
+
+
 class LinuxCompatibilityTests(unittest.TestCase):
     def test_glibc_symbol_versions_are_parsed_without_duplicates(self) -> None:
         version_info = """

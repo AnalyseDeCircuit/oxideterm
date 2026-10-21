@@ -122,13 +122,15 @@ jobs:
       matrix:
         include:
           - label: macos-arm64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
+            xcode: '26.3'
           - label: macos-x64
             # Use an Intel runner so Cargo build scripts run on the same host
             # architecture as the x86_64 release target.
             os: macos-15-intel
             target: x86_64-apple-darwin
+            xcode: '26.3'
           - label: linux-x64
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
@@ -161,13 +163,28 @@ jobs:
           toolchain: 1.97.0
           targets: ${{ matrix.target }}
 
+      - name: Select macOS release SDK
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          XCODE_VERSION: ${{ matrix.xcode }}
+        run: |
+          set -euo pipefail
+          # AppKit chooses native control styling using the linked SDK as well as the runtime OS.
+          export DEVELOPER_DIR="/Applications/Xcode_${XCODE_VERSION}.app/Contents/Developer"
+          test -d "${DEVELOPER_DIR}"
+          echo "DEVELOPER_DIR=${DEVELOPER_DIR}" >> "${GITHUB_ENV}"
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "${GITHUB_ENV}"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
+
       - name: Rust cache
         id: rust_cache
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           # Release dispatches stay on main while checkout selects the tagged commit, so this
           # target-specific prefix can restore compatible dependency artifacts across versions.
-          key: native-package-${{ matrix.target }}
+          key: native-package-${{ matrix.target }}${{ matrix.xcode && format('-xcode-{0}', matrix.xcode) || '' }}
           # Keep the compiled cache even when a build fails so a single-platform
           # retry resumes incrementally instead of rebuilding from scratch.
           cache-on-failure: true

@@ -34,6 +34,8 @@ REQUIRED_DOCUMENTS = {
 LINUX_DEB_GRAPHICS_RECOMMENDS = {"libegl1", "libvulkan1"}
 LINUX_RPM_GRAPHICS_RECOMMENDS = {"libglvnd-egl", "vulkan-loader"}
 LINUX_GLIBC_MAX_VERSION = (2, 35)
+MACOS_MIN_SDK_VERSION = (26, 0, 0)
+MACOS_MAX_DEPLOYMENT_TARGET = (13, 0, 0)
 PACKAGE_VERSION_FILENAME = "VERSION"
 PORTABLE_PLUGINS_DIR = "data/plugins"
 PORTABLE_UPDATE_MANIFEST_FILENAME = "portable-update.json"
@@ -232,6 +234,29 @@ def verify_binary_architecture(path: Path, target: str) -> None:
     expected = ("x86-64", "x86_64") if target.startswith("x86_64") else ("arm64", "aarch64")
     if not any(marker in description for marker in expected):
         raise RuntimeError(f"{path.name} does not match {target}: {description.strip()}")
+
+
+def verify_macos_build_version(binary: Path) -> None:
+    """Require modern AppKit styling without raising the supported macOS baseline."""
+    output = run_checked(["xcrun", "vtool", "-show-build", str(binary)])
+    versions = re.findall(
+        r"platform MACOS\s+minos (\d+\.\d+(?:\.\d+)?)\s+sdk (\d+\.\d+(?:\.\d+)?)",
+        output,
+    )
+    if not versions:
+        raise RuntimeError(f"{binary.name} does not declare a macOS build version")
+    for minimum, sdk in versions:
+        minimum_version = tuple(map(int, minimum.split(".")))
+        sdk_version = tuple(map(int, sdk.split(".")))
+        if sdk_version + (0,) * (3 - len(sdk_version)) < MACOS_MIN_SDK_VERSION:
+            raise RuntimeError(
+                f"{binary.name} was linked with macOS SDK {sdk}; SDK 26.0 or newer "
+                "is required for native macOS 26 controls"
+            )
+        if minimum_version + (0,) * (3 - len(minimum_version)) > MACOS_MAX_DEPLOYMENT_TARGET:
+            raise RuntimeError(
+                f"{binary.name} requires macOS {minimum}, exceeding the supported 13.0 baseline"
+            )
 
 
 def extract_portable_binary(path: Path, target: str, destination: Path) -> Path:
@@ -434,6 +459,8 @@ def verify_release(dist: Path, target: str, version: str) -> dict[str, object]:
         if "linux" in target:
             verify_linux_dynamic_libraries(binary)
             verify_linux_glibc_compatibility(binary)
+        elif "apple-darwin" in target:
+            verify_macos_build_version(binary)
 
     if "windows" in target:
         verify_windows_installer(dist / f"OxideTerm_{version}_{label}-setup.exe", version, target)
