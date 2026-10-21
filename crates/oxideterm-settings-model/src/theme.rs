@@ -622,7 +622,8 @@ pub fn editor_terminal_theme(colors: &[String]) -> TerminalTheme {
         selection_background: leak_static_hex(
             colors
                 .get(3)
-                .and_then(|value| parse_color_hex(value).map(format_hex_color))
+                .filter(|value| parse_color_hex(value).is_some())
+                .map(|value| value.trim().to_string())
                 .unwrap_or_else(|| fallback.selection_background.to_string()),
         ),
         black: color(4, fallback.black),
@@ -765,11 +766,10 @@ fn color_value(value: &serde_json::Value, key: &str) -> Option<u32> {
 }
 
 fn color_string_value(value: &serde_json::Value, key: &str) -> Option<String> {
-    value
-        .get(key)?
-        .as_str()
-        .and_then(parse_color_hex)
-        .map(format_hex_color)
+    let color = value.get(key)?.as_str()?.trim();
+    parse_color_hex(color)?;
+    // Selection colors retain alpha; normalizing to RGB makes translucent themes opaque.
+    Some(color.to_string())
 }
 
 fn leak_static_hex(value: String) -> &'static str {
@@ -934,6 +934,28 @@ mod tests {
             settings.custom_themes["custom:night"]["background"]["camera"],
             serde_json::json!({"motion": "zoomOut", "amount": 0.75, "speed": 0.5})
         );
+    }
+
+    #[test]
+    fn custom_theme_selection_opacity_survives_saving_and_loading() {
+        for color in ["rgba(143, 98, 81, 0.20)", "#8f625133"] {
+            let mut settings = PersistedSettings::default();
+            settings.terminal.theme = "paper-oxide".into();
+            let mut editor =
+                theme_editor_from_settings(&settings, ThemeTarget::Terminal, None, "Paper".into());
+            editor.terminal_colors[3] = color.into();
+            save_theme_editor_snapshot_to_settings(&mut settings, &editor).unwrap();
+            assert_eq!(
+                settings.custom_themes["custom:paper"]["terminalColors"]["selectionBackground"],
+                color
+            );
+            assert_eq!(
+                theme_tokens_from_settings(&settings)
+                    .terminal
+                    .selection_background,
+                color
+            );
+        }
     }
 
     #[test]

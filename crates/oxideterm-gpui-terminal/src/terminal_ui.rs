@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
 use gpui::{
-    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, TextRun,
-    TextSystem, Window, px, rgb,
+    Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, Pixels, Rgba, SharedString,
+    TextRun, TextSystem, Window, px, rgb,
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_settings::{
@@ -901,6 +901,7 @@ pub struct TerminalUiTheme {
     pub(crate) bell_background: u32,
     pub foreground: u32,
     pub(crate) header_foreground: u32,
+    pub(crate) selection_background: Hsla,
 }
 
 impl Default for TerminalUiTheme {
@@ -997,14 +998,44 @@ pub fn terminal_semantic_line_band(
     }
 }
 
+fn terminal_selection_background(theme: oxideterm_theme::TerminalTheme) -> Hsla {
+    // Parse once with the theme, not while laying out each selected cell.
+    let value = theme.selection_background.trim();
+    let color = Rgba::try_from(value).ok().or_else(|| {
+        let lower = value.to_ascii_lowercase();
+        let (components, has_alpha) = if let Some(value) = lower.strip_prefix("rgba(") {
+            (value.strip_suffix(')')?, true)
+        } else {
+            (lower.strip_prefix("rgb(")?.strip_suffix(')')?, false)
+        };
+        let mut parts = components.split(',').map(|part| {
+            part.trim()
+                .parse::<f32>()
+                .ok()
+                .filter(|value| value.is_finite())
+        });
+        let r = parts.next()??.round().clamp(0.0, 255.0) / 255.0;
+        let g = parts.next()??.round().clamp(0.0, 255.0) / 255.0;
+        let b = parts.next()??.round().clamp(0.0, 255.0) / 255.0;
+        let a = if has_alpha {
+            parts.next()??.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        parts.next().is_none().then_some(Rgba { r, g, b, a })
+    });
+    color
+        .unwrap_or_else(|| rgb(theme.foreground).alpha(0.2))
+        .into()
+}
+
 impl TerminalUiTheme {
     pub fn new(background: u32, foreground: u32, cursor: u32) -> Self {
         Self {
-            tokens: default_tokens(),
             background,
-            bell_background: 0x17131a,
             foreground,
             header_foreground: cursor,
+            ..Self::default()
         }
     }
 
@@ -1014,6 +1045,7 @@ impl TerminalUiTheme {
             bell_background: 0x17131a,
             foreground: tokens.terminal.foreground,
             header_foreground: tokens.terminal.cursor,
+            selection_background: terminal_selection_background(tokens.terminal),
             tokens,
         }
     }

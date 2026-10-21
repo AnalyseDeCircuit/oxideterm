@@ -12,7 +12,7 @@ use gpui::{
     Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
 };
 use oxideterm_terminal::{
-    TerminalColor, TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
+    TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticLineRole, SemanticScheme, SemanticShellDialect,
@@ -1155,7 +1155,7 @@ impl TerminalElement {
                     &mut selections,
                     paint_col,
                     cell_width,
-                    to_hsla(TerminalColor::rgb(0x2d, 0x4f, 0x7f)),
+                    self.theme.selection_background,
                 );
             } else if let Some(rect) = current_selection.take() {
                 selections.push(rect);
@@ -1286,6 +1286,7 @@ impl TerminalElement {
         self.theme.background.hash(&mut hasher);
         self.theme.foreground.hash(&mut hasher);
         self.theme.header_foreground.hash(&mut hasher);
+        self.theme.selection_background.hash(&mut hasher);
         self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
         self.bidi_enabled.hash(&mut hasher);
         self.detect_file_paths_as_links.hash(&mut hasher);
@@ -2600,6 +2601,39 @@ mod cache_tests {
         let changed_layout = changed.layout_for_rows(0..1, Some(&mut cache));
         let changed_cache = &changed_layout.cached_rows[0].layout.text_runs[0].cache;
         assert!(!Arc::ptr_eq(first_cache, changed_cache));
+    }
+
+    #[test]
+    fn selection_uses_theme_color_and_refreshes_cached_rows() {
+        use crate::terminal_view::selection::{TerminalGridPoint, TerminalSelectionMode};
+
+        let mut selected = element(snapshot(0, vec![row_with_text_and_cursor(0, "ab", 1)]));
+        selected.snapshot.cols = 2;
+        selected.selection = Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 0 },
+            head: TerminalGridPoint { line: 0, col: 1 },
+            mode: TerminalSelectionMode::Simple,
+        });
+        let mut tokens =
+            oxideterm_theme::ThemeTokens::from_builtin(oxideterm_theme::theme_by_id("paper-oxide"));
+        let mut cache = TerminalLayoutCache::default();
+        for (color, expected) in [
+            (
+                tokens.terminal.selection_background,
+                rgb(0x8f6251).alpha(0.2),
+            ),
+            ("#123456", rgb(0x123456)),
+            ("#12345680", rgba(0x12345680)),
+            ("rgb(17, 34, 51)", rgb(0x112233)),
+        ] {
+            tokens.terminal.selection_background = color;
+            selected.theme = TerminalUiTheme::from_tokens(tokens);
+            let layout = selected.layout_for_rows(0..1, Some(&mut cache));
+            let rects = &layout.cached_rows[0].layout.selections;
+            assert_eq!(rects.len(), 1, "{color}");
+            assert_eq!(rects[0].color, Hsla::from(expected), "{color}");
+            assert_eq!((rects[0].col, rects[0].cells), (0, 2), "{color}");
+        }
     }
 
     #[test]
