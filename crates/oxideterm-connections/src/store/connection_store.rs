@@ -188,12 +188,16 @@ impl ConnectionStore {
             return Ok(());
         }
 
+        // Imports can reuse a slot whose earlier deletion was deferred. A live
+        // reference retires that cleanup request rather than its current secret.
+        let active_privilege_ids = collect_active_privilege_keychain_ids(&self.data);
         self.data.pending_keychain_cleanup = original_connection_ids
             .into_iter()
             .filter(|id| self.keychain.delete(id).is_err())
             .collect();
         self.data.pending_privilege_keychain_cleanup = original_privilege_ids
             .into_iter()
+            .filter(|id| !active_privilege_ids.contains(id))
             .filter(|id| self.privilege_keychain.delete(id).is_err())
             .collect();
         self.save()
@@ -2486,18 +2490,8 @@ impl ConnectionStore {
         let original_keychain = self.snapshot_keychain_entries(&original_data)?;
         let imported_privilege_keychain_ids =
             collect_imported_privilege_keychain_ids(&connections);
-        let existing_privilege_keychain_ids = original_data
-            .connections
-            .iter()
-            .flat_map(collect_privilege_keychain_ids)
-            .chain(
-                original_data
-                    .local_privilege_credentials
-                    .iter()
-                    .chain(&original_data.ssh_common_privilege_credentials)
-                    .filter_map(|credential| credential.keychain_id.clone()),
-            )
-            .collect::<HashSet<_>>();
+        let existing_privilege_keychain_ids =
+            collect_active_privilege_keychain_ids(&original_data);
         let overwritten_privilege_keychain_ids = imported_privilege_keychain_ids
             .intersection(&existing_privilege_keychain_ids)
             .cloned()

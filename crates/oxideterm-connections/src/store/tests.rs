@@ -2113,6 +2113,49 @@ mod tests {
     }
 
     #[test]
+    fn imported_privilege_secret_survives_a_reused_pending_cleanup_reference() {
+        let mut store = load_empty_store("privilege-import-pending-cleanup");
+        store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
+        store
+            .save_privilege_credential(SavePrivilegeCredentialRequest {
+                connection_id: "conn-1".into(),
+                credential_id: Some("cred-1".into()),
+                label: "sudo".into(),
+                kind: PrivilegeCredentialKind::SudoPassword,
+                username_hint: None,
+                prompt_patterns: Vec::new(),
+                secret: None,
+                enabled: true,
+                require_click_to_send: true,
+            })
+            .unwrap();
+        // A prior import retired this slot while the credential backend was
+        // temporarily unable to delete it. The next import reuses that slot.
+        let reference = privilege_keychain_id("conn-1", "cred-1");
+        store
+            .privilege_keychain
+            .store(&reference, &SecretString::from("retired-fixture"))
+            .unwrap();
+        store.data.pending_privilege_keychain_cleanup.push(reference);
+        store.save().unwrap();
+        let mut imported = store.get("conn-1").unwrap().clone();
+        imported.privilege_credentials[0].plaintext_secret =
+            Some(SecretString::from("replacement-fixture"));
+        store
+            .upsert_imported_connections_transaction(vec![imported])
+            .unwrap();
+        assert_eq!(
+            store
+                .get_privilege_credential_secret("conn-1", "cred-1")
+                .unwrap(),
+            SecretString::from("replacement-fixture")
+        );
+        let persisted: ConnectionStoreData =
+            serde_json::from_slice(&fs::read(&store.path).unwrap()).unwrap();
+        assert!(persisted.pending_privilege_keychain_cleanup.is_empty());
+    }
+
+    #[test]
     fn imported_privilege_metadata_preserves_existing_secret() {
         let mut store = load_empty_store("privilege-import-metadata");
         store.upsert(request("conn-1", SavedAuth::Agent)).unwrap();
@@ -2686,6 +2729,36 @@ mod tests {
             "deferred-secret"
         );
 
+        target.upsert(request("conn-live", SavedAuth::Agent)).unwrap();
+        let live_scopes = [
+            "conn-live",
+            LOCAL_SHELL_PRIVILEGE_CONNECTION_ID,
+            SSH_COMMON_PRIVILEGE_SCOPE_ID,
+        ];
+        let live_references = live_scopes
+            .iter()
+            .map(|scope| {
+                target
+                    .save_privilege_credential(SavePrivilegeCredentialRequest {
+                        connection_id: (*scope).into(),
+                        credential_id: Some("live-credential".into()),
+                        label: "sudo".into(),
+                        kind: PrivilegeCredentialKind::SudoPassword,
+                        username_hint: None,
+                        prompt_patterns: Vec::new(),
+                        secret: Some(SecretString::from("live-privilege-fixture")),
+                        enabled: true,
+                        require_click_to_send: true,
+                    })
+                    .unwrap()
+                    .keychain_id
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        target
+            .data
+            .pending_privilege_keychain_cleanup
+            .extend(live_references);
         target
             .finalize_saved_connections_sync_cleanup(&mut cleanup)
             .unwrap();
@@ -2698,6 +2771,16 @@ mod tests {
                 .get(&privilege_keychain_id)
                 .is_err()
         );
+        for scope in live_scopes {
+            assert_eq!(
+                target
+                    .get_privilege_credential_secret(scope, "live-credential")
+                    .unwrap(),
+                SecretString::from("live-privilege-fixture"),
+                "{scope}"
+            );
+        }
+        assert!(target.data.pending_privilege_keychain_cleanup.is_empty());
     }
 
     #[test]

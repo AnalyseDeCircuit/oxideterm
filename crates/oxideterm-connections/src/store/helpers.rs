@@ -439,6 +439,19 @@ fn collect_privilege_keychain_ids(connection: &SavedConnection) -> Vec<String> {
         .collect()
 }
 
+fn collect_active_privilege_keychain_ids(data: &ConnectionStoreData) -> HashSet<String> {
+    data.connections
+        .iter()
+        .flat_map(collect_privilege_keychain_ids)
+        .chain(
+            data.local_privilege_credentials
+                .iter()
+                .chain(&data.ssh_common_privilege_credentials)
+                .filter_map(|credential| credential.keychain_id.clone()),
+        )
+        .collect()
+}
+
 fn collect_imported_privilege_keychain_ids(
     connections: &[SavedConnection],
 ) -> HashSet<String> {
