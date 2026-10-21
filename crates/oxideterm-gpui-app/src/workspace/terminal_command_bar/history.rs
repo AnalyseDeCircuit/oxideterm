@@ -147,7 +147,7 @@ mod tests {
                 "{change}"
             );
         }
-        let mut changed = data.clone();
+        let mut changed = data;
         changed.telnet_profiles[0].port = 2323;
         changed.serial_profiles[0].port_path = "COM4".into();
         assert_ne!(

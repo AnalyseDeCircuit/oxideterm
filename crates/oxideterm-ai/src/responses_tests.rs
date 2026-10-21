@@ -72,7 +72,7 @@ fn tool_images_reopen_in_native_history_and_survive_provider_switches() {
         ]})
     );
     let mut text_only = history.clone();
-    let mut text_config = config.clone();
+    let mut text_config = config;
     text_config.omit_history_images = true;
     prepare_image_history(&mut text_only, &text_config);
     assert_eq!(

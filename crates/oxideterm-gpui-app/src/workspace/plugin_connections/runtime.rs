@@ -413,7 +413,7 @@ impl WorkspaceApp {
                     if let Ok(session_id) = self.create_ssh_terminal_tab_for_existing_node(
                         &node,
                         Some(command),
-                        title.clone(),
+                        title,
                         window,
                         cx,
                     ) && let Some(location) =

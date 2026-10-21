@@ -1327,7 +1327,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            acp_prompt_content("Describe", &[image.clone()], false).unwrap_err(),
+            acp_prompt_content("Describe", std::slice::from_ref(&image), false).unwrap_err(),
             AcpConnectionError::Protocol("ai_image_model_unsupported".into())
         );
         let content = acp_prompt_content("Describe", &[image], true).unwrap();

@@ -238,7 +238,7 @@ pub fn plan_archive_command(
         }
         format!("{}{separator}{relative}", home.trim_end_matches(separator))
     } else if absolute(&path) {
-        path.to_string()
+        path
     } else if windows && path.starts_with(['/', '\\']) {
         let drive = cwd
             .as_deref()

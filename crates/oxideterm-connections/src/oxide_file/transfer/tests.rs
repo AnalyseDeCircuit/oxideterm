@@ -1433,7 +1433,7 @@ mod tests {
                     _ => None,
                 })
                 .collect::<Vec<_>>(),
-            [shared_totp.clone()]
+            std::slice::from_ref(&shared_totp)
         );
 
         let mut target = temp_store("privilege-host-export-target");

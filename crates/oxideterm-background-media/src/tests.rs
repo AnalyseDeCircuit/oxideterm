@@ -204,10 +204,13 @@ fn auto_dimensions_and_explicit_limits_never_upscale() {
 
 #[test]
 fn native_h264_pixels_timestamps_loops_and_cancellation() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/red-blue.mp4");
-    let mut streams = vec![MediaStream::spawn(path.clone(), 42).unwrap()];
+    let path = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/red-blue.mp4"
+    ));
+    let mut streams = vec![MediaStream::spawn(path.to_path_buf(), 42).unwrap()];
     #[cfg(any(target_os = "windows", target_os = "linux"))]
-    streams.push(MediaStream::spawn_software(path, 42).unwrap());
+    streams.push(MediaStream::spawn_software(path.to_path_buf(), 42).unwrap());
     for mut stream in streams.drain(..) {
         let budget = stream.memory_budget();
         let output = OutputParams {

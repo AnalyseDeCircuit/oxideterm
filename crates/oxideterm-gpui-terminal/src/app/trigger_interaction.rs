@@ -91,7 +91,7 @@ impl TerminalPane {
             *row == point.row && *start < range.end && *end > range.start
         });
         let first = visible.next()?;
-        let end_col = visible.last().unwrap_or(first).4;
+        let end_col = visible.next_back().unwrap_or(first).4;
         Some(InteractionHit {
             link: TerminalLinkRange {
                 row: point.row,

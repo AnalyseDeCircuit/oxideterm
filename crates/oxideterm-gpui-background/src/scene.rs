@@ -439,7 +439,7 @@ impl Render for Scene {
                                 });
                             }
                         });
-                        let scene = paint_scene.clone();
+                        let scene = paint_scene;
                         window.on_mouse_event(move |_: &gpui::MouseExitEvent, phase, _, cx| {
                             if phase == gpui::DispatchPhase::Capture {
                                 let _ = scene.update(cx, |scene, cx| {

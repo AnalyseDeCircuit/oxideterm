@@ -173,7 +173,7 @@ impl SshPtyCore {
             } else {
                 (resize.cols as u32, resize.rows as u32)
             };
-            let connect_activity = activity.clone();
+            let connect_activity = activity;
             connect_task = Some(runtime_handle.spawn(async move {
                 // A cancelled startup must release its consumer before the next acquire.
                 if let Some(task) = previous_task {

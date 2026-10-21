@@ -400,10 +400,7 @@ fn plugin_connections_sync_without_provider_registry_and_keep_unknown_configurat
         .unwrap();
     let mut right = SyncReplica::load(left.snapshot(), Uuid::from_u128(2)).unwrap();
     let mut local = view.values.clone();
-    local.insert(
-        name.clone(),
-        FieldValue::encode(&"Renamed locally").unwrap(),
-    );
+    local.insert(name, FieldValue::encode(&"Renamed locally").unwrap());
     let mut remote = view.values.clone();
     let mut config = portable;
     config["config"]["root/host"] = serde_json::json!("remote.device");
