@@ -784,7 +784,7 @@ Use auto-start only for forwards that should start whenever the owning connectio
 
 Graphics sessions are visual runtime surfaces. They are separate from terminal buffers even when a terminal or command launches the remote visual program.
 
-The detailed RDP/VNC/X11 ownership boundary is tracked in [Remote Desktop Boundary](../../design/remote-desktop-boundary.md). Native currently treats visual remoting as three related but separate paths:
+Visual remoting has three related but separate ownership paths:
 
 - **WSL Graphics**: `oxideterm-wsl-graphics` owns WSL distro probing, VNC server startup, desktop/app child processes, and cleanup.
 - **Remote Desktop**: `oxideterm-remote-desktop` and `oxideterm-gpui-remote-desktop` own the shared model, viewer state and binary transport. Protocol engines are independent `plugins/rdp` and `plugins/vnc` packages in the marketplace repository, discovered through the trusted plugin registry and launched by the session owner. Connection forms indicate whether the required plugin is available. Saved profiles, credentials, SSH gateways and the native viewer retain their existing behavior.

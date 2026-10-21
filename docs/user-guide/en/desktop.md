@@ -13,7 +13,7 @@ Use the activity bar as the entry point for app surfaces:
 - Sessions: create, open, group, and monitor SSH work.
 - File manager and SFTP: browse files and manage transfers.
 - Connection pool, monitor, and Host Tools: inspect connection runtime state, resource snapshots, processes, containers, services, tmux, logs, ports, and metrics.
-- Graphics/VNC: open saved RDP/VNC profiles or visual sessions launched from a connected node.
+- Remote desktop: install and enable the RDP or VNC plugin, then open a profile from New Connection or Session Manager. For WSL Graphics on Windows, use New Connection → WSL Graphics.
 - Plugins: manage installed plugins and plugin settings.
 - Cloud sync: inspect sync status and run sync actions.
 - Notifications & Audit: review notifications, recorded operations, session history, and terminal-output recordings.
@@ -47,6 +47,26 @@ Common pane patterns:
 - Close only the pane or tab you no longer need; keep the saved connection profile intact.
 
 Use the terminal context menu and command bar for explicit pane actions such as copy, paste, search, command selection, and terminal-native file transfers. Background images and terminal image placements are visual/rendering state; if a full-screen TUI leaves stale image content behind, clear or reopen the pane rather than editing saved connection data.
+
+### Command Folding and Shell Integration
+
+Open **Settings → Terminal → Display** and enable **Command folding**. Click the button beside a completed command in the left gutter to collapse or expand its output. The command's context menu also offers **Collapse output** or **Expand output**; enable **Hover Actions** if you want those controls beside a selected command.
+
+The gutter uses one character column and works with zero terminal padding. Folding changes the view, not the terminal output or recording. Resizing the window retains the folded command selection while the terminal recalculates line positions. **Command Marks** controls range highlighting separately from the folding switch.
+
+Folding requires reliable command-start, output-start, and completion information from Shell integration. Running commands, incomplete boundaries, and output no longer retained in scrollback are not foldable. Enabling the display switch alone cannot reconstruct missing boundaries from old output.
+
+#### Install or Update SSH Shell Integration
+
+1. Open the target SSH terminal.
+2. Go to **Settings → Terminal → Awareness & Integration**, then check the remote Shell integration status.
+3. Install, update, or repair the integration as indicated. The deployment policy can ask when needed, install automatically, or leave installation to you.
+4. **Open a new SSH terminal afterward.** Existing shells keep their current hooks; updating files does not reload them.
+5. Run a command that produces several lines and finishes, then try its folding control.
+
+An outdated remote integration can trigger an update reminder when a new SSH terminal opens. Choosing **Later** leaves it unchanged; you can update manually from the same settings page.
+
+The remote integration installs readable hooks for Bash, Zsh, Fish, Nushell, and PowerShell. If folding remains unavailable after updating and opening a new terminal, check the actual shell and whether its startup files load the integration. Prompt themes and terminal multiplexers may also affect whether complete command boundaries reach OxideTerm.
 
 ### Free Type Mode
 

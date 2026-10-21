@@ -46,7 +46,7 @@ Consulta la [documentación](https://oxideterm.app) para conocer la aplicación 
 | **Fiabilidad** | La reconexión con periodo de gracia mantiene las aplicaciones TUI activas durante cortes breves de red y después restaura los reenvíos, las transferencias y los archivos abiertos en el editor |
 | **Archivos y edición** | Gestor SFTP de dos paneles, colas de transferencia con límites de velocidad y tiempo estimado, marcadores y editor remoto integrado con escrituras seguras, gestión de conflictos y restauración del espacio de trabajo |
 | **Redes** | Reenvío local, remoto y dinámico SOCKS5, reglas guardadas, detección de puertos remotos, topología de conexiones y depuración puntual de sockets |
-| **Escritorio remoto** | RDP y VNC integrados con compatibilidad para portapapeles y entrada |
+| **Escritorio remoto** | Plugins RDP y VNC instalables desde el mercado, con visor nativo, portapapeles y control de entrada |
 | **Operaciones del servidor** | Supervisión de procesos, servicios, registros, puertos, tareas, discos, paquetes, contenedores y tmux |
 | **IA y automatización** | OxideSens con tu propia clave, MCP, RAG local, Agent Skills, acciones autorizadas en el espacio de trabajo y una CLI independiente |
 | **Revisión y auditoría** | Espacio opcional de notificaciones y auditoría, y grabaciones de sesión cifradas; ambas funciones están desactivadas de forma predeterminada |
@@ -251,7 +251,7 @@ La interfaz y el backend de terminal/SSH comparten un proceso Rust; los agentes 
 
 Las sesiones SFTP llevan una generación de conexión: tras una reconexión, se vuelve a obtener una sesión apta, pero una operación de una generación anterior nunca se traslada silenciosamente a la nueva conexión.
 
-**Reenvío de puertos.** Un crate independiente compatible con `-L`, `-R` y `-D` (SOCKS5). Una única tarea `ssh_io` es propietaria de cada canal SSH, por lo que no hay un mutex compartido en la ruta crítica.
+**Reenvío de puertos.** Un crate dedicado ofrece reenvío local, remoto y dinámico SOCKS5. Cada regla tiene sus propios listeners y tareas de conexión, gestionados mediante el registro compartido de conexiones SSH.
 
 **SSH íntegramente en Rust.** `russh` con `ring`: SSH2 completo, ChaCha20-Poly1305 y AES-GCM, claves Ed25519/RSA/ECDSA, agente SSH en Unix (`SSH_AUTH_SOCK`) y Windows (`\\.\pipe\openssh-ssh-agent`), y cadenas de varios saltos con autenticación independiente en cada salto.
 

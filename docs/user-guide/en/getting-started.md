@@ -32,7 +32,7 @@ After the first local terminal and first SSH connection work, check the app surf
 - Connection monitor and Host Tools: connection health, stale nodes, reconnect state, host resources, and action results.
 - File manager or SFTP: remote directory browsing and transfers.
 - Terminal helpers: context menu actions, command bar actions, background image settings, and X/Y/ZMODEM transfer prompts.
-- Graphics/VNC: saved RDP/VNC profiles or node-launched visual sessions when the target supports them.
+- Remote desktop: install and enable the RDP or VNC plugin, then open a profile from New Connection or Session Manager. Windows WSL Graphics is a separate built-in feature.
 - IDE workspace: remote project folders and editor tabs.
 - AI sidebar: current workspace context and tool approvals.
 - Plugins: installed plugins and plugin settings.

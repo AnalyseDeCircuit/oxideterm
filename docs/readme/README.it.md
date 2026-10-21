@@ -46,7 +46,7 @@ Per una visita guidata, consulta la [documentazione](https://oxideterm.app).
 | **Affidabilità** | La riconnessione con periodo di tolleranza mantiene attive le applicazioni TUI durante brevi interruzioni di rete, poi ripristina inoltri, trasferimenti e file aperti nell'editor |
 | **File e modifica** | Gestore SFTP a due pannelli, code di trasferimento con limiti di velocità e tempo stimato, segnalibri ed editor remoto integrato con scritture sicure, gestione dei conflitti e ripristino dello spazio di lavoro |
 | **Rete** | Inoltro locale, remoto e dinamico SOCKS5, regole salvate, rilevamento delle porte remote, topologia delle connessioni e diagnostica occasionale dei socket |
-| **Desktop remoto** | RDP e VNC integrati con supporto per appunti e input |
+| **Desktop remoto** | Plugin RDP e VNC installabili dal marketplace, con visualizzatore nativo, appunti e controllo di tastiera e mouse |
 | **Operazioni sugli host** | Monitoraggio di processi, servizi, log, porte, attività, dischi, pacchetti, container e tmux |
 | **IA e automazione** | OxideSens con la tua chiave, MCP, RAG locale, Agent Skills, azioni approvate nello spazio di lavoro e CLI autonoma |
 | **Revisione e audit** | Spazio facoltativo per notifiche e audit e registrazioni di sessione cifrate; entrambe le funzioni sono disattivate per impostazione predefinita |
@@ -251,7 +251,7 @@ L'interfaccia e il backend terminale/SSH condividono un processo Rust; gli agent
 
 Le sessioni SFTP hanno una generazione di connessione: dopo una riconnessione viene riacquisita una sessione idonea, ma un'operazione di una generazione precedente non viene mai spostata silenziosamente sulla nuova connessione.
 
-**Inoltro delle porte.** Un crate autonomo con supporto per `-L`, `-R` e `-D` (SOCKS5). Un'unica attività `ssh_io` possiede ciascun canale SSH, quindi non c'è un mutex condiviso nel percorso critico.
+**Inoltro delle porte.** Un crate dedicato gestisce l'inoltro locale, remoto e dinamico SOCKS5. Ogni regola dispone di listener e attività di connessione propri, gestiti tramite il registro condiviso delle connessioni SSH.
 
 **SSH interamente in Rust.** `russh` con `ring`: SSH2 completo, ChaCha20-Poly1305 e AES-GCM, chiavi Ed25519/RSA/ECDSA, agente SSH su Unix (`SSH_AUTH_SOCK`) e Windows (`\\.\pipe\openssh-ssh-agent`), e catene a più salti con autenticazione indipendente per ciascun salto.
 

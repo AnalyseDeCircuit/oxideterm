@@ -92,6 +92,8 @@ Use SFTP or the file manager for remote file operations:
 
 File Transfer settings default to **Auto**: SFTP remains the browsing and preferred transfer protocol, while legacy SCP is used only when the connected POSIX host cannot open its SFTP subsystem. You can force SFTP or SCP for compatibility testing. SCP can pause and resume while its current channel is alive, but a retry after disconnect starts from the beginning because legacy SCP has no offset-resume protocol.
 
+For PDF, SQLite, or certificate previews, install and enable **PDF Preview**, **SQLite Preview**, or **Certificate Viewer** in **Plugin Manager → Marketplace**. The plugins run locally for both File Manager and SFTP previews; they are not installed on the SSH host. SQLite browsing is read-only, and certificate previews do not display private keys. File browsing and transfers remain available without these preview plugins.
+
 Terminal-native modem transfers are separate from SFTP. Run the remote transfer program (such as `rz` for upload or `sz <file>` for download), then choose the local file or directory when OxideTerm detects the transfer. For serial devices that require manual negotiation, use **Binary transfer** in the serial control bar after starting the device's transfer program.
 
 Before overwriting important remote files, confirm the path and keep a backup. Remote file writes are real writes on the target system.
@@ -101,6 +103,8 @@ Before overwriting important remote files, confirm the path and keep a backup. R
 Use the IDE surface when you need a project-style remote file workflow. Open an IDE workspace for a connected node, choose a remote folder, and work with project files in tabs.
 
 IDE workspace state is separate from an ordinary terminal tab. The active editor tab, project root, dirty buffers, and open files belong to the IDE surface. If the connection is interrupted, reconnect before relying on saves or project search.
+
+Shell and configuration languages such as Bash, Zsh, Python, JSON, YAML, TOML, and Markdown are built in. Install and enable language plugins from the marketplace for Rust, Go, C/C++, JavaScript, TypeScript, and other separately distributed grammars. Text editing remains available without a matching grammar; highlighting and grammar-based features require language support on the local device, independently of the remote agent.
 
 ## Port Forwarding
 
@@ -112,11 +116,13 @@ Use the forwarding UI for local, remote, and dynamic forwards:
 
 Use auto-start only for forwards that should start whenever the owning connection opens. Keep the connection monitor visible when testing a new forward.
 
+For forwarding without a terminal, use [Standalone SSH Tunnels](connections-and-forwards.md#standalone-ssh-tunnels). These profiles have their own application-startup policy and can be managed in Session Manager.
+
 ## Host Tools and Graphics
 
 Use Host Tools from the connected-node context when you need a read-oriented view of processes, containers, services, tmux, packages, logs, ports, filesystems, scheduled tasks, or host metrics. Actions that change host state should be reviewed in the app confirmation flow before execution.
 
-Use graphics/VNC sessions for remote visual workflows. A viewer is backed either by a saved RDP/VNC profile and its helper process or by a node-owned graphics runtime; rendered frames are not terminal output, and closing the viewer is separate from deleting saved connection data.
+For remote desktops, first install and enable **RDP** or **VNC** in **Plugin Manager → Marketplace**, then open the connection from New Connection or Session Manager. OxideTerm owns the profiles, SSH gateway settings, and native viewer; the plugin supplies the protocol engine. See [Graphics and VNC](connections-and-forwards.md#graphics-and-vnc). Windows WSL Graphics uses a separate built-in viewer and does not require these remote-desktop plugins.
 
 ## AI Sidebar
 

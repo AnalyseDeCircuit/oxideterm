@@ -27,7 +27,7 @@ For SFTP or forwarding issues, check the owning SSH node in Connection Monitor. 
 
 For Host Tools issues, refresh the tool page first. If the sampler or action still fails, reconnect the owning node and retry the smallest action. Avoid using Host Tools for hidden cleanup or recursive disk scans.
 
-For graphics/VNC issues, check the saved profile/provider or owning node, reconnect the viewer, then restart the helper or graphics session if its backing process stopped. Viewer state is separate from terminal output and saved connection data.
+For RDP/VNC issues, first check that the corresponding plugin is installed, enabled, and compatible with the app in Plugin Manager. Then check the saved profile, remote service, and optional SSH gateway before reconnecting. Windows WSL Graphics has a separate built-in viewer; check its distribution and graphics-session status instead.
 
 For terminal background issues, reopen Settings and confirm the background image is enabled for the current tab type. Native currently treats the background as a selected image slot; adding a new image replaces the current selection.
 

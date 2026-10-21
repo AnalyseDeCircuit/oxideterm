@@ -778,7 +778,7 @@ IDE 文件操作可以使用远端文件层，但 IDE 不是简单 SFTP 表格�
 
 图形会话是视觉运行时页面。即使远端视觉程序由终端或命令启动，它也不属于终端缓冲区。
 
-RDP、VNC 和 X11 的详细所有权边界记录在 [远程桌面边界](../../design/remote-desktop-boundary.zh-Hans.md)。Native 当前应把视觉远程能力分成三条相关但独立的路径：
+图形远程功能分为三条相关但独立的路径：
 
 - **WSL 图形**：`oxideterm-wsl-graphics` 拥有 WSL 发行版探测、VNC server 启动、桌面/应用子进程和清理。
 - **远程桌面**：`oxideterm-remote-desktop` 和 `oxideterm-gpui-remote-desktop` 负责共享模型、查看器状态与二进制传输。协议引擎在市场仓库的 `plugins/rdp` 和 `plugins/vnc` 中独立分发，通过受信任的插件注册表发现，由远程桌面会话启动。连接表单提示所需插件是否可用；已保存连接、凭据、SSH 网关和原生查看器保持原有行为。

@@ -63,7 +63,7 @@ Linux packaging uses Ubuntu 22.04, and the native platform check uses Ubuntu 24.
 
 ### Nix and Git Dependency Hashes
 
-When building via Nix (`nix build .#oxideterm -L --show-trace`) or Nix Flake checks (`nix flake check -L`), `rustPlatform.buildRustPackage` builds inside an isolated sandbox and requires fixed-output hashes in [`nix/package.nix`](../../nix/package.nix) for all Git dependencies (`ironrdp`, `russh`). Standard crates from crates.io do not need entries in `cargoLock.outputHashes` because their checksums are already recorded in `Cargo.lock`.
+When building via Nix (`nix build .#oxideterm -L --show-trace`) or Nix Flake checks (`nix flake check -L`), `rustPlatform.buildRustPackage` builds inside an isolated sandbox and requires fixed-output hashes in [`nix/package.nix`](../../nix/package.nix) for Git dependencies such as `russh`. RDP/VNC engines are built in the separate `oxideterm-plugins` repository. Standard crates from crates.io do not need entries in `cargoLock.outputHashes` because their checksums are already recorded in `Cargo.lock`.
 
 Whenever adding or bumping a Git dependency in `Cargo.toml`:
 1. Update `Cargo.toml` and update `Cargo.lock` (`cargo check` or `cargo update -p <crate>`).

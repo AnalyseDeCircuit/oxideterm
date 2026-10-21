@@ -46,7 +46,7 @@ Pour une visite guidée, consultez la [documentation](https://oxideterm.app).
 | **Fiabilité** | La reconnexion Grace Period maintient les applications TUI en fonctionnement pendant de brèves coupures réseau, puis rétablit les redirections, les transferts et les fichiers ouverts dans l’éditeur |
 | **Fichiers et édition** | Gestionnaire SFTP à deux volets, files de transfert avec limites de vitesse et estimation du temps restant, favoris, éditeur distant intégré avec écriture sécurisée, gestion des conflits et restauration de l’espace de travail |
 | **Réseau** | Redirections locales, distantes et dynamiques SOCKS5, règles enregistrées, détection des ports distants, topologie des connexions et débogage ponctuel de sockets |
-| **Bureau à distance** | RDP et VNC intégrés avec prise en charge du presse-papiers et des entrées |
+| **Bureau à distance** | Plugins RDP et VNC à installer depuis le catalogue, avec affichage natif, presse-papiers et commandes clavier/souris |
 | **Administration des hôtes** | Surveillance des processus, services, journaux, ports, tâches, disques, paquets, conteneurs et tmux |
 | **IA et automatisation** | OxideSens avec votre propre clé, MCP, RAG local, Agent Skills, actions approuvées dans l’espace de travail et CLI autonome |
 | **Suivi et audit** | Espace de travail facultatif de notifications et d’audit, et enregistrements de sessions chiffrés (tous deux désactivés par défaut) |
@@ -251,7 +251,7 @@ L’interface et le backend terminal/SSH partagent un même processus Rust ; les
 
 Les sessions SFTP portent une génération de connexion : après une reconnexion, une session admissible est obtenue à nouveau, mais une opération d’une ancienne génération n’est jamais transférée silencieusement vers la nouvelle connexion.
 
-**Redirection de ports.** Une crate autonome prend en charge `-L`, `-R` et `-D` (SOCKS5). Chaque canal SSH appartient à une seule tâche `ssh_io`, ce qui évite un mutex partagé sur le chemin critique.
+**Redirection de ports.** Une crate dédiée assure les redirections locales, distantes et dynamiques SOCKS5. Chaque règle possède ses propres tâches d’écoute et de connexion, gérées via le registre partagé des connexions SSH.
 
 **SSH entièrement en Rust.** `russh` avec `ring` : SSH2 complet, ChaCha20-Poly1305 et AES-GCM, clés Ed25519/RSA/ECDSA, agent SSH sur Unix (`SSH_AUTH_SOCK`) et Windows (`\\.\pipe\openssh-ssh-agent`), et chaînes à plusieurs sauts avec authentification indépendante à chaque saut.
 

@@ -46,7 +46,7 @@ Xem [tài liệu](https://oxideterm.app) để tìm hiểu ứng dụng qua hư�
 | **Độ tin cậy** | Cơ chế kết nối lại Grace Period giữ ứng dụng TUI hoạt động qua những lần mất mạng ngắn, sau đó khôi phục chuyển tiếp cổng, truyền tệp và các tệp đang mở trong trình biên tập |
 | **Tệp và biên tập** | Trình quản lý SFTP hai khung, hàng đợi truyền tệp với giới hạn tốc độ và thời gian hoàn thành dự kiến, dấu trang, trình biên tập từ xa tích hợp với thao tác ghi an toàn, xử lý xung đột và khôi phục không gian làm việc |
 | **Mạng** | Chuyển tiếp cục bộ, từ xa và SOCKS5 động, quy tắc đã lưu, phát hiện cổng từ xa, sơ đồ kết nối, gỡ lỗi socket theo nhu cầu |
-| **Máy tính từ xa** | RDP và VNC tích hợp, hỗ trợ bảng nhớ tạm và thao tác nhập |
+| **Máy tính từ xa** | Cài plugin RDP hoặc VNC từ chợ plugin để sử dụng trình xem tích hợp, bảng nhớ tạm và điều khiển bàn phím, chuột |
 | **Vận hành máy chủ** | Giám sát tiến trình, dịch vụ, nhật ký, cổng, tác vụ, ổ đĩa, gói phần mềm, container và tmux |
 | **AI và tự động hóa** | OxideSens dùng khóa của bạn, MCP, RAG cục bộ, Agent Skills, thao tác được phê duyệt trong không gian làm việc, CLI độc lập |
 | **Xem xét và kiểm tra hoạt động** | Không gian làm việc Thông báo và Kiểm tra hoạt động tùy chọn, cùng bản ghi phiên được mã hóa (cả hai đều tắt theo mặc định) |
@@ -249,7 +249,7 @@ Giao diện và phần xử lý terminal/SSH dùng chung một tiến trình Rus
 
 Phiên SFTP mang số thế hệ kết nối: sau khi kết nối lại, một phiên đủ điều kiện được lấy lại, nhưng thao tác thuộc thế hệ cũ không bao giờ bị âm thầm chuyển sang kết nối mới.
 
-**Chuyển tiếp cổng.** Một crate độc lập hỗ trợ `-L`, `-R` và `-D` (SOCKS5). Mỗi kênh SSH do một tác vụ `ssh_io` duy nhất sở hữu, nên không có mutex dùng chung trên luồng xử lý thường xuyên.
+**Chuyển tiếp cổng.** Một crate riêng cung cấp chuyển tiếp cục bộ, từ xa và SOCKS5 động. Mỗi quy tắc có bộ lắng nghe và tác vụ kết nối riêng, được quản lý qua sổ đăng ký kết nối SSH dùng chung.
 
 **SSH thuần Rust.** `russh` với `ring`: hỗ trợ đầy đủ SSH2, ChaCha20-Poly1305 và AES-GCM, khóa Ed25519/RSA/ECDSA, SSH agent trên Unix (`SSH_AUTH_SOCK`) và Windows (`\\.\pipe\openssh-ssh-agent`), cùng chuỗi nhiều chặng với xác thực độc lập ở mỗi chặng.
 

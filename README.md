@@ -46,7 +46,7 @@ For a guided tour, see the [documentation](https://oxideterm.app).
 | **Reliability** | Grace Period reconnect keeps TUI apps alive through short network drops, then restores forwards, transfers, and open editor files |
 | **Files and editing** | SFTP dual-pane manager, transfer queues with speed limits and ETA, bookmarks, a built-in remote editor with safe writes, conflict handling, and workspace restore |
 | **Networking** | Local, remote, and dynamic SOCKS5 forwarding, saved rules, remote port detection, connection topology, ad-hoc socket debugging |
-| **Remote desktop** | RDP and VNC plugins with the native viewer, clipboard and input support |
+| **Remote desktop** | Install RDP or VNC from the plugin marketplace for the native viewer, clipboard and input support |
 | **Host operations** | Monitoring for processes, services, logs, ports, tasks, disks, packages, containers, and tmux |
 | **AI and automation** | BYOK OxideSens, MCP, local RAG, Agent Skills, approved workspace actions, a standalone CLI |
 | **Review and audit** | Optional Notification & Audit workspace and encrypted session recordings (both off by default) |
@@ -247,7 +247,7 @@ The UI and the terminal/SSH backend share one Rust process; optional remote agen
 
 SFTP sessions carry a connection generation: after a reconnect, an eligible session is reacquired, but an operation from an old generation is never silently moved to the new connection.
 
-**Port forwarding.** A standalone crate supporting `-L`, `-R`, and `-D` (SOCKS5). A single `ssh_io` task owns each SSH channel, so there is no shared mutex on the hot path.
+**Port forwarding.** A dedicated crate supports local, remote, and dynamic SOCKS5 forwarding. Each rule has its own listener and connection tasks, managed through the shared SSH connection registry.
 
 **Pure-Rust SSH.** `russh` with `ring`: full SSH2, ChaCha20-Poly1305 and AES-GCM, Ed25519/RSA/ECDSA keys, SSH agent on Unix (`SSH_AUTH_SOCK`) and Windows (`\\.\pipe\openssh-ssh-agent`), and multi-hop chains with independent auth per hop.
 

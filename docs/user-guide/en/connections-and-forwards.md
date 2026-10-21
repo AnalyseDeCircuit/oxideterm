@@ -36,7 +36,7 @@ When editing a credential, leave the secret empty to keep its saved value. Remov
 
 ## Mosh connections
 
-Mosh is useful for a terminal that must continue across brief network changes. The remote host needs `mosh-server` installed and a reachable UDP port; OxideTerm provides the local client itself.
+Mosh is useful for a terminal that must continue across brief network changes. First install and enable **Mosh** in **Plugin Manager → Marketplace** on this device. The plugin supplies the local transport; the remote host still needs `mosh-server` installed and a reachable UDP port.
 
 1. Open New Connection and choose **Mosh**. Enter the host, username, SSH port, and authentication used to start the remote session.
 2. In **Mosh Settings**, leave **mosh-server executable** as `mosh-server`, or set its remote path if it is not on the server's command search path.
@@ -103,6 +103,8 @@ Resource snapshots can become stale independently of the terminal tab. Refresh t
 
 ## Graphics And VNC
 
+For RDP or VNC, open **Plugin Manager → Marketplace**, install and enable the corresponding **RDP** or **VNC** plugin, then choose that protocol in **New Connection**. Saved profiles remain in Session Manager; each device needs its own plugin installation, including when the profile arrives through cloud sync. Missing or disabled plugins are shown in the connection form.
+
 Graphics/VNC sessions are visual app surfaces backed either by a saved RDP/VNC profile or by a connected node's graphics runtime. They are useful when a remote workflow needs a desktop or graphical application rather than terminal output.
 
 The viewer state is separate from terminal scrollback. If a profile-backed viewer disconnects, reconnect its provider/helper; if a node-launched viewer disconnects, reconnect or restart it from the node context. Do not duplicate a saved SSH profile just to repair a viewer.
@@ -150,6 +152,20 @@ Forward types:
 - Dynamic: a SOCKS-style tunnel.
 
 Attach forwards to the owning connection so their lifecycle is clear. Enable auto-start only for forwards that should start whenever the connection opens. When testing a new forward, confirm both the forwarding row and the owning connection are healthy.
+
+## Standalone SSH Tunnels
+
+Use a standalone tunnel when you need a forwarded port without opening a terminal.
+
+1. Open **New Connection → Advanced Connections → SSH Tunnel**.
+2. Enter a name and optional group, then select the saved SSH host that will carry the tunnel.
+3. Choose **Local**, **Remote**, or **Dynamic (SOCKS5)**. Set the bind address and port; local and remote forwards also need a destination host and port.
+4. Choose **Save** for later use, or **Save and Start** to connect now.
+5. Enable **Connect on application startup** only if this tunnel should connect whenever OxideTerm starts. Authentication may still require your input.
+
+Manage saved tunnels from **Session Manager** and inspect running rules in **Port Forwarding**. A tunnel retains its own SSH connection usage, so closing an unrelated terminal does not stop it. Stop the tunnel explicitly when it is no longer needed. Exiting OxideTerm stops its tunnels; they do not run as an independent background service.
+
+Tunnel profiles participate in cloud sync and encrypted `.oxide` import/export. Running connections are not synchronized. After moving a profile to another device, check the associated SSH host, authentication, and local bind port before starting it.
 
 ## Validation And Export
 

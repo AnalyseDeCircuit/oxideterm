@@ -46,7 +46,7 @@ Eine Einführung finden Sie in der [Dokumentation](https://oxideterm.app).
 | **Zuverlässigkeit** | Die Grace-Period-Wiederverbindung hält TUI-Anwendungen bei kurzen Netzunterbrechungen am Leben und stellt anschließend Weiterleitungen, Übertragungen und geöffnete Editordateien wieder her |
 | **Dateien und Bearbeitung** | SFTP-Dateimanager mit zwei Bereichen, Übertragungswarteschlangen mit Geschwindigkeitsbegrenzung und geschätzter Restzeit, Lesezeichen sowie integrierter Remote-Editor mit sicheren Schreibvorgängen, Konfliktbehandlung und Wiederherstellung des Arbeitsbereichs |
 | **Netzwerk** | Lokale, entfernte und dynamische SOCKS5-Weiterleitung, gespeicherte Regeln, Erkennung entfernter Ports, Verbindungstopologie und gezieltes Socket-Debugging |
-| **Remote-Desktop** | Integriertes RDP und VNC mit Unterstützung für Zwischenablage und Eingaben |
+| **Remote-Desktop** | RDP- oder VNC-Plugin aus dem Marktplatz installieren; native Ansicht mit Zwischenablage und Eingabesteuerung |
 | **Host-Verwaltung** | Überwachung von Prozessen, Diensten, Protokollen, Ports, Aufgaben, Datenträgern, Paketen, Containern und tmux |
 | **KI und Automatisierung** | OxideSens mit eigenem API-Schlüssel, MCP, lokales RAG, Agent Skills, freigegebene Arbeitsbereichsaktionen und eine eigenständige CLI |
 | **Nachverfolgung und Audit** | Optionaler Arbeitsbereich für Benachrichtigungen und Audit sowie verschlüsselte Sitzungsaufzeichnungen (beides standardmäßig deaktiviert) |
@@ -251,7 +251,7 @@ Oberfläche und Terminal-/SSH-Backend teilen sich einen Rust-Prozess; optionale 
 
 SFTP-Sitzungen tragen eine Verbindungsgeneration: Nach einer Wiederverbindung wird eine dafür geeignete Sitzung neu bezogen; eine Operation aus einer alten Generation wird jedoch niemals stillschweigend auf die neue Verbindung übertragen.
 
-**Portweiterleitung.** Eine eigenständige Crate unterstützt `-L`, `-R` und `-D` (SOCKS5). Jeder SSH-Kanal gehört einer einzelnen `ssh_io`-Task, sodass auf dem zeitkritischen Ausführungspfad kein gemeinsamer Mutex nötig ist.
+**Portweiterleitung.** Eine eigene Crate unterstützt lokale, entfernte und dynamische SOCKS5-Weiterleitungen. Jede Regel besitzt eigene Listener und Verbindungstasks und nutzt die gemeinsame SSH-Verbindungsverwaltung.
 
 **SSH vollständig in Rust.** `russh` mit `ring`: vollständiges SSH2, ChaCha20-Poly1305 und AES-GCM, Ed25519-/RSA-/ECDSA-Schlüssel, SSH-Agent unter Unix (`SSH_AUTH_SOCK`) und Windows (`\\.\pipe\openssh-ssh-agent`) sowie Verbindungen über mehrere Zwischenstationen mit unabhängiger Authentifizierung je Station.
 
