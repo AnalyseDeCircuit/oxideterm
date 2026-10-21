@@ -11,9 +11,10 @@ use std::{
 };
 
 use oxideterm_sftp::{
-    LocalDownloadDisposition, SftpTransferManager, TarTransferOptions, probe_scp_capabilities,
-    probe_tar_capabilities, profile_local_directory, scp_download_directory, scp_download_file,
-    scp_upload_directory, scp_upload_file, tar_upload_directory,
+    LocalDownloadDisposition, SftpExecChannelOpener, SftpTransferManager, TarTransferOptions,
+    probe_scp_capabilities, probe_tar_capabilities, profile_local_directory,
+    scp_download_directory, scp_download_file, scp_upload_directory, scp_upload_file,
+    tar_upload_directory,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ProxyHopConfig, SshConfig,
@@ -545,6 +546,206 @@ impl SshConfigExt for SshConfig {
     fn with_proxy_chain(mut self, proxy_chain: Vec<ProxyHopConfig>) -> Self {
         self.proxy_chain = Some(proxy_chain);
         self
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires local sshd and ssh-keygen"]
+async fn local_sshd_sftp_channel_pressure_preserves_transfers_and_refresh() {
+    for limit in [2, 3, 5, 10] {
+        let sshd = SshdFixture::with_max_sessions(limit);
+        let terminal = SshTransportClient::new(target_config(&sshd))
+            .connect_shell_with_registry(
+                SshConnectionRegistry::default(),
+                ConnectionConsumer::Terminal("sftp-pressure".into()),
+            )
+            .await
+            .unwrap();
+        let connection = terminal.ssh_connection_handle().unwrap();
+        let source = sshd.dir.join("source");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("nested/child.txt"), b"nested contents").unwrap();
+        let payload = vec![0x5a; 1024 * 1024];
+        fs::write(source.join("payload.bin"), &payload).unwrap();
+        let root = sshd.dir.to_str().unwrap();
+
+        for _ in 0..40 {
+            let listing = connection.acquire_transfer_sftp().await.unwrap();
+            assert!(
+                listing
+                    .list_dir(root, None)
+                    .await
+                    .unwrap()
+                    .iter()
+                    .any(|f| f.name == "source")
+            );
+        }
+        // Existing shared consumers must remain usable when no new slot is available.
+        let browser = connection.acquire_sftp().await.unwrap();
+        let listing = connection.acquire_transfer_sftp().await.unwrap();
+        assert_eq!(
+            listing
+                .stat(source.join("nested/child.txt").to_str().unwrap())
+                .await
+                .unwrap()
+                .size,
+            15
+        );
+        drop(listing);
+        drop(browser);
+        connection.clear_sftp().await;
+
+        for round in 0..3 {
+            let transfer = connection.acquire_transfer_sftp().await.unwrap();
+            let manager = Arc::new(SftpTransferManager::new());
+            manager.set_speed_limit_kbps(1024);
+            let destination = sshd.dir.join(format!("uploaded-{round}"));
+            let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(32);
+            let upload = async {
+                let result = transfer
+                    .upload_dir(
+                        source.to_str().unwrap(),
+                        destination.to_str().unwrap(),
+                        "pressure-upload",
+                        Some(progress_tx),
+                        Some(manager),
+                    )
+                    .await;
+                drop(transfer);
+                result
+            };
+            let refresh = async {
+                progress_rx
+                    .recv()
+                    .await
+                    .expect("upload must be active during refresh");
+                let listing = connection.acquire_transfer_sftp().await.unwrap();
+                assert!(
+                    listing
+                        .list_dir(root, None)
+                        .await
+                        .unwrap()
+                        .iter()
+                        .any(|f| f.name == "source")
+                );
+                while progress_rx.recv().await.is_some() {}
+            };
+            let (result, ()) = tokio::time::timeout(Duration::from_secs(15), async {
+                tokio::join!(upload, refresh)
+            })
+            .await
+            .expect("upload and refresh must not deadlock");
+            assert_eq!(result.unwrap(), 2);
+            assert_eq!(fs::read(destination.join("payload.bin")).unwrap(), payload);
+            assert_eq!(
+                fs::read(destination.join("nested/child.txt")).unwrap(),
+                b"nested contents"
+            );
+            let listing = connection.acquire_transfer_sftp().await.unwrap();
+            assert_eq!(
+                listing
+                    .stat(destination.join("payload.bin").to_str().unwrap())
+                    .await
+                    .unwrap()
+                    .size,
+                payload.len() as u64
+            );
+            if round == 0 {
+                let downloaded = sshd.dir.join("downloaded");
+                assert_eq!(
+                    listing
+                        .download_dir(
+                            destination.to_str().unwrap(),
+                            downloaded.to_str().unwrap(),
+                            "pressure-download",
+                            None,
+                            None
+                        )
+                        .await
+                        .unwrap(),
+                    2
+                );
+                assert_eq!(fs::read(downloaded.join("payload.bin")).unwrap(), payload);
+                assert_eq!(
+                    fs::read(downloaded.join("nested/child.txt")).unwrap(),
+                    b"nested contents"
+                );
+            }
+        }
+
+        let manager = Arc::new(SftpTransferManager::new());
+        manager.set_speed_limit_kbps(64);
+        let transfer = connection.acquire_transfer_sftp().await.unwrap();
+        let cancelled_destination = sshd.dir.join("cancelled");
+        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel(32);
+        let upload = async {
+            transfer
+                .upload_dir(
+                    source.to_str().unwrap(),
+                    cancelled_destination.to_str().unwrap(),
+                    "cancel-pressure",
+                    Some(progress_tx),
+                    Some(manager.clone()),
+                )
+                .await
+        };
+        let cancel = async {
+            progress_rx.recv().await.unwrap();
+            let listing = connection.acquire_transfer_sftp().await.unwrap();
+            assert!(manager.cancel("cancel-pressure"));
+            while progress_rx.recv().await.is_some() {}
+            assert_eq!(
+                listing
+                    .stat(source.join("nested/child.txt").to_str().unwrap())
+                    .await
+                    .unwrap()
+                    .size,
+                15
+            );
+        };
+        let (cancelled, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(upload, cancel)
+        })
+        .await
+        .expect("cancellation must leave the shared listing usable");
+        assert!(matches!(
+            cancelled,
+            Err(oxideterm_sftp::SftpError::TransferCancelled)
+        ));
+        drop(transfer);
+
+        // Raw session channels cannot fall back to sharing: acquiring every slot
+        // proves transfer/refresh/cancellation did not leave an SFTP owner behind.
+        let mut slots = Vec::new();
+        for _ in 0..limit - 1 {
+            let channel = tokio::time::timeout(Duration::from_secs(3), async {
+                loop {
+                    match connection.open_exec_channel().await {
+                        Ok(channel) => break channel,
+                        Err(_) => tokio::time::sleep(Duration::from_millis(10)).await,
+                    }
+                }
+            })
+            .await
+            .expect("all server slots must be reclaimed");
+            slots.push(channel);
+        }
+        assert!(connection.open_exec_channel().await.is_err());
+        let rejected =
+            tokio::time::timeout(Duration::from_secs(3), connection.acquire_transfer_sftp())
+                .await
+                .expect("unavailable slots must not cause an endless wait")
+                .unwrap_err();
+        assert!(matches!(
+            rejected,
+            oxideterm_sftp::SftpError::ChannelOpenRejected(_)
+        ));
+        for channel in slots {
+            channel.close().await.unwrap();
+        }
+        eprintln!(
+            "MaxSessions={limit}: 40 refreshes, 3 verified uploads with concurrent refresh, cancellation, and slot reclamation passed"
+        );
     }
 }
 

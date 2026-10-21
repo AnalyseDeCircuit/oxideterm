@@ -1055,7 +1055,7 @@ pub(super) struct SftpWorkspaceEntity {
     remote_path_by_remote: HashMap<SftpRemoteId, String>,
     remote_home_by_remote: HashMap<SftpRemoteId, String>,
     view_generation: u64,
-    init_error: Option<String>,
+    init_error: Option<SftpViewError>,
     pub(super) focused_input: Option<SftpInput>,
     editing_local_path: bool,
     editing_remote_path: bool,
@@ -1944,6 +1944,12 @@ mod entity_delivery_tests {
 
 // Keep each SFTP responsibility in a real module while preserving this file as the facade.
 mod actions;
+#[derive(Clone)]
+enum SftpViewError {
+    Operation(String),
+    Directory(String),
+}
+
 mod controls;
 mod dialogs;
 mod file_list;

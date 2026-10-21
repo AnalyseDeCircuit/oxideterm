@@ -12,7 +12,7 @@ struct SftpPaneRenderSnapshot {
 }
 
 struct SftpSurfaceRenderSnapshot {
-    init_error: Option<String>,
+    init_error: Option<SftpViewError>,
     pane_split_ratio: f32,
     active_pane: SftpPane,
     drag_over_pane: Option<SftpPane>,

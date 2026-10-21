@@ -360,7 +360,7 @@ impl SftpWorkspaceEntity {
                             self.request_remote_load();
                         }
                     }
-                    self.init_error = Some(format!("{path}: {error}"));
+                    self.init_error = Some(SftpViewError::Directory(format!("{path}: {error}")));
                 }
                 SftpRemoteListOutcome {
                     bind_session: None,
@@ -495,7 +495,8 @@ impl SftpWorkspaceEntity {
                         self.init_error = None;
                     }
                     Err(error) => {
-                        self.init_error = Some(format!("{path}: {error}"));
+                        self.init_error =
+                            Some(SftpViewError::Directory(format!("{path}: {error}")));
                     }
                 }
                 true
@@ -632,7 +633,7 @@ impl SftpWorkspaceEntity {
                                 variant: TerminalNoticeVariant::Error,
                             });
                         } else {
-                            self.init_error = Some(error);
+                            self.init_error = Some(SftpViewError::Operation(error));
                         }
                     }
                 }
@@ -694,7 +695,7 @@ impl SftpWorkspaceEntity {
                         }
                     }
                     Err(error) => {
-                        self.init_error = Some(error);
+                        self.init_error = Some(SftpViewError::Operation(error));
                     }
                 }
                 true
@@ -1807,7 +1808,7 @@ impl SftpWorkspaceEntity {
                 }
                 Err(error) => {
                     if !is_sftp_incomplete_store_compat_error(&error) {
-                        self.init_error = Some(error);
+                        self.init_error = Some(SftpViewError::Operation(error));
                     }
                     self.incomplete_transfers.clear();
                     self.show_incomplete = false;

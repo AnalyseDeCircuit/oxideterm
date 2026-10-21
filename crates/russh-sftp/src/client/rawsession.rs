@@ -351,6 +351,10 @@ impl RawSftpSession {
         Ok(())
     }
 
+    pub fn is_closed(&self) -> bool {
+        self.transport.is_closed()
+    }
+
     pub async fn init(&self) -> SftpResult<Version> {
         let result = self.request(None, Init::default().into()).await?;
         if let Packet::Version(version) = result {

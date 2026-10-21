@@ -1,5 +1,15 @@
 use super::*;
 
+async fn transfer_sftp<'a>(
+    backend: &SftpRemoteBackend,
+    prepared: &'a mut Option<SftpSession>,
+) -> Result<&'a SftpSession, String> {
+    if prepared.is_none() {
+        *prepared = Some(backend.acquire_transfer_sftp().await?);
+    }
+    Ok(prepared.as_ref().expect("transfer session was initialized"))
+}
+
 pub(in crate::workspace::sftp) struct SftpTransferLaunch {
     id: u64,
     transfer_id: String,
@@ -36,7 +46,7 @@ impl SftpWorkspaceEntity {
             .next()
             .filter(|name| !name.is_empty() && *name != "." && *name != "..")
         else {
-            self.init_error = Some(missing_path_error);
+            self.init_error = Some(SftpViewError::Operation(missing_path_error));
             cx.notify();
             return None;
         };
@@ -986,6 +996,7 @@ impl WorkspaceApp {
                     .as_ref()
                     .map_or(context.clone(), |request| context.with_request(request))
             });
+            let mut prepared_sftp = None;
             let protocol = match resume_progress
                 .as_ref()
                 .map(|progress| progress.protocol)
@@ -1014,24 +1025,39 @@ impl WorkspaceApp {
                         RemoteTransferProtocol::Scp
                     }
                     oxideterm_settings::FileTransferProtocolPreference::Auto => {
-                        if backend.acquire_sftp().await.is_ok() {
-                            RemoteTransferProtocol::Sftp
-                        } else {
-                            let capabilities = manager
-                                .scp_capabilities(&resolved_connection_id, &resolved_handle)
-                                .await;
-                            if !capabilities.supports_scp {
+                        match backend.acquire_transfer_sftp().await {
+                            Ok(session) => {
+                                prepared_sftp = Some(session);
+                                RemoteTransferProtocol::Sftp
+                            }
+                            Err(error) if error.contains("SFTP subsystem not available:") => {
+                                let capabilities = manager
+                                    .scp_capabilities(&resolved_connection_id, &resolved_handle)
+                                    .await;
+                                if !capabilities.supports_scp {
+                                    let _ = tx.send(SftpWorkerResult::TransferComplete {
+                                        remote_id,
+                                        transfer_id,
+                                        id,
+                                        result: Err(transfer_protocol_unavailable_error),
+                                        refresh_remote: false,
+                                        refresh_local: false,
+                                    });
+                                    return;
+                                }
+                                RemoteTransferProtocol::Scp
+                            }
+                            Err(error) => {
                                 let _ = tx.send(SftpWorkerResult::TransferComplete {
                                     remote_id,
                                     transfer_id,
                                     id,
-                                    result: Err(transfer_protocol_unavailable_error),
+                                    result: Err(error),
                                     refresh_remote: false,
                                     refresh_local: false,
                                 });
                                 return;
                             }
-                            RemoteTransferProtocol::Scp
                         }
                     }
                 },
@@ -1276,10 +1302,7 @@ impl WorkspaceApp {
                         // resume, otherwise a failed tar task can unexpectedly
                         // restart as tar again instead of its persisted strategy.
                         {
-                            let shared = backend
-                                .acquire_sftp()
-                                .await?;
-                            let shared = shared.lock().await;
+                            let shared = transfer_sftp(&backend, &mut prepared_sftp).await?;
                             for prefix in remote_directory_prefixes(&remote_path) {
                                 let _ = shared.mkdir(&prefix).await;
                             }
@@ -1316,9 +1339,7 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
-                            let sftp = backend
-                                .acquire_transfer_sftp()
-                                .await?;
+                            let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                             sftp.upload_dir(
                                 &local_path,
                                 &remote_path,
@@ -1335,9 +1356,7 @@ impl WorkspaceApp {
                         true,
                         Some(RemoteTransferStrategy::DirectoryRecursive),
                     ) => {
-                        let sftp = backend
-                            .acquire_transfer_sftp()
-                            .await?;
+                        let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                         sftp.upload_dir(
                             &local_path,
                             &remote_path,
@@ -1365,10 +1384,7 @@ impl WorkspaceApp {
                             .map_err(|error| error.to_string())?;
                         if let Some(profile) = profile.filter(|profile| profile.prefers_tar()) {
                             {
-                                let shared = backend
-                                    .acquire_sftp()
-                                    .await?;
-                                let shared = shared.lock().await;
+                                let shared = transfer_sftp(&backend, &mut prepared_sftp).await?;
                                 for prefix in remote_directory_prefixes(&remote_path) {
                                     let _ = shared.mkdir(&prefix).await;
                                 }
@@ -1403,9 +1419,7 @@ impl WorkspaceApp {
                                         &transfer_id,
                                         RemoteTransferStrategy::DirectoryRecursive,
                                     );
-                                    let sftp = backend
-                                        .acquire_transfer_sftp()
-                                        .await?;
+                                    let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                                     sftp.upload_dir(
                                         &local_path,
                                         &remote_path,
@@ -1427,9 +1441,7 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
-                            let sftp = backend
-                                .acquire_transfer_sftp()
-                                .await?;
+                            let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                             sftp.upload_dir(
                                 &local_path,
                                 &remote_path,
@@ -1442,9 +1454,7 @@ impl WorkspaceApp {
                         }
                     }
                     (SftpTransferDirection::Upload, false, _) => {
-                        let sftp = backend
-                            .acquire_transfer_sftp()
-                            .await?;
+                        let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                         sftp.upload_with_resume(
                             &local_path,
                             &remote_path,
@@ -1469,10 +1479,7 @@ impl WorkspaceApp {
                         .await;
                         if capabilities.supports_tar {
                             let profile = {
-                                let shared = backend
-                                    .acquire_sftp()
-                                    .await?;
-                                let shared = shared.lock().await;
+                                let shared = transfer_sftp(&backend, &mut prepared_sftp).await?;
                                 shared
                                     .profile_remote_directory(
                                         &remote_path,
@@ -1505,9 +1512,7 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
-                            let sftp = backend
-                                .acquire_transfer_sftp()
-                                .await?;
+                            let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                             sftp.download_dir(
                                 &remote_path,
                                 &local_path,
@@ -1524,9 +1529,7 @@ impl WorkspaceApp {
                         true,
                         Some(RemoteTransferStrategy::DirectoryRecursive),
                     ) => {
-                        let sftp = backend
-                            .acquire_transfer_sftp()
-                            .await?;
+                        let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                         sftp.download_dir(
                             &remote_path,
                             &local_path,
@@ -1544,10 +1547,7 @@ impl WorkspaceApp {
                         )
                         .await;
                         let profile = if capabilities.supports_tar {
-                            let shared = backend
-                                .acquire_sftp()
-                                .await?;
-                            let shared = shared.lock().await;
+                            let shared = transfer_sftp(&backend, &mut prepared_sftp).await?;
                             match shared
                                 .profile_remote_directory(
                                     &remote_path,
@@ -1596,9 +1596,7 @@ impl WorkspaceApp {
                                         &transfer_id,
                                         RemoteTransferStrategy::DirectoryRecursive,
                                     );
-                                    let sftp = backend
-                                        .acquire_transfer_sftp()
-                                        .await?;
+                                    let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                                     sftp.download_dir(
                                         &remote_path,
                                         &local_path,
@@ -1620,9 +1618,7 @@ impl WorkspaceApp {
                                 &transfer_id,
                                 RemoteTransferStrategy::DirectoryRecursive,
                             );
-                            let sftp = backend
-                                .acquire_transfer_sftp()
-                                .await?;
+                            let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                             sftp.download_dir(
                                 &remote_path,
                                 &local_path,
@@ -1635,9 +1631,7 @@ impl WorkspaceApp {
                         }
                     }
                     (SftpTransferDirection::Download, false, _) => {
-                        let sftp = backend
-                            .acquire_transfer_sftp()
-                            .await?;
+                        let sftp = transfer_sftp(&backend, &mut prepared_sftp).await?;
                         sftp.download_with_resume(
                             &remote_path,
                             &local_path,
@@ -1657,6 +1651,7 @@ impl WorkspaceApp {
             }
             .await;
 
+            drop(prepared_sftp);
             // Drain the producer's final progress before freezing the task result.
             let _ = progress_task.await;
 

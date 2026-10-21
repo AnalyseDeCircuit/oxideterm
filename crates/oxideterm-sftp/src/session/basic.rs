@@ -59,6 +59,24 @@ impl SftpSession {
         self
     }
 
+    /// Shares the multiplexed protocol channel, with independent cwd and audit context.
+    pub fn share(&self) -> Self {
+        Self {
+            audit: self.audit.clone(),
+            sftp: self.sftp.clone(),
+            channel_factory: self.channel_factory.clone(),
+            _connection_owner: self._connection_owner.clone(),
+            single_channel_transport: self.single_channel_transport,
+            session_id: self.session_id.clone(),
+            home: self.home.clone(),
+            cwd: self.cwd.clone(),
+        }
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.sftp.is_closed()
+    }
+
     /// Prevents directory batching from opening sibling SSH channels.
     pub fn with_single_channel_transport(mut self) -> Self {
         self.single_channel_transport = true;

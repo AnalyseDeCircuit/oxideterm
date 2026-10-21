@@ -131,6 +131,11 @@ impl SftpSession {
         self.session.close_session()
     }
 
+    /// Whether the transport has terminated or closure has been requested.
+    pub fn is_closed(&self) -> bool {
+        self.session.is_closed()
+    }
+
     /// Attempts to open a file in read-only mode.
     pub async fn open<T: Into<String>>(&self, filename: T) -> SftpResult<File> {
         self.open_with_flags(filename, OpenFlags::READ).await

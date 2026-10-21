@@ -602,6 +602,7 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
             classify_io_error_kind(io_error.kind()).unwrap_or_else(|| classify_message(&message)),
         ),
         SftpError::ChannelError(_)
+        | SftpError::ChannelOpenRejected(_)
         | SftpError::ProtocolError(_)
         | SftpError::SubsystemNotAvailable(_)
             if matches!(
@@ -626,7 +627,9 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
                 IdeFileErrorKind::Other
             }
         }
-        SftpError::ChannelError(_) | SftpError::ProtocolError(_) => IdeFileErrorKind::Other,
+        SftpError::ChannelError(_)
+        | SftpError::ChannelOpenRejected(_)
+        | SftpError::ProtocolError(_) => IdeFileErrorKind::Other,
     };
     IdeFileError::new(kind, message)
 }

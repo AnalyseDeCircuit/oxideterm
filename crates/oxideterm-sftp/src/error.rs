@@ -17,6 +17,8 @@ pub enum SftpError {
     IoError(#[from] std::io::Error),
     #[error("Channel error: {0}")]
     ChannelError(String),
+    #[error("Channel error: {0}")]
+    ChannelOpenRejected(String),
     #[error("Protocol error: {0}")]
     ProtocolError(String),
     #[error("Invalid path: {0}")]
@@ -48,7 +50,10 @@ impl SftpError {
 
     pub fn is_channel_recoverable(&self) -> bool {
         match self {
-            Self::ChannelError(_) | Self::ProtocolError(_) | Self::SubsystemNotAvailable(_) => true,
+            Self::ChannelError(_)
+            | Self::ChannelOpenRejected(_)
+            | Self::ProtocolError(_)
+            | Self::SubsystemNotAvailable(_) => true,
             Self::IoError(error) => matches!(
                 error.kind(),
                 std::io::ErrorKind::ConnectionReset

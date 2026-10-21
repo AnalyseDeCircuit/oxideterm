@@ -503,6 +503,10 @@ impl SessionTransport {
         self.terminate();
     }
 
+    pub(crate) fn is_closed(&self) -> bool {
+        self.cancellation.is_cancelled()
+    }
+
     fn terminate(&self) {
         // Invalidating the live session wakes admission waiters and removes all
         // response ownership before either transport task can outlive it.

@@ -92,7 +92,12 @@ impl SftpChannelOpener for SshSftpChannelOpener {
         async {
             // Auxiliary channels belong to this SFTP session's transport, never a later registry binding.
             self.transport.target.channel_open_session().await
-                .map_err(|error| SftpError::ChannelError(error.to_string()))
+                .map_err(|error| match error {
+                    russh::Error::ChannelOpenFailure(
+                        russh::ChannelOpenFailure::ConnectFailed | russh::ChannelOpenFailure::ResourceShortage,
+                    ) => SftpError::ChannelOpenRejected(error.to_string()),
+                    _ => SftpError::ChannelError(error.to_string()),
+                })
         }
     }
 }

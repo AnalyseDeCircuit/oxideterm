@@ -3,10 +3,14 @@ use super::*;
 impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn render_sftp_init_error(
         &self,
-        error: &str,
+        error: &SftpViewError,
         _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let (label, message) = match error {
+            SftpViewError::Operation(message) => ("sftp.errors.connection_sync", message),
+            SftpViewError::Directory(message) => ("sftp.errors.directory_load_failed", message),
+        };
         div()
             .flex()
             .items_center()
@@ -19,17 +23,13 @@ impl WorkspaceApp {
             .py(px(8.0))
             .text_size(px(SFTP_TEXT_XS))
             .text_color(rgb(self.tokens.ui.text))
-            .child(
-                self.render_selectable_text_scoped(
-                    "sftp-init-error",
-                    (),
-                    self.i18n
-                        .t("sftp.errors.connection_sync")
-                        .replace("{{error}}", error),
-                    self.tokens.ui.text,
-                    cx,
-                ),
-            )
+            .child(self.render_selectable_text_scoped(
+                "sftp-init-error",
+                (),
+                self.i18n.t(label).replace("{{error}}", message),
+                self.tokens.ui.text,
+                cx,
+            ))
             .child(
                 div()
                     .flex()
@@ -56,8 +56,8 @@ impl WorkspaceApp {
                                 // Retry asks the node owner to rebuild SFTP; SCP remains an
                                 // explicit compatibility action beside this control.
                                 this.ensure_node_connection_started(&node_id, cx);
-                                this.request_sftp_remote_load(cx);
                             }
+                            this.request_sftp_remote_load(cx);
                             cx.stop_propagation();
                             cx.notify();
                         }),

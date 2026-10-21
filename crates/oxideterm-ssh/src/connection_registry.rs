@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     sync::{
-        Arc,
+        Arc, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -252,6 +252,7 @@ struct ConnectionEntry {
     consumers: RwLock<Vec<ConnectionConsumer>>,
     physical: RwLock<PhysicalConnection>,
     sftp: Mutex<SharedSftpState>,
+    active_sftp: ParkingMutex<Vec<(u64, Weak<SftpSession>)>>,
     sftp_generation: AtomicU64,
     sftp_state: RwLock<SftpSessionState>,
     remote_env: RwLock<Option<RemoteEnvInfo>>,
@@ -307,6 +308,7 @@ impl ConnectionEntry {
             consumers: RwLock::new(Vec::new()),
             physical: RwLock::new(PhysicalConnection::default()),
             sftp: Mutex::new(SharedSftpState::Empty),
+            active_sftp: ParkingMutex::new(Vec::new()),
             sftp_generation: AtomicU64::new(0),
             sftp_state: RwLock::new(SftpSessionState::default()),
             remote_env: RwLock::new(None),
@@ -704,7 +706,7 @@ impl SshConnectionHandle {
                 continue;
             }
 
-            let created = self.create_sftp_session().await;
+            let created = self.acquire_transfer_sftp().await;
             let mut guard = self.entry.sftp.lock().await;
             match created {
                 Ok(sftp) => {
@@ -763,7 +765,52 @@ impl SshConnectionHandle {
     }
 
     pub async fn acquire_transfer_sftp(&self) -> Result<SftpSession, SftpError> {
-        self.create_sftp_session().await
+        let generation = self.entry.sftp_generation.load(Ordering::Acquire);
+        for attempt in 0..6 {
+            match self.create_sftp_session().await {
+                Ok(session) => {
+                    let session = Arc::new(session);
+                    let mut active = self.entry.active_sftp.lock();
+                    let current_generation = self.entry.sftp_generation.load(Ordering::Acquire);
+                    active.retain(|(g, session)| {
+                        *g == current_generation && session.strong_count() > 0
+                    });
+                    if generation == current_generation {
+                        active.push((generation, Arc::downgrade(&session)));
+                    }
+                    // Only callers retain the channel; the registry must not keep idle
+                    // transfer channels (or their physical connection owner) alive.
+                    return Ok(session.share().with_connection_owner(session));
+                }
+                Err(error @ SftpError::ChannelOpenRejected(_)) => {
+                    if generation != self.entry.sftp_generation.load(Ordering::Acquire) {
+                        return Err(error);
+                    }
+                    let existing = {
+                        let active = self.entry.active_sftp.lock();
+                        active
+                            .iter()
+                            .filter(|(g, _)| *g == generation)
+                            .filter_map(|(_, session)| session.upgrade())
+                            .find(|session| !session.is_closed())
+                    };
+                    if let Some(session) = existing {
+                        return Ok(session
+                            .share()
+                            .with_single_channel_transport()
+                            .with_connection_owner(session));
+                    }
+                    if attempt == 5 {
+                        return Err(error);
+                    }
+                    // The last consumer may have just dropped a channel. Its close
+                    // reaches sshd asynchronously; retry only rejected opens, never writes.
+                    sleep(Duration::from_millis(20 << attempt)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("last rejected open returns its error")
     }
 
     pub async fn clear_sftp(&self) {

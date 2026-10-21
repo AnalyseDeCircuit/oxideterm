@@ -33,7 +33,10 @@ pub fn calculate_backoff(attempt: usize, config: &RetryConfig) -> Duration {
 
 pub fn is_retryable_error(error: &SftpError) -> bool {
     match error {
-        SftpError::IoError(_) | SftpError::ChannelError(_) | SftpError::TransferError(_) => true,
+        SftpError::IoError(_)
+        | SftpError::ChannelError(_)
+        | SftpError::ChannelOpenRejected(_)
+        | SftpError::TransferError(_) => true,
         SftpError::ProtocolError(message) => {
             message.contains("timeout") || message.contains("connection")
         }
@@ -77,6 +80,8 @@ pub fn error_should_retry_initialization(error: &str) -> bool {
         return false;
     }
     error_is_connection_unavailable(error)
+        || lower.contains("failed to open channel (connectfailed)")
+        || lower.contains("failed to open channel (resourceshortage)")
         || lower.contains("not connected")
         || lower.contains("connection timeout")
         || lower.contains("timeout")
