@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "Extraire l’archive",
-      "hint": "Vérifiez et modifiez la commande, puis ajoutez-la comme nouveau brouillon dans la barre de commandes. Rien ne s’exécute automatiquement.",
+      "command": "Commande d’extraction",
+      "change_shell": "Changer",
+      "open_hint": "Cliquez pour préparer la commande d’extraction",
+      "open_modifier_hint": "{{modifier}} + clic pour préparer la commande d’extraction",
       "source": "Archive",
       "destination": "Dossier de destination",
-      "environment_hint": "La détection utilise la connexion SSH ou la distribution WSL d’origine. Si vous êtes entré dans un autre hôte ou conteneur, revenez d’abord à cet environnement.",
-      "confirm_environment": "Je suis dans l’environnement indiqué et j’ai sélectionné le shell actuel",
       "probing": "Vérification des outils d’extraction disponibles…",
       "fill": "Ajouter à la barre de commandes",
       "context_unavailable": "Revenez à un shell inactif avant de préparer l’extraction.",

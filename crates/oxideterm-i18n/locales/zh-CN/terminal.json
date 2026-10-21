@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "解压压缩包",
-      "hint": "检查并编辑命令后，填入新的命令栏草稿，不会自动执行。",
+      "command": "解压命令",
+      "change_shell": "切换",
+      "open_hint": "点击生成解压命令",
+      "open_modifier_hint": "{{modifier}} + 点击生成解压命令",
       "source": "压缩包",
       "destination": "解压目录",
-      "environment_hint": "探测针对原始 SSH 连接或 WSL 发行版。如果已进入其他主机或容器，请先返回该环境。",
-      "confirm_environment": "我仍在上述环境中，并已选择当前使用的 Shell",
       "probing": "正在检查可用的解压工具…",
       "fill": "填入命令栏",
       "context_unavailable": "请返回空闲的 Shell 后再生成解压命令。",

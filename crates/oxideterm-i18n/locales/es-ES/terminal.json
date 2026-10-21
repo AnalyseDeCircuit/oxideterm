@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "Extraer archivo",
-      "hint": "Revisa y edita el comando antes de añadirlo como borrador nuevo a la barra de comandos. No se ejecutará automáticamente.",
+      "command": "Comando de extracción",
+      "change_shell": "Cambiar",
+      "open_hint": "Haz clic para preparar el comando de extracción",
+      "open_modifier_hint": "{{modifier}} + clic para preparar el comando de extracción",
       "source": "Archivo",
       "destination": "Carpeta de destino",
-      "environment_hint": "La detección usa la conexión SSH o distribución WSL original. Si has entrado en otro equipo o contenedor, vuelve primero a ese entorno.",
-      "confirm_environment": "Estoy en el entorno indicado y he seleccionado el intérprete actual",
       "probing": "Comprobando las herramientas de extracción disponibles…",
       "fill": "Añadir a la barra de comandos",
       "context_unavailable": "Vuelve a un intérprete inactivo antes de preparar la extracción.",

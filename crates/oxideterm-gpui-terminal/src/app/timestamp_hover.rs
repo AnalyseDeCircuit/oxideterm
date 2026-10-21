@@ -8,7 +8,7 @@ use oxideterm_terminal::{TerminalCell, TerminalSnapshot};
 use super::{TerminalPane, TerminalPaneEvent};
 use crate::terminal_ui::TERMINAL_CONTENT_PADDING;
 
-pub(super) struct TerminalTimestampHover {
+pub(super) struct TerminalTextHover {
     row: usize,
     columns: Range<usize>,
     pub(super) generation: u64,
@@ -24,8 +24,9 @@ impl TerminalPane {
                 .as_ref()
                 .map(|text| (text.as_str(), hover.position));
         }
-        self.timestamp_hover
+        self.archive_hover
             .as_ref()
+            .or(self.timestamp_hover.as_ref())
             .map(|hover| (hover.label.as_str(), hover.position))
     }
 
@@ -34,9 +35,47 @@ impl TerminalPane {
         if custom {
             self.hovered_link = None;
         }
-        if self.timestamp_hover.take().is_some() || custom {
+        let timestamp = self.timestamp_hover.take().is_some();
+        let archive = self.archive_hover.take().is_some();
+        if timestamp || archive || custom {
             cx.emit(TerminalPaneEvent::HoverTooltipChanged);
         }
+    }
+
+    pub(super) fn update_archive_hover(
+        &mut self,
+        link: &super::TerminalLinkRange,
+        position: Point<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.archive_hover.as_ref().is_some_and(|hover| {
+            hover.generation == self.snapshot_generation
+                && hover.row == link.row
+                && hover.columns == (link.start_col..link.end_col)
+        }) {
+            return;
+        }
+        self.clear_terminal_hover(cx);
+        let label = if self.settings.open_links_with_modifier {
+            self.preferences.archive_link_modifier_hint.replace(
+                "{{modifier}}",
+                if cfg!(target_os = "macos") {
+                    "⌘"
+                } else {
+                    "Ctrl"
+                },
+            )
+        } else {
+            self.preferences.archive_link_hint.clone()
+        };
+        self.archive_hover = Some(TerminalTextHover {
+            row: link.row,
+            columns: link.start_col..link.end_col,
+            generation: self.snapshot_generation,
+            label,
+            position,
+        });
+        cx.emit(TerminalPaneEvent::HoverTooltipChanged);
     }
 
     pub(super) fn update_timestamp_hover(
@@ -59,7 +98,8 @@ impl TerminalPane {
             self.clear_terminal_hover(cx);
             return;
         };
-        self.timestamp_hover = Some(TerminalTimestampHover {
+        self.clear_terminal_hover(cx);
+        self.timestamp_hover = Some(TerminalTextHover {
             row: point.row,
             columns,
             generation: self.snapshot_generation,

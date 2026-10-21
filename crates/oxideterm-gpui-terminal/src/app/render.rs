@@ -286,6 +286,13 @@ impl Render for TerminalPane {
         {
             self.clear_terminal_hover(cx);
         }
+        if self
+            .archive_hover
+            .as_ref()
+            .is_some_and(|hover| hover.generation != self.snapshot_generation)
+        {
+            self.clear_terminal_hover(cx);
+        }
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         if self
             .context_menu

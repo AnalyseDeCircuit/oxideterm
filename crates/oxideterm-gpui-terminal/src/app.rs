@@ -64,7 +64,7 @@ mod scrollbar;
 mod timestamp_hover;
 mod trigger_interaction;
 
-use timestamp_hover::TerminalTimestampHover;
+use timestamp_hover::TerminalTextHover;
 
 use crate::modem_worker::{
     ModemPromptSelection, ModemWorkerEvent, ModemWorkerJob, ModemWorkerProgress,
@@ -523,7 +523,8 @@ pub struct TerminalPane {
     selected_search_match: Option<usize>,
     pending_search_reveal: bool,
     hovered_link: Option<TerminalLinkRange>,
-    timestamp_hover: Option<TerminalTimestampHover>,
+    timestamp_hover: Option<TerminalTextHover>,
+    archive_hover: Option<TerminalTextHover>,
     interactive_trigger_rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
     interactive_trigger_hover: Option<trigger_interaction::TriggerHover>,
     trigger_interaction_requested:
@@ -1275,6 +1276,7 @@ impl TerminalPane {
             pending_search_reveal: false,
             hovered_link: None,
             timestamp_hover: None,
+            archive_hover: None,
             interactive_trigger_rules: None,
             interactive_trigger_hover: None,
             trigger_interaction_requested: None,

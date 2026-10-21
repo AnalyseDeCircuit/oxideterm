@@ -1199,6 +1199,8 @@ impl WorkspaceApp {
             processing_failed_message: self.i18n.t("terminal.processing_failed"),
             reconnect_label: self.i18n.t("sessions.actions.reconnect"),
             reconnect_hint: self.i18n.t("terminal.reconnect_hint"),
+            archive_link_hint: self.i18n.t("terminal.archive.open_hint"),
+            archive_link_modifier_hint: self.i18n.t("terminal.archive.open_modifier_hint"),
             reconnecting_label: self.i18n.t("connections.monitor.reconnecting"),
             font_family: terminal
                 .font_family

@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "Extract archive",
-      "hint": "Review and edit the command, then add it to a new command-bar draft. Nothing runs automatically.",
+      "command": "Extraction command",
+      "change_shell": "Change",
+      "open_hint": "Click to prepare an extraction command",
+      "open_modifier_hint": "{{modifier}} + click to prepare an extraction command",
       "source": "Archive",
       "destination": "Destination",
-      "environment_hint": "Detection uses the original SSH connection or WSL distribution. If you entered another host or container, return to this environment first.",
-      "confirm_environment": "I am in the environment shown above and have selected the current shell",
       "probing": "Checking available extraction tools…",
       "fill": "Add to command bar",
       "context_unavailable": "Return to an idle shell before preparing an extraction command.",

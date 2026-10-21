@@ -2,11 +2,12 @@
   "terminal": {
     "archive": {
       "title": "アーカイブを展開",
-      "hint": "コマンドを確認・編集して、新しい下書きとしてコマンドバーに追加します。自動実行はしません。",
+      "command": "展開コマンド",
+      "change_shell": "変更",
+      "open_hint": "クリックして展開コマンドを作成",
+      "open_modifier_hint": "{{modifier}} + クリックで展開コマンドを作成",
       "source": "アーカイブ",
       "destination": "展開先",
-      "environment_hint": "検出対象は元の SSH 接続または WSL ディストリビューションです。別のホストやコンテナーに入っている場合は、先に元の環境へ戻ってください。",
-      "confirm_environment": "上記の環境にいて、現在使用中のシェルを選択しました",
       "probing": "利用可能な展開ツールを確認中…",
       "fill": "コマンドバーに追加",
       "context_unavailable": "待機中のシェルに戻ってから展開コマンドを作成してください。",

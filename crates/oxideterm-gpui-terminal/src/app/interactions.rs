@@ -1795,11 +1795,20 @@ impl TerminalPane {
             .flatten();
         if can_hover_terminal_content
             && event.pressed_button.is_none()
-            && hovered_link.is_none()
             && self.context_menu.is_none()
             && !self.snapshot_dirty
         {
-            if self.update_interactive_trigger_hover(event.position, cx) {
+            if let Some(link) = hovered_link.as_ref() {
+                if link.kind == TerminalLinkKind::Path
+                    && oxideterm_environment::archive::is_archive_path(
+                        link.target.trim_matches(['\'', '"', '`']),
+                    )
+                {
+                    self.update_archive_hover(link, event.position, cx);
+                } else {
+                    self.clear_terminal_hover(cx);
+                }
+            } else if self.update_interactive_trigger_hover(event.position, cx) {
                 hovered_link = self
                     .interactive_trigger_hover
                     .as_ref()
