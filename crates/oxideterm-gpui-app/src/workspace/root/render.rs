@@ -213,6 +213,7 @@ impl WorkspaceApp {
         // just like Tauri's linuxBackdropBlurClass compatibility gate.
         set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
         if self.needs_active_pane_focus
+            && !window.has_active_prompt()
             && active_tab_projection.as_ref().is_some_and(|(_, kind, _)| {
                 !matches!(
                     kind,
@@ -239,11 +240,15 @@ impl WorkspaceApp {
             self.clear_ai_sidebar_keyboard_focus(cx);
             if let Some(surface) = self.active_ide_surface(cx) {
                 window.on_next_frame(move |window, cx| {
-                    window.focus(&surface.read(cx).focus_handle(cx), cx);
+                    if !window.has_active_prompt() {
+                        window.focus(&surface.read(cx).focus_handle(cx), cx);
+                    }
                 });
             } else {
                 window.on_next_frame(move |window, cx| {
-                    pane.update(cx, |pane, cx| pane.focus(window, cx));
+                    if !window.has_active_prompt() {
+                        pane.update(cx, |pane, cx| pane.focus(window, cx));
+                    }
                 });
             }
         }

@@ -7,6 +7,7 @@ pub mod ai;
 pub mod badge;
 pub mod button;
 pub mod checkbox;
+pub mod choice_dialog;
 pub mod command;
 pub mod command_panel;
 pub mod confirm;

@@ -1089,11 +1089,16 @@ impl IdeSurface {
 
     fn select_ssh_access(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let generation = self.generation;
-        let prompt = window.prompt(
-            gpui::PromptLevel::Info,
-            &self.labels.access_modes[1],
-            Some(&self.labels.agent_choice_hint),
-            &[self.labels.agent_choices[0].as_str(), self.labels.agent_choices[1].as_str(), self.labels.cancel.as_str()],
+        let prompt = oxideterm_gpui_ui::choice_dialog::choice_dialog(
+            self.tokens,
+            oxideterm_gpui_ui::choice_dialog::ChoiceDialog {
+                title: self.labels.access_modes[1].clone(),
+                description: Some(self.labels.agent_choice_hint.clone()),
+                choices: self.labels.agent_choices.clone(),
+                cancel: self.labels.cancel.clone(),
+                confirm: self.labels.confirm.clone(),
+            },
+            window,
             cx,
         );
         self.load_state = IdeLoadState::Loading;

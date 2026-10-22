@@ -57,15 +57,19 @@ impl WorkspaceApp {
             return;
         };
         let source_session = pane.read(cx).shared_session();
-        let prompt = window.prompt(
-            gpui::PromptLevel::Warning,
-            &self.i18n.t("terminal.shell_ide.convert"),
-            Some(&self.i18n.t("terminal.shell_ide.confirm")),
-            &[
-                self.i18n.t("terminal.shell_ide.commands").as_str(),
-                self.i18n.t("terminal.shell_ide.agent").as_str(),
-                self.i18n.t("common.actions.cancel").as_str(),
-            ],
+        let prompt = choice_dialog(
+            self.tokens,
+            ChoiceDialog {
+                title: self.i18n.t("terminal.shell_ide.convert"),
+                description: Some(self.i18n.t("terminal.shell_ide.confirm")),
+                choices: [
+                    self.i18n.t("terminal.shell_ide.commands"),
+                    self.i18n.t("terminal.shell_ide.agent"),
+                ],
+                cancel: self.i18n.t("common.actions.cancel"),
+                confirm: self.i18n.t("common.actions.confirm"),
+            },
+            window,
             cx,
         );
         let weak_pane = pane.downgrade();
@@ -89,8 +93,8 @@ impl WorkspaceApp {
             let _progress_task = progress_task;
             let result = async {
                 let access = match prompt.await {
-                    Ok(0) => oxideterm_ide_fs::RemoteAccess::Commands,
-                    Ok(1) => oxideterm_ide_fs::RemoteAccess::Agent,
+                    Some(0) => oxideterm_ide_fs::RemoteAccess::Commands,
+                    Some(1) => oxideterm_ide_fs::RemoteAccess::Agent,
                     _ => return Ok(None),
                 };
                 let acquisition = weak
