@@ -392,6 +392,14 @@ impl TerminalSession {
         self.backend.mosh_connection_status()
     }
 
+    pub fn shell_channel_owned(&self) -> bool {
+        self.backend.shell_channel_owned()
+    }
+
+    pub fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
+        self.backend.acquire_shell_channel()
+    }
+
     pub fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
         self.backend.set_output_processor(processor);
     }

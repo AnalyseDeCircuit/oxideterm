@@ -2093,6 +2093,19 @@ mod tests {
 }
 
 pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &mut gpui::App) {
+    // Native bindings dispatch before text key handlers. Modal controls must
+    // receive the chord themselves instead of invoking a background action.
+    cx.bind_keys(ACTION_DEFINITIONS.iter().flat_map(|definition| {
+        effective_combos(definition, overrides, KeybindingSide::current())
+            .into_iter()
+            .map(|combo| {
+                KeyBinding::new(
+                    &combo_to_gpui(&combo),
+                    NoAction {},
+                    Some(oxideterm_gpui_ui::modal::MODAL_KEY_CONTEXT),
+                )
+            })
+    }));
     use oxideterm_gpui_editor::{EditorKeybindings, EditorShortcut};
     let mut bindings = Vec::new();
     let mut editor_context = Vec::new();

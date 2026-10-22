@@ -60,7 +60,8 @@
       "overview_error": "오류",
       "overview_refresh_interval": "{{seconds}}초마다 업데이트",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
-      "topology_roots_children": "{{roots}} roots / {{children}} children"
+      "topology_roots_children": "{{roots}} roots / {{children}} children",
+      "ide": "IDE"
     },
     "status": {
       "reconnecting_title": "연결 재설정 중",

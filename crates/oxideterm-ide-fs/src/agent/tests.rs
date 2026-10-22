@@ -2,6 +2,50 @@
 mod tests {
     use super::*;
 
+    pub(super) fn run_linux(program: &str, args: &[&str], input: &[u8]) -> std::process::Output {
+        use std::{
+            io::Write,
+            process::{Command, Stdio},
+        };
+        let mut command = if cfg!(target_os = "linux") {
+            Command::new(program)
+        } else {
+            let mut command = Command::new("docker");
+            command.args([
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "-i",
+                "python:3.6",
+                program,
+            ]);
+            command
+        };
+        let mut child = command
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("Linux tools or local Docker required");
+        child.stdin.take().unwrap().write_all(input).unwrap();
+        child.wait_with_output().unwrap()
+    }
+
+    #[test]
+    fn installed_agent_without_private_save_creation_requires_update() {
+        for compatibility_version in [4, 5] {
+            assert_eq!(
+                parse_remote_version_output(&format!("oxideterm-agent 2.2.4 compat {compatibility_version}")),
+                RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo {
+                    version: "2.2.4".into(), compatibility_version,
+                })
+            );
+        }
+        assert_eq!(parse_remote_version_output("oxideterm-agent 2.2.4 compat 6"), RemoteAgentInstallState::Current);
+    }
+
     #[test]
     fn maps_agent_symlink_directories_as_directories() {
         let node_id = NodeId::new("node-1");
@@ -58,6 +102,8 @@ mod tests {
         let (shutdown_tx, _shutdown_rx) = mpsc::channel::<()>(1);
         let (watch_tx, _) = broadcast::channel::<AgentWatchEvent>(1);
         let transport = AgentTransport {
+            _worker: None,
+            request_limit: None,
             write_tx,
             pending: Arc::new(Mutex::new(HashMap::new())),
             watch_tx,
@@ -262,6 +308,8 @@ mod tests {
             handle.connection_id().to_string(),
             AgentSession::new(
                 AgentTransport {
+                    _worker: None,
+                    request_limit: None,
                     write_tx,
                     pending: pending.clone(),
                     watch_tx: watch_tx.clone(),

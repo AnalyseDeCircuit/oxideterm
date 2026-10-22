@@ -515,6 +515,8 @@ pub struct TerminalPane {
     #[cfg(test)]
     test_accepts_input: bool,
     input_locked: bool,
+    shell_ide_preparing: bool,
+    shell_ide_progress: Option<(String, Option<f32>)>,
     marked_text: Option<String>,
     /// IME caret inside `marked_text`, in UTF-16 units; only read while composing.
     marked_text_caret_utf16: Option<usize>,
@@ -671,6 +673,7 @@ pub(crate) enum FreeTypeDragAction {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalContextAction {
+    ConvertToShellIde,
     Reconnect,
     PluginTextTool,
     SendSelectionToAi,
@@ -1270,6 +1273,8 @@ impl TerminalPane {
             #[cfg(test)]
             test_accepts_input: false,
             input_locked: false,
+            shell_ide_preparing: false,
+            shell_ide_progress: None,
             marked_text: None,
             marked_text_caret_utf16: None,
             privilege_prompt_inline_hint: None,
@@ -2201,7 +2206,12 @@ impl TerminalPane {
     }
 
     pub fn shutdown(&mut self) {
-        self.terminal.lock().shutdown();
+        let mut terminal = self.terminal.lock();
+        // A shell IDE owns this exact PTY until its agent has restored the shell.
+        // Removing the pane relinquishes its Arc; it must not cancel the IDE lease.
+        if !terminal.shell_channel_owned() {
+            terminal.shutdown();
+        }
     }
 
     pub fn lifecycle(&self) -> TerminalLifecycle {
@@ -2862,7 +2872,11 @@ impl TerminalPane {
         // history so remote output cannot escape through an unrelated observer.
         let write_result = {
             let mut terminal = self.terminal.lock();
-            if self.input_locked || self.terminal_exited || !terminal.is_interactive() {
+            if self.input_locked
+                || self.shell_ide_preparing
+                || self.terminal_exited
+                || !terminal.is_interactive()
+            {
                 return false;
             }
             terminal.write_text(&input)
@@ -2908,7 +2922,11 @@ impl TerminalPane {
         // plugin hook, then bypass text recording and command observation.
         let write_result = {
             let mut terminal = self.terminal.lock();
-            if self.input_locked || self.terminal_exited || !terminal.is_interactive() {
+            if self.input_locked
+                || self.shell_ide_preparing
+                || self.terminal_exited
+                || !terminal.is_interactive()
+            {
                 return false;
             }
             if terminal.kind() == TerminalSessionKind::Serial {
@@ -2950,7 +2968,11 @@ impl TerminalPane {
         // must share the same terminal-session lock after interception.
         let write_result = {
             let mut terminal = self.terminal.lock();
-            if self.input_locked || self.terminal_exited || !terminal.is_interactive() {
+            if self.input_locked
+                || self.shell_ide_preparing
+                || self.terminal_exited
+                || !terminal.is_interactive()
+            {
                 return false;
             }
             match std::str::from_utf8(&bytes) {
@@ -3178,6 +3200,27 @@ impl TerminalPane {
             );
         }
         sent
+    }
+
+    pub fn set_shell_ide_progress(
+        &mut self,
+        progress: (String, Option<f32>),
+        cx: &mut Context<Self>,
+    ) {
+        if self.shell_ide_preparing {
+            self.shell_ide_progress = Some(progress);
+            cx.notify();
+        }
+    }
+
+    pub fn set_shell_ide_preparing(&mut self, preparing: bool, cx: &mut Context<Self>) {
+        if !preparing {
+            self.shell_ide_progress = None;
+        }
+        if self.shell_ide_preparing != preparing {
+            self.shell_ide_preparing = preparing;
+            cx.notify();
+        }
     }
 
     pub fn set_input_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
@@ -4388,6 +4431,9 @@ impl TerminalPane {
     }
 
     fn terminal_accepts_input(&self) -> bool {
+        if self.shell_ide_preparing {
+            return false;
+        }
         #[cfg(test)]
         if self.test_accepts_input {
             return !self.input_locked;
@@ -4397,6 +4443,9 @@ impl TerminalPane {
     }
 
     fn terminal_accepts_input_with_interactive_state(&self, terminal_interactive: bool) -> bool {
+        if self.shell_ide_preparing {
+            return false;
+        }
         #[cfg(test)]
         if self.test_accepts_input {
             // Unit tests can exercise input routing without creating a live PTY.
@@ -5469,6 +5518,12 @@ mod tests {
         });
 
         pane.update(cx, |pane, cx| {
+            // Preparation must block all user input before the asynchronous PTY lease arrives.
+            pane.set_shell_ide_preparing(true, cx);
+            pane.commit_text("blocked", cx);
+            pane.send_user_protocol_bytes(b"\x1b[C", cx);
+            pane.paste_text("blocked paste", cx);
+            pane.set_shell_ide_preparing(false, cx);
             pane.commit_text("x", cx);
             pane.send_user_protocol_bytes(b"\x1b[D", cx);
             pane.paste_text("y", cx);

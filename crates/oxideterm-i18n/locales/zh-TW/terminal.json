@@ -616,6 +616,25 @@
       "manage": "提權憑證",
       "manage_title": "開啟此作用域的提權憑證設定",
       "local_manage_unavailable": "本機 Shell 的提權憑證管理尚未開放。"
+    },
+    "shell_ide": {
+      "requirements": "命令方式需要 Linux，以及 GNU find、stat、grep 和 coreutils。",
+      "access_title": "選擇檔案存取方式",
+      "agent": "使用代理（必要時安裝或更新）",
+      "commands": "純 Shell 命令",
+      "sftp": "SFTP",
+      "convert": "轉換為 IDE",
+      "return": "返回終端",
+      "confirm": "請確認終端處於 shell 提示符，且沒有未提交的輸入。選擇純命令或代理方式，均使用目前使用者、容器和目錄。返回終端前，終端輸入將暫停。",
+      "failed": "無法啟動檔案存取。請確認 shell 已就緒且環境符合要求。若終端未能還原，請重新連線。",
+      "preparing": "正在啟動 IDE 檔案服務，終端輸入暫時暫停…",
+      "ssh": "SSH",
+      "agent_choice_hint": "純 Shell 不安裝代理；使用代理會在所選環境的 ~/.oxideterm/oxideterm-agent 安裝或重用代理。",
+      "sftp_unavailable": "SFTP 無法使用，請選擇 SSH。",
+      "ssh_unavailable": "SSH 檔案存取啟動失敗。請檢查環境；如需互動式登入，請先在終端機完成，再以右鍵選擇「轉換為 IDE」。",
+      "ssh_shell": "SSH（Shell 通道）",
+      "agent_installing": "正在安裝代理：{{percent}}%（{{transferred}} / {{total}} KiB）",
+      "agent_starting": "正在啟動代理…"
     }
   },
   "search": {

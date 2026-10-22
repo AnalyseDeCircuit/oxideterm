@@ -616,6 +616,25 @@
       "manage": "Identifiants d’élévation",
       "manage_title": "Ouvrir les réglages d’identifiants d’élévation pour ce périmètre",
       "local_manage_unavailable": "La gestion des identifiants d’élévation du shell local n’est pas encore disponible."
+    },
+    "shell_ide": {
+      "requirements": "L’accès par commandes nécessite Linux avec GNU find, stat, grep et coreutils.",
+      "access_title": "Choisir l’accès aux fichiers",
+      "agent": "Utiliser l’agent (installer ou mettre à jour si nécessaire)",
+      "commands": "Commandes shell",
+      "sftp": "SFTP",
+      "convert": "Convertir en IDE",
+      "return": "Retour au terminal",
+      "confirm": "Confirmez que le terminal affiche une invite shell sans saisie en attente. Les commandes ou l’agent utilisent l’utilisateur, le conteneur et le dossier actuels. La saisie est suspendue jusqu’au retour depuis l’IDE.",
+      "failed": "Impossible de démarrer l’accès aux fichiers. Vérifiez le shell et les prérequis. Reconnectez le terminal si sa restauration a échoué.",
+      "preparing": "Démarrage du service de fichiers IDE ; la saisie du terminal est suspendue…",
+      "ssh": "SSH",
+      "agent_choice_hint": "Le Shell seul n’installe aucun agent. L’agent est installé ou réutilisé dans ~/.oxideterm/oxideterm-agent de l’environnement choisi.",
+      "sftp_unavailable": "SFTP est indisponible. Choisissez SSH.",
+      "ssh_unavailable": "Échec de l’accès aux fichiers SSH. Vérifiez l’environnement. Si une connexion interactive est nécessaire, terminez-la dans un terminal, puis faites un clic droit sur celui-ci et choisissez « Convertir en IDE ».",
+      "ssh_shell": "SSH (canal Shell)",
+      "agent_installing": "Installation de l’agent : {{percent}}% ({{transferred}} / {{total}} KiB)",
+      "agent_starting": "Démarrage de l’agent…"
     }
   },
   "search": {

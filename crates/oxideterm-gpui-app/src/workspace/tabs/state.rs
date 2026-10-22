@@ -280,14 +280,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let host = self.tab_host.read(cx);
-        let Some(pane) = host
-            .tab_by_id(tab_id)
-            .and_then(|tab| tab.active_pane_id)
-            .and_then(|id| host.panes().get(&id))
-            .cloned()
-        else {
+        let Some(pane_id) = host.tab_by_id(tab_id).and_then(|tab| tab.active_pane_id) else {
             return;
         };
+        let Some(pane) = host.panes().get(&pane_id).cloned() else {
+            return;
+        };
+        let surface = self
+            .ide_workspace
+            .read(cx)
+            .shell_surface_for_pane(pane_id)
+            .map(|(_, surface)| surface);
         let Some(handle) = host.detached_window_handle(tab_id).or_else(|| {
             self.window_registry
                 .handle_for_role(window_registry::WindowRole::Main)
@@ -295,10 +298,18 @@ impl WorkspaceApp {
             return;
         };
         if handle.window_id() == window.window_handle().window_id() {
-            pane.update(cx, |pane, cx| pane.focus(window, cx));
+            if let Some(surface) = surface {
+                window.focus(&surface.read(cx).focus_handle(cx), cx);
+            } else {
+                pane.update(cx, |pane, cx| pane.focus(window, cx));
+            }
         } else {
             let _ = handle.update(cx, |_, window, cx| {
-                pane.update(cx, |pane, cx| pane.focus(window, cx));
+                if let Some(surface) = surface {
+                    window.focus(&surface.read(cx).focus_handle(cx), cx);
+                } else {
+                    pane.update(cx, |pane, cx| pane.focus(window, cx));
+                }
             });
         }
     }

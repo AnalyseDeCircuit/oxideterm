@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Node-first IDE agent proxy.
+//! Remote IDE file access through SFTP, agent RPC or shell commands.
 //!
 //! This ports Tauri's `agentService`/`node_agent_*` boundary into the native
 //! file-system layer: the IDE asks for files and directories, this adapter uses
@@ -46,12 +46,34 @@ const AGENT_REMOTE_PATH: &str = "~/.oxideterm/oxideterm-agent";
 const AGENT_RPC_TIMEOUT_SECS: u64 = 30;
 const AGENT_COMPRESS_THRESHOLD: usize = 32 * 1024;
 const LEGACY_AGENT_COMPATIBILITY_VERSION: u32 = 1;
-const CURRENT_AGENT_COMPATIBILITY_VERSION: u32 = 3;
+const CURRENT_AGENT_COMPATIBILITY_VERSION: u32 = 6;
 const INVALID_AGENT_COMPATIBILITY_VERSION: u32 = 0;
 
 static NEXT_AGENT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_IDE_OWNER_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_IDE_SESSION_ID: AtomicU64 = AtomicU64::new(1);
+
+/// File operations are fixed per IDE; terminal ownership is carried by the binding.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RemoteAccess {
+    #[default]
+    Automatic,
+    Sftp,
+    Agent,
+    Commands,
+}
+
+/// Upload counts advance only after the selected remote shell acknowledges receipt.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum AgentInstallProgress {
+    #[default]
+    Checking,
+    Uploading {
+        transferred: usize,
+        total: usize,
+    },
+    Starting,
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum NodeAgentMode {
@@ -99,6 +121,9 @@ impl AgentStatus {
 
 #[derive(Clone)]
 pub struct NodeAgentIdeFileSystem {
+    binding: Option<Arc<RemoteBinding>>,
+    access: RemoteAccess,
+    scope: Option<Arc<BoundNodeOwner>>,
     router: NodeRouter,
     sftp: NodeSftpIdeFileSystem,
     registry: Arc<AgentRegistry>,
@@ -375,3 +400,10 @@ include!("agent/registry.rs");
 include!("agent/install.rs");
 include!("agent/mapping.rs");
 include!("agent/tests.rs");
+
+mod binding;
+mod channel;
+use channel::IdeChannel;
+mod commands;
+mod shell;
+use binding::{BoundNodeOwner, RemoteBinding};

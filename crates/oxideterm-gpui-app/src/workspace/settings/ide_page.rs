@@ -202,8 +202,8 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ide_agent_card(
         &self,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
+        _settings: &PersistedSettings,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ide_card()
             .flex()
@@ -211,14 +211,6 @@ impl WorkspaceApp {
             .gap(px(IDE_SETTINGS_CARD_GAP))
             .child(self.ide_card_title(self.i18n.t("settings_view.ide.agent_title")))
             .child(self.card_separator())
-            .child(self.select_setting_row(
-                "settings_view.ide.agent_mode_label",
-                "settings_view.ide.agent_mode_hint",
-                SettingsSelect::IdeAgentMode,
-                ide_agent_label(settings.ide.agent_mode, &self.i18n),
-                self.tokens.metrics.settings_select_width,
-                cx,
-            ))
             .child(self.ide_card_description(self.i18n.t("settings_view.ide.agent_description")))
             .child(
                 div()

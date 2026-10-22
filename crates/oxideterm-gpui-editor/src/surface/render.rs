@@ -141,6 +141,25 @@ impl Render for TextEditorView {
             .relative()
             .size_full()
             .overflow_hidden()
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    // Document rows consume their own clicks; the remaining viewport is
+                    // whitespace below the document and must retain editor input ownership.
+                    window.focus(&this.focus_handle, cx);
+                    this.activate_caret_blink(cx);
+                    this.context_menu = None;
+                    let end = BufferOffset(this.buffer.len());
+                    let anchor = if event.modifiers.shift {
+                        this.cursor.selection().anchor
+                    } else {
+                        end
+                    };
+                    this.start_selection_drag(anchor, end, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {

@@ -12,8 +12,9 @@ mod local;
 mod node_sftp;
 
 pub use agent::{
-    AgentStatus, IdeSearchMatch, IdeWatchSubscription, NodeAgentIdeFileSystem, NodeAgentMode,
-    NodeAgentRpcError, ReadFileResult as NodeAgentReadFileResult,
+    AgentInstallProgress, AgentStatus, IdeSearchMatch, IdeWatchSubscription,
+    NodeAgentIdeFileSystem, NodeAgentMode, NodeAgentRpcError,
+    ReadFileResult as NodeAgentReadFileResult, RemoteAccess,
     SymbolIndexResult as NodeAgentSymbolIndexResult, SymbolInfo as NodeAgentSymbolInfo,
     SymbolKind as NodeAgentSymbolKind, WriteFileResult as NodeAgentWriteFileResult,
 };

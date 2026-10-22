@@ -12,6 +12,26 @@ use oxideterm_preview::{
 };
 use zeroize::Zeroizing;
 
+pub(crate) const FILE_PREFIX_BYTES: usize = 8192;
+
+pub(crate) fn check_text_prefix(bytes: &[u8], hint: Option<&str>) -> Result<(), IdeFileError> {
+    let explicit_unicode = hint
+        .and_then(|h| Encoding::for_label(h.as_bytes()))
+        .is_some_and(|e| e == UTF_16LE || e == UTF_16BE);
+    if explicit_unicode
+        || bytes.starts_with(&[0xff, 0xfe])
+        || bytes.starts_with(&[0xfe, 0xff])
+        || is_likely_text_content(bytes)
+    {
+        Ok(())
+    } else {
+        Err(IdeFileError::new(
+            IdeFileErrorKind::Binary,
+            "File is not text",
+        ))
+    }
+}
+
 pub(crate) fn check_size(size: u64) -> Result<(), IdeFileError> {
     if size > MAX_EDITABLE_FILE_SIZE {
         return Err(IdeFileError::new(
@@ -28,16 +48,7 @@ pub(crate) fn decode_file(
     version: SavedFileVersion,
 ) -> Result<IdeFileData, IdeFileError> {
     check_size(bytes.len() as u64)?;
-    let unicode_bom = bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]);
-    let explicit_unicode = hint
-        .and_then(|h| Encoding::for_label(h.as_bytes()))
-        .is_some_and(|e| e == UTF_16LE || e == UTF_16BE);
-    if !unicode_bom && !explicit_unicode && !is_likely_text_content(bytes) {
-        return Err(IdeFileError::new(
-            IdeFileErrorKind::Unsupported,
-            "File is not text",
-        ));
-    }
+    check_text_prefix(bytes, hint)?;
     // A manual reopen must honor the selected encoding, even when a conflicting BOM exists.
     // Automatic detection remains shared with previews; editing rejects lossy decoding.
     let (decoded, name, has_bom, errors) = if let Some(hint) = hint {
@@ -134,6 +145,28 @@ fn invalid_encoding() -> IdeFileError {
 mod tests {
     use super::*;
     #[test]
+    fn binary_prefix_rejection_preserves_unicode_encoding_choices() {
+        assert_eq!(
+            check_text_prefix(b"\x7fELF\0\0", None).unwrap_err().kind,
+            IdeFileErrorKind::Binary
+        );
+        for (bytes, hint, expected) in [
+            (b"\xff\xfeA\0B\0".as_slice(), None, "AB"),
+            (b"A\0B\0".as_slice(), Some("UTF-16LE"), "AB"),
+            (b"\0A\0B".as_slice(), Some("UTF-16BE"), "AB"),
+        ] {
+            check_text_prefix(bytes, hint).unwrap();
+            assert_eq!(
+                decode_file(bytes, hint, SavedFileVersion::unknown())
+                    .unwrap()
+                    .text
+                    .as_str(),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn gb2312_crlf_round_trip_above_preview_limit() {
         let source = "中文小说内容\r\n".repeat(250_000);
         let (bytes, _, _) = encoding_rs::GBK.encode(&source);
@@ -184,6 +217,12 @@ mod tests {
 
     #[test]
     fn lossy_operations_are_rejected() {
+        assert_eq!(
+            decode_file(b"\x7fELF\0\0\0\0", None, SavedFileVersion::unknown())
+                .unwrap_err()
+                .kind,
+            IdeFileErrorKind::Binary
+        );
         assert!(decode_file(&[0xff], Some("UTF-8"), SavedFileVersion::unknown()).is_err());
         let format = TextFileFormat {
             encoding: "GBK".into(),

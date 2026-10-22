@@ -336,6 +336,12 @@ impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
                     let sftp = sftp.lock().await;
                     let info = sftp.stat(&path).await.map_err(map_sftp_error)?;
                     check_size(info.size)?;
+                    let (_, _, prefix) = sftp
+                        .read_file_range(&path, 0, crate::text::FILE_PREFIX_BYTES)
+                        .await
+                        .map_err(map_sftp_error)?;
+                    let prefix = zeroize::Zeroizing::new(prefix);
+                    crate::text::check_text_prefix(&prefix, encoding.as_deref())?;
                     let (_, size, bytes) = sftp
                         .read_file_range(&path, 0, (MAX_EDITABLE_FILE_SIZE + 1) as usize)
                         .await

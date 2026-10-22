@@ -56,6 +56,7 @@ fn ide_error_from_agent_error(error: AgentError) -> IdeFileError {
         AgentError::Rpc { code, message } if is_agent_conflict_parts(code, &message) => {
             IdeFileError::new(IdeFileErrorKind::Conflict, message)
         }
+        AgentError::Rpc { code: -32601, message } => IdeFileError::new(IdeFileErrorKind::Unsupported, message),
         AgentError::Rpc { message, .. } => ide_error_from_agent_message(message),
         AgentError::Timeout(timeout) => IdeFileError::new(
             IdeFileErrorKind::Timeout,

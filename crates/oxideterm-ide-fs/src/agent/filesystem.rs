@@ -3,6 +3,9 @@ use oxideterm_ide_core::TextFileFormat;
 impl NodeAgentIdeFileSystem {
     pub fn new(router: NodeRouter, mode: NodeAgentMode) -> Self {
         Self {
+            binding: None,
+            access: RemoteAccess::Automatic,
+            scope: None,
             sftp: NodeSftpIdeFileSystem::new(router.clone()),
             router,
             registry: Arc::new(AgentRegistry::default()),
@@ -20,12 +23,16 @@ impl NodeAgentIdeFileSystem {
     /// Creates a stable client scope that shares backend connections while
     /// owning independent node sessions and watch subscriptions.
     pub fn scoped_owner(&self) -> Self {
+        let owner_id = NEXT_IDE_OWNER_ID.fetch_add(1, Ordering::Relaxed);
         Self {
+            binding: self.binding.clone(),
+            access: self.access,
+            scope: self.scope.as_ref().map(|scope| scope.scoped(owner_id)),
             router: self.router.clone(),
             sftp: self.sftp.clone(),
             registry: self.registry.clone(),
             ide_sessions: self.ide_sessions.clone(),
-            owner_id: NEXT_IDE_OWNER_ID.fetch_add(1, Ordering::Relaxed),
+            owner_id,
             mode: self.mode,
             agent_statuses: self.agent_statuses.clone(),
             latest_agent_status: self.latest_agent_status.clone(),
@@ -36,6 +43,7 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub fn set_mode(&mut self, mode: NodeAgentMode) {
+        if self.access != RemoteAccess::Automatic { return; }
         self.mode = mode;
         if mode == NodeAgentMode::Disabled {
             self.agent_statuses.clear();
@@ -48,6 +56,9 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub fn status_for_node(&self, node_id: Option<&str>) -> AgentStatus {
+        if let Some(binding) = &self.binding {
+            return binding.session.status();
+        }
         let Some(node_id) = node_id else {
             return AgentStatus::SftpFallback;
         };
@@ -61,12 +72,18 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub async fn deploy_agent_for_node(&self, node_id: impl Into<String>) -> AgentStatus {
+        if let Some(binding) = &self.binding {
+            return binding.session.status();
+        }
         let node_id = NodeId::new(node_id.into());
         let _ = self.ensure_ide_session_for_node(&node_id).await;
         self.ensure_agent(&node_id).await
     }
 
     pub async fn refresh_agent_status(&self, node_id: impl Into<String>) -> AgentStatus {
+        if let Some(binding) = &self.binding {
+            return binding.session.status();
+        }
         let node_id = NodeId::new(node_id.into());
         if self.mode == NodeAgentMode::Disabled {
             self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
@@ -88,6 +105,12 @@ impl NodeAgentIdeFileSystem {
         &self,
         node_id: impl Into<String>,
     ) -> Result<(), IdeFileError> {
+        if self.binding.is_some() {
+            return Err(IdeFileError::new(
+                IdeFileErrorKind::Unsupported,
+                "Backend does not support agent installation management",
+            ));
+        }
         let node_id = NodeId::new(node_id.into());
         self.ensure_ide_session_for_node(&node_id).await?;
         let resolved = self
@@ -197,8 +220,9 @@ impl NodeAgentIdeFileSystem {
     ) -> Result<IdeProjectInfo, IdeFileError> {
         let node_id = node_id.into();
         let path = path.into();
+
         let context = oxideterm_audit::AuditContext::current_request()
-            .and_then(|_| self.router.audit_context(&NodeId::new(node_id.clone())));
+            .and_then(|_| self.file_audit_context(&NodeId::new(node_id.clone())));
         let audit = oxideterm_audit::AuditOperation::in_context(
             context.as_ref(),
             oxideterm_audit::AuditCategory::File,
@@ -206,9 +230,20 @@ impl NodeAgentIdeFileSystem {
             Some(&path),
         );
         let result = async {
+            if self.binding.is_some() {
+                let session = self.bound_session(&node_id).await?;
+                return serde_json::from_value(
+                    session
+                        .transport
+                        .call("fs/project", serde_json::json!({"path": path}))
+                        .await
+                        .map_err(ide_error_from_agent_error)?,
+                )
+                .map_err(|_| IdeFileError::new(IdeFileErrorKind::Other, "Invalid project response"));
+            }
         self.ensure_ide_session_for_node(&NodeId::new(node_id.clone()))
             .await?;
-        if self.mode == NodeAgentMode::Enabled {
+        if self.access != RemoteAccess::Sftp && self.mode == NodeAgentMode::Enabled {
             let _ = self.ensure_agent(&NodeId::new(node_id.clone())).await;
         } else {
             self.set_status_for_node(&NodeId::new(node_id.clone()), None, AgentStatus::SftpFallback);
@@ -225,8 +260,27 @@ impl NodeAgentIdeFileSystem {
         path: impl Into<String>,
     ) -> Result<oxideterm_ide_core::IdeFileCheck, IdeFileError> {
         let node_id = node_id.into();
-        self.ensure_ide_session_for_node(&NodeId::new(node_id.clone()))
-            .await?;
+        let path = path.into();
+        if self.binding.is_some() {
+            let stat = self.rpc_stat(&node_id, &path).await?;
+            let size = stat.size.unwrap_or(0);
+            return Ok(if stat.file_type.as_deref() == Some("directory") {
+                oxideterm_ide_core::IdeFileCheck::NotEditable {
+                    reason: "Is a directory".into(),
+                }
+            } else if size > oxideterm_ide_core::MAX_EDITABLE_FILE_SIZE {
+                oxideterm_ide_core::IdeFileCheck::TooLarge {
+                    size,
+                    limit: oxideterm_ide_core::MAX_EDITABLE_FILE_SIZE,
+                }
+            } else {
+                oxideterm_ide_core::IdeFileCheck::Editable {
+                    size,
+                    mtime: stat.mtime.unwrap_or(0),
+                }
+            });
+        }
+        self.ensure_ide_session_for_node(&NodeId::new(node_id.clone())).await?;
         self.sftp.check_file(node_id, path).await
     }
 
@@ -238,6 +292,26 @@ impl NodeAgentIdeFileSystem {
         let node_id = node_id.into();
         self.ensure_ide_session_for_node(&NodeId::new(node_id.clone()))
             .await?;
+        if self.binding.is_some() {
+            let session = self.bound_session(&node_id).await?;
+            let mut result = Vec::new();
+            for path in paths {
+                let stat = session
+                    .stat(&path)
+                    .await
+                    .map_err(ide_error_from_agent_error)?;
+                result.push(if stat.exists {
+                    Some(IdePathStat {
+                        is_dir: stat.file_type.as_deref() == Some("directory"),
+                        size: stat.size.unwrap_or(0),
+                        mtime: stat.mtime.unwrap_or(0),
+                    })
+                } else {
+                    None
+                });
+            }
+            return Ok(result);
+        }
         self.sftp.batch_stat(node_id, paths).await
     }
 
@@ -247,6 +321,9 @@ impl NodeAgentIdeFileSystem {
         path: impl Into<String>,
         ignore: Vec<String>,
     ) -> Result<Option<IdeWatchSubscription>, IdeFileError> {
+        if !self.supports_watching() {
+            return Ok(None);
+        }
         if self.mode == NodeAgentMode::Disabled {
             return Ok(None);
         }
@@ -383,10 +460,12 @@ impl NodeAgentIdeFileSystem {
         let path = path.into();
         let node_id_ref = NodeId::new(node_id.clone());
         self.ensure_ide_session_for_node(&node_id_ref).await?;
-        if let Some(session) = self.agent_session(&node_id_ref).await {
+        if let Some(session) = self.agent_session(&node_id_ref).await? {
             match session.remove_item(&path, recursive).await {
                 Ok(()) => return Ok(()),
-                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                Err(error)
+                    if self.binding.is_none() && should_fallback_from_agent_fs_management(&error) =>
+                {
                     warn!(
                         "[ide-agent] delete via agent failed ({}), falling back to SFTP",
                         agent_error_log_label(&error)
@@ -404,6 +483,18 @@ impl NodeAgentIdeFileSystem {
         node_id: impl Into<String>,
         path: impl Into<String>,
     ) -> Result<SavedFileVersion, IdeFileError> {
+        let node_id = node_id.into();
+        let path = path.into();
+        if self.binding.is_some() {
+            let session = self.bound_session(&node_id).await?;
+            let value = session.transport.call(
+                "fs/createFile",
+                serde_json::json!({"path": path, "content": "", "encoding": "base64"}),
+            ).await.map_err(ide_error_from_agent_error)?;
+            let result = serde_json::from_value(value)
+                .map_err(|_| IdeFileError::new(IdeFileErrorKind::Other, "Invalid create response"))?;
+            return Ok(version_from_agent_write(&result));
+        }
         self.sftp.create_file(node_id, path).await
     }
 
@@ -416,10 +507,12 @@ impl NodeAgentIdeFileSystem {
         let path = path.into();
         let node_id_ref = NodeId::new(node_id.clone());
         self.ensure_ide_session_for_node(&node_id_ref).await?;
-        if let Some(session) = self.agent_session(&node_id_ref).await {
+        if let Some(session) = self.agent_session(&node_id_ref).await? {
             match session.create_folder(&path).await {
                 Ok(()) => return Ok(()),
-                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                Err(error)
+                    if self.binding.is_none() && should_fallback_from_agent_fs_management(&error) =>
+                {
                     warn!(
                         "[ide-agent] mkdir via agent failed ({}), falling back to SFTP",
                         agent_error_log_label(&error)
@@ -443,10 +536,12 @@ impl NodeAgentIdeFileSystem {
         let new_path = new_path.into();
         let node_id_ref = NodeId::new(node_id.clone());
         self.ensure_ide_session_for_node(&node_id_ref).await?;
-        if let Some(session) = self.agent_session(&node_id_ref).await {
+        if let Some(session) = self.agent_session(&node_id_ref).await? {
             match session.rename_item(&old_path, &new_path).await {
                 Ok(()) => return Ok(()),
-                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                Err(error)
+                    if self.binding.is_none() && should_fallback_from_agent_fs_management(&error) =>
+                {
                     warn!(
                         "[ide-agent] rename via agent failed ({}), falling back to SFTP",
                         agent_error_log_label(&error)
@@ -470,10 +565,12 @@ impl NodeAgentIdeFileSystem {
         let target_path = target_path.into();
         let node_id_ref = NodeId::new(node_id.clone());
         self.ensure_ide_session_for_node(&node_id_ref).await?;
-        if let Some(session) = self.agent_session(&node_id_ref).await {
+        if let Some(session) = self.agent_session(&node_id_ref).await? {
             match session.copy_item(&source_path, &target_path).await {
                 Ok(()) => return Ok(()),
-                Err(error) if should_fallback_from_agent_fs_management(&error) => {
+                Err(error)
+                    if self.binding.is_none() && should_fallback_from_agent_fs_management(&error) =>
+                {
                     warn!(
                         "[ide-agent] copy via agent failed ({}), falling back to SFTP",
                         agent_error_log_label(&error)
@@ -519,20 +616,22 @@ impl NodeAgentIdeFileSystem {
         query: IdeSearchQuery,
     ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
         let node_id = NodeId::new(node_id.into());
+
         let context = oxideterm_audit::AuditContext::current_request()
-            .and_then(|_| self.router.audit_context(&node_id));
+            .and_then(|_| self.file_audit_context(&node_id));
         let mut audit = oxideterm_audit::AuditOperation::in_context(
             context.as_ref(),
             oxideterm_audit::AuditCategory::File,
             "file_search",
             Some(&format!("root={}; max_results={}", query.root_path, query.max_results)),
         );
-        let result = async {
+        let paths = SearchPaths::new(&query)?;
+        let mut result = async {
         self.ensure_ide_session_for_node(&node_id).await?;
-        if let Some(session) = self.agent_session(&node_id).await {
+        if let Some(session) = self.agent_session(&node_id).await? {
             match session
                 .grep(
-                    &query.pattern,
+                    &if query.regex { query.pattern.clone() } else { regex::escape(&query.pattern) },
                     &query.root_path,
                     query.case_sensitive,
                     query.max_results,
@@ -547,20 +646,18 @@ impl NodeAgentIdeFileSystem {
                         })
                         .collect());
                 }
-                Err(error) => {
-                    warn!(
-                        "[ide-agent] grep via agent failed ({}), falling back to exec grep",
-                        agent_error_log_label(&error)
-                    );
-                    self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
-                }
+                Err(error) => self.handle_file_rpc_error(&node_id, error, "grep via agent failed; falling back to exec grep")?,
             }
         }
 
+        if self.access == RemoteAccess::Sftp {
+            return self.search_sftp(&node_id, &query, &paths).await;
+        }
         self.grep_project_via_exec(&node_id, &query)
             .await
         }.await;
-        if let Ok(matches) = &result {
+        if let Ok(matches) = &mut result {
+            matches.retain(|hit| paths.allows(&hit.path));
             audit.summary(&format!("root={}; matches={}", query.root_path, matches.len()));
         }
         audit.result(&result);
@@ -606,6 +703,14 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub fn release_ide_session_for_node(&self, node_id: &str) {
+        if let Some(binding) = &self.binding {
+            if binding.id != node_id { return; }
+            if binding.owner_id == self.owner_id && binding.owns_transport {
+                binding.session.transport.alive.store(false, Ordering::Release);
+                let _ = binding.session.transport.shutdown_tx.try_send(());
+            }
+            if binding.terminal { return; }
+        }
         // Each IDE surface releases only the node consumer that it owns.
         if let Some((_, session)) = self.ide_sessions.remove(&self.session_key(node_id)) {
             session.close();
@@ -617,6 +722,14 @@ impl NodeAgentIdeFileSystem {
     }
 
     pub fn close_all_ide_sessions(&self) {
+        if let Some(binding) = &self.binding {
+            self.release_ide_session_for_node(&binding.id);
+            return;
+        }
+        if let Some(scope) = &self.scope {
+            self.release_ide_session_for_node(scope.node_id());
+            return;
+        }
         // Full teardown belongs to the shared file-system owner, not one surface.
         // DashMap iteration holds shard read locks, so finish collecting keys
         // before remove acquires write locks for the same shards.
@@ -704,6 +817,9 @@ impl NodeAgentIdeFileSystem {
     }
 
     async fn ensure_ide_session_for_node(&self, node_id: &NodeId) -> Result<(), IdeFileError> {
+        if self.binding.is_some() {
+            return self.bound_session(&node_id.0).await.map(|_| ());
+        }
         self.acquire_ide_connection(node_id)
             .await
             .map(|_| ())
@@ -714,6 +830,7 @@ impl NodeAgentIdeFileSystem {
         &self,
         node_id: &NodeId,
     ) -> Result<ResolvedConnection, RouteError> {
+        if let Some(scope) = &self.scope { return scope.acquire(node_id).await; }
         let session = self.ide_session_for_node(node_id);
         session.acquire_connection().await
     }
@@ -722,6 +839,14 @@ impl NodeAgentIdeFileSystem {
         &self,
         node_id: &NodeId,
     ) -> Result<Arc<AgentSession>, NodeAgentRpcError> {
+        if !self.supports_symbols() {
+            return Err(NodeAgentRpcError::Unavailable("Backend does not provide agent RPC".into()));
+        }
+        if self.binding.is_some() {
+            return self.bound_session(&node_id.0).await.map_err(|_| {
+                NodeAgentRpcError::Unavailable("Remote IDE session is unavailable".into())
+            });
+        }
         if self.mode == NodeAgentMode::Disabled {
             self.set_status_for_node(node_id, None, AgentStatus::SftpFallback);
             return Err(NodeAgentRpcError::Unavailable(
@@ -764,29 +889,49 @@ impl NodeAgentIdeFileSystem {
         }
     }
 
-    async fn agent_session(&self, node_id: &NodeId) -> Option<Arc<AgentSession>> {
-        if self.mode == NodeAgentMode::Disabled {
+    fn handle_file_rpc_error(
+        &self,
+        node_id: &NodeId,
+        error: AgentError,
+        diagnostic: &str,
+    ) -> Result<(), IdeFileError> {
+        // Only automatic AI access may change backends after an operation fails.
+        if self.binding.is_some() || self.access != RemoteAccess::Automatic {
+            return Err(ide_error_from_agent_error(error));
+        }
+        warn!("[ide-agent] {} ({})", diagnostic, agent_error_log_label(&error));
+        self.set_status_for_node(node_id, None, AgentStatus::SftpFallback);
+        Ok(())
+    }
+
+    async fn agent_session(
+        &self,
+        node_id: &NodeId,
+    ) -> Result<Option<Arc<AgentSession>>, IdeFileError> {
+        // An unavailable shell is an error, never permission to resolve the host node.
+        if self.binding.is_some() {
+            return self.bound_session(&node_id.0).await.map(Some);
+        }
+        if self.access == RemoteAccess::Sftp || self.mode == NodeAgentMode::Disabled {
             self.set_status_for_node(node_id, None, AgentStatus::SftpFallback);
-            return None;
+            return Ok(None);
         }
         if self.mode == NodeAgentMode::Enabled {
             let _ = self.ensure_agent(node_id).await;
         }
-
-        let resolved = self.acquire_ide_connection(node_id).await.ok()?;
-        let session = self.registry.get(&resolved.connection_id)?;
+        let Ok(resolved) = self.acquire_ide_connection(node_id).await else {
+            return Ok(None);
+        };
+        let Some(session) = self.registry.get(&resolved.connection_id) else {
+            return Ok(None);
+        };
         if session.is_alive() {
             self.set_status_for_node(node_id, Some(&resolved.connection_id), session.status());
-            Some(session)
+            Ok(Some(session))
         } else {
-            self.registry
-                .remove_without_shutdown(&resolved.connection_id);
-            self.set_status_for_node(
-                node_id,
-                Some(&resolved.connection_id),
-                AgentStatus::SftpFallback,
-            );
-            None
+            self.registry.remove_without_shutdown(&resolved.connection_id);
+            self.set_status_for_node(node_id, Some(&resolved.connection_id), AgentStatus::SftpFallback);
+            Ok(None)
         }
     }
 
@@ -1094,8 +1239,9 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     ) -> IdeFsFuture<'a, IdeFileData> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+
             let context = oxideterm_audit::AuditContext::current_request()
-                .and_then(|_| self.router.audit_context(&node_id));
+                .and_then(|_| self.file_audit_context(&node_id));
             let audit = oxideterm_audit::AuditOperation::in_context(
                 context.as_ref(),
                 oxideterm_audit::AuditCategory::File,
@@ -1104,16 +1250,14 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             );
             let result = async {
             self.ensure_ide_session_for_node(&node_id).await?;
-            if let Some(session) = self.agent_session(&node_id).await {
+            if let Some(session) = self.agent_session(&node_id).await? {
+                if self.binding.is_some() {
+                    let prefix = session.read_file_prefix(&path).await.map_err(ide_error_from_agent_error)?;
+                    crate::text::check_text_prefix(&prefix, encoding)?;
+                }
                 match session.read_file_bytes(&path).await {
                     Ok((bytes, version)) => return decode_file(&bytes, encoding, version),
-                    Err(error) => {
-                        warn!(
-                            "[ide-agent] read via agent failed ({}), falling back to SFTP",
-                            agent_error_log_label(&error)
-                        );
-                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
-                    }
+                    Err(error) => self.handle_file_rpc_error(&node_id, error, "read via agent failed; falling back to SFTP")?,
                 }
             }
             self.sftp.read_file(location, encoding).await
@@ -1132,12 +1276,12 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
             self.ensure_ide_session_for_node(&node_id).await?;
-            if let Some(session) = self.agent_session(&node_id).await {
+            if let Some(session) = self.agent_session(&node_id).await? {
                 match session.stat(&path).await {
                     Ok(stat) if stat.exists => {
                         return Ok(FileStat {
                             version: version_from_agent_stat(&stat),
-                            is_read_only: stat
+                            is_read_only: self.binding.is_none() && stat
                                 .permissions
                                 .as_deref()
                                 .and_then(|raw| u32::from_str_radix(raw, 8).ok())
@@ -1146,13 +1290,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                         });
                     }
                     Ok(_) => return Err(IdeFileError::new(IdeFileErrorKind::NotFound, path)),
-                    Err(error) => {
-                        warn!(
-                            "[ide-agent] stat via agent failed ({}), falling back to SFTP",
-                            agent_error_log_label(&error)
-                        );
-                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
-                    }
+                    Err(error) => self.handle_file_rpc_error(&node_id, error, "stat via agent failed; falling back to SFTP")?,
                 }
             }
             self.sftp.stat(location).await
@@ -1162,8 +1300,9 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     fn list_dir<'a>(&'a self, location: &'a IdeLocation) -> IdeFsFuture<'a, Vec<FileTreeEntry>> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
+
             let context = oxideterm_audit::AuditContext::current_request()
-                .and_then(|_| self.router.audit_context(&node_id));
+                .and_then(|_| self.file_audit_context(&node_id));
             let mut audit = oxideterm_audit::AuditOperation::in_context(
                 context.as_ref(),
                 oxideterm_audit::AuditCategory::File,
@@ -1172,7 +1311,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             );
             let result = async {
             self.ensure_ide_session_for_node(&node_id).await?;
-            if let Some(session) = self.agent_session(&node_id).await {
+            if let Some(session) = self.agent_session(&node_id).await? {
                 match session.list_dir(&path).await {
                     Ok(entries) => {
                         return Ok(entries
@@ -1180,13 +1319,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                             .map(|entry| file_tree_entry_from_agent(&node_id, entry))
                             .collect());
                     }
-                    Err(error) => {
-                        warn!(
-                            "[ide-agent] directory listing via agent failed ({}), falling back to SFTP",
-                            agent_error_log_label(&error)
-                        );
-                        self.set_status_for_node(&node_id, None, AgentStatus::SftpFallback);
-                    }
+                    Err(error) => self.handle_file_rpc_error(&node_id, error, "directory listing via agent failed; falling back to SFTP")?,
                 }
             }
             self.sftp.list_dir(location).await
@@ -1209,7 +1342,8 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     ) -> IdeFsFuture<'a, SavedFileVersion> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
-            let context = self.router.audit_context(&node_id);
+
+            let context = self.file_audit_context(&node_id);
             let audit = oxideterm_audit::AuditOperation::in_context(
                 context.as_ref(),
                 oxideterm_audit::AuditCategory::File,
@@ -1221,6 +1355,11 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
                 context
             });
             let task = async {
+            if self.binding.is_some() {
+                return self
+                    .rpc_write(&node_id.0, &path, text, format, expected_version, mode)
+                    .await;
+            }
             self.ensure_ide_session_for_node(&node_id).await?;
             if mode == WriteMode::CreateNew {
                 return self
@@ -1231,7 +1370,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
 
             let expect_hash = expected_version.and_then(|version| version.etag.as_deref());
             if should_write_via_agent(expected_version)
-                && let Some(session) = self.agent_session(&node_id).await
+                && let Some(session) = self.agent_session(&node_id).await?
             {
                 let bytes = encode_file(text, format)?;
                 match session.write_file_bytes(&path, &bytes, expect_hash).await {
@@ -1268,5 +1407,167 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             );
             result
         })
+    }
+}
+
+impl NodeAgentIdeFileSystem {
+    pub(super) async fn search_sftp(
+        &self,
+        node: &NodeId,
+        query: &IdeSearchQuery,
+        paths: &SearchPaths,
+    ) -> Result<Vec<IdeSearchMatch>, IdeFileError> {
+        let pattern = if query.regex {
+            query.pattern.clone()
+        } else {
+            regex::escape(&query.pattern)
+        };
+        let matcher = regex::RegexBuilder::new(&pattern)
+            .case_insensitive(!query.case_sensitive)
+            .build()
+            .map_err(|_| IdeFileError::new(IdeFileErrorKind::Other, "Invalid search pattern"))?;
+        let mut directories = vec![query.root_path.clone()];
+        let mut hits = Vec::new();
+        while let Some(path) = directories.pop() {
+            self.ensure_ide_session_for_node(node).await?;
+            for entry in self
+                .sftp
+                .list_dir(&IdeLocation::remote(node.0.clone(), path))
+                .await?
+            {
+                self.ensure_ide_session_for_node(node).await?;
+                if !query.include_hidden && entry.name.starts_with('.') {
+                    continue;
+                }
+                if entry.kind == FileKind::Directory {
+                    if !matches!(entry.name.as_str(), "node_modules" | "target" | ".git") {
+                        if let IdeLocation::Remote { path, .. } = entry.location {
+                            directories.push(path);
+                        }
+                    }
+                    continue;
+                }
+                if entry.kind != FileKind::File
+                    || entry.version.size_bytes.unwrap_or(0)
+                        > oxideterm_ide_core::MAX_EDITABLE_FILE_SIZE
+                {
+                    continue;
+                }
+                if let IdeLocation::Remote { path, .. } = &entry.location {
+                    if !paths.allows(path) {
+                        continue;
+                    }
+                }
+                let file = match self.sftp.read_file(&entry.location, None).await {
+                    Ok(file) => file,
+                    Err(error) if error.kind == IdeFileErrorKind::Unsupported => continue,
+                    Err(error) => return Err(error),
+                };
+                let IdeLocation::Remote { path, .. } = entry.location else {
+                    continue;
+                };
+                for (index, line) in file.text.lines().enumerate() {
+                    if let Some(found) = matcher.find(line) {
+                        let preview = line.chars().take(200).collect::<String>();
+                        hits.push(IdeSearchMatch {
+                            path: path.clone(),
+                            line: (index + 1) as u32,
+                            column: (found.start() + 1) as u32,
+                            preview,
+                            match_start: found.start(),
+                            match_end: found.end(),
+                        });
+                        if hits.len() >= query.max_results as usize {
+                            return Ok(hits);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(hits)
+    }
+}
+
+
+pub(super) struct SearchPaths {
+    root: String,
+    hidden: bool,
+    includes: regex::RegexSet,
+    excludes: regex::RegexSet,
+}
+impl SearchPaths {
+    pub(super) fn new(query: &IdeSearchQuery) -> Result<Self, IdeFileError> {
+        fn patterns(globs: &[String]) -> Result<regex::RegexSet, IdeFileError> {
+            let patterns = globs.iter().map(|glob| {
+                let mut pattern = String::from("^");
+                if !glob.contains('/') {
+                    pattern.push_str("(?:.*/)?");
+                }
+                let mut chars = glob.chars().peekable();
+                while let Some(ch) = chars.next() {
+                    match ch {
+                        '*' if chars.peek() == Some(&'*') => {
+                            chars.next();
+                            if chars.peek() == Some(&'/') {
+                                chars.next();
+                                pattern.push_str("(?:.*/)?");
+                            } else {
+                                pattern.push_str(".*");
+                            }
+                        }
+                        '*' => pattern.push_str("[^/]*"),
+                        '?' => pattern.push_str("[^/]"),
+                        other => pattern.push_str(&regex::escape(&other.to_string())),
+                    }
+                }
+                pattern.push('$');
+                pattern
+            });
+            regex::RegexSet::new(patterns)
+                .map_err(|_| IdeFileError::new(IdeFileErrorKind::Other, "Invalid search filter"))
+        }
+        Ok(Self {
+            root: query.root_path.trim_end_matches('/').to_owned(),
+            hidden: query.include_hidden,
+            includes: patterns(&query.include_globs)?,
+            excludes: patterns(&query.exclude_globs)?,
+        })
+    }
+    pub(super) fn allows(&self, path: &str) -> bool {
+        let relative = path
+            .strip_prefix(&self.root)
+            .unwrap_or(path)
+            .trim_start_matches('/');
+        (self.hidden || !relative.split('/').any(|part| part.starts_with('.')))
+            && (self.includes.is_empty() || self.includes.is_match(relative))
+            && !self.excludes.is_match(relative)
+    }
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+
+    #[test]
+    fn search_filters_apply_to_root_nested_excluded_and_hidden_files() {
+        let mut query = IdeSearchQuery::tauri_literal_project_search("text", "/work", 20, 0);
+        query.include_globs = vec!["**/*.rs".into()];
+        query.exclude_globs = vec!["vendor/**".into()];
+        let paths = SearchPaths::new(&query).unwrap();
+        for (path, expected) in [
+            ("/work/main.rs", true),
+            ("/work/src/lib.rs", true),
+            ("/work/vendor/lib.rs", false),
+            ("/work/.hidden/main.rs", false),
+            ("/work/src/app.ts", false),
+        ] {
+            assert_eq!(paths.allows(path), expected, "{path}");
+        }
+        query.include_hidden = true;
+        assert!(
+            SearchPaths::new(&query)
+                .unwrap()
+                .allows("/work/.hidden/main.rs")
+        );
     }
 }

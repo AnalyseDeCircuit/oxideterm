@@ -513,7 +513,7 @@ impl WorkspaceApp {
     fn render_connection_runtime_consumer_panel(
         &self,
         stats: &ConnectionPoolMonitorStats,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
         let has_background = self.background_surface_active("runtime");
         self.connection_runtime_panel(has_background)
@@ -545,6 +545,13 @@ impl WorkspaceApp {
                 self.i18n.t("connections.monitor.forwards"),
                 stats.total_forwards,
                 LucideIcon::ArrowLeftRight,
+                MONITOR_BLUE,
+                true,
+            ))
+            .child(self.render_connection_runtime_consumer_row(
+                self.i18n.t("connections.monitor.ide"),
+                self.ide_workspace.read(cx).open_project_count(cx),
+                LucideIcon::Code2,
                 MONITOR_BLUE,
                 true,
             ))

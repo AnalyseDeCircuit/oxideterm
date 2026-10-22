@@ -861,6 +861,17 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let terminal = self.render_pane_tree(root_pane, window, cx);
+        if self
+            .terminal_pane_for_window(window, cx)
+            .is_some_and(|pane| {
+                self.ide_workspace
+                    .read(cx)
+                    .shell_surface_for_pane(pane)
+                    .is_some()
+            })
+        {
+            return terminal;
+        }
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
         if self.active_pane(cx).is_none()

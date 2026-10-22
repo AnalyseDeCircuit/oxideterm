@@ -10,6 +10,8 @@ enum Mode {
     Exec,
     Shell,
     Pty,
+    SilentExec,
+    WrongExec,
 }
 
 #[derive(Default)]
@@ -86,6 +88,17 @@ impl server::Handler for Peer {
         let command = std::str::from_utf8(data).unwrap();
         if command.starts_with("echo __OXIDE_PROBE_") {
             self.counts.probes.fetch_add(1, Ordering::SeqCst);
+        }
+        if command.starts_with("echo __OXIDE_PROBE_")
+            && matches!(self.mode, Mode::SilentExec | Mode::WrongExec)
+        {
+            session.channel_success(channel)?;
+            if self.mode == Mode::WrongExec {
+                session.data(channel, b"unrelated login output\n".to_vec())?;
+                session.exit_status_request(channel, 0)?;
+                session.close(channel)?;
+            }
+            return Ok(());
         }
         if self.mode != Mode::Exec {
             session.channel_failure(channel)?;
@@ -266,6 +279,31 @@ async fn command_selection_preserves_results_and_caches_per_connection() {
         assert_eq!(counts.payloads.load(Ordering::SeqCst), 2);
         assert_eq!(counts.authentications.load(Ordering::SeqCst), 1);
         handle.clear_physical().await;
+        server.abort();
+        let _ = server.await;
+    }
+}
+
+#[tokio::test]
+async fn ide_channel_selection_requires_real_probe_output_and_reuses_physical_cache() {
+    for (mode, expected) in [
+        (Mode::Exec, SshCommandChannel::Exec),
+        (Mode::Shell, SshCommandChannel::Shell),
+        (Mode::Pty, SshCommandChannel::PtyShell),
+        (Mode::SilentExec, SshCommandChannel::Shell),
+        (Mode::WrongExec, SshCommandChannel::Shell),
+    ] {
+        let (handle, counts, server) = fixture(mode).await;
+        assert_eq!(handle.select_command_channel().await.unwrap(), expected);
+        assert_eq!(handle.select_command_channel().await.unwrap(), expected);
+        assert_eq!(counts.probes.load(Ordering::SeqCst), 1);
+        assert_eq!(counts.payloads.load(Ordering::SeqCst), 0);
+        assert_eq!(counts.authentications.load(Ordering::SeqCst), 1);
+        handle.clear_physical().await;
+        assert!(matches!(
+            handle.select_command_channel().await,
+            Err(SshTransportError::ConnectionFailed(_))
+        ));
         server.abort();
         let _ = server.await;
     }

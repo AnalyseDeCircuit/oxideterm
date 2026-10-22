@@ -1,5 +1,6 @@
 {
   "ide": {
+    "file_binary": "バイナリファイルのため、テキストエディターでは開けません。",
     "file_too_large": "ファイルが IDE の編集上限 100 MiB を超えています。",
     "file_encoding": "ファイルの文字コード",
     "file_line_ending": "改行コード",

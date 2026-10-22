@@ -7,6 +7,7 @@
 /// the crate testable without depending on the app-level locale crate.
 #[derive(Clone, Debug)]
 pub struct IdeLabels {
+    pub file_binary: String,
     pub file_too_large: String,
     pub file_encoding: String,
     pub file_line_ending: String,
@@ -17,7 +18,19 @@ pub struct IdeLabels {
     pub unrepresentable_text: String,
     pub large_file: String,
 
+    pub access_title: String,
+    pub agent_choices: [String; 2],
+    pub agent_choice_hint: String,
+    pub agent_installing: String,
+    pub agent_starting: String,
+    pub sftp_unavailable: String,
+    pub ssh_unavailable: String,
+    pub ssh_shell: String,
+    pub shell_commands: String,
+    pub backend_requirements: String,
+    pub access_modes: [String; 2],
     pub open_folder: String,
+    pub return_to_terminal: String,
     pub search: String,
     pub refresh: String,
     pub search_placeholder: String,
@@ -89,14 +102,6 @@ pub struct IdeLabels {
     pub agent_checking: String,
     pub agent_manual_upload: String,
     pub agent_manual_update: String,
-    pub agent_optin_title: String,
-    pub agent_optin_desc: String,
-    pub agent_optin_benefit_watch: String,
-    pub agent_optin_benefit_git: String,
-    pub agent_optin_benefit_atomic: String,
-    pub agent_optin_remember: String,
-    pub agent_optin_sftp_only: String,
-    pub agent_optin_enable: String,
     pub agent_remove_btn: String,
     pub agent_deploy_btn: String,
     pub agent_remove_confirm_title: String,
@@ -116,6 +121,7 @@ pub struct IdeLabels {
 impl Default for IdeLabels {
     fn default() -> Self {
         Self {
+            file_binary: "This is a binary file and cannot be opened in the text editor.".into(),
             file_too_large: "The file exceeds the 100 MiB IDE editing limit.".into(),
             file_encoding: "File encoding".into(),
             file_line_ending: "Line endings".into(),
@@ -126,6 +132,18 @@ impl Default for IdeLabels {
             unrepresentable_text: "This encoding cannot represent all characters. Choose UTF-8 to save without losing text.".into(),
             large_file: "Large file: syntax and wrapping off".into(),
 
+            return_to_terminal: "Return to terminal".into(),
+            backend_requirements: "Command access requires Linux with GNU file utilities.".into(),
+            shell_commands: "Shell commands".into(),
+            access_title: "Choose file access".into(),
+            agent_choices: ["Pure Shell", "Use agent (install or update if needed)"].map(str::to_owned),
+            agent_installing: "Installing agent: {{percent}}% ({{transferred}} / {{total}} KiB)".into(),
+            agent_starting: "Starting agent…".into(),
+            agent_choice_hint: "Choose how to access files. Agents are retained in ~/.oxideterm/oxideterm-agent.".into(),
+            ssh_unavailable: "SSH file access failed. Complete interactive login in a terminal, then right-click it and choose Convert to IDE.".into(),
+            ssh_shell: "SSH (shell channel)".into(),
+            sftp_unavailable: "SFTP is unavailable. Choose SSH.".into(),
+            access_modes: ["SFTP", "SSH"].map(str::to_owned),
             open_folder: "Open Folder".into(),
             search: "Search".into(),
             refresh: "Refresh".into(),
@@ -213,16 +231,6 @@ impl Default for IdeLabels {
             agent_checking: "Checking agent...".into(),
             agent_manual_upload: "Manual upload required".into(),
             agent_manual_update: "Manual update required".into(),
-            agent_optin_title: "Enable Remote Agent?".into(),
-            agent_optin_desc: "OxideTerm can deploy a lightweight agent (~2 MB) to the remote host for enhanced IDE features. The agent runs inside your existing SSH connection and makes no external network calls.".into(),
-            agent_optin_benefit_watch:
-                "Real-time file watching (instant tree refresh on external changes)".into(),
-            agent_optin_benefit_git: "Native Git status integration".into(),
-            agent_optin_benefit_atomic:
-                "Atomic file writes with hash-based conflict detection".into(),
-            agent_optin_remember: "Don't ask again".into(),
-            agent_optin_sftp_only: "SFTP Only".into(),
-            agent_optin_enable: "Enable Agent".into(),
             agent_remove_btn: "Remove Agent".into(),
             agent_deploy_btn: "Deploy Agent".into(),
             agent_remove_confirm_title: "Remove Remote Agent?".into(),
@@ -245,6 +253,31 @@ impl Default for IdeLabels {
 }
 
 impl IdeLabels {
+    pub fn agent_install_status(
+        &self,
+        progress: oxideterm_ide_fs::AgentInstallProgress,
+    ) -> (String, Option<f32>) {
+        use oxideterm_ide_fs::AgentInstallProgress;
+        match progress {
+            AgentInstallProgress::Checking => (self.agent_checking.clone(), None),
+            AgentInstallProgress::Starting => (self.agent_starting.clone(), None),
+            AgentInstallProgress::Uploading { transferred, total } => {
+                let percent = if total == 0 {
+                    0.0
+                } else {
+                    transferred as f32 / total as f32 * 100.0
+                };
+                (
+                    self.agent_installing
+                        .replace("{{percent}}", &format!("{:.0}", percent.floor()))
+                        .replace("{{transferred}}", &(transferred / 1024).to_string())
+                        .replace("{{total}}", &total.div_ceil(1024).to_string()),
+                    Some(percent),
+                )
+            }
+        }
+    }
+
     pub(crate) fn tree_name_validation_message(&self, key_or_message: &str) -> String {
         match key_or_message {
             "ide.validation.nameEmpty" => self.validation_name_empty.clone(),

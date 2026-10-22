@@ -33,6 +33,7 @@ const FILE_ENCODINGS: &[(&str, bool)] = &[
 impl IdeSurface {
     fn file_error_message(&self, error: &IdeFileError) -> String {
         match error.kind {
+            IdeFileErrorKind::Binary => self.labels.file_binary.clone(),
             IdeFileErrorKind::TooLarge => self.labels.file_too_large.clone(),
             IdeFileErrorKind::InvalidEncoding => self.labels.invalid_encoding.clone(),
             IdeFileErrorKind::UnrepresentableText => self.labels.unrepresentable_text.clone(),

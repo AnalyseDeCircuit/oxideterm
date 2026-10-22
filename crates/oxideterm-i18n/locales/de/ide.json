@@ -1,5 +1,6 @@
 {
   "ide": {
+    "file_binary": "Diese Datei ist eine Binärdatei und kann nicht im Texteditor geöffnet werden.",
     "file_too_large": "Die Datei überschreitet das IDE-Bearbeitungslimit von 100 MiB.",
     "file_encoding": "Dateikodierung",
     "file_line_ending": "Zeilenenden",

@@ -145,6 +145,12 @@ pub trait TerminalSessionBackend: Send {
     }
     fn activity_receiver(&self) -> TerminalActivityReceiver;
     fn take_events(&mut self) -> Vec<TerminalEvent>;
+    fn shell_channel_owned(&self) -> bool {
+        false
+    }
+    fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
+        bail!("Shell IDE requires an SSH terminal")
+    }
     fn write_input(&mut self, bytes: &[u8]) -> Result<()>;
     fn reconnect_ssh(&mut self, _config: SshSessionConfig) -> Result<()> {
         bail!("Only SSH terminals support this reconnect operation")

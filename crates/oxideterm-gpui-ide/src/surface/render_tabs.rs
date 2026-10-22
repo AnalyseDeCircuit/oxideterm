@@ -15,6 +15,7 @@ fn tab_scroll_viewport(scroll_handle: &ScrollHandle) -> gpui::Stateful<gpui::Div
 impl IdeSurface {
     fn render_editor_area(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let editor_content = div()
+            .debug_selector(|| "ide-editor-content".into())
             .relative()
             .flex_1()
             .min_h_0()
@@ -26,6 +27,21 @@ impl IdeSurface {
                     .is_some_and(|tab_id| self.loading_file_tabs.contains(&tab_id)) =>
                 {
                     self.render_loading_file()
+                }
+                None if let Some(error) = self
+                    .workspace
+                    .active_tab()
+                    .and_then(|tab| self.file_open_errors.get(&tab)) =>
+                {
+                    oxideterm_gpui_ui::error_state(
+                        &self.tokens,
+                        self.icon("lucide/triangle-alert.svg", 32.0, self.tokens.ui.warning),
+                        self.file_error_message(error),
+                        None,
+                        None,
+                    )
+                    .debug_selector(|| "ide-file-open-error".into())
+                    .into_any_element()
                 }
                 None => self.render_empty_editor(cx),
             });

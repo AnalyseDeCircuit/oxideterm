@@ -94,6 +94,7 @@ name = "oxideterm-agent"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "libc",
  "regex",
  "serde",
  "serde_json",

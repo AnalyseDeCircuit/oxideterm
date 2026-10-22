@@ -1009,6 +1009,14 @@ impl WorkspaceApp {
                 .flex()
                 .flex_col()
                 .gap(px(self.tokens.metrics.settings_card_gap))
+                .child(self.select_setting_row(
+                    "settings_view.ide.agent_mode_label",
+                    "settings_view.ide.agent_mode_hint",
+                    SettingsSelect::IdeAgentMode,
+                    ide_agent_label(settings.ide.agent_mode, &self.i18n),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ))
                 .child(self.bool_row(
                     "settings_view.ai.tool_use_enabled",
                     "settings_view.ai.tool_use_enabled_hint",

@@ -28,6 +28,19 @@ impl std::fmt::Debug for SshCommandExecution {
 }
 
 impl SshConnectionHandle {
+    /// Shares verified capabilities with commands without opening a second physical connection.
+    pub async fn select_command_channel(&self) -> Result<SshCommandChannel, SshTransportError> {
+        let pooled = self.physical::<PooledSshConnection>().ok_or_else(|| {
+            SshTransportError::ConnectionFailed("SSH connection is unavailable".into())
+        })?;
+        if pooled.is_closed().await {
+            return Err(SshTransportError::ConnectionFailed(
+                "SSH connection is closed".into(),
+            ));
+        }
+        select_channel(&pooled).await
+    }
+
     /// Selects a verified channel before submitting the command. Never replays it.
     pub async fn execute_command(
         &self,
@@ -171,6 +184,11 @@ async fn select_channel(
     {
         *cached = Some(SshCommandChannel::Exec);
         return Ok(SshCommandChannel::Exec);
+    }
+    if pooled.is_closed().await {
+        return Err(SshTransportError::ConnectionFailed(
+            "SSH connection closed during capability probe".into(),
+        ));
     }
     for with_pty in [false, true] {
         let opened =

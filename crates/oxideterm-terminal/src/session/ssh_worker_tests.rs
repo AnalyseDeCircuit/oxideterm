@@ -1494,3 +1494,165 @@ fn ssh_trzsz_backpressure_stops_at_the_transfer_buffer_and_cancel_wakes_it() {
     wait_until(|| fixture.terminal.shared.finished.load(Ordering::Acquire));
     producer.abort();
 }
+
+#[test]
+fn shell_ide_lease_isolates_protocol_and_restores_interactive_input() {
+    let mut fixture = Fixture::new();
+    fixture.terminal.set_output_events_enabled(true);
+    fixture.barrier();
+    fixture.send(b"shell ready\r\nold-long-root@host$ ");
+    wait_until(|| fixture.terminal.buffer_text().contains("shell ready"));
+    fixture.terminal.take_events();
+    let acquisition = fixture.terminal.acquire_shell_channel().unwrap();
+    let mut lease = fixture.runtime.block_on(acquisition).unwrap().unwrap();
+    fixture.barrier();
+    assert!(
+        fixture
+            .terminal
+            .write_input(b"must not reach agent")
+            .is_err()
+    );
+    fixture.send(b"private-file-token\n");
+    let private = fixture.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), lease.output.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    });
+    assert_eq!(&*private, b"private-file-token\n");
+    fixture.barrier();
+    assert_eq!(
+        fixture.terminal.buffer_text().trim(),
+        "shell ready\nold-long-root@host$"
+    );
+    assert!(
+        !fixture
+            .terminal
+            .take_events()
+            .iter()
+            .any(|event| matches!(event, TerminalEvent::Output(_)))
+    );
+    fixture
+        .runtime
+        .block_on(lease.write(b"agent-request\n"))
+        .unwrap();
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"agent-request\n"
+    );
+    let marker = format!("\x1e{}:RESTORED\x1f", lease.token);
+    fixture.send(&marker.as_bytes()[..12]);
+    fixture.send(&marker.as_bytes()[12..]);
+    fixture.send(b"root@host$ ");
+    wait_until(|| lease.is_restored() && fixture.terminal.buffer_text().contains("root@host$"));
+    fixture.barrier();
+    assert_eq!(
+        fixture.terminal.buffer_text().trim(),
+        "shell ready\nroot@host$"
+    );
+    let output: Vec<u8> = fixture
+        .terminal
+        .take_events()
+        .into_iter()
+        .filter_map(|event| {
+            if let TerminalEvent::Output(bytes) = event {
+                Some(bytes)
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+    assert_eq!(output, b"root@host$ ");
+    drop(lease);
+    fixture.terminal.write_input(b"echo restored\n").unwrap();
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"echo restored\n"
+    );
+    assert!(fixture.terminal.lifecycle().is_running());
+
+    let acquisition = fixture.terminal.acquire_shell_channel().unwrap();
+    let lease = fixture.runtime.block_on(acquisition).unwrap().unwrap();
+    wait_until(|| fixture.terminal.shell_channel_owned());
+    drop(lease);
+    wait_until(|| !fixture.terminal.shell_channel_owned());
+    fixture.send(b"typed");
+    wait_until(|| fixture.terminal.buffer_text().contains("typed"));
+    assert_eq!(
+        fixture.terminal.buffer_text().trim(),
+        "shell ready\nroot@host$ typed"
+    );
+    fixture
+        .terminal
+        .write_input(b"unused lease released\n")
+        .unwrap();
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"unused lease released\n"
+    );
+
+    let acquisition = fixture.terminal.acquire_shell_channel().unwrap();
+    let lease = fixture.runtime.block_on(acquisition).unwrap().unwrap();
+    let token = lease.token.clone();
+    let mut released = lease.release_receiver();
+    fixture.runtime.block_on(async {
+        lease.write(b"failed-bootstrap\n").await.unwrap();
+        drop(lease);
+    });
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"failed-bootstrap\n"
+    );
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        format!("\n#oxideterm-cancel-{token}\n").as_bytes(),
+    );
+    assert!(
+        !*released.borrow(),
+        "startup failure must remain pending during cleanup"
+    );
+    fixture.send(format!("\x1e{token}:RESTORED\x1foriginal shell usable\r\n").as_bytes());
+    fixture.runtime.block_on(async {
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            released.wait_for(|released| *released),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    });
+    fixture
+        .terminal
+        .write_input(b"pwd after failure\n")
+        .unwrap();
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"pwd after failure\n"
+    );
+    assert!(fixture.terminal.lifecycle().is_running());
+}

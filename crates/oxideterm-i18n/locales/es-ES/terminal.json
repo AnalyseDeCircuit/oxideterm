@@ -616,6 +616,25 @@
       "manage": "Credenciales de privilegio",
       "manage_title": "Abrir ajustes de credenciales de privilegio para este ámbito",
       "local_manage_unavailable": "La gestión de credenciales de privilegios para el shell local aún no está disponible."
+    },
+    "shell_ide": {
+      "requirements": "El acceso por comandos requiere Linux con GNU find, stat, grep y coreutils.",
+      "access_title": "Elegir acceso a archivos",
+      "agent": "Usar agente (instalar o actualizar si es necesario)",
+      "commands": "Comandos de shell",
+      "sftp": "SFTP",
+      "convert": "Convertir en IDE",
+      "return": "Volver al terminal",
+      "confirm": "Confirma que el terminal esté en el prompt sin entradas pendientes. Los comandos o el agente usan el usuario, contenedor y directorio actuales. La entrada se pausa hasta volver del IDE.",
+      "failed": "No se pudo iniciar el acceso a archivos. Comprueba la shell y los requisitos del entorno. Reconecta el terminal si no se restauró.",
+      "preparing": "Iniciando el servicio de archivos del IDE; la entrada del terminal está pausada…",
+      "ssh": "SSH",
+      "agent_choice_hint": "Shell puro no instala agentes. El agente se instala o reutiliza en ~/.oxideterm/oxideterm-agent del entorno seleccionado.",
+      "sftp_unavailable": "SFTP no está disponible. Elige SSH.",
+      "ssh_unavailable": "Falló el acceso a archivos SSH. Comprueba el entorno. Si se requiere un inicio de sesión interactivo, complétalo en la terminal y después haz clic derecho en ella y elige Convertir a IDE.",
+      "ssh_shell": "SSH (canal Shell)",
+      "agent_installing": "Instalando agente: {{percent}}% ({{transferred}} / {{total}} KiB)",
+      "agent_starting": "Iniciando agente…"
     }
   },
   "search": {

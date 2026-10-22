@@ -94,9 +94,7 @@ impl IdeSurface {
                         ),
                     ),
             );
-        dialog_backdrop()
-            .child(dialog)
-            .into_any_element()
+        self.render_modal_overlay(dialog)
     }
 
     fn render_conflict_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -380,12 +378,12 @@ impl IdeSurface {
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, _event, window, cx| {
-                                    window.focus(&this.focus_handle, cx);
+                                    window.focus(&this.modal_focus_handle, cx);
                                     cx.stop_propagation();
                                 }),
                             ),
                             cx.entity(),
-                            self.focus_handle.clone(),
+                            self.modal_focus_handle.clone(),
                         ),
                     )
                     .when_some(input.error.clone(), |this, error| {
@@ -984,13 +982,13 @@ impl IdeSurface {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                            window.focus(&this.focus_handle, cx);
+                            window.focus(&this.modal_focus_handle, cx);
                             this.begin_folder_picker_path_selection(event, window, cx);
                             cx.stop_propagation();
                         }),
                     ),
                     cx.entity(),
-                    self.focus_handle.clone(),
+                    self.modal_focus_handle.clone(),
                 )
                 .into_any_element(),
                 move |anchor, _window, cx| {

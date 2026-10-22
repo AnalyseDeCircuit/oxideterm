@@ -795,7 +795,7 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Ide, SettingsSelect::IdeAgentMode) => {
+            (SettingsTab::Ai, SettingsSelect::IdeAgentMode) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for mode in [
                     IdeAgentMode::Ask,

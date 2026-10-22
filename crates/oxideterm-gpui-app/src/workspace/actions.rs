@@ -903,6 +903,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.active_window_modal_owner(cx).is_some() {
+            return;
+        }
         if matches!(
             self.active_ime_target_for_window(window.window_handle().window_id(), cx),
             Some(WorkspaceImeTarget::AuditPolicy(_))
@@ -1256,6 +1259,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        // An inline IDE keeps the terminal tab identity while owning its content.
+        // Unhandled text must reach the IDE input handler, never the hidden PTY.
+        if self.active_ide_surface(cx).is_some() {
+            return false;
+        }
+
         let terminal_active = self.active_tab(cx).is_some_and(|tab| {
             matches!(
                 tab.kind,
