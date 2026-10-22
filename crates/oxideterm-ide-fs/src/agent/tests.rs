@@ -34,9 +34,16 @@ mod tests {
     }
 
     #[test]
-    fn installed_agent_without_prefix_reads_requires_update() {
-        assert_eq!(parse_remote_version_output("oxideterm-agent 2.2.4 compat 4"), RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo { version: "2.2.4".into(), compatibility_version: 4 }));
-        assert_eq!(parse_remote_version_output("oxideterm-agent 2.2.4 compat 5"), RemoteAgentInstallState::Current);
+    fn installed_agent_without_private_save_creation_requires_update() {
+        for compatibility_version in [4, 5] {
+            assert_eq!(
+                parse_remote_version_output(&format!("oxideterm-agent 2.2.4 compat {compatibility_version}")),
+                RemoteAgentInstallState::Incompatible(RemoteAgentVersionInfo {
+                    version: "2.2.4".into(), compatibility_version,
+                })
+            );
+        }
+        assert_eq!(parse_remote_version_output("oxideterm-agent 2.2.4 compat 6"), RemoteAgentInstallState::Current);
     }
 
     #[test]

@@ -148,11 +148,7 @@ pub(super) fn write_file(params: IdeWriteParams) -> Result<WriteFileResult, RpcE
         std::process::id(),
         NEXT_SWAP.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&swap)
-        .map_err(|e| map_io_error(e, parent))?;
+    let mut file = create_save_temp(&swap).map_err(|e| map_io_error(e, parent))?;
     let result = (|| {
         file.write_all(&bytes).map_err(|e| map_io_error(e, &path))?;
         if let Ok(metadata) = fs::metadata(&path) {
@@ -187,4 +183,34 @@ pub(super) fn write_file(params: IdeWriteParams) -> Result<WriteFileResult, RpcE
         let _ = fs::remove_file(&swap);
     }
     result
+}
+
+fn create_save_temp(path: &Path) -> io::Result<File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Restrict access at creation, before any private content reaches disk.
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn save_temp_is_private_before_content_is_written() {
+        let root = env::temp_dir().join(format!("oxideterm-private-save-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        let path = root.join("swap");
+        let file = create_save_temp(&path).unwrap();
+        let mode = file.metadata().unwrap().permissions().mode() & 0o777;
+        drop(file);
+        fs::remove_dir_all(root).unwrap();
+        assert_eq!(mode, 0o600);
+    }
 }

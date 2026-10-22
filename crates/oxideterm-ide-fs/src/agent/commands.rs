@@ -4,8 +4,9 @@
 use super::*;
 use zeroize::Zeroizing;
 
+const SEARCH_OUTPUT_LIMIT: usize = 1024 * 1024;
 const OUTPUT_LIMIT: usize = 150 * 1024 * 1024;
-const TOOLS: &str = "[ \"$(uname -s)\" = Linux ] || exit 69; for t in sh base64 find stat sha256sum cut readlink mktemp cp mv ln rm rmdir mkdir grep cat head chmod dirname; do command -v \"$t\" >/dev/null || exit 69; done; stat --version >/dev/null 2>&1 && find --version >/dev/null 2>&1 && cp --version >/dev/null 2>&1 && grep --version >/dev/null 2>&1 || exit 69";
+const TOOLS: &str = "[ \"$(uname -s)\" = Linux ] || exit 69; for t in sh base64 find stat sha256sum cut readlink mktemp cp mv ln rm rmdir mkdir grep cat head chmod dirname bash mkfifo; do command -v \"$t\" >/dev/null || exit 69; done; stat --version >/dev/null 2>&1 && find --version >/dev/null 2>&1 && cp --version >/dev/null 2>&1 && grep --version >/dev/null 2>&1 || exit 69";
 
 // Both execution contexts consume the same generated scripts and byte results.
 // Only a terminal transport owns stty state and a restoration handshake.
@@ -150,16 +151,7 @@ impl CommandOperation {
                 from = quoted(param(&params, "source_path")?)?,
                 to = quoted(param(&params, "target_path")?)?
             ),
-            "search/grep" => format!(
-                "s=0; grep -r -n -Z -I -E {} -- {} {} || s=$?; [ \"$s\" -le 1 ]",
-                if params["case_sensitive"].as_bool() == Some(true) {
-                    ""
-                } else {
-                    "-i"
-                },
-                quoted(param(&params, "pattern")?)?,
-                quoted(param(&params, "path")?)?
-            ),
+            "search/grep" => search_script(&params)?,
             _ => return Err(command_error(69)),
         };
         let max_results = params["max_results"].as_u64().unwrap_or(1000) as usize;
@@ -266,6 +258,63 @@ impl CommandOperation {
             _ => Ok(json!({})),
         }
     }
+}
+
+// Bound both reads before allocation, preserving NUL-delimited filenames and
+// complete lines. The parent owns and terminates the producer when a limit is reached.
+fn search_script(params: &serde_json::Value) -> Result<String, AgentError> {
+    let limit = params["max_results"].as_u64().unwrap_or(1000);
+    Ok(format!(
+        r#"[ {limit} -gt 0 ] || exit 0
+search_dir=$(mktemp -d) || exit 1
+producer=''
+trap 'if [ -n "$producer" ]; then kill "$producer" 2>/dev/null || :; wait "$producer" 2>/dev/null || :; fi; rm -rf -- "$search_dir"' EXIT HUP INT TERM
+mkfifo "$search_dir/pipe"
+grep -r -H -n -Z -I -E --line-buffered {case} -- {pattern} {path} > "$search_dir/pipe" &
+producer=$!
+limiter_status=0
+LC_ALL=C bash -c '
+remaining=$1
+limit=$2
+marker=$3
+count=0
+while (( remaining > 0 )); do
+    IFS= read -r -d "" -n "$remaining" path || break
+    (( remaining -= ${{#path}} + 1 ))
+    (( remaining > 0 )) || break
+    IFS= read -r -n "$remaining" line || break
+    (( remaining -= ${{#line}} + 1 ))
+    (( remaining >= 0 )) || break
+    printf "%s\0%s\n" "$path" "$line"
+    (( count += 1 ))
+    if (( count >= limit )); then
+        : > "$marker"
+        exit 0
+    fi
+done
+if (( remaining <= 0 )); then : > "$marker"; fi
+' -- {budget} {limit} "$search_dir/limited" < "$search_dir/pipe" || limiter_status=$?
+if [ -f "$search_dir/limited" ] || [ "$limiter_status" -ne 0 ]; then kill "$producer" 2>/dev/null || :; fi
+status=0
+wait "$producer" || status=$?
+producer=''
+[ "$limiter_status" -eq 0 ] || exit 1
+case "$status" in
+    0|1) ;;
+    141|143) [ -f "$search_dir/limited" ] || exit 1 ;;
+    *) exit 1 ;;
+esac
+"#,
+        limit = limit,
+        budget = SEARCH_OUTPUT_LIMIT,
+        case = if params["case_sensitive"].as_bool() == Some(true) {
+            ""
+        } else {
+            "-i"
+        },
+        pattern = quoted(param(params, "pattern")?)?,
+        path = quoted(param(params, "path")?)?,
+    ))
 }
 
 fn write_script(method: &str, params: &serde_json::Value) -> Result<String, AgentError> {
@@ -490,6 +539,99 @@ mod tests {
             operation.decode(&output.stdout).unwrap(),
             json!(base64::engine::general_purpose::STANDARD.encode(vec![0; 8192]))
         );
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(target_os = "linux"),
+        ignore = "requires local Docker for GNU tools"
+    )]
+    fn shell_search_bounds_remote_output_and_preserves_complete_records() {
+        let cases = [
+            ("match", 2, true),
+            ("absent", 2, true),
+            ("[", 2, false),
+            ("match", 0, true),
+        ];
+        for (pattern, limit, success) in cases {
+            let op = CommandOperation::new(
+                "search/grep",
+                json!({"path":".", "pattern":pattern, "max_results":limit}),
+            )
+            .unwrap();
+            let script = format!(
+                "root=$(mktemp -d)\ntrap 'rm -rf -- \"$root\"' EXIT\ncd -- \"$root\"\nprintf 'match one\\nmatch two\\nmatch three\\n' > 'a\nfile'\n(\n{}\n)",
+                &*op.script
+            );
+            let output = run_linux("/bin/sh", &[], script.as_bytes());
+            assert_eq!(output.status.success(), success, "{pattern}/{limit}");
+            if success {
+                let expected = if pattern == "match" && limit > 0 {
+                    b"./a\nfile\x001:match one\n./a\nfile\x002:match two\n".as_slice()
+                } else {
+                    b""
+                };
+                assert_eq!(output.stdout, expected, "{pattern}/{limit}");
+            }
+        }
+        // A producer that pauses after its first hit must be terminated, not drained to EOF.
+        let op = CommandOperation::new(
+            "search/grep",
+            json!({"path":".", "pattern":"match", "max_results":1}),
+        )
+        .unwrap();
+        let script = format!(
+            r#"root=$(mktemp -d)
+trap 'rm -rf -- "$root"' EXIT
+mkdir "$root/bin"
+printf '#!/bin/sh\nprintf "./first\\0001:match\\n"\nexec sleep 30\n' > "$root/bin/grep"
+chmod +x "$root/bin/grep"
+cat > "$root/request" <<'REQUEST'
+{}
+REQUEST
+PATH="$root/bin:$PATH" timeout 3 /bin/sh "$root/request"
+"#,
+            &*op.script
+        );
+        let output = run_linux("/bin/sh", &[], script.as_bytes());
+        assert!(
+            output.status.success(),
+            "limited search failed to stop its producer: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, b"./first\x001:match\n");
+
+        let op = CommandOperation::new(
+            "search/grep",
+            json!({"path":".", "pattern":"x", "max_results":100000}),
+        )
+        .unwrap();
+        let script = format!(
+            "root=$(mktemp -d)\ntrap 'rm -rf -- \"$root\"' EXIT\ncd -- \"$root\"\nhead -c 32768 /dev/zero | tr '\\000' x > line\nfor n in $(seq 1 64); do cat line; printf '\\n'; done > many\nrm line\n{}",
+            &*op.script
+        );
+        let output = run_linux("/bin/sh", &[], script.as_bytes());
+        assert!(output.status.success());
+        assert!(output.stdout.len() <= SEARCH_OUTPUT_LIMIT);
+        let expected = (1..=31)
+            .map(|line| json!({"path":"./many", "line":line, "column":1, "text":"x".repeat(32768)}))
+            .collect::<Vec<_>>();
+        assert_eq!(op.decode(&output.stdout).unwrap(), json!(expected));
+
+        // An oversized first record must not cross the transport or become a partial hit.
+        let op = CommandOperation::new(
+            "search/grep",
+            json!({"path":".", "pattern":"x", "max_results":10}),
+        )
+        .unwrap();
+        let script = format!(
+            "root=$(mktemp -d)\ntrap 'rm -rf -- \"$root\"' EXIT\ncd -- \"$root\"\nhead -c 2097152 /dev/zero | tr '\\000' x > huge\nprintf '\\n' >> huge\n{}",
+            &*op.script
+        );
+        let output = run_linux("/bin/sh", &[], script.as_bytes());
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"");
+        assert_eq!(op.decode(&output.stdout).unwrap(), json!([]));
     }
 
     #[test]

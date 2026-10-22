@@ -22,7 +22,7 @@ use walkdir::WalkDir;
 
 mod ide;
 
-const COMPATIBILITY_VERSION: u32 = 5;
+const COMPATIBILITY_VERSION: u32 = 6;
 const ERR_METHOD_NOT_FOUND: i32 = -32601;
 const ERR_INVALID_PARAMS: i32 = -32602;
 const ERR_INTERNAL: i32 = -32603;
