@@ -506,9 +506,10 @@ impl WorkspaceApp {
             .tool_calls
             .iter()
             .any(|call| call.pointer("/result/imageIds").is_some());
-        if !has_tool_images && !oxideterm_ai::message_images(message).is_empty() {
-            body =
-                body.child(self.render_ai_images(oxideterm_ai::message_images(message), false, cx));
+        let images = oxideterm_ai::message_images(message);
+        let has_message_images = !has_tool_images && !images.is_empty();
+        if !user && has_message_images {
+            body = body.child(self.render_ai_images(images, false, cx));
         }
         if editing {
             body = body.child(self.render_ai_message_edit_body(cx));
@@ -763,6 +764,13 @@ impl WorkspaceApp {
             .px(px(self.tokens.spacing.three))
             .py(px(self.tokens.spacing.three))
             .child(header)
+            .when(user && has_message_images, |message| {
+                message.child(
+                    div()
+                        .mt(px(self.tokens.spacing.two))
+                        .child(self.render_ai_images(images, false, cx)),
+                )
+            })
             .child(ai_message_body(&self.tokens, role, body))
             .into_any_element()
     }

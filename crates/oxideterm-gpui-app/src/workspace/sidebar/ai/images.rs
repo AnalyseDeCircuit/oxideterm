@@ -375,9 +375,6 @@ impl WorkspaceApp {
             let mut card = div()
                 .relative()
                 .flex_none()
-                .flex()
-                .flex_col()
-                .gap(px(3.0))
                 .w(px(if expanded {
                     280.0
                 } else if draft {
@@ -389,7 +386,7 @@ impl WorkspaceApp {
                 .child(
                     self.agent_control(
                         format!("ai-image-{}-{draft}", image.id),
-                        title.clone(),
+                        title,
                         div()
                             .w_full()
                             .overflow_hidden()
@@ -404,21 +401,6 @@ impl WorkspaceApp {
                         cx,
                     ),
                 );
-            if !draft {
-                card = card
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .child(title),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!("{} × {}", image.width, image.height)),
-                    );
-            }
             if draft {
                 let id = image.id.clone();
                 let label = self.i18n.t("ai.images.remove");
