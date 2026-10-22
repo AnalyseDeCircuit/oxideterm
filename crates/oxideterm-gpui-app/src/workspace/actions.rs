@@ -934,6 +934,10 @@ impl WorkspaceApp {
             cx.stop_propagation();
             return;
         }
+        if self.handle_context_tools_menu_key(&event.keystroke.key, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
 
         if self.terminal_command_sender_editor_focused(window, cx)
             || self.quick_command_text_editor_focused(window, cx)

@@ -675,9 +675,7 @@ impl WorkspaceApp {
                 available_width -= self.sidebar_panel_width();
             }
         }
-        if self.context_sidebar_visible() {
-            available_width -= self.ai_entity.read(cx).chat_ui().sidebar_width;
-        }
+        available_width -= self.context_sidebar_occupied_width(cx);
         let grid_width =
             (available_width - self.tokens.spacing.three * 2.0).max(MANAGER_GRID_CARD_MIN_WIDTH);
         let gap = self.tokens.spacing.three;

@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum HostToolsEvent {
     ShowNotice(HostToolsNotice),
-    ToolSelected(ContextSidebarTool),
+    ToolSelected,
 }
 
 /// Moves a Host Tools request across GPUI's cloneable action boundary exactly once.

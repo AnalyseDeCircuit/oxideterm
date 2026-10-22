@@ -62,11 +62,12 @@ fn knowledge_workspace_available_width(
         } else {
             sidebar_panel_width
         };
-    let right_width = if context_sidebar_visible {
-        context_sidebar_width
-    } else {
-        0.0
-    };
+    let right_width = activity_bar_width
+        + if context_sidebar_visible {
+            context_sidebar_width
+        } else {
+            0.0
+        };
     (viewport_width - left_width - right_width).max(0.0)
 }
 
@@ -2645,7 +2646,11 @@ mod tests {
     fn responsive_width_uses_center_workspace_after_sidebars() {
         let available =
             knowledge_workspace_available_width(1_200.0, false, 48.0, false, 260.0, true, 320.0);
-        assert_eq!(available, 572.0);
+        assert_eq!(available, 524.0);
+
+        let collapsed_context =
+            knowledge_workspace_available_width(1_200.0, false, 48.0, false, 260.0, false, 320.0);
+        assert_eq!(collapsed_context, 844.0);
 
         let zen_available =
             knowledge_workspace_available_width(1_200.0, true, 48.0, false, 260.0, true, 320.0);

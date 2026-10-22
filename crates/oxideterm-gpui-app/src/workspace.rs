@@ -849,6 +849,8 @@ pub(crate) struct WorkspaceApp {
     active_surface: ActiveSurface,
     active_session_sidebar_view_mode: ActiveSessionSidebarViewMode,
     session_sort_menu_open: bool,
+    context_tools_menu: Option<ContextSidebarTool>,
+    context_tools_menu_scroll: ScrollHandle,
     session_search_open: bool,
     session_search_query: String,
     active_session_sidebar_focused_node_id: Option<NodeId>,

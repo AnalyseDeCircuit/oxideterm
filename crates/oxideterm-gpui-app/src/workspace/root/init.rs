@@ -420,12 +420,7 @@ impl WorkspaceApp {
                 HostToolsEvent::ShowNotice(notice) => {
                     workspace.push_host_tools_notice(notice.clone(), cx);
                 }
-                HostToolsEvent::ToolSelected(tool) => {
-                    workspace.begin_user_segmented_control_transition(
-                        selection_motion::HOST_TOOLS_SWITCHER_ID,
-                        connection_monitor::host_tools_tab_index(*tool),
-                        cx,
-                    );
+                HostToolsEvent::ToolSelected => {
                     workspace.clear_ime_selection();
                     workspace.ime_marked_text = None;
                     cx.notify();
@@ -711,6 +706,8 @@ impl WorkspaceApp {
             active_surface: ActiveSurface::Terminal,
             active_session_sidebar_view_mode: ActiveSessionSidebarViewMode::Tree,
             session_sort_menu_open: false,
+            context_tools_menu: None,
+            context_tools_menu_scroll: ScrollHandle::new(),
             session_search_open: false,
             session_search_query: String::new(),
             active_session_sidebar_focused_node_id: settings

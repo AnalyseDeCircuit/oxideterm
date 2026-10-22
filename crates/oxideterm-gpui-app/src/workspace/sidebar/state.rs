@@ -182,6 +182,18 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn context_sidebar_occupied_width(&self, cx: &App) -> f32 {
+        if self.settings_store.settings().sidebar_ui.zen_mode {
+            return 0.0;
+        }
+        self.tokens.metrics.activity_bar_width
+            + if self.context_sidebar_visible() {
+                self.ai_entity.read(cx).chat_ui().sidebar_width
+            } else {
+                0.0
+            }
+    }
+
     pub(in crate::workspace) fn set_sidebar_section(
         &mut self,
         section: SidebarSection,
@@ -436,9 +448,6 @@ impl WorkspaceApp {
             // Non-AI context panels share the old right-sidebar shell, but must
             // not keep AI-specific focus or floating popovers alive.
             self.close_ai_sidebar_popovers(cx);
-            self.host_tools.update(cx, |host_tools, cx| {
-                host_tools.reset_active_tool(cx);
-            });
         }
         self.sync_host_tools_lifecycle(panel == ContextSidebarPanel::HostTools, cx);
         self.clear_ai_sidebar_keyboard_focus(cx);
@@ -562,7 +571,11 @@ impl WorkspaceApp {
         // On Windows, inner_window_bounds() reports the restore bounds while
         // maximized, which would clamp every resize update to the same limit.
         let viewport_width = f32::from(window.viewport_size().width);
-        ai_sidebar_width_from_cursor_value(f32::from(cursor_x), viewport_width)
+        ai_sidebar_width_from_cursor_value(
+            f32::from(cursor_x),
+            viewport_width,
+            self.tokens.metrics.activity_bar_width,
+        )
     }
 
     pub(in crate::workspace) fn clamp_sidebar_widths_to_viewport(
@@ -616,14 +629,32 @@ impl WorkspaceApp {
 pub(in crate::workspace) fn ai_sidebar_width_from_cursor_value(
     cursor_x: f32,
     viewport_width: f32,
+    activity_bar_width: f32,
 ) -> f32 {
-    // The context sidebar is anchored to the right edge, so dragging left must
+    // The context sidebar ends at the right activity rail, so dragging left must
     // increase width and dragging right must decrease width. Keep this math in
     // a pure helper so regressions do not require constructing a GPUI Window.
     clamp_responsive_sidebar_width(
-        viewport_width - cursor_x,
+        viewport_width - activity_bar_width - cursor_x,
         viewport_width,
         AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
         AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ai_sidebar_width_from_cursor_value;
+
+    #[test]
+    fn context_sidebar_resize_excludes_the_fixed_right_rail() {
+        assert_eq!(
+            ai_sidebar_width_from_cursor_value(852.0, 1_200.0, 48.0),
+            300.0
+        );
+        assert_eq!(
+            ai_sidebar_width_from_cursor_value(752.0, 1_200.0, 48.0),
+            400.0
+        );
+    }
 }

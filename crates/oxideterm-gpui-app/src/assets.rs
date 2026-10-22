@@ -99,6 +99,7 @@ pub(crate) enum LucideIcon {
     Network,
     PanelLeft,
     PanelLeftClose,
+    PanelRight,
     PanelRightClose,
     Pencil,
     Pause,
@@ -227,6 +228,7 @@ impl LucideIcon {
             "network" => Self::Network,
             "panelleft" => Self::PanelLeft,
             "panelleftclose" => Self::PanelLeftClose,
+            "panelright" => Self::PanelRight,
             "panelrightclose" => Self::PanelRightClose,
             "pencil" => Self::Pencil,
             "pause" => Self::Pause,
@@ -350,6 +352,7 @@ impl LucideIcon {
             Self::Network => "lucide/network.svg",
             Self::PanelLeft => "lucide/panel-left.svg",
             Self::PanelLeftClose => "lucide/panel-left-close.svg",
+            Self::PanelRight => "lucide/panel-right.svg",
             Self::PanelRightClose => "lucide/panel-right-close.svg",
             Self::Pencil => "lucide/pencil.svg",
             Self::Pause => "lucide/pause.svg",
@@ -552,6 +555,7 @@ impl AssetSource for NativeAssets {
             "lucide/network.svg" => NETWORK,
             "lucide/panel-left.svg" => PANEL_LEFT,
             "lucide/panel-left-close.svg" => PANEL_LEFT_CLOSE,
+            "lucide/panel-right.svg" => PANEL_RIGHT,
             "lucide/panel-right-close.svg" => PANEL_RIGHT_CLOSE,
             "lucide/pencil.svg" => PENCIL,
             "lucide/pin.svg" => PIN,
@@ -689,6 +693,7 @@ impl AssetSource for NativeAssets {
                 "network.svg",
                 "panel-left.svg",
                 "panel-left-close.svg",
+                "panel-right.svg",
                 "panel-right-close.svg",
                 "pencil.svg",
                 "pin.svg",
@@ -898,6 +903,7 @@ const MEMORY_STICK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24"
 const NETWORK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>"#;
 const PANEL_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>"#;
 const PANEL_LEFT_CLOSE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>"#;
+const PANEL_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>"#;
 const PANEL_RIGHT_CLOSE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>"#;
 const PENCIL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></svg>"#;
 const PIN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>"#;

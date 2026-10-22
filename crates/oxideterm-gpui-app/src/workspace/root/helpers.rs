@@ -915,6 +915,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.session_sort_menu_open = false;
+        self.context_tools_menu = None;
         self.audit.open_filter = None;
         // Tauri dialogs are Radix modal roots: opening one dismisses background
         // popovers and input focus before the overlay starts trapping events.

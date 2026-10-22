@@ -120,11 +120,10 @@ impl WorkspaceApp {
             ContextSidebarPanel::Assistant => {
                 ("sidebar.panels.ai", "assistant", LucideIcon::Sparkles)
             }
-            ContextSidebarPanel::HostTools => (
-                "sidebar.panels.host_tools",
-                "host-tools",
-                LucideIcon::Wrench,
-            ),
+            ContextSidebarPanel::HostTools => {
+                let tool = self.host_tools.read(cx).active_tool();
+                (tool.label_key(), "host-tools", tool.icon())
+            }
         };
         context_sidebar_region_chrome()
             .child(
@@ -146,8 +145,6 @@ impl WorkspaceApp {
                             .flex()
                             .flex_row()
                             .items_center()
-                            .justify_between()
-                            .gap(px(8.0))
                             .px_3()
                             // Match the center tab bar's chrome opacity instead
                             // of inheriting the more transparent sidebar body.
@@ -158,55 +155,12 @@ impl WorkspaceApp {
                             .occlude()
                             .border_b_1()
                             .border_color(self.workspace_chrome_divider())
-                            // Keep the title and collapse button in one real
-                            // horizontal flex row. The region width is owned by
-                            // the parent frame, so this row must never infer a
-                            // smaller hand-derived width from the title text.
                             .child(self.render_context_sidebar_panel_title(
                                 title_key, title_role, icon, cx,
                             ))
-                            .child(
-                                div()
-                                    .id("context-sidebar-collapse")
-                                    .flex_none()
-                                    .size(px(28.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .cursor_pointer()
-                                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::PanelRightClose,
-                                        self.tokens.metrics.sidebar_collapse_icon_size,
-                                        rgb(theme.text_muted),
-                                    ))
-                                    .on_mouse_move(cx.listener({
-                                        let label = self.i18n.t("sidebar.tooltips.collapse");
-                                        move |this, event: &MouseMoveEvent, _window, cx| {
-                                            this.queue_workspace_tooltip(
-                                                "context-sidebar-collapse",
-                                                label.clone(),
-                                                f32::from(event.position.x) + 12.0,
-                                                f32::from(event.position.y) + 16.0,
-                                                cx,
-                                            );
-                                        }
-                                    }))
-                                    .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
-                                        if !*hovered {
-                                            this.clear_workspace_tooltip(
-                                                "context-sidebar-collapse",
-                                                cx,
-                                            );
-                                        }
-                                    }))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.collapse_context_sidebar(cx);
-                                        }),
-                                    ),
+                            .when(
+                                self.active_context_sidebar_panel == ContextSidebarPanel::HostTools,
+                                |header| header.child(self.render_host_tool_monitoring_toggle(cx)),
                             ),
                     )
                     .child(
@@ -293,6 +247,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let activity_width = self.tokens.metrics.activity_bar_width;
         let hotzone = sidebar_resize_hotzone_chrome(
             "context-right-sidebar-resize-hotzone",
             if self.ai_entity.read(cx).chat_ui().sidebar_resizing {
@@ -322,7 +277,9 @@ impl WorkspaceApp {
             &self.tokens,
             "right-sidebar-edge-motion",
             hotzone,
-            |edge, width| edge.right(px(sidebar_resize_hotzone_origin(width))),
+            move |edge, width| {
+                edge.right(px(sidebar_resize_hotzone_origin(activity_width + width)))
+            },
         )
     }
 
@@ -1403,8 +1360,6 @@ mod sidebar_resize_region_tests {
                                                 .flex()
                                                 .flex_row()
                                                 .items_center()
-                                                .justify_between()
-                                                .gap(px(8.0))
                                                 .px_3()
                                                 .debug_selector(|| "context-titlebar".to_string())
                                                 .child(
@@ -1414,14 +1369,6 @@ mod sidebar_resize_region_tests {
                                                         .min_w(px(0.0))
                                                         .debug_selector(|| {
                                                             "context-title-drag".to_string()
-                                                        }),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_none()
-                                                        .size(px(28.0))
-                                                        .debug_selector(|| {
-                                                            "context-collapse".to_string()
                                                         }),
                                                 ),
                                         ),
@@ -1574,9 +1521,6 @@ mod sidebar_resize_region_tests {
         let titlebar = cx
             .debug_bounds("context-titlebar")
             .expect("titlebar bounds");
-        let collapse = cx
-            .debug_bounds("context-collapse")
-            .expect("collapse bounds");
         let hotzone = cx.debug_bounds("context-hotzone").expect("hotzone bounds");
 
         assert_close("frame width", f32::from(frame.size.width), total_width);
@@ -1591,12 +1535,6 @@ mod sidebar_resize_region_tests {
             f32::from(titlebar.size.width),
             f32::from(region.size.width),
         );
-
-        // The collapse control should be at the right chrome edge, allowing for
-        // the titlebar padding. This catches regressions where the titlebar row
-        // shrinks to the intrinsic "OxideSens" title width.
-        let right_padding = right_edge(&titlebar) - right_edge(&collapse);
-        assert_close("collapse right padding", right_padding, 12.0);
 
         assert_close(
             "hotzone origin",

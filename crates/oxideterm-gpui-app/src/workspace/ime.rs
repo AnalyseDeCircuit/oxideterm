@@ -1231,6 +1231,7 @@ impl WorkspaceApp {
         if self.session_search_open
             && !self.sidebar_collapsed
             && !self.session_sort_menu_open
+            && self.context_tools_menu.is_none()
             && self.effective_sidebar_panel_section() == super::SidebarSection::Sessions
             && (self.selected_ime_target == Some(WorkspaceImeTarget::ActiveSessionSearch)
                 || self.selected_ime_range.as_ref().is_some_and(|selection| {

@@ -202,11 +202,6 @@ pub(super) struct TopologyDragState {
     pub(super) last_y: f32,
 }
 
-#[derive(Clone, Copy)]
-pub(super) struct HostToolsTabScrollbarDragState {
-    pub(super) grab_offset_x: f32,
-}
-
 #[derive(Clone)]
 pub(super) struct TopologyNodeMenuState {
     pub(super) node_id: Option<NodeId>,

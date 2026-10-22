@@ -730,7 +730,6 @@ impl WorkspaceApp {
                 this.update_settings_slider_drag(event, cx);
                 this.update_terminal_cast_seek_drag(event, cx);
                 // Continue scrollbar dragging after the pointer leaves its thin hit target.
-                this.update_host_tools_tab_scrollbar_drag(event, cx);
                 this.update_tabbar_scrollbar_drag(event, window, cx);
                 if this.read_only_selection_drag_active() && !event.dragging() {
                     // A platform capture loss can omit the matching mouse-up. The
@@ -1110,6 +1109,9 @@ impl WorkspaceApp {
                         // the gutter and content here makes resize hit-testing
                         // easy to regress on scroll-heavy Host Tools pages.
                         layout.child(self.render_animated_context_sidebar_frame(cx))
+                    })
+                    .when(!zen_mode, |layout| {
+                        layout.child(self.render_context_activity_bar(window, cx))
                     }),
             )
             .when(!zen_mode && !self.sidebar_collapsed, |root| {
@@ -1154,6 +1156,9 @@ impl WorkspaceApp {
                 |root| root.child(self.render_workspace_pointer_capture_overlay(cx)),
             )
             .when_some(self.render_session_sort_menu(cx), |root, menu| {
+                root.child(menu)
+            })
+            .when_some(self.render_context_tools_menu(window, cx), |root, menu| {
                 root.child(menu)
             })
             .when(
@@ -1461,10 +1466,7 @@ impl WorkspaceApp {
             return self.render_tab_drag_capture(None, cx);
         }
         let cursor = match self.browser_pointer_capture_owner(cx) {
-            Some(
-                browser_behavior::BrowserPointerCaptureOwner::HostToolsTabScrollbar
-                | browser_behavior::BrowserPointerCaptureOwner::TabDrag,
-            ) => CursorStyle::ClosedHand,
+            Some(browser_behavior::BrowserPointerCaptureOwner::TabDrag) => CursorStyle::ClosedHand,
             Some(
                 browser_behavior::BrowserPointerCaptureOwner::EmbeddedSftpSidebarResize
                 | browser_behavior::BrowserPointerCaptureOwner::SftpQueueResize
@@ -1496,7 +1498,6 @@ impl WorkspaceApp {
                 this.update_sftp_queue_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_terminal_quick_commands_resize(event, cx);
-                this.update_host_tools_tab_scrollbar_drag(event, cx);
                 cx.stop_propagation();
             }))
             .on_mouse_up(
@@ -1530,7 +1531,6 @@ impl WorkspaceApp {
         self.finish_split_drag(cx);
         self.finish_settings_slider_drag(cx);
         self.finish_terminal_cast_seek_drag(cx);
-        self.finish_host_tools_tab_scrollbar_drag(cx);
         self.finish_tabbar_scrollbar_drag(cx);
         self.finish_ime_selection_drag(cx);
         self.stop_selectable_text_autoscroll();

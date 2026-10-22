@@ -901,10 +901,6 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(label),
             )
-            .when(
-                self.settings_store.settings().sidebar_ui.show_app_lock_icon,
-                |footer| footer.child(self.render_app_lock_button(24.0, cx)),
-            )
             .into_any_element()
     }
 

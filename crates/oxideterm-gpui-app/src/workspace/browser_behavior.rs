@@ -445,7 +445,6 @@ pub(crate) enum BrowserPointerCaptureOwner {
     PaneSplitter,
     SettingsSlider,
     TerminalCastSeekbar,
-    HostToolsTabScrollbar,
     TextSelection,
     SftpFileDrag,
     TabDrag,
@@ -469,7 +468,6 @@ struct BrowserPointerCaptureState {
     pane_splitter_dragging: bool,
     settings_slider_dragging: bool,
     terminal_cast_seekbar_dragging: bool,
-    host_tools_tab_scrollbar_dragging: bool,
     text_selection_dragging: bool,
     sftp_file_dragging: bool,
     tab_dragging: bool,
@@ -526,7 +524,6 @@ pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptu
             | BrowserPointerCaptureOwner::SftpQueueResize
             | BrowserPointerCaptureOwner::TerminalCommandSenderResize
             | BrowserPointerCaptureOwner::TerminalQuickCommandsResize
-            | BrowserPointerCaptureOwner::HostToolsTabScrollbar
             | BrowserPointerCaptureOwner::TabDrag
     )
 }
@@ -539,7 +536,6 @@ impl WorkspaceApp {
         if self.knowledge_resize_active(cx) {
             return Some(BrowserPointerCaptureOwner::KnowledgeResize);
         }
-        let host_tools_tab_scrollbar_dragging = self.host_tools_tab_scrollbar_drag_active(cx);
         let sftp = self.sftp_view().read(cx);
         resolve_browser_pointer_capture_owner(BrowserPointerCaptureState {
             sidebar_resizing: self.sidebar_resizing,
@@ -557,7 +553,6 @@ impl WorkspaceApp {
             pane_splitter_dragging: self.split_drag.is_some(),
             settings_slider_dragging: self.settings_slider_drag.is_some(),
             terminal_cast_seekbar_dragging: self.terminal.read(cx).cast_seek_dragging(),
-            host_tools_tab_scrollbar_dragging,
             text_selection_dragging: self.ime_drag_selection.is_some(),
             sftp_file_dragging: sftp.has_drag_capture(),
             tab_dragging: self.main_window_tabs.drag.is_some(),
@@ -591,8 +586,6 @@ fn resolve_browser_pointer_capture_owner(
         Some(BrowserPointerCaptureOwner::SettingsSlider)
     } else if state.terminal_cast_seekbar_dragging {
         Some(BrowserPointerCaptureOwner::TerminalCastSeekbar)
-    } else if state.host_tools_tab_scrollbar_dragging {
-        Some(BrowserPointerCaptureOwner::HostToolsTabScrollbar)
     } else if state.text_selection_dragging {
         Some(BrowserPointerCaptureOwner::TextSelection)
     } else if state.sftp_file_dragging {
@@ -675,13 +668,6 @@ mod tests {
             ),
             (
                 BrowserPointerCaptureState {
-                    host_tools_tab_scrollbar_dragging: true,
-                    ..BrowserPointerCaptureState::default()
-                },
-                Some(BrowserPointerCaptureOwner::HostToolsTabScrollbar),
-            ),
-            (
-                BrowserPointerCaptureState {
                     sftp_file_dragging: true,
                     tab_dragging: true,
                     ..BrowserPointerCaptureState::default()
@@ -717,9 +703,6 @@ mod tests {
         ));
         assert!(pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::TerminalQuickCommandsResize
-        ));
-        assert!(pointer_capture_needs_workspace_overlay(
-            BrowserPointerCaptureOwner::HostToolsTabScrollbar
         ));
         assert!(pointer_capture_needs_workspace_overlay(
             BrowserPointerCaptureOwner::TabDrag
