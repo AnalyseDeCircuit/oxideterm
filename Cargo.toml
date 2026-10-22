@@ -360,7 +360,7 @@ opt-level = 3
 
 [profile.dev]
 opt-level = 0
-debug = 1
+debug = "line-tables-only"
 incremental = true
 split-debuginfo = "unpacked"
 
