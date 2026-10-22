@@ -36,6 +36,7 @@ pub(crate) enum LucideIcon {
     Bot,
     Brain,
     Cable,
+    CalendarClock,
     Check,
     CheckCircle,
     CheckSquare,
@@ -49,6 +50,7 @@ pub(crate) enum LucideIcon {
     Copy,
     CornerDownLeft,
     Cpu,
+    Docker,
     Download,
     Eye,
     EyeOff,
@@ -74,6 +76,7 @@ pub(crate) enum LucideIcon {
     FolderOpen,
     Gauge,
     GitFork,
+    Gpu,
     Hash,
     HardDrive,
     HelpCircle,
@@ -97,6 +100,7 @@ pub(crate) enum LucideIcon {
     Monitor,
     MemoryStick,
     Network,
+    Package,
     PanelLeft,
     PanelLeftClose,
     PanelRight,
@@ -117,6 +121,7 @@ pub(crate) enum LucideIcon {
     Search,
     Scissors,
     Server,
+    ServerCog,
     Settings,
     Shield,
     ShieldAlert,
@@ -165,6 +170,7 @@ impl LucideIcon {
             "bot" => Self::Bot,
             "brain" => Self::Brain,
             "cable" => Self::Cable,
+            "calendarclock" => Self::CalendarClock,
             "check" => Self::Check,
             "checkcircle" => Self::CheckCircle,
             "checksquare" => Self::CheckSquare,
@@ -178,6 +184,7 @@ impl LucideIcon {
             "copy" => Self::Copy,
             "cornerdownleft" => Self::CornerDownLeft,
             "cpu" => Self::Cpu,
+            "docker" => Self::Docker,
             "download" => Self::Download,
             "eye" => Self::Eye,
             "eyeoff" => Self::EyeOff,
@@ -203,6 +210,7 @@ impl LucideIcon {
             "folderopen" => Self::FolderOpen,
             "gauge" => Self::Gauge,
             "gitfork" => Self::GitFork,
+            "gpu" => Self::Gpu,
             "hash" => Self::Hash,
             "harddrive" => Self::HardDrive,
             "helpcircle" => Self::HelpCircle,
@@ -226,6 +234,7 @@ impl LucideIcon {
             "monitor" => Self::Monitor,
             "memorystick" => Self::MemoryStick,
             "network" => Self::Network,
+            "package" => Self::Package,
             "panelleft" => Self::PanelLeft,
             "panelleftclose" => Self::PanelLeftClose,
             "panelright" => Self::PanelRight,
@@ -246,6 +255,7 @@ impl LucideIcon {
             "search" => Self::Search,
             "scissors" => Self::Scissors,
             "server" => Self::Server,
+            "servercog" => Self::ServerCog,
             "settings" => Self::Settings,
             "shield" => Self::Shield,
             "shieldalert" => Self::ShieldAlert,
@@ -289,6 +299,7 @@ impl LucideIcon {
             Self::Bot => "lucide/bot.svg",
             Self::Brain => "lucide/brain.svg",
             Self::Cable => "lucide/cable.svg",
+            Self::CalendarClock => "lucide/calendar-clock.svg",
             Self::Check => "lucide/check.svg",
             Self::CheckCircle => "lucide/check-circle.svg",
             Self::CheckSquare => "lucide/check-square.svg",
@@ -302,6 +313,7 @@ impl LucideIcon {
             Self::Copy => "lucide/copy.svg",
             Self::CornerDownLeft => "lucide/corner-down-left.svg",
             Self::Cpu => "lucide/cpu.svg",
+            Self::Docker => "material-icons/docker.svg",
             Self::Download => "lucide/download.svg",
             Self::Eye => "lucide/eye.svg",
             Self::EyeOff => "lucide/eye-off.svg",
@@ -327,6 +339,7 @@ impl LucideIcon {
             Self::FolderOpen => "lucide/folder-open.svg",
             Self::Gauge => "lucide/gauge.svg",
             Self::GitFork => "lucide/git-fork.svg",
+            Self::Gpu => "lucide/gpu.svg",
             Self::Hash => "lucide/hash.svg",
             Self::HardDrive => "lucide/hard-drive.svg",
             Self::HelpCircle => "lucide/help-circle.svg",
@@ -350,6 +363,7 @@ impl LucideIcon {
             Self::Monitor => "lucide/monitor.svg",
             Self::MemoryStick => "lucide/memory-stick.svg",
             Self::Network => "lucide/network.svg",
+            Self::Package => "lucide/package.svg",
             Self::PanelLeft => "lucide/panel-left.svg",
             Self::PanelLeftClose => "lucide/panel-left-close.svg",
             Self::PanelRight => "lucide/panel-right.svg",
@@ -370,6 +384,7 @@ impl LucideIcon {
             Self::Search => "lucide/search.svg",
             Self::Scissors => "lucide/scissors.svg",
             Self::Server => "lucide/server.svg",
+            Self::ServerCog => "lucide/server-cog.svg",
             Self::Settings => "lucide/settings.svg",
             Self::Shield => "lucide/shield.svg",
             Self::ShieldAlert => "lucide/shield-alert.svg",
@@ -484,6 +499,7 @@ impl AssetSource for NativeAssets {
             "lucide/bot.svg" => BOT,
             "lucide/brain.svg" => BRAIN,
             "lucide/cable.svg" => CABLE,
+            "lucide/calendar-clock.svg" => CALENDAR_CLOCK,
             "lucide/check.svg" => CHECK,
             "lucide/check-circle.svg" => CHECK_CIRCLE,
             "lucide/check-square.svg" => CHECK_SQUARE,
@@ -528,6 +544,7 @@ impl AssetSource for NativeAssets {
             "lucide/folder-plus.svg" => FOLDER_PLUS,
             "lucide/gauge.svg" => GAUGE,
             "lucide/git-fork.svg" => GIT_FORK,
+            "lucide/gpu.svg" => GPU,
             "lucide/hash.svg" => HASH,
             "lucide/hard-drive.svg" => HARD_DRIVE,
             "lucide/help-circle.svg" => HELP_CIRCLE,
@@ -553,6 +570,7 @@ impl AssetSource for NativeAssets {
             "lucide/monitor.svg" => MONITOR,
             "lucide/memory-stick.svg" => MEMORY_STICK,
             "lucide/network.svg" => NETWORK,
+            "lucide/package.svg" => PACKAGE,
             "lucide/panel-left.svg" => PANEL_LEFT,
             "lucide/panel-left-close.svg" => PANEL_LEFT_CLOSE,
             "lucide/panel-right.svg" => PANEL_RIGHT,
@@ -573,6 +591,7 @@ impl AssetSource for NativeAssets {
             "lucide/search.svg" => SEARCH,
             "lucide/scissors.svg" => SCISSORS,
             "lucide/server.svg" => SERVER,
+            "lucide/server-cog.svg" => SERVER_COG,
             "lucide/settings.svg" => SETTINGS,
             "lucide/shield.svg" => SHIELD,
             "lucide/shield-alert.svg" => SHIELD_ALERT,
@@ -819,6 +838,24 @@ mod tests {
 
 // Lucide icons are from lucide, licensed ISC. Settings navigation icons match
 // the lucide-react v0.577.0 package used by the Tauri frontend.
+// These four icons come from https://github.com/lucide-icons/lucide/tree/main/icons.
+// ISC License — Copyright (c) 2026 Lucide Icons and Contributors
+//
+// Permission to use, copy, modify, and/or distribute this software for any
+// purpose with or without fee is hereby granted, provided that the above
+// copyright notice and this permission notice appear in all copies.
+//
+// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+const SERVER_COG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m10.852 14.772-.383.923"/><path d="M13.148 14.772a3 3 0 1 0-2.296-5.544l-.383-.923"/><path d="m13.148 9.228.383-.923"/><path d="m13.53 15.696-.382-.924a3 3 0 1 1-2.296-5.544"/><path d="m14.772 10.852.923-.383"/><path d="m14.772 13.148.923.383"/><path d="M4.5 10H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-.5"/><path d="M4.5 14H4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4a2 2 0 0 0-2-2h-.5"/><path d="M6 18h.01"/><path d="M6 6h.01"/><path d="m9.228 10.852-.923-.383"/><path d="m9.228 13.148-.923.383"/></svg>"#;
+const CALENDAR_CLOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 14v2.2l1.6 1"/><path d="M16 2v3"/><path d="M21 7.338V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h2.338"/><path d="M3 9h5.859"/><path d="M8 2v3"/><circle cx="16" cy="16" r="6"/></svg>"#;
+const GPU: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 17h18a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2H2"/><path d="M2 21V3"/><path d="M7 17v3a1 1 0 0 0 1 1h5a1 1 0 0 0 1-1v-3"/><circle cx="16" cy="11" r="2"/><circle cx="8" cy="11" r="2"/></svg>"#;
+const PACKAGE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z"/><path d="M12 22V12"/><polyline points="3.29 7 12 12 20.71 7"/><path d="m7.5 4.27 9 5.15"/></svg>"#;
 const ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>"#;
 const ALERT_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>"#;
 const ALERT_TRIANGLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
