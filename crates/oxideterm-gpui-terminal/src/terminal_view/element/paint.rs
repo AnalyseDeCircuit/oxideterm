@@ -219,32 +219,17 @@ pub(super) fn paint_command_gutter(
 
     // Avoid overlapping translucent strokes, which would darken corners and joins.
     if overlay.has_top {
-        rect(left, top, box_size, stroke);
-        rect(left, bottom - stroke, box_size, stroke);
-        rect(left, top + stroke, stroke, box_size - 2.0 * stroke);
-        rect(
-            right - stroke,
-            top + stroke,
-            stroke,
-            box_size - 2.0 * stroke,
-        );
-        if overlay.collapsed && box_size >= 5.0 {
-            // The plus must remain distinct from the thicker surrounding outline.
-            let inner_size = box_size - 2.0 * stroke;
-            let stroke = (stroke * 0.5).max(1.0).min(inner_size / 3.0);
-            let arm = (box_size * 0.5).max(3.0 * stroke).min(inner_size);
-            rect(center_x - arm / 2.0, center_y - stroke / 2.0, arm, stroke);
+        if overlay.collapsed {
+            rect(left, top, box_size, box_size);
+        } else {
+            rect(left, top, box_size, stroke);
+            rect(left, bottom - stroke, box_size, stroke);
+            rect(left, top + stroke, stroke, box_size - 2.0 * stroke);
             rect(
-                center_x - stroke / 2.0,
-                center_y - arm / 2.0,
+                right - stroke,
+                top + stroke,
                 stroke,
-                (arm - stroke) / 2.0,
-            );
-            rect(
-                center_x - stroke / 2.0,
-                center_y + stroke / 2.0,
-                stroke,
-                (arm - stroke) / 2.0,
+                box_size - 2.0 * stroke,
             );
         }
     }
