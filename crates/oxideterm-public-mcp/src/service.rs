@@ -8,9 +8,10 @@ use http::{header::AUTHORIZATION, request::Parts};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
     model::{
-        CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, Implementation,
-        JsonObject, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities,
-        ServerInfo, Tool, ToolAnnotations,
+        CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, CustomRequest,
+        CustomResult, ErrorCode, Implementation, JsonObject, ListToolsResult,
+        PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
+        ToolAnnotations,
     },
     service::RequestContext,
 };
@@ -695,6 +696,24 @@ impl ServerHandler for PublicMcpService {
             .into_iter()
             .find(|definition| definition.tool.name == name)
             .map(|definition| definition.tool)
+    }
+
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, McpError> {
+        if request.method != "tools/call" {
+            return Err(McpError::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                request.method,
+                None,
+            ));
+        }
+        self.resolve_client(&context)?;
+        // rmcp's untagged request enum falls through to CustomRequest when typed decoding fails.
+        // Diagnose only this fallback; valid calls retain the SDK's normal dispatch path.
+        Err(tools_call_dispatch_error(request.params.as_ref()))
     }
 
     async fn call_tool(
@@ -2837,6 +2856,59 @@ fn tool_error(code: &'static str, message: impl Into<String>) -> CallToolResult 
     }))
 }
 
+fn tools_call_dispatch_error(params: Option<&Value>) -> McpError {
+    fn value_type(value: Option<&Value>) -> &'static str {
+        match value {
+            None => "missing",
+            Some(Value::Null) => "null",
+            Some(Value::Bool(_)) => "boolean",
+            Some(Value::Number(_)) => "number",
+            Some(Value::String(_)) => "string",
+            Some(Value::Array(_)) => "array",
+            Some(Value::Object(_)) => "object",
+        }
+    }
+
+    let invalid_field = |field, expected, actual| {
+        McpError::invalid_params(
+            "Invalid tools/call parameters",
+            Some(json!({
+                "stage": "tools_call_dispatch",
+                "reason": "parameter_type_mismatch",
+                "field": field,
+                "expected": expected,
+                "actual": actual,
+            })),
+        )
+    };
+    let Some(Value::Object(params)) = params else {
+        return invalid_field("params", "object", value_type(params));
+    };
+
+    // Inspect only the SDK's fixed parameter names and JSON types. Tool arguments, arbitrary
+    // keys, and serde error messages can contain credentials and must not enter diagnostics.
+    // CustomRequest has already extracted and decoded _meta into its extensions.
+    for (name, expected, optional) in [
+        ("name", "string", false),
+        ("arguments", "object", true),
+        ("inputResponses", "object", true),
+        ("requestState", "string", true),
+    ] {
+        let actual = value_type(params.get(name));
+        if actual != expected && !(optional && matches!(actual, "missing" | "null")) {
+            return invalid_field(&format!("params.{name}"), expected, actual);
+        }
+    }
+
+    McpError::internal_error(
+        "tools/call reached the unknown-method handler without a parameter type mismatch",
+        Some(json!({
+            "stage": "tools_call_dispatch",
+            "reason": "unexpected_custom_request",
+        })),
+    )
+}
+
 fn unauthorized_error() -> McpError {
     McpError::invalid_request("Unauthorized MCP client", None)
 }
@@ -2845,6 +2917,25 @@ fn unauthorized_error() -> McpError {
 mod tests {
     use super::*;
     use crate::DomainMessage;
+
+    #[test]
+    fn unclassified_tool_call_with_valid_field_types_reports_dispatch_failure() {
+        let params = json!({
+            "name": "secret-tool-name",
+            "arguments": {"password": "secret-argument"},
+            "inputResponses": null,
+            "requestState": "secret-request-state",
+        });
+        let error = tools_call_dispatch_error(Some(&params));
+        assert_eq!(
+            serde_json::to_value(error).unwrap(),
+            json!({
+                "code": -32603,
+                "message": "tools/call reached the unknown-method handler without a parameter type mismatch",
+                "data": {"stage": "tools_call_dispatch", "reason": "unexpected_custom_request"},
+            })
+        );
+    }
 
     struct AuditKeys;
 
