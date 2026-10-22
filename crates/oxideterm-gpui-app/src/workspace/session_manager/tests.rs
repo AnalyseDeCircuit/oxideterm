@@ -1152,7 +1152,7 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
     let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
     let window_handle = cx.windows()[0];
     let node_id = NodeId::new("ide-choice-host");
-    let (cancel, ssh) = workspace.update(cx, |workspace, _cx| {
+    workspace.update(cx, |workspace, _cx| {
         workspace.ssh_nodes.insert(
             node_id.clone(),
             super::super::WorkspaceSshNode::new(
@@ -1163,10 +1163,6 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
                 oxideterm_ssh::NodeReadiness::Ready,
             ),
         );
-        (
-            workspace.i18n.t("ide.cancel"),
-            workspace.i18n.t("terminal.shell_ide.ssh"),
-        )
     });
     let tab_ids = |cx: &TestAppContext| {
         workspace.read_with(cx, |workspace, cx| {
@@ -1178,6 +1174,15 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
         })
     };
     let original_tabs = tab_ids(cx);
+    let prompt_open = |cx: &mut TestAppContext| {
+        window_handle
+            .update(cx, |_, window, cx| {
+                // Keyboard routing uses the rendered custom prompt's focus tree.
+                window.draw(cx).clear(cx);
+                window.has_active_prompt()
+            })
+            .unwrap()
+    };
     for choose_ssh in [false, true] {
         window_handle
             .update(cx, |_, window, cx| {
@@ -1186,16 +1191,17 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
                 });
             })
             .unwrap();
-        assert!(cx.has_pending_prompt());
+        assert!(prompt_open(cx));
         assert_eq!(tab_ids(cx), original_tabs);
         if choose_ssh {
-            cx.simulate_prompt_answer(&ssh);
-            cx.run_until_parked();
-            assert!(cx.has_pending_prompt());
+            cx.simulate_keystrokes(window_handle, "down");
+            assert_eq!(tab_ids(cx), original_tabs);
+            cx.simulate_keystrokes(window_handle, "enter");
+            assert!(prompt_open(cx));
             assert_eq!(tab_ids(cx), original_tabs);
         }
-        cx.simulate_prompt_answer(&cancel);
-        cx.run_until_parked();
+        cx.simulate_keystrokes(window_handle, "escape");
+        assert!(!prompt_open(cx));
         assert_eq!(tab_ids(cx), original_tabs);
     }
     window_handle
@@ -1205,8 +1211,9 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
             });
         })
         .unwrap();
-    cx.simulate_prompt_answer("SFTP");
-    cx.run_until_parked();
+    assert!(prompt_open(cx));
+    cx.simulate_keystrokes(window_handle, "enter");
+    assert!(!prompt_open(cx));
     workspace.read_with(cx, |workspace, cx| {
         let ide_tabs: Vec<_> = workspace
             .tabs(cx)
