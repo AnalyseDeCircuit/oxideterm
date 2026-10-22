@@ -4,14 +4,12 @@ use oxideterm_gpui_ui::select::{
     select_option_action, select_option_highlighted, select_overlay_popup_with_max_height,
 };
 
-const COMMON_TOOLS: [ContextSidebarTool; 5] = [
+const TOOLS: [ContextSidebarTool; 11] = [
     ContextSidebarTool::Monitor,
     ContextSidebarTool::Processes,
     ContextSidebarTool::Services,
     ContextSidebarTool::Logs,
     ContextSidebarTool::Docker,
-];
-const MORE_TOOLS: [ContextSidebarTool; 6] = [
     ContextSidebarTool::Gpu,
     ContextSidebarTool::Tmux,
     ContextSidebarTool::Ports,
@@ -55,18 +53,18 @@ impl ContextSidebarTool {
 }
 
 fn visible_tool_count(available_height: f32, row_height: f32, separator_height: f32) -> usize {
-    // Reserve one row each for OxideSens and More before assigning direct tool entries.
-    (((available_height - separator_height) / row_height).floor() as usize)
-        .saturating_sub(2)
-        .min(COMMON_TOOLS.len())
+    let slots =
+        (((available_height - separator_height) / row_height).floor() as usize).saturating_sub(1);
+    // OxideSens always has a row; More only takes space when tools actually overflow.
+    if slots >= TOOLS.len() {
+        TOOLS.len()
+    } else {
+        slots.saturating_sub(1)
+    }
 }
 
 fn overflow_tools(visible: usize) -> Vec<ContextSidebarTool> {
-    COMMON_TOOLS[visible..]
-        .iter()
-        .chain(MORE_TOOLS.iter())
-        .copied()
-        .collect()
+    TOOLS[visible..].to_vec()
 }
 
 impl WorkspaceApp {
@@ -85,7 +83,7 @@ impl WorkspaceApp {
         visible_tool_count(
             available,
             metrics.activity_icon_size + metrics.activity_icon_gap,
-            metrics.divider_height + metrics.activity_icon_gap * 2.0,
+            metrics.divider_height + metrics.activity_icon_gap,
         )
     }
 
@@ -145,10 +143,10 @@ impl WorkspaceApp {
                     .flex_none()
                     .w(px(self.tokens.metrics.divider_width))
                     .h(px(self.tokens.metrics.divider_height))
-                    .my(px(self.tokens.metrics.activity_icon_gap))
+                    .mb(px(self.tokens.metrics.activity_icon_gap))
                     .bg(self.workspace_divider_color(self.tokens.ui.divider, 0xff)),
             );
-        for tool in COMMON_TOOLS.iter().take(count).copied() {
+        for tool in TOOLS.iter().take(count).copied() {
             let active = self.context_tool_active(tool, cx);
             buttons = buttons.child(
                 div()
@@ -175,6 +173,9 @@ impl WorkspaceApp {
             );
         }
         let overflow = overflow_tools(count);
+        if overflow.is_empty() {
+            return buttons.into_any_element();
+        }
         let active = self.context_tools_menu.is_some()
             || overflow
                 .iter()
@@ -201,6 +202,9 @@ impl WorkspaceApp {
                             this.prepare_modal_interaction_boundary(cx);
                             if open {
                                 let overflow = overflow_tools(this.context_tool_count(window));
+                                if overflow.is_empty() {
+                                    return;
+                                }
                                 let active_tool = this.host_tools.read(cx).active_tool();
                                 let index = overflow
                                     .iter()
@@ -220,16 +224,21 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn render_context_tools_menu(
-        &self,
+        &mut self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let highlighted = self.context_tools_menu?;
         if self.settings_store.settings().sidebar_ui.zen_mode {
+            self.context_tools_menu = None;
             return None;
         }
         let count = self.context_tool_count(window);
         let overflow = overflow_tools(count);
+        if overflow.is_empty() {
+            self.context_tools_menu = None;
+            return None;
+        }
         let highlighted = if overflow.contains(&highlighted) {
             highlighted
         } else {
@@ -264,7 +273,7 @@ impl WorkspaceApp {
             + PRIMARY_SIDEBAR_CONTENT_TOP_INSET
             + (count + 1) as f32 * (metrics.activity_icon_size + metrics.activity_icon_gap)
             + metrics.divider_height
-            + metrics.activity_icon_gap * 2.0;
+            + metrics.activity_icon_gap;
         Some(
             popover_backdrop()
                 .on_mouse_down(
@@ -308,6 +317,10 @@ impl WorkspaceApp {
             return false;
         };
         let overflow = overflow_tools(self.context_tool_count(window));
+        if overflow.is_empty() {
+            self.context_tools_menu = None;
+            return false;
+        }
         let index = overflow
             .iter()
             .position(|tool| *tool == highlighted)
@@ -349,10 +362,25 @@ mod tests {
 
     #[test]
     fn shrinking_the_rail_moves_only_trailing_tools_into_more() {
+        // All tools fit exactly without reserving an unnecessary More button.
+        let all_visible = visible_tool_count(489.0, 40.0, 9.0);
+        assert_eq!(all_visible, 11);
+        assert_eq!(overflow_tools(all_visible), vec![]);
+        assert_eq!(visible_tool_count(700.0, 40.0, 9.0), 11);
+        // Once the last row no longer fits, More needs a row of its own.
+        let almost_all = visible_tool_count(488.0, 40.0, 9.0);
+        assert_eq!(almost_all, 9);
+        assert_eq!(
+            overflow_tools(almost_all),
+            vec![
+                ContextSidebarTool::Filesystems,
+                ContextSidebarTool::Packages
+            ]
+        );
         assert_eq!(visible_tool_count(300.0, 40.0, 9.0), 5);
         let visible = visible_tool_count(210.0, 40.0, 9.0);
         assert_eq!(
-            &COMMON_TOOLS[..visible],
+            &TOOLS[..visible],
             &[
                 ContextSidebarTool::Monitor,
                 ContextSidebarTool::Processes,
