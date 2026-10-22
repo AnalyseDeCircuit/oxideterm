@@ -1,4 +1,6 @@
 struct AgentTransport {
+    _worker: Option<JoinHandle<()>>,
+    request_limit: Option<Arc<tokio::sync::Semaphore>>,
     write_tx: mpsc::Sender<zeroize::Zeroizing<String>>,
     pending: PendingMap,
     watch_tx: broadcast::Sender<AgentWatchEvent>,
@@ -25,7 +27,7 @@ impl AgentTransport {
         let pending_for_task = pending.clone();
         let alive_for_task = alive.clone();
         let watch_tx_for_task = watch_tx.clone();
-        tokio::spawn(async move {
+        let worker = tokio::spawn(async move {
             let mut buffer = zeroize::Zeroizing::new(Vec::<u8>::new());
             'receive: loop {
                 tokio::select! {
@@ -90,6 +92,8 @@ impl AgentTransport {
         });
 
         Ok(Self {
+            _worker: Some(worker),
+            request_limit: None,
             write_tx,
             pending,
             watch_tx,
@@ -121,6 +125,16 @@ impl AgentTransport {
             return Err(AgentError::ChannelClosed);
         }
 
+        let _slot = if let Some(limit) = &self.request_limit {
+            Some(
+                tokio::time::timeout(Duration::from_secs(timeout_secs), limit.acquire())
+                    .await
+                    .map_err(|_| AgentError::Timeout(timeout_secs))?
+                    .map_err(|_| AgentError::ChannelClosed)?,
+            )
+        } else {
+            None
+        };
         let id = NEXT_AGENT_REQUEST_ID.fetch_add(1, Ordering::Relaxed);
         let request = AgentRequest {
             id,

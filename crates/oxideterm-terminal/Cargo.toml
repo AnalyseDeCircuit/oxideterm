@@ -26,6 +26,7 @@ oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }
 oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-tmux = { path = "../oxideterm-tmux" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
+parking_lot.workspace = true
 polling.workspace = true
 serialport.workspace = true
 serde.workspace = true
@@ -34,6 +35,7 @@ tracing.workspace = true
 tempfile = "3.23"
 unicode-segmentation.workspace = true
 zeroize.workspace = true
+uuid.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }

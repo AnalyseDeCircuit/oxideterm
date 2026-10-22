@@ -25,6 +25,7 @@ pub(super) struct SshParser {
     utf8_guard: crate::backpressure::Utf8ResidualGuard,
     output_decoder: TerminalOutputDecoder,
     output_processor: Option<TerminalOutputProcessor>,
+    shell_channel: Option<crate::shell_channel::ShellChannelSink>,
     output_events_enabled: bool,
     recording_sink: Option<oxideterm_audit::RecordingSink>,
     recording_pending: Option<Arc<std::sync::Mutex<crate::recording_output::RecordingOutput>>>,
@@ -112,6 +113,7 @@ impl SshParser {
                 utf8_guard: Default::default(),
                 output_decoder: TerminalOutputDecoder::new(encoding),
                 output_processor: None,
+                shell_channel: None,
                 output_events_enabled: false,
                 recording_sink: None,
                 recording_pending: None,
@@ -139,6 +141,7 @@ impl SshParser {
 
     pub(super) fn retire_transport(&mut self) {
         self.command_tx = None;
+        self.shell_channel.take();
         self.transport_running = false;
         self.tmux_display.reset();
         self.pending_writes.clear();
@@ -211,6 +214,9 @@ impl SshParser {
     }
 
     pub(super) fn send_command(&mut self, command: SshTransportCommand) -> Result<()> {
+        if self.shell_channel_active() && matches!(command, SshTransportCommand::Data(_)) {
+            return Ok(());
+        }
         if self.command_tx.is_none() {
             bail!("SSH PTY backend for {} is still connecting", self.endpoint);
         }
@@ -263,7 +269,58 @@ impl SshParser {
         Ok(())
     }
 
+    pub(super) fn shell_channel_active(&self) -> bool {
+        self.shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+    }
+
+    pub(super) fn close_shell_channel(&mut self) {
+        self.shell_channel.take();
+    }
+
+    pub(super) fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannel> {
+        if self
+            .shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+            || self.tmux_display.is_active()
+            || self.term.lock().mode().contains(TermMode::ALT_SCREEN)
+            || self.modem_consumer.active_transfer().is_some()
+            || !self.pending_writes.is_empty()
+        {
+            bail!("Terminal is busy or already owned by an IDE");
+        }
+        let writer = self
+            .command_tx
+            .clone()
+            .context("SSH terminal is not connected")?;
+        let (channel, sink) = crate::shell_channel::channel(writer);
+        // The parser diverts bytes before recording, transforms and in-band protocols.
+        self.shell_channel = Some(sink);
+        Ok(channel)
+    }
+
     pub(super) fn feed_transport_output(&mut self, bytes: &[u8]) {
+        let released;
+        let bytes = if let Some(sink) = self.shell_channel.as_mut() {
+            let was_active = sink.is_active();
+            released = sink.feed(bytes);
+            if !sink.is_active() {
+                if was_active {
+                    // Hidden bootstrap output never advanced the frozen prompt's cursor.
+                    // Redraw locally so private control bytes do not enter output events or recording.
+                    self.parser.advance(&mut *self.term.lock(), b"\r\x1b[2K");
+                }
+                self.shell_channel.take();
+            }
+            released.as_slice()
+        } else {
+            bytes
+        };
+        if bytes.is_empty() {
+            return;
+        }
         if self.trzsz_consumer.is_some() {
             self.feed_trzsz_transport_output(bytes);
             return;
@@ -692,6 +749,14 @@ impl SshParser {
     }
 
     pub(super) fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
+        if self
+            .shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+        {
+            // Inputs queued before lease publication must not reach the agent.
+            return Ok(());
+        }
         if let Some(commands) = self.tmux_display.input_commands(bytes) {
             self.queue_tmux_commands(commands);
             return Ok(());
@@ -700,6 +765,14 @@ impl SshParser {
     }
 
     pub(super) fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        if self
+            .shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+        {
+            // Inputs queued before lease publication must not reach the agent.
+            return Ok(());
+        }
         if let Some(commands) = self.tmux_display.protocol_commands(bytes) {
             self.queue_tmux_commands(commands);
             return Ok(());
@@ -708,6 +781,14 @@ impl SshParser {
     }
 
     pub(super) fn write_text(&mut self, text: &str) -> Result<()> {
+        if self
+            .shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+        {
+            // Inputs queued before lease publication must not reach the agent.
+            return Ok(());
+        }
         if !self.tmux_display.is_active() && self.route_trzsz_text_input(text) {
             return Ok(());
         }
@@ -716,6 +797,14 @@ impl SshParser {
     }
 
     pub(super) fn paste_text(&mut self, text: &str) -> Result<()> {
+        if self
+            .shell_channel
+            .as_ref()
+            .is_some_and(|sink| sink.is_active())
+        {
+            // Inputs queued before lease publication must not reach the agent.
+            return Ok(());
+        }
         let bytes = self
             .input_encoder
             .encode_paste(text, self.mode().contains(TermMode::BRACKETED_PASTE));

@@ -44,7 +44,9 @@ mod remote_shell_integration;
 mod search;
 mod selection;
 mod session;
+mod shell_channel;
 mod shell_completion;
+pub use shell_channel::{ShellChannel, ShellChannelAcquisition};
 mod shell_integration;
 mod tmux;
 

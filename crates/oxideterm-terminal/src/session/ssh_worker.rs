@@ -23,6 +23,7 @@ struct Controls {
 }
 
 struct Status {
+    shell_owned: Option<tokio::sync::watch::Receiver<bool>>,
     audit: Option<oxideterm_audit::AuditContext>,
     title: Option<String>,
     lifecycle: TerminalLifecycle,
@@ -127,6 +128,7 @@ impl SshPtySession {
         let (ui, activity) = crate::activity::terminal_activity_channel();
         let wake_rx = core.activity_receiver();
         let status = Status {
+            shell_owned: None,
             audit: core.audit_context(),
             title: core.title(),
             lifecycle: core.lifecycle(),
@@ -231,6 +233,17 @@ impl SshPtySession {
         bytes: usize,
         apply: impl FnOnce(&mut SshPtyCore) -> Result<()> + Send + 'static,
     ) -> Result<()> {
+        if self
+            .shared
+            .status
+            .lock()
+            .expect("SSH parser status")
+            .shell_owned
+            .as_ref()
+            .is_some_and(|released| !*released.borrow())
+        {
+            anyhow::bail!("Terminal channel is owned by an IDE");
+        }
         self.enqueue_request(bytes, false, apply)
     }
 
@@ -583,6 +596,9 @@ fn publish(shared: &Shared, core: &mut SshPtyCore) {
         }
         status.lifecycle = core.lifecycle();
         status.interactive = core.is_interactive();
+        if !core.parser_state.shell_channel_active() {
+            status.shell_owned = None;
+        }
         status.mode = core.mode();
         if core.handle.is_none() {
             status.connection = None;
@@ -720,6 +736,61 @@ impl TerminalSessionBackend for SshPtySession {
 
     fn pending_output_flush_delay(&self) -> Option<Duration> {
         None
+    }
+
+    fn shell_channel_owned(&self) -> bool {
+        self.shared
+            .status
+            .lock()
+            .expect("SSH parser status")
+            .shell_owned
+            .as_ref()
+            .is_some_and(|released| !*released.borrow())
+    }
+
+    fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let owner = Arc::downgrade(&self.shared);
+        self.enqueue(0, move |core| {
+            let mut result = core.parser_state.acquire_shell_channel();
+            if let Ok(channel) = &mut result {
+                if let Some(shared) = owner.upgrade() {
+                    // Input gating and startup completion observe the same exact lease release.
+                    shared.status.lock().expect("SSH parser status").shell_owned =
+                        Some(channel.release_receiver());
+                }
+                channel.set_audit_context(core.audit_context());
+                let released_owner = owner.clone();
+                channel.set_release_handler(Arc::new(move || {
+                    if let Some(shared) = released_owner.upgrade() {
+                        // An unused lease can be released without any transport output.
+                        // Wake the parser to publish its new input ownership immediately.
+                        shared.wake.notify();
+                        shared.ui.notify();
+                    }
+                }));
+                channel.set_failure_handler(Arc::new(move || {
+                    if let Some(shared) = owner.upgrade() {
+                        // Cancellation bypasses the bounded input queue, so a failed
+                        // upload cannot leave an unrecovered PTY alive behind queued data.
+                        shared.cancelled.store(true, Ordering::Release);
+                        if let Some(cancel) = shared
+                            .output_cancel
+                            .lock()
+                            .expect("SSH output cancellation")
+                            .as_ref()
+                        {
+                            cancel.cancel();
+                        }
+                        shared.wake.notify();
+                        shared.ui.notify();
+                    }
+                }));
+            }
+            let _ = tx.send(result);
+            Ok(())
+        })?;
+        Ok(rx)
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {

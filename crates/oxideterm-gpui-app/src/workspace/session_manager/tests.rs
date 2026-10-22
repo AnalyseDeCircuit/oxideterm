@@ -1142,3 +1142,79 @@ fn batch_console_profile_delete_retires_its_history_scope(cx: &mut TestAppContex
         );
     });
 }
+
+#[gpui::test]
+fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext) {
+    let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_IDE_ACCESS_PROMPT_TEST_DIR")
+    else {
+        return;
+    };
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+    let window_handle = cx.windows()[0];
+    let node_id = NodeId::new("ide-choice-host");
+    let (cancel, ssh) = workspace.update(cx, |workspace, _cx| {
+        workspace.ssh_nodes.insert(
+            node_id.clone(),
+            super::super::WorkspaceSshNode::new(
+                None,
+                &SshConfig::default(),
+                "Choice Host".into(),
+                Vec::new(),
+                oxideterm_ssh::NodeReadiness::Ready,
+            ),
+        );
+        (
+            workspace.i18n.t("ide.cancel"),
+            workspace.i18n.t("terminal.shell_ide.ssh"),
+        )
+    });
+    let tab_ids = |cx: &TestAppContext| {
+        workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .tabs(cx)
+                .iter()
+                .map(|tab| tab.id)
+                .collect::<Vec<_>>()
+        })
+    };
+    let original_tabs = tab_ids(cx);
+    for choose_ssh in [false, true] {
+        window_handle
+            .update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.open_ide_folder_picker_tab(node_id.clone(), window, cx);
+                });
+            })
+            .unwrap();
+        assert!(cx.has_pending_prompt());
+        assert_eq!(tab_ids(cx), original_tabs);
+        if choose_ssh {
+            cx.simulate_prompt_answer(&ssh);
+            cx.run_until_parked();
+            assert!(cx.has_pending_prompt());
+            assert_eq!(tab_ids(cx), original_tabs);
+        }
+        cx.simulate_prompt_answer(&cancel);
+        cx.run_until_parked();
+        assert_eq!(tab_ids(cx), original_tabs);
+    }
+    window_handle
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_ide_folder_picker_tab(node_id.clone(), window, cx);
+            });
+        })
+        .unwrap();
+    cx.simulate_prompt_answer("SFTP");
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, cx| {
+        let ide_tabs: Vec<_> = workspace
+            .tabs(cx)
+            .iter()
+            .filter(|tab| tab.kind == TabKind::Ide)
+            .collect();
+        assert_eq!(ide_tabs.len(), 1);
+        assert_eq!(ide_tabs[0].title, "IDE · Choice Host");
+        assert_eq!(workspace.active_tab_id(cx), Some(ide_tabs[0].id));
+    });
+}

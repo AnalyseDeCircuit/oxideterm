@@ -346,6 +346,7 @@ impl SshPtyCore {
             Err(error) => {
                 self.lifecycle = TerminalLifecycle::Exited(None);
                 self.parser_state.transport_running = false;
+                self.parser_state.close_shell_channel();
                 self.parser_state.tmux_display.reset();
                 self.parser_state.feed_utf8_terminal_output(
                     format!("\r\nSSH connection failed: {error}\r\n").as_bytes(),
@@ -479,6 +480,7 @@ impl SshPtyCore {
                         }
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.parser_state.transport_running = false;
+                        self.parser_state.close_shell_channel();
                         self.parser_state.tmux_display.reset();
                         let event = if self
                             .handle
@@ -607,6 +609,20 @@ impl TerminalSessionBackend for SshPtyCore {
 
     fn take_events(&mut self) -> Vec<TerminalEvent> {
         std::mem::take(&mut self.parser_state.pending_events)
+    }
+
+    fn shell_channel_owned(&self) -> bool {
+        self.parser_state.shell_channel_active()
+    }
+
+    fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let mut result = self.parser_state.acquire_shell_channel();
+        if let Ok(channel) = &mut result {
+            channel.set_audit_context(self.audit_context());
+        }
+        let _ = tx.send(result);
+        Ok(rx)
     }
 
     fn write_input(&mut self, bytes: &[u8]) -> Result<()> {
@@ -957,6 +973,7 @@ impl TerminalSessionBackend for SshPtyCore {
 
         self.lifecycle = TerminalLifecycle::Closed;
         self.parser_state.transport_running = false;
+        self.parser_state.close_shell_channel();
         self.parser_state.tmux_display.reset();
     }
 

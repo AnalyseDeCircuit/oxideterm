@@ -1,6 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod modal;
+pub use modal::IdeModalLayer;
+
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     ops::Range,
@@ -110,17 +113,6 @@ const IDE_AGENT_MENU_DESCRIPTION_PADDING_X: f32 = 8.0;
 const IDE_AGENT_MENU_DESCRIPTION_PADDING_Y: f32 = 6.0;
 const IDE_AGENT_MENU_ITEM_HEIGHT: f32 = 28.0;
 const IDE_AGENT_MENU_Z: usize = 110;
-const IDE_AGENT_OPT_IN_WIDTH: f32 = 384.0;
-const IDE_AGENT_OPT_IN_ICON_SIZE: f32 = 48.0;
-const IDE_AGENT_OPT_IN_ICON_INNER_SIZE: f32 = 24.0;
-const IDE_AGENT_OPT_IN_BODY_PADDING_X: f32 = 24.0;
-const IDE_AGENT_OPT_IN_BODY_PADDING_TOP: f32 = 24.0;
-const IDE_AGENT_OPT_IN_BODY_PADDING_BOTTOM: f32 = 16.0;
-const IDE_AGENT_OPT_IN_GAP: f32 = 12.0;
-const IDE_AGENT_OPT_IN_ACTION_PADDING_Y: f32 = 10.0;
-const IDE_AGENT_OPT_IN_BORDER_ALPHA: u32 = 0x99;
-const IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA: u32 = 0x1a;
-const IDE_AGENT_OPT_IN_ACCENT_BORDER_ALPHA: u32 = 0x33;
 const IDE_AGENT_POLL_READY_SECS: u64 = 5;
 const IDE_AGENT_POLL_DEPLOYING_SECS: u64 = 2;
 const IDE_AGENT_POLL_MANUAL_SECS: u64 = 10;
@@ -136,7 +128,8 @@ const TAILWIND_AMBER_400: u32 = 0xfbbf24;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IdeSurfaceEvent {
-    RememberAgentMode(NodeAgentMode),
+    ShellReturnReady,
+    ShellOpenFailed,
     ProjectOpened,
     TransientFolderPickerCancelled,
     ReconnectRestoreProjectOpened {
@@ -447,6 +440,19 @@ impl IdeWatchStopReleaseQueue {
     }
 }
 
+struct PendingFileSave {
+    audit_request: Option<oxideterm_audit::AuditContext>,
+    source: oxideterm_audit::AuditSource,
+    close_request: Option<CloseRequestId>,
+}
+
+struct FileSaveRequest {
+    audit_request: Option<oxideterm_audit::AuditContext>,
+    tab_id: EditorTabId,
+    buffer: oxideterm_ide_core::EditorBuffer,
+    close_request: Option<CloseRequestId>,
+}
+
 /// GPUI IDE owner.
 ///
 /// This is the native equivalent of Tauri's `IdeWorkspace` + `ideStore` owner:
@@ -455,11 +461,17 @@ impl IdeWatchStopReleaseQueue {
 /// terminal tab, so reconnect restore has a real IDE surface to target.
 pub struct IdeSurface {
     workspace: IdeWorkspace,
+    shell_return_requested: bool,
+    access_request: Option<(String, String)>,
+    backend_binding_abort: Option<tokio::task::AbortHandle>,
+    agent_install_progress: Option<oxideterm_ide_fs::AgentInstallProgress>,
+    agent_install_task: Option<Task<()>>,
     fs: NodeAgentIdeFileSystem,
     tokens: ThemeTokens,
     labels: IdeLabels,
     runtime_settings: IdeRuntimeSettings,
     focus_handle: FocusHandle,
+    modal_focus_handle: FocusHandle,
     backend_runtime: Arc<tokio::runtime::Runtime>,
     load_state: IdeLoadState,
     node_id: Option<String>,
@@ -473,6 +485,8 @@ pub struct IdeSurface {
     loading_paths: HashSet<String>,
     loading_file_tabs: HashSet<EditorTabId>,
     saving_tabs: HashSet<EditorTabId>,
+    pending_saves: HashMap<EditorTabId, PendingFileSave>,
+    file_open_errors: HashMap<EditorTabId, IdeFileError>,
     save_after_close: Option<CloseRequestId>,
     conflict_state: Option<ConflictState>,
     pending_restore_files: Vec<String>,
@@ -497,8 +511,6 @@ pub struct IdeSurface {
     delete_confirm: Option<DeleteConfirmState>,
     tree_clipboard: Option<TreeClipboardState>,
     tab_drag: Option<TabDrag>,
-    agent_opt_in_open: bool,
-    agent_opt_in_remember: bool,
     agent_status_menu: Option<AgentStatusMenu>,
     file_format_menu: Option<FileFormatMenu>,
     file_format_bounds: [Option<Bounds<Pixels>>; 2],

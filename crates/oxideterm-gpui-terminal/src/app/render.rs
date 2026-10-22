@@ -631,6 +631,35 @@ impl Render for TerminalPane {
             .when(self.is_serial_transport(), |pane| {
                 pane.child(self.render_serial_control_bar(cx))
             })
+            .when(self.shell_ide_preparing, |pane| {
+                let label = self
+                    .shell_ide_progress
+                    .as_ref()
+                    .map(|(label, _)| label.clone())
+                    .unwrap_or_else(|| {
+                        self.preferences
+                            .command_selection_labels
+                            .shell_ide_preparing
+                            .clone()
+                    });
+                pane.child(
+                    div()
+                        .absolute()
+                        .bottom_3()
+                        .right_3()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(self.render_terminal_toolbar_status(label))
+                        .when_some(self.shell_ide_progress.as_ref(), |view, (_, percent)| {
+                            view.child(div().w(px(280.0)).child(progress(
+                                &self.theme.tokens,
+                                *percent,
+                                percent.is_none(),
+                            )))
+                        }),
+                )
+            })
             .when(
                 self.can_reconnect_ssh() || self.ssh_reconnect_pending(),
                 |pane| {
@@ -2133,6 +2162,20 @@ impl TerminalPane {
                             cx,
                         )
                     }))
+                    .when(self.session_kind == TerminalSessionKind::SshPty, |menu| {
+                        menu.child(self.render_terminal_context_menu_item(
+                            self.preferences.command_selection_labels.shell_ide.clone(),
+                            self.terminal_exited,
+                            |this, _, _, cx| {
+                                this.request_context_action(
+                                    TerminalContextAction::ConvertToShellIde,
+                                    false,
+                                    cx,
+                                )
+                            },
+                            cx,
+                        ))
+                    })
                     .child(self.render_terminal_context_menu_item(
                         copy_label,
                         !menu.has_selection,

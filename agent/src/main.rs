@@ -20,7 +20,9 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
-const COMPATIBILITY_VERSION: u32 = 3;
+mod ide;
+
+const COMPATIBILITY_VERSION: u32 = 5;
 const ERR_METHOD_NOT_FOUND: i32 = -32601;
 const ERR_INVALID_PARAMS: i32 = -32602;
 const ERR_INTERNAL: i32 = -32603;
@@ -242,6 +244,12 @@ struct ChmodParams {
 }
 
 fn main() {
+    if env::args().nth(1).as_deref() == Some("--shell-session") {
+        if ide::serve(&env::args().nth(2).unwrap_or_default()).is_err() {
+            std::process::exit(1);
+        }
+        return;
+    }
     if env::args().any(|arg| arg == "--version" || arg == "-V") {
         println!(
             "oxideterm-agent {} compat {}",
@@ -302,7 +310,14 @@ fn dispatch(method: &str, params: Value) -> Result<Value, RpcError> {
     match method {
         "sys/ping" => Ok(json!({ "ok": true })),
         "sys/info" => to_value(sys_info()),
+        "sys/cwd" => env::current_dir()
+            .map(|path| json!(path.to_string_lossy()))
+            .map_err(|_| rpc_error(ERR_IO, "Cannot resolve working directory")),
+        "fs/project" => ide::project(params.get("path").and_then(Value::as_str).unwrap_or(".")),
+        "fs/writeIdeFile" => to_value(ide::write_file(from_params(params)?)?),
+        "fs/createFile" => to_value(ide::create_file(from_params(params)?)?),
         "sys/shutdown" => Ok(json!({})),
+        "fs/readFilePrefix" => ide::read_file_prefix(&from_params::<PathParams>(params)?.path),
         "fs/readFile" => to_value(read_file(from_params(params)?)?),
         "fs/writeFile" => to_value(write_file(from_params(params)?)?),
         "fs/stat" => to_value(stat_path(&from_params::<PathParams>(params)?.path)),

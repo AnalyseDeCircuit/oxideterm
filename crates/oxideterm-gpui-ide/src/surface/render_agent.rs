@@ -1,4 +1,3 @@
-use oxideterm_gpui_ui::modal::rounded_shell_child_radius;
 
 impl IdeSurface {
     fn render_status_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -60,6 +59,17 @@ impl IdeSurface {
     }
 
     fn render_agent_status_trigger(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.fs.is_bound() {
+            let label = match self.fs.access() {
+                oxideterm_ide_fs::RemoteAccess::Sftp => self.labels.access_modes[0].clone(),
+                oxideterm_ide_fs::RemoteAccess::Commands => self.labels.shell_commands.clone(),
+                _ => self.labels.agent_choices[1].clone(),
+            };
+            let label = if self.fs.uses_ssh_shell() {
+                format!("{} · {label}", self.labels.ssh_shell)
+            } else { label };
+            return div().child(label).into_any_element();
+        }
         let status = self.fs.status_for_node(self.node_id.as_deref());
         let (icon, label, color, opacity) = self.agent_status_trigger_parts(&status);
         let entity = cx.entity();
@@ -506,227 +516,6 @@ impl IdeSurface {
                     ),
             );
         self.render_modal_overlay(dialog)
-    }
-
-    fn render_agent_opt_in_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
-        let tokens = &self.tokens;
-        let dialog = div()
-            .w(px(IDE_AGENT_OPT_IN_WIDTH))
-            .overflow_hidden()
-            .rounded(px(tokens.radii.lg))
-            .border_1()
-            .border_color(rgba(
-                (tokens.ui.border << 8) | IDE_AGENT_OPT_IN_BORDER_ALPHA,
-            ))
-            .bg(rgb(tokens.ui.bg_panel))
-            .shadow_lg()
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(IDE_AGENT_OPT_IN_GAP))
-                    .px(px(IDE_AGENT_OPT_IN_BODY_PADDING_X))
-                    .pt(px(IDE_AGENT_OPT_IN_BODY_PADDING_TOP))
-                    .pb(px(IDE_AGENT_OPT_IN_BODY_PADDING_BOTTOM))
-                    .child(
-                        div()
-                            .size(px(IDE_AGENT_OPT_IN_ICON_SIZE))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded_full()
-                            .border_1()
-                            .border_color(rgba(
-                                (tokens.ui.accent << 8) | IDE_AGENT_OPT_IN_ACCENT_BORDER_ALPHA,
-                            ))
-                            .bg(rgba(
-                                (tokens.ui.accent << 8) | IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA,
-                            ))
-                            .child(self.icon(
-                                "lucide/bot.svg",
-                                IDE_AGENT_OPT_IN_ICON_INNER_SIZE,
-                                tokens.ui.accent,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(tokens.metrics.ui_text_sm))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(tokens.ui.text))
-                            .text_align(gpui::TextAlign::Center)
-                            .child(self.labels.agent_optin_title.clone()),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(tokens.metrics.ui_text_xs))
-                            .text_color(rgb(tokens.ui.text_muted))
-                            .text_align(gpui::TextAlign::Center)
-                            .line_height(px(tokens.metrics.ui_text_sm * 1.45))
-                            .child(self.labels.agent_optin_desc.clone()),
-                    )
-                    .child(self.render_agent_opt_in_benefits())
-                    .child(self.render_agent_opt_in_remember(cx)),
-            )
-            .child(
-                div()
-                    .flex()
-                    // Footer hover fills touch the dialog bottom edge; align
-                    // the clip to the inner border curve, like browser
-                    // DialogContent overflow clipping.
-                    .rounded_b(px(rounded_shell_child_radius(tokens.radii.lg)))
-                    .overflow_hidden()
-                    .border_t_1()
-                    .border_color(rgba((tokens.ui.border << 8) | IDE_HOVER_ALPHA))
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap_1()
-                            .py(px(IDE_AGENT_OPT_IN_ACTION_PADDING_Y))
-                            .border_r_1()
-                            .border_color(rgba((tokens.ui.border << 8) | IDE_HOVER_ALPHA))
-                            .text_size(px(tokens.metrics.ui_text_sm))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(rgb(tokens.ui.text_muted))
-                            .cursor_pointer()
-                            .hover(|style| {
-                                style
-                                    .bg(rgb(tokens.ui.bg_hover))
-                                    .text_color(rgb(tokens.ui.text))
-                            })
-                            .child(self.icon("lucide/folder-sync.svg", 14.0, tokens.ui.text_muted))
-                            .child(self.labels.agent_optin_sftp_only.clone())
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.choose_agent_opt_in(NodeAgentMode::Disabled, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .gap_1()
-                            .py(px(IDE_AGENT_OPT_IN_ACTION_PADDING_Y))
-                            .text_size(px(tokens.metrics.ui_text_sm))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(tokens.ui.accent))
-                            .cursor_pointer()
-                            .hover(|style| {
-                                style.bg(rgba(
-                                    (tokens.ui.accent << 8) | IDE_AGENT_OPT_IN_ACCENT_BG_ALPHA,
-                                ))
-                            })
-                            .child(self.icon("lucide/bot.svg", 14.0, tokens.ui.accent))
-                            .child(self.labels.agent_optin_enable.clone())
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.choose_agent_opt_in(NodeAgentMode::Enabled, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                    ),
-            );
-        self.render_modal_overlay(dialog)
-    }
-
-    fn render_agent_opt_in_benefits(&self) -> AnyElement {
-        let mut benefits = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted));
-        for text in [
-            self.labels.agent_optin_benefit_watch.clone(),
-            self.labels.agent_optin_benefit_git.clone(),
-            self.labels.agent_optin_benefit_atomic.clone(),
-        ] {
-            benefits = benefits.child(
-                div()
-                    .flex()
-                    .items_start()
-                    .gap_2()
-                    .child(self.icon("lucide/check.svg", 12.0, TAILWIND_EMERALD_400))
-                    .child(div().flex_1().child(text)),
-            );
-        }
-        benefits.into_any_element()
-    }
-
-    fn render_agent_opt_in_remember(&self, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap_2()
-            .mt_1()
-            .cursor_pointer()
-            .child(
-                div()
-                    .size(px(14.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.xs))
-                    .border_1()
-                    .border_color(if self.agent_opt_in_remember {
-                        rgb(self.tokens.ui.accent)
-                    } else {
-                        rgb(self.tokens.ui.border)
-                    })
-                    .bg(if self.agent_opt_in_remember {
-                        rgb(self.tokens.ui.accent)
-                    } else {
-                        rgb(self.tokens.ui.bg_sunken)
-                    })
-                    .when(self.agent_opt_in_remember, |this| {
-                        this.child(self.icon("lucide/check.svg", 10.0, self.tokens.ui.bg))
-                    }),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.labels.agent_optin_remember.clone()),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.agent_opt_in_remember = !this.agent_opt_in_remember;
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
-    }
-
-    fn choose_agent_opt_in(&mut self, mode: NodeAgentMode, cx: &mut Context<Self>) {
-        self.agent_opt_in_open = false;
-        if self.agent_opt_in_remember {
-            cx.emit(IdeSurfaceEvent::RememberAgentMode(mode));
-        } else {
-            self.runtime_settings.agent_mode = mode;
-            self.fs.set_mode(mode);
-        }
-        if mode == NodeAgentMode::Enabled {
-            self.start_deploy_agent(cx);
-        } else {
-            if mode == NodeAgentMode::Disabled {
-                self.cancel_agent_sampling();
-                self.stop_agent_watch(cx);
-            }
-            self.refresh_agent_status(AgentStatusRefreshOrigin::UserAction, cx);
-        }
-        cx.notify();
     }
 
     fn start_deploy_agent(&mut self, cx: &mut Context<Self>) {

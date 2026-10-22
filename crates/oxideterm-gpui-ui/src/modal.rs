@@ -18,6 +18,7 @@ static TAURI_BACKDROP_BLUR_ALLOWED: AtomicBool = AtomicBool::new(true);
 // Tauri/Radix portals use z-50 for dialog/select/popover surfaces; GPUI uses
 // deferred priority instead of CSS stacking, so keep the source z-index value
 // named and centralized for every migrated floating layer.
+pub const MODAL_KEY_CONTEXT: &str = "Modal";
 pub const TAURI_POPOVER_LAYER_PRIORITY: usize = 50;
 pub const TAURI_SELECT_LAYER_PRIORITY: usize = 50;
 // Tauri TooltipContent uses z-[9999], intentionally above normal portals.

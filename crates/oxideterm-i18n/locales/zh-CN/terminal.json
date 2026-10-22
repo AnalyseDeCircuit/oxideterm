@@ -616,6 +616,25 @@
       "manage": "提权凭据",
       "manage_title": "打开此作用域的提权凭据设置",
       "local_manage_unavailable": "本地 Shell 的提权凭据管理尚未开放。"
+    },
+    "shell_ide": {
+      "requirements": "命令方式需要 Linux，以及 GNU find、stat、grep 和 coreutils。",
+      "access_title": "选择文件访问方式",
+      "agent": "使用代理（必要时安装或更新）",
+      "commands": "纯 Shell 命令",
+      "sftp": "SFTP",
+      "convert": "转换为 IDE",
+      "return": "返回终端",
+      "confirm": "请确认终端处于 shell 提示符，且没有未提交的输入。选择纯命令或代理方式，均使用当前用户、容器和目录。返回终端前，终端输入将暂停。",
+      "failed": "无法启动文件访问。请检查 shell 是否就绪，以及环境是否满足要求。若终端未能恢复，请重新连接。",
+      "preparing": "正在启动 IDE 文件服务，终端输入暂时暂停…",
+      "ssh": "SSH",
+      "agent_choice_hint": "纯 Shell 不安装代理；使用代理会在所选环境的 ~/.oxideterm/oxideterm-agent 安装或复用代理。",
+      "sftp_unavailable": "SFTP 不可用，请选择 SSH。",
+      "ssh_unavailable": "SSH 文件访问启动失败。请检查环境；如需交互式登录，请先在终端完成，再右键该终端选择“转换为 IDE”。",
+      "ssh_shell": "SSH（Shell 通道）",
+      "agent_installing": "正在安装代理：{{percent}}%（{{transferred}} / {{total}} KiB）",
+      "agent_starting": "正在启动代理…"
     }
   },
   "search": {

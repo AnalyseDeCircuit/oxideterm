@@ -3734,7 +3734,7 @@ impl WorkspaceApp {
                             "reason": "Find a connected IDE or SSH target before opening IDE."
                         })]);
                 };
-                self.open_ide_folder_picker_tab(node_id, cx);
+                self.open_ide_folder_picker_tab(node_id, window, cx);
                 snapshot
                     .ok(
                         "Opened ide.",

@@ -1,5 +1,21 @@
 impl Render for IdeSurface {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.fs.terminal_session_id().is_some()
+            && !self.fs.status_for_node(self.node_id.as_deref()).is_ready()
+            && matches!(self.load_state, IdeLoadState::Ready)
+        {
+            self.load_state = IdeLoadState::Disconnected;
+        }
+        if self.has_modal() {
+            // Floating menus and pointer drags belong to the covered surface, not the dialog.
+            self.tab_context_menu = None;
+            self.tree_context_menu = None;
+            self.file_format_menu = None;
+            self.agent_status_menu = None;
+            self.tree_resize = None;
+            self.tree_resize_activation = None;
+            self.tab_drag = None;
+        }
         let theme = self.tokens.ui;
         let font_family = tauri_ui_font_family(self.tokens.metrics.font_family);
         let mut root = div()
@@ -50,6 +66,10 @@ impl Render for IdeSurface {
                 this.update_folder_picker_path_selection_drag(event, window, cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.has_modal() {
+                    this.handle_modal_key(event, window, cx);
+                    return;
+                }
                 if event.keystroke.key == "escape" && this.file_format_menu.take().is_some() {
                     cx.stop_propagation();
                     cx.notify();
@@ -72,31 +92,69 @@ impl Render for IdeSurface {
             IdeLoadState::Error(message) => self.render_project_error(message.clone(), cx),
             IdeLoadState::Disconnected | IdeLoadState::Ready => self.render_workspace(cx),
         };
-        root = root.child(body);
+        if self.is_shell_ide() {
+            root = root
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .h(px(IDE_WORKSPACE_HEADER_HEIGHT))
+                        .flex_none()
+                        .px_2()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .border_b_1()
+                        .border_color(rgb(self.tokens.ui.border))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .child(self.root_path.clone().unwrap_or_default()),
+                        )
+                        .child(
+                            button_with(
+                                &self.tokens,
+                                self.labels.return_to_terminal.clone(),
+                                ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.request_shell_return(cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        ),
+                )
+                .child(div().flex_1().min_h_0().relative().child(body));
+        } else {
+            root = root.child(body);
+        }
 
         if matches!(self.load_state, IdeLoadState::Disconnected) {
-            root = root.child(self.render_disconnected_overlay());
-        }
-        if self.workspace.pending_close().is_some() {
-            root = root.child(self.render_dirty_close_dialog(cx));
-        }
-        if self.conflict_state.is_some() {
-            root = root.child(self.render_conflict_dialog(cx));
-        }
-        if self.folder_switch_confirm_open {
-            root = root.child(self.render_folder_switch_confirm_dialog(cx));
-        }
-        if self.folder_picker.open {
-            root = root.child(self.render_folder_picker_dialog(cx));
-        }
-        if self.tree_name_input.is_some() {
-            root = root.child(self.render_tree_name_input_dialog(cx));
+            let overlay = self.render_disconnected_overlay();
+            root = if self.is_shell_ide() {
+                root.child(
+                    div()
+                        .absolute()
+                        .top(px(IDE_WORKSPACE_HEADER_HEIGHT))
+                        .bottom_0()
+                        .left_0()
+                        .right_0()
+                        .child(overlay),
+                )
+            } else {
+                root.child(overlay)
+            };
         }
         if self.search.open {
             root = root.child(self.render_project_search_panel(cx));
-        }
-        if self.delete_confirm.is_some() {
-            root = root.child(self.render_delete_confirm_dialog(cx));
         }
         if let Some(menu) = self.tab_context_menu {
             root = root.child(self.render_tab_context_menu(menu, _window, cx));
@@ -109,12 +167,6 @@ impl Render for IdeSurface {
         }
         if let Some(menu) = self.agent_status_menu {
             root = root.child(self.render_agent_status_menu(menu, _window, cx));
-        }
-        if self.agent_remove_confirm_open {
-            root = root.child(self.render_agent_remove_confirm_dialog(cx));
-        }
-        if self.agent_opt_in_open {
-            root = root.child(self.render_agent_opt_in_dialog(cx));
         }
         if self.tree_resize.is_some() {
             // Match sidebar capture: editor and scrollable children must not
@@ -144,7 +196,11 @@ impl Render for IdeSurface {
 
 impl Focusable for IdeSurface {
     fn focus_handle(&self, _: &App) -> FocusHandle {
-        self.focus_handle.clone()
+        if self.has_modal() {
+            self.modal_focus_handle.clone()
+        } else {
+            self.focus_handle.clone()
+        }
     }
 }
 

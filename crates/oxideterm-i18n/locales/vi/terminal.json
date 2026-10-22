@@ -616,6 +616,25 @@
       "manage": "Thông tin xác thực đặc quyền",
       "manage_title": "Mở cài đặt thông tin xác thực đặc quyền cho phạm vi này",
       "local_manage_unavailable": "Quản lý thông tin xác thực đặc quyền cho shell cục bộ chưa khả dụng."
+    },
+    "shell_ide": {
+      "requirements": "Truy cập bằng lệnh yêu cầu Linux với GNU find, stat, grep và coreutils.",
+      "access_title": "Chọn cách truy cập tệp",
+      "agent": "Dùng tác nhân (cài đặt hoặc cập nhật khi cần)",
+      "commands": "Lệnh shell",
+      "sftp": "SFTP",
+      "convert": "Chuyển thành IDE",
+      "return": "Trở về thiết bị đầu cuối",
+      "confirm": "Xác nhận terminal ở dấu nhắc shell và không có nội dung chưa gửi. Lệnh hoặc tác nhân dùng người dùng, container và thư mục hiện tại. Nhập liệu tạm dừng đến khi quay lại từ IDE.",
+      "failed": "Không thể bắt đầu truy cập tệp. Kiểm tra shell và yêu cầu môi trường. Kết nối lại nếu terminal chưa được khôi phục.",
+      "preparing": "Đang khởi động dịch vụ tệp IDE; việc nhập ở thiết bị đầu cuối đang tạm dừng…",
+      "ssh": "SSH",
+      "agent_choice_hint": "Shell thuần không cài tác nhân. Tác nhân được cài hoặc tái sử dụng tại ~/.oxideterm/oxideterm-agent trong môi trường đã chọn.",
+      "sftp_unavailable": "SFTP không khả dụng. Hãy chọn SSH.",
+      "ssh_unavailable": "Không thể khởi động truy cập tệp SSH. Hãy kiểm tra môi trường. Nếu cần đăng nhập tương tác, hãy hoàn tất trong terminal, sau đó nhấp chuột phải vào terminal đó và chọn Chuyển thành IDE.",
+      "ssh_shell": "SSH (kênh Shell)",
+      "agent_installing": "Đang cài đặt tác nhân: {{percent}}% ({{transferred}} / {{total}} KiB)",
+      "agent_starting": "Đang khởi động tác nhân…"
     }
   },
   "search": {

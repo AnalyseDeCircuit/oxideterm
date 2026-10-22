@@ -504,6 +504,7 @@ impl WorkspaceApp {
         pane_id: &PaneId,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
+        self.release_shell_ide_for_pane(*pane_id, cx);
         self.clear_workspace_tooltip(&format!("terminal-timestamp-{}", pane_id.0), cx);
         if let Some(terminal) = self
             .tab_host
@@ -811,6 +812,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if let Some((_, surface)) = self
+            .ide_workspace
+            .read(cx)
+            .shell_surface_for_pane(active_pane_id)
+        {
+            surface.update(cx, |surface, cx| surface.request_shell_return(cx));
+            return;
+        }
         let Some(root) = self
             .tab_by_id(tab_id, cx)
             .and_then(|tab| tab.root_pane.as_ref())
@@ -1211,6 +1220,42 @@ impl WorkspaceApp {
             }
             PaneNode::Leaf { pane_id, .. } => {
                 let active = Some(*pane_id) == active_pane_id;
+                let shell_surface = self.ide_workspace.read(cx).shell_surface_for_pane(*pane_id);
+                if let Some((_, surface)) = shell_surface {
+                    let pane_id = *pane_id;
+                    return div()
+                        .id(("workspace-pane", pane_id.0))
+                        .size_full()
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .capture_any_mouse_down(cx.listener(
+                            move |this, _: &MouseDownEvent, _, cx| {
+                                if let Some(tab_id) = tab_id {
+                                    let changed = this.tab_host.update(cx, |host, _| {
+                                        host.set_active_pane(Some(tab_id), pane_id)
+                                    });
+                                    if changed {
+                                        this.blur_text_inputs(cx);
+                                        if !this.tab_host.read(cx).is_outside_main_window(tab_id) {
+                                            this.sync_active_tab_surface(cx);
+                                        }
+                                    }
+                                }
+                                cx.notify();
+                            },
+                        ))
+                        .when(split, |frame| {
+                            frame.child(self.render_terminal_pane_header(
+                                tab_id.unwrap(),
+                                pane_id,
+                                active,
+                                cx,
+                            ))
+                        })
+                        .child(div().flex_1().min_h_0().relative().child(surface))
+                        .into_any_element();
+                }
                 let Some(pane) = self.tab_host.read(cx).panes().get(pane_id).cloned() else {
                     return div().size_full().into_any_element();
                 };

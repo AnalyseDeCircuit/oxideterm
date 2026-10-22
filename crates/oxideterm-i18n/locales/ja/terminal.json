@@ -616,6 +616,25 @@
       "manage": "権限昇格資格情報",
       "manage_title": "このスコープの権限昇格資格情報設定を開く",
       "local_manage_unavailable": "ローカル Shell の権限昇格用資格情報管理はまだ利用できません。"
+    },
+    "shell_ide": {
+      "requirements": "コマンド方式には Linux と GNU find、stat、grep、coreutils が必要です。",
+      "access_title": "ファイルへのアクセス方法を選択",
+      "agent": "エージェントを使用（必要に応じてインストール・更新）",
+      "commands": "シェルコマンド",
+      "sftp": "SFTP",
+      "convert": "IDE に変換",
+      "return": "ターミナルに戻る",
+      "confirm": "未送信の入力がないシェルプロンプトであることを確認してください。コマンドとエージェントは現在のユーザー、コンテナー、ディレクトリを使用します。IDE から戻るまで端末入力は停止します。",
+      "failed": "ファイルアクセスを開始できません。シェルの状態と環境要件を確認してください。端末を復元できなかった場合は再接続してください。",
+      "preparing": "IDE ファイルサービスを起動中です。ターミナル入力は一時停止しています…",
+      "ssh": "SSH",
+      "agent_choice_hint": "純粋な Shell ではエージェントをインストールしません。使用する場合、選択した環境の ~/.oxideterm/oxideterm-agent にインストールするか既存のものを再利用します。",
+      "sftp_unavailable": "SFTP を利用できません。SSH を選択してください。",
+      "ssh_unavailable": "SSH ファイルアクセスを開始できませんでした。環境を確認してください。対話ログインが必要な場合は、端末で完了後、その端末を右クリックして「IDE に変換」を選択してください。",
+      "ssh_shell": "SSH（Shell チャネル）",
+      "agent_installing": "エージェントをインストール中：{{percent}}%（{{transferred}} / {{total}} KiB）",
+      "agent_starting": "エージェントを起動中…"
     }
   },
   "search": {

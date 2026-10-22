@@ -60,7 +60,8 @@
       "overview_error": "Fehler",
       "overview_refresh_interval": "Aktualisierung alle {{seconds}} Sekunden",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
-      "topology_roots_children": "{{roots}} roots / {{children}} children"
+      "topology_roots_children": "{{roots}} roots / {{children}} children",
+      "ide": "IDE"
     },
     "status": {
       "reconnecting_title": "Verbindung wird wiederhergestellt",

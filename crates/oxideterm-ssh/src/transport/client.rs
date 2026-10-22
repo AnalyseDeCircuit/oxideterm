@@ -1741,6 +1741,8 @@ impl SshTransportClient {
                         let Some(command) = command else { cancelled = true; break };
                         match command {
                             SshTransportCommand::Data(data) => {
+                                // PTY data may contain shell-agent file contents as well as credentials.
+                                let data = zeroize::Zeroizing::new(data);
                                 output_batcher.note_interaction();
                                 if let Err(error) = channel.data(data.as_slice()).await {
                                     mark_transport_lost(format!(

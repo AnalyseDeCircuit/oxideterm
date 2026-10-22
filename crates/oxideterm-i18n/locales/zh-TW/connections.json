@@ -60,7 +60,8 @@
       "overview_error": "錯誤",
       "overview_refresh_interval": "每 {{seconds}} 秒更新",
       "topology_nodes_edges": "Nodes: {{nodes}} • Edges: {{edges}}",
-      "topology_roots_children": "{{roots}} roots / {{children}} children"
+      "topology_roots_children": "{{roots}} roots / {{children}} children",
+      "ide": "IDE"
     },
     "status": {
       "reconnecting_title": "連線重新連接中",

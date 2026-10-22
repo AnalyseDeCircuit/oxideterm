@@ -616,6 +616,25 @@
       "manage": "Privileg-Anmeldedaten",
       "manage_title": "Privileg-Anmeldedaten für diesen Bereich öffnen",
       "local_manage_unavailable": "Die Verwaltung von Privileg-Anmeldedaten für die lokale Shell ist noch nicht verfügbar."
+    },
+    "shell_ide": {
+      "requirements": "Befehlszugriff erfordert Linux mit GNU find, stat, grep und coreutils.",
+      "access_title": "Dateizugriff auswählen",
+      "agent": "Agent verwenden (bei Bedarf installieren oder aktualisieren)",
+      "commands": "Shell-Befehle",
+      "sftp": "SFTP",
+      "convert": "In IDE umwandeln",
+      "return": "Zurück zum Terminal",
+      "confirm": "Bestätigen Sie eine Shell-Eingabeaufforderung ohne ausstehende Eingabe. Befehle oder Agent verwenden den aktuellen Benutzer, Container und Ordner. Die Terminaleingabe pausiert bis zur Rückkehr aus der IDE.",
+      "failed": "Dateizugriff konnte nicht gestartet werden. Prüfen Sie Shell und Umgebung. Verbinden Sie das Terminal erneut, falls es nicht wiederhergestellt wurde.",
+      "preparing": "IDE-Dateidienst wird gestartet; Terminaleingaben sind pausiert…",
+      "ssh": "SSH",
+      "agent_choice_hint": "Reine Shell installiert keinen Agenten. Der Agent wird unter ~/.oxideterm/oxideterm-agent in der gewählten Umgebung installiert oder wiederverwendet.",
+      "sftp_unavailable": "SFTP ist nicht verfügbar. Wählen Sie SSH.",
+      "ssh_unavailable": "SSH-Dateizugriff fehlgeschlagen. Prüfen Sie die Umgebung. Falls eine interaktive Anmeldung nötig ist, schließen Sie diese im Terminal ab und wählen Sie dort per Rechtsklick „In IDE umwandeln“.",
+      "ssh_shell": "SSH (Shell-Kanal)",
+      "agent_installing": "Agent wird installiert: {{percent}}% ({{transferred}} / {{total}} KiB)",
+      "agent_starting": "Agent wird gestartet…"
     }
   },
   "search": {

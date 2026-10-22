@@ -33,6 +33,18 @@ impl AgentSession {
             .any(|available| available == capability)
     }
 
+    async fn read_file_prefix(&self, path: &str) -> Result<zeroize::Zeroizing<Vec<u8>>, AgentError> {
+        let value = self.transport.call("fs/readFilePrefix", serde_json::json!({"path": path})).await?;
+        let content = zeroize::Zeroizing::new(serde_json::from_value::<String>(value)
+            .map_err(|_| AgentError::Deserialize("Invalid file prefix response".into()))?);
+        let bytes = zeroize::Zeroizing::new(base64::engine::general_purpose::STANDARD.decode(content.as_bytes())
+            .map_err(|_| AgentError::Deserialize("Invalid file prefix bytes".into()))?);
+        if bytes.len() > crate::text::FILE_PREFIX_BYTES {
+            return Err(AgentError::Deserialize("File prefix exceeds limit".into()));
+        }
+        Ok(bytes)
+    }
+
     async fn read_file_bytes(
         &self,
         path: &str,
@@ -80,9 +92,25 @@ impl AgentSession {
                 "Agent does not support byte-preserving file IO".into(),
             ));
         }
-        let content =
-            zeroize::Zeroizing::new(base64::engine::general_purpose::STANDARD.encode(bytes));
-        let value = self.transport.call_with_timeout("fs/writeFile", serde_json::json!({ "path": path, "content": &*content, "encoding": "base64", "expect_hash": expect_hash }), 300).await?;
+        self.write_bytes("fs/writeFile", path, bytes, expect_hash, None).await
+    }
+
+    async fn write_bytes(
+        &self,
+        method: &str,
+        path: &str,
+        bytes: &[u8],
+        expect_hash: Option<&str>,
+        create_new: Option<bool>,
+    ) -> Result<WriteFileResult, AgentError> {
+        let content = zeroize::Zeroizing::new(base64::engine::general_purpose::STANDARD.encode(bytes));
+        let mut params = serde_json::json!({
+            "path": path, "content": &*content, "encoding": "base64", "expect_hash": expect_hash,
+        });
+        if let Some(create_new) = create_new {
+            params["create_new"] = create_new.into();
+        }
+        let value = self.transport.call_with_timeout(method, params, 300).await?;
         serde_json::from_value(value).map_err(|error| AgentError::Deserialize(error.to_string()))
     }
 

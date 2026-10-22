@@ -1305,6 +1305,8 @@ impl WorkspaceApp {
                 copy: self.i18n.t("terminal.command_selection.copy"),
                 copy_title: self.i18n.t("terminal.command_selection.copy_title"),
                 copy_command: self.i18n.t("terminal.command_selection.copy_command"),
+                shell_ide: self.i18n.t("terminal.shell_ide.convert"),
+                shell_ide_preparing: self.i18n.t("terminal.shell_ide.preparing"),
                 send_to_ai: self.i18n.t("terminal.command_selection.send_to_ai"),
                 fill_command_bar: self.i18n.t("terminal.command_selection.fill_command_bar"),
                 insert_selection_into_command: self

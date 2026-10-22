@@ -15,6 +15,6 @@ pub use labels::IdeLabels;
 pub use oxideterm_ide_core::{IdePluginFileSnapshot, IdePluginProjectSnapshot, IdePluginSnapshot};
 pub use oxideterm_ide_fs::NodeAgentMode;
 pub use surface::{
-    IdeAiContextSnapshot, IdeLoadState, IdeRuntimeSettings, IdeSurface, IdeSurfaceEvent,
-    IdeSurfaceMount,
+    IdeAiContextSnapshot, IdeLoadState, IdeModalLayer, IdeRuntimeSettings, IdeSurface,
+    IdeSurfaceEvent, IdeSurfaceMount,
 };

@@ -616,6 +616,25 @@
       "manage": "Privilege credentials",
       "manage_title": "Open privilege credential settings for this scope",
       "local_manage_unavailable": "Local shell privilege credential management is not available yet."
+    },
+    "shell_ide": {
+      "requirements": "Command access requires Linux with GNU find, stat, grep and coreutils.",
+      "access_title": "Choose file access",
+      "agent": "Use agent (install or update if needed)",
+      "commands": "Shell commands",
+      "sftp": "SFTP",
+      "convert": "Convert to IDE",
+      "return": "Return to terminal",
+      "confirm": "Confirm this terminal is at a shell prompt with no unfinished input. Choose commands or an agent to use its current user, container and directory. Terminal input pauses until you return from the IDE.",
+      "failed": "Could not start file access. Check shell readiness and environment requirements. Reconnect if the terminal could not be restored.",
+      "preparing": "Starting IDE file service; terminal input is paused…",
+      "ssh": "SSH",
+      "agent_choice_hint": "Pure Shell installs no agent. Using an agent installs or reuses ~/.oxideterm/oxideterm-agent in the selected environment.",
+      "sftp_unavailable": "SFTP is unavailable. Choose SSH.",
+      "ssh_unavailable": "SSH file access failed. Check the environment; if interactive login is required, complete it in a terminal, then right-click that terminal and choose Convert to IDE.",
+      "ssh_shell": "SSH (shell channel)",
+      "agent_installing": "Installing agent: {{percent}}% ({{transferred}} / {{total}} KiB)",
+      "agent_starting": "Starting agent…"
     }
   },
   "search": {

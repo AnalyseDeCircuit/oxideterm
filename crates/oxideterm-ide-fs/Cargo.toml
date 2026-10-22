@@ -8,12 +8,17 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+memchr.workspace = true
+uuid.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-backend-classification = { path = "../oxideterm-backend-classification" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 base64.workspace = true
+regex.workspace = true
 dashmap.workspace = true
 futures-util.workspace = true
 russh.workspace = true
@@ -27,3 +32,7 @@ zstd = "0.13"
 oxideterm-preview = { path = "../oxideterm-preview" }
 encoding_rs.workspace = true
 zeroize.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+rand10.workspace = true
