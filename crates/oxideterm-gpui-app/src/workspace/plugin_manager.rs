@@ -3,7 +3,7 @@ use gpui::Div;
 use oxideterm_gpui_ui::{
     ActionSlotRowOptions, StatusTone, SurfaceKind, SurfaceOptions, SurfacePadding, action_slot_row,
     semantic_surface,
-    text_input::{TextInputContentAlign, TextInputView, text_input_with_content_align},
+    text_input::{TextInputContentAlign, TextInputView},
 };
 use std::process::Command;
 use zeroize::Zeroizing;
@@ -2502,8 +2502,8 @@ impl WorkspaceApp {
         // with the other native form fields.
         self.text_input_with_workspace_ime(
             target,
-            text_input_with_content_align(
-                &self.tokens,
+            self.workspace_text_input_with_align(
+                target,
                 TextInputView {
                     value: &display_value,
                     placeholder,

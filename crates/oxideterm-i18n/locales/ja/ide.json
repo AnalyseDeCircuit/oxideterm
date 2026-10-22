@@ -43,6 +43,7 @@
     "search_truncated": "結果が切り捨てられました。より正確な結果を得るために検索条件を絞り込んでください。",
     "search_results_count": "{{files}} ファイルで {{count}} 件の結果",
     "find_placeholder": "検索",
+    "insert_newline": "改行を挿入",
     "replace_placeholder": "置換",
     "find_next": "次を検索 (Enter)",
     "find_previous": "前を検索 (Shift+Enter)",

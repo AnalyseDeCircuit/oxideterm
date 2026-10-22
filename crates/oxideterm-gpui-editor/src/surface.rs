@@ -30,7 +30,10 @@ mod input;
 mod render;
 mod scroll;
 mod search;
+mod search_bar;
 pub use scroll::{EditorScrollAnchor, EditorScrollOrigin, EditorViewportChanged};
+use search_bar::EditorSearchBar;
+pub use search_bar::EditorSearchLabels;
 mod syntax_task;
 mod wrap;
 
@@ -324,6 +327,8 @@ pub struct TextEditorView {
     // indexed by line so each row does not scan every match in a large file.
     find_line_matches: Vec<Range<usize>>,
     active_find_index: Option<usize>,
+    search_labels: Option<EditorSearchLabels>,
+    search_bar: Option<EditorSearchBar>,
     folded_ranges: Vec<FoldRange>,
     fold_revision: u64,
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
@@ -439,6 +444,8 @@ impl TextEditorView {
             find_matches: Vec::new(),
             find_line_matches: Vec::new(),
             active_find_index: None,
+            search_labels: None,
+            search_bar: None,
             folded_ranges: Vec::new(),
             fold_revision: 0,
             display_rows_cache: RefCell::new(None),
@@ -714,6 +721,7 @@ impl TextEditorView {
         self.pending_layout_anchor = Some(self.scroll_anchor());
         self.appearance = EditorAppearance::from_theme(tokens);
         self.language_notice_tokens = *tokens;
+        self.apply_search_theme(tokens, cx);
         // Embedded editors can follow the typography of their owning surface.
         self.appearance.font_family = font_family;
         self.appearance.font_fallback_family = font_fallback_family;

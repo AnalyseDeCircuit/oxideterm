@@ -43,6 +43,7 @@
     "search_truncated": "Risultati troncati. Affina la ricerca per corrispondenze più specifiche.",
     "search_results_count": "{{count}} risultati in {{files}} file",
     "find_placeholder": "Cerca",
+    "insert_newline": "Inserisci interruzione di riga",
     "replace_placeholder": "Sostituisci",
     "find_next": "Corrispondenza successiva (Enter)",
     "find_previous": "Corrispondenza precedente (Shift+Enter)",

@@ -134,6 +134,10 @@ impl TextEditorView {
     ) {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
+        if key == "escape" && self.close_search(window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         let commits_platform_text = input::keystroke_commits_platform_text(&event.keystroke);
         if !commits_platform_text {
             // Navigation and command keys do not pass through the platform
@@ -156,13 +160,20 @@ impl TextEditorView {
                     EditorShortcut::Undo => self.undo(cx),
                     EditorShortcut::Redo => self.redo(cx),
                     EditorShortcut::AddNextMatch => self.add_next_find_match_as_cursor(cx),
-                    // The IDE owns the search UI and handles this on the bubble path.
-                    EditorShortcut::Find => return,
+                    EditorShortcut::Find => {
+                        if !self.open_search(cx) {
+                            return;
+                        }
+                    }
                 }
                 cx.stop_propagation();
                 return;
             }
         } else {
+            if matches_tauri_plain_mod_key(key, modifiers, "f") && self.open_search(cx) {
+                cx.stop_propagation();
+                return;
+            }
             if matches_tauri_plain_mod_key(key, modifiers, "s") {
                 self.save(window, cx);
                 return;

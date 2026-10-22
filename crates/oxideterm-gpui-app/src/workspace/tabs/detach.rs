@@ -415,20 +415,21 @@ impl WorkspaceApp {
         let dialog = self.tab_rename_dialog.as_ref()?;
         let target = WorkspaceImeTarget::TabRename;
         let submit_disabled = dialog.draft.trim().is_empty();
-        let input = text_input(
-            &self.tokens,
-            TextInputView {
-                value: dialog.draft.as_str(),
-                placeholder: self.i18n.t("tabbar.rename_tab_placeholder"),
-                focused: true,
-                caret_visible: self.input_caret.visible(),
-                secret: false,
-                selected_all: false,
-                selected_range: self.ime_selected_range_for_target(target, cx),
-                marked_text: self.marked_text_for_target(target, cx),
-            },
-        )
-        .h(px(34.0));
+        let input = self
+            .workspace_text_input(
+                target,
+                TextInputView {
+                    value: dialog.draft.as_str(),
+                    placeholder: self.i18n.t("tabbar.rename_tab_placeholder"),
+                    focused: true,
+                    caret_visible: self.input_caret.visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
+                },
+            )
+            .h(px(34.0));
         let input = self.text_input_with_workspace_ime(
             target,
             input,

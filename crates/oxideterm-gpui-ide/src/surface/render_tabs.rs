@@ -28,9 +28,6 @@ impl IdeSurface {
                     self.render_loading_file()
                 }
                 None => self.render_empty_editor(cx),
-            })
-            .when(self.editor_search.open, |this| {
-                this.child(self.render_editor_search_bar(cx))
             });
 
         div()

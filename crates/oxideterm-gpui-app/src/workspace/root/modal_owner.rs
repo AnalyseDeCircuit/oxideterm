@@ -750,10 +750,10 @@ impl WorkspaceApp {
             && self.effective_sidebar_panel_section() == SidebarSection::Sessions
             && self.embedded_sftp_node_id.is_some()
             && self.sftp_view.read(cx).current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
-            && let Some(dialog) = self.sftp_view.read(cx).dialog()
+            && self.sftp_view.read(cx).dialog_is_open()
         {
             return Some(ActiveTabWindowModalSnapshot {
-                kind: if matches!(dialog, crate::workspace::sftp::SftpDialog::Editor { .. }) {
+                kind: if self.sftp_view.read(cx).preview_text_editor_visible() {
                     ActiveTabWindowModalKind::SftpEditor
                 } else {
                     ActiveTabWindowModalKind::SftpDialog
@@ -891,10 +891,7 @@ impl WorkspaceApp {
                 let _scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Tab(active_tab.id));
                 let sftp = self.sftp_view().read(cx);
                 sftp.dialog_is_open().then(|| ActiveTabWindowModalSnapshot {
-                    kind: if matches!(
-                        sftp.dialog(),
-                        Some(crate::workspace::sftp::SftpDialog::Editor { .. })
-                    ) {
+                    kind: if sftp.preview_text_editor_visible() {
                         ActiveTabWindowModalKind::SftpEditor
                     } else {
                         ActiveTabWindowModalKind::SftpDialog
@@ -923,6 +920,17 @@ impl WorkspaceApp {
         let Some(owner) = self.active_window_modal_owner(cx) else {
             return false;
         };
+        if matches!(
+            owner,
+            ActiveWindowModalOwner::ActiveTabWindowModal {
+                kind: ActiveTabWindowModalKind::SftpEditor,
+                ..
+            }
+        ) && owner.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible
+            && self.handle_sftp_editor_search_key(event, window, cx)
+        {
+            return true;
+        }
         // Exiting search dialogs still own input until their backdrop is removed.
         // Route only their reopen shortcut; do not start a new IME composition.
         if owner == ActiveWindowModalOwner::CommandPalette

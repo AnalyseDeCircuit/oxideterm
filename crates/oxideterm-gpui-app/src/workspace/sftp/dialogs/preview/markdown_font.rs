@@ -310,9 +310,11 @@ impl WorkspaceApp {
                 select_all: self.i18n.t("fileManager.selectAll"),
             };
             let (editor_text, _) = normalize_text_line_endings(source);
+            let search_labels = self.editor_search_labels();
             let editor = cx.new(|cx| {
                 let mut editor = TextEditorView::new(editor_text, &tokens, cx);
                 editor.set_read_only(true);
+                editor.set_search_labels(search_labels);
                 editor.set_context_menu_labels(context_menu_labels);
                 editor.apply_ide_runtime_settings(
                     &tokens,

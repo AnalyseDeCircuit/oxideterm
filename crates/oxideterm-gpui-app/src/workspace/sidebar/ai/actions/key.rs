@@ -446,8 +446,8 @@ impl WorkspaceApp {
         let caret = replacement_range
             .as_ref()
             .map(|range| range.start + " ".encode_utf16().count());
+        self.replace_ime_target_text(target, replacement_range, " ", caret, cx);
         self.clear_ime_selection();
-        self.replace_ime_target_text(target, replacement_range, " ", cx);
         if let Some(caret) = caret {
             self.set_ime_selection_from_anchor(target, caret, caret);
         }

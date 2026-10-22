@@ -1080,8 +1080,8 @@ impl WorkspaceApp {
             .child(
                 self.text_input_with_workspace_ime(
                     target,
-                    text_input(
-                        &self.tokens,
+                    self.workspace_text_input(
+                        target,
                         TextInputView {
                             value: query,
                             placeholder: self.i18n.t("settings_view.search.placeholder"),

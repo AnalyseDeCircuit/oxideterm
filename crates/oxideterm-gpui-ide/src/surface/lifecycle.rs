@@ -45,7 +45,6 @@ impl IdeSurface {
             tree_scroll_handle: UniformListScrollHandle::new(),
             tab_scroll_handle: ScrollHandle::new(),
             search: ProjectSearchState::default(),
-            editor_search: EditorSearchState::default(),
             search_cache: HashMap::new(),
             search_cache_order: Vec::new(),
             pending_search_queries: BTreeMap::new(),

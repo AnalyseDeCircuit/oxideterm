@@ -58,7 +58,7 @@ use oxideterm_gpui_ui::{
     context_menu::{ContextMenuActionableStyle, context_menu_action, context_menu_actionable_row},
     modal::overlay_content_boundary,
     text_input::{
-        text_caret, text_input, text_input_anchor_probe, text_input_value_segments_with_color,
+        text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
         text_input_value_segments_with_marked_range,
     },
 };

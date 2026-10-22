@@ -19,8 +19,8 @@ impl WorkspaceApp {
         // ownership and selection behavior as other Workspace controls.
         self.text_input_with_workspace_ime(
             target,
-            text_input_with_content_align(
-                &self.tokens,
+            self.workspace_text_input_with_align(
+                target,
                 TextInputView {
                     value: display_value,
                     placeholder: value.clone(),
@@ -311,8 +311,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         self.text_input_with_workspace_ime(
             target,
-            text_input_with_content_align(
-                &self.tokens,
+            self.workspace_text_input_with_align(
+                target,
                 TextInputView {
                     value: display_value,
                     placeholder,

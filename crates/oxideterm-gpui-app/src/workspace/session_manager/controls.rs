@@ -85,37 +85,7 @@ impl WorkspaceApp {
             .marked_text_for_target(WorkspaceImeTarget::SessionManager(target), cx)
             .unwrap_or_default();
         let visually_empty = value.is_empty() && marked.is_empty();
-        let text = if value.is_empty() && marked.is_empty() {
-            placeholder
-        } else if value.is_empty() {
-            String::new()
-        } else if secret {
-            text_input_secret_mask(value)
-        } else {
-            value.to_string()
-        };
-        let marked_text = if secret {
-            text_input_secret_mask(marked)
-        } else {
-            marked.to_string()
-        };
         let input_target = WorkspaceImeTarget::SessionManager(target);
-        let input_range = if active && !value.is_empty() && marked.is_empty() {
-            self.ime_selected_range_for_target(input_target, cx)
-        } else {
-            None
-        }
-        // Session-manager password fields keep the real value in IME state but
-        // paint masked bullets, so selection/caret offsets need the shared
-        // visual-range conversion before rendering.
-        .map(|range| text_input_visual_range(value, secret, range));
-        let selection_range = input_range.clone().filter(|range| range.start < range.end);
-        let caret_offset = input_range
-            .as_ref()
-            .filter(|range| range.start == range.end)
-            .map(|range| range.start);
-        let shows_selection = selection_range.is_some();
-        let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
         self.text_input_with_workspace_ime(
             input_target,
             (if target == SessionManagerInput::Search {
@@ -157,35 +127,25 @@ impl WorkspaceApp {
                     .bg(rgba(0x00000000))
             })
             .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .items_center()
-                    .overflow_hidden()
-                    .when(active && visually_empty, |input| {
-                        input.child(text_caret(&self.tokens, self.input_caret.visible()))
-                    })
-                    .child(text_input_value_segments(
-                        &self.tokens,
-                        &text,
-                        visually_empty,
-                        selection_range,
-                        caret_offset,
-                        self.input_caret.visible(),
-                    ))
-                    .when(active && !marked_text.is_empty(), |input| {
-                        input.child(
-                            div()
-                                .underline()
-                                .text_color(rgb(theme.text))
-                                .child(marked_text),
-                        )
-                    })
-                    .when(
-                        active && !visually_empty && !shows_selection && !shows_positioned_caret,
-                        |input| input.child(text_caret(&self.tokens, self.input_caret.visible())),
-                    ),
+                self.workspace_text_input(
+                    input_target,
+                    oxideterm_gpui_ui::text_input::TextInputView {
+                        value,
+                        placeholder,
+                        focused: active,
+                        caret_visible: self.input_caret.visible(),
+                        secret,
+                        selected_all: false,
+                        selected_range: self.ime_selected_range_for_target(input_target, cx),
+                        marked_text: Some(marked),
+                    },
+                )
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .border_0()
+                .bg(rgba(0x00000000))
+                .px(px(0.0)),
             ),
             move |this, cx| {
                 this.session_manager.update(cx, |manager, cx| {
@@ -223,9 +183,8 @@ impl WorkspaceApp {
                 _ => None,
             }
             .unwrap_or_default();
-            // Only the bullet mask crosses the Entity render boundary; the
-            // secret remains owned by SessionManagerState.
-            text_input_secret_mask(value)
+            // Preserve UTF-16 offsets without copying the secret out of its owner.
+            super::super::ime::secret_ime_proxy(value)
         };
         self.render_session_text_input_with_options(target, &masked_value, placeholder, true, cx)
     }

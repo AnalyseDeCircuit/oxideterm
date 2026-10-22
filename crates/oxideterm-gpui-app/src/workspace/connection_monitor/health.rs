@@ -4,7 +4,7 @@ use gpui::Div;
 use oxideterm_gpui_ui::select::{
     select_event_boundary, select_option_action, select_option_highlighted,
 };
-use oxideterm_gpui_ui::text_input::{TextInputView, text_input, text_input_anchor_probe};
+use oxideterm_gpui_ui::text_input::{TextInputView, text_input_anchor_probe};
 
 use crate::workspace::selectable_text::{SelectableTextRenderState, selectable_document_group_id};
 

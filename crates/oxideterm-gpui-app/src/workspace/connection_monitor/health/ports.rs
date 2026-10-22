@@ -112,7 +112,7 @@ impl HostToolsEntity {
         let anchor_frame = ime.clone();
         text_input_anchor_probe(
             ime.anchor_id(),
-            text_input(
+            ime.text_input(
                 tokens,
                 TextInputView {
                     value: &self.ui.host_port_search_query,

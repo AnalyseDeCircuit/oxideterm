@@ -47,6 +47,7 @@ pub struct TextInputViewport {
 struct TextInputViewportState {
     scroll_x: Pixels,
     layout: Option<TextLayout>,
+    align: TextInputContentAlign,
 }
 
 impl TextInputViewport {
@@ -55,11 +56,14 @@ impl TextInputViewport {
         let state = self.state.borrow();
         let layout = state.layout.as_ref()?;
         let line_origin = layout.position_for_index(0)?;
+        let line = layout.line_layout_for_index(0)?;
         // Single-line controls hit-test by x even when the click lands in vertical padding.
-        let position = point(position.x, line_origin.y + layout.line_height() * 0.5);
-        Some(match layout.index_for_position(position) {
-            Ok(index) | Err(index) => index,
-        })
+        let position = point(position.x - line_origin.x, layout.line_height() * 0.5);
+        Some(
+            match line.closest_index_for_position(position, layout.line_height()) {
+                Ok(index) | Err(index) => index,
+            },
+        )
     }
 
     /// Returns the screen position of one UTF-8 byte boundary in the visible layout.
@@ -69,6 +73,23 @@ impl TextInputViewport {
             .layout
             .as_ref()?
             .position_for_index(index)
+    }
+
+    /// Gives the platform IME the same caret rectangle used by the input painter.
+    pub fn caret_bounds_for_byte_index(
+        &self,
+        index: usize,
+        width: Pixels,
+        height: Pixels,
+    ) -> Option<Bounds<Pixels>> {
+        let state = self.state.borrow();
+        let layout = state.layout.as_ref()?;
+        Some(text_input_caret_bounds(
+            layout.position_for_index(index)?,
+            layout.line_height(),
+            width,
+            height,
+        ))
     }
 
     fn update_layout(&self, layout: TextLayout, scroll_x: Pixels) {
@@ -88,8 +109,9 @@ impl TextInputViewport {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TextInputContentAlign {
+    #[default]
     Start,
     Center,
 }
@@ -235,6 +257,23 @@ pub fn text_input_with_content_align(
     text_input_with_content_align_and_viewport(tokens, view, align, None, None, None)
 }
 
+pub fn text_input_with_viewport_and_content_align(
+    tokens: &ThemeTokens,
+    view: TextInputView<'_>,
+    align: TextInputContentAlign,
+    viewport: &TextInputViewport,
+    active_offset: Option<usize>,
+) -> Div {
+    text_input_with_content_align_and_viewport(
+        tokens,
+        view,
+        align,
+        Some(viewport),
+        active_offset,
+        None,
+    )
+}
+
 fn text_input_with_content_align_and_viewport(
     tokens: &ThemeTokens,
     view: TextInputView<'_>,
@@ -243,6 +282,9 @@ fn text_input_with_content_align_and_viewport(
     active_offset: Option<usize>,
     ghost_text: Option<&str>,
 ) -> Div {
+    if let Some(viewport) = viewport {
+        viewport.state.borrow_mut().align = align;
+    }
     if !view.focused
         && let Some(viewport) = viewport
     {
@@ -268,8 +310,8 @@ fn text_input_with_content_align_and_viewport(
     let visually_empty = empty && marked.is_empty();
     let raw_input_range = if view.focused {
         view.selected_range.or_else(|| {
-            view.selected_all
-                .then_some(0..view.value.encode_utf16().count())
+            let end = view.value.encode_utf16().count();
+            Some(if view.selected_all { 0..end } else { end..end })
         })
     } else {
         None
@@ -296,8 +338,10 @@ fn text_input_with_content_align_and_viewport(
     let caret_offset = input_range
         .as_ref()
         .filter(|range| range.start == range.end)
-        .map(|range| range.start);
+        .map(|range| range.start)
+        .or_else(|| (visually_empty && view.focused && viewport.is_some()).then_some(0));
     let active_offset = active_offset
+        .filter(|_| view.focused)
         .map(|offset| text_input_visual_range(view.value, view.secret, offset..offset).start);
     let show_selection = selection_range.is_some();
     let show_positioned_caret = caret_offset.is_some() && !show_selection;
@@ -348,14 +392,17 @@ fn text_input_with_content_align_and_viewport(
                 .flex()
                 .flex_row()
                 .items_center()
-                .when(viewport.is_some(), |row| row.w_full().min_w_0())
+                .when(viewport.is_some(), |row| {
+                    row.w_full().min_w_0().overflow_hidden()
+                })
                 .when(align == TextInputContentAlign::Center, |row| {
                     row.w_full().justify_center()
                 });
 
-            row.when(view.focused && visually_empty, |row| {
-                row.child(text_caret(tokens, view.caret_visible))
-            })
+            row.when(
+                view.focused && visually_empty && viewport.is_none(),
+                |row| row.child(text_caret(tokens, view.caret_visible)),
+            )
             .child({
                 if let Some(marked_range) = marked_range {
                     text_input_value_segments_with_marked_text(
@@ -449,7 +496,7 @@ fn text_input_value_segments_with_viewport(
     let len = display.encode_utf16().count();
     let selection_range = selection_range.and_then(|range| text_input_clamped_range(len, range));
     let caret_offset = caret_offset.map(|offset| offset.min(len));
-    if selection_range.is_none() && caret_offset.is_none() {
+    if viewport.is_none() && selection_range.is_none() && caret_offset.is_none() {
         if let Some(viewport) = viewport.as_ref() {
             viewport.reset();
         }
@@ -729,15 +776,22 @@ impl TextInputOverlayValue {
         let Some(viewport) = self.viewport.as_ref() else {
             return px(0.0);
         };
+        let layout = self.text.layout();
+        let Some(end) = layout.position_for_index(self.display.len()) else {
+            return px(0.0);
+        };
+        let start = layout.position_for_index(0).unwrap_or(bounds.origin);
+        let text_width = end.x - start.x;
+        if viewport.state.borrow().align == TextInputContentAlign::Center
+            && text_width < bounds.size.width
+        {
+            return -(bounds.size.width - text_width) * 0.5;
+        }
         let Some(focus_offset) = self.focus_offset else {
             return px(0.0);
         };
-        let layout = self.text.layout();
         let Some(focus) = layout.position_for_index(self.byte_index_for_offset(focus_offset))
         else {
-            return px(0.0);
-        };
-        let Some(end) = layout.position_for_index(self.display.len()) else {
             return px(0.0);
         };
         update_text_input_scroll(
@@ -792,7 +846,7 @@ impl Element for TextInputOverlayValue {
         self.text
             .prepaint(id, inspector_id, bounds, request_layout, window, cx);
         let horizontal_offset = self.update_horizontal_offset(bounds);
-        if horizontal_offset > px(0.0) {
+        if horizontal_offset != px(0.0) {
             // Re-anchor the shaped line so the active caret remains inside the clipped input.
             self.text.prepaint(
                 id,
@@ -850,9 +904,13 @@ impl Element for TextInputOverlayValue {
         let caret_bounds = if self.caret_visible {
             self.caret_offset
                 .and_then(|offset| layout.position_for_index(self.byte_index_for_offset(offset)))
-                .map(|position| Bounds {
-                    origin: point(position.x, overlay_y),
-                    size: size(px(self.caret_width), overlay_height),
+                .map(|position| {
+                    text_input_caret_bounds(
+                        position,
+                        line_height,
+                        px(self.caret_width),
+                        px(self.caret_height),
+                    )
                 })
         } else {
             None
@@ -878,6 +936,19 @@ fn text_input_clamped_range(len: usize, range: Range<usize>) -> Option<Range<usi
     let start = range.start.min(len);
     let end = range.end.min(len);
     (start < end).then_some(start..end)
+}
+
+fn text_input_caret_bounds(
+    position: Point<Pixels>,
+    line_height: Pixels,
+    width: Pixels,
+    height: Pixels,
+) -> Bounds<Pixels> {
+    let height = height.min(line_height);
+    Bounds {
+        origin: point(position.x, position.y + (line_height - height) / 2.0),
+        size: size(width, height),
+    }
 }
 
 fn update_text_input_scroll(
@@ -960,9 +1031,9 @@ mod tests {
     use oxideterm_theme::{ThemeTokens, default_tokens};
 
     use super::{
-        TextInputView, TextInputViewport, text_input_marked_display_parts,
+        TextInputContentAlign, TextInputView, TextInputViewport, text_input_marked_display_parts,
         text_input_projected_marked_parts, text_input_secret_mask, text_input_visual_range,
-        text_input_with_viewport, text_input_with_viewport_and_ghost_text,
+        text_input_with_viewport_and_content_align, text_input_with_viewport_and_ghost_text,
         update_text_input_scroll,
     };
 
@@ -972,6 +1043,11 @@ mod tests {
         value: String,
         marked_text: Option<String>,
         ghost_text: Option<String>,
+        selection: Option<std::ops::Range<usize>>,
+        active_offset: Option<usize>,
+        align: TextInputContentAlign,
+        secret: bool,
+        focused: bool,
     }
 
     impl Render for LongTextInput {
@@ -980,11 +1056,11 @@ mod tests {
             let view = TextInputView {
                 value: &self.value,
                 placeholder: String::new(),
-                focused: true,
+                focused: self.focused,
                 caret_visible: true,
-                secret: false,
+                secret: self.secret,
                 selected_all: false,
-                selected_range: Some(end..end),
+                selected_range: self.selection.clone().or(Some(end..end)),
                 marked_text: self.marked_text.as_deref(),
             };
             match self.ghost_text.as_deref() {
@@ -995,7 +1071,13 @@ mod tests {
                     Some(end),
                     Some(ghost_text),
                 ),
-                None => text_input_with_viewport(&self.tokens, view, &self.viewport, Some(end)),
+                None => text_input_with_viewport_and_content_align(
+                    &self.tokens,
+                    view,
+                    self.align,
+                    &self.viewport,
+                    self.active_offset.or(Some(end)),
+                ),
             }
             .w(px(120.0))
             .debug_selector(|| "long-input".to_string())
@@ -1063,7 +1145,7 @@ mod tests {
 
     #[gpui::test]
     fn long_input_viewport_keeps_end_caret_visible_and_hit_testable(cx: &mut TestAppContext) {
-        let value = "echo this command is wider than the input viewport".to_string();
+        let value = "echo 中文🔒 this command is wider than the input viewport".to_string();
         let viewport = TextInputViewport::default();
         let viewport_for_view = viewport.clone();
         let value_len = value.len();
@@ -1073,6 +1155,11 @@ mod tests {
             value,
             marked_text: None,
             ghost_text: None,
+            selection: None,
+            active_offset: None,
+            align: TextInputContentAlign::Start,
+            secret: false,
+            focused: true,
         });
         cx.simulate_resize(size(px(320.0), px(200.0)));
         cx.update(|window, cx| {
@@ -1085,6 +1172,14 @@ mod tests {
             .expect("end caret position");
         assert!(caret.x >= input_bounds.left());
         assert!(caret.x <= input_bounds.right());
+        assert_eq!(caret.y, viewport.position_for_byte_index(0).unwrap().y);
+        let ime_bounds = viewport
+            .caret_bounds_for_byte_index(value_len, px(1.0), px(16.0))
+            .unwrap();
+        assert_eq!(ime_bounds.left(), caret.x);
+        assert!(
+            ime_bounds.top() >= input_bounds.top() && ime_bounds.bottom() <= input_bounds.bottom()
+        );
         assert_eq!(viewport.byte_index_for_position(caret), Some(value_len));
         assert_eq!(
             viewport.byte_index_for_position(point(caret.x, input_bounds.top())),
@@ -1097,12 +1192,73 @@ mod tests {
 
         cx.update(|window, cx| {
             view.update(cx, |input, cx| {
+                input.focused = false;
+                input.active_offset = Some(input.value.encode_utf16().count());
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        let unfocused_start = viewport.position_for_byte_index(0).unwrap();
+        assert!(
+            unfocused_start.x >= input_bounds.left() && unfocused_start.x <= input_bounds.right()
+        );
+        assert_eq!(viewport.byte_index_for_position(unfocused_start), Some(0));
+
+        cx.update(|window, cx| {
+            view.update(cx, |input, cx| {
+                input.focused = true;
+                input.selection = Some(0..input.value.encode_utf16().count());
+                input.active_offset = Some(0);
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        let start = viewport.position_for_byte_index(0).unwrap();
+        assert!(start.x >= input_bounds.left() && start.x <= input_bounds.right());
+        assert_eq!(viewport.byte_index_for_position(start), Some(0));
+
+        cx.update(|window, cx| {
+            view.update(cx, |input, cx| {
+                input.value = "42".to_string();
+                input.selection = None;
+                input.active_offset = None;
+                input.align = TextInputContentAlign::Center;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        let start = viewport.position_for_byte_index(0).unwrap();
+        let end = viewport.position_for_byte_index(2).unwrap();
+        assert!(
+            ((start.x + end.x) / 2.0 - (input_bounds.left() + input_bounds.right()) / 2.0).abs()
+                < px(1.0)
+        );
+        assert_eq!(viewport.byte_index_for_position(end), Some(2));
+
+        cx.update(|window, cx| {
+            view.update(cx, |input, cx| {
+                input.value = "秘密🔒".repeat(20);
+                input.secret = true;
+                input.align = TextInputContentAlign::Start;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        let masked_end = "•".len() * 60;
+        let caret = viewport.position_for_byte_index(masked_end).unwrap();
+        assert!(caret.x >= input_bounds.left() && caret.x <= input_bounds.right());
+        assert_eq!(viewport.byte_index_for_position(caret), Some(masked_end));
+
+        cx.update(|window, cx| {
+            view.update(cx, |input, cx| {
                 input.value.clear();
                 cx.notify();
             });
             window.draw(cx).clear(cx);
         });
-        assert!(viewport.position_for_byte_index(0).is_none());
+        let empty_caret = viewport.position_for_byte_index(0).unwrap();
+        assert!(empty_caret.x >= input_bounds.left() && empty_caret.x <= input_bounds.right());
+        assert_eq!(viewport.byte_index_for_position(empty_caret), Some(0));
     }
 
     #[gpui::test]
@@ -1118,6 +1274,11 @@ mod tests {
             value,
             marked_text: Some(marked_text),
             ghost_text: None,
+            selection: None,
+            active_offset: None,
+            align: TextInputContentAlign::Start,
+            secret: false,
+            focused: true,
         });
         cx.simulate_resize(size(px(320.0), px(200.0)));
         cx.update(|window, cx| {
@@ -1150,6 +1311,11 @@ mod tests {
             value,
             marked_text: None,
             ghost_text: Some(ghost_text),
+            selection: None,
+            active_offset: None,
+            align: TextInputContentAlign::Start,
+            secret: false,
+            focused: true,
         });
         cx.simulate_resize(size(px(320.0), px(200.0)));
         cx.update(|window, cx| {

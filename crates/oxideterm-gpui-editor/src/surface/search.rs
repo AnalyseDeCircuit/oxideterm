@@ -11,13 +11,10 @@ use super::TextEditorView;
 impl TextEditorView {
     pub fn set_find_query(&mut self, query: impl Into<String>, cx: &mut Context<Self>) {
         self.find_query = query.into();
+        self.sync_search_input(cx);
         self.refresh_find_matches();
         self.active_find_index = (!self.find_matches.is_empty()).then_some(0);
-        if let Some(hit) = self.active_find_match() {
-            self.cursor
-                .set_selection(Selection::new(hit.range.start, hit.range.end));
-            self.secondary_selections.clear();
-        }
+        self.select_active_find_match();
         cx.notify();
     }
 
@@ -42,6 +39,7 @@ impl TextEditorView {
         self.settings.find_case_sensitive = case_sensitive;
         self.refresh_find_matches();
         self.active_find_index = (!self.find_matches.is_empty()).then_some(0);
+        self.select_active_find_match();
         cx.notify();
     }
 
@@ -54,11 +52,7 @@ impl TextEditorView {
             .map(|index| (index + 1) % self.find_matches.len())
             .unwrap_or(0);
         self.active_find_index = Some(next);
-        if let Some(hit) = self.active_find_match() {
-            self.cursor
-                .set_selection(Selection::new(hit.range.start, hit.range.end));
-            self.secondary_selections.clear();
-        }
+        self.select_active_find_match();
         cx.notify();
     }
 
@@ -77,11 +71,7 @@ impl TextEditorView {
             })
             .unwrap_or(0);
         self.active_find_index = Some(previous);
-        if let Some(hit) = self.active_find_match() {
-            self.cursor
-                .set_selection(Selection::new(hit.range.start, hit.range.end));
-            self.secondary_selections.clear();
-        }
+        self.select_active_find_match();
         cx.notify();
     }
 
@@ -90,6 +80,9 @@ impl TextEditorView {
         replacement: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
+        if self.read_only {
+            return;
+        }
         let Some(hit) = self.active_find_match() else {
             return;
         };
@@ -102,7 +95,7 @@ impl TextEditorView {
         replacement: impl Into<String>,
         cx: &mut Context<Self>,
     ) {
-        if self.find_query.is_empty() {
+        if self.read_only || self.find_query.is_empty() {
             return;
         }
         let replacement = replacement.into();
@@ -192,6 +185,27 @@ impl TextEditorView {
                 .push(Selection::new(hit.range.start, hit.range.end));
         }
         cx.notify();
+    }
+
+    fn select_active_find_match(&mut self) {
+        let Some(hit) = self.active_find_match() else {
+            return;
+        };
+        self.cursor
+            .set_selection(Selection::new(hit.range.start, hit.range.end));
+        self.secondary_selections.clear();
+        if let Ok(position) = self.buffer.offset_to_line_col(hit.range.start) {
+            self.unfold_line_if_hidden(position.line);
+            let text = self.buffer.line_text(position.line).unwrap_or_default();
+            let column = super::coords::visual_column_for_byte_column(&text, position.column);
+            if let Some((index, _, _)) = super::wrap::display_row_for_visual_column(
+                &self.display_rows(),
+                position.line,
+                column,
+            ) {
+                self.reveal_display_row(index);
+            }
+        }
     }
 
     fn find_options(&self) -> FindOptions {

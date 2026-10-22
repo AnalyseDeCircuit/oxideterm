@@ -101,7 +101,7 @@ impl Render for TextEditorView {
         // Content edits, wrapping, and resizing can all shorten the widest row.
         self.viewport
             .clamp_horizontal(self.max_horizontal_scroll_px());
-        self.reveal_changed_caret_horizontally(window);
+        self.reveal_changed_caret(window);
         let display_rows = self.display_rows();
         let visible = self
             .viewport
@@ -222,11 +222,10 @@ impl Render for TextEditorView {
                 this.handle_key(event, window, cx);
             }))
             .child(body);
-        if self.presentation == EditorPresentation::Document
+        if (self.presentation == EditorPresentation::Document || self.document_row_count() > 1)
             && let Some(scrollbar) = self.render_vertical_scrollbar(view, cx)
         {
-            // Inline editors are single-row controls. Their overflow belongs to
-            // the horizontal axis, so a vertical thumb is always misleading.
+            // Multiline inputs share the document viewport and scrollbar behavior.
             root = root.child(scrollbar);
         }
         if let Some(scrollbar) = self.render_horizontal_scrollbar(cx.entity(), cx) {
@@ -234,6 +233,12 @@ impl Render for TextEditorView {
         }
         if let Some(menu) = self.context_menu {
             root = root.child(self.render_context_menu(menu, window, cx));
+        }
+        // Search inputs are siblings of the document key handler, so their edits
+        // cannot bubble into the buffer they are searching.
+        let mut root = div().relative().size_full().child(root);
+        if self.search_bar.is_some() {
+            root = root.child(self.render_search_bar(window, cx));
         }
         let Some(language) = self
             .language
@@ -261,7 +266,7 @@ impl Render for TextEditorView {
 }
 
 impl TextEditorView {
-    fn reveal_changed_caret_horizontally(&mut self, window: &mut Window) {
+    fn reveal_changed_caret(&mut self, window: &mut Window) {
         let Some(bounds) = self.content_bounds else {
             return;
         };
@@ -270,6 +275,19 @@ impl TextEditorView {
             return;
         }
         self.last_revealed_caret = Some(caret_state);
+        if self.presentation == EditorPresentation::Inline
+            && let Ok(position) = self.buffer.offset_to_line_col(caret_state.1)
+        {
+            let text = self.buffer.line_text(position.line).unwrap_or_default();
+            let column = visual_column_for_byte_column(&text, position.column);
+            if let Some((index, _, _)) = super::wrap::display_row_for_visual_column(
+                &self.display_rows(),
+                position.line,
+                column,
+            ) {
+                self.reveal_display_row(index);
+            }
+        }
         // Only edits and caret movement reveal text. Repaints after manual scrolling
         // must not pull the viewport back to an unchanged selection.
         let caret = self.bounds_for_byte_offset(caret_state.1, bounds, window);

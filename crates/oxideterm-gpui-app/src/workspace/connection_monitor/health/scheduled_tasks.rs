@@ -118,38 +118,39 @@ impl HostToolsEntity {
     ) -> AnyElement {
         let input = ime.input();
         let anchor_frame = ime.clone();
-        let input_control = text_input(
-            tokens,
-            TextInputView {
-                value: &self.ui.host_schedule_search_query,
-                placeholder: i18n.t("sidebar.host_schedules.search_placeholder"),
-                focused: self.ui.input_is_focused(input),
-                caret_visible: ime.caret_visible(),
-                secret: false,
-                selected_all: false,
-                selected_range: ime.selected_range(),
-                marked_text: ime.marked_text(),
-            },
-        )
-        .h(px(34.0))
-        .cursor(CursorStyle::IBeam)
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
-                host_tools.ui.focus_input(input);
-                // The root coordinates only the shared window IME selection.
-                window.dispatch_action(
-                    Box::new(HostToolsWindowRequest::new(
-                        HostToolsWindowIntent::BeginPlainTextImeSelection {
-                            input,
-                            event: event.clone(),
-                        },
-                    )),
-                    cx,
-                );
-                cx.stop_propagation();
-            }),
-        );
+        let input_control = ime
+            .text_input(
+                tokens,
+                TextInputView {
+                    value: &self.ui.host_schedule_search_query,
+                    placeholder: i18n.t("sidebar.host_schedules.search_placeholder"),
+                    focused: self.ui.input_is_focused(input),
+                    caret_visible: ime.caret_visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: ime.selected_range(),
+                    marked_text: ime.marked_text(),
+                },
+            )
+            .h(px(34.0))
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |host_tools, event: &MouseDownEvent, window, cx| {
+                    host_tools.ui.focus_input(input);
+                    // The root coordinates only the shared window IME selection.
+                    window.dispatch_action(
+                        Box::new(HostToolsWindowRequest::new(
+                            HostToolsWindowIntent::BeginPlainTextImeSelection {
+                                input,
+                                event: event.clone(),
+                            },
+                        )),
+                        cx,
+                    );
+                    cx.stop_propagation();
+                }),
+            );
         text_input_anchor_probe(
             ime.anchor_id(),
             input_control,

@@ -22,7 +22,7 @@ use oxideterm_gpui_ui::context_menu::{
     ContextMenuActionableStyle, context_menu_event_boundary, context_menu_pointer_event_boundary,
 };
 use oxideterm_gpui_ui::text_input::{
-    TextInputView, text_input, text_input_anchor_probe, text_input_with_viewport_and_ghost_text,
+    TextInputView, text_input_anchor_probe, text_input_with_viewport_and_ghost_text,
 };
 use oxideterm_gpui_ui::{
     ActionChipOptions, ActionChipTextTone, CommandPanelOptions, ContextChipOptions,

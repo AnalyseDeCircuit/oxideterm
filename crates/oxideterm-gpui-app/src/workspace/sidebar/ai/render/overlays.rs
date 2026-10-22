@@ -420,8 +420,8 @@ impl WorkspaceApp {
             )
         );
         let title_control = if is_renaming {
-            let input = text_input(
-                &self.tokens,
+            let input = self.workspace_text_input(
+                rename_target,
                 TextInputView {
                     value: &rename_draft,
                     placeholder: String::new(),

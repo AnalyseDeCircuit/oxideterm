@@ -11,7 +11,7 @@ impl WorkspaceApp {
         let input = focused_input
             .map(|input| {
                 let target = WorkspaceImeTarget::Settings(input);
-                let mask = |value: &str| "•".repeat(value.encode_utf16().count());
+                let mask = super::super::ime::secret_ime_proxy;
                 CloudSyncInputRenderProjection {
                     focused_input: Some(input),
                     active_value: Some(if input.is_secret() {
@@ -21,6 +21,7 @@ impl WorkspaceApp {
                         self.settings_input_draft.clone()
                     }),
                     selected_range: self.ime_selected_range_for_target(target, cx),
+                    active_offset: self.ime_active_offset_for_target(target, cx),
                     marked_text: self.marked_text_for_target(target, cx).map(|text| {
                         if input.is_secret() {
                             mask(text)
@@ -65,6 +66,7 @@ impl WorkspaceApp {
         // I18n clones share the catalog Arc; no locale table or secret draft is copied.
         CloudSyncPageRenderer {
             cloud_sync: self.cloud_sync.clone(),
+            input_anchors: self.text_input_anchors.clone(),
             render: std::rc::Rc::new(CloudSyncListRenderProjection {
                 tokens: self.tokens,
                 i18n: self.i18n.clone(),

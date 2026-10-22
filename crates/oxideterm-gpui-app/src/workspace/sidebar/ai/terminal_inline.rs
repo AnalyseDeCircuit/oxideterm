@@ -240,25 +240,11 @@ impl WorkspaceApp {
         let focused = prompt_focused;
         let marked_text = self.marked_text_for_target(target, cx);
         let selected_range = self.ime_selected_range_for_target(target, cx);
-        let showing_placeholder = prompt.is_empty() && marked_text.is_none();
         let placeholder = if has_selection {
             self.i18n.t("terminal.ai.selection_placeholder")
         } else {
             self.i18n.t("terminal.ai.inline_placeholder")
         };
-        let prompt_text = if showing_placeholder {
-            placeholder
-        } else {
-            prompt.clone()
-        };
-        let prompt_range = selected_range
-            .clone()
-            .filter(|_| focused && !prompt.is_empty() && marked_text.is_none());
-        let selection_range = prompt_range.clone().filter(|range| range.start < range.end);
-        let caret_offset = prompt_range
-            .as_ref()
-            .filter(|range| range.start == range.end)
-            .map(|range| range.start);
         let workspace = cx.entity();
         let placement = self.terminal_ai_inline_panel_placement(cx);
 
@@ -314,21 +300,20 @@ impl WorkspaceApp {
                             .child(
                                 text_input_anchor_probe(
                                     target.anchor_id(),
-                                    div()
-                                        .h(px(22.0))
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .items_center()
-                                        .overflow_hidden()
+                                    self.workspace_text_input(target, oxideterm_gpui_ui::text_input::TextInputView {
+                                        value: &prompt,
+                                        placeholder,
+                                        focused,
+                                        caret_visible: self.input_caret.visible(),
+                                        secret: false,
+                                        selected_all: false,
+                                        selected_range,
+                                        marked_text,
+                                    })
+                                        .h(px(22.0)).flex_1().min_w_0().border_0()
+                                        .bg(rgba(0x00000000)).px(px(0.0))
                                         .font_family(settings_mono_font_family(self.settings_store.settings()))
                                         .text_size(px(13.0))
-                                        .text_color(if showing_placeholder {
-                                            rgb(theme.text_muted)
-                                        } else {
-                                            rgb(theme.text)
-                                        })
-                                        .cursor(CursorStyle::IBeam)
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
@@ -349,43 +334,7 @@ window.focus(&this.focus_handle, cx);
                                                 this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                                             }),
                                         )
-                                        .when(focused && showing_placeholder, |input| {
-                                            input.child(text_caret(&self.tokens, self.input_caret.visible()))
-                                        })
-                                        .child(if showing_placeholder {
-                                            div().truncate().child(prompt_text).into_any_element()
-                                        } else {
-                                            text_input_value_segments_with_color(
-                                                &self.tokens,
-                                                &prompt_text,
-                                                false,
-                                                selection_range,
-                                                caret_offset,
-                                                self.input_caret.visible(),
-                                                Some(theme.text),
-                                            )
-                                            .into_any_element()
-                                        })
-                                        .when_some(marked_text, |input, marked| {
-                                            input.child(
-                                                div()
-                                                    .underline()
-                                                    .text_color(rgb(theme.text))
-                                                    .child(marked.to_string()),
-                                            )
-                                        })
-                                        .when(
-                                            focused
-                                                && !showing_placeholder
-                                                && selected_range.is_none()
-                                                && marked_text.is_none(),
-                                            |input| {
-                                                input.child(text_caret(
-                                                    &self.tokens,
-                                                    self.input_caret.visible(),
-                                                ))
-                                            },
-                                        ),
+                                        ,
                                     Self::deferred_ai_text_input_anchor_update(workspace),
                                 ),
                             )

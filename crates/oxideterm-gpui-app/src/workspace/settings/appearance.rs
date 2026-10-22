@@ -1355,8 +1355,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         self.text_input_with_workspace_ime(
             target,
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: display_value,
                     placeholder,
@@ -2221,16 +2221,19 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let control = settings_theme_editor_text_input(
             &self.tokens,
-            TextInputView {
-                value: display_value,
-                placeholder,
-                focused,
-                caret_visible: self.input_caret.visible(),
-                secret: false,
-                selected_all: false,
-                selected_range: self.ime_selected_range_for_target(target, cx),
-                marked_text: self.marked_text_for_target(target, cx),
-            },
+            self.workspace_text_input(
+                target,
+                TextInputView {
+                    value: display_value,
+                    placeholder,
+                    focused,
+                    caret_visible: self.input_caret.visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
+                },
+            ),
             kind,
             settings_mono_font_family(self.settings_store.settings()),
         )

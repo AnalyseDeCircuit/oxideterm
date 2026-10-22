@@ -261,8 +261,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(SettingsInput::KeybindingSearch);
         self.text_input_with_workspace_ime(
             target,
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value,
                     placeholder: self.i18n.t("settings_view.keybindings.search_placeholder"),

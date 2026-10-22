@@ -2,6 +2,28 @@ use super::external::open_path_in_external_app;
 use super::*;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_sftp_editor_search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(editor) = self.sftp_view().read(cx).preview_editor.clone() else {
+            return false;
+        };
+        if event.keystroke.key == "escape" && editor.read(cx).search_is_open() {
+            return editor.update(cx, |editor, cx| editor.close_search(window, cx));
+        }
+        if crate::keybindings::keystroke_matches_action(
+            &event.keystroke,
+            "editor.find",
+            &self.settings_store.settings().keybindings.overrides,
+        ) {
+            return editor.update(cx, |editor, cx| editor.open_search(cx));
+        }
+        false
+    }
+
     pub(in crate::workspace) fn open_or_preview_sftp_file(
         &mut self,
         pane: SftpPane,
@@ -139,6 +161,7 @@ impl WorkspaceApp {
             paste: self.i18n.t("menu.paste"),
             select_all: self.i18n.t("fileManager.selectAll"),
         };
+        let search_labels = self.editor_search_labels();
         // The SFTP view owns its preview editor, so this backlink must be weak.
         let sftp_entity = self.sftp_view().downgrade();
         let (editor_text, line_ending) = normalize_text_line_endings(&data);
@@ -147,6 +170,7 @@ impl WorkspaceApp {
         let configure_editor =
             move |editor: &mut TextEditorView, cx: &mut Context<TextEditorView>| {
                 editor.set_read_only(false);
+                editor.set_search_labels(search_labels);
                 editor.set_context_menu_labels(context_menu_labels);
                 editor.apply_ide_runtime_settings(
                     &tokens,
@@ -670,6 +694,38 @@ impl SftpWorkspaceEntity {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn only_visible_text_previews_receive_editor_keys(cx: &mut TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        let editor =
+            cx.new(|cx| TextEditorView::new("# title", &oxideterm_theme::default_tokens(), cx));
+        entity.update(cx, |sftp, _| {
+            sftp.preview_editor = Some(editor);
+            sftp.preview_content = Some(Arc::new(PreviewContent::Text {
+                data: "# title".into(),
+                mime_type: Some("text/markdown".into()),
+                language: Some("markdown".into()),
+                encoding: "utf-8".into(),
+                confidence: 1.0,
+                has_bom: false,
+            }));
+            sftp.set_dialog(SftpDialog::Preview {
+                name: "readme.md".into(),
+            });
+            assert!(!sftp.preview_text_editor_visible());
+            sftp.preview_markdown_source_mode = true;
+            assert!(sftp.preview_text_editor_visible());
+            sftp.set_dialog(SftpDialog::Editor {
+                name: "readme.md".into(),
+            });
+            assert!(sftp.preview_text_editor_visible());
+            sftp.set_dialog(SftpDialog::EditorCloseConfirm {
+                name: "readme.md".into(),
+            });
+            assert!(!sftp.preview_text_editor_visible());
+        });
+    }
 
     #[gpui::test]
     fn preview_save_shares_the_captured_version_across_later_edits(cx: &mut TestAppContext) {

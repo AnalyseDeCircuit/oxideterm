@@ -20,7 +20,7 @@ use oxideterm_gpui_ui::{
     },
     scroll::ScrollableElement,
     surface::{color_for_background, color_with_background_scaled_alpha},
-    text_input::{TextInputView, text_input},
+    text_input::TextInputView,
 };
 use oxideterm_local_files::{
     BOOKMARKS_FILENAME as FILE_MANAGER_BOOKMARKS_FILENAME, LocalArchiveEntry, LocalArchiveInfo,

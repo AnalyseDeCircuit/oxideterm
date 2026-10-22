@@ -504,6 +504,22 @@ impl IdeOpenIntent {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn editor_search_labels(
+        &self,
+    ) -> oxideterm_gpui_editor::EditorSearchLabels {
+        oxideterm_gpui_editor::EditorSearchLabels {
+            find_placeholder: self.i18n.t("ide.find_placeholder"),
+            replace_placeholder: self.i18n.t("ide.replace_placeholder"),
+            find_next: self.i18n.t("ide.find_next"),
+            find_previous: self.i18n.t("ide.find_previous"),
+            match_case: self.i18n.t("ide.match_case"),
+            toggle_replace: self.i18n.t("ide.toggle_replace"),
+            close_search: self.i18n.t("ide.close_search"),
+            replace_btn: self.i18n.t("ide.replace_btn"),
+            replace_all_btn: self.i18n.t("ide.replace_all_btn"),
+            insert_newline: self.i18n.t("ide.insert_newline"),
+        }
+    }
     pub(in crate::workspace) fn sync_ide_surface_mount(&mut self, tab_id: TabId, cx: &mut App) {
         let mut pages = Vec::new();
         if let Some(root) = self
@@ -930,17 +946,7 @@ impl WorkspaceApp {
             save: self.i18n.t("ide.save"),
             discard: self.i18n.t("ide.discard"),
             cancel: self.i18n.t("ide.cancel"),
-            find_placeholder: self.i18n.t("ide.find_placeholder"),
-            replace_placeholder: self.i18n.t("ide.replace_placeholder"),
-            find_next: self.i18n.t("ide.find_next"),
-            find_previous: self.i18n.t("ide.find_previous"),
-            match_case: self.i18n.t("ide.match_case"),
-            toggle_replace: self.i18n.t("ide.toggle_replace"),
-            close_search: self.i18n.t("ide.close_search"),
-            replace_btn: self.i18n.t("ide.replace_btn"),
-            replace_all_btn: self.i18n.t("ide.replace_all_btn"),
-            replace: self.i18n.t("ide.replace"),
-            replace_all: self.i18n.t("ide.replace_all"),
+            editor_search: self.editor_search_labels(),
             editor_copy: self.i18n.t("menu.copy"),
             editor_cut: self.i18n.t("fileManager.cut"),
             editor_paste: self.i18n.t("menu.paste"),

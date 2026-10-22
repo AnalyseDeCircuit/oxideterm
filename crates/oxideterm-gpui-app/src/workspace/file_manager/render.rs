@@ -1219,26 +1219,27 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let target = WorkspaceImeTarget::FileManager(input);
-        let control = text_input(
-            &self.tokens,
-            TextInputView {
-                value,
-                placeholder: self.i18n.t("fileManager.pathPlaceholder"),
-                focused,
-                caret_visible: self.input_caret.visible(),
-                secret: false,
-                selected_all: false,
-                selected_range: self.ime_selected_range_for_target(target, cx),
-                marked_text: self.marked_text_for_target(target, cx),
-            },
-        )
-        .flex_1()
-        .min_w(px(0.0))
-        .h_full()
-        .px(px(0.0))
-        .border_0()
-        .bg(rgba(0x00000000))
-        .text_size(px(FILE_MANAGER_TEXT_XS));
+        let control = self
+            .workspace_text_input(
+                target,
+                TextInputView {
+                    value,
+                    placeholder: self.i18n.t("fileManager.pathPlaceholder"),
+                    focused,
+                    caret_visible: self.input_caret.visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
+                },
+            )
+            .flex_1()
+            .min_w(px(0.0))
+            .h_full()
+            .px(px(0.0))
+            .border_0()
+            .bg(rgba(0x00000000))
+            .text_size(px(FILE_MANAGER_TEXT_XS));
 
         // The shared primitive keeps address completion geometry out of the render update path.
         self.text_input_with_workspace_ime(
@@ -1398,8 +1399,8 @@ impl WorkspaceApp {
             .child(
                 self.text_input_with_workspace_ime(
                     target,
-                    text_input(
-                        &self.tokens,
+                    self.workspace_text_input(
+                        target,
                         TextInputView {
                             value: &filter,
                             placeholder: self.i18n.t("fileManager.filterPlaceholder"),

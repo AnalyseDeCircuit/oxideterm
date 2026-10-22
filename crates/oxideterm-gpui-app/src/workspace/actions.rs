@@ -1,7 +1,6 @@
 use super::ime::WorkspaceImeTarget;
 use super::tabs::TabCloseConfirmKeyAction;
 use super::*;
-use oxideterm_gpui_ui::text_input::{text_caret, text_input_value_segments_with_color};
 use oxideterm_quick_commands::{
     PreparedQuickCommand, QuickCommand, QuickCommandContextValues, QuickCommandRisk,
     QuickCommandTargetContext, QuickCommandTargetProtocol,
@@ -2966,22 +2965,6 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Search(pane_id);
         let has_query = !search.query.is_empty();
         let marked_text = self.marked_text_for_target(target, cx);
-        let selected_range = focused
-            .then(|| self.ime_selected_range_for_target(target, cx))
-            .flatten();
-        let input_range = selected_range.filter(|_| has_query && marked_text.is_none());
-        let selection_range = input_range.clone().filter(|range| range.start < range.end);
-        let caret_offset = input_range
-            .as_ref()
-            .filter(|range| range.start == range.end)
-            .map(|range| range.start);
-        let shows_selection = selection_range.is_some();
-        let shows_positioned_caret = caret_offset.is_some() && !shows_selection;
-        let query = if has_query {
-            search.query.clone()
-        } else {
-            self.i18n.t("search.placeholder")
-        };
         let match_count = search.match_count;
         let active_match = search.active_match.filter(|index| *index < match_count);
         let navigation_disabled = !has_query || match_count == 0;
@@ -3028,59 +3011,26 @@ impl WorkspaceApp {
                     .child(
                         self.text_input_with_workspace_ime(
                             target,
-                            div()
-                                .h(px(28.0))
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .flex()
-                                .items_center()
-                                .overflow_hidden()
-                                .rounded(px(self.tokens.radii.sm))
-                                .px(px(2.0))
-                                .cursor_text()
-                                .text_color(if has_query {
-                                    rgb(theme.text)
-                                } else {
-                                    rgb(theme.text_muted)
-                                })
-                                .when(focused && !has_query && marked_text.is_none(), |input| {
-                                    input
-                                        .child(text_caret(&self.tokens, self.input_caret.visible()))
-                                })
-                                .child(if has_query {
-                                    text_input_value_segments_with_color(
-                                        &self.tokens,
-                                        &query,
-                                        false,
-                                        selection_range,
-                                        caret_offset,
-                                        self.input_caret.visible(),
-                                        Some(theme.text),
-                                    )
-                                    .into_any_element()
-                                } else {
-                                    div().child(query).into_any_element()
-                                })
-                                .when_some(marked_text, |input, marked| {
-                                    input.child(
-                                        div()
-                                            .underline()
-                                            .text_color(rgb(theme.text))
-                                            .child(marked.to_string()),
-                                    )
-                                })
-                                .when(
-                                    focused
-                                        && has_query
-                                        && !shows_selection
-                                        && !shows_positioned_caret,
-                                    |input| {
-                                        input.child(text_caret(
-                                            &self.tokens,
-                                            self.input_caret.visible(),
-                                        ))
-                                    },
-                                ),
+                            self.workspace_text_input(
+                                target,
+                                oxideterm_gpui_ui::text_input::TextInputView {
+                                    value: &search.query,
+                                    placeholder: self.i18n.t("search.placeholder"),
+                                    focused,
+                                    caret_visible: self.input_caret.visible(),
+                                    secret: false,
+                                    selected_all: false,
+                                    selected_range: self.ime_selected_range_for_target(target, cx),
+                                    marked_text,
+                                },
+                            )
+                            .h(px(28.0))
+                            .flex_1()
+                            .min_w_0()
+                            .border_0()
+                            .bg(rgba(0x00000000))
+                            .px(px(2.0))
+                            .text_size(px(13.0)),
                             move |this, cx| this.focus_search_pane(pane_id, cx),
                             cx,
                         ),

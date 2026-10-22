@@ -43,6 +43,7 @@
     "search_truncated": "结果已截断。请优化搜索条件以获得更精确的匹配。",
     "search_results_count": "在 {{files}} 个文件中找到 {{count}} 个结果",
     "find_placeholder": "查找",
+    "insert_newline": "插入换行",
     "replace_placeholder": "替换",
     "find_next": "下一个匹配项 (Enter)",
     "find_previous": "上一个匹配项 (Shift+Enter)",

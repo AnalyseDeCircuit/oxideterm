@@ -231,26 +231,25 @@ impl IdeSurface {
     }
 
     pub fn open_active_editor_search(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.active_editor().is_none() {
+        let Some(editor) = self.active_editor() else {
             return false;
-        }
-        self.open_editor_search(cx);
-        true
+        };
+        editor.update(cx, |editor, cx| editor.open_search(cx))
     }
 
     pub fn select_next_active_editor_search_match(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.active_editor().is_none() {
+        let Some(editor) = self.active_editor() else {
             return false;
-        }
-        self.select_next_editor_search_match(cx);
+        };
+        editor.update(cx, |editor, cx| editor.select_next_find_match(cx));
         true
     }
 
     pub fn select_previous_active_editor_search_match(&mut self, cx: &mut Context<Self>) -> bool {
-        if self.active_editor().is_none() {
+        let Some(editor) = self.active_editor() else {
             return false;
-        }
-        self.select_previous_editor_search_match(cx);
+        };
+        editor.update(cx, |editor, cx| editor.select_previous_find_match(cx));
         true
     }
 
@@ -819,136 +818,11 @@ impl IdeSurface {
                 && event.keystroke.key.eq_ignore_ascii_case("f")
         };
         if matches {
-            self.open_editor_search(cx);
+            self.open_active_editor_search(cx);
             cx.stop_propagation();
         }
     }
 
-    fn handle_editor_search_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
-        if !self.editor_search.open {
-            return;
-        }
-        let mut handled = true;
-        match event.keystroke.key.as_str() {
-            "escape" => self.close_editor_search(cx),
-            "enter" => {
-                if event.keystroke.modifiers.shift {
-                    self.select_previous_editor_search_match(cx);
-                } else {
-                    self.select_next_editor_search_match(cx);
-                }
-            }
-            "tab" => {
-                self.editor_search.replace_focused =
-                    self.editor_search.replace_open && !self.editor_search.replace_focused;
-                cx.notify();
-            }
-            "backspace" => {
-                if self.editor_search.replace_focused {
-                    if self.editor_search.replacement.pop().is_some() {
-                        cx.notify();
-                    }
-                } else if self.editor_search.query.pop().is_some() {
-                    self.apply_editor_search_query(cx);
-                }
-            }
-            _ => {
-                handled = false;
-                if let Some(text) = event.keystroke.key_char.as_deref()
-                    && !text.is_empty()
-                    && !text.chars().any(char::is_control)
-                    && !event.keystroke.modifiers.platform
-                    && !event.keystroke.modifiers.control
-                {
-                    handled = true;
-                    if self.editor_search.replace_focused {
-                        self.editor_search.replacement.push_str(text);
-                        cx.notify();
-                    } else {
-                        self.editor_search.query.push_str(text);
-                        self.apply_editor_search_query(cx);
-                    }
-                }
-            }
-        }
-        if handled {
-            cx.stop_propagation();
-        }
-    }
-
-    fn open_editor_search(&mut self, cx: &mut Context<Self>) {
-        self.editor_search.open = true;
-        self.editor_search.replace_focused = false;
-        self.apply_editor_search_query(cx);
-        cx.notify();
-    }
-
-    fn close_editor_search(&mut self, cx: &mut Context<Self>) {
-        self.editor_search.open = false;
-        self.editor_search.query.clear();
-        self.editor_search.replacement.clear();
-        self.editor_search.replace_open = false;
-        self.editor_search.replace_focused = false;
-        if let Some(editor) = self.active_editor() {
-            editor.update(cx, |editor, cx| editor.set_find_query("", cx));
-        }
-        cx.notify();
-    }
-
-    fn apply_editor_search_query(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.active_editor() {
-            let query = self.editor_search.query.clone();
-            let case_sensitive = self.editor_search.case_sensitive;
-            editor.update(cx, |editor, cx| {
-                editor.set_find_case_sensitive(case_sensitive, cx);
-                editor.set_find_query(query, cx);
-            });
-        }
-        cx.notify();
-    }
-
-    fn toggle_editor_search_replace(&mut self, cx: &mut Context<Self>) {
-        self.editor_search.replace_open = !self.editor_search.replace_open;
-        if !self.editor_search.replace_open {
-            self.editor_search.replace_focused = false;
-        }
-        cx.notify();
-    }
-
-    fn toggle_editor_search_case_sensitive(&mut self, cx: &mut Context<Self>) {
-        self.editor_search.case_sensitive = !self.editor_search.case_sensitive;
-        self.apply_editor_search_query(cx);
-    }
-
-    fn select_next_editor_search_match(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.active_editor() {
-            editor.update(cx, |editor, cx| editor.select_next_find_match(cx));
-        }
-    }
-
-    fn select_previous_editor_search_match(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.active_editor() {
-            editor.update(cx, |editor, cx| editor.select_previous_find_match(cx));
-        }
-    }
-
-    fn replace_current_editor_search_match(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.active_editor() {
-            let replacement = self.editor_search.replacement.clone();
-            editor.update(cx, |editor, cx| {
-                editor.replace_current_find_match(replacement, cx)
-            });
-        }
-    }
-
-    fn replace_all_editor_search_matches(&mut self, cx: &mut Context<Self>) {
-        if let Some(editor) = self.active_editor() {
-            let replacement = self.editor_search.replacement.clone();
-            editor.update(cx, |editor, cx| {
-                editor.replace_all_find_matches(replacement, cx)
-            });
-        }
-    }
 
     fn open_search_match(&mut self, hit: IdeSearchMatch, cx: &mut Context<Self>) {
         let Some(node_id) = self.node_id.clone() else {
@@ -1288,6 +1162,7 @@ impl IdeSurface {
         let symbol_surface = surface;
         let editor = cx.new(|cx| {
             let mut editor = TextEditorView::new(text, &tokens, cx);
+            editor.set_search_labels(self.labels.editor_search.clone());
             editor.set_context_menu_labels(EditorContextMenuLabels {
                 copy: self.labels.editor_copy.clone(),
                 cut: self.labels.editor_cut.clone(),

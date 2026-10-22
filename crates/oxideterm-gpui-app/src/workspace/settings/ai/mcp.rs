@@ -763,8 +763,8 @@ impl WorkspaceApp {
         let input_control = {
             let ai_workspace = self.ai_entity.read(cx);
             let focused = ai_workspace.focused_settings_input() == Some(input);
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: ai_workspace.settings_input_value(input).unwrap_or_default(),
                     placeholder,

@@ -44,9 +44,6 @@ use oxideterm_gpui_ui::{
     },
     modal::{dismissible_dialog_backdrop, modal_backdrop, overlay_content_boundary},
     surface::{color_for_background, color_for_background_or_alpha},
-    text_input::{
-        text_caret, text_input_secret_mask, text_input_value_segments, text_input_visual_range,
-    },
 };
 use oxideterm_session_adapter::upstream_proxy_config_from_saved_policy;
 use oxideterm_settings::{

@@ -11,7 +11,6 @@ use gpui::{
     AnyElement, Div, IntoElement, ObjectFit, ParentElement, SharedString, Styled, div, img,
     prelude::*, px, relative, rgb, rgba,
 };
-use oxideterm_gpui_ui::text_input::{TextInputView, text_input};
 use oxideterm_i18n::I18n;
 use oxideterm_settings::PersistedSettings;
 use oxideterm_theme::{AppUiColors, TerminalTheme, ThemeTokens};
@@ -877,13 +876,13 @@ pub fn settings_theme_editor_duplicate_row(label: AnyElement, select: AnyElement
 
 pub fn settings_theme_editor_text_input(
     tokens: &ThemeTokens,
-    view: TextInputView,
+    control: Div,
     kind: ThemeEditorTextInputKind,
     mono_font_family: SharedString,
 ) -> Div {
     // This builds only the visual text-input primitive. Mouse/IME handlers and
     // anchor probes are attached by the app around the returned control.
-    let control = text_input(tokens, view)
+    let control = control
         .h(px(SETTINGS_THEME_EDITOR_INPUT_HEIGHT))
         .cursor(gpui::CursorStyle::IBeam);
     match kind {

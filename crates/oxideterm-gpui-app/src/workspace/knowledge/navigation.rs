@@ -726,8 +726,8 @@ impl WorkspaceApp {
             return None;
         }
         let target = ime::WorkspaceImeTarget::KnowledgeRename;
-        let input = oxideterm_gpui_ui::text_input::text_input(
-            &self.tokens,
+        let input = self.workspace_text_input(
+            target,
             oxideterm_gpui_ui::text_input::TextInputView {
                 value: &rename.name,
                 placeholder: String::new(),

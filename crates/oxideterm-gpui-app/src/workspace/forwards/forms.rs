@@ -10,7 +10,7 @@ use super::{
     AnyElement, ConfirmDialogVariant, ConfirmDialogView, Context, FORWARDS_TW_ALPHA_30,
     FORWARDS_TW_ALPHA_50, ForwardInput, ForwardType, ForwardingRuntimeOperation, LucideIcon,
     MouseButton, NodeId, TW_BLACK, TabId, TextInputView, WorkspaceApp, WorkspaceImeTarget,
-    confirm_dialog, div, px, rgb, settings_mono_font_family, text_input,
+    confirm_dialog, div, px, rgb, settings_mono_font_family,
 };
 
 impl WorkspaceApp {
@@ -671,8 +671,8 @@ impl WorkspaceApp {
             div()
                 .when(fill, |wrapper| wrapper.w_full())
                 .font_family(self.forward_mono_font())
-                .child(text_input(
-                    &self.tokens,
+                .child(self.workspace_text_input(
+                    target,
                     TextInputView {
                         value,
                         placeholder,

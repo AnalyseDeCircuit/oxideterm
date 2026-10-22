@@ -191,8 +191,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         let input_control = if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
             let ai_workspace = self.ai_entity.read(cx);
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: ai_workspace.settings_input_value(input).unwrap_or_default(),
                     placeholder,
@@ -205,8 +205,8 @@ impl WorkspaceApp {
                 },
             )
         } else {
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value,
                     placeholder,

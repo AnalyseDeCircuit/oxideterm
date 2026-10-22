@@ -10,7 +10,7 @@ use oxideterm_gpui_ui::{
         dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
         dismissible_dialog_backdrop,
     },
-    text_input::{TextInputView, text_input},
+    text_input::TextInputView,
 };
 
 use crate::workspace::{ime::WorkspaceImeTarget, settings::settings_dialog_transition};
@@ -168,8 +168,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         self.text_input_with_workspace_ime(
             target,
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: display_value,
                     placeholder: String::new(),
@@ -229,8 +229,8 @@ impl WorkspaceApp {
         let target = WorkspaceImeTarget::Settings(input);
         self.text_input_with_workspace_ime(
             target,
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: display_value,
                     placeholder: String::new(),

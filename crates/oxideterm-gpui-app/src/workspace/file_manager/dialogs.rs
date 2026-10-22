@@ -849,8 +849,8 @@ impl WorkspaceApp {
             .child(
                 self.text_input_with_workspace_ime(
                     target,
-                    text_input(
-                        &self.tokens,
+                    self.workspace_text_input(
+                        target,
                         TextInputView {
                             value: &dialog_value,
                             placeholder,
@@ -912,8 +912,8 @@ impl WorkspaceApp {
             .child(
                 self.text_input_with_workspace_ime(
                     target,
-                    text_input(
-                        &self.tokens,
+                    self.workspace_text_input(
+                        target,
                         TextInputView {
                             value: &dialog_value,
                             placeholder: self.i18n.t("fileManager.bookmarkName"),

@@ -130,21 +130,22 @@ impl WorkspaceApp {
             (AuditPolicyInput::Capacity, true) => "event_log.recordings.capacity",
         };
         let value = self.audit_policy_input_value(input);
-        let field = oxideterm_gpui_ui::text_input::text_input(
-            &self.tokens,
-            oxideterm_gpui_ui::text_input::TextInputView {
-                value: &value,
-                placeholder: String::new(),
-                focused: self.active_ime_target(cx) == Some(target),
-                caret_visible: self.input_caret.visible(),
-                secret: false,
-                selected_all: false,
-                selected_range: self.ime_selected_range_for_target(target, cx),
-                marked_text: self.marked_text_for_target(target, cx),
-            },
-        )
-        .w(px(88.0))
-        .h(px(28.0));
+        let field = self
+            .workspace_text_input(
+                target,
+                oxideterm_gpui_ui::text_input::TextInputView {
+                    value: &value,
+                    placeholder: String::new(),
+                    focused: self.active_ime_target(cx) == Some(target),
+                    caret_visible: self.input_caret.visible(),
+                    secret: false,
+                    selected_all: false,
+                    selected_range: self.ime_selected_range_for_target(target, cx),
+                    marked_text: self.marked_text_for_target(target, cx),
+                },
+            )
+            .w(px(88.0))
+            .h(px(28.0));
         let field = self.text_input_with_workspace_ime(
             target,
             field,

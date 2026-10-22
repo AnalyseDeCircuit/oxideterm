@@ -471,8 +471,8 @@ impl WorkspaceApp {
         let terminal = self.terminal.read(cx);
         self.text_input_with_workspace_ime(
             target,
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: terminal.cwd_query(),
                     placeholder: self.i18n.t("terminal.cwd.search_directories"),
@@ -987,8 +987,8 @@ impl WorkspaceApp {
         let terminal = self.terminal.read(cx);
         self.text_input_with_workspace_ime(
             target,
-            text_input(
-                &self.tokens,
+            self.workspace_text_input(
+                target,
                 TextInputView {
                     value: terminal.project_query(),
                     placeholder: self.i18n.t("terminal.project.search_tasks"),

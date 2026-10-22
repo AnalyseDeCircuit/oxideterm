@@ -60,7 +60,7 @@ use oxideterm_gpui_ui::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,
         select_overlay_popup_with_max_height, select_trigger_with_focus_visible,
     },
-    status_pill, text_input,
+    status_pill,
     text_input::{
         text_caret, text_input_value_segments, text_input_value_segments_with_marked_range,
     },
