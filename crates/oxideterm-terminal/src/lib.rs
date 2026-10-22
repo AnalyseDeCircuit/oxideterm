@@ -69,7 +69,7 @@ pub use editor_integration::{
     TerminalEditorClipboardEvent, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEditorMode, TerminalEditorSelection, VIM_FREE_TYPE_INTEGRATION_SOURCE,
 };
-pub use local_shell::{LocalPtyConfig, ShellInfo, default_shell, scan_shells};
+pub use local_shell::{LocalPtyConfig, ShellInfo, default_shell, is_shell_executable, scan_shells};
 pub use local_shell_integration::TerminalCwdIntegrationLaunchState;
 pub use oxideterm_modem_transfer::{
     DetectedModemProtocol, ModemTransferDirection,

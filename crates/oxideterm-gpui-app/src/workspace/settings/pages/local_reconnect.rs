@@ -11,31 +11,7 @@ impl WorkspaceApp {
         match section_index {
             0 => {
                 let mut shell_rows = vec![self.local_shell_select_row(settings, cx)];
-                if let Some(path_hint) = self.local_shell_path_hint(settings) {
-                    shell_rows.push(path_hint);
-                }
-                if cfg!(target_os = "windows") {
-                    shell_rows.push(self.card_separator());
-                    shell_rows.push(
-                        self.setting_row(
-                            "settings_view.local_terminal.git_bash_path",
-                            "settings_view.local_terminal.git_bash_path_hint",
-                            self.settings_text_input_control(
-                                SettingsInput::LocalGitBashPath,
-                                settings
-                                    .local_terminal
-                                    .git_bash_path
-                                    .clone()
-                                    .unwrap_or_default(),
-                                self.i18n
-                                    .t("settings_view.local_terminal.git_bash_path_placeholder"),
-                                300.0,
-                                cx,
-                            ),
-                            cx,
-                        ),
-                    );
-                }
+                shell_rows.extend(self.local_shell_options_rows(settings, cx));
                 shell_rows.push(self.card_separator());
                 shell_rows.push(
                     self.setting_row(
@@ -77,32 +53,6 @@ impl WorkspaceApp {
                 )],
             ),
             2 => self.local_privilege_credentials_card(cx),
-            3 => {
-                let effective_shells = self.effective_local_shells_for_settings(settings);
-                let shell_list = if effective_shells.is_empty() {
-                    div()
-                        .text_align(gpui::TextAlign::Center)
-                        .py(px(32.0))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("settings_view.local_terminal.loading_shells"))
-                        .into_any_element()
-                } else {
-                    let shell_count = effective_shells.len();
-                    let mut list = div().w_full().min_w(px(0.0)).flex().flex_col();
-                    for (index, shell) in effective_shells.iter().enumerate() {
-                        list = list.child(self.available_shell_row(index, shell, settings, cx));
-                        if index + 1 < shell_count {
-                            list = list.child(self.card_separator());
-                        }
-                    }
-                    list.into_any_element()
-                };
-                self.settings_card(
-                    "settings_view.local_terminal.available_shells",
-                    "settings_view.local_terminal.select_shell",
-                    vec![shell_list],
-                )
-            }
             _ => div().into_any_element(),
         }
     }

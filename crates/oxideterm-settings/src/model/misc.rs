@@ -5,6 +5,9 @@ pub struct LocalTerminalSettings {
     pub recent_shell_ids: Vec<String>,
     pub default_cwd: Option<String>,
     pub git_bash_path: Option<String>,
+    // Executable locations belong to this device and are excluded from portable settings.
+    #[serde(default)]
+    pub shell_paths: std::collections::BTreeMap<String, String>,
     pub load_shell_profile: bool,
     pub oh_my_posh_enabled: bool,
     pub oh_my_posh_theme: Option<String>,
@@ -23,6 +26,7 @@ impl Default for LocalTerminalSettings {
             recent_shell_ids: Vec::new(),
             default_cwd: None,
             git_bash_path: None,
+            shell_paths: std::collections::BTreeMap::new(),
             load_shell_profile: true,
             oh_my_posh_enabled: false,
             oh_my_posh_theme: None,

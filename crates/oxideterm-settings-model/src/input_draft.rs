@@ -108,11 +108,7 @@ pub fn persisted_settings_input_value(
             .default_cwd
             .clone()
             .unwrap_or_default(),
-        SettingsInput::LocalGitBashPath => settings
-            .local_terminal
-            .git_bash_path
-            .clone()
-            .unwrap_or_default(),
+        SettingsInput::LocalShellPath(_) => return None,
         SettingsInput::LocalOhMyPoshTheme => settings
             .local_terminal
             .oh_my_posh_theme
@@ -516,10 +512,7 @@ pub fn apply_persisted_settings_input_draft(
             settings.local_terminal.default_cwd = non_empty_trimmed(draft);
             SettingsInputDraftApply::Applied
         }
-        SettingsInput::LocalGitBashPath => {
-            settings.local_terminal.git_bash_path = non_empty_trimmed(draft);
-            SettingsInputDraftApply::Applied
-        }
+        SettingsInput::LocalShellPath(_) => SettingsInputDraftApply::Unhandled,
         SettingsInput::LocalOhMyPoshTheme => {
             settings.local_terminal.oh_my_posh_theme = non_empty_trimmed(draft);
             SettingsInputDraftApply::Applied

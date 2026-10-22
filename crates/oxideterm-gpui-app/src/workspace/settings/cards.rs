@@ -1402,6 +1402,26 @@ impl WorkspaceApp {
             return String::new();
         }
         let settings = self.settings_store.settings();
+        if let SettingsInput::LocalShellPath(index) = input {
+            return self
+                .effective_local_shells_for_settings(settings)
+                .get(index)
+                .and_then(|shell| {
+                    settings
+                        .local_terminal
+                        .shell_paths
+                        .get(&shell.id)
+                        .or_else(|| {
+                            if shell.id == "git-bash" {
+                                settings.local_terminal.git_bash_path.as_ref()
+                            } else {
+                                None
+                            }
+                        })
+                })
+                .cloned()
+                .unwrap_or_default();
+        }
         if let Some(value) = persisted_settings_input_value(settings, input) {
             return value;
         }
@@ -1511,6 +1531,25 @@ impl WorkspaceApp {
         input: SettingsInput,
         cx: &mut Context<Self>,
     ) {
+        if let SettingsInput::LocalShellPath(index) = input {
+            let shells = self.effective_local_shells_for_settings(self.settings_store.settings());
+            if let Some(shell) = shells.get(index) {
+                let draft = self.settings_input_draft.trim();
+                if draft.is_empty() {
+                    self.set_local_shell_path(&shell.id, None, cx);
+                    if !self.local_shells.iter().any(|known| known.id == shell.id) {
+                        // Removing an undiscovered shell also removes its indexed input.
+                        self.focused_settings_input = None;
+                        self.clear_settings_input_draft(input);
+                        self.clear_ime_selection();
+                    }
+                } else if expand_local_terminal_cwd(draft).is_absolute() {
+                    self.set_local_shell_path(&shell.id, Some(draft.to_string()), cx);
+                }
+            }
+            cx.notify();
+            return;
+        }
         let mut next_settings = if input.is_background() {
             self.background_settings_for_controls(cx)
         } else {

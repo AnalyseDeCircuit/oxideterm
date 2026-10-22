@@ -1409,6 +1409,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
+                            this.blur_text_inputs(cx);
                             this.edit_settings(
                                 |settings| {
                                     settings.local_terminal.default_shell_id =

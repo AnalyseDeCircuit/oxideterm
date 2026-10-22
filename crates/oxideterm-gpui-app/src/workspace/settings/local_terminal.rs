@@ -32,10 +32,6 @@ pub(in crate::workspace) fn application_semantic_scheme_label(
 }
 
 pub(in crate::workspace) const LOCAL_GIT_BASH_ID: &str = "git-bash";
-// Compact shell rows keep stable scan columns without nesting another card surface.
-const LOCAL_SHELL_NAME_COLUMN_WIDTH: f32 = 160.0;
-const LOCAL_SHELL_PATH_COLUMN_WIDTH: f32 = 240.0;
-const LOCAL_SHELL_ROW_VERTICAL_PADDING: f32 = 8.0;
 
 pub(in crate::workspace) fn local_shell_supports_oh_my_posh(shell_id: Option<&str>) -> bool {
     // The native injector is compiled only for these Windows PowerShell IDs.
@@ -79,17 +75,34 @@ pub(in crate::workspace) fn local_git_bash_override(path: Option<&str>) -> Optio
 pub(in crate::workspace) fn effective_local_shells(
     shells: &[ShellInfo],
     git_bash_path: Option<&str>,
+    shell_paths: &std::collections::BTreeMap<String, String>,
 ) -> Vec<ShellInfo> {
-    let Some(override_shell) = local_git_bash_override(git_bash_path) else {
-        return shells.to_vec();
-    };
-
-    let mut effective = shells
-        .iter()
-        .filter(|shell| shell.id != LOCAL_GIT_BASH_ID)
-        .cloned()
-        .collect::<Vec<_>>();
-    effective.push(override_shell);
+    let mut effective = shells.to_vec();
+    if let Some(override_shell) = local_git_bash_override(git_bash_path) {
+        if let Some(shell) = effective
+            .iter_mut()
+            .find(|shell| shell.id == LOCAL_GIT_BASH_ID)
+        {
+            *shell = override_shell;
+        } else {
+            effective.push(override_shell);
+        }
+    }
+    for (id, path) in shell_paths {
+        if id.starts_with("wsl") || path.trim().is_empty() {
+            continue;
+        }
+        let path = expand_local_terminal_cwd(path);
+        let mut found = false;
+        for shell in effective.iter_mut().filter(|shell| shell.id == *id) {
+            shell.path = path.clone();
+            found = true;
+        }
+        if !found {
+            // Keep explicit choices selectable even if discovery no longer finds the executable.
+            effective.push(ShellInfo::new(id, id, path));
+        }
+    }
     effective
 }
 
@@ -114,6 +127,7 @@ impl WorkspaceApp {
         effective_local_shells(
             &self.local_shells,
             settings.local_terminal.git_bash_path.as_deref(),
+            &settings.local_terminal.shell_paths,
         )
     }
 
@@ -136,11 +150,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let effective_shells = self.effective_local_shells_for_settings(settings);
-        let value = settings
+        let default_shell_id = settings
             .local_terminal
             .default_shell_id
-            .as_deref()
-            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
+            .clone()
+            .unwrap_or_else(|| oxideterm_terminal::default_shell().id);
+        let value = effective_shells
+            .iter()
+            .find(|shell| shell.id == default_shell_id)
+            .or_else(|| effective_shells.first())
             .map(|shell| shell.label.clone())
             .unwrap_or_else(|| self.i18n.t("settings_view.local_terminal.select_shell"));
 
@@ -154,57 +172,93 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn local_shell_path_hint(
+    pub(in crate::workspace) fn local_shell_options_rows(
         &self,
-        settings: &PersistedSettings,
-    ) -> Option<AnyElement> {
-        let effective_shells = self.effective_local_shells_for_settings(settings);
-        let default_shell = settings
-            .local_terminal
-            .default_shell_id
-            .as_deref()
-            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
-            .or_else(|| effective_shells.first())?
-            .clone();
-
-        Some(
-            div()
-                .w_full()
-                .min_w(px(0.0))
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(format!(
-                                    "{}:",
-                                    self.i18n.t("settings_view.local_terminal.path")
-                                )),
-                        )
-                        .child(
-                            div()
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(default_shell.path.display().to_string()),
-                        ),
-                )
-                .into_any_element(),
-        )
-    }
-
-    pub(in crate::workspace) fn available_shell_row(
-        &self,
-        index: usize,
-        shell: &ShellInfo,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let default_shell_id = settings.local_terminal.default_shell_id.as_deref();
+    ) -> Vec<AnyElement> {
+        let effective_shells = self.effective_local_shells_for_settings(settings);
+        let default_shell_id = settings
+            .local_terminal
+            .default_shell_id
+            .clone()
+            .unwrap_or_else(|| oxideterm_terminal::default_shell().id);
+        let index = effective_shells
+            .iter()
+            .position(|shell| shell.id == default_shell_id)
+            .unwrap_or(0);
+        let Some(shell) = effective_shells.get(index) else {
+            return Vec::new();
+        };
+        let mut rows = Vec::new();
+        if !shell.id.starts_with("wsl") {
+            let input = SettingsInput::LocalShellPath(index);
+            let path = self.current_settings_input_value(input, cx);
+            let draft = if self.focused_settings_input == Some(input) {
+                self.settings_input_draft.as_str()
+            } else {
+                path.as_str()
+            };
+            let resolved = expand_local_terminal_cwd(draft);
+            let invalid = !draft.trim().is_empty()
+                && (!resolved.is_absolute() || !oxideterm_terminal::is_shell_executable(&resolved));
+            let browse_shell = shell.id.clone();
+            let reset_shell = shell.id.clone();
+            let controls = div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap(px(8.0))
+                .child(self.settings_text_input_control(
+                    input,
+                    path.clone(),
+                    shell.path.display().to_string(),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ))
+                .child(self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.local_terminal.browse_shell"),
+                    None,
+                    ToolbarButtonOptions::default(),
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.blur_text_inputs(cx);
+                        this.pick_local_shell_path(browse_shell.clone(), cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .when(!path.is_empty(), |controls| {
+                    controls.child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.local_terminal.reset_shell_path"),
+                        None,
+                        ToolbarButtonOptions::default(),
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.blur_text_inputs(cx);
+                            this.set_local_shell_path(&reset_shell, None, cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
+                })
+                .into_any_element();
+            rows.push(self.card_separator());
+            rows.push(self.setting_row(
+                "settings_view.local_terminal.shell_path",
+                "settings_view.local_terminal.shell_path_hint",
+                controls,
+                cx,
+            ));
+            if invalid {
+                rows.push(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.error))
+                        .child(
+                            self.i18n
+                                .t("settings_view.local_terminal.shell_path_invalid"),
+                        )
+                        .into_any_element(),
+                );
+            }
+        }
         let scheme_label = settings
             .local_terminal
             .semantic_scheme_for_shell(&shell.id)
@@ -217,57 +271,81 @@ impl WorkspaceApp {
                         &application_semantic_scheme_label(settings, &self.i18n),
                     )
             });
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_x(px(16.0))
-            .gap_y(px(4.0))
-            .py(px(LOCAL_SHELL_ROW_VERTICAL_PADDING))
-            .child(
-                div()
-                    .w(px(LOCAL_SHELL_NAME_COLUMN_WIDTH))
-                    .max_w_full()
-                    .flex_none()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(shell.label.clone()),
-            )
-            .child(
-                div()
-                    .w(px(LOCAL_SHELL_PATH_COLUMN_WIDTH))
-                    .max_w_full()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .truncate()
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(shell.path.display().to_string()),
-            )
-            .when(default_shell_id == Some(shell.id.as_str()), |row| {
-                row.child(self.text_badge(
-                    self.i18n.t("settings_view.local_terminal.default"),
-                    self.tokens.ui.warning,
-                ))
-            })
-            .child(self.settings_select_control(
+        rows.push(self.card_separator());
+        rows.push(self.setting_row(
+            "settings_view.local_terminal.shell_scheme",
+            "",
+            self.settings_select_control(
                 SettingsSelect::LocalShellSemanticScheme(index),
                 scheme_label,
                 false,
                 Some(self.tokens.metrics.settings_select_width),
                 cx,
-            ))
-            .into_any_element()
+            ),
+            cx,
+        ));
+        rows
+    }
+
+    pub(in crate::workspace) fn set_local_shell_path(
+        &mut self,
+        shell_id: &str,
+        path: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.edit_settings(
+            |settings| {
+                if let Some(path) = path {
+                    if settings.local_terminal.default_shell_id.is_none() {
+                        settings.local_terminal.default_shell_id = Some(shell_id.to_string());
+                    }
+                    settings
+                        .local_terminal
+                        .shell_paths
+                        .insert(shell_id.to_string(), path);
+                } else {
+                    settings.local_terminal.shell_paths.remove(shell_id);
+                }
+                if shell_id == LOCAL_GIT_BASH_ID {
+                    settings.local_terminal.git_bash_path = None;
+                }
+            },
+            cx,
+        );
+    }
+
+    fn pick_local_shell_path(&mut self, shell_id: String, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(
+                self.i18n
+                    .t("settings_view.local_terminal.browse_shell")
+                    .into(),
+            ),
+        });
+        cx.spawn(async move |workspace, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
+                return;
+            };
+            let Some(path) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = workspace.update(cx, |this, cx| {
+                this.set_local_shell_path(&shell_id, Some(path.to_string_lossy().into_owned()), cx);
+            });
+        })
+        .detach();
     }
 
     pub(in crate::workspace) fn local_terminal_config(&self) -> LocalPtyConfig {
         let settings = &self.settings_store.settings().local_terminal;
-        let effective_shells =
-            effective_local_shells(&self.local_shells, settings.git_bash_path.as_deref());
+        let effective_shells = effective_local_shells(
+            &self.local_shells,
+            settings.git_bash_path.as_deref(),
+            &settings.shell_paths,
+        );
         let shell = settings
             .default_shell_id
             .as_deref()
@@ -311,8 +389,11 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn local_terminal_tab_title(&self) -> String {
         let settings = &self.settings_store.settings().local_terminal;
-        let effective_shells =
-            effective_local_shells(&self.local_shells, settings.git_bash_path.as_deref());
+        let effective_shells = effective_local_shells(
+            &self.local_shells,
+            settings.git_bash_path.as_deref(),
+            &settings.shell_paths,
+        );
         settings
             .default_shell_id
             .as_deref()
@@ -328,13 +409,49 @@ mod local_terminal_tests {
     use super::*;
 
     #[test]
+    fn custom_shell_paths_keep_launch_identity_and_missing_executables() {
+        let shells = vec![
+            ShellInfo::new("bash", "Bash", "/bin/bash").with_args(vec!["--login".into()]),
+            ShellInfo::new("zsh", "Zsh", "/bin/zsh"),
+        ];
+        let paths = std::collections::BTreeMap::from([
+            ("bash".into(), "/custom path/bash".into()),
+            ("fish".into(), "/missing/fish".into()),
+        ]);
+        let effective = effective_local_shells(&shells, None, &paths);
+        assert_eq!(
+            effective,
+            vec![
+                ShellInfo::new("bash", "Bash", "/custom path/bash")
+                    .with_args(vec!["--login".into()]),
+                ShellInfo::new("zsh", "Zsh", "/bin/zsh"),
+                ShellInfo::new("fish", "fish", "/missing/fish"),
+            ]
+        );
+        assert_eq!(
+            resolve_local_shell(&effective, None, Some("fish"))
+                .unwrap()
+                .path,
+            PathBuf::from("/missing/fish")
+        );
+        assert_eq!(
+            effective_local_shells(&shells, None, &Default::default()),
+            shells
+        );
+    }
+
+    #[test]
     pub(in crate::workspace) fn git_bash_override_replaces_scanned_git_bash_shell() {
         let shells = vec![
             ShellInfo::new("cmd", "Command Prompt", "cmd.exe"),
             ShellInfo::new("git-bash", "Git Bash", r"C:\Program Files\Git\bin\bash.exe"),
         ];
 
-        let effective = effective_local_shells(&shells, Some(r" D:\PortableGit\bin\bash.exe "));
+        let effective = effective_local_shells(
+            &shells,
+            Some(r" D:\PortableGit\bin\bash.exe "),
+            &Default::default(),
+        );
 
         assert_eq!(effective.len(), 2);
         let git_bash = effective
@@ -348,7 +465,10 @@ mod local_terminal_tests {
     #[test]
     pub(in crate::workspace) fn blank_git_bash_override_keeps_scanned_shells() {
         let shells = vec![ShellInfo::new("cmd", "Command Prompt", "cmd.exe")];
-        assert_eq!(effective_local_shells(&shells, Some("  ")), shells);
+        assert_eq!(
+            effective_local_shells(&shells, Some("  "), &Default::default()),
+            shells
+        );
     }
 
     #[test]

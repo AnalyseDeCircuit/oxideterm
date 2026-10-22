@@ -235,6 +235,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             &[
                 "settings_view.local_terminal.default_shell",
                 "settings_view.local_terminal.default_cwd",
+                "settings_view.local_terminal.shell_path",
+                "settings_view.local_terminal.shell_scheme",
             ],
         ),
         terminal_search_entry(
@@ -248,12 +250,6 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             3,
             "settings_view.local_terminal.privilege_credentials",
             &["settings_view.local_terminal.privilege_credentials_hint"],
-        ),
-        terminal_search_entry(
-            TerminalSettingsPage::Local,
-            4,
-            "settings_view.local_terminal.available_shells",
-            &["settings_view.local_terminal.select_shell"],
         ),
         terminal_search_entry(
             TerminalSettingsPage::CommandBar,
@@ -832,10 +828,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         TerminalSettingsPage::Local,
         1,
         "settings_view.local_terminal.shell",
-        &[
-            "settings_view.local_terminal.git_bash_path",
-            "settings_view.local_terminal.oh_my_posh",
-        ],
+        &["settings_view.local_terminal.oh_my_posh"],
     ));
     #[cfg(target_os = "linux")]
     specs.push(settings_search_entry(

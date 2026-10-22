@@ -145,6 +145,7 @@ const IDE_KEYS: &[&str] = &[
     "wordWrap",
 ];
 const LOCAL_TERMINAL_KEYS: &[&str] = &[
+    // shellPaths is device-local: neither cloud sync nor .oxide imports may replace it.
     "defaultShellId",
     "recentShellIds",
     "defaultCwd",
@@ -595,6 +596,38 @@ mod tests {
     }
 
     #[test]
+    fn importing_local_terminal_settings_keeps_this_devices_shell_paths() {
+        let mut current = PersistedSettings::default();
+        current
+            .local_terminal
+            .shell_paths
+            .insert("zsh".into(), "/this-device/bin/zsh".into());
+        let imported = merge_oxide_settings_snapshot(
+            &current,
+            &json!({
+                "format": OXIDE_SETTINGS_FORMAT,
+                "version": OXIDE_SETTINGS_VERSION,
+                "sectionIds": ["localTerminal"],
+                "settings": {"localTerminal": {
+                    "defaultShellId": "zsh",
+                    "shellPaths": {"zsh": "/other-device/bin/zsh", "bash": "/other-device/bin/bash"}
+                }}
+            })
+            .to_string(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            imported.local_terminal.default_shell_id.as_deref(),
+            Some("zsh")
+        );
+        assert_eq!(
+            imported.local_terminal.shell_paths,
+            std::collections::BTreeMap::from([("zsh".into(), "/this-device/bin/zsh".into())])
+        );
+    }
+
+    #[test]
     fn export_selected_extended_sections() {
         let mut settings = PersistedSettings::default();
         settings.ai.enabled = true;
@@ -619,6 +652,10 @@ mod tests {
         settings.local_terminal.default_cwd = Some("/tmp".to_string());
         settings
             .local_terminal
+            .shell_paths
+            .insert("zsh".into(), "/device-a/bin/zsh".into());
+        settings
+            .local_terminal
             .custom_env_vars
             .insert("FOO".to_string(), Value::String("bar".to_string()));
         let selected = ["network", "ai", "localTerminal", "nativePreferences"]
@@ -630,6 +667,11 @@ mod tests {
             export_oxide_settings_snapshot_json(&settings, Some(&selected), false).expect("export");
         let parsed: Value = serde_json::from_str(&exported).expect("json");
         assert!(!exported.contains("device-secret-reference"));
+        assert!(
+            parsed["settings"]["localTerminal"]
+                .get("shellPaths")
+                .is_none()
+        );
         assert_eq!(
             parsed["settings"]["network"]["upstreamProxy"]["host"],
             "proxy.test"
