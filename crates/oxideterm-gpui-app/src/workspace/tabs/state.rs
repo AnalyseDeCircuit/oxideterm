@@ -112,6 +112,13 @@ impl WorkspaceApp {
         self.tab_host.read(cx).tabs()
     }
 
+    pub(in crate::workspace) fn main_tabs<'a>(
+        &self,
+        cx: &'a App,
+    ) -> impl DoubleEndedIterator<Item = (usize, &'a Tab)> + use<'a> {
+        self.tab_host.read(cx).main_tabs()
+    }
+
     pub(in crate::workspace) fn active_tab_id(&self, cx: &App) -> Option<TabId> {
         self.tab_host.read(cx).active_tab_id()
     }

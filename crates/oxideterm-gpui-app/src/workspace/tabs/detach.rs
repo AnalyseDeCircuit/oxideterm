@@ -842,12 +842,9 @@ impl WorkspaceApp {
         let scroll_x = f32::from(-self.main_window_tabs.scroll_handle.offset().x).max(0.0);
         let pointer_x = screen_x - f32::from(drop_bounds.origin.x) + scroll_x
             - self.tokens.metrics.tabbar_leading_offset;
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let visible_widths = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .map(|tab| self.tab_visual_width(tab))
+            .main_tabs(cx)
+            .map(|(_, tab)| self.tab_visual_width(tab))
             .collect::<Vec<_>>();
         Some(tab_return_visible_insertion_index(
             pointer_x,
@@ -1074,13 +1071,10 @@ impl WorkspaceApp {
             width: handoff.origin.width,
             height: handoff.origin.height,
         };
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let preceding_width = self
-            .tabs(cx)
-            .iter()
-            .take(tab_index)
-            .filter(|candidate| !outside_main_tabs.contains(&candidate.id))
-            .map(|candidate| self.tab_visual_width(candidate))
+            .main_tabs(cx)
+            .take_while(|(i, _)| *i < tab_index)
+            .map(|(_, candidate)| self.tab_visual_width(candidate))
             .sum::<f32>();
         let target = TabWindowHandoffRect {
             left: self.tabbar_left_x() + self.tokens.metrics.tabbar_leading_offset
@@ -1312,10 +1306,9 @@ impl WorkspaceApp {
         let can_split_into_active =
             active_tab_id.is_some_and(|target| self.can_combine_tabs(menu.tab_id, target, cx));
         let merge_targets = if active_tab_id == Some(menu.tab_id) {
-            self.tabs(cx)
-                .iter()
-                .filter(|tab| self.can_combine_tabs(menu.tab_id, tab.id, cx))
-                .map(|tab| (tab.id, self.tab_display_title(tab)))
+            self.main_tabs(cx)
+                .filter(|(_, tab)| self.can_combine_tabs(menu.tab_id, tab.id, cx))
+                .map(|(_, tab)| (tab.id, self.tab_display_title(tab)))
                 .collect::<Vec<_>>()
         } else {
             Vec::new()

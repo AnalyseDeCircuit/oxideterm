@@ -206,17 +206,12 @@ impl WorkspaceApp {
             let mut x = f32::from(point.x - bounds.origin.x)
                 + f32::from(-self.main_window_tabs.scroll_handle.offset().x)
                 - self.tokens.metrics.tabbar_leading_offset;
-            let host = self.tab_host.read(cx);
-            let hovered = self
-                .tabs(cx)
-                .iter()
-                .filter(|tab| !host.is_outside_main_window(tab.id))
-                .find_map(|tab| {
-                    let width = self.tab_visual_width(tab);
-                    let hit = x >= 0.0 && x < width;
-                    x -= width;
-                    hit.then_some(tab.id)
-                });
+            let hovered = self.main_tabs(cx).find_map(|(_, tab)| {
+                let width = self.tab_visual_width(tab);
+                let hit = x >= 0.0 && x < width;
+                x -= width;
+                hit.then_some(tab.id)
+            });
             if let Some(tab) = hovered.filter(|tab| *tab != drag.tab_id) {
                 drag.destination_tab = Some(tab);
                 if self.active_tab_id(cx) != Some(tab) {

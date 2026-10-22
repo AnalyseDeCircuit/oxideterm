@@ -34,6 +34,29 @@ pub(in crate::workspace) struct PluginConnectionSession {
 }
 
 impl PluginConnections {
+    pub(in crate::workspace) fn instance_for_page(&self, tab: TabId) -> Option<&str> {
+        self.sessions
+            .iter()
+            .find(|(_, session)| session.tab == tab && session.terminal.is_none())
+            .map(|(instance, _)| instance.as_str())
+    }
+
+    pub(in crate::workspace) fn instance_for_terminal(
+        &self,
+        terminal: &SharedTerminalSession,
+    ) -> Option<&str> {
+        // Terminal tab IDs change during split/merge; the owned session remains stable.
+        self.sessions
+            .iter()
+            .find(|(_, session)| {
+                session
+                    .terminal
+                    .as_ref()
+                    .is_some_and(|owned| Arc::ptr_eq(owned, terminal))
+            })
+            .map(|(instance, _)| instance.as_str())
+    }
+
     pub fn stop_plugin(&mut self, plugin_id: &str) {
         for session in self
             .sessions

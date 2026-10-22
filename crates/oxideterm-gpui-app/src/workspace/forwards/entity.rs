@@ -299,10 +299,6 @@ impl ForwardingWorkspaceEntity {
             .find_map(|(tab_id, mapped_node_id)| (mapped_node_id == node_id).then_some(*tab_id))
     }
 
-    pub(in crate::workspace) fn tab_matches_node(&self, tab_id: TabId, node_id: &NodeId) -> bool {
-        self.tab_nodes.get(&tab_id) == Some(node_id)
-    }
-
     pub(in crate::workspace) fn map_tab_to_node(
         &mut self,
         tab_id: TabId,

@@ -114,12 +114,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let existing_tab_ids = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .map(|tab| tab.id)
+            .main_tabs(cx)
+            .map(|(_, tab)| tab.id)
             .collect::<HashSet<_>>();
         let Some(tab_id) = self.tab_host.update(cx, |tab_host, _| {
             tab_host.navigate_history(forward, &existing_tab_ids)
@@ -714,12 +711,7 @@ impl WorkspaceApp {
             return;
         }
 
-        let tab_ids = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| self.tab_host.read(cx).container_tab_id(tab.id) != active_tab_id)
-            .map(|tab| tab.id)
-            .collect::<Vec<_>>();
+        let tab_ids = self.tab_host.read(cx).other_main_tab_ids(active_tab_id);
         if tab_ids.is_empty() {
             return;
         }
@@ -1153,14 +1145,9 @@ impl WorkspaceApp {
 
     pub(super) fn tab_exit_visual(&self, index: usize, cx: &App) -> Option<ExitingTabVisual> {
         let tab = self.tabs(cx).get(index)?;
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
-        if outside_main_tabs.contains(&tab.id) {
-            return None;
-        }
-        let live_visual_index = self.tabs(cx)[..index]
-            .iter()
-            .filter(|candidate| !outside_main_tabs.contains(&candidate.id))
-            .count();
+        let live_visual_index = self
+            .main_tabs(cx)
+            .position(|(_, candidate)| candidate.id == tab.id)?;
         let mut occupied_indices = self
             .main_window_tabs
             .exiting_tabs
@@ -1256,24 +1243,8 @@ impl WorkspaceApp {
     }
 
     fn tab_belongs_to_node(&self, tab: &Tab, node_id: &NodeId, cx: &App) -> bool {
-        if self.sftp_tab_nodes.get(&tab.id) == Some(node_id) {
-            return true;
-        }
-        if self.ide_workspace.read(cx).node_for_tab(tab.id) == Some(node_id) {
-            return true;
-        }
-        if self.forwarding.read(cx).tab_matches_node(tab.id, node_id) {
-            return true;
-        }
-        let mut session_ids = Vec::new();
-        if let Some(root_pane) = &tab.root_pane {
-            root_pane.collect_session_ids(&mut session_ids);
-        }
-        session_ids.into_iter().any(|session_id| {
-            self.workspace_runtime
-                .read(cx)
-                .ssh_terminal_session_belongs_to_node(session_id, node_id)
-        })
+        self.tab_affinities(tab.id, cx)
+            .contains(&TabAffinity::Ssh(node_id.clone()))
     }
 
     pub(in crate::workspace) fn next_tab(
@@ -1282,12 +1253,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let visible_tabs = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .map(|tab| tab.id)
+            .main_tabs(cx)
+            .map(|(_, tab)| tab.id)
             .collect::<Vec<_>>();
         if visible_tabs.is_empty() {
             return;
@@ -1319,14 +1287,8 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
-        if let Some(tab_id) = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .nth(index)
-            .map(|tab| tab.id)
-        {
+        let tab_id = self.main_tabs(cx).nth(index).map(|(_, tab)| tab.id);
+        if let Some(tab_id) = tab_id {
             self.set_main_window_active_tab(Some(tab_id), cx);
             self.sync_active_tab_surface(cx);
             self.needs_active_pane_focus = self
@@ -1370,13 +1332,10 @@ impl WorkspaceApp {
     }
 
     fn tabbar_content_width(&self, cx: &App) -> f32 {
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         self.tokens.metrics.tabbar_leading_offset
             + self
-                .tabs(cx)
-                .iter()
-                .filter(|tab| !outside_main_tabs.contains(&tab.id))
-                .map(|tab| self.tab_visual_width(tab))
+                .main_tabs(cx)
+                .map(|(_, tab)| self.tab_visual_width(tab))
                 .sum::<f32>()
     }
 
@@ -1469,14 +1428,11 @@ impl WorkspaceApp {
             self.clamp_tab_scroll(window, cx);
             return;
         };
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let tab_left = self.tokens.metrics.tabbar_leading_offset
             + self
-                .tabs(cx)
-                .iter()
-                .take(index)
-                .filter(|tab| !outside_main_tabs.contains(&tab.id))
-                .map(|tab| self.tab_visual_width(tab))
+                .main_tabs(cx)
+                .take_while(|(i, _)| *i < index)
+                .map(|(_, tab)| self.tab_visual_width(tab))
                 .sum::<f32>();
         let tab_right = tab_left + self.tab_visual_width(&self.tabs(cx)[index]);
         let viewport_width = self.tabbar_scroll_viewport_width(window, cx);
@@ -1564,19 +1520,11 @@ impl WorkspaceApp {
         }
         let start_x = f32::from(event.position.x);
         let start_y = f32::from(event.position.y);
-        let outside_main_tabs = self.tab_host.read(cx).outside_main_tab_ids();
         let tab_widths = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .map(|tab| self.tab_visual_width(tab))
+            .main_tabs(cx)
+            .map(|(_, tab)| self.tab_visual_width(tab))
             .collect::<Vec<_>>();
-        let Some(visible_index) = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| !outside_main_tabs.contains(&tab.id))
-            .position(|tab| tab.id == tab_id)
-        else {
+        let Some(visible_index) = self.main_tabs(cx).position(|(_, tab)| tab.id == tab_id) else {
             return;
         };
         // Select on press: native chrome can consume release or cancel capture with a

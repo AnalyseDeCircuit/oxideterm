@@ -188,6 +188,22 @@ impl WorkspaceTabHostEntity {
         &self.tabs
     }
 
+    /// The strip, navigation, and batch actions share this ordered window-local list.
+    /// Indices still address the canonical collection used by tab lifecycle operations.
+    pub(in crate::workspace) fn main_tabs(&self) -> impl DoubleEndedIterator<Item = (usize, &Tab)> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| !self.is_outside_main_window(tab.id))
+    }
+
+    pub(in crate::workspace) fn other_main_tab_ids(&self, tab_id: TabId) -> Vec<TabId> {
+        self.main_tabs()
+            .filter(|(_, tab)| tab.id != tab_id)
+            .map(|(_, tab)| tab.id)
+            .collect()
+    }
+
     pub(in crate::workspace) fn active_tab_id(&self) -> Option<TabId> {
         self.active_tab_id
     }
@@ -307,19 +323,9 @@ impl WorkspaceTabHostEntity {
             }) {
             previous_active_tab_id
         } else {
-            self.tabs
-                .iter()
-                .enumerate()
-                .skip(index.min(self.tabs.len().saturating_sub(1)))
-                .find(|(_, tab)| !self.is_outside_main_window(tab.id))
-                .or_else(|| {
-                    self.tabs
-                        .iter()
-                        .enumerate()
-                        .take(index)
-                        .rev()
-                        .find(|(_, tab)| !self.is_outside_main_window(tab.id))
-                })
+            self.main_tabs()
+                .find(|(i, _)| *i >= index.min(self.tabs.len().saturating_sub(1)))
+                .or_else(|| self.main_tabs().rev().find(|(i, _)| *i < index))
                 .map(|(_, tab)| tab.id)
         };
         self.select_main_tab(next_active_tab_id);
@@ -337,14 +343,17 @@ impl WorkspaceTabHostEntity {
         tab_id: TabId,
         target_visible_index: usize,
     ) -> bool {
-        let Some(source_index) = self.tab_index_by_id(tab_id) else {
+        let Some(source_index) = self
+            .main_tabs()
+            .find(|(_, tab)| tab.id == tab_id)
+            .map(|(i, _)| i)
+        else {
             return false;
         };
         let visible_tab_ids = self
-            .tabs
-            .iter()
-            .filter(|tab| tab.id != tab_id && !self.is_outside_main_window(tab.id))
-            .map(|tab| tab.id)
+            .main_tabs()
+            .filter(|(_, tab)| tab.id != tab_id)
+            .map(|(_, tab)| tab.id)
             .collect::<Vec<_>>();
         let target_visible_index = target_visible_index.min(visible_tab_ids.len());
         let anchor_tab_id = visible_tab_ids.get(target_visible_index).copied();
@@ -428,6 +437,32 @@ impl WorkspaceTabHostEntity {
                     .page_id_for_pane(tab.active_pane_id?)
             })
             .unwrap_or(container)
+    }
+
+    pub(in crate::workspace) fn tab_contents(&self, tab_id: TabId) -> Vec<TabContent> {
+        fn collect(root: &PaneNode, contents: &mut Vec<TabContent>) {
+            match root {
+                PaneNode::Page { tab_id, .. } => contents.push(TabContent::Page(*tab_id)),
+                PaneNode::Leaf { session_id, .. } => {
+                    contents.push(TabContent::Terminal(*session_id))
+                }
+                PaneNode::Group { children, .. } => {
+                    for child in children {
+                        collect(&child.node, contents);
+                    }
+                }
+            }
+        }
+        let Some(tab) = self.tab_by_id(tab_id) else {
+            return Vec::new();
+        };
+        let mut contents = Vec::new();
+        if let Some(root) = &tab.root_pane {
+            collect(root, &mut contents);
+        } else {
+            contents.push(TabContent::Page(tab.id));
+        }
+        contents
     }
 
     pub(in crate::workspace) fn surface_is_visible(&self, page: TabId) -> bool {
@@ -1105,19 +1140,9 @@ impl WorkspaceTabHostEntity {
     }
 
     fn nearest_main_tab(&self, index: usize) -> Option<TabId> {
-        self.tabs
-            .iter()
-            .enumerate()
-            .skip(index + 1)
-            .find(|(_, tab)| !self.is_outside_main_window(tab.id))
-            .or_else(|| {
-                self.tabs
-                    .iter()
-                    .enumerate()
-                    .take(index)
-                    .rev()
-                    .find(|(_, tab)| !self.is_outside_main_window(tab.id))
-            })
+        self.main_tabs()
+            .find(|(i, _)| *i > index)
+            .or_else(|| self.main_tabs().rev().find(|(i, _)| *i < index))
             .map(|(_, tab)| tab.id)
     }
 
@@ -1127,19 +1152,6 @@ impl WorkspaceTabHostEntity {
             self.tab_mounts.get(&tab_id),
             Some(TabMount::Detached { .. })
         )
-    }
-
-    pub(in crate::workspace) fn outside_main_tab_ids(&self) -> HashSet<TabId> {
-        // Renderers need to release the Entity borrow before mutating GPUI.
-        // Copy only stable IDs, never tab contents, panes, or session state.
-        self.tab_mounts
-            .iter()
-            .filter_map(|(tab_id, mount)| {
-                matches!(mount, TabMount::Detached { .. }).then_some(*tab_id)
-            })
-            .chain(self.pending_detach_mounts.keys().copied())
-            .chain(self.embedded_pages.keys().copied())
-            .collect()
     }
 
     pub(in crate::workspace) fn detached_window_handle(
@@ -1609,6 +1621,35 @@ mod tests {
         assert_eq!(removed.mount_cleanup.reason, TabMountCloseReason::TabClosed);
         assert_eq!(tab_host.active_tab_id(), Some(first));
         assert!(tab_host.tab_by_id(second).is_none());
+
+        let pending = TabId(4);
+        let last = TabId(5);
+        tab_host.insert_tab(test_tab(pending, None));
+        tab_host.insert_tab(test_tab(last, None));
+        let mount = tab_host.begin_detach(pending).unwrap();
+        assert_eq!(tab_host.other_main_tab_ids(first), vec![third, last]);
+        assert!(!tab_host.move_main_tab_to_visible_index(pending, 0));
+        assert!(tab_host.move_main_tab_to_visible_index(last, 0));
+        assert_eq!(
+            tab_host
+                .main_tabs()
+                .map(|(_, tab)| tab.id)
+                .collect::<Vec<_>>(),
+            vec![last, third, first]
+        );
+        tab_host.select_main_tab(Some(first));
+        let removed = tab_host
+            .remove_tab_at(tab_host.tab_index_by_id(first).unwrap())
+            .unwrap();
+        assert_eq!(removed.next_active_tab_id, Some(third));
+        assert!(tab_host.rollback_detach(pending, mount));
+        assert_eq!(
+            tab_host
+                .main_tabs()
+                .map(|(_, tab)| tab.id)
+                .collect::<Vec<_>>(),
+            vec![last, third, pending]
+        );
     }
 
     #[test]
@@ -1703,6 +1744,20 @@ mod tests {
         let (combined, _) = host
             .combine_pages(terminal, combined.id, SplitDirection::Horizontal)
             .unwrap();
+        assert_eq!(
+            host.tab_contents(combined.id),
+            vec![
+                TabContent::Page(ide),
+                TabContent::Page(sftp),
+                TabContent::Page(forwards),
+                TabContent::Terminal(session),
+            ]
+        );
+        assert_eq!(host.tab_contents(sftp), vec![TabContent::Page(sftp)]);
+        assert_eq!(
+            host.main_tabs().map(|(_, tab)| tab.id).collect::<Vec<_>>(),
+            vec![combined.id]
+        );
         for id in ids {
             assert_eq!(host.container_tab_id(id), combined.id);
             assert!(host.surface_is_visible(id));
@@ -1715,6 +1770,7 @@ mod tests {
         let mount = host.begin_detach(combined.id).unwrap();
         assert!(host.commit_detach(combined.id, mount, detached.into()));
         host.select_main_tab(None);
+        assert_eq!(host.other_main_tab_ids(sftp), Vec::<TabId>::new());
         for (id, handle) in ids.into_iter().zip(&handles) {
             let target = ai
                 .validate_app_surface_handle(&tools, Some(handle.handle_id.as_str()))
@@ -1746,6 +1802,11 @@ mod tests {
         assert_eq!(remaining, vec![forwards]);
         assert_eq!(host.focused_page_id(combined.id), forwards);
         assert_eq!(host.tab_by_id(sftp).unwrap().kind, TabKind::Sftp);
+        assert_eq!(
+            host.tab_contents(combined.id),
+            vec![TabContent::Page(forwards), TabContent::Terminal(session)]
+        );
+        assert_eq!(host.other_main_tab_ids(combined.id), vec![sftp]);
         assert_eq!(
             host.terminal_location(session),
             Some(TerminalLocation {
