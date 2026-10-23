@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Tất cả thẻ",
+      "global": "Trang chung",
+      "local": "Thiết bị đầu cuối cục bộ",
+      "connection": "Kết nối",
+      "empty": "Không có thẻ trong phạm vi này",
+      "search": "Tìm phạm vi thẻ…",
+      "categories": "Danh mục",
+      "connections": "Kết nối",
+      "hint": "↑↓ Chọn · Enter Chuyển · Esc Hủy"
+    },
     "search": {
       "title": "Tìm phiên",
       "placeholder": "Tìm phiên…",

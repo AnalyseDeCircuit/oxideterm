@@ -2,7 +2,7 @@ use super::*;
 use crate::workspace::standalone_connections::StandaloneConnectionSurface;
 
 /// Runtime identity, never a hostname or a saved profile shared by separate connections.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(in crate::workspace) enum TabAffinity {
     Global,
     LocalTerminal,
@@ -10,6 +10,13 @@ pub(in crate::workspace) enum TabAffinity {
     Standalone(String),
     FileTransfer(String),
     Plugin(String),
+}
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub(in crate::workspace) enum TabScope {
+    #[default]
+    All,
+    Affinity(TabAffinity),
 }
 
 /// Terminal pages retain session IDs when merging removes their original tab descriptors.

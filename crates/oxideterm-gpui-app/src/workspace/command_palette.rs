@@ -61,6 +61,7 @@ struct PaletteItem {
 
 #[derive(Clone)]
 enum PaletteAction {
+    SelectTabScope(tabs::TabScope),
     Keybinding(&'static str),
     ActivateTab(TabId),
     OpenSavedConnection(String),
@@ -151,6 +152,30 @@ enum ShortcutsModalVirtualRow {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn open_tab_scope_picker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_modal_interaction_boundary(cx);
+        let scope = self.tab_host.read(cx).scope();
+        let index = self
+            .tab_scope_choices(cx)
+            .iter()
+            .position(|(choice, _, _)| choice == scope)
+            .unwrap_or(0);
+        self.command_palette.update(cx, |palette, cx| {
+            palette.open_tab_scopes(cx);
+            palette.set_selected_index(index, cx);
+        });
+        self.scroll_selected_command_palette_item_into_view(cx);
+        self.clear_ime_selection();
+        self.show_active_input_caret(cx);
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
     pub(super) fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.bootstrap_native_plugin_runtime(cx);
         self.prepare_modal_interaction_boundary(cx);
@@ -482,10 +507,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.record_command_palette_mru(&execution.id, cx);
+        if !matches!(execution.action, PaletteAction::SelectTabScope(_)) {
+            self.record_command_palette_mru(&execution.id, cx);
+        }
         self.ime_marked_text = None;
 
         match execution.action {
+            PaletteAction::SelectTabScope(scope) => self.select_tab_scope(scope, window, cx),
             PaletteAction::Keybinding(action_id) => {
                 let _ = self.dispatch_keybinding_action(action_id, window, cx);
             }
@@ -788,10 +816,9 @@ impl WorkspaceApp {
         // the shortcut closes an active split pane in terminal tabs, while the
         // palette command directly closes all tabs except the active tab.
         let tab_ids = self
-            .tabs(cx)
-            .iter()
-            .filter(|tab| self.tab_host.read(cx).container_tab_id(tab.id) != active_tab_id)
-            .map(|tab| tab.id)
+            .main_tabs(cx)
+            .filter(|(_, tab)| tab.id != active_tab_id)
+            .map(|(_, tab)| tab.id)
             .collect::<Vec<_>>();
         for tab_id in tab_ids {
             self.close_tab_by_id(tab_id, window, cx);
@@ -799,7 +826,10 @@ impl WorkspaceApp {
     }
 
     fn close_all_tabs_from_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let tab_ids = self.tabs(cx).iter().map(|tab| tab.id).collect::<Vec<_>>();
+        let tab_ids = self
+            .main_tabs(cx)
+            .map(|(_, tab)| tab.id)
+            .collect::<Vec<_>>();
         for tab_id in tab_ids {
             self.close_tab_by_id(tab_id, window, cx);
         }
@@ -929,6 +959,47 @@ impl WorkspaceApp {
     }
 
     fn ranked_command_palette_items(&self, cx: &Context<Self>) -> Vec<RankedItem> {
+        if self.command_palette.read(cx).is_tab_scope_picker() {
+            let query = self.command_palette.read(cx).query();
+            return self
+                .tab_scope_choices(cx)
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, (scope, label, detail))| {
+                    let value = format!("{label} {}", detail.as_deref().unwrap_or_default());
+                    let matched = command_palette_match(&label, &value, query)?;
+                    let icon = match &scope {
+                        tabs::TabScope::All => LucideIcon::Layers,
+                        tabs::TabScope::Affinity(tabs::TabAffinity::Global) => {
+                            LucideIcon::AppWindow
+                        }
+                        tabs::TabScope::Affinity(tabs::TabAffinity::LocalTerminal) => {
+                            LucideIcon::Terminal
+                        }
+                        _ => LucideIcon::Server,
+                    };
+                    Some(RankedItem {
+                        score: matched.score,
+                        highlights: Vec::new(),
+                        item: PaletteItem {
+                            id: format!("tab-scope-{index}"),
+                            label,
+                            detail,
+                            icon,
+                            section: if index < 3 {
+                                PaletteSection::Commands
+                            } else {
+                                PaletteSection::Connections
+                            },
+                            shortcut: None,
+                            value,
+                            action: PaletteAction::SelectTabScope(scope),
+                            disabled: false,
+                        },
+                    })
+                })
+                .collect();
+        }
         let (raw_query, ssh_config_hosts) = {
             let palette = self.command_palette.read(cx);
             (palette.query().to_string(), palette.ssh_config_hosts())
@@ -1329,7 +1400,11 @@ impl WorkspaceApp {
         let preview =
             selected_connection.map(|item| command_palette_connection_preview(&self.tokens, item));
         let viewport = window.viewport_size();
-        let palette_top = f32::from(viewport.height) * COMMAND_PALETTE_TOP_RATIO;
+        let palette_top = if palette.tab_scopes {
+            self.window_titlebar_height(window) + 4.0
+        } else {
+            f32::from(viewport.height) * COMMAND_PALETTE_TOP_RATIO
+        };
         let preview_height = if preview.is_some() {
             COMMAND_PALETTE_CONNECTION_PREVIEW_HEIGHT
         } else {
@@ -1342,7 +1417,11 @@ impl WorkspaceApp {
             - 48.0)
             .clamp(0.0, COMMAND_PALETTE_LIST_MAX_HEIGHT);
         let mode = palette.mode;
-        let query_placeholder = self.i18n.t(command_palette_placeholder_key(mode));
+        let query_placeholder = self.i18n.t(if palette.tab_scopes {
+            "sidebar.tab_scope.search"
+        } else {
+            command_palette_placeholder_key(mode)
+        });
         let rows = Arc::new(command_palette_virtual_rows(ranked_items));
         let row_count = rows.len();
         let rows_height =
@@ -1351,7 +1430,11 @@ impl WorkspaceApp {
         let entity = cx.entity();
 
         let panel = dialog_content(&self.tokens)
-            .w(px(command_palette_panel_width(f32::from(viewport.width))))
+            .w(px(if palette.tab_scopes {
+                400.0_f32.min(f32::from(viewport.width) - 16.0)
+            } else {
+                command_palette_panel_width(f32::from(viewport.width))
+            }))
             .rounded(px(self.tokens.radii.lg))
             .shadow_xl()
             .child(
@@ -1446,7 +1529,11 @@ impl WorkspaceApp {
                                 SelectableTextRole::NonSelectable,
                                 "command-palette-footer",
                                 "hint",
-                                self.i18n.t("command_palette.footer_hint"),
+                                self.i18n.t(if palette.tab_scopes {
+                                    "sidebar.tab_scope.hint"
+                                } else {
+                                    "command_palette.footer_hint"
+                                }),
                                 self.tokens.ui.text_muted,
                                 cx,
                             )),
@@ -1514,7 +1601,16 @@ impl WorkspaceApp {
         section: PaletteSection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let label = self.i18n.t(section_label_key(section));
+        let key = if self.command_palette.read(cx).is_tab_scope_picker() {
+            if section == PaletteSection::Connections {
+                "sidebar.tab_scope.connections"
+            } else {
+                "sidebar.tab_scope.categories"
+            }
+        } else {
+            section_label_key(section)
+        };
+        let label = self.i18n.t(key);
         div()
             .w_full()
             .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))

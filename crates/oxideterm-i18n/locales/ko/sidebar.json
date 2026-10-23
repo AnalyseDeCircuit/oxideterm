@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "모든 탭",
+      "global": "공통 페이지",
+      "local": "로컬 터미널",
+      "connection": "연결",
+      "empty": "이 범위에 탭이 없습니다",
+      "search": "탭 범위 검색…",
+      "categories": "분류",
+      "connections": "연결",
+      "hint": "↑↓ 선택 · Enter 전환 · Esc 취소"
+    },
     "search": {
       "title": "세션 검색",
       "placeholder": "세션 검색…",

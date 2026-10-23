@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Tutte le schede",
+      "global": "Pagine globali",
+      "local": "Terminali locali",
+      "connection": "Connessione",
+      "empty": "Nessuna scheda in questo ambito",
+      "search": "Cerca ambiti delle schede…",
+      "categories": "Categorie",
+      "connections": "Connessioni",
+      "hint": "↑↓ Seleziona · Invio Applica · Esc Annulla"
+    },
     "search": {
       "title": "Cerca sessioni",
       "placeholder": "Cerca sessioni…",

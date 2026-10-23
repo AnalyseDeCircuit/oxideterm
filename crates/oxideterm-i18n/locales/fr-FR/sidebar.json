@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Tous les onglets",
+      "global": "Pages globales",
+      "local": "Terminaux locaux",
+      "connection": "Connexion",
+      "empty": "Aucun onglet dans ce périmètre",
+      "search": "Rechercher un périmètre d’onglets…",
+      "categories": "Catégories",
+      "connections": "Connexions",
+      "hint": "↑↓ Sélectionner · Entrée Appliquer · Échap Annuler"
+    },
     "search": {
       "title": "Rechercher des sessions",
       "placeholder": "Rechercher des sessions…",

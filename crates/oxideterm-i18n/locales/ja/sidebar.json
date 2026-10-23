@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "すべてのタブ",
+      "global": "共通ページ",
+      "local": "ローカルターミナル",
+      "connection": "接続",
+      "empty": "この範囲にタブはありません",
+      "search": "タブの範囲を検索…",
+      "categories": "カテゴリ",
+      "connections": "接続",
+      "hint": "↑↓ 選択 · Enter 切り替え · Esc キャンセル"
+    },
     "search": {
       "title": "セッションを検索",
       "placeholder": "セッションを検索…",

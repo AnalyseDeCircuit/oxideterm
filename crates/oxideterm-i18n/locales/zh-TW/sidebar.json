@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "全部分頁",
+      "global": "全域頁面",
+      "local": "本機終端機",
+      "connection": "連線",
+      "empty": "此範圍內尚無分頁",
+      "search": "搜尋分頁範圍…",
+      "categories": "分類",
+      "connections": "連線",
+      "hint": "↑↓ 選擇 · Enter 切換 · Esc 取消"
+    },
     "search": {
       "title": "搜尋工作階段",
       "placeholder": "搜尋工作階段…",

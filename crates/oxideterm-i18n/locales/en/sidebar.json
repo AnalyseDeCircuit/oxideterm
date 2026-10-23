@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "All tabs",
+      "global": "Global pages",
+      "local": "Local terminals",
+      "connection": "Connection",
+      "empty": "No tabs in this scope",
+      "search": "Search tab scopes…",
+      "categories": "Categories",
+      "connections": "Connections",
+      "hint": "↑↓ Select · Enter Apply · Esc Cancel"
+    },
     "search": {
       "title": "Search sessions",
       "placeholder": "Search sessions…",

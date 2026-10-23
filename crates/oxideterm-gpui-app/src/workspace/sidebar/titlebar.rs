@@ -1,6 +1,7 @@
 use super::*;
 
 const TITLEBAR_CONTROL_ICON_SIZE: f32 = 12.0;
+const TITLEBAR_CONTROL_WIDTH: f32 = 46.0;
 
 pub(in crate::workspace) fn client_titlebar_button_layout(cx: &App) -> gpui::WindowButtonLayout {
     #[cfg(target_os = "linux")]
@@ -156,6 +157,11 @@ impl ClientTitlebarIcon {
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn window_titlebar_visible(&self, window: &Window) -> bool {
+        !self.settings_store.settings().sidebar_ui.zen_mode
+            && (window.is_fullscreen() || self.window_titlebar_controls_visible(window))
+    }
+
+    pub(in crate::workspace) fn window_titlebar_controls_visible(&self, window: &Window) -> bool {
         window_titlebar_visibility(
             cfg!(target_os = "linux"),
             window.is_fullscreen(),
@@ -252,6 +258,24 @@ impl WorkspaceApp {
         let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
         let button_layout = client_titlebar_button_layout(cx);
         let supported_controls = window.window_controls();
+        let show_client_controls = cfg!(any(target_os = "windows", target_os = "linux"))
+            && self.window_titlebar_controls_visible(window);
+        let show_native_controls = cfg!(target_os = "macos") && !window.is_fullscreen();
+        let left_controls_width = if show_native_controls {
+            72.0
+        } else if show_client_controls {
+            visible_window_buttons(button_layout.left, supported_controls).count() as f32
+                * TITLEBAR_CONTROL_WIDTH
+        } else {
+            0.0
+        };
+        let right_controls_width = if show_client_controls {
+            visible_window_buttons(button_layout.right, supported_controls).count() as f32
+                * TITLEBAR_CONTROL_WIDTH
+        } else {
+            0.0
+        };
+        let side_min_width = left_controls_width.max(right_controls_width);
 
         div()
             .w_full()
@@ -264,29 +288,48 @@ impl WorkspaceApp {
             .border_color(self.workspace_divider_color(titlebar_border, 0xff))
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(text_color))
-            .when(cfg!(target_os = "linux"), |bar| {
-                bar.child(self.render_client_titlebar_controls(
-                    button_layout.left,
-                    supported_controls,
-                    titlebar_bg,
-                    text_color,
-                    window.is_maximized(),
-                    cx,
-                ))
-            })
-            .child(self.render_window_drag_region("workspace-titlebar-drag-region", cx))
-            .when(
-                cfg!(any(target_os = "windows", target_os = "linux")),
-                |bar| {
-                    bar.child(self.render_client_titlebar_controls(
-                        button_layout.right,
-                        supported_controls,
-                        titlebar_bg,
-                        text_color,
-                        window.is_maximized(),
-                        cx,
-                    ))
-                },
+            // Equal side regions keep the selector centered in the window,
+            // regardless of which side owns the native caption controls.
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(side_min_width))
+                    .h_full()
+                    .flex()
+                    .when(show_native_controls, |side| {
+                        side.child(div().w(px(72.0)).h_full().flex_none())
+                    })
+                    .when(show_client_controls && cfg!(target_os = "linux"), |side| {
+                        side.child(self.render_client_titlebar_controls(
+                            button_layout.left,
+                            supported_controls,
+                            titlebar_bg,
+                            text_color,
+                            window.is_maximized(),
+                            cx,
+                        ))
+                    })
+                    .child(self.render_window_drag_region("workspace-titlebar-drag-left", cx)),
+            )
+            .child(self.render_tab_scope_trigger(cx))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(side_min_width))
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .child(self.render_window_drag_region("workspace-titlebar-drag-right", cx))
+                    .when(show_client_controls, |side| {
+                        side.child(self.render_client_titlebar_controls(
+                            button_layout.right,
+                            supported_controls,
+                            titlebar_bg,
+                            text_color,
+                            window.is_maximized(),
+                            cx,
+                        ))
+                    }),
             )
             .when(
                 cfg!(target_os = "linux") && supported_controls.window_menu,
@@ -311,6 +354,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .h_full()
+            .flex_none()
             .flex()
             .flex_row()
             .children(
@@ -364,7 +408,7 @@ impl WorkspaceApp {
             .role(gpui::Role::Button)
             .aria_label(accessibility_label)
             .occlude()
-            .w(px(46.0))
+            .w(px(TITLEBAR_CONTROL_WIDTH))
             .h_full()
             .flex()
             .items_center()

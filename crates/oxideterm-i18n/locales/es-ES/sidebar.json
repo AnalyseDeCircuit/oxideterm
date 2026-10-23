@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Todas las pestañas",
+      "global": "Páginas globales",
+      "local": "Terminales locales",
+      "connection": "Conexión",
+      "empty": "No hay pestañas en este ámbito",
+      "search": "Buscar ámbitos de pestañas…",
+      "categories": "Categorías",
+      "connections": "Conexiones",
+      "hint": "↑↓ Seleccionar · Enter Cambiar · Esc Cancelar"
+    },
     "search": {
       "title": "Buscar sesiones",
       "placeholder": "Buscar sesiones…",
