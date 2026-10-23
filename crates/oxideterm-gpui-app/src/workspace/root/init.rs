@@ -831,6 +831,7 @@ impl WorkspaceApp {
             ssh_nodes: HashMap::new(),
             saved_ssh_nodes: HashMap::new(),
             expanded_ssh_nodes: HashSet::new(),
+            session_group_expanded: HashMap::new(),
             expanded_standalone_connections: HashSet::new(),
             local_session_group_expanded: true,
             active_ssh_node_id: None,

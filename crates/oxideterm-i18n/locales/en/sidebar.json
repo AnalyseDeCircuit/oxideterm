@@ -95,6 +95,7 @@
       "ai_hint": "OxideSens",
       "switch_tree": "Switch to Tree View",
       "switch_focus": "Switch to Focus View",
+      "switch_host": "Switch to Host View",
       "new_connection": "New Connection",
       "lock_app": "Lock OxideTerm",
       "setup_app_lock": "Set Up Application Lock",

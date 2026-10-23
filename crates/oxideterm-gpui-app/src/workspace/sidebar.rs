@@ -99,6 +99,7 @@ pub(in crate::workspace) enum SessionActionVariant {
 pub(super) enum ActiveSessionSidebarViewMode {
     Tree,
     Focus,
+    Host,
 }
 
 impl SidebarSection {

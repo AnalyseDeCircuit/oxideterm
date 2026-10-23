@@ -922,6 +922,10 @@ pub(crate) struct WorkspaceApp {
     ssh_nodes: HashMap<NodeId, WorkspaceSshNode>,
     saved_ssh_nodes: HashMap<String, NodeId>,
     expanded_ssh_nodes: HashSet<NodeId>,
+    /// Host view disclosure state keyed by synthetic group row ids. Host headers
+    /// default to expanded so the grouping is visible immediately; user rows
+    /// default to collapsed so their option stacks stay out of the way.
+    session_group_expanded: HashMap<NodeId, bool>,
     expanded_standalone_connections: HashSet<String>,
     local_session_group_expanded: bool,
     active_ssh_node_id: Option<NodeId>,

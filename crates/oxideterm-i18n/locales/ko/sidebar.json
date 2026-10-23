@@ -95,6 +95,7 @@
       "ai_hint": "OxideSens",
       "switch_tree": "트리 보기",
       "switch_focus": "포커스 보기",
+      "switch_host": "호스트 보기",
       "new_connection": "새 연결",
       "lock_app": "OxideTerm 잠그기",
       "setup_app_lock": "애플리케이션 잠금 설정",

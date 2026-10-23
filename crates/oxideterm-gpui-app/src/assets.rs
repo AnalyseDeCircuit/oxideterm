@@ -139,6 +139,7 @@ pub(crate) enum LucideIcon {
     Terminal,
     Trash2,
     Upload,
+    UserRound,
     Wifi,
     WifiOff,
     Wrench,
@@ -276,6 +277,7 @@ impl LucideIcon {
             "terminal" => Self::Terminal,
             "trash" | "trash2" => Self::Trash2,
             "upload" => Self::Upload,
+            "user" | "userround" => Self::UserRound,
             "wifi" => Self::Wifi,
             "wifioff" => Self::WifiOff,
             "wrench" => Self::Wrench,
@@ -408,6 +410,7 @@ impl LucideIcon {
             Self::Terminal => "lucide/terminal.svg",
             Self::Trash2 => "lucide/trash-2.svg",
             Self::Upload => "lucide/upload.svg",
+            Self::UserRound => "lucide/user-round.svg",
             Self::Wifi => "lucide/wifi.svg",
             Self::WifiOff => "lucide/wifi-off.svg",
             Self::Wrench => "lucide/wrench.svg",
@@ -619,6 +622,7 @@ impl AssetSource for NativeAssets {
             "lucide/terminal.svg" => TERMINAL,
             "lucide/trash-2.svg" => TRASH_2,
             "lucide/upload.svg" => UPLOAD,
+            "lucide/user-round.svg" => USER_ROUND,
             "lucide/wifi.svg" => WIFI,
             "lucide/wifi-off.svg" => WIFI_OFF,
             "lucide/wrench.svg" => WRENCH,
@@ -986,6 +990,8 @@ const STAR: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height=
 const TERMINAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>"#;
 const TRASH_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>"#;
 const UPLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>"#;
+const USER_ROUND: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/></svg>"#;
+
 const WIFI: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/></svg>"#;
 const WIFI_OFF: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h.01"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/><path d="M5 12.859a10 10 0 0 1 5.17-2.69"/><path d="M19 12.859a10 10 0 0 0-2.007-1.523"/><path d="M2 8.82a15 15 0 0 1 4.177-2.643"/><path d="M22 8.82a15 15 0 0 0-11.288-3.764"/><path d="m2 2 20 20"/></svg>"#;
 const X: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;

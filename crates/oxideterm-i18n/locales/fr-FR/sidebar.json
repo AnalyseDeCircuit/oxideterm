@@ -95,6 +95,7 @@
       "ai_hint": "OxideSens",
       "switch_tree": "Vue arborescente",
       "switch_focus": "Vue focus",
+      "switch_host": "Vue par hôte",
       "new_connection": "Nouvelle connexion",
       "lock_app": "Verrouiller OxideTerm",
       "setup_app_lock": "Configurer le verrouillage",

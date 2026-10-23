@@ -95,6 +95,7 @@
       "ai_hint": "OxideSens",
       "switch_tree": "Vista ad albero",
       "switch_focus": "Vista focus",
+      "switch_host": "Vista per host",
       "new_connection": "Nuova connessione",
       "lock_app": "Blocca OxideTerm",
       "setup_app_lock": "Configura blocco applicazione",
