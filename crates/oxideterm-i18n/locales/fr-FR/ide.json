@@ -44,6 +44,7 @@
     "search_truncated": "Résultats tronqués. Affinez votre recherche pour des correspondances plus précises.",
     "search_results_count": "{{count}} résultats dans {{files}} fichiers",
     "find_placeholder": "Rechercher",
+    "insert_newline": "Insérer un saut de ligne",
     "replace_placeholder": "Remplacer",
     "find_next": "Match suivant (Enter)",
     "find_previous": "Match précédent (Shift+Enter)",

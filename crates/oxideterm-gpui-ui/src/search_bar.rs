@@ -33,6 +33,7 @@ pub fn search_panel(tokens: &ThemeTokens) -> Div {
 pub fn search_row() -> Div {
     div()
         .flex()
+        .flex_wrap()
         .items_center()
         .gap(px(8.0))
         .px(px(12.0))

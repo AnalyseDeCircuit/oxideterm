@@ -44,6 +44,7 @@
     "search_truncated": "Resultados truncados. Refina tu búsqueda para obtener coincidencias más específicas.",
     "search_results_count": "{{count}} resultados en {{files}} archivos",
     "find_placeholder": "Buscar",
+    "insert_newline": "Insertar salto de línea",
     "replace_placeholder": "Reemplazar",
     "find_next": "Siguiente coincidencia (Enter)",
     "find_previous": "Coincidencia anterior (Shift+Enter)",

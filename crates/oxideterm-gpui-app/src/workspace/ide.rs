@@ -571,6 +571,7 @@ impl WorkspaceApp {
             find_previous: self.i18n.t("ide.find_previous"),
             match_case: self.i18n.t("ide.match_case"),
             toggle_replace: self.i18n.t("ide.toggle_replace"),
+            insert_newline: self.i18n.t("ide.insert_newline"),
             close_search: self.i18n.t("ide.close_search"),
             replace_btn: self.i18n.t("ide.replace_btn"),
             replace_all_btn: self.i18n.t("ide.replace_all_btn"),

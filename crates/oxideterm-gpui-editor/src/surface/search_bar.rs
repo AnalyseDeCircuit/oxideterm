@@ -21,6 +21,7 @@ use oxideterm_theme::ThemeTokens;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorSearchLabels {
     pub find_placeholder: String,
+    pub insert_newline: String,
     pub replace_placeholder: String,
     pub find_next: String,
     pub find_previous: String,
@@ -42,6 +43,7 @@ mod tests {
     fn labels() -> EditorSearchLabels {
         EditorSearchLabels {
             find_placeholder: "Find".into(),
+            insert_newline: "Insert newline".into(),
             replace_placeholder: "Replace".into(),
             find_next: "Next".into(),
             find_previous: "Previous".into(),
@@ -249,14 +251,49 @@ mod tests {
         });
         cx.simulate_keystrokes(&format!("{modifier}-enter"));
         editor.read_with(cx, |editor, _| {
-            assert_eq!(editor.find_query, "α\nβ");
+            assert_eq!(editor.find_query, "α\nβ\n");
             assert_eq!(editor.buffer.text(), source);
         });
+        cx.simulate_keystrokes("backspace");
         let toggle = cx.debug_bounds("toggle-replace").unwrap();
         cx.simulate_click(toggle.center(), Modifiers::default());
         cx.simulate_keystrokes("tab");
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("新\n行".into())));
         cx.simulate_keystrokes(&format!("{modifier}-v"));
+        let newline = cx.debug_bounds("replace-newline").unwrap();
+        cx.simulate_click(newline.center(), Modifiers::default());
+        editor.read_with(cx, |editor, cx| {
+            assert_eq!(
+                editor
+                    .search_bar
+                    .as_ref()
+                    .unwrap()
+                    .replacement
+                    .read(cx)
+                    .buffer
+                    .text(),
+                "新\n行\n"
+            );
+            assert_eq!(editor.buffer.text(), source);
+        });
+        cx.simulate_keystrokes("backspace");
+        cx.simulate_resize(size(px(250.0), px(500.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        for replacement in [false, true] {
+            editor.read_with(cx, |editor, cx| {
+                let input = editor.search_input(replacement).unwrap();
+                let bounds = input.read(cx).content_bounds.unwrap();
+                assert!(bounds.size.width >= px(120.0), "search input was squeezed");
+                assert!(bounds.left() >= px(0.0) && bounds.right() <= px(250.0));
+            });
+        }
+        for selector in ["find-next", "find-close", "replace-current", "replace-all"] {
+            let bounds = cx.debug_bounds(selector).unwrap();
+            assert!(
+                bounds.left() >= px(0.0) && bounds.right() <= px(250.0),
+                "{selector}"
+            );
+        }
         let replace = cx.debug_bounds("replace-current").unwrap();
         cx.simulate_click(replace.center(), Modifiers::default());
         editor.read_with(cx, |editor, _| {
@@ -473,6 +510,18 @@ impl TextEditorView {
         })
     }
 
+    fn insert_search_newline(
+        &mut self,
+        replacement: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(input) = self.search_input(replacement) {
+            input.update(cx, |input, cx| input.insert_text("\n", cx));
+            window.focus(&input.read(cx).focus_handle(cx), cx);
+        }
+    }
+
     fn handle_search_key(
         &mut self,
         event: &KeyDownEvent,
@@ -526,6 +575,9 @@ impl TextEditorView {
         match event.keystroke.key.as_str() {
             "escape" => {
                 self.close_search(window, cx);
+            }
+            "enter" if event.keystroke.modifiers.secondary() => {
+                self.insert_search_newline(replacement_focused, window, cx);
             }
             "enter" => {
                 if event.keystroke.modifiers.shift {
@@ -595,9 +647,39 @@ impl TextEditorView {
                 labels.find_placeholder.clone()
             })
             .flex_1()
-            .min_w_0()
-            .h(px(height))
-            .child(input)
+            .min_w(px(160.0))
+            .max_w_full()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child(div().flex_1().min_w_0().h(px(height)).child(input))
+            .child(
+                self.search_icon_button(
+                    if replacement {
+                        "replace-newline"
+                    } else {
+                        "find-newline"
+                    },
+                    "lucide/corner-down-left.svg",
+                    format!(
+                        "{} ({}+Enter)",
+                        labels.insert_newline,
+                        if cfg!(target_os = "macos") {
+                            "⌘"
+                        } else {
+                            "Ctrl"
+                        }
+                    ),
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.insert_search_newline(replacement, window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            )
             .into_any_element()
     }
 
@@ -702,7 +784,8 @@ impl TextEditorView {
             )
             .child(
                 div()
-                    .h(px(28.0))
+                    .min_h(px(28.0))
+                    .max_w_full()
                     .flex_none()
                     .flex()
                     .items_center()

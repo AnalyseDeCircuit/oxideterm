@@ -315,6 +315,36 @@ mod terminal_search_tests {
         workspace.read_with(cx, |workspace, _| {
             assert_eq!(workspace.search.panes[&pane_id].query, "替换");
         });
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.detach_tab_to_window(TabId(100), None, window, cx);
+            });
+        });
+        let detached = workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .tab_host
+                .read(cx)
+                .detached_window_handle(TabId(100))
+                .unwrap()
+        });
+        let mut detached_cx = gpui::VisualTestContext::from_window(detached, cx);
+        detached_cx.run_until_parked();
+        detached_cx.update(|window, cx| {
+            // Detached content mounts on the first platform frame.
+            window.simulate_next_frame(cx);
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_search_for_pane(pane_id, window, cx);
+            });
+            window.draw(cx).clear(cx);
+        });
+        detached_cx.simulate_keystrokes("tab");
+        detached_cx.update(|window, cx| {
+            let workspace = workspace.read(cx);
+            let pane = &workspace.tab_host.read(cx).panes()[&pane_id];
+            assert!(pane.read(cx).focus_handle(cx).is_focused(window));
+            assert!(workspace.search.panes[&pane_id].visible);
+            assert_eq!(workspace.search.focused, None);
+        });
     }
 
     #[test]
@@ -657,13 +687,16 @@ impl WorkspaceApp {
         }
         match event.keystroke.key.as_str() {
             "enter" => self.search_next_for_pane(pane_id, !event.keystroke.modifiers.shift, cx),
-            "escape" => {
-                self.hide_search(pane_id, cx);
+            "escape" | "tab" => {
+                if event.keystroke.key == "escape" {
+                    self.hide_search(pane_id, cx);
+                } else {
+                    self.search.blur();
+                }
                 if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
                     pane.update(cx, |pane, cx| pane.focus(window, cx));
                 }
             }
-            "tab" => self.focus_active_pane(window, cx),
             _ => return false,
         }
         true
@@ -3284,7 +3317,8 @@ impl WorkspaceApp {
                             .id(("terminal-search-input", pane_id.0))
                             .aria_label(self.i18n.t("search.placeholder"))
                             .flex_1()
-                            .min_w_0()
+                            .min_w(px(160.0))
+                            .max_w_full()
                             .h(px(input_height))
                             .capture_any_mouse_down(cx.listener(move |this, _, _, cx| {
                                 this.focus_search_pane(pane_id, cx);
@@ -3345,6 +3379,7 @@ impl WorkspaceApp {
                         row.child(
                             div()
                                 .flex_none()
+                                .max_w_full()
                                 .min_w(px(48.0))
                                 .text_size(px(12.0))
                                 .text_color(rgb(theme.text_muted))

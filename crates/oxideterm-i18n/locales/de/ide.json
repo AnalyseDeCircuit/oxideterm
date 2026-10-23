@@ -44,6 +44,7 @@
     "search_truncated": "Ergebnisse wurden abgeschnitten. Verfeinern Sie Ihre Suche für genauere Treffer.",
     "search_results_count": "{{count}} Ergebnisse in {{files}} Dateien",
     "find_placeholder": "Suchen",
+    "insert_newline": "Zeilenumbruch einfügen",
     "replace_placeholder": "Ersetzen",
     "find_next": "Nächste Übereinstimmung (Enter)",
     "find_previous": "Vorherige Übereinstimmung (Shift+Enter)",

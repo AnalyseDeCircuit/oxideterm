@@ -191,6 +191,7 @@ impl Default for IdeLabels {
             find_previous: "Previous match (Shift+Enter)".into(),
             match_case: "Match case".into(),
             toggle_replace: "Toggle replace".into(),
+            insert_newline: "Insert newline".into(),
             close_search: "Close search (Esc)".into(),
             replace_btn: "Replace".into(),
             replace_all_btn: "All".into(),
