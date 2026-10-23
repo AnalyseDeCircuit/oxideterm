@@ -10,6 +10,7 @@
   dbus,
   fontconfig,
   freetype,
+  gnugrep,
   gst_all_1,
   krb5,
   libclang,
@@ -39,6 +40,33 @@ assert lib.assertMsg stdenv.hostPlatform.isLinux
 
 let
   target = stdenv.hostPlatform.rust.rustcTarget;
+  # Keep native root discovery unless the host has no PEM certificates. These
+  # are openssl-probe's Linux locations, also used by rustls-native-certs.
+  sslCertSetup = ''
+    if [ -z "''${SSL_CERT_FILE+x}" ] && [ -z "''${SSL_CERT_DIR+x}" ]; then
+      oxide_has_ca=false
+      for oxide_cert in \
+        /etc/ssl/certs/ca-certificates.crt \
+        /etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem \
+        /etc/pki/tls/certs/ca-bundle.crt \
+        /etc/ssl/ca-bundle.pem \
+        /etc/pki/tls/cacert.pem \
+        /etc/ssl/cert.pem \
+        /opt/etc/ssl/certs/ca-certificates.crt \
+        /etc/ssl/certs/* \
+        /etc/pki/tls/certs/* \
+        /etc/security/certificates/*; do
+        if [ -f "$oxide_cert" ] && ${gnugrep}/bin/grep -q '^-----BEGIN CERTIFICATE-----' "$oxide_cert"; then
+          oxide_has_ca=true
+          break
+        fi
+      done
+      if [ "$oxide_has_ca" = false ]; then
+        export SSL_CERT_FILE='${cacert}/etc/ssl/certs/ca-bundle.crt'
+      fi
+      unset oxide_has_ca oxide_cert
+    fi
+  '';
   gstPluginsBase = gst_all_1.gst-plugins-base;
   gstPluginsGood = gst_all_1.gst-plugins-good;
   gstPluginsBad = gst_all_1.gst-plugins-bad;
@@ -155,19 +183,13 @@ rustPlatform.buildRustPackage {
     install -Dm644 crates/oxideterm-gpui-app/resources/icons/128x128@2x.png \
       "$out/share/icons/hicolor/256x256/apps/oxideterm.png"
 
-    # rustls-native-certs reads SSL_CERT_FILE/SSL_CERT_DIR first and then never
-    # probes the platform store, so pinning the bundle here would hide CAs the
-    # host added (for example NixOS security.pki). Only fall back to the pinned
-    # bundle when the host has no system store at all.
-    ssl_cert_fallback="if [ ! -d /etc/ssl/certs ] && [ ! -e /etc/ssl/certs/ca-certificates.crt ]; then export SSL_CERT_FILE='${cacert}/etc/ssl/certs/ca-bundle.crt'; fi"
-
     wrapProgram "$out/bin/oxideterm" \
-      --run "$ssl_cert_fallback" \
+      --run ${lib.escapeShellArg sslCertSetup} \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}"
 
     wrapProgram "$out/bin/oxideterm-native" \
       --set OXIDETERM_CLI_BIN "$out/bin/oxideterm" \
-      --run "$ssl_cert_fallback" \
+      --run ${lib.escapeShellArg sslCertSetup} \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}" \
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins}"
 
