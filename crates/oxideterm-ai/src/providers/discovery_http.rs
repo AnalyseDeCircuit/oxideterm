@@ -81,10 +81,9 @@ pub(crate) async fn fetch_provider_models_payload(
 }
 
 async fn send_text(request: reqwest::RequestBuilder) -> Result<String> {
-    let response = request
-        .send()
-        .await
-        .map_err(|error| anyhow!("model refresh request failed: {}", error.without_url()))?;
+    let response = request.send().await.map_err(|error| {
+        anyhow::Error::new(error.without_url()).context("model refresh request failed")
+    })?;
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -105,6 +104,29 @@ pub(crate) fn parse_provider_json(body: &str, context: &str) -> Result<Value> {
     })
 }
 
+/// Provider base URLs are user input and may carry credentials in userinfo or
+/// query parameters. Error text from here reaches a user-visible toast, so only
+/// the scheme, host, port, and path survive.
+pub(crate) fn redacted_endpoint(url: &str) -> String {
+    if let Ok(mut parsed) = reqwest::Url::parse(url) {
+        let _ = parsed.set_username("");
+        let _ = parsed.set_password(None);
+        parsed.set_query(None);
+        parsed.set_fragment(None);
+        return parsed.to_string();
+    }
+    // Unparseable candidates never reached the network; keep the shape only.
+    url.split(['?', '#'])
+        .next()
+        .and_then(|head| head.rsplit('@').next())
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn provider_http_error_message(url: &str, status: reqwest::StatusCode) -> String {
+    format!("{} returned HTTP {status}", redacted_endpoint(url))
+}
+
 pub(crate) async fn fetch_openai_compatible_json(
     client: &reqwest::Client,
     base_url: &str,
@@ -120,14 +142,13 @@ pub(crate) async fn fetch_openai_compatible_json(
             request = request.bearer_auth(api_key.as_str());
         }
         let has_fallback = index + 1 < candidates.len();
-        let response = request
-            .send()
-            .await
-            .map_err(|error| anyhow!("{context} request failed: {}", error.without_url()))?;
+        let response = request.send().await.map_err(|error| {
+            anyhow::Error::new(error.without_url()).context(format!("{context} request failed"))
+        })?;
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            let message = format!("{url} returned HTTP {status}");
+            let message = provider_http_error_message(url, status);
             errors.push(message.clone());
             if has_fallback
                 && (status.as_u16() == 400
@@ -147,7 +168,7 @@ pub(crate) async fn fetch_openai_compatible_json(
         match parse_provider_json(&body, context) {
             Ok(json) => return Ok(json),
             Err(error) => {
-                errors.push(format!("{url}: {error}"));
+                errors.push(format!("{}: {error}", redacted_endpoint(url)));
                 if has_fallback && looks_like_html_response(&body) {
                     continue;
                 }
@@ -269,6 +290,37 @@ pub(crate) fn url_encode_component(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacted_endpoint_drops_credentials_and_query() {
+        assert_eq!(
+            redacted_endpoint("https://user:secret@gateway.example/v1/models?key=SECRET#frag"),
+            "https://gateway.example/v1/models"
+        );
+        assert_eq!(
+            redacted_endpoint("http://127.0.0.1:8080/v1/models?api_key=SECRET"),
+            "http://127.0.0.1:8080/v1/models"
+        );
+        // Unparseable input still cannot leak the credential-shaped parts.
+        assert_eq!(
+            redacted_endpoint("not a url user:secret@host/v1?key=SECRET"),
+            "host/v1"
+        );
+    }
+
+    #[test]
+    fn provider_http_error_message_never_reports_credentials() {
+        let message = provider_http_error_message(
+            "https://user:secret@gateway.example/v1/models?key=SECRET",
+            reqwest::StatusCode::UNAUTHORIZED,
+        );
+        assert_eq!(
+            message,
+            "https://gateway.example/v1/models returned HTTP 401 Unauthorized"
+        );
+        assert!(!message.contains("secret"));
+        assert!(!message.contains("SECRET"));
+    }
 
     #[test]
     fn gemini_api_base_accepts_service_and_versioned_roots() {

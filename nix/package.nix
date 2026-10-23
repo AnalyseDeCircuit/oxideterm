@@ -155,13 +155,19 @@ rustPlatform.buildRustPackage {
     install -Dm644 crates/oxideterm-gpui-app/resources/icons/128x128@2x.png \
       "$out/share/icons/hicolor/256x256/apps/oxideterm.png"
 
+    # rustls-native-certs reads SSL_CERT_FILE/SSL_CERT_DIR first and then never
+    # probes the platform store, so pinning the bundle here would hide CAs the
+    # host added (for example NixOS security.pki). Only fall back to the pinned
+    # bundle when the host has no system store at all.
+    ssl_cert_fallback="if [ ! -d /etc/ssl/certs ] && [ ! -e /etc/ssl/certs/ca-certificates.crt ]; then export SSL_CERT_FILE='${cacert}/etc/ssl/certs/ca-bundle.crt'; fi"
+
     wrapProgram "$out/bin/oxideterm" \
-      --set SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
+      --run "$ssl_cert_fallback" \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}"
 
     wrapProgram "$out/bin/oxideterm-native" \
       --set OXIDETERM_CLI_BIN "$out/bin/oxideterm" \
-      --set SSL_CERT_FILE "${cacert}/etc/ssl/certs/ca-bundle.crt" \
+      --run "$ssl_cert_fallback" \
       --prefix LD_LIBRARY_PATH : "${lib.makeLibraryPath runtimeLibs}" \
       --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" gstPlugins}"
 

@@ -198,11 +198,9 @@ impl WorkspaceApp {
                                 cx,
                             );
                         }
-                        ai_state::AiModelRefreshIntent::Failed => {
-                            let safe_error =
-                                self.i18n.t("settings_view.ai.acp_agent_error_unknown");
+                        ai_state::AiModelRefreshIntent::Failed { message } => {
                             self.push_ai_settings_toast(
-                                self.ai_i18n_error("settings_view.ai.refresh_failed", &safe_error),
+                                self.ai_i18n_error("settings_view.ai.refresh_failed", &message),
                                 TerminalNoticeVariant::Error,
                                 cx,
                             );
