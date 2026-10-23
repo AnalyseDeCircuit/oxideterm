@@ -1149,6 +1149,8 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
     else {
         return;
     };
+    // Confirming access starts a Tokio backend task that can wake GPUI from another thread.
+    cx.executor().allow_parking();
     let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
     let window_handle = cx.windows()[0];
     let node_id = NodeId::new("ide-choice-host");
