@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "全部标签",
+      "global": "全局页面",
+      "local": "本地终端",
+      "connection": "连接",
+      "empty": "此范围内暂无标签",
+      "search": "搜索标签范围…",
+      "categories": "分类",
+      "connections": "连接",
+      "hint": "↑↓ 选择 · Enter 切换 · Esc 取消"
+    },
     "search": {
       "title": "搜索会话",
       "placeholder": "搜索会话…",
@@ -66,6 +77,8 @@
       "packages": "包管理"
     },
     "tooltips": {
+      "switch_to_light": "切换为浅色主题",
+      "switch_to_dark": "切换为深色主题",
       "settings": "设置",
       "ai_hint": "OxideSens",
       "switch_tree": "切换到树形视图",

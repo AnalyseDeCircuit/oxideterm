@@ -244,6 +244,7 @@ impl WorkspaceApp {
         }
         self.register_tab_surface(&tab, cx);
         self.close_tab_context_menu();
+        self.reveal_tab_scope(tab.id, cx);
         self.apply_main_window_active_tab_change(previous, Some(tab.id), cx);
         self.sync_active_tab_surface(cx);
         self.focus_tab_terminal(tab.id, window, cx);
@@ -695,6 +696,7 @@ impl WorkspaceApp {
         if let Some(transition) = transition {
             // Close the source shell directly; re-entering its handle from its own event fails.
             self.apply_tab_mount_cleanup(transition.cleanup, Some(current_window), cx);
+            self.reveal_tab_scope(tab_id, cx);
             self.apply_main_window_active_tab_change(
                 transition.selection.previous,
                 transition.selection.current,
@@ -1723,7 +1725,7 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let button_layout = sidebar::client_titlebar_button_layout(cx);
         let supported_controls = window.window_controls();
-        let show_window_controls = self.window_titlebar_visible(window);
+        let show_window_controls = self.window_titlebar_controls_visible(window);
         div()
             .h(px(self.tokens.metrics.titlebar_height))
             .flex_none()

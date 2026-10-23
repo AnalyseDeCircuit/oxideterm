@@ -34,6 +34,12 @@ pub(in crate::workspace) struct PluginConnectionSession {
 }
 
 impl PluginConnections {
+    pub(in crate::workspace) fn profile_for_instance(&self, instance: &str) -> Option<&str> {
+        self.sessions
+            .get(instance)
+            .map(|session| session.profile_id.as_str())
+    }
+
     pub(in crate::workspace) fn instance_for_page(&self, tab: TabId) -> Option<&str> {
         self.sessions
             .iter()

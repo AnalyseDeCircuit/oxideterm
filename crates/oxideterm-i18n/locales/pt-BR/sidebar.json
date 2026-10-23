@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Todas as abas",
+      "global": "Páginas globais",
+      "local": "Terminais locais",
+      "connection": "Conexão",
+      "empty": "Nenhuma aba neste escopo",
+      "search": "Buscar escopos de abas…",
+      "categories": "Categorias",
+      "connections": "Conexões",
+      "hint": "↑↓ Selecionar · Enter Aplicar · Esc Cancelar"
+    },
     "search": {
       "title": "Pesquisar sessões",
       "placeholder": "Pesquisar sessões…",
@@ -66,6 +77,8 @@
       "packages": "Pacotes"
     },
     "tooltips": {
+      "switch_to_light": "Mudar para o tema claro",
+      "switch_to_dark": "Mudar para o tema escuro",
       "settings": "Configurações",
       "ai_hint": "OxideSens",
       "switch_tree": "Visualização em árvore",

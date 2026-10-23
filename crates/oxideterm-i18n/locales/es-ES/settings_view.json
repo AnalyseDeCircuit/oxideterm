@@ -813,6 +813,16 @@
       "display_behavior_hint": "Configurar márgenes, desplazamiento y codificación del terminal."
     },
     "appearance": {
+      "mode": "Modo de apariencia",
+      "mode_light": "Claro",
+      "mode_dark": "Oscuro",
+      "mode_hint": "Usa un perfil claro u oscuro fijo, o cambia automáticamente con el sistema.",
+      "edit_scheme": "Configurar perfiles",
+      "legacy_scheme_hint": "La apariencia actual no está asignada a un perfil. Elige Claro u Oscuro y luego «Usar apariencia actual».",
+      "use_current_scheme": "Usar apariencia actual",
+      "scheme_unavailable": "{{scheme}} no está configurado o su tema no está disponible. Configúralo primero.",
+      "schemes_identical": "Los perfiles claro y oscuro son idénticos.",
+      "configure_schemes": "Configurar apariencia",
       "follow_system": "Seguir la apariencia del sistema",
       "system_light": "Perfil claro",
       "system_dark": "Perfil oscuro",

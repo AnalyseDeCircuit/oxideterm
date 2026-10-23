@@ -813,6 +813,16 @@
       "display_behavior_hint": "Configure terminal padding, scrolling, and character encoding."
     },
     "appearance": {
+      "mode": "Appearance mode",
+      "mode_light": "Light",
+      "mode_dark": "Dark",
+      "mode_hint": "Use a fixed light or dark scheme, or switch automatically with the system.",
+      "edit_scheme": "Configure schemes",
+      "legacy_scheme_hint": "Your current appearance is not assigned to a scheme. Choose Light or Dark, then select “Use current appearance”.",
+      "use_current_scheme": "Use current appearance",
+      "scheme_unavailable": "{{scheme}} is not configured or its theme is unavailable. Set it up first.",
+      "schemes_identical": "The light and dark schemes are identical.",
+      "configure_schemes": "Configure appearance",
       "follow_system": "Follow system appearance",
       "system_light": "Light scheme",
       "system_dark": "Dark scheme",

@@ -865,11 +865,12 @@ impl WorkspaceApp {
             _cloud_sync_subscription: cloud_sync_subscription,
             i18n,
             tokens,
+            theme_transition_task: None,
             system_dark,
             appearance_edit_dark: settings
                 .appearance
-                .follow_system_appearance
-                .then_some(system_dark),
+                .active_scheme(system_dark)
+                .map(oxideterm_settings::AppearanceScheme::is_dark),
             active_background: settings.resolved_background(system_dark),
             detected_graphics,
             render_profile_override,

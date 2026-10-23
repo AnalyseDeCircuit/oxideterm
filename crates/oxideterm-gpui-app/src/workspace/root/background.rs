@@ -134,6 +134,182 @@ mod tests {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn toggle_titlebar_theme(&mut self, cx: &mut Context<Self>) {
+        if self.theme_transition_task.is_some() {
+            return;
+        }
+        match oxideterm_settings_model::next_appearance_scheme(
+            self.settings_store.settings(),
+            self.system_dark,
+        ) {
+            Ok(scheme) => self.change_appearance_mode(Some(scheme), cx),
+            Err(error) => self.show_appearance_scheme_error(error, cx),
+        }
+    }
+
+    pub(in crate::workspace) fn show_appearance_scheme_error(
+        &mut self,
+        error: oxideterm_settings_model::AppearanceSchemeError,
+        cx: &mut Context<Self>,
+    ) {
+        use oxideterm_settings_model::AppearanceSchemeError;
+        let (message, scheme) = match error {
+            AppearanceSchemeError::Unassigned => (
+                self.i18n.t("settings_view.appearance.legacy_scheme_hint"),
+                None,
+            ),
+            AppearanceSchemeError::Identical => (
+                self.i18n.t("settings_view.appearance.schemes_identical"),
+                self.appearance_edit_dark,
+            ),
+            AppearanceSchemeError::Unavailable(scheme) => (
+                self.i18n
+                    .t("settings_view.appearance.scheme_unavailable")
+                    .replace(
+                        "{{scheme}}",
+                        &self.i18n.t(if scheme.is_dark() {
+                            "settings_view.appearance.system_dark"
+                        } else {
+                            "settings_view.appearance.system_light"
+                        }),
+                    ),
+                Some(scheme.is_dark()),
+            ),
+        };
+        self.apply_workspace_overlay_intent(
+            overlay::WorkspaceOverlayIntent::AppearanceSetup {
+                notice: TerminalNotice {
+                    title: message,
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Warning,
+                },
+                scheme,
+                label: self.i18n.t("settings_view.appearance.configure_schemes"),
+                workspace: cx.entity().downgrade(),
+            },
+            cx,
+        );
+    }
+
+    fn validate_appearance_mode(
+        &self,
+        scheme: Option<oxideterm_settings::AppearanceScheme>,
+    ) -> Result<(), oxideterm_settings_model::AppearanceSchemeError> {
+        use oxideterm_settings::AppearanceScheme;
+        for candidate in [AppearanceScheme::Light, AppearanceScheme::Dark] {
+            if scheme.is_none_or(|scheme| scheme == candidate) {
+                oxideterm_settings_model::validate_appearance_scheme(
+                    self.settings_store.settings(),
+                    candidate,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(in crate::workspace) fn change_appearance_mode(
+        &mut self,
+        scheme: Option<oxideterm_settings::AppearanceScheme>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.theme_transition_task.is_some() {
+            return;
+        }
+        if let Err(error) = self.validate_appearance_mode(scheme) {
+            self.show_appearance_scheme_error(error, cx);
+            return;
+        }
+        let appearance = &self.settings_store.settings().appearance;
+        if match scheme {
+            None => appearance.follow_system_appearance,
+            Some(scheme) => {
+                !appearance.follow_system_appearance && appearance.manual_scheme == Some(scheme)
+            }
+        } {
+            return;
+        }
+        let previous = self.tokens;
+        self.apply_appearance_mode(scheme, cx);
+        if !self.tokens.motion.enabled || cx.reduce_motion() || previous.ui == self.tokens.ui {
+            return;
+        }
+
+        let duration = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        let target = self.tokens;
+        self.interpolate_theme_colors(previous, target, 0.0);
+        let started = cx.background_executor().now();
+        // Only repaint UI colors. Persistence, terminal palettes and plugin events
+        // are applied once above; background media retains its existing crossfade.
+        self.theme_transition_task = Some(cx.spawn(async move |workspace, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_millis(16))
+                    .await;
+                let elapsed = cx
+                    .background_executor()
+                    .now()
+                    .saturating_duration_since(started);
+                let progress = (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
+                // Match the background crossfade's smooth start and finish.
+                let eased = progress * progress * (3.0 - 2.0 * progress);
+                if workspace
+                    .update(cx, |this, cx| {
+                        this.interpolate_theme_colors(previous, target, eased);
+                        if progress >= 1.0 {
+                            this.theme_transition_task = None;
+                        }
+                        cx.notify();
+                    })
+                    .is_err()
+                    || progress >= 1.0
+                {
+                    break;
+                }
+            }
+        }));
+        cx.notify();
+    }
+
+    fn interpolate_theme_colors(&mut self, from: ThemeTokens, to: ThemeTokens, progress: f32) {
+        use oxideterm_gpui_ui::motion::lerp;
+        self.tokens.ui = from.ui.interpolate(to.ui, progress);
+        self.tokens.metrics.window_vibrancy_tint_alpha = lerp(
+            from.metrics.window_vibrancy_tint_alpha,
+            to.metrics.window_vibrancy_tint_alpha,
+            progress,
+        );
+        self.tokens.metrics.panel_vibrancy_alpha = lerp(
+            from.metrics.panel_vibrancy_alpha,
+            to.metrics.panel_vibrancy_alpha,
+            progress,
+        );
+        self.tokens.metrics.sidebar_vibrancy_alpha = lerp(
+            from.metrics.sidebar_vibrancy_alpha,
+            to.metrics.sidebar_vibrancy_alpha,
+            progress,
+        );
+    }
+
+    fn apply_appearance_mode(
+        &mut self,
+        scheme: Option<oxideterm_settings::AppearanceScheme>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = self.validate_appearance_mode(scheme) {
+            self.show_appearance_scheme_error(error, cx);
+            return;
+        }
+        self.edit_settings(
+            |settings| oxideterm_settings_model::apply_appearance_mode(settings, scheme),
+            cx,
+        );
+    }
+
     pub(in crate::workspace) fn sync_system_appearance(
         &mut self,
         appearance: gpui::WindowAppearance,
@@ -150,6 +326,7 @@ impl WorkspaceApp {
             .resolved_id(self.settings_store.settings(), self.system_dark)
             .to_string();
         self.system_dark = dark;
+        self.theme_transition_task = None;
         let settings = self.settings_store.settings();
         self.tokens = tokens_from_settings(settings, dark);
         self.active_background = settings.resolved_background(dark);

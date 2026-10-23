@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Tutte le schede",
+      "global": "Pagine globali",
+      "local": "Terminali locali",
+      "connection": "Connessione",
+      "empty": "Nessuna scheda in questo ambito",
+      "search": "Cerca ambiti delle schede…",
+      "categories": "Categorie",
+      "connections": "Connessioni",
+      "hint": "↑↓ Seleziona · Invio Applica · Esc Annulla"
+    },
     "search": {
       "title": "Cerca sessioni",
       "placeholder": "Cerca sessioni…",
@@ -66,6 +77,8 @@
       "packages": "Pacchetti"
     },
     "tooltips": {
+      "switch_to_light": "Passa al tema chiaro",
+      "switch_to_dark": "Passa al tema scuro",
       "settings": "Impostazioni",
       "ai_hint": "OxideSens",
       "switch_tree": "Vista ad albero",

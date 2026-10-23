@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Alle Tabs",
+      "global": "Globale Seiten",
+      "local": "Lokale Terminals",
+      "connection": "Verbindung",
+      "empty": "Keine Tabs in diesem Bereich",
+      "search": "Tab-Bereiche suchen…",
+      "categories": "Kategorien",
+      "connections": "Verbindungen",
+      "hint": "↑↓ Auswählen · Enter Wechseln · Esc Abbrechen"
+    },
     "search": {
       "title": "Sitzungen suchen",
       "placeholder": "Sitzungen suchen…",
@@ -66,6 +77,8 @@
       "packages": "Pakete"
     },
     "tooltips": {
+      "switch_to_light": "Zum hellen Design wechseln",
+      "switch_to_dark": "Zum dunklen Design wechseln",
       "settings": "Einstellungen",
       "ai_hint": "OxideSens",
       "switch_tree": "Baumansicht",

@@ -7,7 +7,7 @@
 //! GPUI rendering. The app keeps the modal layout while this module owns the
 //! JSON shape, color normalization, and editor value conversion.
 
-use oxideterm_settings::PersistedSettings;
+use oxideterm_settings::{AppearanceScheme, PersistedSettings};
 use oxideterm_theme::{AppUiColors, BUILT_IN_THEMES, TerminalTheme, ThemeTokens, theme_by_id};
 
 pub const CUSTOM_THEME_PREFIX: &str = "custom:";
@@ -41,9 +41,14 @@ impl ThemeTarget {
     }
 
     pub fn resolved_id(self, settings: &PersistedSettings, dark: bool) -> &str {
-        if !settings.appearance.follow_system_appearance {
-            self.selected_id(settings)
-        } else if dark {
+        match settings.appearance.active_scheme(dark) {
+            Some(scheme) => self.scheme_id(settings, scheme.is_dark()),
+            None => self.selected_id(settings),
+        }
+    }
+
+    pub fn scheme_id(self, settings: &PersistedSettings, dark: bool) -> &str {
+        if dark {
             &self.system_themes(settings).dark
         } else {
             &self.system_themes(settings).light
@@ -75,6 +80,94 @@ impl ThemeTarget {
             Self::Terminal => settings.terminal.theme = id,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppearanceSchemeError {
+    Unassigned,
+    Unavailable(AppearanceScheme),
+    Identical,
+}
+
+pub fn validate_appearance_scheme(
+    settings: &PersistedSettings,
+    scheme: AppearanceScheme,
+) -> Result<(), AppearanceSchemeError> {
+    for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
+        let id = target.scheme_id(settings, scheme.is_dark());
+        let valid = BUILT_IN_THEMES.iter().any(|theme| theme.id == id)
+            || settings
+                .custom_themes
+                .get(id)
+                .is_some_and(|theme| match target {
+                    ThemeTarget::Application => theme
+                        .get("uiColors")
+                        .and_then(app_ui_colors_from_value)
+                        .is_some(),
+                    ThemeTarget::Terminal => theme.get("terminalColors").is_some_and(|colors| {
+                        TERMINAL_THEME_COLOR_FIELDS
+                            .iter()
+                            .all(|field| color_value(colors, field.json_key).is_some())
+                    }),
+                });
+        if !valid {
+            return Err(AppearanceSchemeError::Unavailable(scheme));
+        }
+    }
+    Ok(())
+}
+
+pub fn next_appearance_scheme(
+    settings: &PersistedSettings,
+    system_dark: bool,
+) -> Result<AppearanceScheme, AppearanceSchemeError> {
+    let current = settings
+        .appearance
+        .active_scheme(system_dark)
+        .ok_or(AppearanceSchemeError::Unassigned)?;
+    let next = AppearanceScheme::from_dark(!current.is_dark());
+    validate_appearance_scheme(settings, next)?;
+    if [ThemeTarget::Application, ThemeTarget::Terminal]
+        .into_iter()
+        .all(|target| target.scheme_id(settings, false) == target.scheme_id(settings, true))
+        && settings.terminal.background_for_scheme(Some(false))
+            == settings.terminal.background_for_scheme(Some(true))
+    {
+        return Err(AppearanceSchemeError::Identical);
+    }
+    Ok(next)
+}
+
+pub fn apply_appearance_mode(settings: &mut PersistedSettings, scheme: Option<AppearanceScheme>) {
+    settings.appearance.follow_system_appearance = scheme.is_none();
+    if let Some(scheme) = scheme {
+        settings.appearance.manual_scheme = Some(scheme);
+        // Keep the fixed-theme fields usable by released clients and plugin APIs.
+        for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
+            let id = target.scheme_id(settings, scheme.is_dark()).to_owned();
+            target.apply(settings, id);
+        }
+        let background = settings
+            .terminal
+            .background_for_scheme(Some(scheme.is_dark()));
+        settings.terminal.apply_background_style(background);
+    }
+}
+
+pub fn assign_current_appearance(
+    settings: &mut PersistedSettings,
+    scheme: AppearanceScheme,
+    system_dark: bool,
+) {
+    let background = settings.resolved_background(system_dark);
+    for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
+        let id = target.resolved_id(settings, system_dark).to_owned();
+        target.apply_for_scheme(settings, Some(scheme.is_dark()), id);
+    }
+    settings
+        .terminal
+        .set_background_for_scheme(Some(scheme.is_dark()), background);
+    apply_appearance_mode(settings, Some(scheme));
 }
 
 #[derive(Clone, Copy)]
@@ -879,6 +972,114 @@ mod tests {
         }
         assert_eq!(settings.appearance.theme, "github-dark");
         assert_eq!(settings.terminal.theme, "monokai");
+
+        for (ui, terminal, image) in [
+            ("code-light", "solarized-light", "day.png"),
+            ("dracula", "tokyo-night", "night.png"),
+        ] {
+            let scheme = next_appearance_scheme(&settings, true).unwrap();
+            apply_appearance_mode(&mut settings, Some(scheme));
+            assert_eq!(settings.appearance.theme, ui);
+            assert_eq!(settings.terminal.theme, terminal);
+            assert!(!settings.appearance.follow_system_appearance);
+            assert_eq!(ThemeTarget::Application.resolved_id(&settings, false), ui);
+            assert_eq!(ThemeTarget::Terminal.resolved_id(&settings, true), terminal);
+            assert_eq!(
+                settings.resolved_background(true).image.as_deref(),
+                Some(image)
+            );
+        }
+    }
+
+    #[test]
+    fn scheme_switch_uses_explicit_modes_and_preserves_unassigned_themes() {
+        let mut settings = oxideterm_settings::sanitize_settings_value(serde_json::json!({
+            "appearance": {"theme": "azurite"},
+            "terminal": {"theme": "paper-oxide", "backgroundImage": "current.png"}
+        }))
+        .unwrap()
+        .settings;
+        assert_eq!(
+            next_appearance_scheme(&settings, false),
+            Err(AppearanceSchemeError::Unassigned)
+        );
+        assert_eq!(
+            ThemeTarget::Application.resolved_id(&settings, true),
+            "azurite"
+        );
+        assert_eq!(settings.appearance.manual_scheme, None);
+
+        assign_current_appearance(&mut settings, AppearanceScheme::Dark, false);
+        assert_eq!(
+            settings.appearance.manual_scheme,
+            Some(AppearanceScheme::Dark)
+        );
+        assert_eq!(settings.appearance.system_themes.dark, "azurite");
+        assert_eq!(settings.terminal.system_themes.dark, "paper-oxide");
+        assert_eq!(
+            settings.resolved_background(false).image.as_deref(),
+            Some("current.png")
+        );
+
+        // A user may intentionally choose dark-colored palettes for the light mode.
+        settings.appearance.system_themes.light = "dracula".into();
+        settings.terminal.system_themes.light = "monokai".into();
+        let next = next_appearance_scheme(&settings, false).unwrap();
+        assert_eq!(next, AppearanceScheme::Light);
+        apply_appearance_mode(&mut settings, Some(next));
+        assert_eq!(settings.to_value()["appearance"]["manualScheme"], "light");
+        for system_dark in [false, true] {
+            assert_eq!(
+                ThemeTarget::Application.resolved_id(&settings, system_dark),
+                "dracula"
+            );
+            assert_eq!(
+                ThemeTarget::Terminal.resolved_id(&settings, system_dark),
+                "monokai"
+            );
+            assert_eq!(
+                next_appearance_scheme(&settings, system_dark),
+                Ok(AppearanceScheme::Dark)
+            );
+        }
+    }
+
+    #[test]
+    fn scheme_switch_reports_missing_and_identical_profiles_without_replacement() {
+        let mut settings = PersistedSettings::default();
+        settings.appearance.manual_scheme = Some(AppearanceScheme::Dark);
+        settings.appearance.system_themes.dark = "azurite".into();
+        settings.terminal.system_themes.light = "paper-oxide".into();
+        settings.terminal.system_themes.dark = "paper-oxide".into();
+        for id in ["", "custom:removed"] {
+            settings.appearance.system_themes.light = id.into();
+            assert_eq!(
+                next_appearance_scheme(&settings, false),
+                Err(AppearanceSchemeError::Unavailable(AppearanceScheme::Light))
+            );
+            assert_eq!(settings.appearance.system_themes.light, id);
+            assert_eq!(
+                settings.appearance.manual_scheme,
+                Some(AppearanceScheme::Dark)
+            );
+        }
+        settings.appearance.system_themes.light = "azurite".into();
+        assert_eq!(
+            next_appearance_scheme(&settings, false),
+            Err(AppearanceSchemeError::Identical)
+        );
+        assert_eq!(settings.appearance.system_themes.light, "azurite");
+        settings.terminal.set_background_for_scheme(
+            Some(false),
+            oxideterm_settings::BackgroundStyle {
+                image: Some("day.png".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            next_appearance_scheme(&settings, false),
+            Ok(AppearanceScheme::Light)
+        );
     }
 
     #[test]

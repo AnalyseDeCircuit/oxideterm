@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "Todas las pestañas",
+      "global": "Páginas globales",
+      "local": "Terminales locales",
+      "connection": "Conexión",
+      "empty": "No hay pestañas en este ámbito",
+      "search": "Buscar ámbitos de pestañas…",
+      "categories": "Categorías",
+      "connections": "Conexiones",
+      "hint": "↑↓ Seleccionar · Enter Cambiar · Esc Cancelar"
+    },
     "search": {
       "title": "Buscar sesiones",
       "placeholder": "Buscar sesiones…",
@@ -66,6 +77,8 @@
       "packages": "Paquetes"
     },
     "tooltips": {
+      "switch_to_light": "Cambiar al tema claro",
+      "switch_to_dark": "Cambiar al tema oscuro",
       "settings": "Configuración",
       "ai_hint": "OxideSens",
       "switch_tree": "Vista de árbol",

@@ -813,6 +813,16 @@
       "display_behavior_hint": "Configura margini, scorrimento e codifica del terminale."
     },
     "appearance": {
+      "mode": "Modalità aspetto",
+      "mode_light": "Chiaro",
+      "mode_dark": "Scuro",
+      "mode_hint": "Usa un profilo chiaro o scuro fisso oppure segui automaticamente il sistema.",
+      "edit_scheme": "Configura profili",
+      "legacy_scheme_hint": "L’aspetto attuale non è assegnato a un profilo. Scegli Chiaro o Scuro, poi «Usa aspetto attuale».",
+      "use_current_scheme": "Usa aspetto attuale",
+      "scheme_unavailable": "{{scheme}} non è configurato o il tema non è disponibile. Configuralo prima.",
+      "schemes_identical": "I profili chiaro e scuro sono identici.",
+      "configure_schemes": "Configura aspetto",
       "follow_system": "Segui l’aspetto del sistema",
       "system_light": "Profilo chiaro",
       "system_dark": "Profilo scuro",

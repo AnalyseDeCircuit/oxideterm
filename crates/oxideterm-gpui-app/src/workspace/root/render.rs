@@ -179,6 +179,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let window_id = window.window_handle().window_id();
+        let previous_tab = self.active_tab_id(cx);
+        self.sync_tab_scope(cx);
+        if previous_tab != self.active_tab_id(cx) {
+            self.sync_active_tab_surface(cx);
+            self.needs_active_pane_focus = true;
+        }
         let active_ime_target = self.active_ime_target_for_window(window_id, cx);
         self.workspace_input.update(cx, |input, cx| {
             input.sync_active_target(active_ime_target, cx);
@@ -295,6 +301,8 @@ impl WorkspaceApp {
                     self.render_empty_workspace(available_width, cx)
                 }
             }
+        } else if *self.tab_host.read(cx).scope() != tabs::TabScope::All {
+            self.render_empty_tab_scope(cx)
         } else {
             let available_width = self.welcome_main_content_width(window, cx);
             self.render_empty_workspace(available_width, cx)

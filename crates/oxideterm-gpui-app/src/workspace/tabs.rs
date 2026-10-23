@@ -10,10 +10,11 @@ mod navigation;
 mod nodes;
 mod nodes_reconnect_helpers;
 mod render;
+mod scope;
 pub(super) mod split_drop;
 mod state;
 
-pub(in crate::workspace) use affinity::{TabAffinity, TabContent};
+pub(in crate::workspace) use affinity::{TabAffinity, TabContent, TabScope};
 
 pub(in crate::workspace) use entity::{
     TabCloseConfirmKeyAction, TabCloseProcessProbe, TabDetachTransition, TabMountCleanupPlan,

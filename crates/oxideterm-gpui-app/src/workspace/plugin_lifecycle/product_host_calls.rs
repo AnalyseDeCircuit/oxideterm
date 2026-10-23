@@ -291,6 +291,7 @@ impl WorkspaceApp {
             |settings| {
                 settings.appearance.theme = theme_id.clone();
                 settings.appearance.follow_system_appearance = false;
+                settings.appearance.manual_scheme = None;
                 settings.terminal.theme = theme_id;
             },
             cx,

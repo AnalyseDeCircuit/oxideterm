@@ -54,6 +54,9 @@ jobs:
         run: cargo fmt --check
 
       - name: cargo test
+        env:
+          # Cargo runs each package's tests from its crate directory.
+          OXIDETERM_AGENT_DIR: ${{ github.workspace }}/crates/oxideterm-gpui-app/resources/agents
         run: cargo test --workspace
 
   i18n:

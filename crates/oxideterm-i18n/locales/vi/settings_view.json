@@ -813,6 +813,16 @@
       "display_behavior_hint": "Cấu hình lề, cuộn và mã hóa ký tự của terminal."
     },
     "appearance": {
+      "mode": "Chế độ giao diện",
+      "mode_light": "Sáng",
+      "mode_dark": "Tối",
+      "mode_hint": "Dùng giao diện sáng hoặc tối cố định, hoặc tự động chuyển theo hệ thống.",
+      "edit_scheme": "Thiết lập bộ giao diện",
+      "legacy_scheme_hint": "Giao diện hiện tại chưa được gán vào bộ nào. Chọn Sáng hoặc Tối, rồi chọn “Dùng giao diện hiện tại”.",
+      "use_current_scheme": "Dùng giao diện hiện tại",
+      "scheme_unavailable": "{{scheme}} chưa được thiết lập hoặc chủ đề không còn khả dụng. Hãy thiết lập trước.",
+      "schemes_identical": "Bộ giao diện sáng và tối giống nhau.",
+      "configure_schemes": "Thiết lập giao diện",
       "follow_system": "Theo giao diện hệ thống",
       "system_light": "Bộ giao diện sáng",
       "system_dark": "Bộ giao diện tối",

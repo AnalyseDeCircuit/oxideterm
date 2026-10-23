@@ -349,7 +349,11 @@ impl WorkspaceApp {
         self.sync_active_privilege_prompt_inline_hint(cx);
     }
 
-    fn focus_active_tab_keyboard_owner(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn focus_active_tab_keyboard_owner(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(tab_id) = self.active_remote_desktop_tab_id(cx) {
             // Remote desktop tabs are keyboard owners. Activating the tab must
             // release stale Workspace input fields even before the user clicks

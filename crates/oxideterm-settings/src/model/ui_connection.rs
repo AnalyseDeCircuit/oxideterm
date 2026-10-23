@@ -38,12 +38,31 @@ pub enum AppIconVariant {
     FilledRed,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AppearanceScheme {
+    Light,
+    Dark,
+}
+
+impl AppearanceScheme {
+    pub fn is_dark(self) -> bool {
+        self == Self::Dark
+    }
+
+    pub fn from_dark(dark: bool) -> Self {
+        if dark { Self::Dark } else { Self::Light }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
     pub theme: String,
     #[serde(default)]
     pub follow_system_appearance: bool,
+    #[serde(default)]
+    pub manual_scheme: Option<AppearanceScheme>,
     #[serde(default)]
     pub system_themes: SystemThemeSettings,
     #[serde(default)]
@@ -70,6 +89,7 @@ impl Default for AppearanceSettings {
         Self {
             theme: DEFAULT_COLOR_THEME.to_string(),
             follow_system_appearance: false,
+            manual_scheme: None,
             system_themes: SystemThemeSettings::default(),
             app_icon: AppIconVariant::default(),
             sidebar_collapsed_default: false,
@@ -83,6 +103,16 @@ impl Default for AppearanceSettings {
             frosted_glass: FrostedGlassMode::Off,
             render_profile: RenderProfile::Auto,
             extra: ExtraFields::new(),
+        }
+    }
+}
+
+impl AppearanceSettings {
+    pub fn active_scheme(&self, system_dark: bool) -> Option<AppearanceScheme> {
+        if self.follow_system_appearance {
+            Some(AppearanceScheme::from_dark(system_dark))
+        } else {
+            self.manual_scheme
         }
     }
 }

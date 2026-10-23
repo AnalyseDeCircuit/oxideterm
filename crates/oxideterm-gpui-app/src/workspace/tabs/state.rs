@@ -56,6 +56,9 @@ impl WorkspaceApp {
         active_tab_id: Option<TabId>,
         cx: &mut App,
     ) {
+        if let Some(tab) = active_tab_id {
+            self.reveal_tab_scope(tab, cx);
+        }
         let previous_active_tab_id = self
             .tab_host
             .update(cx, |tab_host, _| tab_host.select_main_tab(active_tab_id));

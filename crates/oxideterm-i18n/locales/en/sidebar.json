@@ -1,5 +1,16 @@
 {
   "sidebar": {
+    "tab_scope": {
+      "all": "All tabs",
+      "global": "Global pages",
+      "local": "Local terminals",
+      "connection": "Connection",
+      "empty": "No tabs in this scope",
+      "search": "Search tab scopes…",
+      "categories": "Categories",
+      "connections": "Connections",
+      "hint": "↑↓ Select · Enter Apply · Esc Cancel"
+    },
     "search": {
       "title": "Search sessions",
       "placeholder": "Search sessions…",
@@ -66,6 +77,8 @@
       "packages": "Packages"
     },
     "tooltips": {
+      "switch_to_light": "Switch to light theme",
+      "switch_to_dark": "Switch to dark theme",
       "settings": "Settings",
       "ai_hint": "OxideSens",
       "switch_tree": "Switch to Tree View",

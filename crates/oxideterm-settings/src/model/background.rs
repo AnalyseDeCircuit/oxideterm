@@ -235,8 +235,11 @@ impl TerminalSettings {
 
 impl PersistedSettings {
     pub fn resolved_background(&self, dark: bool) -> BackgroundStyle {
-        self.terminal
-            .background_for_scheme(self.appearance.follow_system_appearance.then_some(dark))
+        self.terminal.background_for_scheme(
+            self.appearance
+                .active_scheme(dark)
+                .map(AppearanceScheme::is_dark),
+        )
     }
 }
 
@@ -246,11 +249,15 @@ mod background_tests {
 
     #[test]
     fn tide_particle_combination_uses_a_stable_settings_kind() {
-        let effect: GeneratedBackgroundSettings = serde_json::from_str(r#"{"kind":"tideParticles","strength":0.7,"speed":1.5}"#).unwrap();
+        let effect: GeneratedBackgroundSettings =
+            serde_json::from_str(r#"{"kind":"tideParticles","strength":0.7,"speed":1.5}"#).unwrap();
         assert_eq!(effect.kind, GeneratedBackgroundKind::TideParticles);
         assert_eq!(effect.strength, 0.7);
         assert_eq!(effect.speed, 1.5);
-        assert_eq!(serde_json::to_value(effect).unwrap()["kind"], "tideParticles");
+        assert_eq!(
+            serde_json::to_value(effect).unwrap()["kind"],
+            "tideParticles"
+        );
     }
 
     #[test]

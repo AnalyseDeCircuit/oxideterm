@@ -813,6 +813,16 @@
       "display_behavior_hint": "Configurer les marges, le défilement et l’encodage du terminal."
     },
     "appearance": {
+      "mode": "Mode d’apparence",
+      "mode_light": "Clair",
+      "mode_dark": "Sombre",
+      "mode_hint": "Utilisez un profil clair ou sombre fixe, ou changez automatiquement avec le système.",
+      "edit_scheme": "Configurer les profils",
+      "legacy_scheme_hint": "L’apparence actuelle n’est associée à aucun profil. Choisissez Clair ou Sombre, puis « Utiliser l’apparence actuelle ».",
+      "use_current_scheme": "Utiliser l’apparence actuelle",
+      "scheme_unavailable": "{{scheme}} n’est pas configuré ou son thème est indisponible. Configurez-le d’abord.",
+      "schemes_identical": "Les profils clair et sombre sont identiques.",
+      "configure_schemes": "Configurer l’apparence",
       "follow_system": "Suivre l’apparence du système",
       "system_light": "Profil clair",
       "system_dark": "Profil sombre",
