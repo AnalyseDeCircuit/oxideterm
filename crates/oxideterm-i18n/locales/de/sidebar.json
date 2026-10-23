@@ -77,6 +77,8 @@
       "packages": "Pakete"
     },
     "tooltips": {
+      "switch_to_light": "Zum hellen Design wechseln",
+      "switch_to_dark": "Zum dunklen Design wechseln",
       "settings": "Einstellungen",
       "ai_hint": "OxideSens",
       "switch_tree": "Baumansicht",

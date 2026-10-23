@@ -77,6 +77,8 @@
       "packages": "包管理"
     },
     "tooltips": {
+      "switch_to_light": "切换为浅色主题",
+      "switch_to_dark": "切换为深色主题",
       "settings": "设置",
       "ai_hint": "OxideSens",
       "switch_tree": "切换到树形视图",

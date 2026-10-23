@@ -77,6 +77,8 @@
       "packages": "Gói"
     },
     "tooltips": {
+      "switch_to_light": "Chuyển sang giao diện sáng",
+      "switch_to_dark": "Chuyển sang giao diện tối",
       "settings": "Cài đặt",
       "ai_hint": "OxideSens",
       "switch_tree": "Chế độ cây",

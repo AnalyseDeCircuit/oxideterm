@@ -813,6 +813,16 @@
       "display_behavior_hint": "터미널 여백, 스크롤 및 문자 인코딩을 설정합니다."
     },
     "appearance": {
+      "mode": "화면 모드",
+      "mode_light": "밝게",
+      "mode_dark": "어둡게",
+      "mode_hint": "밝은 모드나 어두운 모드로 고정하거나 시스템에 따라 자동으로 전환합니다.",
+      "edit_scheme": "모드별 설정",
+      "legacy_scheme_hint": "현재 모양이 어느 모드에도 지정되지 않았습니다. 밝은 모드나 어두운 모드를 고른 다음 ‘현재 모양 사용’을 선택하세요.",
+      "use_current_scheme": "현재 모양 사용",
+      "scheme_unavailable": "{{scheme}}이 구성되지 않았거나 테마를 사용할 수 없습니다. 먼저 설정하세요.",
+      "schemes_identical": "밝은 모드와 어두운 모드의 설정이 같습니다.",
+      "configure_schemes": "모양 설정",
       "follow_system": "시스템 모양 따르기",
       "system_light": "밝은 모드 설정",
       "system_dark": "어두운 모드 설정",

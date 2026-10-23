@@ -813,6 +813,16 @@
       "display_behavior_hint": "配置终端边距、滚动和字符编码。"
     },
     "appearance": {
+      "mode": "外观模式",
+      "mode_light": "浅色",
+      "mode_dark": "深色",
+      "mode_hint": "使用固定的浅色、深色方案，或跟随系统自动切换。",
+      "edit_scheme": "配置方案",
+      "legacy_scheme_hint": "当前外观尚未归入方案。请选择浅色或深色，再点击“使用当前外观”。",
+      "use_current_scheme": "使用当前外观",
+      "scheme_unavailable": "{{scheme}}未配置或主题已不可用，请先设置。",
+      "schemes_identical": "浅色和深色方案相同。",
+      "configure_schemes": "设置外观方案",
       "follow_system": "跟随系统外观",
       "system_light": "亮色方案",
       "system_dark": "暗色方案",

@@ -813,6 +813,16 @@
       "display_behavior_hint": "端末の余白、スクロール、文字エンコーディングを設定します。"
     },
     "appearance": {
+      "mode": "外観モード",
+      "mode_light": "ライト",
+      "mode_dark": "ダーク",
+      "mode_hint": "ライトまたはダークに固定するか、システムに合わせて自動で切り替えます。",
+      "edit_scheme": "設定を編集",
+      "legacy_scheme_hint": "現在の外観はどちらの設定にも割り当てられていません。ライトまたはダークを選び、「現在の外観を使用」を押してください。",
+      "use_current_scheme": "現在の外観を使用",
+      "scheme_unavailable": "{{scheme}}が未設定か、テーマが利用できません。先に設定してください。",
+      "schemes_identical": "ライト設定とダーク設定が同じです。",
+      "configure_schemes": "外観を設定",
       "follow_system": "システムの外観に合わせる",
       "system_light": "ライト設定",
       "system_dark": "ダーク設定",

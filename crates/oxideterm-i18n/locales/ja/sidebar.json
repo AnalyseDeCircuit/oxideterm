@@ -77,6 +77,8 @@
       "packages": "パッケージ"
     },
     "tooltips": {
+      "switch_to_light": "ライトテーマに切り替え",
+      "switch_to_dark": "ダークテーマに切り替え",
       "settings": "設定",
       "ai_hint": "OxideSens",
       "switch_tree": "ツリービューに切替",

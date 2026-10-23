@@ -813,6 +813,16 @@
       "display_behavior_hint": "Terminalabstände, Scrollen und Zeichenkodierung einstellen."
     },
     "appearance": {
+      "mode": "Darstellungsmodus",
+      "mode_light": "Hell",
+      "mode_dark": "Dunkel",
+      "mode_hint": "Ein festes helles oder dunkles Profil verwenden oder automatisch dem System folgen.",
+      "edit_scheme": "Profile bearbeiten",
+      "legacy_scheme_hint": "Ihre aktuelle Darstellung ist keinem Profil zugewiesen. Wählen Sie Hell oder Dunkel und dann „Aktuelle Darstellung übernehmen“.",
+      "use_current_scheme": "Aktuelle Darstellung übernehmen",
+      "scheme_unavailable": "{{scheme}} ist nicht eingerichtet oder das Design ist nicht verfügbar. Richten Sie es zuerst ein.",
+      "schemes_identical": "Das helle und das dunkle Profil sind identisch.",
+      "configure_schemes": "Darstellung einrichten",
       "follow_system": "Systemdarstellung folgen",
       "system_light": "Helles Profil",
       "system_dark": "Dunkles Profil",

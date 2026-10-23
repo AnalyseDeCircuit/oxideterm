@@ -77,6 +77,8 @@
       "packages": "Pacotes"
     },
     "tooltips": {
+      "switch_to_light": "Mudar para o tema claro",
+      "switch_to_dark": "Mudar para o tema escuro",
       "settings": "Configurações",
       "ai_hint": "OxideSens",
       "switch_tree": "Visualização em árvore",

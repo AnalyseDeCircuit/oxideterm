@@ -77,6 +77,8 @@
       "packages": "套件"
     },
     "tooltips": {
+      "switch_to_light": "切換為淺色主題",
+      "switch_to_dark": "切換為深色主題",
       "settings": "設定",
       "ai_hint": "OxideSens",
       "switch_tree": "切換到樹形視圖",

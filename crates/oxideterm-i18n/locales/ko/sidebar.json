@@ -77,6 +77,8 @@
       "packages": "패키지"
     },
     "tooltips": {
+      "switch_to_light": "밝은 테마로 전환",
+      "switch_to_dark": "어두운 테마로 전환",
       "settings": "설정",
       "ai_hint": "OxideSens",
       "switch_tree": "트리 보기",

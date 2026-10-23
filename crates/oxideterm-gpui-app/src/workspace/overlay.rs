@@ -38,6 +38,12 @@ pub(in crate::workspace) enum WorkspaceOverlayIntent {
         label: String,
         workspace: WeakEntity<WorkspaceApp>,
     },
+    AppearanceSetup {
+        notice: TerminalNotice,
+        scheme: Option<bool>,
+        label: String,
+        workspace: WeakEntity<WorkspaceApp>,
+    },
     PluginProgress {
         key: String,
         notice: TerminalNotice,
@@ -139,6 +145,7 @@ struct NoticeAction {
 enum NoticeActionTarget {
     Plugin(String),
     SshTerminal(NodeId),
+    AppearanceSettings(Option<bool>),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -314,6 +321,24 @@ impl WorkspaceOverlayEntity {
                     Duration::from_secs(12),
                     Some(NoticeAction {
                         target: NoticeActionTarget::SshTerminal(node_id),
+                        label,
+                        workspace,
+                    }),
+                    cx.background_executor().now(),
+                );
+                true
+            }
+            WorkspaceOverlayIntent::AppearanceSetup {
+                notice,
+                scheme,
+                label,
+                workspace,
+            } => {
+                self.push_notice(
+                    notice,
+                    Duration::from_secs(12),
+                    Some(NoticeAction {
+                        target: NoticeActionTarget::AppearanceSettings(scheme),
                         label,
                         workspace,
                     }),
@@ -1176,6 +1201,9 @@ impl WorkspaceOverlayEntity {
                                         window,
                                         cx,
                                     );
+                                }
+                                NoticeActionTarget::AppearanceSettings(scheme) => {
+                                    workspace.open_appearance_settings(*scheme, window, cx);
                                 }
                             });
                         let _ = overlay.update(cx, |overlay, cx| {

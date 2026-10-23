@@ -44,6 +44,29 @@ fn settings_nav_vertical_offset(
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn open_appearance_settings(
+        &mut self,
+        scheme: Option<bool>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.set_active_tab(SettingsTab::Appearance, cx)
+        });
+        self.appearance_edit_dark = scheme.or(self.appearance_edit_dark);
+        self.close_settings_select();
+        self.focused_settings_input = None;
+        self.settings_slider_drag = None;
+        self.clear_ime_selection();
+        self.sync_settings_section_list_state(cx);
+        self.settings_section_list_state
+            .scroll_to(gpui::ListOffset {
+                item_ix: 0,
+                offset_in_item: px(0.0),
+            });
+        self.open_settings(window, cx);
+    }
+
     pub(in crate::workspace) fn open_settings(
         &mut self,
         window: &mut Window,
@@ -489,8 +512,10 @@ impl WorkspaceApp {
                         .appearance
                         .follow_system_appearance
                         .hash(&mut hasher);
+                    settings.appearance.manual_scheme.hash(&mut hasher);
+                    self.appearance_edit_dark.hash(&mut hasher);
                     let dark = self.appearance_edit_scheme().unwrap_or(self.system_dark);
-                    let style = settings.resolved_background(dark);
+                    let style = settings.terminal.background_for_scheme(Some(dark));
                     (style.enabled && style.day_cycle).hash(&mut hasher);
                     if style.day_cycle {
                         (style.image.is_some() || style.effect.is_some()).hash(&mut hasher);
@@ -503,13 +528,13 @@ impl WorkspaceApp {
                 if section == 0 {
                     let dark = self.appearance_edit_scheme().unwrap_or(self.system_dark);
                     for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
-                        is_custom_theme_id(target.resolved_id(settings, dark)).hash(&mut hasher);
+                        is_custom_theme_id(target.scheme_id(settings, dark)).hash(&mut hasher);
                     }
                 } else if section == 3 {
                     // Source and effect capabilities add rows; paint-only adjustments keep scroll anchoring stable.
-                    let style = settings.resolved_background(
-                        self.appearance_edit_scheme().unwrap_or(self.system_dark),
-                    );
+                    let style = settings
+                        .terminal
+                        .background_for_scheme(self.appearance_edit_scheme());
                     style.image.is_some().hash(&mut hasher);
                     style.parallax.hash(&mut hasher);
                     style.camera.is_some().hash(&mut hasher);
@@ -1333,10 +1358,14 @@ impl WorkspaceApp {
         oxideterm_desktop_presence::set_keep_running_on_close(
             settings.general.minimize_to_tray_on_close,
         );
-        self.appearance_edit_dark = settings
-            .appearance
-            .follow_system_appearance
-            .then(|| self.appearance_edit_dark.unwrap_or(self.system_dark));
+        self.appearance_edit_dark.get_or_insert_with(|| {
+            settings
+                .appearance
+                .active_scheme(self.system_dark)
+                .is_some_and(oxideterm_settings::AppearanceScheme::is_dark)
+        });
+        // A new settings update supersedes an in-flight appearance transition.
+        self.theme_transition_task = None;
         self.tokens = tokens_from_settings(&settings, self.system_dark);
         self.active_background = settings.resolved_background(self.system_dark);
         self.render_policy = compute_render_policy(

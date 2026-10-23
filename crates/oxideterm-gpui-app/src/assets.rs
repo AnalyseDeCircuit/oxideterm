@@ -98,6 +98,7 @@ pub(crate) enum LucideIcon {
     MessageSquare,
     MoreVertical,
     Monitor,
+    Moon,
     MemoryStick,
     Network,
     Package,
@@ -133,6 +134,7 @@ pub(crate) enum LucideIcon {
     Square,
     Star,
     StopCircle,
+    Sun,
     Terminal,
     Trash2,
     Upload,
@@ -232,6 +234,7 @@ impl LucideIcon {
             "messagesquare" => Self::MessageSquare,
             "morevertical" => Self::MoreVertical,
             "monitor" => Self::Monitor,
+            "moon" => Self::Moon,
             "memorystick" => Self::MemoryStick,
             "network" => Self::Network,
             "package" => Self::Package,
@@ -266,6 +269,7 @@ impl LucideIcon {
             "splitsquarevertical" | "squaresplitvertical" => Self::SplitSquareVertical,
             "square" => Self::Square,
             "star" => Self::Star,
+            "sun" => Self::Sun,
             "stopcircle" | "circlestop" => Self::StopCircle,
             "terminal" => Self::Terminal,
             "trash" | "trash2" => Self::Trash2,
@@ -361,6 +365,7 @@ impl LucideIcon {
             Self::MessageSquare => "lucide/message-square.svg",
             Self::MoreVertical => "lucide/more-vertical.svg",
             Self::Monitor => "lucide/monitor.svg",
+            Self::Moon => "lucide/moon.svg",
             Self::MemoryStick => "lucide/memory-stick.svg",
             Self::Network => "lucide/network.svg",
             Self::Package => "lucide/package.svg",
@@ -396,6 +401,7 @@ impl LucideIcon {
             Self::Square => "lucide/square.svg",
             Self::Star => "lucide/star.svg",
             Self::StopCircle => "lucide/circle-stop.svg",
+            Self::Sun => "lucide/sun.svg",
             Self::Terminal => "lucide/terminal.svg",
             Self::Trash2 => "lucide/trash-2.svg",
             Self::Upload => "lucide/upload.svg",
@@ -568,6 +574,7 @@ impl AssetSource for NativeAssets {
             "lucide/more-horizontal.svg" => MORE_HORIZONTAL,
             "lucide/more-vertical.svg" => MORE_VERTICAL,
             "lucide/monitor.svg" => MONITOR,
+            "lucide/moon.svg" => MOON,
             "lucide/memory-stick.svg" => MEMORY_STICK,
             "lucide/network.svg" => NETWORK,
             "lucide/package.svg" => PACKAGE,
@@ -604,6 +611,7 @@ impl AssetSource for NativeAssets {
             "lucide/square.svg" => SQUARE,
             "lucide/star.svg" => STAR,
             "lucide/circle-stop.svg" => CIRCLE_STOP,
+            "lucide/sun.svg" => SUN,
             "lucide/terminal.svg" => TERMINAL,
             "lucide/trash-2.svg" => TRASH_2,
             "lucide/upload.svg" => UPLOAD,
@@ -936,6 +944,8 @@ const LIST_TREE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" he
 const LIST_CHECKS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>"#;
 const MORE_HORIZONTAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>"#;
 const MONITOR: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>"#;
+const MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>"#;
+const SUN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/></svg>"#;
 const MEMORY_STICK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 19v-3"/><path d="M10 19v-3"/><path d="M14 19v-3"/><path d="M18 19v-3"/><path d="M8 11V9"/><path d="M16 11V9"/><path d="M12 11V9"/><path d="M2 15h20"/><path d="M2 7a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2Z"/></svg>"#;
 const NETWORK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>"#;
 const PANEL_LEFT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>"#;

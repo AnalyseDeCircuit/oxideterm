@@ -53,6 +53,37 @@ pub struct AppUiColors {
     pub info: u32,
 }
 
+impl AppUiColors {
+    pub fn interpolate(self, target: Self, progress: f32) -> Self {
+        let blend = |from, to| mix(to, from, progress.clamp(0.0, 1.0));
+        Self {
+            bg: blend(self.bg, target.bg),
+            bg_panel: blend(self.bg_panel, target.bg_panel),
+            bg_card: blend(self.bg_card, target.bg_card),
+            bg_hover: blend(self.bg_hover, target.bg_hover),
+            bg_active: blend(self.bg_active, target.bg_active),
+            bg_secondary: blend(self.bg_secondary, target.bg_secondary),
+            bg_elevated: blend(self.bg_elevated, target.bg_elevated),
+            bg_sunken: blend(self.bg_sunken, target.bg_sunken),
+            text: blend(self.text, target.text),
+            text_muted: blend(self.text_muted, target.text_muted),
+            text_secondary: blend(self.text_secondary, target.text_secondary),
+            text_heading: blend(self.text_heading, target.text_heading),
+            border: blend(self.border, target.border),
+            border_strong: blend(self.border_strong, target.border_strong),
+            divider: blend(self.divider, target.divider),
+            accent: blend(self.accent, target.accent),
+            accent_hover: blend(self.accent_hover, target.accent_hover),
+            accent_text: blend(self.accent_text, target.accent_text),
+            accent_secondary: blend(self.accent_secondary, target.accent_secondary),
+            success: blend(self.success, target.success),
+            warning: blend(self.warning, target.warning),
+            error: blend(self.error, target.error),
+            info: blend(self.info, target.info),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BuiltInTheme {
     pub id: &'static str,

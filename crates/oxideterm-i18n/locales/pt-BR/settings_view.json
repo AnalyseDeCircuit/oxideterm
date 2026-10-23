@@ -813,6 +813,16 @@
       "display_behavior_hint": "Configure margens, rolagem e codificação do terminal."
     },
     "appearance": {
+      "mode": "Modo de aparência",
+      "mode_light": "Claro",
+      "mode_dark": "Escuro",
+      "mode_hint": "Use um perfil claro ou escuro fixo ou alterne automaticamente com o sistema.",
+      "edit_scheme": "Configurar perfis",
+      "legacy_scheme_hint": "A aparência atual não está atribuída a um perfil. Escolha Claro ou Escuro e selecione “Usar aparência atual”.",
+      "use_current_scheme": "Usar aparência atual",
+      "scheme_unavailable": "{{scheme}} não está configurado ou o tema está indisponível. Configure-o primeiro.",
+      "schemes_identical": "Os perfis claro e escuro são idênticos.",
+      "configure_schemes": "Configurar aparência",
       "follow_system": "Seguir a aparência do sistema",
       "system_light": "Perfil claro",
       "system_dark": "Perfil escuro",

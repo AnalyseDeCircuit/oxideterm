@@ -24,6 +24,13 @@ pub(super) fn native_apply_syncable_settings_payload(
 
     workspace.edit_settings(
         |settings| {
+            if (plan.theme.is_some() || plan.application_theme.is_some())
+                && !settings.appearance.follow_system_appearance
+                && let Some(scheme) = settings.appearance.manual_scheme
+            {
+                oxideterm_settings_model::apply_appearance_mode(settings, Some(scheme));
+                settings.appearance.manual_scheme = None;
+            }
             if let Some(language) = plan.language {
                 settings.general.language = language;
             }

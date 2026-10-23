@@ -380,6 +380,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.appearance.application_theme_hint",
                 "settings_view.appearance.terminal_theme",
                 "settings_view.appearance.follow_system",
+                "settings_view.appearance.mode",
+                "settings_view.appearance.edit_scheme",
                 "settings_view.appearance.system_light",
                 "settings_view.appearance.system_dark",
                 "settings_view.custom_theme.create",

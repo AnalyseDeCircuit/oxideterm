@@ -964,6 +964,7 @@ pub(crate) struct WorkspaceApp {
     _cloud_sync_subscription: Subscription,
     i18n: I18n,
     tokens: ThemeTokens,
+    theme_transition_task: Option<Task<()>>,
     system_dark: bool,
     appearance_edit_dark: Option<bool>,
     active_background: oxideterm_settings::BackgroundStyle,

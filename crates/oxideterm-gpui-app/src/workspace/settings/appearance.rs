@@ -122,66 +122,62 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        use oxideterm_settings::AppearanceScheme;
         let follow = settings.appearance.follow_system_appearance;
-        let mut rows = vec![
-            div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .child(
-                    self.appearance_row(
-                        "settings_view.appearance.follow_system",
-                        "settings_view.appearance.follow_system_hint",
-                        checkbox(&self.tokens, String::new(), follow)
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.close_settings_select();
-                                    this.blur_text_inputs(cx);
-                                    this.finish_settings_slider_drag(cx);
-                                    this.settings_workspace.update(cx, |settings, cx| {
-                                        settings.finish_background_blur_drag(cx)
-                                    });
-                                    this.appearance_edit_dark =
-                                        (!follow).then_some(this.system_dark);
-                                    this.edit_settings(
-                                        |settings| {
-                                            if !follow {
-                                                let style = settings.terminal.background_style();
-                                                settings
-                                                    .terminal
-                                                    .system_backgrounds
-                                                    .light
-                                                    .get_or_insert_with(|| style.clone());
-                                                settings
-                                                    .terminal
-                                                    .system_backgrounds
-                                                    .dark
-                                                    .get_or_insert(style);
-                                            }
-                                            settings.appearance.follow_system_appearance = !follow;
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                            .into_any_element(),
+        let modes = oxideterm_gpui_ui::tabs::tabs_list(&self.tokens)
+            .h_auto()
+            .flex_wrap()
+            .children(
+                [
+                    (
+                        Some(AppearanceScheme::Light),
+                        "settings_view.appearance.mode_light",
                     ),
-                )
-                .child(oxideterm_gpui_ui::motion::auto_height(
-                    &self.tokens,
-                    "theme-scheme-reveal",
-                    follow.then(|| {
-                        div()
-                            .pt(px(self.tokens.spacing.three))
-                            .child(self.appearance_scheme_control("theme-scheme", cx))
-                            .into_any_element()
-                    }),
-                ))
-                .into_any_element(),
-        ];
+                    (
+                        Some(AppearanceScheme::Dark),
+                        "settings_view.appearance.mode_dark",
+                    ),
+                    (None, "settings_view.appearance.follow_system"),
+                ]
+                .map(|(scheme, key)| {
+                    let selected = match scheme {
+                        None => follow,
+                        Some(scheme) => {
+                            !follow && settings.appearance.manual_scheme == Some(scheme)
+                        }
+                    };
+                    oxideterm_gpui_ui::tabs::tabs_trigger(&self.tokens, self.i18n.t(key), selected)
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.close_settings_select();
+                                this.blur_text_inputs(cx);
+                                this.finish_settings_slider_drag(cx);
+                                this.settings_workspace.update(cx, |settings, cx| {
+                                    settings.finish_background_blur_drag(cx)
+                                });
+                                this.change_appearance_mode(scheme, cx);
+                                cx.stop_propagation();
+                            }),
+                        )
+                }),
+            );
+        let mut rows = vec![self.appearance_row(
+            "settings_view.appearance.mode",
+            "settings_view.appearance.mode_hint",
+            modes.into_any_element(),
+        )];
+        if !follow && settings.appearance.manual_scheme.is_none() {
+            rows.push(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("settings_view.appearance.legacy_scheme_hint"))
+                    .into_any_element(),
+            );
+        }
         rows.extend([
+            self.appearance_scheme_control("theme-scheme", cx),
             self.appearance_theme_target_row(settings, ThemeTarget::Application, cx),
             self.appearance_theme_target_row(settings, ThemeTarget::Terminal, cx),
         ]);
@@ -190,11 +186,6 @@ impl WorkspaceApp {
 
     fn appearance_scheme_control(&self, id: &'static str, cx: &mut Context<Self>) -> AnyElement {
         let selected = self.appearance_edit_scheme().unwrap_or(self.system_dark);
-        let system_key = if self.system_dark {
-            "settings_view.appearance.system_dark"
-        } else {
-            "settings_view.appearance.system_light"
-        };
         div()
             .id(id)
             .w_full()
@@ -205,14 +196,10 @@ impl WorkspaceApp {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(
-                        self.i18n
-                            .t("settings_view.appearance.system_current_scheme")
-                            .replace("{{scheme}}", &self.i18n.t(system_key)),
-                    ),
+                    .child(self.i18n.t("settings_view.appearance.edit_scheme")),
             )
             .child(
-                div().flex().gap(px(self.tokens.spacing.two)).children(
+                oxideterm_gpui_ui::tabs::tabs_list(&self.tokens).children(
                     [
                         (false, "settings_view.appearance.system_light"),
                         (true, "settings_view.appearance.system_dark"),
@@ -223,7 +210,7 @@ impl WorkspaceApp {
                             self.i18n.t(key),
                             selected == dark,
                         )
-                        .id(("appearance-scheme", u64::from(dark)))
+                        .id((id, u64::from(dark)))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.close_settings_select();
                             this.blur_text_inputs(cx);
@@ -234,6 +221,40 @@ impl WorkspaceApp {
                         }))
                     }),
                 ),
+            )
+            .when(
+                !self
+                    .settings_store
+                    .settings()
+                    .appearance
+                    .follow_system_appearance
+                    && self
+                        .settings_store
+                        .settings()
+                        .appearance
+                        .manual_scheme
+                        .is_none(),
+                |body| {
+                    body.child(self.appearance_action_button(
+                        LucideIcon::Check,
+                        self.i18n.t("settings_view.appearance.use_current_scheme"),
+                        cx.listener(move |this, _, _, cx| {
+                            let scheme = oxideterm_settings::AppearanceScheme::from_dark(selected);
+                            let system_dark = this.system_dark;
+                            this.edit_settings(
+                                |settings| {
+                                    oxideterm_settings_model::assign_current_appearance(
+                                        settings,
+                                        scheme,
+                                        system_dark,
+                                    )
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ))
+                },
             )
             .child(
                 div()
@@ -263,7 +284,7 @@ impl WorkspaceApp {
             ),
         };
         let scheme = self.appearance_edit_scheme();
-        let selected_id = target.resolved_id(settings, scheme.unwrap_or(self.system_dark));
+        let selected_id = target.scheme_id(settings, scheme.unwrap_or(self.system_dark));
         let select = match (target, scheme) {
             (ThemeTarget::Application, Some(false)) => SettingsSelect::AppearanceThemeLight,
             (ThemeTarget::Application, Some(true)) => SettingsSelect::AppearanceThemeDark,
@@ -313,7 +334,7 @@ impl WorkspaceApp {
                                             .appearance_edit_scheme()
                                             .unwrap_or(this.system_dark);
                                         let id = target
-                                            .resolved_id(this.settings_store.settings(), dark)
+                                            .scheme_id(this.settings_store.settings(), dark)
                                             .to_string();
                                         this.open_theme_editor(target, Some(id), cx);
                                         cx.stop_propagation();
@@ -598,9 +619,7 @@ impl WorkspaceApp {
         });
         let mut rows = Vec::new();
         if !editor_open {
-            if settings.appearance.follow_system_appearance {
-                rows.push(self.appearance_scheme_control("background-scheme", cx));
-            }
+            rows.push(self.appearance_scheme_control("background-scheme", cx));
             let preview = self.settings_workspace.read(cx).background_preview.clone();
             rows.push(self.appearance_preview(self.settings_store.settings(), preview, cx));
         }
@@ -1535,9 +1554,9 @@ impl WorkspaceApp {
             if preview_target == Some(target) {
                 self.settings_theme_preview
                     .as_deref()
-                    .unwrap_or(target.resolved_id(settings, preview_dark))
+                    .unwrap_or(target.scheme_id(settings, preview_dark))
             } else {
-                target.resolved_id(settings, preview_dark)
+                target.scheme_id(settings, preview_dark)
             }
         };
         let application_id = preview_id(ThemeTarget::Application);
@@ -1550,7 +1569,7 @@ impl WorkspaceApp {
         };
         preview_tokens.refresh_palette_metrics();
         let page = self.settings_workspace.read(cx).theme_preview_page;
-        let mut style = settings.resolved_background(preview_dark);
+        let mut style = settings.terminal.background_for_scheme(Some(preview_dark));
         if let Some(blur) = self
             .settings_workspace
             .read(cx)
@@ -2314,7 +2333,7 @@ impl WorkspaceApp {
         target.apply(
             &mut initial,
             target
-                .resolved_id(settings, scheme.unwrap_or(self.system_dark))
+                .scheme_id(settings, scheme.unwrap_or(self.system_dark))
                 .to_string(),
         );
         let mut editor = theme_editor_from_settings(
