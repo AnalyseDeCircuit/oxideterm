@@ -5,11 +5,13 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::button::button_focus_visible;
-use crate::confirm::{
-    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, confirm_dialog_with_focus,
+use crate::button::{
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_focus_visible, button_with,
 };
-use crate::modal::MODAL_KEY_CONTEXT;
+use crate::modal::{
+    MODAL_KEY_CONTEXT, dialog_content, dialog_footer, dialog_header, dialog_title,
+    dismissible_dialog_backdrop, modal_body,
+};
 use crate::radio_group::{radio_group, radio_group_item};
 
 pub struct ChoiceDialog {
@@ -88,6 +90,7 @@ impl Focusable for ChoiceDialogView {
 impl Render for ChoiceDialogView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = &self.tokens;
+        let theme = tokens.ui;
         let mut options = radio_group(tokens)
             .w_full()
             .text_align(gpui::TextAlign::Left);
@@ -96,13 +99,18 @@ impl Render for ChoiceDialogView {
                 button_focus_visible(
                     tokens,
                     div()
+                        .w_full()
+                        .min_w_0()
                         .flex()
                         .items_center()
                         .gap(px(tokens.spacing.two))
+                        .px(px(tokens.spacing.two))
                         .py(px(tokens.spacing.two))
+                        .rounded(px(tokens.radii.md))
                         .text_size(px(tokens.metrics.ui_text_sm))
                         .text_color(rgb(tokens.ui.text))
                         .cursor_pointer()
+                        .hover(move |row| row.bg(rgb(theme.bg_hover)))
                         .child(radio_group_item(tokens, self.selected == index, false).flex_none())
                         .child(div().flex_1().min_w_0().child(action.label().clone())),
                     self.keyboard_focus
@@ -121,45 +129,97 @@ impl Render for ChoiceDialogView {
                 ),
             );
         }
-        let focused_action = self
-            .keyboard_focus
-            .then_some(self.focused_control)
-            .and_then(|focus| match focus {
-                ChoiceFocus::Options => None,
-                ChoiceFocus::Cancel => Some(ConfirmDialogAction::Cancel),
-                ChoiceFocus::Confirm => Some(ConfirmDialogAction::Confirm),
-            });
-        let dialog = confirm_dialog_with_focus(
+        let form = dialog_content(tokens)
+            .max_w(gpui::relative(0.9))
+            .max_h(gpui::relative(0.9))
+            .shadow(crate::theme_overlay_shadow(tokens))
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(dialog_header(tokens).child(dialog_title(tokens, self.title.clone())))
+            .child(
+                modal_body(tokens)
+                    .id("choice-dialog-body")
+                    .w_full()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .when_some(self.description.clone(), |body, description| {
+                        body.child(
+                            div()
+                                .text_size(px(tokens.metrics.ui_text_sm))
+                                .line_height(px(tokens.metrics.ui_text_sm * 1.5))
+                                .text_color(rgb(theme.text_muted))
+                                .child(description),
+                        )
+                    })
+                    .child(options),
+            )
+            .child(
+                dialog_footer(tokens)
+                    .flex_none()
+                    .child(
+                        button_focus_visible(
+                            tokens,
+                            button_with(
+                                tokens,
+                                self.actions[2].label().to_string(),
+                                ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Default,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                            ),
+                            self.keyboard_focus && self.focused_control == ChoiceFocus::Cancel,
+                        )
+                        .id("choice-dialog-cancel")
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|_, _, _, cx| {
+                                cx.emit(PromptResponse(2));
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    )
+                    .child(
+                        button_focus_visible(
+                            tokens,
+                            button_with(
+                                tokens,
+                                self.confirm.clone(),
+                                ButtonOptions {
+                                    variant: ButtonVariant::Default,
+                                    size: ButtonSize::Default,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                            ),
+                            self.keyboard_focus && self.focused_control == ChoiceFocus::Confirm,
+                        )
+                        .id("choice-dialog-confirm")
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _, _, cx| {
+                                cx.emit(PromptResponse(this.selected));
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    ),
+            );
+        let dialog = dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _, _, cx| {
+                    cx.emit(PromptResponse(2));
+                    cx.stop_propagation();
+                }),
+            )
+            .child(form);
+        let dialog = crate::motion::fade_in(
             tokens,
-            ConfirmDialogView {
-                variant: ConfirmDialogVariant::Default,
-                title: div().child(self.title.clone()).into_any_element(),
-                description: Some(
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(px(tokens.spacing.three))
-                        .when_some(self.description.clone(), |body, description| {
-                            body.child(div().child(description))
-                        })
-                        .child(options)
-                        .into_any_element(),
-                ),
-                cancel_label: div()
-                    .child(self.actions[2].label().clone())
-                    .into_any_element(),
-                confirm_label: div().child(self.confirm.clone()).into_any_element(),
-            },
-            focused_action,
-            cx.listener(|_, _, _, cx| {
-                cx.emit(PromptResponse(2));
-                cx.stop_propagation();
-            }),
-            cx.listener(|this, _, _, cx| {
-                cx.emit(PromptResponse(this.selected));
-                cx.stop_propagation();
-            }),
+            "choice-dialog",
+            dialog,
+            crate::motion::MotionDuration::Control,
         );
         div()
             .size_full()
