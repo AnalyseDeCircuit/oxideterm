@@ -170,7 +170,9 @@ pub(in crate::workspace) enum AiModelRefreshIntent {
     MissingApiKey {
         provider_id: String,
     },
-    Failed,
+    Failed {
+        message: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -214,7 +216,14 @@ enum AiProviderKeyOperation {
 
 enum AiModelRefreshFailure {
     MissingApiKey,
-    Failed,
+    Failed(String),
+}
+
+fn model_refresh_failure_message(error: &anyhow::Error) -> String {
+    // Preserve the proxy/TLS/HTTP classification while keeping the toast
+    // bounded and single-line. Reqwest errors already drop the request URL.
+    let message = format!("{error:#}").replace(['\r', '\n'], " ");
+    message.chars().take(400).collect()
 }
 
 struct AiModelRefreshWorkerDelivery {
@@ -2150,12 +2159,25 @@ impl AiWorkspaceEntity {
                             });
                             return;
                         }
-                        Ok(Err(_)) | Err(_) => {
+                        Ok(Err(error)) => {
                             let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
                                 index,
                                 provider_id,
                                 generation,
-                                result: Err(AiModelRefreshFailure::Failed),
+                                result: Err(AiModelRefreshFailure::Failed(format!(
+                                    "could not read the saved API key: {error}"
+                                ))),
+                            });
+                            return;
+                        }
+                        Err(error) => {
+                            let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
+                                index,
+                                provider_id,
+                                generation,
+                                result: Err(AiModelRefreshFailure::Failed(format!(
+                                    "could not read the saved API key: {error}"
+                                ))),
                             });
                             return;
                         }
@@ -2164,7 +2186,9 @@ impl AiWorkspaceEntity {
             };
             let result = oxideterm_ai::fetch_provider_models(provider, api_key)
                 .await
-                .map_err(|_| AiModelRefreshFailure::Failed);
+                .map_err(|error| {
+                    AiModelRefreshFailure::Failed(model_refresh_failure_message(&error))
+                });
             let _ = worker_tx.send(AiModelRefreshWorkerDelivery {
                 index,
                 provider_id,
@@ -4399,7 +4423,9 @@ impl AiWorkspaceEntity {
                 Err(AiModelRefreshFailure::MissingApiKey) => AiModelRefreshIntent::MissingApiKey {
                     provider_id: delivery.provider_id,
                 },
-                Err(AiModelRefreshFailure::Failed) => AiModelRefreshIntent::Failed,
+                Err(AiModelRefreshFailure::Failed(message)) => {
+                    AiModelRefreshIntent::Failed { message }
+                }
             };
             self.model_refresh_intents.push_back(intent);
         }
@@ -7276,5 +7302,42 @@ pub(in crate::workspace) mod entity_tests {
         assert!(terminal_inline_wake.is_stopped());
         assert!(chat_stream_wake.is_stopped());
         assert!(compaction_wake.is_stopped());
+    }
+}
+
+#[cfg(test)]
+mod refresh_failure_message_tests {
+    use super::*;
+
+    #[test]
+    fn keeps_the_cause_chain_on_one_bounded_line() {
+        let error = anyhow::Error::new(std::io::Error::other("certificate verify failed"))
+            .context("model refresh request failed");
+        let message = model_refresh_failure_message(&error);
+        assert!(
+            message.contains("model refresh request failed"),
+            "{message}"
+        );
+        assert!(message.contains("certificate verify failed"), "{message}");
+        assert!(
+            !message.contains('\n') && !message.contains('\r'),
+            "{message}"
+        );
+
+        let truncated = model_refresh_failure_message(&anyhow::Error::new(std::io::Error::other(
+            "x".repeat(500),
+        )));
+        assert_eq!(truncated.chars().count(), 400);
+    }
+
+    #[test]
+    fn flattens_newlines_inside_the_cause() {
+        let error = anyhow::Error::new(std::io::Error::other("line one\nline two\r\nline three"));
+        let message = model_refresh_failure_message(&error);
+        assert!(
+            !message.contains('\n') && !message.contains('\r'),
+            "{message}"
+        );
+        assert_eq!(message.matches("line").count(), 3, "{message}");
     }
 }
