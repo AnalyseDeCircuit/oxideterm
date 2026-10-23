@@ -8,6 +8,71 @@ use gpui::{
 mod ssh_peer;
 
 #[gpui::test]
+fn ssh_search_refreshes_during_output(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config = SshSessionConfig::from(peer.config.take().unwrap())
+        .with_runtime(peer.runtime.clone())
+        .with_registry(
+            peer.registry.clone(),
+            oxideterm_ssh::ConnectionConsumer::Terminal("search-output".into()),
+        );
+    let (pane, cx) = cx.add_window_view(move |window, cx| {
+        TerminalPane::new_ssh_with_preferences(
+            config,
+            TerminalUiPreferences {
+                cursor_blink: false,
+                ..Default::default()
+            },
+            window,
+            cx,
+        )
+        .unwrap()
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    pane.update(cx, |pane, cx| {
+        pane.tick(cx);
+        pane.set_search_query(Some("late-hit".into()), None, cx);
+    });
+    cx.run_until_parked();
+    cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE);
+    cx.run_until_parked();
+    pane.read_with(cx, |pane, _| {
+        assert_eq!(pane.current_search_matches().as_ref(), &[])
+    });
+    let activity = pane.read_with(cx, |pane, _| pane.terminal.lock().activity_receiver());
+    for output in ["late-hit\r\n", "more output\r\n"] {
+        peer.runtime
+            .block_on(sender.data(channel, output.as_bytes().to_vec()))
+            .unwrap();
+        peer.runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while !pane.read_with(cx, |pane, _| {
+                    pane.terminal.lock().buffer_text().contains(output.trim())
+                }) {
+                    assert!(activity.notified().await);
+                }
+            })
+            .await
+            .expect("SSH parser did not consume the new output");
+        });
+        pane.update(cx, |pane, cx| pane.tick(cx));
+        cx.run_until_parked();
+        cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE / 2);
+        cx.run_until_parked();
+    }
+    pane.read_with(cx, |pane, _| {
+        let matches = pane.current_search_matches();
+        assert_eq!(
+            matches
+                .iter()
+                .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                .collect::<Vec<_>>(),
+            vec![(0, 0, 8)]
+        );
+    });
+}
+
+#[gpui::test]
 fn exited_ssh_pane_requests_reconnect_only_for_enter_and_resumes_in_place(cx: &mut TestAppContext) {
     let mut peer = ssh_peer::SshPeer::new();
     let config = SshSessionConfig::from(peer.config.take().unwrap())

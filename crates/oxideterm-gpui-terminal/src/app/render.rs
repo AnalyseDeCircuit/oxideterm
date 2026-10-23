@@ -515,6 +515,7 @@ impl Render for TerminalPane {
             .id("terminal-pane")
             .size_full()
             .relative()
+            .cursor(gpui::CursorStyle::IBeam)
             .bg(if transparent_pane_base {
                 rgba(0x00000000)
             } else {
@@ -2941,6 +2942,27 @@ mod tests {
                 self.background.clone(),
                 Some(self.image.clone()),
             )
+        }
+    }
+
+    #[gpui::test]
+    fn terminal_viewport_uses_text_mouse_cursor(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            super::TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                .unwrap()
+        });
+        cx.simulate_resize(gpui::size(gpui::px(800.0), gpui::px(400.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        for (x, y) in [(4.0, 4.0), (200.0, 100.0)] {
+            cx.simulate_mouse_move(
+                gpui::point(gpui::px(x), gpui::px(y)),
+                None,
+                gpui::Modifiers::default(),
+            );
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::IBeam);
+            });
         }
     }
 

@@ -643,6 +643,9 @@
     "next": "succ",
     "close": "x",
     "no_results": "Nessun risultato",
+    "match_case": "Distingui maiuscole e minuscole",
+    "use_regex": "Usa espressione regolare",
+    "invalid_regex": "Espressione regolare non valida",
     "visible_terminal_hint": "Cerca nello scrollback visibile del terminale."
   },
   "workspace": {

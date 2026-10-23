@@ -138,6 +138,10 @@ impl<T> Row<T> {
     #[inline]
     pub fn identity(&self) -> usize { self.identity }
 
+    /// Upper bound of cells touched since the row was reset, including written spaces.
+    #[inline]
+    pub fn occupied_len(&self) -> usize { self.occ }
+
     #[inline]
     pub fn from_vec(vec: Vec<T>, occ: usize) -> Row<T> {
         Row { identity: next_row_identity(), inner: vec, occ }

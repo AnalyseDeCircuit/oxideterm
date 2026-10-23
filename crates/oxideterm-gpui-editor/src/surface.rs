@@ -322,6 +322,9 @@ pub struct TextEditorView {
     secondary_selections: Vec<Selection>,
     settings: EditorSettings,
     find_query: String,
+    find_regex: bool,
+    find_regex_error: bool,
+    find_pattern_cache: RefCell<Option<search::FindPatternCache>>,
     find_matches: Vec<FindMatch>,
     // Scroll rendering asks for highlights per visible row. Keep search hits
     // indexed by line so each row does not scan every match in a large file.
@@ -441,6 +444,9 @@ impl TextEditorView {
             secondary_selections: Vec::new(),
             settings,
             find_query: String::new(),
+            find_regex: false,
+            find_regex_error: false,
+            find_pattern_cache: RefCell::new(None),
             find_matches: Vec::new(),
             find_line_matches: Vec::new(),
             active_find_index: None,
@@ -609,6 +615,7 @@ impl TextEditorView {
         // Inline mode removes only visual chrome. Buffer, cursor, undo, IME,
         // and selection ownership remain on this editor instance.
         self.presentation = presentation;
+        self.viewport.scroll_past_end = presentation == EditorPresentation::Document;
         self.display_rows_cache.borrow_mut().take();
         self.viewport
             .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1660,7 +1667,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn fractional_line_height_keeps_the_final_row_inside_the_viewport(
+    fn fractional_line_height_allows_the_final_row_at_the_viewport_top(
         cx: &mut gpui::TestAppContext,
     ) {
         let (editor, cx) = cx.add_window_view(|_, cx| {
@@ -1682,9 +1689,9 @@ mod tests {
                     cx,
                 );
                 for (scale, row_height, scroll_end) in [
-                    (1.0, 17.0, 3237.0),
-                    (2.0, 17.0, 3237.0),
-                    (1.25, 16.8, 3196.8),
+                    (1.0, 17.0, 3400.0),
+                    (2.0, 17.0, 3400.0),
+                    (1.25, 16.8, 3360.0),
                 ] {
                     window.set_scale_factor(scale);
                     editor.measure_code_metrics(window, cx);

@@ -571,10 +571,13 @@ impl WorkspaceApp {
             find_previous: self.i18n.t("ide.find_previous"),
             match_case: self.i18n.t("ide.match_case"),
             toggle_replace: self.i18n.t("ide.toggle_replace"),
+            insert_newline: self.i18n.t("ide.insert_newline"),
             close_search: self.i18n.t("ide.close_search"),
             replace_btn: self.i18n.t("ide.replace_btn"),
             replace_all_btn: self.i18n.t("ide.replace_all_btn"),
-            insert_newline: self.i18n.t("ide.insert_newline"),
+            use_regex: self.i18n.t("ide.use_regex"),
+            invalid_regex: self.i18n.t("search.invalid_regex"),
+            no_results: self.i18n.t("search.no_results"),
         }
     }
     pub(in crate::workspace) fn sync_ide_surface_mount(&mut self, tab_id: TabId, cx: &mut App) {

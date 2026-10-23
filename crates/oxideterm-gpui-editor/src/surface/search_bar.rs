@@ -4,18 +4,24 @@
 use gpui::{
     AnyElement, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
     KeyDownEvent, MouseButton, ParentElement, StatefulInteractiveElement, Styled, Subscription,
-    Window, div, px, rgb, rgba, svg,
+    Window, div, px, rgb,
 };
 use oxideterm_gpui_ui::{
-    button::{ButtonOptions, ButtonSize, IconButtonOptions, button_with, icon_button},
+    button::{ButtonOptions, ButtonSize, button_with},
+    search_bar::{
+        search_action_button, search_input_height, search_mode_button, search_mode_group,
+        search_panel, search_row,
+    },
     tooltip::tooltip_view,
 };
 
 use super::{EditorPresentation, TextEditorView};
+use oxideterm_theme::ThemeTokens;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditorSearchLabels {
     pub find_placeholder: String,
+    pub insert_newline: String,
     pub replace_placeholder: String,
     pub find_next: String,
     pub find_previous: String,
@@ -24,7 +30,9 @@ pub struct EditorSearchLabels {
     pub close_search: String,
     pub replace_btn: String,
     pub replace_all_btn: String,
-    pub insert_newline: String,
+    pub use_regex: String,
+    pub invalid_regex: String,
+    pub no_results: String,
 }
 
 #[cfg(test)]
@@ -35,6 +43,7 @@ mod tests {
     fn labels() -> EditorSearchLabels {
         EditorSearchLabels {
             find_placeholder: "Find".into(),
+            insert_newline: "Insert newline".into(),
             replace_placeholder: "Replace".into(),
             find_next: "Next".into(),
             find_previous: "Previous".into(),
@@ -43,8 +52,139 @@ mod tests {
             close_search: "Close".into(),
             replace_btn: "Replace".into(),
             replace_all_btn: "All".into(),
-            insert_newline: "Insert newline".into(),
+            use_regex: "Use regular expression".into(),
+            invalid_regex: "Invalid regular expression".into(),
+            no_results: "No results".into(),
         }
+    }
+
+    #[gpui::test]
+    fn search_regex_dot_requires_explicit_cross_line_mode(cx: &mut TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("foo\nbar", &oxideterm_theme::default_tokens(), cx)
+        });
+        editor.update(cx, |editor, cx| {
+            editor.set_find_regex(true, cx);
+            for (query, expected) in [
+                (".*", vec![0..3, 4..7]),
+                ("foo.bar", vec![]),
+                (r"foo\nbar", vec![0..7]),
+                ("(?s).*", vec![0..7]),
+            ] {
+                editor.set_find_query(query, cx);
+                assert_eq!(
+                    editor
+                        .find_matches
+                        .iter()
+                        .map(|hit| hit.range.start.0..hit.range.end.0)
+                        .collect::<Vec<_>>(),
+                    expected,
+                    "query={query}"
+                );
+            }
+            editor.set_find_query(".*", cx);
+            editor.replace_all_find_matches("x", cx);
+            assert_eq!(editor.buffer.text(), "x\nx");
+        });
+    }
+
+    #[gpui::test]
+    fn search_regex_controls_match_across_lines_and_expand_replacements(cx: &mut TestAppContext) {
+        let source = "Name: Alpha\nvalue=12\nName: alpha\nvalue=34\nName: beta\nvalue=56";
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor = TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx);
+            editor.set_search_labels(labels());
+            window.focus(&editor.focus_handle, cx);
+            editor
+        });
+        cx.simulate_resize(size(px(900.0), px(400.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let modifier = if cfg!(target_os = "macos") {
+            "cmd"
+        } else {
+            "ctrl"
+        };
+        cx.simulate_keystrokes(&format!("{modifier}-f"));
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(
+                "Name: (Alpha)\nvalue=(\\d+)".into(),
+            ))
+        });
+        cx.simulate_keystrokes(&format!("{modifier}-v"));
+        editor.read_with(cx, |editor, _| assert_eq!(editor.find_matches, vec![]));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let regex = cx.debug_bounds("find-use-regex").unwrap();
+        cx.simulate_click(regex.center(), Modifiers::default());
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|hit| hit.range.start.0..hit.range.end.0)
+                    .collect::<Vec<_>>(),
+                vec![0..20, 21..41]
+            )
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let case = cx.debug_bounds("find-match-case").unwrap();
+        cx.simulate_click(case.center(), Modifiers::default());
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|hit| hit.range.start.0..hit.range.end.0)
+                    .collect::<Vec<_>>(),
+                vec![0..20]
+            )
+        });
+        editor.update(cx, |editor, cx| {
+            editor.replace_current_find_match("<${1}:${2}>", cx);
+            assert_eq!(
+                editor.buffer.text(),
+                "<Alpha:12>\nName: alpha\nvalue=34\nName: beta\nvalue=56"
+            );
+            editor.set_find_case_sensitive(false, cx);
+            editor.replace_all_find_matches("${1}=${2}", cx);
+            assert_eq!(
+                editor.buffer.text(),
+                "<Alpha:12>\nalpha=34\nName: beta\nvalue=56"
+            );
+            editor.set_find_query("[", cx);
+            assert!(editor.find_regex_error);
+            assert_eq!(editor.find_matches, vec![]);
+            editor.replace_all_find_matches("changed", cx);
+            assert_eq!(
+                editor.buffer.text(),
+                "<Alpha:12>\nalpha=34\nName: beta\nvalue=56"
+            );
+            editor.set_find_query("^", cx);
+            assert!(!editor.find_regex_error);
+            assert_eq!(editor.find_matches, vec![]);
+            editor.set_find_query("alph", cx);
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|hit| hit.range.start.0..hit.range.end.0)
+                    .collect::<Vec<_>>(),
+                vec![1..5, 11..15]
+            );
+            let mut settings = editor.settings.clone();
+            settings.find_whole_word = true;
+            editor.set_settings(settings.clone(), cx);
+            assert_eq!(editor.find_matches, vec![]);
+            settings.find_whole_word = false;
+            editor.set_settings(settings, cx);
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|hit| hit.range.start.0..hit.range.end.0)
+                    .collect::<Vec<_>>(),
+                vec![1..5, 11..15]
+            );
+        });
     }
 
     #[gpui::test]
@@ -96,22 +236,64 @@ mod tests {
             );
             assert_eq!(editor.buffer.text(), source);
         });
+        let input_bounds = cx.debug_bounds("editor-find-input").unwrap();
+        for selector in ["find-match-case", "find-use-regex"] {
+            let mode_bounds = cx.debug_bounds(selector).unwrap();
+            assert!(
+                (f32::from(mode_bounds.center().y - input_bounds.center().y)).abs() < 1.0,
+                "{selector} moved to another row"
+            );
+            assert!(mode_bounds.left() >= input_bounds.right());
+        }
         cx.simulate_keystrokes("enter");
         editor.read_with(cx, |editor, _| {
             assert_eq!(editor.active_find_position(), Some((2, 2)))
         });
         cx.simulate_keystrokes(&format!("{modifier}-enter"));
-        editor.read_with(cx, |editor, _| assert_eq!(editor.find_query, "α\nβ\n"));
-        cx.simulate_keystrokes(&format!("{modifier}-z"));
         editor.read_with(cx, |editor, _| {
-            assert_eq!(editor.find_query, "α\nβ");
+            assert_eq!(editor.find_query, "α\nβ\n");
             assert_eq!(editor.buffer.text(), source);
         });
+        cx.simulate_keystrokes("backspace");
         let toggle = cx.debug_bounds("toggle-replace").unwrap();
         cx.simulate_click(toggle.center(), Modifiers::default());
         cx.simulate_keystrokes("tab");
         cx.update(|_, cx| cx.write_to_clipboard(ClipboardItem::new_string("新\n行".into())));
         cx.simulate_keystrokes(&format!("{modifier}-v"));
+        let newline = cx.debug_bounds("replace-newline").unwrap();
+        cx.simulate_click(newline.center(), Modifiers::default());
+        editor.read_with(cx, |editor, cx| {
+            assert_eq!(
+                editor
+                    .search_bar
+                    .as_ref()
+                    .unwrap()
+                    .replacement
+                    .read(cx)
+                    .buffer
+                    .text(),
+                "新\n行\n"
+            );
+            assert_eq!(editor.buffer.text(), source);
+        });
+        cx.simulate_keystrokes("backspace");
+        cx.simulate_resize(size(px(250.0), px(500.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        for replacement in [false, true] {
+            editor.read_with(cx, |editor, cx| {
+                let input = editor.search_input(replacement).unwrap();
+                let bounds = input.read(cx).content_bounds.unwrap();
+                assert!(bounds.size.width >= px(120.0), "search input was squeezed");
+                assert!(bounds.left() >= px(0.0) && bounds.right() <= px(250.0));
+            });
+        }
+        for selector in ["find-next", "find-close", "replace-current", "replace-all"] {
+            let bounds = cx.debug_bounds(selector).unwrap();
+            assert!(
+                bounds.left() >= px(0.0) && bounds.right() <= px(250.0),
+                "{selector}"
+            );
+        }
         let replace = cx.debug_bounds("replace-current").unwrap();
         cx.simulate_click(replace.center(), Modifiers::default());
         editor.read_with(cx, |editor, _| {
@@ -227,8 +409,20 @@ impl TextEditorView {
         } else {
             self.buffer.slice(selected.range()).unwrap_or_default()
         };
-        let query = self.new_search_input(&query_text, labels.find_placeholder.clone(), cx);
-        let replacement = self.new_search_input("", labels.replace_placeholder.clone(), cx);
+        let query = Self::new_search_input(
+            &query_text,
+            &self.language_notice_tokens,
+            labels.find_placeholder.clone(),
+            self.context_menu_labels.clone(),
+            cx,
+        );
+        let replacement = Self::new_search_input(
+            "",
+            &self.language_notice_tokens,
+            labels.replace_placeholder.clone(),
+            self.context_menu_labels.clone(),
+            cx,
+        );
         let query_version = query.read(cx).buffer.version();
         let replacement_version = replacement.read(cx).buffer.version();
         // Only buffer changes trigger a search. Caret blinking and selection in
@@ -276,14 +470,14 @@ impl TextEditorView {
         true
     }
 
-    fn new_search_input(
-        &self,
+    pub fn new_search_input<T: 'static>(
         text: &str,
+        tokens: &ThemeTokens,
         placeholder: String,
-        cx: &mut Context<Self>,
+        context_labels: super::EditorContextMenuLabels,
+        cx: &mut Context<T>,
     ) -> Entity<Self> {
-        let tokens = self.language_notice_tokens;
-        let context_labels = self.context_menu_labels.clone();
+        let tokens = *tokens;
         cx.new(|cx| {
             let mut input = Self::new(text, &tokens, cx);
             input.set_presentation(EditorPresentation::Inline, cx);
@@ -296,8 +490,11 @@ impl TextEditorView {
                 false,
                 cx,
             );
+            input.settings.soft_wrap = false;
             input.settings.highlight_current_line = false;
+            input.settings.highlight_special_chars = false;
             input.settings.indentation_markers = false;
+            input.set_border_visible(false);
             input.set_placeholder(Some(placeholder), cx);
             input.set_context_menu_labels(context_labels);
             input
@@ -379,7 +576,7 @@ impl TextEditorView {
             "escape" => {
                 self.close_search(window, cx);
             }
-            "enter" if event.keystroke.modifiers.control || event.keystroke.modifiers.platform => {
+            "enter" if event.keystroke.modifiers.secondary() => {
                 self.insert_search_newline(replacement_focused, window, cx);
             }
             "enter" => {
@@ -414,94 +611,47 @@ impl TextEditorView {
         label: String,
         disabled: bool,
     ) -> gpui::Stateful<gpui::Div> {
-        let tokens = self.language_notice_tokens;
-        icon_button(
-            &tokens,
-            svg()
-                .path(path)
-                .size(px(14.0))
-                .text_color(rgb(tokens.ui.text_muted))
-                .into_any_element(),
-            IconButtonOptions {
-                disabled,
-                ..IconButtonOptions::compact(24.0)
-            },
-        )
-        .flex_none()
-        .id(id)
-        .debug_selector(move || id.to_string())
-        .aria_label(label.clone())
-        .tooltip(move |_, cx| {
-            tooltip_view(
-                tokens,
-                label.clone(),
-                (path == "lucide/corner-down-left.svg").then(|| {
-                    if cfg!(target_os = "macos") {
-                        "⌘Enter"
-                    } else {
-                        "Ctrl+Enter"
-                    }
-                    .to_string()
-                }),
-                cx,
-            )
-        })
+        search_action_button(&self.language_notice_tokens, id, path, label, disabled)
+            .debug_selector(move || id.to_string())
     }
 
     fn render_search_input(
         &self,
         replacement: bool,
-        window: &Window,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let input = self.search_input(replacement).unwrap();
-        let tokens = &self.language_notice_tokens;
-        let focused = input.read(cx).focus_handle.is_focused(window);
-        let rows = input.read(cx).buffer.line_count().clamp(1, 4);
-        let height = input.read(cx).line_height() * rows as f32;
-        let label = self.search_labels.as_ref().unwrap().insert_newline.clone();
-        let input_label = if replacement {
-            self.search_labels
-                .as_ref()
-                .unwrap()
-                .replace_placeholder
-                .clone()
-        } else {
-            self.search_labels
-                .as_ref()
-                .unwrap()
-                .find_placeholder
-                .clone()
-        };
+        let height = search_input_height(
+            input.read(cx).buffer.line_count() as usize,
+            input.read(cx).line_height(),
+        );
+        let labels = self.search_labels.as_ref().unwrap();
         div()
             .id(if replacement {
                 "editor-replace-input"
             } else {
                 "editor-find-input"
             })
-            .aria_label(input_label)
-            .flex()
-            .items_start()
-            .flex_1()
-            .min_w(px(120.0))
-            .gap_1()
-            .px_2()
-            .py_1()
-            .rounded(px(tokens.radii.sm))
-            .border_1()
-            .border_color(rgb(if focused {
-                tokens.ui.accent
+            .debug_selector(move || {
+                if replacement {
+                    "editor-replace-input"
+                } else {
+                    "editor-find-input"
+                }
+                .to_string()
+            })
+            .aria_label(if replacement {
+                labels.replace_placeholder.clone()
             } else {
-                tokens.ui.border
-            }))
-            .bg(rgb(tokens.ui.bg))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_, _, _, cx| {
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            )
+                labels.find_placeholder.clone()
+            })
+            .flex_1()
+            .min_w(px(160.0))
+            .max_w_full()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
             .child(div().flex_1().min_w_0().h(px(height)).child(input))
             .child(
                 self.search_icon_button(
@@ -511,7 +661,15 @@ impl TextEditorView {
                         "find-newline"
                     },
                     "lucide/corner-down-left.svg",
-                    label,
+                    format!(
+                        "{} ({}+Enter)",
+                        labels.insert_newline,
+                        if cfg!(target_os = "macos") {
+                            "⌘"
+                        } else {
+                            "Ctrl"
+                        }
+                    ),
                     false,
                 )
                 .on_mouse_down(
@@ -547,16 +705,16 @@ impl TextEditorView {
         let current = self
             .active_find_position()
             .map_or(0, |(current, _)| current);
-        let match_label = if self.find_query.is_empty() {
+        let match_label = if self.find_regex_error {
+            labels.invalid_regex.clone()
+        } else if self.find_query.is_empty() {
             String::new()
+        } else if match_count == 0 {
+            labels.no_results.clone()
         } else {
             format!("{current}/{match_count}")
         };
-        let mut row = div()
-            .flex()
-            .flex_wrap()
-            .items_start()
-            .gap_1()
+        let mut row = search_row()
             .child(
                 self.search_icon_button(
                     "toggle-replace",
@@ -587,33 +745,48 @@ impl TextEditorView {
             .child(self.render_search_input(false, window, cx));
         row = row
             .child(
-                icon_button(
-                    &tokens,
-                    div().child("Aa").into_any_element(),
-                    IconButtonOptions {
-                        size: 24.0,
-                        background: self
-                            .settings
-                            .find_case_sensitive
-                            .then_some(rgba((tokens.ui.accent << 8) | 0x33)),
-                        ..IconButtonOptions::compact(24.0)
-                    },
-                )
-                .flex_none()
-                .id("find-match-case")
-                .aria_label(labels.match_case.clone())
-                .tooltip(move |_, cx| tooltip_view(tokens, labels.match_case.clone(), None, cx))
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.set_find_case_sensitive(!this.settings.find_case_sensitive, cx);
-                        cx.stop_propagation();
-                    }),
-                ),
+                search_mode_group()
+                    .child(
+                        search_mode_button(&tokens, "Aa", self.settings.find_case_sensitive)
+                            .id("find-match-case")
+                            .debug_selector(|| "find-match-case".into())
+                            .aria_label(labels.match_case.clone())
+                            .tooltip(move |_, cx| {
+                                tooltip_view(tokens, labels.match_case.clone(), None, cx)
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.set_find_case_sensitive(
+                                        !this.settings.find_case_sensitive,
+                                        cx,
+                                    );
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .child(
+                        search_mode_button(&tokens, ".*", self.find_regex)
+                            .id("find-use-regex")
+                            .debug_selector(|| "find-use-regex".into())
+                            .aria_label(labels.use_regex.clone())
+                            .tooltip(move |_, cx| {
+                                tooltip_view(tokens, labels.use_regex.clone(), None, cx)
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _, _, cx| {
+                                    this.set_find_regex(!this.find_regex, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    ),
             )
             .child(
                 div()
-                    .h(px(28.0))
+                    .min_h(px(28.0))
+                    .max_w_full()
+                    .flex_none()
                     .flex()
                     .items_center()
                     .text_size(px(tokens.metrics.ui_text_xs))
@@ -637,7 +810,7 @@ impl TextEditorView {
             .child(
                 self.search_icon_button(
                     "find-next",
-                    "lucide/chevron-down.svg",
+                    "lucide/arrow-down.svg",
                     labels.find_next,
                     match_count == 0,
                 )
@@ -659,35 +832,16 @@ impl TextEditorView {
                         }),
                     ),
             );
-        let mut panel = div()
+        let mut panel = search_panel(&tokens)
             .id("editor-search-bar")
-            .absolute()
-            .top_0()
-            .right(px(8.0))
-            .w(px(460.0))
-            .max_w(gpui::relative(0.92))
-            .p_2()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .rounded(px(tokens.radii.md))
-            .border_1()
-            .border_color(rgb(tokens.ui.border))
-            .bg(rgb(tokens.ui.bg_elevated))
-            .text_color(rgb(tokens.ui.text))
-            .font_family(tokens.metrics.font_family)
-            .shadow_lg()
-            .occlude()
             .capture_key_down(cx.listener(Self::handle_search_key))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(row);
         if replace_open && !self.read_only {
-            let mut row = div()
-                .flex()
-                .flex_wrap()
-                .items_start()
-                .gap_1()
-                .pl(px(28.0))
+            let mut row = search_row()
+                .border_t_1()
+                .border_color(rgb(tokens.ui.border))
+                .child(div().w(px(28.0)).flex_none())
                 .child(self.render_search_input(true, window, cx));
             for (all, label) in [(false, labels.replace_btn), (true, labels.replace_all_btn)] {
                 row = row.child(

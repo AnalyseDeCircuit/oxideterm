@@ -719,7 +719,14 @@ mod tests {
 
     #[test]
     fn logical_search_splits_matches_across_wrapped_rows() {
-        let cell_map = vec![(-1, 0), (-1, 1), (-1, 2), (0, 0), (0, 1), (0, 2)];
+        let cell_map = vec![
+            (-1, 0, 1),
+            (-1, 1, 2),
+            (-1, 2, 3),
+            (0, 0, 1),
+            (0, 1, 2),
+            (0, 2, 3),
+        ];
         let matches = search_logical_line_matches("abcdef", &cell_map, "cde", 80);
 
         assert_eq!(

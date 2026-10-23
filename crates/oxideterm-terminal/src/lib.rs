@@ -92,7 +92,9 @@ pub use remote_shell_integration::{
     RemoteShellKind, inspect_remote_shell_integration, install_remote_shell_integration,
     remove_remote_shell_integration,
 };
-pub use search::TerminalSearchSource;
+pub use search::{
+    TerminalSearchOptions, TerminalSearchQuery, TerminalSearchResult, TerminalSearchSource,
+};
 pub use selection::TerminalSelectionRange;
 pub use session::{
     MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,

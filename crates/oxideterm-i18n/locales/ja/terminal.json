@@ -643,6 +643,9 @@
     "next": "次",
     "close": "x",
     "no_results": "結果なし",
+    "match_case": "大文字と小文字を区別",
+    "use_regex": "正規表現を使用",
+    "invalid_regex": "無効な正規表現",
     "visible_terminal_hint": "表示中のターミナルスクロールバックを検索します。"
   },
   "workspace": {

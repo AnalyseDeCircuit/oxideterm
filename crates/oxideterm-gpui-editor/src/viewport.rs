@@ -23,6 +23,7 @@ pub struct EditorViewport {
     pub width_px: f32,
     pub height_px: f32,
     pub overscan_rows: usize,
+    pub(crate) scroll_past_end: bool,
 }
 
 impl EditorViewport {
@@ -33,6 +34,7 @@ impl EditorViewport {
             width_px: 0.0,
             height_px: 0.0,
             overscan_rows,
+            scroll_past_end: true,
         }
     }
 
@@ -65,8 +67,8 @@ impl EditorViewport {
         let old_x = self.scroll_x_px;
         let old_y = self.scroll_y_px;
         self.scroll_x_px = (self.scroll_x_px + dx_px).clamp(0.0, max_scroll_x_px.max(0.0));
-        self.scroll_y_px = (self.scroll_y_px + dy_px)
-            .clamp(0.0, max_scroll_y(line_count, line_height, self.height_px));
+        self.scroll_y_px =
+            (self.scroll_y_px + dy_px).clamp(0.0, self.max_scroll_y(line_count, line_height));
         (self.scroll_x_px - old_x).abs() > f32::EPSILON
             || (self.scroll_y_px - old_y).abs() > f32::EPSILON
     }
@@ -74,7 +76,7 @@ impl EditorViewport {
     pub fn clamp(&mut self, line_count: usize, line_height: f32) {
         self.scroll_y_px = self
             .scroll_y_px
-            .clamp(0.0, max_scroll_y(line_count, line_height, self.height_px));
+            .clamp(0.0, self.max_scroll_y(line_count, line_height));
     }
 
     pub fn clamp_horizontal(&mut self, max_scroll_x_px: f32) {
@@ -92,6 +94,20 @@ impl EditorViewport {
         }
         self.clamp(line_count, line_height);
         (self.scroll_y_px - old_y).abs() > f32::EPSILON
+    }
+
+    pub(crate) fn scrollable_height(&self, line_count: usize, line_height: f32) -> f32 {
+        // Document views leave room below the last row; inline inputs retain their compact extent.
+        let bottom_padding = if self.scroll_past_end {
+            (self.height_px - line_height).max(0.0)
+        } else {
+            0.0
+        };
+        line_count as f32 * line_height + bottom_padding
+    }
+
+    pub(crate) fn max_scroll_y(&self, line_count: usize, line_height: f32) -> f32 {
+        (self.scrollable_height(line_count, line_height) - self.height_px.max(0.0)).max(0.0)
     }
 
     pub fn visible_rows(&self, line_count: usize, line_height: f32) -> VisibleRows {
@@ -122,8 +138,4 @@ impl EditorViewport {
             bottom_spacer_px,
         }
     }
-}
-
-fn max_scroll_y(line_count: usize, line_height: f32, viewport_height: f32) -> f32 {
-    (line_count as f32 * line_height - viewport_height.max(0.0)).max(0.0)
 }

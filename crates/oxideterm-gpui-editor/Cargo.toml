@@ -15,6 +15,7 @@ gpui.workspace = true
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 tracing.workspace = true
 serde.workspace = true
+regex.workspace = true
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-plugin-manifest = { path = "../oxideterm-plugin-manifest" }

@@ -483,6 +483,13 @@ impl WorkspaceApp {
                     // Yield only to the modal's own input or editor, never background routing.
                     return;
                 }
+                if this.search_editor_focused(window, cx) {
+                    if this.handle_search_editor_key(event, window, cx) {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
+                    return;
+                }
                 if this
                     .plugin_ui_state(cx)
                     .focused_text_area_context(window, cx)

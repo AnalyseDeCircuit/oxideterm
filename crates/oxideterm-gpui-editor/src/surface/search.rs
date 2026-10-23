@@ -3,10 +3,18 @@
 
 use gpui::Context;
 use oxideterm_editor_core::{
-    BufferOffset, FindOptions, Selection, find_all, replace_all_transaction, word_at,
+    BufferOffset, EditTransaction, FindMatch, FindOptions, Selection, TextEdit, TextRange,
+    find_all, replace_all_transaction, word_at,
 };
 
 use super::TextEditorView;
+
+pub(super) struct FindPatternCache {
+    query: String,
+    case_sensitive: bool,
+    whole_word: bool,
+    pattern: Result<regex::Regex, regex::Error>,
+}
 
 impl TextEditorView {
     pub fn set_find_query(&mut self, query: impl Into<String>, cx: &mut Context<Self>) {
@@ -41,6 +49,44 @@ impl TextEditorView {
         self.active_find_index = (!self.find_matches.is_empty()).then_some(0);
         self.select_active_find_match();
         cx.notify();
+    }
+
+    pub fn set_find_regex(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.find_regex == enabled {
+            return;
+        }
+        self.find_regex = enabled;
+        self.refresh_find_matches();
+        self.active_find_index = (!self.find_matches.is_empty()).then_some(0);
+        self.select_active_find_match();
+        cx.notify();
+    }
+
+    fn find_pattern(&self) -> Result<regex::Regex, regex::Error> {
+        let mut cache = self.find_pattern_cache.borrow_mut();
+        if let Some(cached) = cache.as_ref()
+            && cached.query == self.find_query
+            && cached.case_sensitive == self.settings.find_case_sensitive
+            && cached.whole_word == self.settings.find_whole_word
+        {
+            return cached.pattern.clone();
+        }
+        let pattern = if self.settings.find_whole_word {
+            format!(r"\b(?:{})\b", self.find_query)
+        } else {
+            self.find_query.clone()
+        };
+        let pattern = regex::RegexBuilder::new(&pattern)
+            .case_insensitive(!self.settings.find_case_sensitive)
+            .multi_line(true)
+            .build();
+        *cache = Some(FindPatternCache {
+            query: self.find_query.clone(),
+            case_sensitive: self.settings.find_case_sensitive,
+            whole_word: self.settings.find_whole_word,
+            pattern: pattern.clone(),
+        });
+        pattern
     }
 
     pub fn select_next_find_match(&mut self, cx: &mut Context<Self>) {
@@ -86,6 +132,26 @@ impl TextEditorView {
         let Some(hit) = self.active_find_match() else {
             return;
         };
+        let mut replacement = replacement.into();
+        if self.find_regex {
+            let Ok(pattern) = self.find_pattern() else {
+                return;
+            };
+            let expanded = self.buffer.with_text(|text| {
+                let captures = pattern.captures_at(text, hit.range.start.0)?;
+                let matched = captures.get(0)?;
+                if matched.start() != hit.range.start.0 || matched.end() != hit.range.end.0 {
+                    return None;
+                }
+                let mut expanded = String::new();
+                captures.expand(&replacement, &mut expanded);
+                Some(expanded)
+            });
+            let Some(expanded) = expanded else {
+                return;
+            };
+            replacement = expanded;
+        }
         self.replace_range_with_caret(hit.range, replacement, cx);
         self.refresh_find_matches();
     }
@@ -99,9 +165,36 @@ impl TextEditorView {
             return;
         }
         let replacement = replacement.into();
-        let transaction = self.buffer.with_text(|text| {
-            replace_all_transaction(text, &self.find_query, &replacement, self.find_options())
-        });
+        let transaction = if self.find_regex {
+            let Ok(pattern) = self.find_pattern() else {
+                return;
+            };
+            self.buffer.with_text(|text| {
+                let edits = pattern
+                    .captures_iter(text)
+                    .filter_map(|captures| {
+                        let matched = captures.get(0)?;
+                        if matched.is_empty() {
+                            return None;
+                        }
+                        let mut expanded = String::new();
+                        captures.expand(&replacement, &mut expanded);
+                        Some(TextEdit::new(
+                            TextRange::new(
+                                BufferOffset(matched.start()),
+                                BufferOffset(matched.end()),
+                            ),
+                            expanded,
+                        ))
+                    })
+                    .collect();
+                EditTransaction::new(edits)
+            })
+        } else {
+            self.buffer.with_text(|text| {
+                replace_all_transaction(text, &self.find_query, &replacement, self.find_options())
+            })
+        };
         if transaction.is_empty() {
             return;
         }
@@ -123,15 +216,37 @@ impl TextEditorView {
     }
 
     pub(super) fn refresh_find_matches(&mut self) {
+        self.find_regex_error = false;
         if self.find_query.is_empty() {
+            self.find_pattern_cache.borrow_mut().take();
             self.find_matches.clear();
             self.find_line_matches.clear();
             self.active_find_index = None;
             return;
         }
-        self.find_matches = self
-            .buffer
-            .with_text(|text| find_all(text, &self.find_query, self.find_options()));
+        self.find_matches = if self.find_regex {
+            match self.find_pattern() {
+                Ok(pattern) => self.buffer.with_text(|text| {
+                    pattern
+                        .find_iter(text)
+                        .filter(|matched| !matched.is_empty())
+                        .map(|matched| FindMatch {
+                            range: TextRange::new(
+                                BufferOffset(matched.start()),
+                                BufferOffset(matched.end()),
+                            ),
+                        })
+                        .collect()
+                }),
+                Err(_) => {
+                    self.find_regex_error = true;
+                    Vec::new()
+                }
+            }
+        } else {
+            self.buffer
+                .with_text(|text| find_all(text, &self.find_query, self.find_options()))
+        };
         self.find_line_matches = self.build_find_line_matches();
         if self
             .active_find_index

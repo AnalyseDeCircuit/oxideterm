@@ -213,6 +213,7 @@ impl TerminalPane {
 
         if key == "end" && modifiers.platform {
             self.pending_search_reveal = false;
+            self.search_navigation_needs_viewport_anchor = true;
             let snapshot = {
                 let mut terminal = self.terminal.lock();
                 terminal.scroll_to_bottom();
@@ -226,6 +227,7 @@ impl TerminalPane {
 
         if key == "home" && modifiers.platform {
             self.pending_search_reveal = false;
+            self.search_navigation_needs_viewport_anchor = true;
             let snapshot = {
                 let mut terminal = self.terminal.lock();
                 terminal.scroll_to_top();
@@ -535,6 +537,7 @@ impl TerminalPane {
             return;
         };
         self.pending_search_reveal = false;
+        self.search_navigation_needs_viewport_anchor = true;
 
         if mouse_mode(mode, event.modifiers.shift) {
             self.clear_smooth_scroll_animation();
@@ -1271,6 +1274,7 @@ impl TerminalPane {
         };
 
         self.pending_search_reveal = false;
+        self.search_navigation_needs_viewport_anchor = true;
 
         let available = (geometry.track_height - geometry.height).max(px(1.0));
         let y = (position.y - geometry.y - thumb_offset_y).clamp(px(0.0), available);
@@ -1431,6 +1435,7 @@ impl TerminalPane {
         }
 
         self.pending_search_reveal = false;
+        self.search_navigation_needs_viewport_anchor = true;
 
         let target_offset = self.physical_scroll_offset(target_offset);
         let snapshot = {
@@ -1454,6 +1459,7 @@ impl TerminalPane {
 
     fn apply_scroll_action(&mut self, action: TerminalScrollAction, cx: &mut Context<Self>) {
         self.pending_search_reveal = false;
+        self.search_navigation_needs_viewport_anchor = true;
         let folded_offset = self.folding_active().then(|| {
             let current = self.visible_scroll_offset();
             let page = self.snapshot.rows.saturating_sub(1).max(1);
@@ -1501,15 +1507,39 @@ impl TerminalPane {
             .selected_search_match
             .unwrap_or(0)
             .min(matches.len() - 1);
-        self.selected_search_match = Some(if forward {
-            (current + 1) % matches.len()
-        } else if current == 0 {
-            matches.len() - 1
-        } else {
-            current - 1
-        });
+        self.selected_search_match =
+            if std::mem::take(&mut self.search_navigation_needs_viewport_anchor) {
+                let snapshot = self.terminal.lock().snapshot();
+                self.snapshot = self.stamp_snapshot(snapshot);
+                self.nearest_search_match(&matches)
+            } else {
+                Some(if forward {
+                    (current + 1) % matches.len()
+                } else if current == 0 {
+                    matches.len() - 1
+                } else {
+                    current - 1
+                })
+            };
         let selected = matches[self.selected_search_match.unwrap()].clone();
         self.scroll_to_search_match(&selected, cx);
+    }
+
+    pub(super) fn nearest_search_match(&self, matches: &[TerminalSearchMatch]) -> Option<usize> {
+        let origin = self.snapshot.scrollback_lines as i64;
+        let top = self.displayed_absolute_line(0) as i64 - origin;
+        let bottom =
+            self.displayed_absolute_line(self.snapshot.rows.saturating_sub(1)) as i64 - origin;
+        matches
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, hit)| {
+                let start = i64::from(hit.line);
+                let end = i64::from(hit.ranges.last().map_or(hit.line, |range| range.line));
+                // Every visible match has zero distance; buffer order breaks ties.
+                (top - end).max(start - bottom).max(0)
+            })
+            .map(|(index, _)| index)
     }
 
     pub(super) fn scroll_to_selected_search_match(&mut self, cx: &mut Context<Self>) {
@@ -3697,6 +3727,125 @@ mod tests {
     }
 
     #[gpui::test]
+    fn search_reset_cancels_pending_work_and_clears_invalid_patterns(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(20, 3, Default::default(), window, cx).unwrap()
+        });
+        pane.update(cx, |pane, cx| {
+            pane.feed_recording_output(b"needle", cx);
+            pane.set_search_query(Some("needle".into()), None, cx);
+            pane.reset_recording_playback(20, 3, cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE);
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            assert_eq!(pane.search_status().query, None);
+            assert_eq!(pane.current_search_matches().as_ref(), &[]);
+            pane.set_search_query_with_options(
+                Some("[".into()),
+                oxideterm_terminal::TerminalSearchOptions {
+                    regex: true,
+                    ..Default::default()
+                },
+                None,
+                cx,
+            );
+            assert!(pane.search_status().invalid_regex);
+            pane.clear_buffer(cx);
+            assert_eq!(pane.search_status().query, None);
+            assert!(!pane.search_status().invalid_regex);
+            pane.feed_recording_output(b"needle", cx);
+            pane.set_search_query(Some("needle".into()), None, cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE);
+        cx.run_until_parked();
+        pane.read_with(cx, |pane, _| {
+            assert_eq!(
+                pane.current_search_matches()
+                    .iter()
+                    .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                    .collect::<Vec<_>>(),
+                vec![(0, 0, 6)]
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn search_initially_selects_match_nearest_viewport(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        for (offset, expected_index, expected_text) in [
+            (0, 2, "needle 18"),
+            (8, 1, "needle 10"),
+            (12, 1, "needle 10"),
+            (17, 0, "needle 0"),
+        ] {
+            let pane = cx.update(|window, cx| {
+                cx.new(|cx| {
+                    TerminalPane::new_recording_playback(
+                        20,
+                        3,
+                        TerminalUiPreferences::default(),
+                        window,
+                        cx,
+                    )
+                    .unwrap()
+                })
+            });
+            pane.update(cx, |pane, cx| {
+                let output = (0..20)
+                    .map(|row| {
+                        if [0, 10, 18].contains(&row) {
+                            format!("needle {row}")
+                        } else {
+                            format!("row {row}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\r\n");
+                pane.terminal
+                    .lock()
+                    .feed_recording_output(output.as_bytes());
+                pane.terminal.lock().scroll_to_display_offset(offset);
+                let snapshot = pane.terminal.lock().snapshot();
+                pane.snapshot = pane.stamp_snapshot(snapshot);
+                pane.tick(cx);
+                pane.set_search_query(Some("needle".into()), None, cx);
+            });
+            cx.run_until_parked();
+            cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE);
+            cx.run_until_parked();
+            pane.read_with(cx, |pane, _| {
+                assert_eq!(
+                    pane.search_status().active_match,
+                    Some(expected_index),
+                    "offset={offset}"
+                );
+                assert!(
+                    pane.visible_text_snapshot().contains(expected_text),
+                    "offset={offset}"
+                );
+            });
+            pane.update(cx, |pane, cx| {
+                pane.select_next_search_result(true, cx);
+                pane.apply_scroll_action(TerminalScrollAction::Top, cx);
+                pane.select_next_search_result(true, cx);
+                assert_eq!(pane.search_status().active_match, Some(0));
+                assert!(pane.visible_text_snapshot().contains("needle 0"));
+                pane.select_next_search_result(true, cx);
+                assert_eq!(pane.search_status().active_match, Some(1));
+                pane.apply_scroll_action(TerminalScrollAction::Bottom, cx);
+                pane.select_next_search_result(false, cx);
+                assert_eq!(pane.search_status().active_match, Some(2));
+                assert!(pane.visible_text_snapshot().contains("needle 18"));
+                pane.select_next_search_result(false, cx);
+                assert_eq!(pane.search_status().active_match, Some(1));
+            });
+        }
+    }
+
+    #[gpui::test]
     fn search_refresh_preserves_manual_scroll(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
         for pending in [false, true] {
@@ -3775,9 +3924,16 @@ mod tests {
                         pane.snapshot.display_offset, offset,
                         "{input}, pending={pending}"
                     );
+                    let expected = if input == "wheel" { 0 } else { 1 };
                     pane.select_next_search_result(true, cx);
-                    assert_eq!(pane.search_status().active_match, Some(1));
-                    assert!(pane.visible_text_snapshot().contains("needle 10"));
+                    assert_eq!(pane.search_status().active_match, Some(expected));
+                    assert!(pane.visible_text_snapshot().contains(if expected == 0 {
+                        "needle 0"
+                    } else {
+                        "needle 10"
+                    }));
+                    pane.select_next_search_result(true, cx);
+                    assert_eq!(pane.search_status().active_match, Some(1 - expected));
                 });
                 let output_offset = pane.update(cx, |pane, cx| {
                     pane.terminal.lock().feed_recording_output(b"\r\nneedle 20");
@@ -3791,8 +3947,13 @@ mod tests {
                     assert_eq!(pane.search_status().match_count, 3);
                     assert_eq!(pane.snapshot.display_offset, output_offset);
                     pane.select_next_search_result(false, cx);
-                    assert_eq!(pane.search_status().active_match, Some(0));
-                    assert!(pane.visible_text_snapshot().contains("needle 0"));
+                    let expected = if input == "wheel" { 0 } else { 2 };
+                    assert_eq!(pane.search_status().active_match, Some(expected));
+                    assert!(pane.visible_text_snapshot().contains(if expected == 0 {
+                        "needle 0"
+                    } else {
+                        "needle 20"
+                    }));
                     pane.tick(cx);
                     pane.set_search_query(Some("row 5".into()), None, cx);
                 });

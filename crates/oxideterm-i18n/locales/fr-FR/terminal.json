@@ -643,6 +643,9 @@
     "next": "suiv",
     "close": "x",
     "no_results": "Aucun résultat",
+    "match_case": "Respecter la casse",
+    "use_regex": "Utiliser une expression régulière",
+    "invalid_regex": "Expression régulière invalide",
     "visible_terminal_hint": "Recherche dans le défilement visible du terminal."
   },
   "workspace": {

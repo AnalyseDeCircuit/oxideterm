@@ -141,7 +141,7 @@ impl Render for TextEditorView {
             .relative()
             .size_full()
             .overflow_hidden()
-            .cursor(CursorStyle::IBeam)
+            .cursor(CursorStyle::Arrow)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
@@ -180,6 +180,15 @@ impl Render for TextEditorView {
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
                     this.finish_selection_drag(cx);
                 }),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(px(self.visible_gutter_width()))
+                    .right_0()
+                    .top_0()
+                    .bottom_0()
+                    .cursor(CursorStyle::IBeam),
             )
             .child(rows);
         if let Some(placeholder) = self.render_placeholder() {
@@ -332,7 +341,8 @@ impl TextEditorView {
     ) -> Option<AnyElement> {
         let geometry = editor_scrollbar_geometry(
             self.viewport.height_px,
-            self.document_row_count() as f32 * self.metrics.line_height,
+            self.viewport
+                .scrollable_height(self.document_row_count(), self.metrics.line_height),
             self.viewport.scroll_y_px,
         )?;
         let drag_state = EditorScrollbarDragState {
@@ -404,7 +414,8 @@ impl TextEditorView {
         };
         let Some(geometry) = editor_scrollbar_geometry(
             self.viewport.height_px,
-            self.document_row_count() as f32 * self.metrics.line_height,
+            self.viewport
+                .scrollable_height(self.document_row_count(), self.metrics.line_height),
             self.viewport.scroll_y_px,
         ) else {
             return;
@@ -1580,7 +1591,7 @@ fn visible_indentation_columns(
 
 #[cfg(test)]
 mod tests {
-    use super::visible_indentation_columns;
+    use super::*;
     use crate::surface::wrap::DisplayRow;
     use oxideterm_editor_syntax::{LanguageId, StructureCache};
 
@@ -1592,6 +1603,133 @@ mod tests {
             is_first: start_col == 0,
             is_folded_header: false,
         }
+    }
+
+    #[gpui::test]
+    fn cursor_distinguishes_gutter_from_text_and_document_whitespace(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("text", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.simulate_resize(gpui::size(px(500.0), px(240.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (bounds, gutter, line_height) = editor.read_with(cx, |editor, _| {
+            (
+                editor.content_bounds.unwrap(),
+                editor.visible_gutter_width(),
+                editor.metrics.line_height,
+            )
+        });
+        for (x, y, expected) in [
+            (gutter / 2.0, line_height / 2.0, CursorStyle::Arrow),
+            (gutter + 20.0, line_height / 2.0, CursorStyle::IBeam),
+            (gutter / 2.0, 180.0, CursorStyle::Arrow),
+            (gutter + 20.0, 180.0, CursorStyle::IBeam),
+        ] {
+            cx.simulate_mouse_move(
+                bounds.origin + gpui::point(px(x), px(y)),
+                None,
+                gpui::Modifiers::default(),
+            );
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                assert_eq!(
+                    window.cursor_style_for_test(),
+                    expected,
+                    "position=({x}, {y})"
+                );
+            });
+        }
+        editor.update(cx, |editor, cx| {
+            editor.set_presentation(EditorPresentation::Inline, cx)
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(
+            bounds.origin + gpui::point(px(4.0), px(8.0)),
+            None,
+            gpui::Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.cursor_style_for_test(), CursorStyle::IBeam);
+        });
+    }
+
+    #[gpui::test]
+    fn final_line_reaches_viewport_top_by_wheel_and_scrollbar(cx: &mut gpui::TestAppContext) {
+        let source = format!("{}\nlast", "abc ".repeat(40));
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.simulate_resize(gpui::size(px(340.0), px(200.0)));
+        for wrap in [false, true] {
+            editor.update(cx, |editor, cx| {
+                let mut settings = editor.settings.clone();
+                settings.soft_wrap = wrap;
+                settings.soft_wrap_column = None;
+                editor.set_settings(settings, cx);
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            editor.update(cx, |editor, cx| {
+                editor.handle_scroll(
+                    &ScrollWheelEvent {
+                        position: editor.content_bounds.unwrap().center(),
+                        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-10000.0))),
+                        modifiers: gpui::Modifiers::default(),
+                        touch_phase: gpui::TouchPhase::Moved,
+                    },
+                    cx,
+                );
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                editor.update(cx, |editor, _| {
+                    let anchor = editor.scroll_anchor();
+                    assert_eq!(anchor.source_position, 161.0, "wrap={wrap}");
+                    assert!(anchor.at_end);
+                    let bounds = editor.content_bounds.unwrap();
+                    let point = bounds.origin
+                        + gpui::point(
+                            px(editor.visible_gutter_width()
+                                + editor.visible_content_padding_x()
+                                + 1.0),
+                            px(1.0),
+                        );
+                    assert_eq!(
+                        editor.offset_for_window_point(point, window),
+                        Some(BufferOffset(161)),
+                        "last line must occupy the first viewport row"
+                    );
+                });
+            });
+            editor.update(cx, |editor, cx| {
+                editor.viewport.scroll_y_px = 0.0;
+                editor.scroll_from_scrollbar_pointer(
+                    editor.content_bounds.unwrap().bottom() + px(100.0),
+                    0.0,
+                    cx,
+                );
+                assert_eq!(
+                    editor.scroll_anchor().source_position,
+                    161.0,
+                    "scrollbar wrap={wrap}"
+                );
+            });
+        }
+        cx.simulate_resize(gpui::size(px(340.0), px(300.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        editor.update(cx, |editor, cx| {
+            assert_eq!(editor.scroll_anchor().source_position, 161.0);
+            let mut settings = editor.settings.clone();
+            settings.soft_wrap = false;
+            editor.set_settings(settings, cx);
+            editor.set_presentation(EditorPresentation::Inline, cx);
+            assert_eq!(
+                editor.viewport.scroll_y_px, 0.0,
+                "inline inputs must not inherit document bottom padding"
+            );
+        });
     }
 
     #[test]

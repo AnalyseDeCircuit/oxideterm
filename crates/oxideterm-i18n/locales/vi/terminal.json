@@ -643,6 +643,9 @@
     "next": "tiếp",
     "close": "x",
     "no_results": "Không có kết quả",
+    "match_case": "Phân biệt chữ hoa và chữ thường",
+    "use_regex": "Dùng biểu thức chính quy",
+    "invalid_regex": "Biểu thức chính quy không hợp lệ",
     "visible_terminal_hint": "Tìm trong vùng cuộn hiện đang hiển thị của terminal."
   },
   "workspace": {
