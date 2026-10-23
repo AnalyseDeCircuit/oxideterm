@@ -302,6 +302,7 @@ pub struct TerminalSearchStatus {
     pub query: Option<String>,
     pub active_match: Option<usize>,
     pub match_count: usize,
+    pub invalid_regex: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -523,11 +524,15 @@ pub struct TerminalPane {
     privilege_prompt_inline_hint: Option<String>,
     privilege_prompt_submit_requested: bool,
     search_query: Option<String>,
+    search_options: oxideterm_terminal::TerminalSearchOptions,
+    search_pattern: Option<Arc<oxideterm_terminal::TerminalSearchQuery>>,
+    search_invalid_regex: bool,
     terminal_content_revision: u64,
     search_cache: Option<TerminalSearchCache>,
     search_generation: Arc<AtomicU64>,
     search_task: Option<gpui::Task<()>>,
     selected_search_match: Option<usize>,
+    search_navigation_needs_viewport_anchor: bool,
     pending_search_reveal: bool,
     hovered_link: Option<TerminalLinkRange>,
     timestamp_hover: Option<TerminalTextHover>,
@@ -1280,11 +1285,15 @@ impl TerminalPane {
             privilege_prompt_inline_hint: None,
             privilege_prompt_submit_requested: false,
             search_query: None,
+            search_options: Default::default(),
+            search_pattern: None,
+            search_invalid_regex: false,
             terminal_content_revision: 1,
             search_cache: None,
             search_generation: Arc::new(AtomicU64::new(0)),
             search_task: None,
             selected_search_match: None,
+            search_navigation_needs_viewport_anchor: false,
             pending_search_reveal: false,
             hovered_link: None,
             timestamp_hover: None,
@@ -2584,10 +2593,30 @@ impl TerminalPane {
         selected_match: Option<usize>,
         cx: &mut Context<Self>,
     ) -> TerminalSearchStatus {
+        self.set_search_query_with_options(query, self.search_options, selected_match, cx)
+    }
+
+    pub fn set_search_query_with_options(
+        &mut self,
+        query: Option<String>,
+        options: oxideterm_terminal::TerminalSearchOptions,
+        selected_match: Option<usize>,
+        cx: &mut Context<Self>,
+    ) -> TerminalSearchStatus {
+        self.search_generation.fetch_add(1, Ordering::AcqRel);
+        self.search_task = None;
+        self.search_options = options;
+        let compiled = query
+            .as_deref()
+            .filter(|query| !query.is_empty())
+            .map(|query| oxideterm_terminal::TerminalSearchQuery::new(query, options));
+        self.search_invalid_regex = compiled.as_ref().is_some_and(Result::is_err);
+        self.search_pattern = compiled.and_then(Result::ok).map(Arc::new);
         self.search_query = query;
         self.search_cache = None;
         self.selected_search_match = selected_match.or(Some(0));
         self.pending_search_reveal = true;
+        self.search_navigation_needs_viewport_anchor = false;
         self.schedule_search_refresh(cx);
         cx.notify();
         self.search_status()
@@ -2610,6 +2639,7 @@ impl TerminalPane {
                 .selected_search_match
                 .filter(|index| *index < match_count),
             match_count,
+            invalid_regex: self.search_invalid_regex,
         }
     }
 
@@ -2634,6 +2664,11 @@ impl TerminalPane {
     }
 
     fn schedule_search_refresh(&mut self, cx: &mut Context<Self>) {
+        // Output joins the pending refresh instead of postponing it indefinitely.
+        // Query changes cancel the task before scheduling a replacement.
+        if self.search_task.is_some() {
+            return;
+        }
         let generation = self
             .search_generation
             .fetch_add(1, Ordering::AcqRel)
@@ -2650,11 +2685,10 @@ impl TerminalPane {
             self.pending_search_reveal = false;
             return;
         };
-        let Some(search_source) = self.terminal.lock().search_source() else {
+        let Some(pattern) = self.search_pattern.clone() else {
             return;
         };
         let cancellation = self.search_generation.clone();
-        let content_revision = self.terminal_content_revision;
         self.search_task = Some(cx.spawn(async move |weak, cx| {
             cx.background_executor()
                 .timer(TERMINAL_SEARCH_DEBOUNCE)
@@ -2662,32 +2696,51 @@ impl TerminalPane {
             if cancellation.load(Ordering::Acquire) != generation {
                 return;
             }
+            let Ok(Some((search_source, content_revision))) = weak.update(cx, |this, _| {
+                this.terminal
+                    .lock()
+                    .search_source()
+                    .map(|source| (source, this.terminal_content_revision))
+            }) else {
+                let _ = weak.update(cx, |this, _| this.search_task = None);
+                return;
+            };
             let worker_cancellation = cancellation.clone();
-            let worker_query = query.clone();
             let search_task = cx.background_executor().spawn(async move {
                 let started = Instant::now();
                 let is_cancelled = || worker_cancellation.load(Ordering::Acquire) != generation;
-                let matches = search_source.search_matches(&worker_query, &is_cancelled);
+                let matches = search_source.search(&pattern, &is_cancelled);
                 (matches, started.elapsed())
             });
             let (matches, elapsed) = search_task.await;
             let _ = weak.update(cx, |this, cx| {
                 if this.search_generation.load(Ordering::Acquire) != generation
-                    || this.terminal_content_revision != content_revision
                     || this.search_query.as_deref() != Some(query.as_str())
                 {
                     return;
                 }
-                let matches: Arc<[TerminalSearchMatch]> = matches.into();
+                this.search_task = None;
+                let dirty = this.terminal_content_revision != content_revision;
+                let source = this.terminal.lock().search_source();
+                let Some(source) = source else {
+                    return;
+                };
+                // Reconcile by stable row identity instead of discarding every busy-buffer scan.
+                let matches: Arc<[TerminalSearchMatch]> =
+                    source.resolve_search_result(matches).into();
                 this.search_cache = Some(TerminalSearchCache {
                     query,
-                    content_revision,
+                    content_revision: this.terminal_content_revision,
                     matches: matches.clone(),
                 });
                 this.render_stats.search_micros =
                     elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
                 this.selected_search_match = if matches.is_empty() {
                     None
+                } else if this.pending_search_reveal {
+                    let snapshot = this.terminal.lock().snapshot();
+                    this.snapshot = this.stamp_snapshot(snapshot);
+                    this.nearest_search_match(&matches)
                 } else {
                     this.selected_search_match
                         .or(Some(0))
@@ -2700,6 +2753,9 @@ impl TerminalPane {
                 }
                 cx.emit(TerminalPaneEvent::SearchStatusChanged);
                 cx.notify();
+                if dirty {
+                    this.schedule_search_refresh(cx);
+                }
             });
         }));
     }
@@ -3252,8 +3308,7 @@ impl TerminalPane {
         self.snapshot = self.stamp_snapshot(snapshot);
         self.mark_terminal_content_changed(cx);
         self.set_selection(None);
-        self.search_query = None;
-        self.selected_search_match = None;
+        self.set_search_query(None, None, cx);
         self.reset_command_marks_for_terminal_reset();
         cx.notify();
     }

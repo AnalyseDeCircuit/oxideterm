@@ -54,8 +54,9 @@ impl TextEditorView {
                 a as f64 + fraction * b.saturating_sub(a).max(1) as f64
             })
             .unwrap_or(0.0);
-        let maximum =
-            (rows.len() as f32 * self.metrics.line_height - self.viewport.height_px).max(0.0);
+        let maximum = self
+            .viewport
+            .max_scroll_y(rows.len(), self.metrics.line_height);
         EditorScrollAnchor {
             version: self.buffer.version(),
             source_position: position,
@@ -76,8 +77,9 @@ impl TextEditorView {
 
     pub(super) fn restore_scroll_anchor(&mut self, anchor: EditorScrollAnchor) {
         let rows = self.display_rows();
-        let maximum =
-            (rows.len() as f32 * self.metrics.line_height - self.viewport.height_px).max(0.0);
+        let maximum = self
+            .viewport
+            .max_scroll_y(rows.len(), self.metrics.line_height);
         let position = anchor.source_position.clamp(0.0, self.buffer.len() as f64);
         let mut target = maximum;
         for (index, row) in rows.iter().enumerate() {

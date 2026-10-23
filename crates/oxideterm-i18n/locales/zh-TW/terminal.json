@@ -643,6 +643,9 @@
     "next": "下一個",
     "close": "x",
     "no_results": "無結果",
+    "match_case": "區分大小寫",
+    "use_regex": "使用正規表示式",
+    "invalid_regex": "正規表示式無效",
     "visible_terminal_hint": "搜尋目前可見的終端機捲動緩衝。"
   },
   "workspace": {

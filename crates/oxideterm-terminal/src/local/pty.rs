@@ -1812,6 +1812,200 @@ mod incremental_snapshot_tests {
     }
 
     #[test]
+    fn search_source_always_matches_hard_breaks_in_literal_and_regex_queries() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 40,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let term = Arc::new(FairMutex::new(Term::new(
+            Config::default(),
+            &size,
+            listener,
+        )));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        {
+            let mut term = term.lock();
+            // Place a wrapped line and a hard break across the search lock chunk boundary.
+            parser.advance(&mut *term, "\r\n".repeat(30).as_bytes());
+            parser.advance(&mut *term, b"123456Foo\r\nbar");
+        }
+        let source = TerminalSearchSource::new(term, size.cols);
+        let options = crate::TerminalSearchOptions {
+            case_sensitive: false,
+            regex: true,
+        };
+        let hits = source.search_matches_with_options(r"foo\nbar", options, &|| false);
+        assert_eq!(
+            hits.iter()
+                .map(|hit| hit
+                    .ranges
+                    .iter()
+                    .map(|range| (range.line, range.start_col, range.end_col))
+                    .collect::<Vec<_>>())
+                .collect::<Vec<_>>(),
+            vec![vec![(30, 6, 8), (31, 0, 1), (32, 0, 3)]]
+        );
+        assert_eq!(source.search_matches("Foo\nbar", &|| false), hits);
+        assert_eq!(
+            source.search_matches_with_options(r"foo\nbar", options, &|| true),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn search_source_preserves_written_spaces_and_unicode_cell_widths() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 4,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let term = Arc::new(FairMutex::new(Term::new(
+            Config::default(),
+            &size,
+            listener,
+        )));
+        Processor::<StdSyncHandler>::new().advance(
+            &mut *term.lock(),
+            "a中文be\u{301}\r\nfoo \r\nbar".as_bytes(),
+        );
+        let source = TerminalSearchSource::new(term, size.cols);
+        for (query, expected) in [
+            ("中", vec![(0, 1, 3)]),
+            ("中文", vec![(0, 1, 5)]),
+            ("文b", vec![(0, 3, 6)]),
+            ("\u{301}", vec![(0, 6, 7)]),
+            ("foo ", vec![(1, 0, 4)]),
+            ("foo \nbar", vec![(1, 0, 4), (2, 0, 3)]),
+        ] {
+            for regex in [false, true] {
+                let hits = source.search_matches_with_options(
+                    query,
+                    crate::TerminalSearchOptions {
+                        regex,
+                        ..Default::default()
+                    },
+                    &|| false,
+                );
+                assert_eq!(
+                    hits.iter()
+                        .flat_map(|hit| hit.ranges.iter())
+                        .map(|range| (range.line, range.start_col, range.end_col))
+                        .collect::<Vec<_>>(),
+                    expected,
+                    "query={query:?}, regex={regex}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn search_results_follow_surviving_rows_and_reject_overwritten_matches() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 3,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let term = Arc::new(FairMutex::new(Term::new(
+            Config::default(),
+            &size,
+            listener,
+        )));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut *term.lock(), b"hit one\r\nhit two\r\ntail");
+        let source = TerminalSearchSource::new(term.clone(), size.cols);
+        let query = crate::TerminalSearchQuery::new("hit", Default::default()).unwrap();
+        let result = source.search(&query, &|| false);
+        let cross_line =
+            crate::TerminalSearchQuery::new("hit one\nhit two", Default::default()).unwrap();
+        let cross_line_result = source.search(&cross_line, &|| false);
+        let anchored = crate::TerminalSearchQuery::new(
+            r"tail\z",
+            crate::TerminalSearchOptions {
+                regex: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let anchored_result = source.search(&anchored, &|| false);
+        parser.advance(&mut *term.lock(), b"\r\nextra\x1b[1;1Hchanged");
+        assert_eq!(
+            source
+                .resolve_search_result(result)
+                .iter()
+                .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                .collect::<Vec<_>>(),
+            vec![(-1, 0, 3)]
+        );
+        assert_eq!(source.resolve_search_result(cross_line_result), vec![]);
+        assert_eq!(source.resolve_search_result(anchored_result), vec![]);
+        let rewritten = crate::TerminalSearchQuery::new("extra", Default::default()).unwrap();
+        let rewritten_result = source.search(&rewritten, &|| false);
+        parser.advance(
+            &mut *term.lock(),
+            b"\x1b[3;1H\x1b[2Kgone\r\nnext\r\nlast\r\nend",
+        );
+        assert_eq!(source.resolve_search_result(rewritten_result), vec![]);
+    }
+
+    #[test]
+    #[ignore = "manual search performance baseline"]
+    fn search_large_buffer_benchmark() {
+        let size = TerminalSize {
+            cols: 80,
+            rows: 24,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let term = Arc::new(FairMutex::new(Term::new(
+            Config::default(),
+            &size,
+            listener,
+        )));
+        let output = (0..10_000)
+            .map(|line| {
+                format!(
+                    "{}{}",
+                    if line == 500 || line == 9500 {
+                        "ERROR"
+                    } else {
+                        "TRACE"
+                    },
+                    "x".repeat(74)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n");
+        Processor::<StdSyncHandler>::new().advance(&mut *term.lock(), output.as_bytes());
+        let source = TerminalSearchSource::new(term, size.cols);
+        let started = std::time::Instant::now();
+        for _ in 0..5 {
+            let hits = source.search_matches_with_options(
+                "ERROR",
+                crate::TerminalSearchOptions {
+                    regex: true,
+                    ..Default::default()
+                },
+                &|| false,
+            );
+            assert_eq!(
+                hits.iter()
+                    .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                    .collect::<Vec<_>>(),
+                vec![(-9476, 0, 5), (-476, 0, 5)]
+            );
+        }
+        eprintln!("five searches: {:?}", started.elapsed());
+    }
+
+    #[test]
     fn search_source_honors_cancellation_and_finds_completed_work() {
         let size = TerminalSize {
             cols: 16,

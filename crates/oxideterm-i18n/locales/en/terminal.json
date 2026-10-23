@@ -643,6 +643,9 @@
     "next": "next",
     "close": "x",
     "no_results": "No results",
+    "match_case": "Match case",
+    "use_regex": "Use regular expression",
+    "invalid_regex": "Invalid regular expression",
     "visible_terminal_hint": "Search the visible terminal scrollback."
   },
   "workspace": {

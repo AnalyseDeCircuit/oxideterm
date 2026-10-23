@@ -44,7 +44,6 @@
     "search_truncated": "Kết quả đã bị cắt ngắn. Tinh chỉnh tìm kiếm để có kết quả chính xác hơn.",
     "search_results_count": "{{count}} kết quả trong {{files}} tệp",
     "find_placeholder": "Tìm kiếm",
-    "insert_newline": "Chèn dòng mới",
     "replace_placeholder": "Thay thế",
     "find_next": "Kết quả tiếp theo (Enter)",
     "find_previous": "Kết quả trước đó (Shift+Enter)",

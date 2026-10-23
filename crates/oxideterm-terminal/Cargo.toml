@@ -16,6 +16,7 @@ crossbeam-channel.workspace = true
 fernomade-predict = { path = "../fernomade/predict" }
 libc.workspace = true
 memchr.workspace = true
+regex.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-mosh = { path = "../oxideterm-mosh" }

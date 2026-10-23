@@ -44,7 +44,6 @@
     "search_truncated": "결과가 잘렸습니다. 더 정확한 일치를 위해 검색을 세분화하세요.",
     "search_results_count": "{{files}}개 파일에서 {{count}}개 결과",
     "find_placeholder": "찾기",
-    "insert_newline": "줄바꿈 삽입",
     "replace_placeholder": "바꾸기",
     "find_next": "다음 찾기 (Enter)",
     "find_previous": "이전 찾기 (Shift+Enter)",

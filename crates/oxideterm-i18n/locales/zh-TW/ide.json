@@ -44,7 +44,6 @@
     "search_truncated": "結果已截斷。請優化搜尋條件以獲得更精確的匹配。",
     "search_results_count": "在 {{files}} 個檔案中找到 {{count}} 個結果",
     "find_placeholder": "尋找",
-    "insert_newline": "插入換行",
     "replace_placeholder": "取代",
     "find_next": "尋找下一個 (Enter)",
     "find_previous": "尋找上一個 (Shift+Enter)",

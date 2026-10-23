@@ -643,6 +643,9 @@
     "next": "weiter",
     "close": "x",
     "no_results": "Keine Ergebnisse",
+    "match_case": "Groß-/Kleinschreibung beachten",
+    "use_regex": "Regulären Ausdruck verwenden",
+    "invalid_regex": "Ungültiger regulärer Ausdruck",
     "visible_terminal_hint": "Durchsucht den sichtbaren Terminal-Scrollback."
   },
   "workspace": {

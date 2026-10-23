@@ -26,6 +26,7 @@ pub mod motion;
 pub mod progress;
 pub mod radio_group;
 pub mod scroll;
+pub mod search_bar;
 pub mod section;
 pub mod segmented_control;
 pub mod select;
