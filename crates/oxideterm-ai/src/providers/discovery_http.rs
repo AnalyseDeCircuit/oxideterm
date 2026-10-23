@@ -158,12 +158,9 @@ pub(crate) async fn fetch_openai_compatible_json(
             {
                 continue;
             }
-            let detail = parse_openai_compatible_error(&body);
-            let suffix = detail
-                .filter(|detail| !detail.is_empty())
-                .map(|detail| format!(" — {detail}"))
-                .unwrap_or_default();
-            return Err(anyhow!("{context} failed: {message}{suffix}"));
+            // Remote error bodies can echo credentials. Report the status and
+            // sanitized endpoint without carrying that body into notifications.
+            return Err(anyhow!("{context} failed: {message}"));
         }
         match parse_provider_json(&body, context) {
             Ok(json) => return Ok(json),
@@ -202,21 +199,6 @@ fn path_has_version_segment(pathname: &str) -> bool {
 
 pub(crate) fn looks_like_html_response(body: &str) -> bool {
     body.trim_start().starts_with('<')
-}
-
-fn parse_openai_compatible_error(body: &str) -> Option<String> {
-    if body.is_empty() {
-        return None;
-    }
-    if let Ok(json) = serde_json::from_str::<Value>(body) {
-        return json
-            .get("error")
-            .and_then(|error| error.get("message"))
-            .or_else(|| json.get("message"))
-            .and_then(Value::as_str)
-            .map(str::to_string);
-    }
-    Some(body.chars().take(200).collect())
 }
 
 pub(crate) fn api_key_required_ref<'a>(
@@ -308,18 +290,63 @@ mod tests {
         );
     }
 
-    #[test]
-    fn provider_http_error_message_never_reports_credentials() {
-        let message = provider_http_error_message(
-            "https://user:secret@gateway.example/v1/models?key=SECRET",
-            reqwest::StatusCode::UNAUTHORIZED,
-        );
-        assert_eq!(
-            message,
-            "https://gateway.example/v1/models returned HTTP 401 Unauthorized"
-        );
-        assert!(!message.contains("secret"));
-        assert!(!message.contains("SECRET"));
+    #[tokio::test]
+    async fn provider_http_errors_do_not_expose_echoed_credentials() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}/v1", listener.local_addr().unwrap());
+        let bodies = [
+            r#"{"error":{"message":"Invalid API key: synthetic-refresh-secret"}}"#,
+            r#"{"message":"Authorization: Bearer synthetic-refresh-secret"}"#,
+            "Invalid API key: synthetic-refresh-secret",
+        ];
+        let server = tokio::spawn(async move {
+            for body in bodies {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0; 1024];
+                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                    let count = socket.read(&mut buffer).await.unwrap();
+                    assert_ne!(count, 0, "request ended before its headers");
+                    request.extend_from_slice(&buffer[..count]);
+                }
+                assert!(
+                    String::from_utf8(request)
+                        .unwrap()
+                        .to_ascii_lowercase()
+                        .contains("authorization: bearer synthetic-refresh-secret\r\n")
+                );
+                socket.write_all(format!(
+                    "HTTP/1.1 401 Unauthorized\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()
+                ).as_bytes()).await.unwrap();
+            }
+        });
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let key = Zeroizing::new("synthetic-refresh-secret".to_string());
+        for _ in bodies {
+            let error = fetch_openai_compatible_json(
+                &client,
+                &base_url,
+                "/models",
+                Some(&key),
+                "Model list",
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                format!("{error:#}"),
+                format!("Model list failed: {base_url}/models returned HTTP 401 Unauthorized")
+            );
+        }
+        server.await.unwrap();
     }
 
     #[test]
