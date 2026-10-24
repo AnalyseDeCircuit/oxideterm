@@ -164,6 +164,11 @@ impl WorkspaceApp {
             .pr(px(self.tokens.spacing.two))
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
+            .bg(color_for_background(
+                self.tokens.ui.bg_secondary,
+                self.background_surface_active("knowledge"),
+                KNOWLEDGE_BACKGROUND_SURFACE_ALPHA,
+            ))
             .child(self.knowledge_navigator_action(
                 "notes-toggle-navigation",
                 if navigator_visible {
