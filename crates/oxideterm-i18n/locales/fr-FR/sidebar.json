@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "Tâches en arrière-plan : {{count}}",
+      "search": "Rechercher une tâche en arrière-plan…",
+      "transferring": "Transfert en cours",
+      "reconnecting": "Reconnexion en cours"
+    },
     "tab_scope": {
       "all": "Tous les onglets",
       "global": "Pages globales",
@@ -24,6 +30,7 @@
       "connected_first": "Connectées en premier"
     },
     "actions": {
+      "enter_zen": "Activer le mode Zen",
       "expand": "Développer la barre latérale",
       "collapse": "Réduire la barre latérale",
       "new_local_terminal": "Nouveau terminal local",

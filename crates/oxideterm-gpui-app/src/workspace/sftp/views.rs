@@ -18,6 +18,68 @@ impl Drop for SftpSurfaceScope {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn background_transfer_host_label(&self, remote_key: &str) -> String {
+        if let Some(endpoint_id) = remote_key.strip_prefix("standalone-sftp:") {
+            self.standalone_sftp_sessions
+                .get(endpoint_id)
+                .map(|runtime| runtime.title.clone())
+        } else if let Some(endpoint_id) = remote_key.strip_prefix("ftp:") {
+            self.ftp_sessions
+                .get(endpoint_id)
+                .map(|runtime| runtime.options.host.clone())
+        } else {
+            self.ssh_nodes
+                .get(&NodeId::new(remote_key))
+                .map(|node| node.title.clone())
+        }
+        .unwrap_or_else(|| self.i18n.t("sidebar.panels.sftp"))
+    }
+
+    pub(in crate::workspace) fn reveal_background_transfer(
+        &mut self,
+        transfer_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let page = self.sftp_pages.iter().find_map(|(id, page)| {
+            page.view
+                .read(cx)
+                .transfers
+                .iter()
+                .any(|transfer| transfer.transfer_id == transfer_id)
+                .then_some(*id)
+        });
+        if let Some(id) = page {
+            self.set_active_tab(id, window, cx);
+            return;
+        }
+        let Some(transfer) = self
+            .sftp_transfer_manager
+            .get_background_transfer(transfer_id)
+        else {
+            return;
+        };
+        let title = self.background_transfer_host_label(&transfer.node_id);
+        if let Some(endpoint) = transfer.node_id.strip_prefix("standalone-sftp:") {
+            if self.standalone_sftp_sessions.contains_key(endpoint) {
+                self.open_standalone_sftp_tab_surface(endpoint.to_owned(), title, None, cx);
+            }
+        } else if let Some(endpoint) = transfer.node_id.strip_prefix("ftp:") {
+            if self.ftp_sessions.contains_key(endpoint) {
+                self.open_standalone_sftp_tab_surface(endpoint.to_owned(), title, None, cx);
+            }
+        } else {
+            let node_id = NodeId::new(transfer.node_id);
+            if self.ssh_nodes.contains_key(&node_id) {
+                if self.embedded_sftp_node_id.as_ref() == Some(&node_id) {
+                    self.open_sftp_sidebar_surface(node_id, None, cx);
+                } else {
+                    self.open_sftp_tab_surface(node_id, None, cx);
+                }
+            }
+        }
+    }
+
     pub(in crate::workspace) fn sftp_page_remote_keys(
         &self,
         tab_id: TabId,

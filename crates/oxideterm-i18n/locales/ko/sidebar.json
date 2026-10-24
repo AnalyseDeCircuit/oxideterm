@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "백그라운드 작업: {{count}}",
+      "search": "백그라운드 작업 검색…",
+      "transferring": "전송 중",
+      "reconnecting": "다시 연결 중"
+    },
     "tab_scope": {
       "all": "모든 탭",
       "global": "공통 페이지",
@@ -24,6 +30,7 @@
       "connected_first": "연결된 세션 우선"
     },
     "actions": {
+      "enter_zen": "집중 모드 시작",
       "expand": "사이드바 펼치기",
       "collapse": "사이드바 접기",
       "new_local_terminal": "새 로컬 터미널",

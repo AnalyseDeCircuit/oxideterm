@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "Hintergrundaufgaben: {{count}}",
+      "search": "Hintergrundaufgaben suchen…",
+      "transferring": "Übertragung läuft",
+      "reconnecting": "Verbindung wird wiederhergestellt"
+    },
     "tab_scope": {
       "all": "Alle Tabs",
       "global": "Globale Seiten",
@@ -24,6 +30,7 @@
       "connected_first": "Verbundene zuerst"
     },
     "actions": {
+      "enter_zen": "Zen-Modus aktivieren",
       "expand": "Seitenleiste erweitern",
       "collapse": "Seitenleiste einklappen",
       "new_local_terminal": "Neues lokales Terminal",

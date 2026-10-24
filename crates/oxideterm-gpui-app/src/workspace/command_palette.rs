@@ -2,7 +2,7 @@ use super::*;
 mod entity;
 
 pub(in crate::workspace) use entity::CommandPaletteEntity;
-use entity::CommandPaletteView;
+use entity::{CommandPaletteView, PaletteContent};
 use oxideterm_connections::{resolve_ssh_config_alias, saved_connection_from_ssh_host};
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::modal::{
@@ -41,6 +41,8 @@ enum PaletteSection {
     Commands,
     Sessions,
     Connections,
+    Transfers,
+    Reconnects,
     #[allow(dead_code)]
     Plugins,
     Help,
@@ -62,6 +64,7 @@ struct PaletteItem {
 #[derive(Clone)]
 enum PaletteAction {
     SelectTabScope(tabs::TabScope),
+    BackgroundTask(background_tasks::BackgroundTaskTarget),
     Keybinding(&'static str),
     ActivateTab(TabId),
     OpenSavedConnection(String),
@@ -169,6 +172,21 @@ impl WorkspaceApp {
             palette.set_selected_index(index, cx);
         });
         self.scroll_selected_command_palette_item_into_view(cx);
+        self.clear_ime_selection();
+        self.show_active_input_caret(cx);
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_background_task_picker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_modal_interaction_boundary(cx);
+        self.command_palette
+            .update(cx, |palette, cx| palette.open_background_tasks(cx));
         self.clear_ime_selection();
         self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;
@@ -507,13 +525,19 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !matches!(execution.action, PaletteAction::SelectTabScope(_)) {
+        if !matches!(
+            execution.action,
+            PaletteAction::SelectTabScope(_) | PaletteAction::BackgroundTask(_)
+        ) {
             self.record_command_palette_mru(&execution.id, cx);
         }
         self.ime_marked_text = None;
 
         match execution.action {
             PaletteAction::SelectTabScope(scope) => self.select_tab_scope(scope, window, cx),
+            PaletteAction::BackgroundTask(target) => {
+                self.reveal_background_task(target, window, cx)
+            }
             PaletteAction::Keybinding(action_id) => {
                 let _ = self.dispatch_keybinding_action(action_id, window, cx);
             }
@@ -959,6 +983,48 @@ impl WorkspaceApp {
     }
 
     fn ranked_command_palette_items(&self, cx: &Context<Self>) -> Vec<RankedItem> {
+        if self.command_palette.read(cx).is_background_task_picker() {
+            let query = self.command_palette.read(cx).query();
+            return self
+                .background_task_choices(cx)
+                .into_iter()
+                .filter_map(|(target, label, detail, icon)| {
+                    let value = format!("{label} {detail}");
+                    let matched = command_palette_match(&label, &value, query)?;
+                    let section = match &target {
+                        background_tasks::BackgroundTaskTarget::Transfer(_) => {
+                            PaletteSection::Transfers
+                        }
+                        background_tasks::BackgroundTaskTarget::Reconnect(_) => {
+                            PaletteSection::Reconnects
+                        }
+                    };
+                    let id = match &target {
+                        background_tasks::BackgroundTaskTarget::Transfer(id) => {
+                            format!("background-transfer:{id}")
+                        }
+                        background_tasks::BackgroundTaskTarget::Reconnect(node) => {
+                            format!("background-reconnect:{}", node.0)
+                        }
+                    };
+                    Some(RankedItem {
+                        score: matched.score,
+                        highlights: matched.highlights,
+                        item: PaletteItem {
+                            id,
+                            label,
+                            section,
+                            icon,
+                            detail: Some(detail),
+                            shortcut: None,
+                            value,
+                            action: PaletteAction::BackgroundTask(target),
+                            disabled: false,
+                        },
+                    })
+                })
+                .collect();
+        }
         if self.command_palette.read(cx).is_tab_scope_picker() {
             let query = self.command_palette.read(cx).query();
             return self
@@ -1392,6 +1458,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let ranked_items = self.ranked_command_palette_items(cx);
+        if self.command_palette.read(cx).is_background_task_picker() {
+            self.command_palette.update(cx, |palette, cx| {
+                let index = palette
+                    .selected_index()
+                    .min(ranked_items.len().saturating_sub(1));
+                palette.set_selected_index(index, cx);
+            });
+        }
         let palette: CommandPaletteView = self.command_palette.read(cx).view();
         let selected_connection = ranked_items
             .get(self.command_palette.read(cx).selected_index())
@@ -1400,7 +1474,8 @@ impl WorkspaceApp {
         let preview =
             selected_connection.map(|item| command_palette_connection_preview(&self.tokens, item));
         let viewport = window.viewport_size();
-        let palette_top = if palette.tab_scopes {
+        let compact = palette.content != PaletteContent::Commands;
+        let palette_top = if compact {
             self.window_titlebar_height(window) + 4.0
         } else {
             f32::from(viewport.height) * COMMAND_PALETTE_TOP_RATIO
@@ -1417,10 +1492,10 @@ impl WorkspaceApp {
             - 48.0)
             .clamp(0.0, COMMAND_PALETTE_LIST_MAX_HEIGHT);
         let mode = palette.mode;
-        let query_placeholder = self.i18n.t(if palette.tab_scopes {
-            "sidebar.tab_scope.search"
-        } else {
-            command_palette_placeholder_key(mode)
+        let query_placeholder = self.i18n.t(match palette.content {
+            PaletteContent::TabScopes => "sidebar.tab_scope.search",
+            PaletteContent::BackgroundTasks => "sidebar.background_tasks.search",
+            PaletteContent::Commands => command_palette_placeholder_key(mode),
         });
         let rows = Arc::new(command_palette_virtual_rows(ranked_items));
         let row_count = rows.len();
@@ -1430,7 +1505,7 @@ impl WorkspaceApp {
         let entity = cx.entity();
 
         let panel = dialog_content(&self.tokens)
-            .w(px(if palette.tab_scopes {
+            .w(px(if compact {
                 400.0_f32.min(f32::from(viewport.width) - 16.0)
             } else {
                 command_palette_panel_width(f32::from(viewport.width))
@@ -1529,7 +1604,7 @@ impl WorkspaceApp {
                                 SelectableTextRole::NonSelectable,
                                 "command-palette-footer",
                                 "hint",
-                                self.i18n.t(if palette.tab_scopes {
+                                self.i18n.t(if compact {
                                     "sidebar.tab_scope.hint"
                                 } else {
                                     "command_palette.footer_hint"
@@ -2412,6 +2487,8 @@ fn section_label_key(section: PaletteSection) -> &'static str {
         PaletteSection::Commands => "command_palette.section_commands",
         PaletteSection::Sessions => "command_palette.section_sessions",
         PaletteSection::Connections => "command_palette.section_connections",
+        PaletteSection::Transfers => "sftp.queue.title",
+        PaletteSection::Reconnects => "sidebar.background_tasks.reconnecting",
         PaletteSection::Plugins => "command_palette.section_plugins",
         PaletteSection::Help => "command_palette.section_help",
     }

@@ -129,8 +129,8 @@ fn newest_welcome_connections(
     recent
 }
 
-// Keep empty-workspace hints aligned with the same effective bindings used by dispatch.
-pub(super) fn effective_shortcut_label(
+// Keep visible shortcut hints aligned with the effective bindings used by dispatch.
+pub(in crate::workspace) fn effective_shortcut_label(
     action_id: &str,
     overrides: &serde_json::Map<String, serde_json::Value>,
 ) -> Option<String> {
@@ -179,7 +179,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_workspace_shortcut_uses_effective_override() {
+    fn shortcut_hints_use_effective_overrides_and_hide_unbound_actions() {
         let side = crate::keybindings::KeybindingSide::current();
         let combo = crate::keybindings::KeyCombo {
             key: "p".to_string(),
@@ -188,21 +188,22 @@ mod tests {
             alt: false,
             meta: cfg!(target_os = "macos"),
         };
-        let expected = crate::keybindings::format_combo(&combo);
+        let expected = if cfg!(target_os = "macos") {
+            "⇧⌘p"
+        } else {
+            "Ctrl+Shift+p"
+        };
         let mut overrides = serde_json::Map::new();
 
-        // Use the public override path so the test covers persisted settings semantics too.
-        crate::keybindings::set_override(&mut overrides, "app.commandPalette", side, combo);
-
-        assert_eq!(
-            effective_shortcut_label("app.commandPalette", &overrides),
-            Some(expected)
-        );
-
-        crate::keybindings::set_unbound_override(&mut overrides, "app.commandPalette", side);
-        assert_eq!(
-            effective_shortcut_label("app.commandPalette", &overrides),
-            None
-        );
+        for action in ["app.commandPalette", "app.zenMode"] {
+            // Use the public override path so the test covers persisted settings semantics too.
+            crate::keybindings::set_override(&mut overrides, action, side, combo.clone());
+            assert_eq!(
+                effective_shortcut_label(action, &overrides).as_deref(),
+                Some(expected)
+            );
+            crate::keybindings::set_unbound_override(&mut overrides, action, side);
+            assert_eq!(effective_shortcut_label(action, &overrides), None);
+        }
     }
 }

@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "背景工作：{{count}}",
+      "search": "搜尋背景工作…",
+      "transferring": "傳輸中",
+      "reconnecting": "正在重新連線"
+    },
     "tab_scope": {
       "all": "全部分頁",
       "global": "全域頁面",
@@ -24,6 +30,7 @@
       "connected_first": "已連線優先"
     },
     "actions": {
+      "enter_zen": "進入禪模式",
       "expand": "展開側邊欄",
       "collapse": "收合側邊欄",
       "new_local_terminal": "新增本機終端機",

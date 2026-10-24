@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "Attività in background: {{count}}",
+      "search": "Cerca attività in background…",
+      "transferring": "Trasferimento in corso",
+      "reconnecting": "Riconnessione in corso"
+    },
     "tab_scope": {
       "all": "Tutte le schede",
       "global": "Pagine globali",
@@ -24,6 +30,7 @@
       "connected_first": "Connesse per prime"
     },
     "actions": {
+      "enter_zen": "Attiva modalità Zen",
       "expand": "Espandi Barra Laterale",
       "collapse": "Comprimi Barra Laterale",
       "new_local_terminal": "Nuovo Terminale Locale",

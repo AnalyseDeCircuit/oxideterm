@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "Background tasks: {{count}}",
+      "search": "Search background tasks…",
+      "transferring": "Transferring",
+      "reconnecting": "Reconnecting"
+    },
     "tab_scope": {
       "all": "All tabs",
       "global": "Global pages",
@@ -24,6 +30,7 @@
       "connected_first": "Connected first"
     },
     "actions": {
+      "enter_zen": "Enter Zen mode",
       "expand": "Expand Sidebar",
       "collapse": "Collapse Sidebar",
       "new_local_terminal": "New Local Terminal",

@@ -429,6 +429,8 @@ impl WorkspaceApp {
         );
         let sftp_transfer_manager = Arc::new(SftpTransferManager::new());
         sftp_transfer_manager.apply_settings(sftp_runtime_settings_from_settings(&settings));
+        let background_transfer_observation =
+            Self::observe_background_transfers(sftp_transfer_manager.clone(), cx);
         let sftp_progress_store: Arc<dyn ProgressStore> = {
             let path = default_settings_path()
                 .parent()
@@ -810,6 +812,8 @@ impl WorkspaceApp {
             forwarding_service,
             forwarding_runtime,
             sftp_transfer_manager,
+            background_transfers: Vec::new(),
+            _background_transfer_observation: background_transfer_observation,
             sftp_progress_store,
             node_router,
             notification_center: NotificationCenterState::default(),

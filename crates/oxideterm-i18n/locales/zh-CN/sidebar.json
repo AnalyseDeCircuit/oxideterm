@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "后台任务：{{count}}",
+      "search": "搜索后台任务…",
+      "transferring": "传输中",
+      "reconnecting": "正在重连"
+    },
     "tab_scope": {
       "all": "全部标签",
       "global": "全局页面",
@@ -24,6 +30,7 @@
       "connected_first": "已连接优先"
     },
     "actions": {
+      "enter_zen": "进入禅模式",
       "expand": "展开侧边栏",
       "collapse": "折叠侧边栏",
       "new_local_terminal": "新建本地终端",

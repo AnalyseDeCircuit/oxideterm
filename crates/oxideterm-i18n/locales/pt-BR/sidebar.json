@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "Tarefas em segundo plano: {{count}}",
+      "search": "Buscar tarefas em segundo plano…",
+      "transferring": "Transferindo",
+      "reconnecting": "Reconectando"
+    },
     "tab_scope": {
       "all": "Todas as abas",
       "global": "Páginas globais",
@@ -24,6 +30,7 @@
       "connected_first": "Conectadas primeiro"
     },
     "actions": {
+      "enter_zen": "Entrar no modo Zen",
       "expand": "Expandir barra lateral",
       "collapse": "Recolher barra lateral",
       "new_local_terminal": "Novo terminal local",

@@ -281,6 +281,7 @@ pub struct SftpTransferManager {
     audit_transfers: RwLock<HashMap<String, AuditedTransfer>>,
     previous_attempts: RwLock<HashMap<String, String>>,
     background_notify: Arc<Notify>,
+    background_state_changes: watch::Sender<()>,
     tar_capability_probes: RwLock<HashMap<String, Arc<OnceCell<TarCapabilities>>>>,
     scp_capability_probes: RwLock<HashMap<String, Arc<OnceCell<ScpCapabilities>>>>,
 }
@@ -362,6 +363,7 @@ impl SftpTransferManager {
             audit_transfers: RwLock::new(HashMap::new()),
             previous_attempts: RwLock::new(HashMap::new()),
             background_notify: Arc::new(Notify::new()),
+            background_state_changes: watch::channel(()).0,
             tar_capability_probes: RwLock::new(HashMap::new()),
             scp_capability_probes: RwLock::new(HashMap::new()),
         }
@@ -494,6 +496,11 @@ impl SftpTransferManager {
 
     pub fn active_count(&self) -> usize {
         self.active_count.load(Ordering::Acquire)
+    }
+
+    /// Observes task membership and state, without waking UI consumers for byte progress.
+    pub fn subscribe_background_state_changes(&self) -> watch::Receiver<()> {
+        self.background_state_changes.subscribe()
     }
 
     pub fn registered_count(&self) -> usize {
@@ -644,6 +651,7 @@ impl SftpTransferManager {
             .write()
             .insert(transfer_id.clone(), snapshot);
         self.background_notify.notify_waiters();
+        self.background_state_changes.send_replace(());
         if !accepted {
             let _ = self.finish_background_transfer(
                 &transfer_id,
@@ -676,7 +684,11 @@ impl SftpTransferManager {
         if let Some(snapshot) = self.background_transfers.write().get_mut(transfer_id)
             && !snapshot.state.is_finished()
         {
+            let changed = snapshot.state != BackgroundTransferState::Active;
             snapshot.state = BackgroundTransferState::Active;
+            if changed {
+                self.background_state_changes.send_replace(());
+            }
             self.background_notify.notify_waiters();
         }
     }
@@ -696,7 +708,11 @@ impl SftpTransferManager {
                 snapshot.size = total;
             }
             snapshot.backend_speed = Some(speed);
+            let changed = snapshot.state != BackgroundTransferState::Active;
             snapshot.state = BackgroundTransferState::Active;
+            if changed {
+                self.background_state_changes.send_replace(());
+            }
             self.background_notify.notify_waiters();
         }
     }
@@ -755,6 +771,7 @@ impl SftpTransferManager {
             );
         }
         self.background_notify.notify_waiters();
+        self.background_state_changes.send_replace(());
         Some(snapshot)
     }
 
@@ -830,6 +847,7 @@ impl SftpTransferManager {
             {
                 snapshot.state = BackgroundTransferState::Paused;
                 snapshot.backend_speed = Some(0);
+                self.background_state_changes.send_replace(());
                 self.background_notify.notify_waiters();
             }
             true
@@ -850,6 +868,7 @@ impl SftpTransferManager {
                 && snapshot.state == BackgroundTransferState::Paused
             {
                 snapshot.state = BackgroundTransferState::Pending;
+                self.background_state_changes.send_replace(());
                 self.background_notify.notify_waiters();
             }
             true
@@ -893,6 +912,7 @@ impl SftpTransferManager {
             snapshot.error = Some(reason);
             snapshot.backend_speed = Some(0);
             snapshot.end_time = Some(now_ms());
+            self.background_state_changes.send_replace(());
             self.background_notify.notify_waiters();
             return true;
         }
@@ -954,6 +974,7 @@ impl SftpTransferManager {
         }
         self.background_notify.notify_waiters();
 
+        self.background_state_changes.send_replace(());
         let drained = tokio::time::timeout(grace_period, async {
             loop {
                 let notified = self.shutdown_notify.notified();
@@ -1201,13 +1222,60 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn background_state_observer_tracks_lifecycle_without_byte_progress_wakeups() {
+        async fn expect_state(
+            manager: &SftpTransferManager,
+            changes: &mut watch::Receiver<()>,
+            expected: BackgroundTransferState,
+        ) {
+            tokio::time::timeout(Duration::from_millis(300), changes.changed())
+                .await
+                .expect("state change should wake the observer")
+                .expect("manager remains live");
+            assert_eq!(
+                manager.get_background_transfer("tx-1").unwrap().state,
+                expected
+            );
+        }
+
+        let manager = SftpTransferManager::new();
+        let mut changes = manager.subscribe_background_state_changes();
+        manager.register("tx-1");
+        manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
+        expect_state(&manager, &mut changes, BackgroundTransferState::Pending).await;
+        manager.mark_background_transfer_active("tx-1");
+        expect_state(&manager, &mut changes, BackgroundTransferState::Active).await;
+
+        manager.update_background_transfer_progress("tx-1", 10, 100, 5);
+        manager.update_background_transfer_progress("tx-1", 20, 100, 8);
+        manager.mark_background_transfer_active("tx-1");
+        assert!(
+            !changes.has_changed().unwrap(),
+            "byte updates must not repaint the titlebar"
+        );
+        assert_eq!(
+            manager.get_background_transfer("tx-1").unwrap().transferred,
+            20
+        );
+
+        manager.pause("tx-1");
+        expect_state(&manager, &mut changes, BackgroundTransferState::Paused).await;
+        manager.resume("tx-1");
+        expect_state(&manager, &mut changes, BackgroundTransferState::Pending).await;
+        manager.finish_background_transfer("tx-1", BackgroundTransferState::Completed, None, None);
+        expect_state(&manager, &mut changes, BackgroundTransferState::Completed).await;
+    }
+
+    #[tokio::test]
     async fn interrupted_transfer_exits_and_records_background_error() {
         let manager = SftpTransferManager::new();
         manager.register("tx-1");
         manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
         manager.mark_background_transfer_active("tx-1");
 
+        let changes = manager.subscribe_background_state_changes();
         assert!(manager.interrupt("tx-1", "Connection lost"));
+        assert!(changes.has_changed().unwrap());
 
         let error = manager
             .check_control("tx-1")
@@ -1346,6 +1414,7 @@ mod tests {
         let control = manager.register_for_node("tx-1", "node-a");
         manager.register_background_transfer(make_background_snapshot("tx-1", "node-a"), None);
         manager.mark_background_transfer_active("tx-1");
+        let changes = manager.subscribe_background_state_changes();
 
         let unregistering_manager = manager.clone();
         let mut cancellation = control.subscribe_cancellation();
@@ -1361,6 +1430,7 @@ mod tests {
             .shutdown_session_transfers(Duration::from_millis(300))
             .await;
         worker.await.expect("worker should unregister cleanly");
+        assert!(changes.has_changed().unwrap());
         let second = manager
             .shutdown_session_transfers(Duration::from_millis(300))
             .await;

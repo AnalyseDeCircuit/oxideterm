@@ -1,5 +1,11 @@
 {
   "sidebar": {
+    "background_tasks": {
+      "summary": "Tác vụ nền: {{count}}",
+      "search": "Tìm tác vụ nền…",
+      "transferring": "Đang truyền",
+      "reconnecting": "Đang kết nối lại"
+    },
     "tab_scope": {
       "all": "Tất cả thẻ",
       "global": "Trang chung",
@@ -24,6 +30,7 @@
       "connected_first": "Ưu tiên đã kết nối"
     },
     "actions": {
+      "enter_zen": "Bật chế độ tập trung",
       "expand": "Mở rộng thanh bên",
       "collapse": "Thu gọn thanh bên",
       "new_local_terminal": "Terminal cục bộ mới",
