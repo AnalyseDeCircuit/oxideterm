@@ -1337,8 +1337,8 @@
     "external_import_desc": "從 SSH 設定和支援的第三方終端管理器匯入主機，並提供預覽與衝突處理。"
   },
   "zen_mode": {
-    "hint": "Zen 模式 — 按 ⌘⇧Z 退出",
-    "hint_other": "Zen 模式 — 按 Ctrl+Shift+Z 退出"
+    "hint": "禪模式 — 按 {{shortcut}} 退出",
+    "hint_unbound": "禪模式 — 可在命令面板中退出"
   },
   "tabbar": {
     "drag_to_dock": "拖曳停靠",

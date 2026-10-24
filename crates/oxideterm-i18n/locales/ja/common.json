@@ -1337,8 +1337,8 @@
     "external_import_desc": "SSH 設定や対応するサードパーティ端末マネージャーから、プレビューと重複処理付きでホストをインポートします。"
   },
   "zen_mode": {
-    "hint": "Zen モード — ⌘⇧Z で終了",
-    "hint_other": "Zen モード — Ctrl+Shift+Z で終了"
+    "hint": "Zen モード — {{shortcut}} で終了",
+    "hint_unbound": "Zen モード — コマンドパレットから終了できます"
   },
   "tabbar": {
     "drag_to_dock": "ドラッグしてドッキング",

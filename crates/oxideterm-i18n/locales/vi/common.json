@@ -1337,8 +1337,8 @@
     "continue_button": "Tiếp tục đến OxideTerm 2"
   },
   "zen_mode": {
-    "hint": "Chế độ Zen — Nhấn ⌘⇧Z để thoát",
-    "hint_other": "Chế độ Zen — Nhấn Ctrl+Shift+Z để thoát"
+    "hint": "Chế độ Zen — Nhấn {{shortcut}} để thoát",
+    "hint_unbound": "Chế độ Zen — Thoát qua bảng lệnh"
   },
   "tabbar": {
     "drag_to_dock": "Kéo để ghép",

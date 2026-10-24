@@ -1337,8 +1337,8 @@
     "external_import_desc": "Importa host da configurazioni SSH e gestori terminale supportati con anteprima e gestione duplicati."
   },
   "zen_mode": {
-    "hint": "Modalità Zen — Premi ⌘⇧Z per uscire",
-    "hint_other": "Modalità Zen — Premi Ctrl+Shift+Z per uscire"
+    "hint": "Modalità Zen — Premi {{shortcut}} per uscire",
+    "hint_unbound": "Modalità Zen — Esci dalla tavolozza dei comandi"
   },
   "tabbar": {
     "drag_to_dock": "Trascina per ancorare",

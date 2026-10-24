@@ -1337,8 +1337,8 @@
     "external_import_desc": "Importez des hôtes depuis la configuration SSH et les gestionnaires de terminaux tiers pris en charge, avec aperçu et gestion des doublons."
   },
   "zen_mode": {
-    "hint": "Mode Zen — Appuyez sur ⌘⇧Z pour quitter",
-    "hint_other": "Mode Zen — Appuyez sur Ctrl+Shift+Z pour quitter"
+    "hint": "Mode Zen — Appuyez sur {{shortcut}} pour quitter",
+    "hint_unbound": "Mode Zen — Quittez depuis la palette de commandes"
   },
   "tabbar": {
     "drag_to_dock": "Glisser pour ancrer",

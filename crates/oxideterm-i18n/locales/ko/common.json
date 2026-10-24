@@ -1337,8 +1337,8 @@
     "external_import_desc": "SSH 설정과 지원되는 타사 터미널 관리자에서 미리보기와 중복 처리와 함께 호스트를 가져옵니다."
   },
   "zen_mode": {
-    "hint": "Zen 모드 — ⌘⇧Z를 눌러 종료",
-    "hint_other": "Zen 모드 — Ctrl+Shift+Z를 눌러 종료"
+    "hint": "Zen 모드 — {{shortcut}} 키를 눌러 종료",
+    "hint_unbound": "Zen 모드 — 명령 팔레트에서 종료할 수 있습니다"
   },
   "tabbar": {
     "drag_to_dock": "드래그하여 도킹",

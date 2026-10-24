@@ -1337,8 +1337,8 @@
     "continue_button": "Continuar para o OxideTerm 2"
   },
   "zen_mode": {
-    "hint": "Modo Zen — Pressione ⌘⇧Z para sair",
-    "hint_other": "Modo Zen — Pressione Ctrl+Shift+Z para sair"
+    "hint": "Modo Zen — Pressione {{shortcut}} para sair",
+    "hint_unbound": "Modo Zen — Saia pela paleta de comandos"
   },
   "tabbar": {
     "drag_to_dock": "Arraste para encaixar",

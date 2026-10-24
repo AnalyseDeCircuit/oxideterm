@@ -1337,8 +1337,8 @@
     "external_import_desc": "Importieren Sie Hosts aus SSH-Konfigurationen und unterstützten Terminal-Managern mit Vorschau und Duplikatbehandlung."
   },
   "zen_mode": {
-    "hint": "Zen-Modus — Drücken Sie ⌘⇧Z zum Beenden",
-    "hint_other": "Zen-Modus — Drücken Sie Ctrl+Shift+Z zum Beenden"
+    "hint": "Zen-Modus — Zum Beenden {{shortcut}} drücken",
+    "hint_unbound": "Zen-Modus — Über die Befehlspalette beenden"
   },
   "tabbar": {
     "drag_to_dock": "Zum Andocken ziehen",

@@ -1337,8 +1337,8 @@
     "external_import_desc": "Import hosts from SSH config and supported third-party terminal managers with preview and duplicate handling."
   },
   "zen_mode": {
-    "hint": "Zen Mode — Press ⌘⇧Z to exit",
-    "hint_other": "Zen Mode — Press Ctrl+Shift+Z to exit"
+    "hint": "Zen Mode — Press {{shortcut}} to exit",
+    "hint_unbound": "Zen Mode — Exit from the command palette"
   },
   "tabbar": {
     "drag_to_dock": "Drag to dock",
