@@ -4,12 +4,6 @@ use crate::workspace::root::init::terminal_preference_overrides;
 
 const SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX: usize = 5;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct SettingsNavSelectionMotion {
-    duration: Duration,
-    spatial: bool,
-}
-
 fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Option<usize> {
     let mut item_index = 0;
     for (group_index, group) in groups.iter().enumerate() {
@@ -24,13 +18,6 @@ fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Opt
         }
     }
     None
-}
-
-fn settings_nav_selection_motion(tokens: &ThemeTokens) -> Option<SettingsNavSelectionMotion> {
-    oxideterm_gpui_ui::segmented_control_motion(tokens).map(|motion| SettingsNavSelectionMotion {
-        duration: motion.duration,
-        spatial: motion.spatial,
-    })
 }
 
 fn settings_nav_vertical_offset(
@@ -1040,12 +1027,6 @@ impl WorkspaceApp {
         let active = self.settings_workspace.read(cx).route_snapshot().active_tab == tab;
         let nav_item_index = settings_nav_item_index(navigation_groups, tab);
         let navigation_groups_for_click = navigation_groups.to_vec();
-        let selection_transition = active.then_some(()).and_then(|()| {
-            self.segmented_control_user_transition(
-                selection_motion::SETTINGS_NAVIGATION_ID,
-                nav_item_index?,
-            )
-        });
         let transition_scroll_handle = settings_nav_scroll.clone();
         let selection_surface = active.then(|| {
             let surface = div()
@@ -1057,46 +1038,14 @@ impl WorkspaceApp {
                 .bg(self.settings_panel_background(theme.bg_panel));
             let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &self.tokens);
 
-            let Some((generation, vertical_offset_y)) = selection_transition else {
-                return surface.into_any_element();
-            };
-            let Some(motion) = settings_nav_selection_motion(&self.tokens) else {
-                return surface.into_any_element();
-            };
-
-            let animation_id = (
-                gpui::ElementId::from(selection_motion::SETTINGS_NAVIGATION_ID),
-                format!("selection-{generation}"),
-            );
-            if motion.spatial
-                && let Some(vertical_offset_y) = vertical_offset_y
-            {
-                // The measured item bounds include real group separators and
-                // flex growth, so the indicator crosses groups continuously.
-                return surface
-                    .with_animation(
-                        animation_id,
-                        Animation::new(motion.duration)
-                            .with_easing(oxideterm_gpui_ui::motion::ease_in_out_cubic),
-                        move |surface, progress| {
-                            let offset =
-                                oxideterm_gpui_ui::motion::lerp(vertical_offset_y, 0.0, progress);
-                            // Moving both edges preserves the absolute
-                            // indicator's height throughout the transition.
-                            surface.top(px(offset)).bottom(px(-offset))
-                        },
-                    )
-                    .into_any_element();
+            match nav_item_index {
+                Some(index) => self.render_vertical_selection_surface(
+                    selection_motion::SETTINGS_NAVIGATION_ID,
+                    index,
+                    surface,
+                ),
+                None => surface.into_any_element(),
             }
-
-            surface
-                .with_animation(
-                    animation_id,
-                    Animation::new(motion.duration)
-                        .with_easing(oxideterm_gpui_ui::motion::ease_out_cubic),
-                    |surface, progress| surface.opacity(progress),
-                )
-                .into_any_element()
         });
         div()
             // Keep selection and hover surfaces stable when the settings

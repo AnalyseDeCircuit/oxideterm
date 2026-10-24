@@ -1,4 +1,4 @@
-use super::{MotionDuration, duration, ease_out_cubic};
+use super::{MotionDuration, spring_config};
 use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement,
     LayoutId, ParentElement, Pixels, Styled, Window, div, prelude::*, px,
@@ -8,10 +8,10 @@ use std::{cell::RefCell, rc::Rc};
 
 #[derive(Default)]
 struct HeightState {
-    from: f32,
+    velocity: f32,
     target: f32,
     current: f32,
-    started_at: Option<std::time::Instant>,
+    updated_at: Option<std::time::Instant>,
 }
 
 /// Animates the occupied space of a bounded composer region. Removed content
@@ -87,35 +87,33 @@ impl Element for AutoHeight {
             self.tokens.motion.enabled && self.tokens.motion.spatial_enabled && !cx.reduce_motion();
         let now = cx.background_executor().now();
         let mut current = state.borrow_mut();
-        let mut running = if let Some(started_at) = current.started_at {
-            let progress = (now - started_at).as_secs_f32()
-                / duration(&self.tokens, MotionDuration::Micro)
-                    .as_secs_f32()
-                    .max(f32::EPSILON);
-            current.current =
-                current.from + (current.target - current.from) * ease_out_cubic(progress.min(1.0));
-            if progress >= 1.0 {
-                current.started_at = None;
-            }
-            progress < 1.0
-        } else {
-            false
-        };
-        if let Some(target) = self.target_height {
-            if !animated {
-                current.from = target;
-                current.target = target;
-                current.current = target;
-                current.started_at = None;
-                running = false;
-            } else if (target - current.target).abs() > 0.1 {
-                current.from = current.current;
-                current.target = target;
-                current.started_at = Some(now);
-                running = true;
-            }
+        let config = spring_config(&self.tokens, MotionDuration::Micro);
+        if let Some(updated_at) = current.updated_at {
+            let sampled = config.step(
+                gpui::SpringState {
+                    position: current.current,
+                    velocity: current.velocity,
+                },
+                current.target,
+                now.saturating_duration_since(updated_at).as_secs_f32(),
+            );
+            current.current = sampled.position;
+            current.velocity = sampled.velocity;
         }
-        let height = current.current;
+        if let Some(target) = self.target_height {
+            current.target = target;
+        }
+        let sampled = gpui::SpringState {
+            position: current.current,
+            velocity: current.velocity,
+        };
+        let running = animated && !config.is_settled(sampled, current.target, 0.1);
+        if !running {
+            current.current = current.target;
+            current.velocity = 0.0;
+        }
+        current.updated_at = running.then_some(now);
+        let height = current.current.max(0.0);
         drop(current);
         if animated && running {
             window.request_animation_frame();
@@ -145,14 +143,13 @@ impl Element for AutoHeight {
                     .map_or(0.0, |bounds| f32::from(bounds.size.height));
                 let mut state = measured.borrow_mut();
                 if !animated {
-                    state.from = height;
+                    state.velocity = 0.0;
                     state.target = height;
                     state.current = height;
-                    state.started_at = None;
+                    state.updated_at = None;
                 } else if (height - state.target).abs() > 0.1 {
-                    state.from = state.current;
                     state.target = height;
-                    state.started_at = Some(cx.background_executor().now());
+                    state.updated_at = Some(cx.background_executor().now());
                     window.request_animation_frame();
                 }
             });
@@ -246,7 +243,7 @@ mod tests {
         assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(0.0));
         cx.executor().advance_clock(Duration::from_millis(60));
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(70.0));
+        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 77.0).abs() <= 0.5);
         view.update(cx, |view, cx| {
             view.height = None;
             cx.notify();
@@ -256,10 +253,10 @@ mod tests {
             cx.debug_bounds("content").is_none(),
             "removed content must not be retained for exit animation"
         );
-        assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(70.0));
+        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 77.0).abs() <= 0.5);
         cx.executor().advance_clock(Duration::from_millis(60));
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 8.75).abs() <= 0.5);
+        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 3.2).abs() <= 0.6);
         cx.executor().advance_clock(Duration::from_millis(60));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(0.0));
@@ -372,7 +369,10 @@ mod tests {
                 };
                 cx.executor().advance_clock(Duration::from_millis(half));
                 cx.update(|window, cx| window.draw(cx).clear(cx));
-                assert_eq!(cx.debug_bounds("after-sender").unwrap().top(), px(108.0));
+                assert!(
+                    (f32::from(cx.debug_bounds("after-sender").unwrap().top()) - 111.0).abs()
+                        <= 0.6
+                );
                 view.update(cx, |view, cx| {
                     view.height = 0.0;
                     cx.notify();
@@ -385,7 +385,7 @@ mod tests {
                 cx.executor().advance_clock(Duration::from_millis(half));
                 cx.update(|window, cx| window.draw(cx).clear(cx));
                 let closing_top = cx.debug_bounds("after-sender").unwrap().top();
-                assert!(closing_top > px(80.0) && closing_top < px(108.0));
+                assert!(closing_top > px(80.0) && closing_top < px(111.0));
                 view.update(cx, |view, cx| {
                     view.height = 32.0;
                     cx.notify();

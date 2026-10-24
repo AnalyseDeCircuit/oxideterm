@@ -1,6 +1,6 @@
 use super::super::password_prompt::SavedPasswordLoadError;
 use super::*;
-use gpui::{Animation, AnimationExt, App, CursorStyle};
+use gpui::{App, CursorStyle};
 use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SavedAuth, SshChannelStrategy};
 use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
@@ -1932,42 +1932,14 @@ impl WorkspaceApp {
             .w(gpui::relative(item_width))
             .rounded(px(self.tokens.radii.xs))
             .bg(rgb(self.tokens.ui.bg));
-        let indicator = match (
-            transition_generation,
-            oxideterm_gpui_ui::segmented_control_motion(&self.tokens),
-        ) {
-            (Some(generation), Some(motion)) if motion.spatial => indicator
-                .with_animation(
-                    (
-                        gpui::ElementId::from(control_id),
-                        format!("selection-{generation}"),
-                    ),
-                    Animation::new(motion.duration)
-                        .with_easing(oxideterm_gpui_ui::motion::ease_in_out_cubic),
-                    move |indicator, progress| {
-                        indicator.left(gpui::relative(oxideterm_gpui_ui::motion::lerp(
-                            previous_left,
-                            active_left,
-                            progress,
-                        )))
-                    },
-                )
-                .into_any_element(),
-            (Some(generation), Some(motion)) => indicator
-                .left(gpui::relative(active_left))
-                .with_animation(
-                    (
-                        gpui::ElementId::from(control_id),
-                        format!("selection-{generation}"),
-                    ),
-                    Animation::new(motion.duration),
-                    |indicator, progress| indicator.opacity(progress),
-                )
-                .into_any_element(),
-            _ => indicator
-                .left(gpui::relative(active_left))
-                .into_any_element(),
-        };
+        let indicator = oxideterm_gpui_ui::segmented_control::selection_indicator(
+            &self.tokens,
+            control_id,
+            indicator,
+            previous_left,
+            active_left,
+            transition_generation.is_some(),
+        );
         let mut inner = div().relative().w_full().flex().flex_row().child(indicator);
         for item in items {
             inner = inner.child(item);
@@ -2996,12 +2968,6 @@ impl WorkspaceApp {
             } else {
                 theme.text_muted
             };
-            let selection_transition = active.then_some(()).and_then(|()| {
-                self.segmented_control_user_transition(
-                    crate::workspace::selection_motion::NEW_CONNECTION_TRANSPORT_SELECTOR_ID,
-                    transport_index,
-                )
-            });
             let selection_surface = active.then(|| {
                 let surface = div()
                     .absolute()
@@ -3012,49 +2978,11 @@ impl WorkspaceApp {
                     .bg(self.settings_panel_background(theme.bg_panel));
                 let surface = oxideterm_gpui_ui::theme_card_surface_shadow(surface, &self.tokens);
 
-                let Some((generation, vertical_offset_y)) = selection_transition else {
-                    return surface.into_any_element();
-                };
-                let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) else {
-                    return surface.into_any_element();
-                };
-                let animation_id = (
-                    gpui::ElementId::from(
-                        crate::workspace::selection_motion::NEW_CONNECTION_TRANSPORT_SELECTOR_ID,
-                    ),
-                    format!("selection-{generation}"),
-                );
-
-                if motion.spatial
-                    && let Some(vertical_offset_y) = vertical_offset_y
-                {
-                    return surface
-                        .with_animation(
-                            animation_id,
-                            Animation::new(motion.duration)
-                                .with_easing(oxideterm_gpui_ui::motion::ease_in_out_cubic),
-                            move |surface, progress| {
-                                let offset = oxideterm_gpui_ui::motion::lerp(
-                                    vertical_offset_y,
-                                    0.0,
-                                    progress,
-                                );
-                                // Move both edges so the highlight keeps its
-                                // fixed row height during vertical travel.
-                                surface.top(px(offset)).bottom(px(-offset))
-                            },
-                        )
-                        .into_any_element();
-                }
-
-                surface
-                    .with_animation(
-                        animation_id,
-                        Animation::new(motion.duration)
-                            .with_easing(oxideterm_gpui_ui::motion::ease_out_cubic),
-                        |surface, progress| surface.opacity(progress),
-                    )
-                    .into_any_element()
+                self.render_vertical_selection_surface(
+                    crate::workspace::selection_motion::NEW_CONNECTION_TRANSPORT_SELECTOR_ID,
+                    transport_index,
+                    surface,
+                )
             });
             let row = div()
                 .w_full()

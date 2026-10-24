@@ -1,5 +1,6 @@
 use gpui::{
-    AnyElement, Div, FontWeight, ParentElement, Styled, div, prelude::*, px, rgb, rgba, svg,
+    AnimationExt, AnyElement, Div, FontWeight, ParentElement, Styled, div, prelude::*, px, rgb,
+    rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -100,7 +101,15 @@ pub fn toast(tokens: &ThemeTokens, view: ToastView) -> AnyElement {
                                     .h_full()
                                     .rounded_full()
                                     .bg(rgb(tokens.ui.accent))
-                                    .w(gpui::relative((progress / 100.0).clamp(0.0, 1.0))),
+                                    .with_spring(
+                                        "toast-progress",
+                                        crate::motion::spatial_spring(
+                                            tokens,
+                                            crate::motion::MotionDuration::Control,
+                                            (progress / 100.0).clamp(0.0, 1.0),
+                                        ),
+                                        |bar, value| bar.w(gpui::relative(value.clamp(0.0, 1.0))),
+                                    ),
                             ),
                     )
                 })
@@ -168,4 +177,88 @@ pub fn toast_close(tokens: &ThemeTokens) -> Div {
                 // GPUI SVG elements do not inherit the parent text color.
                 .text_color(rgb(tokens.ui.text_muted)),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{Context, Render, TestAppContext, Window};
+    use oxideterm_theme::UiMotionProfile;
+    use std::time::Duration;
+
+    struct ProgressToast {
+        tokens: ThemeTokens,
+        progress: f32,
+    }
+
+    impl Render for ProgressToast {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            toast(
+                &self.tokens,
+                ToastView {
+                    id: "transfer".into(),
+                    phase: crate::motion::ExitPhase::Visible,
+                    title: String::new(),
+                    description: None,
+                    status_text: None,
+                    progress: Some(self.progress),
+                    variant: ToastVariant::Default,
+                    actions: None,
+                    close: None,
+                },
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn progress_respects_reduced_and_disabled_profiles(cx: &mut TestAppContext) {
+        for profile in [
+            UiMotionProfile::Off,
+            UiMotionProfile::Reduced,
+            UiMotionProfile::Normal,
+            UiMotionProfile::Fast,
+        ] {
+            let (view, cx) = cx.add_window_view(|_, _| {
+                let mut tokens = oxideterm_theme::default_tokens();
+                tokens.apply_motion(profile);
+                ProgressToast {
+                    tokens,
+                    progress: 10.0,
+                }
+            });
+            cx.simulate_resize(gpui::size(px(420.0), px(200.0)));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.executor().advance_clock(Duration::from_secs(1));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let color: gpui::Hsla = view.read_with(cx, |view, _| rgb(view.tokens.ui.accent).into());
+            let width = |cx: &mut gpui::VisualTestContext| {
+                cx.update(|window, _| {
+                    window
+                        .painted_quads()
+                        .iter()
+                        .find(|quad| quad.background.as_solid() == Some(color))
+                        .expect("painted progress indicator")
+                        .bounds
+                        .size
+                        .width
+                        .0
+                })
+            };
+            let before = width(cx);
+            view.update(cx, |view, cx| {
+                view.progress = 90.0;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let immediate = width(cx);
+            if matches!(profile, UiMotionProfile::Off | UiMotionProfile::Reduced) {
+                assert!((immediate - before * 9.0).abs() < 5.0, "{profile:?}");
+            } else {
+                assert_eq!(immediate, before, "{profile:?}");
+                cx.executor().advance_clock(Duration::from_secs(1));
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                assert!((width(cx) - before * 9.0).abs() < 5.0, "{profile:?}");
+            }
+        }
+    }
 }

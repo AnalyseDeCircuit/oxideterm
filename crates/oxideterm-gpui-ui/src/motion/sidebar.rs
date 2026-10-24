@@ -1,20 +1,9 @@
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{Animation, AnimationExt, AnyElement, IntoElement};
+use gpui::{AnimationExt, AnyElement, IntoElement};
 use oxideterm_theme::ThemeTokens;
 
-use super::{MotionDuration, duration};
-
-// CSS cubic-bezier(0.25, 1, 0.5, 1). Its x derivative is at least 0.75,
-// so bounded Newton iterations converge without a general curve solver.
-fn sidebar_ease_out(progress: f32) -> f32 {
-    let x = progress.clamp(0.0, 1.0);
-    let mut t = x;
-    for _ in 0..5 {
-        t -= (0.75 * t + 0.25 * t * t * t - x) / (0.75 + 0.75 * t * t);
-    }
-    1.0 - (1.0 - t).powi(3)
-}
+use super::{MotionDuration, spatial_spring};
 
 /// Window-owned sidebar position, shared by the clipping viewport and resize edge.
 /// Retargeting starts at the last drawn width, not at the previous endpoint.
@@ -41,7 +30,6 @@ impl SidebarMotion {
         }
         self.from = self.current.get();
         self.target = width;
-        self.generation = self.generation.wrapping_add(1);
     }
 
     /// Manual resizing owns the width immediately and invalidates the old timeline.
@@ -59,20 +47,14 @@ impl SidebarMotion {
         element: E,
         apply_width: impl Fn(E, f32) -> E + 'static,
     ) -> AnyElement {
-        if !tokens.motion.enabled || !tokens.motion.spatial_enabled || self.from == self.target {
-            self.current.set(self.target);
-            return apply_width(element, self.target).into_any_element();
-        }
-        let from = self.from;
-        let target = self.target;
         let current = self.current.clone();
         element
-            .with_animation(
+            .with_spring(
                 (id, self.generation),
-                Animation::new(duration(tokens, MotionDuration::Control))
-                    .with_easing(sidebar_ease_out),
-                move |element, progress| {
-                    let width = from + (target - from) * progress;
+                spatial_spring(tokens, MotionDuration::Control, self.target)
+                    .from(self.from)
+                    .with_epsilon(0.1),
+                move |element, width| {
                     current.set(width);
                     apply_width(element, width)
                 },
@@ -152,7 +134,7 @@ mod tests {
             window.draw(cx).clear(cx);
         });
         let closing_width = cx.debug_bounds("sidebar-viewport").unwrap().size.width;
-        assert_eq!(closing_width, px(87.0));
+        assert!((f32::from(closing_width) - 80.4).abs() <= 0.6);
         assert_eq!(
             cx.debug_bounds("sidebar-edge").unwrap().origin.x,
             closing_width
@@ -231,28 +213,6 @@ mod tests {
                 px(width)
             );
             assert_eq!(cx.debug_bounds("sidebar-edge").unwrap().origin.x, px(width));
-        }
-    }
-
-    #[test]
-    fn sidebar_curve_matches_css_reference_without_overshoot() {
-        for (time, expected) in [
-            (0.0, 0.0),
-            (0.25, 0.6885898),
-            (0.5, 0.9340958),
-            (0.75, 0.9939447),
-            (1.0, 1.0),
-        ] {
-            assert!(
-                (sidebar_ease_out(time) - expected).abs() < 0.00001,
-                "time={time}"
-            );
-        }
-        let mut previous = 0.0;
-        for step in 0..=200 {
-            let value = sidebar_ease_out(step as f32 / 200.0);
-            assert!(value >= previous && value <= 1.0);
-            previous = value;
         }
     }
 }

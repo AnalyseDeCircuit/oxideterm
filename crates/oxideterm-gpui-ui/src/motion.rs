@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Div, ElementId, IntoElement, ParentElement, Styled, Svg,
-    Transformation, radians, size,
+    Animation, AnimationExt, AnyElement, Div, ElementId, IntoElement, ParentElement,
+    SpringAnimation, SpringConfig, SpringPlayback, Styled, Svg, Transformation, radians, size,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -25,8 +25,9 @@ pub enum ExitPhase {
     Exiting,
 }
 
-const FORM_ENTER_OFFSET_Y: f32 = 18.0;
-const FORM_ENTER_SPRING_OVERSHOOT: f32 = 0.55;
+const FORM_ENTER_OFFSET_Y: f32 = 12.0;
+// Ten time constants leave less than 0.1% displacement at the owner's deadline.
+const SETTLE_RESPONSE: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExitPresence {
@@ -92,14 +93,58 @@ pub fn ease_in_out_cubic(progress: f32) -> f32 {
     }
 }
 
-pub fn spring_out(progress: f32) -> f32 {
-    let progress = progress.clamp(0.0, 1.0);
-    if progress == 0.0 || progress == 1.0 {
-        return progress;
+/// The response follows the existing duration tiers. Critical damping keeps
+/// opacity and clipped geometry bounded while preserving velocity on reversal.
+pub fn spring_config(tokens: &ThemeTokens, tier: MotionDuration) -> SpringConfig {
+    let seconds = duration(tokens, tier).as_secs_f32().max(0.001);
+    let frequency = SETTLE_RESPONSE / seconds;
+    SpringConfig::new(frequency * frequency, 2.0 * frequency, 1.0)
+}
+
+pub fn spring(tokens: &ThemeTokens, tier: MotionDuration, target: f32) -> SpringAnimation<f32> {
+    SpringAnimation::new(spring_config(tokens, tier))
+        .to(target)
+        .playback(if tokens.motion.enabled {
+            SpringPlayback::Running
+        } else {
+            SpringPlayback::Completed
+        })
+}
+
+pub fn spatial_spring(
+    tokens: &ThemeTokens,
+    tier: MotionDuration,
+    target: f32,
+) -> SpringAnimation<f32> {
+    spring(tokens, tier, target).playback(
+        if tokens.motion.enabled && tokens.motion.spatial_enabled {
+            SpringPlayback::Running
+        } else {
+            SpringPlayback::Completed
+        },
+    )
+}
+
+/// GPUI fades individual primitives; fading the surface alone exposes its own
+/// shadow through the fill. Delay shadow ink until the fill can cover it.
+pub fn surface_opacity<E: Styled>(mut element: E, visibility: f32) -> E {
+    let visibility = visibility.clamp(0.0, 1.0);
+    if let Some(shadows) = element.style().box_shadow.as_mut() {
+        for shadow in shadows {
+            shadow.color.a *= visibility * visibility;
+        }
     }
-    let shifted = progress - 1.0;
-    let cubic = FORM_ENTER_SPRING_OVERSHOOT + 1.0;
-    1.0 + cubic * shifted.powi(3) + FORM_ENTER_SPRING_OVERSHOOT * shifted.powi(2)
+    element.opacity(visibility)
+}
+
+/// A bounded settle for finite handoffs that must finish before their owner
+/// releases the old surface. Continuous controls use retained springs instead.
+pub fn ease_settle(progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    if progress == 1.0 {
+        return 1.0;
+    }
+    1.0 - (1.0 + SETTLE_RESPONSE * progress) * (-SETTLE_RESPONSE * progress).exp()
 }
 
 pub fn lerp(from: f32, to: f32, progress: f32) -> f32 {
@@ -128,19 +173,15 @@ pub fn fade<E>(
 where
     E: IntoElement + Styled + 'static,
 {
-    let id = (id.into(), if visible { "visible" } else { "exiting" });
-    if !tokens.motion.enabled {
-        return element
-            .opacity(if visible { 1.0 } else { 0.0 })
-            .into_any_element();
-    }
     element
-        .with_animation(
+        .with_spring(
             id,
-            Animation::new(duration(tokens, tier)).with_easing(ease_out_cubic),
-            move |element, progress| {
-                element.opacity(if visible { progress } else { 1.0 - progress })
-            },
+            spring(tokens, tier, if visible { 1.0 } else { 0.0 }).from(if visible {
+                0.0
+            } else {
+                1.0
+            }),
+            surface_opacity,
         )
         .into_any_element()
 }
@@ -152,20 +193,15 @@ pub fn slide_fade_in_y(
     offset: f32,
     tier: MotionDuration,
 ) -> AnyElement {
-    if !tokens.motion.enabled {
-        return element.opacity(1.0).into_any_element();
-    }
     let spatial = tokens.motion.spatial_enabled;
     element
-        .with_animation(
+        .with_spring(
             id,
-            Animation::new(duration(tokens, tier)).with_easing(ease_out_cubic),
+            spring(tokens, tier, 1.0).from(0.0),
             move |element, progress| {
-                let element = element.opacity(progress);
+                let element = surface_opacity(element, progress);
                 if spatial {
-                    element
-                        .relative()
-                        .top(gpui::px(lerp(offset, 0.0, progress)))
+                    element.relative().top(gpui::px(offset * (1.0 - progress)))
                 } else {
                     element
                 }
@@ -184,31 +220,20 @@ pub fn form_transition(
     form: Div,
     visible: bool,
 ) -> AnyElement {
-    let id = (id.into(), if visible { "visible" } else { "exiting" });
-    if !tokens.motion.enabled {
-        return form
-            .opacity(if visible { 1.0 } else { 0.0 })
-            .into_any_element();
-    }
     let spatial = tokens.motion.spatial_enabled;
-    form.with_animation(
+    form.with_spring(
         id,
-        Animation::new(duration(tokens, MotionDuration::Overlay)),
+        spring(
+            tokens,
+            MotionDuration::Overlay,
+            if visible { 1.0 } else { 0.0 },
+        )
+        .from(if visible { 0.0 } else { 1.0 }),
         move |form, progress| {
-            let visibility = if visible {
-                ease_out_cubic(progress)
-            } else {
-                1.0 - ease_in_out_cubic(progress)
-            };
-            let form = form.opacity(visibility);
+            let form = surface_opacity(form, progress);
             if spatial {
-                let spatial_progress = if visible {
-                    spring_out(progress)
-                } else {
-                    1.0 - ease_in_out_cubic(progress)
-                };
                 form.relative()
-                    .top(gpui::px(FORM_ENTER_OFFSET_Y * (1.0 - spatial_progress)))
+                    .top(gpui::px(FORM_ENTER_OFFSET_Y * (1.0 - progress)))
             } else {
                 form
             }
@@ -235,24 +260,19 @@ pub fn slide_fade_x(
     tier: MotionDuration,
     visible: bool,
 ) -> AnyElement {
-    let id = (id.into(), if visible { "visible" } else { "exiting" });
-    if !tokens.motion.enabled {
-        return element
-            .opacity(if visible { 1.0 } else { 0.0 })
-            .into_any_element();
-    }
     let spatial = tokens.motion.spatial_enabled;
     element
-        .with_animation(
+        .with_spring(
             id,
-            Animation::new(duration(tokens, tier)).with_easing(ease_out_cubic),
+            spring(tokens, tier, if visible { 1.0 } else { 0.0 }).from(if visible {
+                0.0
+            } else {
+                1.0
+            }),
             move |element, progress| {
-                let visibility = if visible { progress } else { 1.0 - progress };
-                let element = element.opacity(visibility);
+                let element = surface_opacity(element, progress);
                 if spatial {
-                    element
-                        .relative()
-                        .left(gpui::px(lerp(offset, 0.0, visibility)))
+                    element.relative().left(gpui::px(offset * (1.0 - progress)))
                 } else {
                     element
                 }
@@ -268,38 +288,21 @@ pub fn horizontal_reveal(
     expanded_width: f32,
     expanded: bool,
 ) -> AnyElement {
-    // GPUI retains one-shot animation state by element ID, so the target state
-    // must participate in the ID while remaining stable across ordinary redraws.
-    let id = (id.into(), if expanded { "expanded" } else { "collapsed" });
-    let final_width = if expanded { expanded_width } else { 0.0 };
-    let final_opacity = if expanded { 1.0 } else { 0.0 };
-    // Animate a clipping viewport while the mounted content keeps its natural width.
-    let viewport = gpui::div()
+    let spatial = tokens.motion.spatial_enabled;
+    let target = if expanded { 1.0 } else { 0.0 };
+    // Keep the child at natural width while the viewport clips its reveal.
+    gpui::div()
         .h_full()
         .flex_none()
         .overflow_hidden()
-        .child(element.w(gpui::px(expanded_width)).flex_none());
-    if !tokens.motion.enabled {
-        return viewport
-            .w(gpui::px(final_width))
-            .opacity(final_opacity)
-            .into_any_element();
-    }
-    let spatial = tokens.motion.spatial_enabled;
-    viewport
-        .with_animation(
+        .child(element.w(gpui::px(expanded_width)).flex_none())
+        .with_spring(
             id,
-            Animation::new(duration(tokens, MotionDuration::Control))
-                .with_easing(ease_in_out_cubic),
+            spring(tokens, MotionDuration::Control, target),
             move |element, progress| {
-                let visibility = if expanded { progress } else { 1.0 - progress };
-                let element = element.opacity(visibility);
-                if spatial {
-                    element.w(gpui::px(lerp(0.0, expanded_width, visibility)))
-                } else {
-                    // Reduced motion preserves layout and limits the transition to opacity.
-                    element.w(gpui::px(expanded_width))
-                }
+                element.opacity(progress.clamp(0.0, 1.0)).w(gpui::px(
+                    expanded_width * if spatial { progress.max(0.0) } else { target },
+                ))
             },
         )
         .into_any_element()
@@ -312,31 +315,17 @@ pub fn vertical_reveal(
     expanded_height: f32,
     expanded: bool,
 ) -> AnyElement {
-    // Keep the content mounted so the same stable element can animate in both directions.
-    let id = (id.into(), if expanded { "expanded" } else { "collapsed" });
-    let final_height = if expanded { expanded_height } else { 0.0 };
-    let final_opacity = if expanded { 1.0 } else { 0.0 };
-    if !tokens.motion.enabled {
-        return element
-            .h(gpui::px(final_height))
-            .opacity(final_opacity)
-            .into_any_element();
-    }
     let spatial = tokens.motion.spatial_enabled;
+    let target = if expanded { 1.0 } else { 0.0 };
     element
         .overflow_hidden()
-        .with_animation(
+        .with_spring(
             id,
-            Animation::new(duration(tokens, MotionDuration::Micro)).with_easing(ease_in_out_cubic),
+            spring(tokens, MotionDuration::Micro, target),
             move |element, progress| {
-                let visibility = if expanded { progress } else { 1.0 - progress };
-                let element = element.opacity(visibility);
-                if spatial {
-                    element.h(gpui::px(lerp(0.0, expanded_height, visibility)))
-                } else {
-                    // Reduced motion changes layout immediately and limits the visual transition.
-                    element.h(gpui::px(final_height))
-                }
+                element.opacity(progress.clamp(0.0, 1.0)).h(gpui::px(
+                    expanded_height * if spatial { progress.max(0.0) } else { target },
+                ))
             },
         )
         .into_any_element()
@@ -348,20 +337,16 @@ pub fn animated_checkmark(
     icon: Svg,
     checked: bool,
 ) -> AnyElement {
-    // Restart only when the semantic state changes, not on every repaint.
-    let id = (id.into(), if checked { "checked" } else { "unchecked" });
-    if !tokens.motion.enabled {
-        return icon
-            .opacity(if checked { 1.0 } else { 0.0 })
-            .into_any_element();
-    }
     let spatial = tokens.motion.spatial_enabled;
-    icon.with_animation(
+    icon.with_spring(
         id,
-        Animation::new(duration(tokens, MotionDuration::Micro)).with_easing(ease_out_cubic),
-        move |icon, progress| {
-            let visibility = if checked { progress } else { 1.0 - progress };
-            let icon = icon.opacity(visibility);
+        spring(
+            tokens,
+            MotionDuration::Micro,
+            if checked { 1.0 } else { 0.0 },
+        ),
+        move |icon, visibility| {
+            let icon = icon.opacity(visibility.clamp(0.0, 1.0));
             if spatial {
                 let scale = lerp(0.92, 1.0, visibility);
                 icon.with_transformation(Transformation::scale(size(scale, scale)))
@@ -379,27 +364,16 @@ pub fn animated_chevron(
     icon: Svg,
     expanded: bool,
 ) -> AnyElement {
-    // A completed expansion timeline cannot also drive the reverse transition.
-    let id = (id.into(), if expanded { "expanded" } else { "collapsed" });
-    let final_turn = if expanded { 0.25 } else { 0.0 };
-    if !tokens.motion.enabled || !tokens.motion.spatial_enabled {
-        return icon
-            .with_transformation(Transformation::rotate(radians(
-                final_turn * std::f32::consts::TAU,
-            )))
-            .into_any_element();
-    }
-    icon.with_animation(
+    icon.with_spring(
         id,
-        Animation::new(duration(tokens, MotionDuration::Control)).with_easing(ease_in_out_cubic),
+        spatial_spring(
+            tokens,
+            MotionDuration::Control,
+            if expanded { 1.0 } else { 0.0 },
+        ),
         move |icon, progress| {
-            let turn = if expanded {
-                progress * 0.25
-            } else {
-                (1.0 - progress) * 0.25
-            };
             icon.with_transformation(Transformation::rotate(radians(
-                turn * std::f32::consts::TAU,
+                progress * std::f32::consts::FRAC_PI_2,
             )))
         },
     )
@@ -407,12 +381,12 @@ pub fn animated_chevron(
 }
 
 pub fn animated_spinner(tokens: &ThemeTokens, id: impl Into<ElementId>, icon: Svg) -> AnyElement {
-    if !tokens.motion.enabled {
+    if !tokens.motion.enabled || !tokens.motion.spatial_enabled {
         return icon.into_any_element();
     }
     icon.with_animation(
         id,
-        Animation::new(duration(tokens, MotionDuration::Overlay))
+        Animation::new(scaled_duration(tokens, 900))
             .repeat()
             .with_easing(|progress| progress),
         |icon, progress| {
@@ -428,6 +402,123 @@ pub fn animated_spinner(tokens: &ThemeTokens, id: impl Into<ElementId>, icon: Sv
 mod tests {
     use super::*;
     use gpui::{Context, InteractiveElement, Render, TestAppContext, div, px, size};
+    use std::{cell::Cell, rc::Rc};
+
+    struct ProfileView {
+        tokens: ThemeTokens,
+        target: f32,
+        opacity: Rc<Cell<f32>>,
+    }
+
+    impl Render for ProfileView {
+        fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+            let opacity = self.opacity.clone();
+            div().size_full().child(
+                div()
+                    .size(px(20.0))
+                    .relative()
+                    .debug_selector(|| "moving-control".into())
+                    .with_spring(
+                        "opacity",
+                        spring(&self.tokens, MotionDuration::Control, self.target),
+                        move |element, value| {
+                            opacity.set(value);
+                            element.opacity(value)
+                        },
+                    )
+                    .with_spring(
+                        "position",
+                        spatial_spring(&self.tokens, MotionDuration::Control, self.target),
+                        |element, value| {
+                            element.map_element(|element| element.left(px(value * 100.0)))
+                        },
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn profiles_control_motion_and_stop_requesting_frames(cx: &mut TestAppContext) {
+        use oxideterm_theme::UiMotionProfile;
+        for (profile, expected_opacity, expected_x) in [
+            (UiMotionProfile::Off, 1.0, 100.0),
+            (UiMotionProfile::Reduced, 0.9596, 100.0),
+            (UiMotionProfile::Normal, 0.8009, 80.0),
+            (UiMotionProfile::Fast, 0.9724, 97.0),
+        ] {
+            let opacity = Rc::new(Cell::new(0.0));
+            let (view, cx) = cx.add_window_view(|_, _| {
+                let mut tokens = oxideterm_theme::default_tokens();
+                tokens.apply_motion(profile);
+                ProfileView {
+                    tokens,
+                    target: 0.0,
+                    opacity: opacity.clone(),
+                }
+            });
+            cx.simulate_resize(size(px(400.0), px(200.0)));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            view.update(cx, |view, cx| {
+                view.target = 1.0;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.executor().advance_clock(Duration::from_millis(60));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert!(
+                (opacity.get() - expected_opacity).abs() < 0.001,
+                "{profile:?}"
+            );
+            assert!(
+                (f32::from(cx.debug_bounds("moving-control").unwrap().left()) - expected_x).abs()
+                    <= 0.6,
+                "{profile:?}"
+            );
+            // Changing the profile mid-flight must synchronize both channels.
+            view.update(cx, |view, cx| {
+                view.tokens.apply_motion(UiMotionProfile::Off);
+                view.target = 0.5;
+                cx.notify();
+            });
+            cx.update(|window, cx| {
+                window.simulate_next_frame(cx);
+                window.draw(cx).clear(cx);
+            });
+            assert_eq!(opacity.get(), 0.5);
+            assert_eq!(cx.debug_bounds("moving-control").unwrap().left(), px(50.0));
+            cx.update(|window, cx| assert_eq!(window.simulate_next_frame(cx), 0));
+        }
+    }
+
+    #[test]
+    fn surface_fade_keeps_shadow_behind_translucent_fill() {
+        let shadow = gpui::BoxShadow {
+            color: gpui::rgba(0x00000080).into(),
+            offset: gpui::point(px(0.0), px(2.0)),
+            blur_radius: px(8.0),
+            spread_radius: px(0.0),
+            inset: false,
+        };
+        let mut surface = surface_opacity(div().shadow(vec![shadow]), 0.5);
+        assert_eq!(surface.style().opacity, Some(0.5));
+        assert!((surface.style().box_shadow.as_ref().unwrap()[0].color.a - 0.12549).abs() < 0.0001);
+    }
+
+    #[test]
+    fn finite_curves_preserve_endpoints_and_settle_without_overshoot() {
+        for curve in [ease_out_cubic, ease_in_out_cubic, ease_settle] {
+            assert_eq!(curve(0.0), 0.0);
+            assert_eq!(curve(1.0), 1.0);
+            let mut previous = 0.0;
+            for step in 0..=100 {
+                let value = curve(step as f32 / 100.0);
+                assert!(value >= previous && value <= 1.0);
+                previous = value;
+            }
+        }
+        assert_eq!(lerp(4.0, 8.0, 0.0), 4.0);
+        assert_eq!(lerp(4.0, 8.0, 1.0), 8.0);
+    }
 
     struct CollapsedHorizontalReveal {
         tokens: ThemeTokens,
@@ -514,21 +605,6 @@ mod tests {
             samples[samples.len() / 2],
             samples[samples.len() * 95 / 100]
         );
-    }
-
-    #[test]
-    fn easing_curves_keep_endpoints_and_spring_settles_after_a_small_overshoot() {
-        assert_eq!(ease_out_cubic(0.0), 0.0);
-        assert_eq!(ease_out_cubic(1.0), 1.0);
-        assert_eq!(ease_in_out_cubic(0.0), 0.0);
-        assert_eq!(ease_in_out_cubic(1.0), 1.0);
-        assert_eq!(spring_out(0.0), 0.0);
-        assert_eq!(spring_out(1.0), 1.0);
-        assert_eq!(lerp(4.0, 8.0, 0.0), 4.0);
-        assert_eq!(lerp(4.0, 8.0, 1.0), 8.0);
-        assert!(spring_out(0.5) > 0.9);
-        assert!(spring_out(0.75) > 1.0);
-        assert!(spring_out(0.75) < 1.03);
     }
 
     #[gpui::test]

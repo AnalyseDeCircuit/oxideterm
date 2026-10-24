@@ -38,7 +38,7 @@ pub fn tooltip_content(
     shortcut: Option<String>,
 ) -> AnyElement {
     let label = label.into();
-    let animation_id = gpui::ElementId::Name(format!("tooltip-enter-{label}").into());
+    let animation_id = "tooltip-enter";
     let tooltip = tooltip_surface(tokens, label, shortcut);
     crate::motion::fade_in(
         tokens,

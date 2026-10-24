@@ -793,46 +793,11 @@ impl WorkspaceApp {
                 .inset_0()
                 .rounded(px(self.tokens.radii.sm))
                 .bg(rgba((theme.accent << 8) | FILE_MANAGER_SELECTED_BG_ALPHA));
-            let Some((generation, vertical_offset_y)) = self.segmented_control_user_transition(
+            self.render_vertical_selection_surface(
                 selection_motion::FILE_MANAGER_NAVIGATION_ID,
                 item_geometry.transition_index,
-            ) else {
-                return surface.into_any_element();
-            };
-            let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) else {
-                return surface.into_any_element();
-            };
-            let animation_id = (
-                gpui::ElementId::from(selection_motion::FILE_MANAGER_NAVIGATION_ID),
-                format!("selection-{generation}"),
-            );
-            if motion.spatial
-                && let Some(vertical_offset_y) = vertical_offset_y
-            {
-                // Animate only the indicator; icons and labels stay at their
-                // final row just like the Settings navigation treatment.
-                return surface
-                    .with_animation(
-                        animation_id,
-                        Animation::new(motion.duration)
-                            .with_easing(oxideterm_gpui_ui::motion::ease_in_out_cubic),
-                        move |surface, progress| {
-                            let offset =
-                                oxideterm_gpui_ui::motion::lerp(vertical_offset_y, 0.0, progress);
-                            surface.top(px(offset)).bottom(px(-offset))
-                        },
-                    )
-                    .into_any_element();
-            }
-
-            surface
-                .with_animation(
-                    animation_id,
-                    Animation::new(motion.duration)
-                        .with_easing(oxideterm_gpui_ui::motion::ease_out_cubic),
-                    |surface, progress| surface.opacity(progress),
-                )
-                .into_any_element()
+                surface,
+            )
         })
     }
 

@@ -989,7 +989,7 @@ impl WorkspaceApp {
                     &self.tokens,
                     oxideterm_gpui_ui::motion::MotionDuration::Overlay,
                 ))
-                .with_easing(oxideterm_gpui_ui::motion::ease_in_out_cubic),
+                .with_easing(oxideterm_gpui_ui::motion::ease_settle),
                 move |surface, progress| {
                     let surface = surface.opacity(1.0 - progress);
                     if !spatial {

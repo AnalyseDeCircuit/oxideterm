@@ -526,6 +526,12 @@ pub fn action_chip(
         } else {
             CursorStyle::PointingHand
         })
+        .when(tokens.motion.enabled && !options.disabled, |button| {
+            button.hover_background_transition(crate::motion::duration(
+                tokens,
+                crate::motion::MotionDuration::Micro,
+            ))
+        })
         .hover(move |chip| {
             if options.disabled {
                 chip
@@ -609,6 +615,12 @@ pub fn context_chip(
             CursorStyle::OperationNotAllowed
         } else {
             CursorStyle::PointingHand
+        })
+        .when(tokens.motion.enabled && !options.disabled, |button| {
+            button.hover_background_transition(crate::motion::duration(
+                tokens,
+                crate::motion::MotionDuration::Micro,
+            ))
         })
         .hover(move |chip| {
             if options.disabled {
@@ -741,10 +753,10 @@ pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOp
         // Icon buttons appear all over toolbars; disabled/loading must be
         // visible at the primitive level even when the caller owns the action.
         .when(tokens.motion.enabled && !disabled, |button| {
-            button.hover_background_transition(
-                crate::motion::duration(tokens, crate::motion::MotionDuration::Micro)
-                    .min(std::time::Duration::from_millis(100)),
-            )
+            button.hover_background_transition(crate::motion::duration(
+                tokens,
+                crate::motion::MotionDuration::Micro,
+            ))
         })
         .cursor(if disabled {
             CursorStyle::OperationNotAllowed
@@ -798,6 +810,12 @@ pub fn split_footer_button(
         })
         .when_some(options.font_size, |button, font_size| {
             button.text_size(px(font_size))
+        })
+        .when(tokens.motion.enabled && !disabled, |button| {
+            button.hover_background_transition(crate::motion::duration(
+                tokens,
+                crate::motion::MotionDuration::Micro,
+            ))
         })
         .hover(move |button| {
             if disabled {
@@ -901,10 +919,10 @@ fn button_base(tokens: &ThemeTokens, options: ButtonOptions, has_background: boo
         // semantics. Keep the shared primitive from advertising clickability
         // when feature code intentionally omits the mouse handler.
         .when(tokens.motion.enabled && !options.disabled, |button| {
-            button.hover_background_transition(
-                crate::motion::duration(tokens, crate::motion::MotionDuration::Micro)
-                    .min(std::time::Duration::from_millis(100)),
-            )
+            button.hover_background_transition(crate::motion::duration(
+                tokens,
+                crate::motion::MotionDuration::Micro,
+            ))
         })
         .cursor(if options.disabled {
             CursorStyle::OperationNotAllowed

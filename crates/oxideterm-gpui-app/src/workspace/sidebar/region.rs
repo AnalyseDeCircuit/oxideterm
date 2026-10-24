@@ -184,15 +184,13 @@ impl WorkspaceApp {
                                         self.render_host_tools_context_panel(cx)
                                     }
                                 };
-                                oxideterm_gpui_ui::motion::fade_in(
+                                oxideterm_gpui_ui::motion::slide_fade_in_x(
                                     &self.tokens,
-                                    match self.active_context_sidebar_panel {
-                                        ContextSidebarPanel::Assistant => "context-panel-assistant",
-                                        ContextSidebarPanel::HostTools => {
-                                            "context-panel-host-tools"
-                                        }
-                                    },
+                                    gpui::ElementId::Name(
+                                        format!("context-panel-{title_key}").into(),
+                                    ),
                                     div().size_full().child(content),
+                                    6.0,
                                     oxideterm_gpui_ui::motion::MotionDuration::Micro,
                                 )
                             }),
