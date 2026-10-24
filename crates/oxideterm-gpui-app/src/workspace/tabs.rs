@@ -6,6 +6,7 @@ mod create;
 mod detach;
 mod entity;
 mod helpers;
+mod layout;
 mod navigation;
 mod nodes;
 mod nodes_reconnect_helpers;
@@ -15,6 +16,7 @@ pub(super) mod split_drop;
 mod state;
 
 pub(in crate::workspace) use affinity::{TabAffinity, TabContent, TabScope};
+use layout::TabStripItemKind;
 
 pub(in crate::workspace) use entity::{
     TabCloseConfirmKeyAction, TabCloseProcessProbe, TabDetachTransition, TabMountCleanupPlan,

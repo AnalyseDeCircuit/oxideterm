@@ -203,14 +203,14 @@ impl WorkspaceApp {
             .is_some_and(|bounds| bounds.contains(&point));
         if over_strip {
             let bounds = self.main_window_tabbar_drop_bounds.unwrap();
-            let mut x = f32::from(point.x - bounds.origin.x)
-                + f32::from(-self.main_window_tabs.scroll_handle.offset().x)
-                - self.tokens.metrics.tabbar_leading_offset;
+            let x = f32::from(point.x - bounds.origin.x)
+                + f32::from(-self.main_window_tabs.scroll_handle.offset().x);
+            let layout = self.tab_strip_layout(window, cx);
             let hovered = self.main_tabs(cx).find_map(|(_, tab)| {
-                let width = self.tab_visual_width(tab);
-                let hit = x >= 0.0 && x < width;
-                x -= width;
-                hit.then_some(tab.id)
+                layout
+                    .bounds(tab.id)
+                    .filter(|bounds| bounds.contains(&x))
+                    .map(|_| tab.id)
             });
             if let Some(tab) = hovered.filter(|tab| *tab != drag.tab_id) {
                 drag.destination_tab = Some(tab);

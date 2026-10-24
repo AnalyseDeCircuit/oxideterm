@@ -6,6 +6,26 @@ use super::*;
 
 use gpui::StatefulInteractiveElement;
 
+const TAB_RECONNECT_PHASES: [ReconnectPhase; 8] = [
+    ReconnectPhase::Snapshot,
+    ReconnectPhase::GracePeriod,
+    ReconnectPhase::SshConnect,
+    ReconnectPhase::AwaitTerminal,
+    ReconnectPhase::RestoreForwards,
+    ReconnectPhase::ResumeTransfers,
+    ReconnectPhase::RestoreIde,
+    ReconnectPhase::Verify,
+];
+
+fn tab_reconnect_phase_text(job: &ReconnectProgress) -> String {
+    let label = reconnect_phase_label(&job.status);
+    if job.attempt > 1 {
+        format!("{label} {}/{}", job.attempt, job.max_attempts)
+    } else {
+        label.to_string()
+    }
+}
+
 #[derive(Clone, Copy)]
 enum WelcomeToolAction {
     NewConnection,
@@ -50,6 +70,19 @@ fn tab_kind_icon(
 }
 
 impl WorkspaceApp {
+    pub(super) fn tab_reconnect_controls_width(
+        &self,
+        job: &ReconnectProgress,
+        window: &Window,
+    ) -> f32 {
+        let phases_width =
+            TAB_RECONNECT_PHASES.len() as f32 * 4.0 + (TAB_RECONNECT_PHASES.len() - 1) as f32 * 2.0;
+        12.0 + phases_width
+            + self.tab_text_width(&tab_reconnect_phase_text(job), 10.0, window)
+            + self.tokens.metrics.tab_close_button_size
+            + 3.0 * 4.0
+    }
+
     fn render_skip_future_ssh_close_confirmations(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w_full()
@@ -105,6 +138,7 @@ impl WorkspaceApp {
         // still measures and applies the offset without GPUI boundary overscroll.
         let mut scroll_viewport = div()
             .id("workspace-tab-scroll-viewport")
+            .debug_selector(|| "workspace-tab-scroll-viewport".into())
             .h_full()
             .flex_1()
             .min_w(px(0.0))
@@ -119,86 +153,43 @@ impl WorkspaceApp {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
 
-        let returning_placeholder = self.detached_tab_return_placeholder(cx);
-        let returning_tab = returning_placeholder.and_then(|placeholder| {
-            self.tab_by_id(placeholder.tab_id, cx).map(|tab| {
-                (
-                    tab.id,
-                    tab.kind.clone(),
-                    self.tab_display_title(tab),
-                    self.tab_visual_width(tab),
-                )
-            })
-        });
         let tabs_with_unread_terminal_output =
             self.tab_host.read(cx).unread_terminal_output_tab_ids();
         let active_tab_id = self.active_tab_id(cx);
-        let mut live_tabs = self
-            .main_tabs(cx)
-            .map(|(tab_index, tab)| {
-                let tab_id = tab.id;
-                let tab_width = self.tab_visual_width(tab);
-                let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
-                let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
-                    self.workspace_runtime
-                        .read(cx)
-                        .reconnect_active_progress(node_id)
-                });
-                let icon = tab_kind_icon(self, &tab.kind, cx);
-                let tab_text = self.tab_display_title(tab);
-                (
-                    tab_index,
-                    tab_id,
-                    tab_width,
-                    reconnect_node_id,
-                    reconnect_job,
-                    icon,
-                    tab_text,
-                )
-            })
-            .collect::<Vec<_>>()
-            .into_iter();
-        let live_tab_count = live_tabs.len();
-        let visual_tab_count = live_tab_count
-            + self.main_window_tabs.exiting_tabs.len()
-            + usize::from(returning_tab.is_some());
+        let layout = self.tab_strip_layout(window, cx);
+        if !self.main_window_tabs.exiting_tabs.is_empty() {
+            window.request_animation_frame();
+        }
+        let live_tab_count = self.main_tabs(cx).count();
         let mut visible_tab_index = 0;
-        let mut placeholder_rendered = false;
-        for visual_index in 0..visual_tab_count {
-            if let Some(exiting) = self
-                .main_window_tabs
-                .exiting_tabs
-                .iter()
-                .find(|exiting| exiting.visual_index == visual_index)
-            {
+        for item in layout.items {
+            if let TabStripItemKind::Exiting(index) = item.kind {
+                let exiting = &self.main_window_tabs.exiting_tabs[index];
                 scroll_viewport =
-                    scroll_viewport.child(self.render_exiting_tab_visual(exiting, cx));
+                    scroll_viewport.child(self.render_exiting_tab_visual(exiting, item.width, cx));
                 continue;
             }
-            if !placeholder_rendered
-                && returning_placeholder
-                    .is_some_and(|placeholder| placeholder.visible_index == visible_tab_index)
-                && let Some((tab_id, tab_kind, tab_title, tab_width)) = returning_tab.as_ref()
-            {
-                scroll_viewport =
-                    scroll_viewport.child(self.render_detached_return_tab_placeholder(
-                        *tab_id, tab_kind, tab_title, *tab_width, cx,
-                    ));
-                placeholder_rendered = true;
-                continue;
-            }
-            let Some((
-                tab_index,
-                tab_id,
-                tab_width,
-                reconnect_node_id,
-                reconnect_job,
-                icon,
-                tab_text,
-            )) = live_tabs.next()
-            else {
+            let Some(tab) = self.tab_by_id(item.tab_id, cx) else {
                 continue;
             };
+            let tab_id = tab.id;
+            let tab_width = item.width;
+            let tab_text = self.tab_display_title(tab);
+            if item.kind == TabStripItemKind::Returning {
+                scroll_viewport =
+                    scroll_viewport.child(self.render_detached_return_tab_placeholder(
+                        tab_id, &tab.kind, &tab_text, tab_width, cx,
+                    ));
+                continue;
+            }
+            let tab_index = self.tab_index_by_id(tab_id, cx).unwrap();
+            let reconnect_node_id = self.reconnect_node_id_for_tab(tab, cx);
+            let reconnect_job = reconnect_node_id.as_ref().and_then(|node_id| {
+                self.workspace_runtime
+                    .read(cx)
+                    .reconnect_active_progress(node_id)
+            });
+            let icon = tab_kind_icon(self, &tab.kind, cx);
             let current_visible_index = visible_tab_index;
             visible_tab_index += 1;
             let active = Some(tab_id) == active_tab_id;
@@ -229,11 +220,10 @@ impl WorkspaceApp {
             };
             let tab_element = div()
                 .id(("workspace-tab", tab_id.0))
+                .debug_selector(move || format!("workspace-tab-{}", tab_id.0))
                 .h_full()
                 .flex_none()
                 .w(px(tab_width))
-                .min_w(px(self.tokens.metrics.tab_min_width))
-                .max_w(px(self.tokens.metrics.tab_max_width))
                 .px(px(self.tokens.metrics.tab_padding_x))
                 .relative()
                 .flex()
@@ -325,8 +315,10 @@ impl WorkspaceApp {
                 ))
                 .child(
                     div()
+                        .id(("workspace-tab-title", tab_id.0))
+                        .debug_selector(move || format!("workspace-tab-title-{}", tab_id.0))
                         .flex_1()
-                        .truncate()
+                        .whitespace_nowrap()
                         .text_size(px(self.tokens.metrics.tab_font_size))
                         .child(tab_text),
                 )
@@ -362,18 +354,15 @@ impl WorkspaceApp {
                             ),
                     )
                 });
-            scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::horizontal_reveal(
+            scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::fade_in(
                 &self.tokens,
                 ("workspace-tab-open", tab_id.0),
-                // Keep the content at full width while the clipping viewport
-                // animates as the scroll area's direct flex child.
                 div()
                     .w(px(tab_width))
                     .h_full()
                     .flex_none()
                     .child(tab_element),
-                tab_width,
-                true,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
             ));
         }
 
@@ -453,7 +442,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_1()
-                    .truncate()
+                    .whitespace_nowrap()
                     .text_size(px(self.tokens.metrics.tab_font_size))
                     .child(tab_title.to_string()),
             )
@@ -621,6 +610,7 @@ impl WorkspaceApp {
     fn render_exiting_tab_visual(
         &self,
         exiting: &ExitingTabVisual,
+        width: f32,
         cx: &Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -664,7 +654,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_1()
-                    .truncate()
+                    .whitespace_nowrap()
                     .text_size(px(self.tokens.metrics.tab_font_size))
                     .child(exiting.title.clone()),
             )
@@ -673,13 +663,18 @@ impl WorkspaceApp {
                 self.tokens.metrics.tab_close_icon_size,
                 rgb(theme.text_muted),
             ));
-        oxideterm_gpui_ui::motion::horizontal_reveal(
-            &self.tokens,
-            ("workspace-tab-exit", exiting.tab_id.0),
-            tab,
-            exiting.width,
-            false,
-        )
+        // The strip and the clipping viewport consume the same animated width.
+        let tab_id = exiting.tab_id;
+        div()
+            .id(("workspace-tab-exit", exiting.tab_id.0))
+            .debug_selector(move || format!("workspace-tab-exit-{}", tab_id.0))
+            .h_full()
+            .w(px(width))
+            .flex_none()
+            .overflow_hidden()
+            .opacity(exiting.exit_visibility(&self.tokens))
+            .child(tab)
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_node_disconnect_confirm_dialog(
@@ -798,7 +793,7 @@ impl WorkspaceApp {
         )
     }
 
-    fn reconnect_node_id_for_tab(&self, tab: &Tab, cx: &App) -> Option<NodeId> {
+    pub(super) fn reconnect_node_id_for_tab(&self, tab: &Tab, cx: &App) -> Option<NodeId> {
         match tab.kind {
             TabKind::SshTerminal | TabKind::LocalTerminal => {
                 if let Some(active_pane_id) = tab.active_pane_id
@@ -864,14 +859,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let phase_label = reconnect_phase_label(&job.status);
-        let phase_text = if job.attempt > 1 {
-            format!("{phase_label} {}/{}", job.attempt, job.max_attempts)
-        } else {
-            phase_label.to_string()
-        };
+        let phase_text = tab_reconnect_phase_text(job);
         div()
             .flex()
+            .flex_none()
             .items_center()
             .gap(px(4.0))
             .text_size(px(10.0))
@@ -882,7 +873,7 @@ impl WorkspaceApp {
                 rgb(theme.warning),
             ))
             .child(self.render_reconnect_phase_strip(job))
-            .child(div().max_w(px(72.0)).truncate().child(phase_text))
+            .child(div().whitespace_nowrap().child(phase_text))
             .child(
                 div()
                     .id((
@@ -933,21 +924,11 @@ impl WorkspaceApp {
     }
 
     fn render_reconnect_phase_strip(&self, job: &ReconnectProgress) -> AnyElement {
-        let phases = [
-            ReconnectPhase::Snapshot,
-            ReconnectPhase::GracePeriod,
-            ReconnectPhase::SshConnect,
-            ReconnectPhase::AwaitTerminal,
-            ReconnectPhase::RestoreForwards,
-            ReconnectPhase::ResumeTransfers,
-            ReconnectPhase::RestoreIde,
-            ReconnectPhase::Verify,
-        ];
         div()
             .flex()
             .items_center()
             .gap(px(2.0))
-            .children(phases.into_iter().map(|phase| {
+            .children(TAB_RECONNECT_PHASES.into_iter().map(|phase| {
                 let result = job
                     .phase_history
                     .iter()

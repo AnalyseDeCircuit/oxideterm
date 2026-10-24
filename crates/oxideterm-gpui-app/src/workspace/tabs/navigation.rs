@@ -995,7 +995,7 @@ impl WorkspaceApp {
         {
             return;
         }
-        let exiting_visual = self.tab_exit_visual(index, cx);
+        let exiting_visual = self.tab_exit_visual(index, window, cx);
         let Some(transition) = self
             .tab_host
             .update(cx, |tab_host, _cx| tab_host.remove_tab_at(index))
@@ -1154,7 +1154,12 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn tab_exit_visual(&self, index: usize, cx: &App) -> Option<ExitingTabVisual> {
+    pub(super) fn tab_exit_visual(
+        &self,
+        index: usize,
+        window: &Window,
+        cx: &App,
+    ) -> Option<ExitingTabVisual> {
         let tab = self.tabs(cx).get(index)?;
         let live_visual_index = self
             .main_tabs(cx)
@@ -1167,29 +1172,32 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         occupied_indices.sort_unstable();
         let visual_index = tab_exit_visual_index(live_visual_index, &occupied_indices);
+        let bounds = self.tab_strip_layout(window, cx).bounds(tab.id)?;
         Some(ExitingTabVisual {
             tab_id: tab.id,
             kind: tab.kind.clone(),
             title: self.tab_display_title(tab),
-            width: self.tab_visual_width(tab),
+            width: bounds.end - bounds.start,
             visual_index,
             was_active: Some(tab.id) == self.active_tab_id(cx),
+            started_at: Instant::now(),
         })
     }
 
     pub(super) fn begin_tab_visual_exit(
         &mut self,
-        exiting_visual: ExitingTabVisual,
+        mut exiting_visual: ExitingTabVisual,
         cx: &mut Context<Self>,
     ) {
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        if delay.is_zero() {
+        if !self.tokens.motion.enabled || delay.is_zero() {
             return;
         }
         let tab_id = exiting_visual.tab_id;
+        exiting_visual.started_at = Instant::now();
         self.main_window_tabs.exiting_tabs.push(exiting_visual);
         cx.spawn(async move |weak, cx| {
             Timer::after(delay).await;
@@ -1342,20 +1350,10 @@ impl WorkspaceApp {
         }
     }
 
-    fn tabbar_content_width(&self, cx: &App) -> f32 {
-        self.tokens.metrics.tabbar_leading_offset
-            + self
-                .main_tabs(cx)
-                .map(|(_, tab)| self.tab_visual_width(tab))
-                .sum::<f32>()
-    }
-
     pub(in crate::workspace) fn tabbar_max_scroll(&self, window: &Window, cx: &App) -> f32 {
-        let measured_width = f32::from(self.main_window_tabs.scroll_handle.bounds().size.width);
-        if measured_width > 1.0 {
-            return f32::from(self.main_window_tabs.scroll_handle.max_offset().x);
-        }
-        (self.tabbar_content_width(cx) - self.tabbar_scroll_viewport_width(window, cx)).max(0.0)
+        (self.tab_strip_layout(window, cx).content_width()
+            - self.tabbar_scroll_viewport_width(window, cx))
+        .max(0.0)
     }
 
     fn clamp_tab_scroll(&mut self, window: &Window, cx: &App) {
@@ -1439,18 +1437,19 @@ impl WorkspaceApp {
             self.clamp_tab_scroll(window, cx);
             return;
         };
-        let tab_left = self.tokens.metrics.tabbar_leading_offset
-            + self
-                .main_tabs(cx)
-                .take_while(|(i, _)| *i < index)
-                .map(|(_, tab)| self.tab_visual_width(tab))
-                .sum::<f32>();
-        let tab_right = tab_left + self.tab_visual_width(&self.tabs(cx)[index]);
+        let Some(bounds) = self
+            .tab_strip_layout(window, cx)
+            .bounds(self.tabs(cx)[index].id)
+        else {
+            return;
+        };
+        let tab_left = bounds.start;
+        let tab_right = bounds.end;
         let viewport_width = self.tabbar_scroll_viewport_width(window, cx);
 
         let current_scroll_x = self.tabbar_effective_scroll_x(window, cx);
         let mut next_scroll_x = current_scroll_x;
-        if tab_left < current_scroll_x {
+        if tab_left < current_scroll_x || tab_right - tab_left > viewport_width {
             next_scroll_x = tab_left;
         } else if tab_right > current_scroll_x + viewport_width {
             next_scroll_x = tab_right - viewport_width;
@@ -1462,7 +1461,8 @@ impl WorkspaceApp {
         let title = match tab.title_source {
             TabTitleSource::Static => tab.title.clone(),
             TabTitleSource::I18nKey(key) => self.i18n.t(key),
-        };
+        }
+        .replace(['\r', '\n'], " ");
         if is_terminal_tab_kind(&tab.kind) {
             let pane_count = tab.root_pane.as_ref().map_or(1, PaneNode::pane_count);
             if pane_count > 1 {
@@ -1472,48 +1472,9 @@ impl WorkspaceApp {
         title
     }
 
-    pub(super) fn tab_visual_width(&self, tab: &Tab) -> f32 {
-        let metrics = self.tokens.metrics;
-        let title = self.tab_display_title(tab);
-        let title_width = title
-            .chars()
-            .map(|ch| {
-                if ch.is_ascii() {
-                    metrics.tab_font_size * metrics.tab_title_width_ratio
-                } else {
-                    metrics.tab_font_size
-                }
-            })
-            .sum::<f32>();
-        let fixed_width = metrics.tab_padding_x * 2.0
-            + metrics.tab_icon_size
-            + metrics.tab_gap * 2.0
-            + metrics.tab_close_button_size;
-
-        (title_width + fixed_width).clamp(metrics.tab_min_width, metrics.tab_max_width)
-    }
-
-    fn tab_drop_target_index_for_x(
-        &self,
-        client_x: f32,
-        window: &Window,
-        tab_widths: &[f32],
-        cx: &mut App,
-    ) -> usize {
-        if tab_widths.is_empty() {
-            return 0;
-        }
-        let tabbar_x = client_x - self.tabbar_left_x() + self.tabbar_effective_scroll_x(window, cx)
-            - self.tokens.metrics.tabbar_leading_offset;
-        let mut left = 0.0;
-        for (index, width) in tab_widths.iter().copied().enumerate() {
-            let midpoint = left + width / 2.0;
-            if tabbar_x < midpoint {
-                return index;
-            }
-            left += width;
-        }
-        tab_widths.len()
+    fn tab_drop_target_index_for_x(&self, client_x: f32, window: &Window, cx: &mut App) -> usize {
+        let tabbar_x = client_x - self.tabbar_left_x() + self.tabbar_effective_scroll_x(window, cx);
+        self.tab_strip_layout(window, cx).insertion_index(tabbar_x)
     }
 
     pub(in crate::workspace) fn start_tab_drag_candidate(
@@ -1531,10 +1492,7 @@ impl WorkspaceApp {
         }
         let start_x = f32::from(event.position.x);
         let start_y = f32::from(event.position.y);
-        let tab_widths = self
-            .main_tabs(cx)
-            .map(|(_, tab)| self.tab_visual_width(tab))
-            .collect::<Vec<_>>();
+        let tab_widths = self.tab_strip_layout(window, cx).live_widths();
         let Some(visible_index) = self.main_tabs(cx).position(|(_, tab)| tab.id == tab_id) else {
             return;
         };
@@ -1543,7 +1501,7 @@ impl WorkspaceApp {
         let destination_tab = self.active_tab_id(cx).filter(|id| *id != tab_id);
         self.split_drop_target = None;
         self.set_active_tab(tab_id, window, cx);
-        let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, &tab_widths, cx);
+        let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, cx);
         self.main_window_tabs.drag = Some(TabDragState {
             tab_id,
             from_index: visible_index,
@@ -1583,6 +1541,7 @@ impl WorkspaceApp {
         // the root mouse-up is responsible for finishing or cancelling.
         drag.current_x = f32::from(event.position.x);
         drag.current_y = f32::from(event.position.y);
+        drag.tab_widths = self.tab_strip_layout(window, cx).live_widths();
         let delta_x = drag.current_x - drag.start_x;
         let delta_y = drag.current_y - drag.start_y;
         // Tauri uses a 10px pointer threshold for reorder. GPUI also needs the
@@ -1600,8 +1559,7 @@ impl WorkspaceApp {
         } else if tab_drag_is_horizontal_reorder(delta_x, delta_y) {
             drag.active = true;
             drag.mode = TabDragMode::Reorder;
-            drag.drop_target_index =
-                self.tab_drop_target_index_for_x(drag.current_x, window, &drag.tab_widths, cx);
+            drag.drop_target_index = self.tab_drop_target_index_for_x(drag.current_x, window, cx);
         } else {
             drag.active = false;
             drag.mode = TabDragMode::Pending;
