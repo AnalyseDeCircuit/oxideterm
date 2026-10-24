@@ -1568,10 +1568,15 @@ fn extend_or_push_row_rect(
     color: Hsla,
 ) {
     if let Some(rect) = current
-        && rect.col + rect.cells == col
+        && col <= rect.col + rect.cells
+        && rect.col <= col + cells
         && rect.color == color
     {
-        rect.cells += cells;
+        // A wide glyph and its spacer overlap by one column. Union their
+        // coverage instead of painting translucent selection color twice.
+        let end = (rect.col + rect.cells).max(col + cells);
+        rect.col = rect.col.min(col);
+        rect.cells = end - rect.col;
         return;
     }
 
@@ -2607,11 +2612,16 @@ mod cache_tests {
     fn selection_uses_theme_color_and_refreshes_cached_rows() {
         use crate::terminal_view::selection::{TerminalGridPoint, TerminalSelectionMode};
 
-        let mut selected = element(snapshot(0, vec![row_with_text_and_cursor(0, "ab", 1)]));
-        selected.snapshot.cols = 2;
+        // Each wide glyph has a second, blank grid cell in the backend snapshot.
+        let mut row = row_with_text_and_cursor(0, "a中 文 b", 5);
+        row.cells_mut()[1].wide = true;
+        row.cells_mut()[3].wide = true;
+        row.refresh_signature();
+        let mut selected = element(snapshot(0, vec![row]));
+        selected.snapshot.cols = 6;
         selected.selection = Some(TerminalSelection {
             anchor: TerminalGridPoint { line: 0, col: 0 },
-            head: TerminalGridPoint { line: 0, col: 1 },
+            head: TerminalGridPoint { line: 0, col: 5 },
             mode: TerminalSelectionMode::Simple,
         });
         let mut tokens =
@@ -2630,9 +2640,35 @@ mod cache_tests {
             selected.theme = TerminalUiTheme::from_tokens(tokens);
             let layout = selected.layout_for_rows(0..1, Some(&mut cache));
             let rects = &layout.cached_rows[0].layout.selections;
-            assert_eq!(rects.len(), 1, "{color}");
+            assert_eq!(
+                rects
+                    .iter()
+                    .map(|rect| (rect.col, rect.cells))
+                    .collect::<Vec<_>>(),
+                vec![(0, 6)],
+                "{color}: each selected grid cell must be painted once"
+            );
             assert_eq!(rects[0].color, Hsla::from(expected), "{color}");
-            assert_eq!((rects[0].col, rects[0].cells), (0, 2), "{color}");
+        }
+        for (start, end, expected) in [(0, 1, (0, 3)), (2, 5, (2, 4))] {
+            selected.selection = Some(TerminalSelection {
+                anchor: TerminalGridPoint {
+                    line: 0,
+                    col: start,
+                },
+                head: TerminalGridPoint { line: 0, col: end },
+                mode: TerminalSelectionMode::Simple,
+            });
+            let layout = selected.layout_for_rows(0..1, Some(&mut cache));
+            assert_eq!(
+                layout.cached_rows[0]
+                    .layout
+                    .selections
+                    .iter()
+                    .map(|rect| (rect.col, rect.cells))
+                    .collect::<Vec<_>>(),
+                vec![expected]
+            );
         }
     }
 
