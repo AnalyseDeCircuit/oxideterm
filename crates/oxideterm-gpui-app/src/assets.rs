@@ -91,6 +91,7 @@ pub(crate) enum LucideIcon {
     Layers,
     LayoutList,
     ListChecks,
+    ListFilter,
     ListTree,
     Link2,
     LoaderCircle,
@@ -227,6 +228,7 @@ impl LucideIcon {
             "layers" => Self::Layers,
             "layoutlist" => Self::LayoutList,
             "listchecks" => Self::ListChecks,
+            "listfilter" => Self::ListFilter,
             "listtree" => Self::ListTree,
             "link" | "link2" => Self::Link2,
             "loader" | "loadercircle" => Self::LoaderCircle,
@@ -358,6 +360,7 @@ impl LucideIcon {
             Self::Layers => "lucide/layers.svg",
             Self::LayoutList => "lucide/layout-list.svg",
             Self::ListChecks => "lucide/list-checks.svg",
+            Self::ListFilter => "lucide/list-filter.svg",
             Self::ListTree => "lucide/list-tree.svg",
             Self::Link2 => "lucide/link-2.svg",
             Self::LoaderCircle => "lucide/loader-circle.svg",
@@ -571,6 +574,7 @@ impl AssetSource for NativeAssets {
             "lucide/message-square.svg" => MESSAGE_SQUARE,
             "lucide/list-tree.svg" => LIST_TREE,
             "lucide/list-checks.svg" => LIST_CHECKS,
+            "lucide/list-filter.svg" => LIST_FILTER,
             "lucide/more-horizontal.svg" => MORE_HORIZONTAL,
             "lucide/more-vertical.svg" => MORE_VERTICAL,
             "lucide/monitor.svg" => MONITOR,
@@ -712,6 +716,7 @@ impl AssetSource for NativeAssets {
                 "lock.svg",
                 "list-tree.svg",
                 "list-checks.svg",
+                "list-filter.svg",
                 "memory-stick.svg",
                 "message-square.svg",
                 "more-horizontal.svg",
@@ -942,6 +947,7 @@ const LOADER_CIRCLE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24
 const LOCK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>"#;
 const LIST_TREE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12h-8"/><path d="M21 6H8"/><path d="M21 18h-8"/><path d="M3 6v4c0 1.1.9 2 2 2h3"/><path d="M3 10v6c0 1.1.9 2 2 2h3"/></svg>"#;
 const LIST_CHECKS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>"#;
+const LIST_FILTER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>"#;
 const MORE_HORIZONTAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>"#;
 const MONITOR: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>"#;
 const MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>"#;

@@ -7,6 +7,11 @@
       "reconnecting": "다시 연결 중"
     },
     "tab_scope": {
+      "show_all": "모두 표시",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "이 창의 탭 {{total}}개를 모두 표시합니다.",
+      "filtered_tooltip": "“{{scope}}”의 탭만 표시 중입니다({{visible}}/{{total}}). 다른 탭도 열려 있습니다.",
       "all": "모든 탭",
       "global": "공통 페이지",
       "local": "로컬 터미널",

@@ -241,10 +241,16 @@ impl WorkspaceTabHostEntity {
     }
 
     pub(in crate::workspace) fn switch_scope(&mut self, scope: TabScope) -> Option<TabId> {
+        // Clearing a filter reveals other tabs without leaving the current page.
+        // Empty scopes still fall back to the remembered selection.
+        let keep_active = (scope == TabScope::All)
+            .then_some(self.active_tab_id)
+            .flatten();
         self.prepare_scope(scope);
         let remembered = self.scope_selections.get(&self.scope).copied();
-        let next = remembered
+        let next = keep_active
             .filter(|id| self.main_tabs().any(|(_, tab)| tab.id == *id))
+            .or(remembered.filter(|id| self.main_tabs().any(|(_, tab)| tab.id == *id)))
             .or_else(|| self.main_tabs().next().map(|(_, tab)| tab.id));
         self.select_main_tab(next)
     }
@@ -1669,6 +1675,29 @@ mod tests {
             assert!(host.terminal_pane_for_target(b, sb).is_none());
             assert_eq!(host.terminal_pane_for_target(a, sa), Some(panes[0].clone()));
         });
+    }
+
+    #[test]
+    fn clearing_tab_scope_preserves_the_current_page() {
+        let mut host = WorkspaceTabHostEntity::new();
+        for id in 1..=3 {
+            host.insert_tab(test_tab(TabId(id), None));
+        }
+        let connection = TabAffinity::Ssh(NodeId::new("server"));
+        host.update_affinities(HashMap::from([
+            (TabId(1), vec![TabAffinity::Global]),
+            (TabId(2), vec![connection.clone()]),
+            (TabId(3), vec![connection.clone()]),
+        ]));
+        host.select_main_tab(Some(TabId(1)));
+        host.switch_scope(TabScope::Affinity(connection));
+        host.select_main_tab(Some(TabId(3)));
+        host.switch_scope(TabScope::All);
+        assert_eq!(host.active_tab_id(), Some(TabId(3)));
+        assert_eq!(
+            host.main_tabs().map(|(_, tab)| tab.id).collect::<Vec<_>>(),
+            vec![TabId(1), TabId(2), TabId(3)]
+        );
     }
 
     #[test]

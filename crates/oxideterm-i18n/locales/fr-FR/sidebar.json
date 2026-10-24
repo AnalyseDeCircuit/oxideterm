@@ -7,6 +7,11 @@
       "reconnecting": "Reconnexion en cours"
     },
     "tab_scope": {
+      "show_all": "Tout afficher",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Afficher les {{total}} onglets de cette fenêtre.",
+      "filtered_tooltip": "Seuls les onglets de « {{scope}} » sont affichés ({{visible}}/{{total}}). Les autres restent ouverts.",
       "all": "Tous les onglets",
       "global": "Pages globales",
       "local": "Terminaux locaux",

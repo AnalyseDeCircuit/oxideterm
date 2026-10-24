@@ -7,6 +7,11 @@
       "reconnecting": "Reconectando"
     },
     "tab_scope": {
+      "show_all": "Mostrar todo",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Mostrar las {{total}} pestañas de esta ventana.",
+      "filtered_tooltip": "Solo se muestran las pestañas de «{{scope}}» ({{visible}}/{{total}}). Las demás siguen abiertas.",
       "all": "Todas las pestañas",
       "global": "Páginas globales",
       "local": "Terminales locales",

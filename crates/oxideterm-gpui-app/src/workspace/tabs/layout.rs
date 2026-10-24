@@ -171,7 +171,12 @@ impl WorkspaceApp {
             .ceil()
     }
 
-    pub(super) fn tab_text_width(&self, text: &str, size: f32, window: &Window) -> f32 {
+    pub(in crate::workspace) fn tab_text_width(
+        &self,
+        text: &str,
+        size: f32,
+        window: &Window,
+    ) -> f32 {
         let text = SharedString::from(text.to_string());
         let run = TextRun {
             len: text.len(),

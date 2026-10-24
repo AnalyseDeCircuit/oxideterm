@@ -7,6 +7,11 @@
       "reconnecting": "Riconnessione in corso"
     },
     "tab_scope": {
+      "show_all": "Mostra tutto",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Mostra tutte le {{total}} schede di questa finestra.",
+      "filtered_tooltip": "Sono visibili solo le schede di «{{scope}}» ({{visible}}/{{total}}). Le altre restano aperte.",
       "all": "Tutte le schede",
       "global": "Pagine globali",
       "local": "Terminali locali",

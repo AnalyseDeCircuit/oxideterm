@@ -7,6 +7,11 @@
       "reconnecting": "Verbindung wird wiederhergestellt"
     },
     "tab_scope": {
+      "show_all": "Alle anzeigen",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Alle {{total}} Tabs in diesem Fenster anzeigen.",
+      "filtered_tooltip": "Nur Tabs in „{{scope}}“ werden angezeigt ({{visible}}/{{total}}). Andere Tabs bleiben geöffnet.",
       "all": "Alle Tabs",
       "global": "Globale Seiten",
       "local": "Lokale Terminals",

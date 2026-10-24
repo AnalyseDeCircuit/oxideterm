@@ -7,6 +7,11 @@
       "reconnecting": "正在重连"
     },
     "tab_scope": {
+      "show_all": "显示全部",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "显示当前窗口的全部 {{total}} 个标签。",
+      "filtered_tooltip": "仅显示“{{scope}}”的标签（{{visible}}/{{total}}）。其他标签仍保持打开。",
       "all": "全部标签",
       "global": "全局页面",
       "local": "本地终端",

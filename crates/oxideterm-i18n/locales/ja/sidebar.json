@@ -7,6 +7,11 @@
       "reconnecting": "再接続中"
     },
     "tab_scope": {
+      "show_all": "すべて表示",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "このウィンドウの全 {{total}} 個のタブを表示します。",
+      "filtered_tooltip": "「{{scope}}」のタブのみ表示中（{{visible}}/{{total}}）。他のタブも開いたままです。",
       "all": "すべてのタブ",
       "global": "共通ページ",
       "local": "ローカルターミナル",

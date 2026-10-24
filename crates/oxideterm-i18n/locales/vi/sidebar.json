@@ -7,6 +7,11 @@
       "reconnecting": "Đang kết nối lại"
     },
     "tab_scope": {
+      "show_all": "Hiện tất cả",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Hiển thị tất cả {{total}} thẻ trong cửa sổ này.",
+      "filtered_tooltip": "Chỉ hiển thị các thẻ trong “{{scope}}” ({{visible}}/{{total}}). Các thẻ khác vẫn đang mở.",
       "all": "Tất cả thẻ",
       "global": "Trang chung",
       "local": "Thiết bị đầu cuối cục bộ",

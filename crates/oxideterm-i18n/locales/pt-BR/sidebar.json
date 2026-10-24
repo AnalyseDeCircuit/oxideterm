@@ -7,6 +7,11 @@
       "reconnecting": "Reconectando"
     },
     "tab_scope": {
+      "show_all": "Mostrar tudo",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Mostrar todas as {{total}} abas desta janela.",
+      "filtered_tooltip": "Exibindo apenas as abas de “{{scope}}” ({{visible}}/{{total}}). As outras continuam abertas.",
       "all": "Todas as abas",
       "global": "Páginas globais",
       "local": "Terminais locais",

@@ -7,6 +7,11 @@
       "reconnecting": "Reconnecting"
     },
     "tab_scope": {
+      "show_all": "Show all",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "Show all {{total}} tabs in this window.",
+      "filtered_tooltip": "Showing only tabs in “{{scope}}” ({{visible}}/{{total}}). Other tabs remain open.",
       "all": "All tabs",
       "global": "Global pages",
       "local": "Local terminals",

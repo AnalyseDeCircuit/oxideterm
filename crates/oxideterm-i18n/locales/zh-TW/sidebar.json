@@ -7,6 +7,11 @@
       "reconnecting": "正在重新連線"
     },
     "tab_scope": {
+      "show_all": "顯示全部",
+      "count_all": "· {{total}}",
+      "count_filtered": "· {{visible}}/{{total}}",
+      "all_tooltip": "顯示目前視窗的全部 {{total}} 個分頁。",
+      "filtered_tooltip": "僅顯示「{{scope}}」的分頁（{{visible}}/{{total}}）。其他分頁仍保持開啟。",
       "all": "全部分頁",
       "global": "全域頁面",
       "local": "本機終端機",
