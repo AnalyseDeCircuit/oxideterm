@@ -219,16 +219,50 @@ fn link_styling_respects_explicit_links_application_colors_and_hover() {
 
 #[test]
 fn path_links_resolve_and_percent_encode_file_urls() {
-    for (path, expected) in [
-        ("./src/main.rs", "file:///tmp/Oxide%20Term/./src/main.rs"),
-        (
-            "/tmp/a b/中文.rs",
-            "file:///tmp/a%20b/%E4%B8%AD%E6%96%87.rs",
-        ),
-    ] {
+    #[cfg(windows)]
+    let (base_dir, cases) = (
+        Path::new(r"C:\tmp\Oxide Term"),
+        vec![
+            ("./src/main.rs", "file:///C:/tmp/Oxide%20Term/src/main.rs"),
+            (r".\src\main.rs", "file:///C:/tmp/Oxide%20Term/src/main.rs"),
+            (r"D:\a b\中文.rs", "file:///D:/a%20b/%E4%B8%AD%E6%96%87.rs"),
+            ("/tmp/report.txt", "file:///C:/tmp/report.txt"),
+            (
+                r"\\server\share\a b\中文.rs",
+                "file://server/share/a%20b/%E4%B8%AD%E6%96%87.rs",
+            ),
+            (r"\\?\C:\tmp\report.txt", "file:///C:/tmp/report.txt"),
+            (
+                "'./100%#report.txt'",
+                "file:///C:/tmp/Oxide%20Term/100%25%23report.txt",
+            ),
+        ],
+    );
+    #[cfg(not(windows))]
+    let (base_dir, cases) = (
+        Path::new("/tmp/Oxide Term"),
+        vec![
+            ("./src/main.rs", "file:///tmp/Oxide%20Term/src/main.rs"),
+            (
+                "/tmp/a b/中文.rs",
+                "file:///tmp/a%20b/%E4%B8%AD%E6%96%87.rs",
+            ),
+            (
+                "'./100%#report.txt'",
+                "file:///tmp/Oxide%20Term/100%25%23report.txt",
+            ),
+            (r"./a\b.txt", "file:///tmp/Oxide%20Term/a%5Cb.txt"),
+        ],
+    );
+    for (path, expected) in cases {
         assert_eq!(
-            path_link_to_file_url(path, Path::new("/tmp/Oxide Term")).unwrap(),
-            expected
+            path_link_to_file_url(path, base_dir).as_deref(),
+            Some(expected),
+            "{path}"
         );
     }
+    assert_eq!(
+        path_link_to_file_url("./src/main.rs", Path::new("relative")),
+        None
+    );
 }

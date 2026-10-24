@@ -332,25 +332,12 @@ pub(crate) fn path_link_to_file_url(target: &str, base_dir: &Path) -> Option<Str
         }
     };
 
-    Some(format!("file://{}", percent_encode_path(&path)))
+    // File URLs require platform-aware handling of drive letters and UNC roots.
+    url::Url::from_file_path(path).ok().map(String::from)
 }
 
 pub(crate) fn home_dir() -> Option<PathBuf> {
     env::var_os("HOME").map(PathBuf::from)
-}
-
-pub(crate) fn percent_encode_path(path: &Path) -> String {
-    let path = path.to_string_lossy();
-    let mut encoded = String::with_capacity(path.len());
-    for byte in path.as_bytes() {
-        match *byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(*byte as char)
-            }
-            byte => encoded.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    encoded
 }
 
 pub(crate) fn is_link_terminator(ch: char) -> bool {

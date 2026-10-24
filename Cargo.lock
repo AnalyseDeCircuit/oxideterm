@@ -7534,6 +7534,7 @@ dependencies = [
  "tokio",
  "unicode-segmentation",
  "unicode-width",
+ "url",
  "uuid",
  "vte",
  "zeroize",
