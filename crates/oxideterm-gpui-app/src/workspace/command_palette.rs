@@ -63,6 +63,7 @@ struct PaletteItem {
 
 #[derive(Clone)]
 enum PaletteAction {
+    SelectQuickBarCategory(Option<String>),
     SelectTabScope(tabs::TabScope),
     BackgroundTask(background_tasks::BackgroundTaskTarget),
     Keybinding(&'static str),
@@ -155,6 +156,36 @@ enum ShortcutsModalVirtualRow {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn open_quick_bar_category_picker(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_modal_interaction_boundary(cx);
+        let selected = self
+            .settings_store
+            .settings()
+            .terminal
+            .command_bar
+            .quick_bar_category
+            .as_deref();
+        let index = self
+            .quick_bar_category_choices(cx)
+            .iter()
+            .position(|(id, _, _)| id.as_deref() == selected)
+            .unwrap_or(0);
+        self.command_palette.update(cx, |palette, cx| {
+            palette.open_quick_bar_categories(cx);
+            palette.set_selected_index(index, cx);
+        });
+        self.scroll_selected_command_palette_item_into_view(cx);
+        self.clear_ime_selection();
+        self.show_active_input_caret(cx);
+        self.needs_active_pane_focus = false;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
     pub(in crate::workspace) fn open_tab_scope_picker(
         &mut self,
         window: &mut Window,
@@ -527,13 +558,31 @@ impl WorkspaceApp {
     ) {
         if !matches!(
             execution.action,
-            PaletteAction::SelectTabScope(_) | PaletteAction::BackgroundTask(_)
+            PaletteAction::SelectTabScope(_)
+                | PaletteAction::BackgroundTask(_)
+                | PaletteAction::SelectQuickBarCategory(_)
         ) {
             self.record_command_palette_mru(&execution.id, cx);
         }
         self.ime_marked_text = None;
 
         match execution.action {
+            PaletteAction::SelectQuickBarCategory(category) => {
+                let category = category.filter(|id| {
+                    self.terminal
+                        .read(cx)
+                        .quick_commands
+                        .store
+                        .categories
+                        .iter()
+                        .any(|c| c.id == *id)
+                });
+                self.edit_settings(
+                    |settings| settings.terminal.command_bar.quick_bar_category = category,
+                    cx,
+                );
+                self.needs_active_pane_focus = true;
+            }
             PaletteAction::SelectTabScope(scope) => self.select_tab_scope(scope, window, cx),
             PaletteAction::BackgroundTask(target) => {
                 self.reveal_background_task(target, window, cx)
@@ -1025,6 +1074,32 @@ impl WorkspaceApp {
                 })
                 .collect();
         }
+        if self.command_palette.read(cx).is_quick_bar_category_picker() {
+            let query = self.command_palette.read(cx).query();
+            return self
+                .quick_bar_category_choices(cx)
+                .into_iter()
+                .enumerate()
+                .filter_map(|(index, (id, label, icon))| {
+                    let matched = command_palette_match(&label, &label, query)?;
+                    Some(RankedItem {
+                        score: matched.score,
+                        highlights: Vec::new(),
+                        item: PaletteItem {
+                            id: format!("quick-bar-category-{index}"),
+                            value: label.clone(),
+                            label,
+                            icon,
+                            detail: None,
+                            section: PaletteSection::Commands,
+                            shortcut: None,
+                            action: PaletteAction::SelectQuickBarCategory(id),
+                            disabled: false,
+                        },
+                    })
+                })
+                .collect();
+        }
         if self.command_palette.read(cx).is_tab_scope_picker() {
             let query = self.command_palette.read(cx).query();
             return self
@@ -1494,6 +1569,7 @@ impl WorkspaceApp {
         let mode = palette.mode;
         let query_placeholder = self.i18n.t(match palette.content {
             PaletteContent::TabScopes => "sidebar.tab_scope.search",
+            PaletteContent::QuickBarCategories => "terminal.quick_commands.search_groups",
             PaletteContent::BackgroundTasks => "sidebar.background_tasks.search",
             PaletteContent::Commands => command_palette_placeholder_key(mode),
         });
@@ -1676,7 +1752,9 @@ impl WorkspaceApp {
         section: PaletteSection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let key = if self.command_palette.read(cx).is_tab_scope_picker() {
+        let key = if self.command_palette.read(cx).is_quick_bar_category_picker() {
+            "terminal.quick_commands.groups"
+        } else if self.command_palette.read(cx).is_tab_scope_picker() {
             if section == PaletteSection::Connections {
                 "sidebar.tab_scope.connections"
             } else {

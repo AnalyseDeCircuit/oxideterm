@@ -50,6 +50,7 @@ fn migrate_v1(snapshot: QuickCommandsSnapshotV1) -> QuickCommandsSnapshot {
             id: category.id,
             name: category.name,
             icon: category.icon,
+            icon_color: None,
             sort_order: migration_sort_order(index),
         })
         .collect();
@@ -109,6 +110,7 @@ mod tests {
 
         assert_eq!(snapshot.version, QUICK_COMMANDS_SCHEMA_VERSION);
         assert_eq!(snapshot.categories[0].id, "ops");
+        assert_eq!(snapshot.categories[0].icon_color, None);
         assert_eq!(snapshot.commands[0].command, "uptime");
         assert_eq!(
             snapshot.commands[0].availability.host_patterns,
@@ -125,13 +127,14 @@ mod tests {
     fn v2_match_field_preserves_old_rules_and_serializes_explicit_selection() {
         let mut snapshot = decode_snapshot_json(
             r#"{
-            "version":2,"collections":[],"commands":[{
+            "version":2,"collections":[{"id":"custom","name":"Custom","icon":"zap","sortOrder":0}],"commands":[{
                 "id":"device","name":"Device","body":"uptime","collectionId":"custom",
                 "availability":{"hostPatterns":["prod-*"]},"sortOrder":0,"createdAt":1,"updatedAt":1
             }],"updatedAt":1
         }"#,
         )
         .unwrap();
+        assert_eq!(snapshot.categories[0].icon_color, None);
         assert_eq!(
             snapshot.commands[0].availability.match_field,
             crate::QuickCommandMatchField::All

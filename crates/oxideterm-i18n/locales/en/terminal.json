@@ -356,6 +356,13 @@
       "disabled_description": "The remote server initiated a trzsz transfer, but in-band file transfer is disabled. Enable it in Settings → Terminal to use trzsz."
     },
     "quick_commands": {
+      "all_groups": "All groups",
+      "search_groups": "Search groups…",
+      "group_empty": "No available commands in this group",
+      "icon_color": "Icon color",
+      "icon_color_hint": "#RRGGBB · empty follows theme",
+      "icon_color_reset": "Use theme color",
+      "icon_color_invalid": "Enter a six-digit hexadecimal color, such as #22d3ee.",
       "title": "Quick Commands",
       "open": "Quick Commands",
       "close": "Close Quick Commands",

@@ -31,6 +31,7 @@ pub struct QuickCommandCategoryDraft {
     pub id: Option<String>,
     pub name: String,
     pub icon: QuickCommandIcon,
+    pub icon_color: String,
 }
 
 pub fn quick_command_draft_can_save(draft: &QuickCommandDraft) -> bool {
@@ -39,6 +40,8 @@ pub fn quick_command_draft_can_save(draft: &QuickCommandDraft) -> bool {
 
 pub fn quick_command_category_draft_can_save(draft: &QuickCommandCategoryDraft) -> bool {
     !draft.name.trim().is_empty()
+        && (draft.icon_color.trim().is_empty()
+            || crate::parse_icon_color(&draft.icon_color).is_some())
 }
 
 pub fn visible_quick_commands(
@@ -187,6 +190,9 @@ pub fn upsert_quick_command_category(
     draft: QuickCommandCategoryDraft,
     current_active_category: &str,
 ) -> String {
+    if !quick_command_category_draft_can_save(&draft) {
+        return current_active_category.to_string();
+    }
     let existing_sort_order = draft
         .id
         .as_ref()
@@ -197,6 +203,7 @@ pub fn upsert_quick_command_category(
         id: draft.id.unwrap_or_else(new_quick_category_id),
         name: draft.name.trim().to_string(),
         icon: draft.icon,
+        icon_color: crate::parse_icon_color(&draft.icon_color).map(|color| format!("#{color:06x}")),
         sort_order: existing_sort_order,
     };
     if category.name.is_empty() {

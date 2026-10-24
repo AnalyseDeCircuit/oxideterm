@@ -226,9 +226,23 @@ impl QuickCommandsState {
     }
 
     pub(super) fn upsert_category(&mut self, draft: QuickCommandCategoryDraft) -> String {
-        self.active_category =
-            upsert_quick_command_category(&mut self.categories, draft, &self.active_category);
-        self.persist();
+        let mut categories = self.categories.clone();
+        let active_category =
+            upsert_quick_command_category(&mut categories, draft, &self.active_category);
+        let snapshot = QuickCommandsSnapshot {
+            version: QUICK_COMMANDS_SCHEMA_VERSION,
+            categories,
+            commands: self.commands.clone(),
+            updated_at: now_ms(),
+        };
+        match oxideterm_quick_commands::save_snapshot(&self.settings_path, &snapshot) {
+            Ok(()) => {
+                self.categories = snapshot.categories;
+                self.active_category = active_category;
+                self.last_persist_error = None;
+            }
+            Err(error) => self.last_persist_error = Some(error),
+        }
         self.active_category.clone()
     }
 
@@ -463,6 +477,7 @@ mod quick_command_tests {
             id: None,
             name: "Ops".to_string(),
             icon: QuickCommandIcon::Zap,
+            icon_color: String::new(),
         });
         state.upsert_command(QuickCommandDraft {
             id: None,
@@ -509,11 +524,13 @@ mod quick_command_tests {
             id: None,
             name: "Custom".to_string(),
             icon: QuickCommandIcon::Zap,
+            icon_color: String::new(),
         });
         let second = state.upsert_category(QuickCommandCategoryDraft {
             id: None,
             name: "Custom".to_string(),
             icon: QuickCommandIcon::Zap,
+            icon_color: String::new(),
         });
 
         assert_ne!(first, second);
@@ -619,6 +636,7 @@ mod quick_command_tests {
                 id: "files".to_string(),
                 name: "Files".to_string(),
                 icon: QuickCommandIcon::Folder,
+                icon_color: None,
                 sort_order: 0,
             }],
             commands: vec![QuickCommand {

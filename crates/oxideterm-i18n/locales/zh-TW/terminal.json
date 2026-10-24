@@ -294,6 +294,13 @@
       "source_quick_command": "快捷命令"
     },
     "quick_commands": {
+      "all_groups": "全部群組",
+      "search_groups": "搜尋群組…",
+      "group_empty": "目前群組沒有可用命令",
+      "icon_color": "圖示顏色",
+      "icon_color_hint": "#RRGGBB · 留空跟隨主題",
+      "icon_color_reset": "跟隨主題",
+      "icon_color_invalid": "請輸入六位十六進位顏色，例如 #22d3ee。",
       "title": "快捷命令",
       "open": "快捷命令",
       "close": "关闭快捷命令",

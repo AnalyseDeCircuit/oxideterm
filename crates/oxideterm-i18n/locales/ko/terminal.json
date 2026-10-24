@@ -294,6 +294,13 @@
       "source_quick_command": "quick"
     },
     "quick_commands": {
+      "all_groups": "모든 그룹",
+      "search_groups": "그룹 검색…",
+      "group_empty": "이 그룹에 사용 가능한 명령이 없습니다",
+      "icon_color": "아이콘 색상",
+      "icon_color_hint": "#RRGGBB · 비워두면 테마 사용",
+      "icon_color_reset": "테마 색상 사용",
+      "icon_color_invalid": "#22d3ee와 같은 6자리 16진수 색상을 입력하세요.",
       "title": "Quick Commands",
       "open": "Quick Commands",
       "close": "Close Quick Commands",

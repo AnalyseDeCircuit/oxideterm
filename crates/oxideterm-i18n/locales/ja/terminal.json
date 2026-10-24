@@ -294,6 +294,13 @@
       "source_quick_command": "quick"
     },
     "quick_commands": {
+      "all_groups": "すべてのグループ",
+      "search_groups": "グループを検索…",
+      "group_empty": "このグループに利用可能なコマンドはありません",
+      "icon_color": "アイコンの色",
+      "icon_color_hint": "#RRGGBB · 空欄でテーマに従う",
+      "icon_color_reset": "テーマの色を使用",
+      "icon_color_invalid": "#22d3ee など、6 桁の 16 進数の色を入力してください。",
       "title": "Quick Commands",
       "open": "Quick Commands",
       "close": "Close Quick Commands",

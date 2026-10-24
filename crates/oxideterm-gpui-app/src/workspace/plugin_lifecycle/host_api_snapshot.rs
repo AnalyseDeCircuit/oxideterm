@@ -636,6 +636,7 @@ mod tests {
             id: "ops".to_string(),
             name: "Operations".to_string(),
             icon: QuickCommandIcon::Server,
+            icon_color: None,
             sort_order: 0,
         }];
         let commands = vec![QuickCommand {

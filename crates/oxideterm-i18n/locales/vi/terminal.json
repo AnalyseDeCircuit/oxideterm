@@ -294,6 +294,13 @@
       "source_quick_command": "quick"
     },
     "quick_commands": {
+      "all_groups": "Tất cả nhóm",
+      "search_groups": "Tìm nhóm…",
+      "group_empty": "Không có lệnh khả dụng trong nhóm này",
+      "icon_color": "Màu biểu tượng",
+      "icon_color_hint": "#RRGGBB · để trống theo giao diện",
+      "icon_color_reset": "Dùng màu giao diện",
+      "icon_color_invalid": "Nhập màu thập lục phân gồm sáu chữ số, ví dụ #22d3ee.",
       "title": "Quick Commands",
       "open": "Quick Commands",
       "close": "Close Quick Commands",

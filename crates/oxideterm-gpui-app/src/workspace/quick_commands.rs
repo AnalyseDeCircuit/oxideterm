@@ -33,6 +33,7 @@ pub(super) enum QuickCommandInput {
     ParameterDefault(usize),
     ParameterChoices(usize),
     CategoryName,
+    CategoryColor,
 }
 
 impl QuickCommandInput {
@@ -44,6 +45,7 @@ impl QuickCommandInput {
             Self::CommandDescription => 4,
             Self::CommandHostPattern => 5,
             Self::CategoryName => 6,
+            Self::CategoryColor => 7,
             Self::ParameterName(index) => 100 + index as u64 * 4,
             Self::ParameterLabel(index) => 101 + index as u64 * 4,
             Self::ParameterDefault(index) => 102 + index as u64 * 4,

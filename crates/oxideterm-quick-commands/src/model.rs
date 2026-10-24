@@ -21,7 +21,16 @@ pub struct QuickCommandCategory {
     pub id: String,
     pub name: String,
     pub icon: QuickCommandIcon,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_color: Option<String>,
     pub sort_order: i64,
+}
+
+pub fn parse_icon_color(value: &str) -> Option<u32> {
+    let value = value.trim().strip_prefix('#').unwrap_or(value.trim());
+    (value.len() == 6 && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| u32::from_str_radix(value, 16).ok())
+        .flatten()
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]

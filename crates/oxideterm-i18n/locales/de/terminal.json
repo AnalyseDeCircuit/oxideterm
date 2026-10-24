@@ -294,6 +294,13 @@
       "source_quick_command": "quick"
     },
     "quick_commands": {
+      "all_groups": "Alle Gruppen",
+      "search_groups": "Gruppen suchen…",
+      "group_empty": "Keine verfügbaren Befehle in dieser Gruppe",
+      "icon_color": "Symbolfarbe",
+      "icon_color_hint": "#RRGGBB · leer für Designfarbe",
+      "icon_color_reset": "Designfarbe verwenden",
+      "icon_color_invalid": "Eine sechsstellige Hex-Farbe eingeben, z. B. #22d3ee.",
       "title": "Quick Commands",
       "open": "Quick Commands",
       "close": "Close Quick Commands",

@@ -356,6 +356,13 @@
       "disabled_description": "远程服务器发起了 trzsz 传输，但带内文件传输功能未启用。请前往「设置 → 终端」以启用 trzsz。"
     },
     "quick_commands": {
+      "all_groups": "全部分组",
+      "search_groups": "搜索分组…",
+      "group_empty": "当前分组暂无可用命令",
+      "icon_color": "图标颜色",
+      "icon_color_hint": "#RRGGBB · 留空跟随主题",
+      "icon_color_reset": "跟随主题",
+      "icon_color_invalid": "请输入六位十六进制颜色，例如 #22d3ee。",
       "title": "快捷命令",
       "open": "快捷命令",
       "close": "关闭快捷命令",

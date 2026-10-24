@@ -1,6 +1,33 @@
 use super::*;
 
 #[test]
+fn quick_command_category_sync_merges_icon_color_and_theme_reset() {
+    let mut base = oxideterm_quick_commands::default_quick_command_categories();
+    for initial in [None, Some("#112233".to_string())] {
+        base[0].icon_color = initial.clone();
+        let mut local = base.clone();
+        local[0].icon_color = if initial.is_none() {
+            Some("#22d3ee".into())
+        } else {
+            None
+        };
+        let mut remote = base.clone();
+        remote[0].name = "Renamed remotely".into();
+        merge_quick_command_categories(&mut remote, &base, &local, &ConflictStrategy::Merge)
+            .unwrap();
+        assert_eq!(remote[0].name, "Renamed remotely");
+        assert_eq!(
+            remote[0].icon_color.as_deref(),
+            if initial.is_none() {
+                Some("#22d3ee")
+            } else {
+                None
+            }
+        );
+    }
+}
+
+#[test]
 fn ftp_cloud_merge_keeps_independent_local_and_remote_edits() {
     use oxideterm_connections::{FtpProfile, FtpProfilesSyncSnapshot, FtpSecurity};
     let profile = FtpProfile::new(

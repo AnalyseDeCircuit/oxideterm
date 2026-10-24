@@ -26,7 +26,7 @@ pub use model::{
     QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability, QuickCommandCategory,
     QuickCommandConfirmationPolicy, QuickCommandIcon, QuickCommandImportResult,
     QuickCommandImportStrategy, QuickCommandMatchField, QuickCommandParameter,
-    QuickCommandParameterKind, QuickCommandTargetProtocol, QuickCommandsSnapshot,
+    QuickCommandParameterKind, QuickCommandTargetProtocol, QuickCommandsSnapshot, parse_icon_color,
 };
 pub use risk::{QuickCommandRisk, classify_command_risk};
 pub use snapshot::{decode_snapshot_json, encode_snapshot_json};

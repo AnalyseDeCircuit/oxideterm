@@ -294,6 +294,13 @@
       "source_quick_command": "quick"
     },
     "quick_commands": {
+      "all_groups": "Todos los grupos",
+      "search_groups": "Buscar grupos…",
+      "group_empty": "No hay comandos disponibles en este grupo",
+      "icon_color": "Color del icono",
+      "icon_color_hint": "#RRGGBB · vacío usa el tema",
+      "icon_color_reset": "Usar color del tema",
+      "icon_color_invalid": "Introduce un color hexadecimal de seis dígitos, como #22d3ee.",
       "title": "Quick Commands",
       "open": "Quick Commands",
       "close": "Close Quick Commands",

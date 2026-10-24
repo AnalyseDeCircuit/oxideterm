@@ -482,6 +482,7 @@ fn merge_snapshot(
                         &format!("{} (Imported)", incoming_category.name),
                     ),
                     icon: incoming_category.icon,
+                    icon_color: incoming_category.icon_color,
                     sort_order: next_category_sort_order(&categories),
                 };
                 category_remap.insert(incoming_category.id, renamed.id.clone());
@@ -497,6 +498,7 @@ fn merge_snapshot(
                     if category.id == conflict.id {
                         category.name = incoming_category.name.clone();
                         category.icon = incoming_category.icon;
+                        category.icon_color = incoming_category.icon_color.clone();
                         category.sort_order = incoming_category.sort_order;
                     }
                 }
@@ -645,10 +647,21 @@ fn sanitize_snapshot(snapshot: QuickCommandsSnapshot) -> Result<QuickCommandsSna
 }
 
 fn sanitize_category(category: QuickCommandCategory) -> Result<QuickCommandCategory, String> {
+    let icon_color = category
+        .icon_color
+        .map(|value| {
+            crate::parse_icon_color(&value)
+                .map(|color| format!("#{color:06x}"))
+                .ok_or_else(|| {
+                    "Invalid category icon color: expected six hexadecimal digits".to_string()
+                })
+        })
+        .transpose()?;
     Ok(QuickCommandCategory {
         id: bounded_required(category.id, "category.id", MAX_ID_LEN)?,
         name: bounded_required(category.name, "category.name", MAX_NAME_LEN)?,
         icon: category.icon,
+        icon_color,
         sort_order: category.sort_order,
     })
 }
@@ -938,6 +951,7 @@ fn quick_category(
         id: id.to_string(),
         name: name.to_string(),
         icon,
+        icon_color: None,
         sort_order,
     }
 }
@@ -1035,6 +1049,60 @@ mod tests {
             std::env::temp_dir().join(format!("oxideterm-quick-commands-{name}-{}", now_ms()));
         fs::create_dir_all(&dir).unwrap();
         dir.join("settings.json")
+    }
+
+    #[test]
+    fn category_colors_survive_import_strategies_and_reject_invalid_values() {
+        let settings_path = temp_settings_path("category-colors");
+        let current = QuickCommandsSnapshot {
+            version: QUICK_COMMANDS_SCHEMA_VERSION,
+            categories: vec![QuickCommandCategory {
+                icon_color: Some("#112233".into()),
+                ..quick_category("ops", "Ops", QuickCommandIcon::Server, 0)
+            }],
+            commands: Vec::new(),
+            updated_at: 1,
+        };
+        let incoming = r##"{"version":2,"collections":[{"id":"ops","name":"Ops","icon":"server","iconColor":"#22D3EE","sortOrder":0}],"commands":[],"updatedAt":2}"##;
+        for (strategy, expected) in [
+            (QuickCommandImportStrategy::Merge, vec!["#22d3ee"]),
+            (QuickCommandImportStrategy::Replace, vec!["#22d3ee"]),
+            (QuickCommandImportStrategy::Skip, vec!["#112233"]),
+            (
+                QuickCommandImportStrategy::Rename,
+                vec!["#112233", "#22d3ee"],
+            ),
+        ] {
+            save_snapshot(&settings_path, &current).unwrap();
+            let result = apply_snapshot_json(&settings_path, incoming, strategy);
+            assert!(result.errors.is_empty(), "{:?}", result.errors);
+            let exported = export_snapshot_json(&settings_path).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&exported).unwrap();
+            assert_eq!(
+                value["collections"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|c| c["iconColor"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
+        save_snapshot(&settings_path, &current).unwrap();
+        let invalid = incoming.replace("#22D3EE", "#12345678");
+        let result = apply_snapshot_json(
+            &settings_path,
+            &invalid,
+            QuickCommandImportStrategy::Replace,
+        );
+        assert!(!result.errors.is_empty());
+        assert_eq!(
+            load_snapshot(&settings_path).unwrap().categories[0]
+                .icon_color
+                .as_deref(),
+            Some("#112233")
+        );
+        fs::remove_dir_all(settings_path.parent().unwrap()).unwrap();
     }
 
     #[test]
