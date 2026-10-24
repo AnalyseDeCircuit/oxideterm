@@ -1104,6 +1104,9 @@ impl WindowsWindowInner {
         }
         let new_display = WindowsDisplay::new(WindowsDisplay::display_id_for_monitor(new_monitor))?;
         self.state.display.set(new_display);
+        // Topology can change without resizing this window. Refresh mounted views so
+        // remote desktop layouts observe external-display hotplug even on a static frame.
+        self.draw_window(handle, true);
         Some(0)
     }
 

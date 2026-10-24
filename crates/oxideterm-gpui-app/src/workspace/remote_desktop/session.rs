@@ -842,19 +842,66 @@ impl RemoteDesktopSessionEntity {
     }
 
     fn sync_monitor_layout(&mut self, cx: &mut Context<Self>) {
-        if !self.profile.session_options.display.use_all_monitors {
+        if !self.profile.session_options.display.use_all_monitors
+            || !self.provider.capabilities.multi_monitor
+        {
             return;
         }
         let layout = remote_desktop_monitor_layout(&self.profile, cx);
+        self.apply_monitor_layout(layout, cx);
+    }
+
+    fn uses_monitor_layout(&self) -> bool {
+        self.profile.session_options.display.use_all_monitors
+            && self.provider.capabilities.multi_monitor
+            && self.last_monitor_layout.monitors.len() > 1
+    }
+
+    fn apply_monitor_layout(&mut self, layout: RemoteDesktopMonitorLayout, cx: &mut Context<Self>) {
+        // A transient empty topology during hotplug must not erase the last usable desktop.
+        if layout.monitors.is_empty() {
+            return;
+        }
         if layout == self.last_monitor_layout {
             return;
         }
+        self.resize_generation.fetch_add(1, Ordering::Relaxed);
+        self.last_sent_resize = None;
+        let mut requested = layout.clone();
+        if requested.monitors.len() == 1 {
+            let Some(viewport) = self.geometry.viewport_size().or(self.last_viewport_size) else {
+                return;
+            };
+            let size = remote_desktop_requested_size_for_viewport(
+                viewport,
+                self.last_viewport_scale_factor,
+            );
+            let monitor = &mut requested.monitors[0];
+            monitor.width = size.width.clamp(
+                RemoteDesktopSize::MIN_WIDTH,
+                RemoteDesktopSize::MAX_DIMENSION,
+            ) & !1;
+            monitor.height = size.height.clamp(
+                RemoteDesktopSize::MIN_WIDTH,
+                RemoteDesktopSize::MAX_DIMENSION,
+            );
+            monitor.left = 0;
+            monitor.top = 0;
+            monitor.primary = true;
+            monitor.desktop_scale_factor = self.last_viewport_scale_factor.unwrap_or(100);
+            monitor.physical_width_mm = None;
+            monitor.physical_height_mm = None;
+            monitor.orientation = if monitor.width >= monitor.height {
+                RemoteDesktopMonitorOrientation::Landscape
+            } else {
+                RemoteDesktopMonitorOrientation::Portrait
+            };
+        }
         if let Some(worker) = self.worker.as_ref() {
-            worker.send(RemoteDesktopHelperRequest::UpdateDisplayLayout {
-                layout: layout.clone(),
-            });
+            worker.send(RemoteDesktopHelperRequest::UpdateDisplayLayout { layout: requested });
         }
         self.last_monitor_layout = layout;
+        cx.notify();
     }
 
     fn resize_capability(&self) -> NegotiatedCapabilityStatus {
@@ -872,7 +919,8 @@ impl RemoteDesktopSessionEntity {
         scale_factor: Option<u32>,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.state.snapshot().status != RemoteDesktopSessionStatus::Connected
+        if self.uses_monitor_layout()
+            || self.state.snapshot().status != RemoteDesktopSessionStatus::Connected
             || !self.resize_capability().is_supported()
         {
             return false;
@@ -917,7 +965,7 @@ impl RemoteDesktopSessionEntity {
         scale_factor: u32,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.follow_window_size == enabled {
+        if self.uses_monitor_layout() || self.follow_window_size == enabled {
             return false;
         }
         self.follow_window_size = enabled;
@@ -933,6 +981,9 @@ impl RemoteDesktopSessionEntity {
         scale_factor: u32,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.uses_monitor_layout() {
+            return false;
+        }
         // A fixed preset and automatic viewport following are mutually
         // exclusive; otherwise the next local layout pass would overwrite it.
         self.follow_window_size = false;
@@ -949,6 +1000,10 @@ impl RemoteDesktopSessionEntity {
             // Layout is measured after render; keep the first physical scale
             // before deciding whether the helper can start.
             self.last_viewport_scale_factor = Some(scale_factor);
+        }
+        // Local layout passes also run without incoming RDP frames (for example after hotplug).
+        if self.worker.is_some() {
+            self.sync_monitor_layout(cx);
         }
         let snapshot = self.state.snapshot();
         let Some(viewport_size) = self.geometry.viewport_size() else {
@@ -985,7 +1040,7 @@ impl RemoteDesktopSessionEntity {
         if snapshot.status != RemoteDesktopSessionStatus::Connected {
             return false;
         }
-        if !self.follow_window_size {
+        if self.uses_monitor_layout() || !self.follow_window_size {
             return false;
         }
         let should_send_resize = remote_desktop_resize_request_needed_for_capability(
@@ -1098,7 +1153,6 @@ impl RemoteDesktopSessionEntity {
                     match event {
                         RemoteDesktopSessionEvent::DeliveryReady { .. } => {
                             let outcome = session.poll_deliveries(window, cx);
-                            session.sync_monitor_layout(cx);
                             if outcome.changed {
                                 cx.notify();
                             }
@@ -1538,6 +1592,9 @@ impl WorkspaceApp {
         menu_open: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let disabled = self
+            .remote_desktop_session_entity(tab_id, cx)
+            .is_some_and(|session| session.read(cx).uses_monitor_layout());
         let theme = self.tokens.ui;
         let workspace = cx.entity();
         let fit_button = self.workspace_toolbar_action_button(
@@ -1552,7 +1609,7 @@ impl WorkspaceApp {
                     variant: ButtonVariant::Secondary,
                     size: ButtonSize::Sm,
                     radius: ButtonRadius::Md,
-                    disabled: false,
+                    disabled,
                 },
                 height: Some(24.0),
                 padding_x: Some(8.0),
@@ -1620,7 +1677,8 @@ impl WorkspaceApp {
         };
         let session = session_entity.read(cx);
         let snapshot = session.state.snapshot();
-        let follow_window_size = session.follow_window_size;
+        let disabled = session.uses_monitor_layout();
+        let follow_window_size = session.follow_window_size && !disabled;
         let current_size = snapshot.size;
         let viewport = window.viewport_size();
         let actionable_or_value_count = 2 + REMOTE_DESKTOP_COMMON_RESOLUTIONS.len();
@@ -1644,14 +1702,14 @@ impl WorkspaceApp {
             self.i18n.t("remote_desktop.follow_window_size"),
             DropdownMenuItemKind::Checkbox(follow_window_size),
             false,
-            false,
+            disabled,
         );
         let mut menu = context_menu_event_boundary(
             dropdown_menu_content(&self.tokens).w(px(REMOTE_DESKTOP_RESIZE_MENU_WIDTH)),
         )
         .child(self.workspace_context_menu_persistent_styled_action(
             follow_item,
-            false,
+            disabled,
             false,
             oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle::default(),
             move |this, _event, window, cx| {
@@ -1689,11 +1747,11 @@ impl WorkspaceApp {
                 remote_desktop_resolution_label(size),
                 DropdownMenuItemKind::Radio(selected),
                 false,
-                false,
+                disabled,
             );
             menu = menu.child(self.workspace_context_menu_styled_action(
                 item,
-                false,
+                disabled,
                 false,
                 oxideterm_gpui_ui::context_menu::ContextMenuActionableStyle::default(),
                 |this| this.remote_desktop_resize_menu_tab_id = None,
@@ -2163,6 +2221,151 @@ mod tests {
     };
 
     struct RemoteDesktopSessionTestRoot;
+
+    #[gpui::test]
+    fn display_topology_owns_size_until_the_last_external_screen_is_removed(
+        cx: &mut TestAppContext,
+    ) {
+        let window = cx.add_window(|_, _| RemoteDesktopSessionTestRoot);
+        let mut profile = preview_remote_desktop_profile(RemoteDesktopProtocol::Rdp);
+        profile.session_options.display.use_all_monitors = true;
+        let mut provider = builtin_preview_provider_registry()
+            .unwrap()
+            .get_for_protocol(RemoteDesktopProtocol::Rdp)
+            .unwrap()
+            .clone();
+        provider.capabilities.multi_monitor = true;
+        let (tx, rx) = mpsc::channel();
+        let directory = tempfile::tempdir().unwrap();
+        let session = cx.new(|cx| {
+            let mut session = RemoteDesktopSessionEntity::new(
+                TabId(900),
+                profile,
+                provider,
+                None,
+                directory.path().join("certificates.json"),
+                RemoteDesktopFrameDeliverySlot::new(),
+                window.into(),
+            );
+            session.worker = Some(RemoteDesktopWorkerOwner::new(tx, thread::spawn(|| {})));
+            session.last_viewport_size = Some(RemoteDesktopSize {
+                width: 1000,
+                height: 600,
+            });
+            session.last_viewport_scale_factor = Some(150);
+            session
+                .state
+                .apply_event(RemoteDesktopHelperEvent::Connected {
+                    size: RemoteDesktopSize {
+                        width: 1500,
+                        height: 900,
+                    },
+                });
+            session
+                .state
+                .apply_event(RemoteDesktopHelperEvent::CapabilitiesNegotiated {
+                    capabilities: NegotiatedCapabilities {
+                        resize: NegotiatedCapabilityStatus::Supported,
+                        ..Default::default()
+                    },
+                });
+            session.install_release_handler(cx);
+            session
+        });
+        let primary = RemoteDesktopMonitor {
+            stable_id: "external".into(),
+            left: 0,
+            top: 0,
+            width: 3840,
+            height: 2160,
+            primary: true,
+            desktop_scale_factor: 150,
+            device_scale_factor: 140,
+            physical_width_mm: None,
+            physical_height_mm: None,
+            orientation: RemoteDesktopMonitorOrientation::Landscape,
+        };
+        let secondary = RemoteDesktopMonitor {
+            stable_id: "left".into(),
+            left: -1920,
+            width: 1920,
+            height: 1080,
+            primary: false,
+            desktop_scale_factor: 100,
+            device_scale_factor: 100,
+            ..primary.clone()
+        };
+        let dual = RemoteDesktopMonitorLayout {
+            monitors: vec![primary.clone(), secondary],
+        };
+        session.update(cx, |session, cx| {
+            session.apply_monitor_layout(dual.clone(), cx);
+            assert!(!session.request_preset_size(
+                RemoteDesktopSize {
+                    width: 1280,
+                    height: 720
+                },
+                150,
+                cx
+            ));
+            assert!(!session.set_follow_window_size(false, 150, cx));
+            assert!(!session.send_resize_immediately(
+                RemoteDesktopSize {
+                    width: 1600,
+                    height: 900
+                },
+                Some(150),
+                cx
+            ));
+        });
+        match rx.try_recv().unwrap() {
+            RemoteDesktopHelperRequest::UpdateDisplayLayout { layout } => assert_eq!(layout, dual),
+            _ => panic!("multi-monitor layout must be the only outgoing size request"),
+        }
+        assert!(rx.try_recv().is_err());
+        session.update(cx, |session, cx| {
+            session.apply_monitor_layout(
+                RemoteDesktopMonitorLayout {
+                    monitors: vec![primary],
+                },
+                cx,
+            );
+        });
+        let RemoteDesktopHelperRequest::UpdateDisplayLayout { layout } = rx.try_recv().unwrap()
+        else {
+            panic!("missing return to single-monitor layout");
+        };
+        assert_eq!(
+            layout
+                .monitors
+                .iter()
+                .map(|m| (m.left, m.top, m.width, m.height, m.primary))
+                .collect::<Vec<_>>(),
+            vec![(0, 0, 1500, 900, true)]
+        );
+        session.update(cx, |session, cx| {
+            assert!(session.request_preset_size(
+                RemoteDesktopSize {
+                    width: 1280,
+                    height: 720
+                },
+                150,
+                cx
+            ));
+        });
+        assert!(matches!(
+            rx.try_recv().unwrap(),
+            RemoteDesktopHelperRequest::Resize {
+                size: RemoteDesktopSize {
+                    width: 1280,
+                    height: 720
+                },
+                scale_factor: Some(150)
+            }
+        ));
+        drop(session);
+        cx.run_until_parked();
+    }
 
     struct AuditKeys;
 
