@@ -105,3 +105,6 @@
 ## Avoid instruction-to-output leakage（IMPORTANT）
 
 Distinguish instructions from deliverable content. Embody the requirements; never restate them unless explicitly requested.
+
+## About UI
+Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining.
