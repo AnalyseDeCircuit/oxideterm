@@ -5,10 +5,9 @@ use std::{cell::Cell, collections::BTreeMap, ops::Range, rc::Rc};
 
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Context, CursorStyle, Div,
-    EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Render, ScrollWheelEvent, SharedString,
-    StatefulInteractiveElement, Styled, Window, anchored, deferred, div, prelude::FluentBuilder,
-    px, rgb, rgba,
+    EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
+    Render, ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
+    deferred, div, prelude::FluentBuilder, px, rgb, rgba,
 };
 use oxideterm_editor_core::{BufferOffset, Selection};
 use oxideterm_editor_syntax::{BracketPair, SyntaxScope};
@@ -172,15 +171,6 @@ impl Render for TextEditorView {
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
                 this.handle_scroll(event, cx);
             }))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
-                this.drag_selection_to_point(event.position, window, cx);
-            }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
-                    this.finish_selection_drag(cx);
-                }),
-            )
             .child(
                 div()
                     .absolute()
@@ -1603,6 +1593,143 @@ mod tests {
             is_first: start_col == 0,
             is_folded_header: false,
         }
+    }
+
+    struct SelectionDragTestView {
+        editor: Entity<TextEditorView>,
+    }
+
+    impl Render for SelectionDragTestView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .p(px(30.0))
+                .child(div().h(px(160.0)).w_full().child(self.editor.clone()))
+        }
+    }
+
+    #[gpui::test]
+    fn dragging_at_viewport_edges_scrolls_and_extends_selection_until_mouse_up(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let source = (0..200)
+            .map(|line| format!("line {line:03}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let (root, cx) = cx.add_window_view(|_, cx| SelectionDragTestView {
+            editor: cx
+                .new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx)),
+        });
+        let editor = root.read_with(cx, |root, _| root.editor.clone());
+        cx.simulate_resize(gpui::size(px(500.0), px(300.0)));
+        cx.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear(cx);
+        });
+        let (bounds, x, line_height) = editor.read_with(cx, |editor, _| {
+            let bounds = editor.content_bounds.unwrap();
+            (
+                bounds,
+                bounds.left()
+                    + px(editor.visible_gutter_width() + editor.visible_content_padding_x()),
+                editor.metrics.line_height,
+            )
+        });
+        let start = gpui::point(x, bounds.top() + px(line_height / 2.0));
+        let bottom = gpui::point(x, bounds.bottom() - px(1.0));
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(bottom, Some(MouseButton::Left), gpui::Modifiers::default());
+        cx.run_until_parked();
+        // The pointer remains still; scrolling must not depend on more move events.
+        for _ in 0..20 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(30));
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        editor.read_with(cx, |editor, _| {
+            let selection = editor.cursor.selection();
+            assert_eq!(selection.anchor, BufferOffset::ZERO);
+            let selected = editor.buffer.slice(selection.range()).unwrap();
+            assert!(
+                selected.contains("line 010"),
+                "selection did not reach text below the original viewport: {selected:?}"
+            );
+            assert!(editor.viewport.scroll_y_px > 0.0);
+        });
+
+        cx.simulate_mouse_move(
+            bounds.center(),
+            Some(MouseButton::Left),
+            gpui::Modifiers::default(),
+        );
+        let paused = editor.read_with(cx, |editor, _| {
+            (editor.viewport.scroll_y_px, editor.cursor.selection())
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(
+                (editor.viewport.scroll_y_px, editor.cursor.selection()),
+                paused
+            );
+        });
+
+        let outside = gpui::point(x, bounds.bottom() + px(line_height));
+        let before = editor.read_with(cx, |editor, _| {
+            (editor.viewport.scroll_y_px, editor.cursor.selection())
+        });
+        cx.simulate_mouse_move(outside, Some(MouseButton::Left), gpui::Modifiers::default());
+        for _ in 0..3 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(30));
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        editor.read_with(cx, |editor, _| {
+            assert!(editor.viewport.scroll_y_px > before.0);
+            assert!(editor.cursor.selection().head > before.1.head);
+            assert_eq!(editor.cursor.selection().anchor, BufferOffset::ZERO);
+        });
+        cx.simulate_mouse_up(outside, MouseButton::Left, gpui::Modifiers::default());
+        let stopped = editor.read_with(cx, |editor, _| {
+            (editor.viewport.scroll_y_px, editor.cursor.selection())
+        });
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(100));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(
+                (editor.viewport.scroll_y_px, editor.cursor.selection()),
+                stopped
+            );
+            assert!(editor.selection_drag.is_none());
+        });
+
+        cx.simulate_mouse_down(
+            bounds.center(),
+            MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        let anchor = editor.read_with(cx, |editor, _| editor.cursor.selection().anchor);
+        let top = gpui::point(x, bounds.top() - px(line_height));
+        cx.simulate_mouse_move(top, Some(MouseButton::Left), gpui::Modifiers::default());
+        cx.run_until_parked();
+        for _ in 0..3 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(30));
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        editor.read_with(cx, |editor, _| {
+            assert!(editor.viewport.scroll_y_px < stopped.0);
+            assert!(editor.cursor.selection().head < anchor);
+            assert_eq!(editor.cursor.selection().anchor, anchor);
+        });
+        cx.simulate_mouse_up(top, MouseButton::Left, gpui::Modifiers::default());
     }
 
     #[gpui::test]

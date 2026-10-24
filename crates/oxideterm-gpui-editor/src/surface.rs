@@ -4,10 +4,10 @@
 use std::{cell::RefCell, collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use gpui::{
-    AnyElement, App, Bounds, Context, Div, Element, ElementId, ElementInputHandler, Entity,
-    FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    ParentElement, Pixels, Point, ScrollWheelEvent, SharedString, Task, TextRun, Window, div,
-    point, prelude::*, px, rgb,
+    AnyElement, App, Bounds, Context, DispatchPhase, Div, Element, ElementId, ElementInputHandler,
+    Entity, FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
+    MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollWheelEvent,
+    SharedString, Task, TextRun, Window, div, point, prelude::*, px, rgb,
 };
 use oxideterm_editor_core::{
     BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
@@ -57,6 +57,7 @@ fn normalize_editor_text(text: String) -> String {
 }
 
 const EDITOR_CARET_BLINK_INTERVAL: Duration = Duration::from_millis(530);
+const EDITOR_SELECTION_SCROLL_INTERVAL: Duration = Duration::from_millis(30);
 
 /// Controls whether the editor owns a full document surface or sits inside an
 /// existing input row whose surrounding component already provides chrome.
@@ -173,6 +174,34 @@ impl Element for EditorBoundsProbe {
             ElementInputHandler::new(_bounds, self.view.clone()),
             cx,
         );
+        let drag_view = self.view.downgrade();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if phase == DispatchPhase::Capture
+                && let Some(view) = drag_view.upgrade()
+                && view.read(cx).selection_drag.is_some()
+            {
+                view.update(cx, |this, cx| {
+                    if event.pressed_button == Some(MouseButton::Left) {
+                        this.drag_selection_to_point(event.position, window, cx);
+                    } else {
+                        this.finish_selection_drag(cx);
+                    }
+                });
+            }
+        });
+        let drag_view = self.view.downgrade();
+        // Drag selection belongs to this editor until release, even outside its viewport.
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _window, cx| {
+            if phase == DispatchPhase::Capture
+                && event.button == MouseButton::Left
+                && let Some(view) = drag_view.upgrade()
+                && view.read(cx).selection_drag.is_some()
+            {
+                view.update(cx, |this, cx| {
+                    this.finish_selection_drag(cx);
+                });
+            }
+        });
     }
 }
 
@@ -272,9 +301,10 @@ impl HighlightChunkCache {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct SelectionDrag {
     anchor: BufferOffset,
+    position: Option<Point<Pixels>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -337,6 +367,7 @@ pub struct TextEditorView {
     display_rows_cache: RefCell<Option<DisplayRowsCache>>,
     highlight_chunk_cache: RefCell<HighlightChunkCache>,
     selection_drag: Option<SelectionDrag>,
+    selection_scroll_task: Option<Task<()>>,
     transparent_background: bool,
     presentation: EditorPresentation,
     border_visible: bool,
@@ -457,6 +488,7 @@ impl TextEditorView {
             display_rows_cache: RefCell::new(None),
             highlight_chunk_cache: RefCell::new(HighlightChunkCache::default()),
             selection_drag: None,
+            selection_scroll_task: None,
             transparent_background: false,
             presentation: EditorPresentation::Document,
             border_visible: true,
@@ -477,6 +509,7 @@ impl TextEditorView {
         if focused {
             self.restart_caret_blink(cx);
         } else {
+            self.finish_selection_drag(cx);
             // Dropping the task stops repainting as soon as this editor loses focus.
             self.caret_blink_generation = self.caret_blink_generation.wrapping_add(1);
             self.caret_blink_task = None;
@@ -567,6 +600,7 @@ impl TextEditorView {
             .apply_transaction(EditTransaction::single(TextEdit::new(range, text)))
             .is_ok()
         {
+            self.finish_selection_drag(cx);
             self.cursor
                 .set_selection(Selection::caret(BufferOffset::ZERO));
             self.secondary_selections.clear();
@@ -1327,7 +1361,11 @@ impl TextEditorView {
         head: BufferOffset,
         cx: &mut Context<Self>,
     ) {
-        self.selection_drag = Some(SelectionDrag { anchor });
+        self.selection_scroll_task = None;
+        self.selection_drag = Some(SelectionDrag {
+            anchor,
+            position: None,
+        });
         self.cursor.set_selection(Selection::new(anchor, head));
         self.secondary_selections.clear();
         self.marked_text = None;
@@ -1340,17 +1378,109 @@ impl TextEditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.focus_handle.is_focused(window) {
+            self.finish_selection_drag(cx);
+            return;
+        }
+        let Some(drag) = self.selection_drag.as_mut() else {
+            return;
+        };
+        drag.position = Some(point);
+        if self.update_drag_selection(point, window) {
+            cx.notify();
+        }
+        if self.selection_scroll_delta(point) == 0.0 {
+            self.selection_scroll_task = None;
+        } else if self.selection_scroll_task.is_none() {
+            let executor = cx.background_executor().clone();
+            // The editor owns this loop; release, blur, or dropping the view cancels it.
+            self.selection_scroll_task = Some(cx.spawn_in(window, async move |editor, cx| {
+                loop {
+                    executor.timer(EDITOR_SELECTION_SCROLL_INTERVAL).await;
+                    let keep_scrolling = editor
+                        .update_in(cx, |this, window, cx| {
+                            if !window.is_window_active() || !this.focus_handle.is_focused(window) {
+                                this.finish_selection_drag(cx);
+                                return false;
+                            }
+                            if this.scroll_drag_selection(window, cx) {
+                                return true;
+                            }
+                            this.selection_scroll_task = None;
+                            false
+                        })
+                        .unwrap_or(false);
+                    if !keep_scrolling {
+                        break;
+                    }
+                }
+            }));
+        }
+    }
+
+    fn update_drag_selection(&mut self, point: Point<Pixels>, window: &mut Window) -> bool {
         let Some(drag) = self.selection_drag else {
-            return;
+            return false;
         };
-        let Some(head) = self.offset_for_window_point(point, window) else {
-            return;
+        let Some(bounds) = self.content_bounds else {
+            return false;
         };
-        self.cursor.set_selection(Selection::new(drag.anchor, head));
-        cx.notify();
+        let y = f32::from(point.y - bounds.top())
+            .clamp(0.0, (f32::from(bounds.size.height) - 1.0).max(0.0));
+        let point = gpui::point(point.x, bounds.top() + px(y));
+        let head = self
+            .offset_for_window_point(point, window)
+            .unwrap_or(BufferOffset(self.buffer.len()));
+        let selection = Selection::new(drag.anchor, head);
+        if selection == self.cursor.selection() {
+            return false;
+        }
+        self.cursor.set_selection(selection);
+        true
+    }
+
+    fn selection_scroll_delta(&self, point: Point<Pixels>) -> f32 {
+        let Some(bounds) = self.content_bounds else {
+            return 0.0;
+        };
+        let height = f32::from(bounds.size.height);
+        if height <= 0.0 {
+            return 0.0;
+        }
+        let edge = self.metrics.line_height.min(height / 4.0).max(1.0);
+        let y = f32::from(point.y - bounds.top());
+        let distance = if y < edge {
+            y - edge
+        } else if y > height - edge {
+            y - (height - edge)
+        } else {
+            return 0.0;
+        };
+        (distance / edge).clamp(-3.0, 3.0) * self.metrics.line_height
+    }
+
+    fn scroll_drag_selection(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let Some(point) = self.selection_drag.and_then(|drag| drag.position) else {
+            return false;
+        };
+        let dy = self.selection_scroll_delta(point);
+        let scrolled = self.viewport.scroll_by(
+            0.0,
+            dy,
+            self.max_horizontal_scroll_px(),
+            self.document_row_count(),
+            self.metrics.line_height,
+        );
+        if scrolled {
+            self.scroll_origin = EditorScrollOrigin::User;
+            self.update_drag_selection(point, window);
+            cx.notify();
+        }
+        scrolled
     }
 
     fn finish_selection_drag(&mut self, cx: &mut Context<Self>) {
+        self.selection_scroll_task = None;
         if self.selection_drag.take().is_some() {
             cx.notify();
         }
