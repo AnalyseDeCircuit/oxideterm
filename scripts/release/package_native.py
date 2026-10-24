@@ -25,6 +25,7 @@ APP_MANIFEST = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "Cargo.toml"
 RESOURCE_DIR = ROOT_DIR / "crates" / "oxideterm-gpui-app" / "resources"
 MACOS_INFO_PLIST_EXTENSION_DIR = RESOURCE_DIR / "info"
 MACOS_ENTITLEMENTS = RESOURCE_DIR / "OxideTerm.entitlements"
+MACOS_DEPLOYMENT_TARGET = "13.0"
 MACOS_UNSIGNED_INSTALL_NOTICE = (
     RESOURCE_DIR / "macos" / "unsigned-install-notice.png"
 )
@@ -464,6 +465,8 @@ def find_makensis() -> str | None:
 def native_cargo_build_env(target: str) -> dict[str, str]:
     env = os.environ.copy()
     if target.endswith("apple-darwin"):
+        # Match the bundle's support floor instead of Rust's architecture-specific defaults.
+        env["MACOSX_DEPLOYMENT_TARGET"] = MACOS_DEPLOYMENT_TARGET
         # Release builds must use the system GSS framework even when Homebrew
         # exposes an alternative Kerberos implementation through pkg-config.
         env["LIBGSSAPI_IMPL"] = "apple"
@@ -633,7 +636,7 @@ def build_macos_info_plist(version: str, identity: ReleaseIdentity) -> dict:
         "CFBundlePackageType": "APPL",
         "CFBundleShortVersionString": version,
         "CFBundleVersion": version,
-        "LSMinimumSystemVersion": "13.0",
+        "LSMinimumSystemVersion": MACOS_DEPLOYMENT_TARGET,
         "NSHighResolutionCapable": True,
         "CFBundleURLTypes": [
             {

@@ -294,6 +294,24 @@ class MacosConnectionUriTests(unittest.TestCase):
         )
 
 
+class NativeBuildEnvironmentTests(unittest.TestCase):
+    def test_macos_release_builds_pin_the_supported_deployment_target(self) -> None:
+        with patch.dict(os.environ, {
+            "MACOSX_DEPLOYMENT_TARGET": "26.0",
+            "LIBGSSAPI_IMPL": "mit",
+        }, clear=True):
+            for target, minimum, gss in [
+                ("x86_64-apple-darwin", "13.0", "apple"),
+                ("aarch64-apple-darwin", "13.0", "apple"),
+                ("x86_64-unknown-linux-gnu", "26.0", "mit"),
+                ("x86_64-pc-windows-msvc", "26.0", "mit"),
+            ]:
+                with self.subTest(target=target):
+                    env = package_native.native_cargo_build_env(target)
+                    self.assertEqual(env["MACOSX_DEPLOYMENT_TARGET"], minimum)
+                    self.assertEqual(env["LIBGSSAPI_IMPL"], gss)
+
+
 class MacosBridgeArchiveTests(unittest.TestCase):
     def test_tauri_bridge_archive_keeps_app_bundle_root(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

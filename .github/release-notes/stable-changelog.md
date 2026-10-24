@@ -7,7 +7,7 @@ section as the detailed changelog attached to the corresponding GitHub Release.
 
 ### 中文
 
-OxideTerm 2.2.5 加入按连接筛选标签、快捷命令分组筛选与图标颜色、独立 SSH 隧道和可选的命令输出折叠，统一终端与编辑器搜索，并支持在当前终端环境中打开远程 IDE。同时完善提权认证、明暗外观方案、插件连接同步及 RDP 显示器布局，修复中文选区、文件链接、SSH Agent 和受限服务器上的文件访问问题。
+OxideTerm 2.2.5 加入按连接筛选标签、快捷命令分组筛选与图标颜色、独立 SSH 隧道和可选的命令输出折叠，统一终端与编辑器搜索，并支持在当前终端环境中打开远程 IDE。同时完善界面动效、提权认证、明暗外观方案、插件连接同步及 RDP 显示器布局，修复中文选区、文件链接、SSH Agent 和受限服务器上的文件访问问题。
 
 #### 🗂️ 工作区与标签
 
@@ -61,6 +61,8 @@ OxideTerm 2.2.5 加入按连接筛选标签、快捷命令分组筛选与图标�
 #### 🎨 外观与 AI
 
 - 支持固定浅色、固定深色或跟随系统外观，分别配置明暗方案中的应用与终端主题，并可将当前外观保存为所选方案。
+- 统一侧边栏、选项高亮、弹窗、通知和按钮反馈的过渡；连续切换或反向操作时从当前状态平滑衔接，避免动画重新开始造成跳变。
+- 界面动效统一遵循标准、快速、减少和关闭四档设置。减少模式省略位移和旋转，保留轻量淡入淡出；关闭后立即更新界面，不等待动画结束。
 - 知识库顶部“笔记”栏与左侧导航使用一致的半透明主题底色，增强背景素材下的界面层次。
 - 网络请求使用操作系统证书信任库，支持已安装的企业或代理 CA；模型刷新失败时显示更明确的错误。（PR [#718](https://github.com/AnalyseDeCircuit/oxideterm/pull/718)）
 - Nix 包保留用户指定的证书环境变量，并优先使用宿主证书；模型刷新通知避免展示服务端原始错误正文及凭据。（PR [#718](https://github.com/AnalyseDeCircuit/oxideterm/pull/718)）
@@ -71,7 +73,7 @@ OxideTerm 2.2.5 加入按连接筛选标签、快捷命令分组筛选与图标�
 - 插件可提供持续更新的工作台和可保存的连接类型，连接配置可在会话管理中打开、编辑和删除。
 - 插件连接配置及凭据支持云同步和加密 `.oxide` 导入导出，并保留预览、变更合并和敏感信息选择。
 - 统一 RDP 单屏与多屏尺寸控制：单屏随窗口请求分辨率，多屏使用活动显示器布局，窗口调整只改变本地显示比例。完善内置屏关闭、外接屏变化和重连时的布局更新，避免窗口尺寸覆盖多屏布局。
-- macOS 发行包改用较新的 SDK 构建，统一发行构建的系统控件样式基础。
+- macOS 发行包改用较新的 SDK 构建，统一发行构建的系统控件样式基础；Intel 与 Apple Silicon 构建均显式使用 macOS 13.0 最低目标，修复 Intel 包的版本信息校验失败。
 
 #### 👥 贡献者
 
@@ -88,7 +90,7 @@ OxideTerm 2.2.5 加入按连接筛选标签、快捷命令分组筛选与图标�
 
 ### English
 
-OxideTerm 2.2.5 adds connection-scoped tabs, quick-command group filtering and icon colors, standalone SSH tunnels, and optional command-output folding. It unifies terminal and editor search and supports opening the remote IDE in the current terminal environment. The release also improves privilege authentication, light/dark appearance schemes, plugin connection sync, and RDP display layouts, while fixing CJK selections, file links, SSH Agent handling, and file access on restricted servers.
+OxideTerm 2.2.5 adds connection-scoped tabs, quick-command group filtering and icon colors, standalone SSH tunnels, and optional command-output folding. It unifies terminal and editor search and supports opening the remote IDE in the current terminal environment. The release also improves interface motion, privilege authentication, light/dark appearance schemes, plugin connection sync, and RDP display layouts, while fixing CJK selections, file links, SSH Agent handling, and file access on restricted servers.
 
 #### 🗂️ Workspace and tabs
 
@@ -142,6 +144,8 @@ OxideTerm 2.2.5 adds connection-scoped tabs, quick-command group filtering and i
 #### 🎨 Appearance and AI
 
 - Choose fixed light, fixed dark, or system-following appearance, configure application and terminal themes independently for each scheme, and assign the current appearance to a scheme.
+- Unified transitions across sidebars, selection highlights, dialogs, notifications, and button feedback. Rapid changes and reversals continue smoothly from the current state instead of restarting and jumping.
+- Interface motion consistently follows the Normal, Fast, Reduced, and Off profiles. Reduced removes movement and rotation while retaining subtle fades; Off updates the interface immediately without waiting for animations.
 - The Knowledge workspace's Notes header now matches the navigation sidebar's translucent theme background for clearer structure over background media.
 - Network requests use the operating system's certificate trust store, including installed corporate or proxy CAs. Model-refresh failures show clearer errors. (PR [#718](https://github.com/AnalyseDeCircuit/oxideterm/pull/718))
 - Nix packages preserve explicit certificate environment overrides and prefer host certificates. Model-refresh notifications avoid exposing raw server error bodies or credentials. (PR [#718](https://github.com/AnalyseDeCircuit/oxideterm/pull/718))
@@ -152,7 +156,7 @@ OxideTerm 2.2.5 adds connection-scoped tabs, quick-command group filtering and i
 - Plugins can provide live workbenches and persistent connection types that can be opened, edited, and deleted in Session Manager.
 - Plugin connection profiles and credentials support cloud sync and encrypted `.oxide` import/export, including previews, change merging, and sensitive-data selection.
 - Unified RDP single- and multi-monitor sizing: single-monitor resolution follows the window, while multi-monitor sessions use the active display layout and window resizing changes only local scaling. Improved layout updates when the internal display is disabled, external displays change, or sessions reconnect, preventing window dimensions from overriding multi-monitor layouts.
-- macOS release packages use a newer SDK to align the system-control styling baseline of release builds.
+- macOS release packages use a newer SDK to align the system-control styling baseline. Intel and Apple Silicon builds explicitly target macOS 13.0 as the minimum, fixing build-version verification failures for Intel packages.
 
 #### 👥 Contributors
 
