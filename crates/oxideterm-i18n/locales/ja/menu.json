@@ -7,6 +7,7 @@
     "show_main_window": "メインウィンドウを表示",
     "hide_main_window": "メインウィンドウを非表示",
     "quit": "OxideTerm を終了",
+    "confirm_quit": "OxideTerm を終了しますか？すべてのアクティブなターミナルセッションと接続が閉じられます。",
     "edit": "編集",
     "cut": "切り取り",
     "copy": "コピー",

@@ -1102,7 +1102,7 @@ impl WorkspaceApp {
         cx.spawn(async move |weak, cx| {
             Timer::after(std::time::Duration::from_millis(750)).await;
             let _ = weak.update(cx, |workspace, cx| {
-                workspace.request_application_quit(cx);
+                workspace.quit_after_confirmation(cx);
             });
         })
         .detach();

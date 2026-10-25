@@ -7,6 +7,7 @@
     "show_main_window": "Hauptfenster anzeigen",
     "hide_main_window": "Hauptfenster ausblenden",
     "quit": "OxideTerm beenden",
+    "confirm_quit": "OxideTerm beenden? Alle aktiven Terminalsitzungen und Verbindungen werden geschlossen.",
     "edit": "Bearbeiten",
     "cut": "Ausschneiden",
     "copy": "Kopieren",

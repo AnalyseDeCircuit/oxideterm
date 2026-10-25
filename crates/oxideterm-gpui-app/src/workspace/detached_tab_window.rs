@@ -314,16 +314,10 @@ impl Render for DetachedTabWindow {
                 }
             }))
             .on_action(cx.listener(|detached, _: &Quit, _window, cx| {
-                let intercepted = detached
+                detached
                     .session
-                    .update(cx, |session, cx| session.guard_dirty_knowledge_app_quit(cx));
-                if intercepted {
-                    cx.stop_propagation();
-                } else {
-                    // Detached roots also stop actions during bubbling, so clean exits must reach
-                    // the application-level handler explicitly.
-                    cx.propagate();
-                }
+                    .update(cx, |session, cx| session.request_application_quit(cx));
+                cx.stop_propagation();
             }))
             .map(|root| {
                 // Window creation can paint this root while its Workspace is leased.

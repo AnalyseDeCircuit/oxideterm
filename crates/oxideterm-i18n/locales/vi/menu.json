@@ -7,6 +7,7 @@
     "show_main_window": "Hiện cửa sổ chính",
     "hide_main_window": "Ẩn cửa sổ chính",
     "quit": "Thoát OxideTerm",
+    "confirm_quit": "Thoát OxideTerm? Tất cả phiên terminal và kết nối đang hoạt động sẽ bị đóng.",
     "edit": "Chỉnh sửa",
     "cut": "Cắt",
     "copy": "Sao chép",

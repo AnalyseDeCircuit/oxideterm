@@ -11,6 +11,7 @@ impl WorkspaceApp {
         single_instance_rx: Option<crate::single_instance::SingleInstanceReceiver>,
     ) -> Result<Self> {
         let focus_handle = cx.focus_handle();
+        window.focus(&focus_handle, cx);
         let window_registry = window_registry::WorkspaceWindowRegistry::default();
         let window_intents = cx.new(|cx| {
             WorkspaceWindowIntentEntity::new(desktop_presence_rx, single_instance_rx, cx)

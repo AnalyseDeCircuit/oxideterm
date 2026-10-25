@@ -134,6 +134,32 @@ fn start_app_quit(cx: &mut App) {
 }
 
 impl WorkspaceApp {
+    /// Keeps explicit quit intents behind the same confirmation used for terminal closes.
+    pub(crate) fn request_application_quit(&mut self, cx: &mut Context<Self>) {
+        if self.tab_host.read(cx).close_confirm() != Some(&TabCloseConfirm::ApplicationQuit) {
+            self.skip_future_ssh_close_confirmations = false;
+            self.tab_host.update(cx, |host, cx| {
+                host.open_close_confirm(TabCloseConfirm::ApplicationQuit, cx);
+            });
+        }
+        // The close dialog is mounted by the main shell, including for tray and detached-window quits.
+        oxideterm_desktop_presence::show_main_window();
+        if let Some(handle) = self
+            .window_registry
+            .handle_for_role(window_registry::WindowRole::Main)
+        {
+            let _ = handle.update(cx, |_root, window, _cx| window.activate_window());
+        }
+        cx.notify();
+    }
+
+    /// Continues an approved exit while preserving the unsaved-document guard.
+    pub(in crate::workspace) fn quit_after_confirmation(&mut self, cx: &mut Context<Self>) {
+        if !self.guard_dirty_knowledge_app_quit(cx) {
+            request_app_quit(cx);
+        }
+    }
+
     fn stop_ai_for_quit(&mut self, cx: &mut Context<Self>) {
         self.ai_entity.update(cx, |ai, _| {
             ai.history.quitting = true;
@@ -174,7 +200,9 @@ mod tests {
     use gpui::TestAppContext;
 
     #[gpui::test]
-    fn quit_requested_from_workspace_update_finishes_without_reentry(cx: &mut TestAppContext) {
+    fn workspace_quit_requires_confirmation_from_keyboard_and_window_close(
+        cx: &mut TestAppContext,
+    ) {
         let executable = std::env::current_exe().unwrap();
         let fixture_key = "OXIDETERM_HISTORY_QUIT_TEST_DIR";
         let Some(fixture_dir) = std::env::var_os(fixture_key) else {
@@ -203,6 +231,9 @@ mod tests {
         assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
         let mut store = SettingsStore::load_from_path(&settings_path).unwrap();
         store.settings_mut().ssh_config.auto_load_hosts = false;
+        store.settings_mut().onboarding_completed = true;
+        store.settings_mut().general.minimize_to_tray_on_close = false;
+        store.settings_mut().appearance.animation_speed = oxideterm_settings::AnimationSpeed::Off;
         store.save().unwrap();
         cx.executor().allow_parking();
         let (shell, cx) = cx.add_window_view(|window, cx| {
@@ -212,8 +243,52 @@ mod tests {
         let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
         cx.run_until_parked();
 
-        // Update completion requests quit while the workspace entity is still leased.
-        workspace.update(cx, |workspace, cx| workspace.request_application_quit(cx));
+        let close_session = workspace.clone();
+        cx.update(|window, cx| {
+            oxideterm_desktop_presence::set_keep_running_on_close(false);
+            oxideterm_desktop_presence::install_main_window_close_guard(
+                window,
+                cx,
+                move |_, cx| {
+                    close_session
+                        .update(cx, |workspace, cx| workspace.request_application_quit(cx));
+                    false
+                },
+            );
+            cx.bind_keys(crate::keybindings::startup_key_bindings(&Default::default()));
+        });
+        // No click precedes the shortcut: startup must provide a working keyboard dispatch path.
+        for close_window in [false, true] {
+            if close_window {
+                cx.update(|window, cx| window.request_close(cx));
+            } else {
+                cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+                    "cmd-q"
+                } else {
+                    "ctrl-q"
+                });
+            }
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            workspace.read_with(cx, |workspace, cx| {
+                assert_eq!(
+                    workspace.tab_host.read(cx).close_confirm(),
+                    Some(&TabCloseConfirm::ApplicationQuit)
+                );
+                assert!(!workspace.ai_entity.read(cx).history.quitting);
+            });
+            cx.simulate_keystrokes("escape");
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            workspace.read_with(cx, |workspace, cx| {
+                assert_eq!(workspace.tab_host.read(cx).close_confirm(), None);
+                assert!(!cx.has_global::<HistoryQuit>());
+            });
+        }
+        let retained_root =
+            cx.update(|window, _| window.root::<WorkspaceWindowShell>().flatten().unwrap());
+        assert_eq!(retained_root, shell);
+        cx.update(|window, cx| window.request_close(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes("enter");
         let task = cx.update(|_, cx| cx.global_mut::<HistoryQuit>().task.take().unwrap());
         cx.foreground_executor().block_test(task);
         workspace.read_with(cx, |workspace, cx| {

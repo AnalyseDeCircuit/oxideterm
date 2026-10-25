@@ -664,6 +664,7 @@ struct ExitingTabVisual {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum TabCloseConfirm {
+    ApplicationQuit,
     Single { tab_id: TabId },
     LocalChildProcess { tab_id: TabId },
     LocalChildProcessBatch { tab_ids: Vec<TabId> },

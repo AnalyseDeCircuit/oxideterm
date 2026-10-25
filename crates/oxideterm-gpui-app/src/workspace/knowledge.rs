@@ -1820,14 +1820,6 @@ impl WorkspaceApp {
         self.guard_dirty_knowledge_tab_close(tab_id, window, cx)
     }
 
-    /// Applies the dirty-draft guard for quit intents that do not originate from a focused window.
-    pub(in crate::workspace) fn request_application_quit(&mut self, cx: &mut Context<Self>) {
-        if self.guard_dirty_knowledge_app_quit(cx) {
-            return;
-        }
-        super::request_app_quit(cx);
-    }
-
     /// Loads a document for the editor pane while keeping the Knowledge tab itself stable.
     pub(in crate::workspace) fn select_knowledge_document(
         &mut self,

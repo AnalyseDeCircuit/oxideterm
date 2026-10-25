@@ -1064,7 +1064,14 @@ impl WorkspaceApp {
             .track_focus(&self.focus_handle)
             .key_context("Workspace")
             .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                this.handle_app_lock_key(event, window, cx);
+                if this.tab_host.read(cx).close_confirm() == Some(&TabCloseConfirm::ApplicationQuit)
+                {
+                    this.handle_tab_close_confirm_key(event, window, cx);
+                    window.prevent_default();
+                    cx.stop_propagation();
+                } else {
+                    this.handle_app_lock_key(event, window, cx);
+                }
             }))
             .when(titlebar_visible, |root| {
                 root.child(self.render_title_bar(window, cx))
@@ -1078,6 +1085,10 @@ impl WorkspaceApp {
                     .justify_center()
                     .p(px(24.0))
                     .child(card),
+            )
+            .when(
+                self.tab_host.read(cx).close_confirm() == Some(&TabCloseConfirm::ApplicationQuit),
+                |root| root.child(self.render_tab_close_confirm_dialog(cx)),
             )
             .child(WorkspaceImeElement::new(
                 cx.entity(),

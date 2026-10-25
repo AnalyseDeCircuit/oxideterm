@@ -7,6 +7,7 @@
     "show_main_window": "기본 창 표시",
     "hide_main_window": "기본 창 숨기기",
     "quit": "OxideTerm 종료",
+    "confirm_quit": "OxideTerm을 종료하시겠습니까? 모든 활성 터미널 세션과 연결이 닫힙니다.",
     "edit": "편집",
     "cut": "잘라내기",
     "copy": "복사",
