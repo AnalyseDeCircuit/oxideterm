@@ -58,4 +58,6 @@ Ask four questions:
 3. Is there already a closer test that should be extended?
 4. Will a manual platform check still be required?
 
-Run the focused command from the [verification matrix](verification.md) after changing tests. Do not weaken an existing test to accommodate a behavior change until the old contract has been shown to be wrong or intentionally retired.
+Also identify a credible regression and the assertion that would fail, and check that the test does not require a production interface with no business caller. Extend the closest existing scenario rather than duplicating lower-level coverage. Modal tests must drive the actual application-owned dialog and resulting action, not an obsolete operating-system prompt stub.
+
+Complete the implementation, callers, and test edits together, then run the focused checks from the [verification matrix](verification.md). Reuse still-valid results rather than rebuilding unchanged code. Do not weaken an existing test to accommodate a behavior change until the old contract has been shown to be wrong or intentionally retired.

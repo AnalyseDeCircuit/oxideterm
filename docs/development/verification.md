@@ -13,6 +13,8 @@ cargo fmt --check
 
 Run checks from the repository root. When a command needs an operating-system-specific backend, run it on that host instead of treating a cross-platform compile from another machine as equivalent evidence.
 
+Complete a coherent set of implementation, caller, and test changes before checking it. Reuse successful results while their source, dependencies, configuration, and environment are unchanged. A successful Clippy run already establishes compilation for that configuration; do not follow it with a duplicate `cargo check`. Launch the application only for the manual acceptance that needs it, not after every edit.
+
 ## Focused Changes
 
 | Change area | Required focused verification | Manual verification when applicable |
@@ -26,6 +28,7 @@ Run checks from the repository root. When a command needs an operating-system-sp
 | Linux framework code | Relevant Linux crate and application checks | Both affected compositor paths: Wayland and/or X11 |
 | Repository scripts or workflows | The matching script test module | Dispatch only the workflow needed by the change |
 | Git dependencies, Nix package, or flake | `nix build .#oxideterm -L --show-trace` and `nix flake check -L` | Confirm `result/bin/oxideterm` builds and runs |
+| Documentation only | Relative links, referenced paths, locale/route parity, and `git diff --check`; build the docs website when changed | Inspect changed website pages; no Rust build |
 
 ## Selecting The Scope
 
@@ -49,6 +52,14 @@ Check normal output, a long scrolling workload, selection, resize, alternate scr
 ### Shared SSH Runtime
 
 Open two consumers for the same node, then close one. Confirm that the remaining terminal, SFTP surface, or forward continues to work. Test explicit disconnect and reconnect separately; they have different ownership consequences.
+
+### Tab Scopes, Search, and Motion
+
+For tab-scope changes, cover mixed-pane membership, visible-only navigation/closing/reordering, empty scopes, and window moves while hidden work continues. For search/input changes, cover multiline paste, explicit newline insertion, replacement captures, independent undo, horizontal scrolling, and IME coordinates. For motion changes, use the existing controllable-clock tests for interruption/reversal and Off/Reduced behavior, then inspect the actual transition once the edits are complete.
+
+### Remote Desktop Displays
+
+Check the affected plugin and host together. Distinguish single-monitor viewport resize from all-monitor topology. Exercise external-display changes, laptop-lid state, scaling, and reconnect when those paths changed. Compare remote screenshots with local viewer output and reported remote dimensions to identify cropping.
 
 ### Platform Windowing
 

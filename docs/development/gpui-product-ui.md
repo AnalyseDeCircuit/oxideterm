@@ -36,6 +36,8 @@ The shared [text_input](../../crates/oxideterm-gpui-ui/src/text_input.rs) functi
 
 Preserve the full path for committed text, marked text, UTF-16 selection ranges, paste, deletion, caret positioning, and focus changes. Typing from the platform text payload must work independently of shortcut key names. Password masking changes display coordinates as well as appearance, so retain the shared raw-to-visible range handling.
 
+Single-line inputs share a horizontal viewport: text painting, caret, mouse selection, and IME candidate coordinates must use the same offset. Keep undo/redo history isolated by input identity; a field's undo shortcut must not intercept terminal `Ctrl+Z`. IDE and SFTP editing reuse the editor search bar and search model, including multiline queries and replacement. Terminal search stays single-line by default.
+
 Use `TextEditorView` for an existing multiline editing use case such as the paste dialog. Let the entity retain its buffer, undo history, focus handle, and observation. Submission and cancellation release the temporary editor.
 
 Before adding a dialog, trace [modal ownership](../../crates/oxideterm-gpui-app/src/workspace/root/modal_owner.rs) and [root rendering](../../crates/oxideterm-gpui-app/src/workspace/root/render.rs). The active window's modal owns keyboard input. Consumed shortcuts, paste, and IME input must not reach the terminal behind it. Cancel deferred terminal focus when opening the modal, and restore focus after closing it.
@@ -54,8 +56,14 @@ Use `ThemeTokens` for semantic colors, radii, spacing, and typography. Reuse a n
 
 A page may be standalone, embedded in a mixed layout, or displayed in another window. Resolve the page and window that own the action instead of assuming the active top-level tab owns every control. See [page and pane lifetime](runtime-ownership.md#pages-panes-and-window-mounts) before adding singleton navigation, close behavior, or window-specific state.
 
+Tab scopes are window-local presentation state. Derive membership from page bindings and the union of mixed-pane memberships, not labels or host addresses. Rendering, keyboard navigation, bulk closing, reordering, and scroll positioning must use the same visible list and tab widths. Explicit navigation may reveal a page's scope; background completion must not change it. See [workspace behavior](../user-guide/en/workspace.md).
+
+## Motion
+
+Reuse the shared motion primitives and retained animation state. Normal and Fast use their configured timing; Reduced retains fades without spatial movement or rotation; Off applies the final state immediately and stops requesting animation frames. Interrupted or reversed transitions continue from the current state rather than restarting from an endpoint. Keep animation ownership with the control or surface so hiding a sidebar or closing a popup does not leave an unrelated frame loop running.
+
 ## Verify The Interaction
 
-Run `cargo check -p oxideterm-gpui-app` and the locale audit for a UI change. Use the closest existing GPUI tests for stable state transitions; follow the [verification matrix](verification.md) for the affected feature.
+Finish the implementation, callers, and necessary tests before running the affected checks together. Choose the relevant crate check or Clippy run and locale audit; a successful Clippy run does not need another compile-only check under the same configuration. Use the closest existing GPUI tests for stable state transitions and follow the [verification matrix](verification.md). Do not repeatedly launch the application after small edits.
 
 Exercise the actual field or popup with typing, selection, paste, IME composition, Escape, Enter, Tab, and Shift+Tab. Test scrolling with the popup open, a narrow mixed pane, and a detached window. Confirm that the background terminal receives no modal input. Native window and input behavior still needs a check on the affected operating system.

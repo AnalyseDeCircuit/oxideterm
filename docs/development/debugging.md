@@ -20,7 +20,7 @@ Relevant redacted log lines and screenshot/video:
 Use a clean configuration directory when possible:
 
 ```sh
-cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
+oxideterm --config-dir ./fixture-config doctor --strict
 ```
 
 Do not use production connection data as a test fixture. Redact hostnames, usernames, local paths, commands, keys, passwords, tokens, and MFA responses before sharing anything.
@@ -32,9 +32,9 @@ The desktop log is `oxideterm-native.log` in the `logs` directory beside `settin
 Enable debug logging in the app only for a bounded reproduction, then collect a redacted report with the CLI:
 
 ```sh
-cargo run -p oxideterm-cli -- paths --json
-cargo run -p oxideterm-cli -- diagnose --json
-cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.json --json
+oxideterm paths --json
+oxideterm diagnose --json
+oxideterm report --bundle ./oxideterm-report.json --json
 ```
 
 Enable **Settings → Help → Diagnostics → Debug Logging** only for a bounded reproduction, then restart the app before collecting the report. Review a report before sharing it. A support bundle is safer than copying an entire settings directory, but it can still contain private environment details that need redaction.
@@ -42,10 +42,12 @@ Enable **Settings → Help → Diagnostics → Debug Logging** only for a bounde
 For a source-run investigation, `RUST_LOG` overrides the normal filter. Keep it narrow and do not upload raw terminal or credential-bearing output:
 
 ```sh
-RUST_LOG=oxideterm_gpui_app=debug,oxideterm_ssh=debug cargo run
+RUST_LOG=oxideterm_gpui_app=debug,oxideterm_ssh=debug target/debug/oxideterm-native
 ```
 
 The normal file-log filter already records warnings plus application and SSH information. Avoid leaving verbose logging enabled after the reproduction is complete.
+
+For source builds, build the needed target once after the edits and reuse its executable for repeated observations. Substitute `target/debug/oxideterm` for the installed CLI above. A logging or input-sequence change does not require rebuilding unchanged Rust code.
 
 ## Platform-Specific Evidence
 
@@ -56,6 +58,7 @@ The normal file-log filter already records warnings plus application and SSH inf
 | Linux windowing or rendering | Distribution, desktop session, Wayland or X11, GPU/driver, renderer profile, and the application log |
 | Terminal rendering | Shell, terminal theme, font family, exact emitted bytes or command, alternate-screen status, and a screenshot |
 | Connection runtime | Protocol, server family, auth method, proxy or jump-host topology, Connection Monitor state, and redacted log lines |
+| RDP/VNC viewport or missing desktop edges | Host and plugin versions, single/all-monitor mode, active physical monitors and scales, lid state, viewer's remote dimensions, remote-side screenshot, and local screenshot |
 
 ## Performance Work
 

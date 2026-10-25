@@ -1,6 +1,6 @@
 # OxideSens Agent Collaboration
 
-OxideSens delegates bounded work from a parent conversation to independent child runs. Open **OxideSens → Tools** and enable **Allow subagents** for the displayed current conversation before starting a task. The model preference also belongs to that conversation; the concurrency limit applies across the application. The switch is off by default. ACP sessions are not child-agent backends.
+OxideSens delegates bounded work from a parent conversation to independent child runs. Open **Settings → OxideSens → Tools** and enable **Allow subagents** before starting a task. Enablement, default model, and concurrency are application-wide settings; the switch is off by default. ACP sessions are not child-agent backends.
 
 ## Execution And Authority
 
@@ -18,7 +18,7 @@ Only parents can delegate, message or stop children. A child can report progress
 
 Delegation requires current runtime handles. Include each terminal, SFTP or IDE handle the child needs; a node inspection handle does not confer authority over every consumer of that node. Child discovery and execution are restricted by the same registry scope. Children receive fresh handles, not the parent's transferable authority. Global settings, credential operations, schedulers and opaque MCP targets remain parent operations because they do not expose host-enforced delegated target scopes.
 
-The default child model is a snapshot of the parent configuration. Conversation options can select another configured model; a queued run's selection remains editable until it first acquires execution capacity. Requeueing after approval or a resource wait does not unlock the model. Unavailable models or credentials fail that run without substituting another provider.
+When the global model preference is set to inherit, the child takes a snapshot of the parent configuration. Settings can select another configured default model; a queued run's selection remains editable until it first acquires execution capacity. Requeueing after approval or a resource wait does not unlock the model. Unavailable models or credentials fail that run without substituting another provider.
 
 ## Coordination And Budgets
 

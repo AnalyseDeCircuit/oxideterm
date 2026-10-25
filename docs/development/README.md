@@ -40,6 +40,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | --- | --- |
 | Find the correct crate or entry point | [Crate map](crate-map.md) |
 | Build a product page with existing controls, focus, IME, and overlays | [GPUI product UI](gpui-product-ui.md) |
+| Change tab scopes, shared search, or motion | [Product UI contracts](gpui-product-ui.md) and [workspace behavior](../user-guide/en/workspace.md) |
 | Build and run on macOS, Windows, or Linux | [Local development](local-development.md) |
 | Choose checks for a focused change | [Verification matrix](verification.md) |
 | Change a shared SSH connection or long-running task | [Runtime ownership](runtime-ownership.md) |
@@ -53,6 +54,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 | Handle credentials, diagnostics, or external process input | [Secrets and sensitive data](secrets-and-sensitive-data.md) |
 | Change persisted settings, export, sync, or migration behavior | [Settings, data, and migrations](settings-data-and-migrations.md) |
 | Add business data to the shared sync coordinator | [Cloud-sync mapping workflow](settings-data-and-migrations.md#include-business-data-in-cloud-sync) |
+| Maintain publication, recovery, or an HTTP JSON sync server | [Cloud Sync v3](cloud-sync-v3.md) |
 | Make a performance claim or change a hot path | [Performance and benchmarking](performance-and-benchmarking.md) |
 | Prepare a stable release or repair release assets | [Release process](release-process.md) |
 | Maintain Nix packaging, flake checks, or Git dependency hashes | [Nix packaging guide](../../nix/README.md) |

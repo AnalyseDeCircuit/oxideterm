@@ -1,11 +1,9 @@
 # OxideTerm Native Architecture
 
 > **Version**: Native desktop architecture
-> **Last updated**: 2026-08-01
-> **Workspace version**: Cargo workspace `2.0.15`
-> **Reference style**: based on the Tauri architecture documents and retained for migration context; the Rust/GPUI native app is the implementation source of truth.
+> **Source of truth**: the current Rust/GPUI workspace; see [Cargo.toml](../../../Cargo.toml) for its version and [development guides](../../development/README.md) for contributor workflows.
 
-This document describes the OxideTerm Native system architecture, design decisions, and core components. It follows the same architectural writing style as the Tauri reference: start with principles, show the whole system, separate data and control paths, then describe each subsystem and its lifecycle.
+This document describes the native system's components, data and control paths, and lifecycle ownership. For daily navigation, start with [Workspace Navigation](workspace.md).
 
 ## Contents
 
@@ -16,7 +14,7 @@ This document describes the OxideTerm Native system architecture, design decisio
 5. [Node-First Runtime Model](#node-first-runtime-model)
 6. [Desktop Workspace Architecture](#desktop-workspace-architecture)
 7. [Terminal Architecture](#terminal-architecture)
-8. [SSH Connection Pool](#ssh-connection-pool)
+8. [SSH Connection Registry and Runtime](#ssh-connection-registry-and-runtime)
 9. [SFTP Architecture](#sftp-architecture)
 10. [IDE Architecture](#ide-architecture)
 11. [Port Forwarding Architecture](#port-forwarding-architecture)
@@ -36,7 +34,6 @@ This document describes the OxideTerm Native system architecture, design decisio
 25. [Event And Notification Model](#event-and-notification-model)
 26. [Failure Model](#failure-model)
 27. [Native Crate Map](#native-crate-map)
-28. [Tauri Reference Mapping](#tauri-reference-mapping)
 
 ---
 
@@ -214,7 +211,7 @@ That separation explains common behavior:
 
 ## Two-Plane Architecture
 
-The Tauri architecture describes a data plane and a control plane. Native GPUI removes the webview boundary, but the architectural split still applies.
+The native application separates the terminal data path from structured control operations even though both live in the same Rust process.
 
 ### Data Plane
 
@@ -445,7 +442,7 @@ Persistent state is shared by the desktop app and CLI companion. Secret values m
 
 ### Problem Avoided
 
-The Tauri Oxide-Next architecture identified a structural problem: SFTP, IDE, and forwarding should not depend on transient terminal session IDs. A terminal session can be recreated; the remote node is the stable unit of work.
+SFTP, IDE, and forwarding must not depend on transient terminal session IDs. A terminal session can be recreated; the remote node is the stable unit of work.
 
 Native keeps the same user-facing model.
 
@@ -547,9 +544,11 @@ Tabs are visible surfaces. A tab can represent:
 
 Tabs are closeable views. They are not the durable source of truth for saved connections or secrets.
 
+Tab scopes are window-local filters: all tabs, global pages, local terminals, or a specific connection. Mixed layouts combine their panes' memberships and stay intact in every matching scope. Scope selection and last-active-tab memory affect presentation, not runtime ownership, and are not persisted across restart. Rendering, keyboard navigation, reordering, bulk closing, and scroll positioning share the visible tab list and content-based widths.
+
 ### Activity Bar
 
-The activity bar is the navigation entrypoint. It should take users to app surfaces, not expose low-level runtime handles.
+The left activity bar opens connection management and global pages. The right bar opens OxideSens and individual Host Tools, with overflow only when height is insufficient. The top bar owns scope selection, command-palette access, Zen mode, theme switching, and background-task summary. It remains visible in full screen and hides in Zen mode.
 
 ### Knowledge Workspace
 
@@ -750,6 +749,10 @@ The IDE workspace is a remote project surface.
 
 IDE file operations may use the remote file layer, but the IDE is not simply an SFTP table. It owns editor state, project root, active editor tab, and dirty-buffer decisions.
 
+File access is selected explicitly: SFTP, SSH pure Shell, or the remote agent. Terminal conversion binds the IDE to the current terminal environment, retaining its user, container, and directory instead of assuming the node's default login context. Pure Shell operations have bounded search execution and result sizes; writes retain conflict checks and restricted temporary-file permissions. The agent adds watching and symbol services.
+
+IDE and SFTP editors share the search bar and search model. Search supports case sensitivity, regular expressions, multiline input, and capture-group replacement; terminal search uses the same matching capability with a single-line default. Text-input viewports keep caret, selection, and IME coordinates aligned, and editing histories belong to individual inputs.
+
 ### User Rule
 
 Before closing an IDE tab or reconnecting an unstable host, check unsaved buffers. The connection can be rebuilt, but unsaved editor state still requires an explicit save/discard decision.
@@ -803,6 +806,8 @@ Visual remoting has three related but separate ownership paths:
 The graphics runtime owns the server/session process lifecycle. The GPUI viewer owns the client connection, current framebuffer, pointer geometry, and input dispatch. Closing the viewer should stop or detach the graphics session according to the chosen action, but it should not rewrite saved SSH connection profiles.
 
 For RDP/VNC sessions, `oxideterm-connections` owns saved profile metadata and secret references, while the app tab/session owns the helper process lifecycle and the GPUI viewer owns framebuffer and input state. RDP/VNC protocol code lives in helper binaries or protocol-specific crates, not in `oxideterm-gpui-app`; an SSH node supplies tunnel or node context only when the session is launched through that node.
+
+Display layout and viewer fitting are separate. Single-monitor mode may request a resolution from the viewport. All-monitor mode uses active physical monitor topology; window resize changes local fitting rather than replacing that topology. Display changes and reconnect must refresh the session layout, including external-monitor and closed-laptop-screen cases.
 
 ---
 
@@ -1025,7 +1030,7 @@ Use the CLI for:
 - Support bundle generation.
 - Portable bundle validation.
 
-Do not use the CLI as the normal way to drive interactive SSH work when the desktop app is available.
+Most management commands operate directly on persisted stores. `connections open` resolves a saved SSH profile and opens it through the desktop; `ssh` opens a temporary GUI terminal. `mcp bridge` connects a stdio client to the running app's authenticated loopback MCP endpoint. These entry points preserve the desktop's runtime and credential owners; they are not independent SSH session registries.
 
 ---
 
@@ -1875,27 +1880,3 @@ Staleness means "the app cannot prove this state is current." It does not automa
 | Cloud sync and portable runtime | `oxideterm-cloud-sync`, `oxideterm-gpui-cloud-sync`, `oxideterm-portable-runtime` |
 | Notifications and update | `oxideterm-notification-center`, `oxideterm-update` |
 | CLI companion | `oxideterm-cli` |
-
----
-
-## Tauri Reference Mapping
-
-| Tauri Architecture Section | Native Architecture Equivalent |
-|---|---|
-| React frontend layer | GPUI workspace shell and app surfaces |
-| Tauri command backend | Rust domain crates and runtime integrations |
-| Data plane | Terminal hot path |
-| Control plane | Structured app/domain commands |
-| SessionTreeStore and AppStore split | Saved connection store, node runtime state, connection monitor snapshots |
-| Oxide-Next node sovereignty | Node-first runtime model |
-| SFTP on connection rather than terminal | Node-level SFTP architecture |
-| Host/resource side panels | Connection Monitor / Host Tools architecture |
-| Terminal protocol helpers | Terminal privilege helpers and X/Y/ZMODEM modem transfer engine |
-| Visual remote sessions | Graphics / VNC session architecture |
-| ReconnectOrchestratorStore | Native reconnect orchestration model |
-| AI sidebar and tools | OxideSens AI architecture |
-| Plugin runtime | Plugin registry, host API, lifecycle, settings, secrets |
-| SettingsStore | Settings domain crates and Settings surface |
-| `.oxide` format and backups | Portable bundles, backups, cloud sync |
-
-The implementation details are native GPUI/Rust rather than Tauri/React, but the architectural intent is the same: keep terminal hot-path work responsive, route remote capabilities through stable node identity, separate user views from runtime owners, and keep secrets out of ordinary app text.

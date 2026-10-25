@@ -103,11 +103,19 @@ Resource snapshots can become stale independently of the terminal tab. Refresh t
 
 ## Graphics And VNC
 
+For RDP display-layout support, use host 2.2.5 or later with RDP plugin 0.2.0 or later. Single-monitor mode can follow the viewer size or use a fixed resolution. All-monitor mode follows the active physical displays; resizing the window changes local fitting rather than overwriting the remote topology. Display changes and reconnect refresh the layout.
+
 For RDP or VNC, open **Plugin Manager → Marketplace**, install and enable the corresponding **RDP** or **VNC** plugin, then choose that protocol in **New Connection**. Saved profiles remain in Session Manager; each device needs its own plugin installation, including when the profile arrives through cloud sync. Missing or disabled plugins are shown in the connection form.
 
 Graphics/VNC sessions are visual app surfaces backed either by a saved RDP/VNC profile or by a connected node's graphics runtime. They are useful when a remote workflow needs a desktop or graphical application rather than terminal output.
 
 The viewer state is separate from terminal scrollback. If a profile-backed viewer disconnects, reconnect its provider/helper; if a node-launched viewer disconnects, reconnect or restart it from the node context. Do not duplicate a saved SSH profile just to repair a viewer.
+
+## Telnet Line Endings
+
+Telnet exposes separate transmit and receive line-ending controls in the connection form and terminal control bar. Use transmit settings when Enter does not submit correctly, and receive settings when output lines are laid out incorrectly; these are separate from Backspace key mapping. Changes apply to the live terminal and are saved back to its associated Telnet profile when it has one.
+
+Telnet does not encrypt traffic. Use it only on an appropriate trusted network or protected route; choose SSH where encrypted remote login is available.
 
 ## Serial Terminals
 

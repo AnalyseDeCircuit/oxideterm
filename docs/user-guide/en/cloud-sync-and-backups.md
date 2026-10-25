@@ -45,6 +45,8 @@ Enter passwords and tokens in the dedicated credential fields. With sensitive sy
 
 You can enable auto upload after a successful manual sync. Independent edits merge; conflicting edits remain available for review. Turning off a category excludes it from this device's sync selection and does not delete its remote data.
 
+Standalone SSH tunnels, plugin connection profiles, and quick-command group appearance are included in their supported configuration scopes. Install connection plugins separately on each device; sync does not install packages or restore running instances. Local shell executable overrides and window-local tab scopes do not travel between devices.
+
 ## Conflicts and interrupted sync
 
 The preview lists changed fields and competing versions. Choose the version you want for each conflict; **Current device** identifies the current local candidate. Values such as credentials appear as **Protected value**. Unselected conflicts keep the current local value and remain unresolved. Apply and synchronize saves the selected result and publishes it to the shared location; synchronize the other devices to receive it.

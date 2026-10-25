@@ -22,6 +22,8 @@ Workspace runtime
 | Port forward | The forwarding owner | It retains listener, bridge-task, and cancellation ownership until the rule or owning node stops |
 | Health check and reconnect | Node/runtime owner | UI observes emitted node state; it does not infer liveness from terminal existence |
 | Jump-host child node | Child node runtime plus recorded parent dependency | The parent transport remains retained while the child needs it |
+| Standalone SSH tunnel | Tunnel/forwarding runtime | Retains its own connection consumer without a terminal; explicit stop or app shutdown ends it |
+| RDP/VNC session | Remote-desktop session owner | Owns its plugin helper and optional gateway consumer; viewer fitting does not own remote display topology |
 
 ## Lifecycle Walkthroughs
 
@@ -60,6 +62,8 @@ The layout model is in [oxideterm-workspace](../../crates/oxideterm-workspace/sr
 [WorkspaceTabHostEntity](../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs) owns these mappings. Use `container_tab_id`, `focused_page_id`, and `focus_content_page` where the operation needs them. A Settings or SFTP page can be focused inside a container whose top-level kind is `Workspace`; searching only the visible tab strip loses that page's identity.
 
 ### Move, Close, And Reopen
+
+Tab filtering does not move or close resources. Resolve membership from the actual page/connection binding, including plugin pages and mixed layouts. Each window owns its current scope and last-selected tab per scope. Use the same visible list for navigation and bulk operations; only explicit user navigation may reveal another scope. Host actions still resolve the active pane or selected tool connection, never the scope label.
 
 - Combining pages changes layout ownership while keeping their descriptors and feature state. Use the tab host's combination and unembedding methods, with [split-drop handling](../../crates/oxideterm-gpui-app/src/workspace/tabs/split_drop.rs) for the actual drop target.
 - Reopening a singleton page focuses its existing content pane, including when it belongs to a detached window. Do not create a second feature runtime merely because the page is embedded.

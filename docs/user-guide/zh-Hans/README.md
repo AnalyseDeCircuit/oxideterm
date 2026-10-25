@@ -4,6 +4,7 @@ OxideTerm Native 是基于 Rust/GPUI 的 SSH 工作区，包含终端、SFTP、�
 
 ## 文档
 
+- [工作区导航](./workspace.md)：标签范围、顶栏操作、右侧工具和快捷命令分组。
 - [快速开始](./getting-started.md)：首次启动、本地终端检查、保存连接设置和配置路径。
 - [应用指南](./app.md)：应用布局、标签页、会话、SFTP、IDE、转发、主机工具、图形/VNC、AI、Agent Skills、高级命令发送器、设置、插件和云同步。
 - [架构](./architecture.md)：桌面应用组织方式，包括节点、终端、主机工具、modem 传输、图形/VNC、SFTP、IDE、AI、插件、同步、安全和 CLI 边界。

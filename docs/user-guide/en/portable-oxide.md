@@ -48,7 +48,7 @@ Managed keys are OxideTerm-owned credentials. A connection stores only a managed
 
 When a bundle contains managed keys, the import preview lets you restore them into OxideTerm. If restore is disabled, OxideTerm may use embedded fallback key files when available; otherwise affected connections need auth repair after import.
 
-Duplicate managed keys are matched by fingerprint and should reuse the existing key instead of creating another copy.
+Duplicate managed keys are matched by fingerprint; certificate-backed keys also require the same certificate before reuse. A complete embedded certificate/private-key pair restores through managed authentication and retains its passphrase. An incomplete pair is rejected before application.
 
 ## Cloud Sync Boundary
 

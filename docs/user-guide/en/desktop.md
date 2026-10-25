@@ -2,13 +2,13 @@
 
 ## First Launch
 
-Open OxideTerm, then check the left activity bar for the main work areas: sessions, connection pool, connection monitor, Host Tools, graphics/VNC, plugins, cloud sync, file manager, notifications, and settings.
+Open OxideTerm and use the left activity bar for connection management and global pages. OxideSens and Host Tools are on the right. The top bar filters tabs without interrupting hidden sessions; see [Workspace Navigation](workspace.md).
 
 If the app starts with no sessions, create a local shell tab first. This verifies the terminal renderer, shell integration, input handling, and theme settings before you add remote hosts.
 
 ## Activity Bar
 
-Use the activity bar as the entry point for app surfaces:
+Use the activity bars and connection entries to reach app surfaces:
 
 - Sessions: create, open, group, and monitor SSH work.
 - File manager and SFTP: browse files and manage transfers.
@@ -180,6 +180,8 @@ Use SFTP when you want to browse directories and manage a transfer queue. See [t
 
 ## Audit and session recordings
 
+For a one-off recording, use the terminal's recording controls to start, pause/resume, stop and save a `.cast` file, or discard it. This records output rather than direct keystrokes. Open the file in the cast player for playback and search. Manual `.cast` files are plaintext; review their output before sharing. This is separate from the encrypted automatic audit recordings below.
+
 Open **Notifications & Audit** from the activity bar. Notifications show recent messages; **Audit**, **Sessions**, and **Session recordings** provide operation history and playback.
 
 ### Record and find operations
@@ -229,6 +231,18 @@ For command execution, prefer asking the AI to target a specific saved connectio
 Settings are grouped by feature area. Use the desktop UI for interactive changes such as appearance, terminal behavior, AI provider setup, cloud sync, portable runtime, and help/about.
 
 For scripted or repeatable changes, use the CLI with `--dry-run` first. The CLI and desktop app read the same configuration files.
+
+### Light, Dark, and Motion
+
+Under **Appearance**, select fixed light, fixed dark, or system appearance. Configure application and terminal themes separately for both schemes, or save the current appearance into a scheme. The top-bar icon shows the current mode; clicking switches to the other configured scheme. Missing configuration produces a prompt rather than an arbitrary theme choice.
+
+Motion offers **Normal**, **Fast**, **Reduced**, and **Off**. Reduced retains fades but omits movement and rotation; Off applies changes immediately. Interrupted or reversed transitions continue from their current state. Theme files contain colors; fonts, density, motion, and background choices remain application settings.
+
+### Local Shell Paths and Fonts
+
+Under **Terminal → Local**, edit or browse for the selected shell's executable path and open a new terminal. Enter a program path, not a command with arguments. Reset returns to automatic detection. This override is device-local and excluded from cross-device export and sync.
+
+Terminal font stacks are tried in order. Unavailable fonts produce a notice and use a monospace fallback. Check the preview when selecting a custom font; an installed bitmap font may not be usable by the application.
 
 ## Command Palette and Navigation
 

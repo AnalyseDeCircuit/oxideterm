@@ -2,6 +2,8 @@
 
 This guide describes the OxideTerm Native plugin model. It is intentionally different from the Tauri/Web plugin model: native plugins do not run React components, do not inject CSS, and do not execute `main.js` through a WebView. A native plugin is discovered through `plugin.json`, then either contributes manifest-only metadata or runs through a host-owned process/WASM runtime bridge.
 
+Specialized packages also use `language`, `acp`, `remote-desktop`, `terminal-transport`, and `helper` runtimes. RDP and VNC engines are marketplace plugins; the host retains saved profiles and the viewer. Process connection providers can supply independent connection instances and live workbenches.
+
 ## Contents
 
 1. [Build A Running Plugin](#build-a-running-plugin)
@@ -13,20 +15,23 @@ This guide describes the OxideTerm Native plugin model. It is intentionally diff
 7. [Native Versus Tauri Plugins](#native-versus-tauri-plugins)
 8. [Plugin Directory](#plugin-directory)
 9. [Minimal Manifest-Only Plugin](#minimal-manifest-only-plugin)
-10. [Process Runtime Plugin](#process-runtime-plugin)
-11. [Protocol Frames](#protocol-frames)
-12. [Runtime Registrations](#runtime-registrations)
-13. [Declarative Native UI](#declarative-native-ui)
-14. [Host API Calls](#host-api-calls)
-15. [Permissions And Capabilities](#permissions-and-capabilities)
-16. [Settings, Storage, And Secrets](#settings-storage-and-secrets)
-17. [Terminal, SFTP, Forwarding, IDE, And AI](#terminal-sftp-forwarding-ide-and-ai)
-18. [Packaging And Installation](#packaging-and-installation)
-19. [Interface Reference](#interface-reference)
-20. [Host API Reference](#host-api-reference)
-21. [Events Reference](#events-reference)
-22. [Debugging](#debugging)
-23. [Migration Notes](#migration-notes)
+10. [Background Material Packs](#background-material-packs)
+11. [Editor Language Plugins](#editor-language-plugins)
+12. [Process Runtime Plugin](#process-runtime-plugin)
+13. [Protocol Frames](#protocol-frames)
+14. [Runtime Registrations](#runtime-registrations)
+15. [Connection providers](#connection-providers)
+16. [Declarative Native UI](#declarative-native-ui)
+17. [Host API Calls](#host-api-calls)
+18. [Permissions And Capabilities](#permissions-and-capabilities)
+19. [Settings, Storage, And Secrets](#settings-storage-and-secrets)
+20. [Terminal, SFTP, Forwarding, IDE, And AI](#terminal-sftp-forwarding-ide-and-ai)
+21. [Packaging And Installation](#packaging-and-installation)
+22. [Interface Reference](#interface-reference)
+23. [Host API Reference](#host-api-reference)
+24. [Events Reference](#events-reference)
+25. [Debugging](#debugging)
+26. [Migration Notes](#migration-notes)
 
 ---
 
@@ -626,13 +631,13 @@ The host owns every durable and security-sensitive boundary:
 - Plugin settings, storage, and secrets.
 - UI rendering through native GPUI controls.
 
-The plugin never receives raw GPUI elements, DOM nodes, React instances, SSH transport handles, or direct filesystem access outside approved host APIs.
+The host API does not expose raw GPUI elements, DOM nodes, React instances, or SSH transport handles. Native process plugins run with their user's operating-system permissions; host API checks do not sandbox the executable's own filesystem or network access.
 
 ## Native Versus Tauri Plugins
 
 | Area | Tauri/Web Plugin | Native Plugin |
 |---|---|---|
-| Runtime | ESM `main.js` loaded through dynamic import | `runtime.kind` is `process`, `wasm`, `manifest-only`, or `language` |
+| Runtime | ESM `main.js` loaded through dynamic import | General extensions use `process`, `wasm`, or `manifest-only`; specialized runtimes are listed above |
 | UI | React components and CSS | Declarative native UI schema rendered by GPUI |
 | Shared modules | `window.__OXIDE__` | Not available |
 | Styling | CSS and theme variables | Host-owned native controls only |
@@ -892,7 +897,7 @@ A registration must use the same plugin id as the plugin that emitted it. Dispos
 Process plugins can declare connection types in `contributes.connections`. They appear in
 the existing New Connection dialog and Session Manager, including search, editing,
 deletion, batch selection and groups. Each opening creates an independent instance even
-when it uses the same saved profile. This API requires a host newer than 2.2.4; exclude
+when it uses the same saved profile. This API requires OxideTerm 2.2.5 or later; exclude
 older hosts in `engines.oxideterm` and request `ui.write`.
 
 ```json
@@ -987,7 +992,7 @@ Keep stdout exclusively for JSON Lines protocol frames.
 Switching or closing an ordinary contributed tab does not stop the plugin process. The plugin owns its network
 connections and should provide an explicit disconnect action. Disabling, uninstalling or
 closing the workspace stops its runtime and output readers; updates from a retired instance
-are discarded. These capabilities require a host newer than 2.2.4. Exclude older hosts in
+are discarded. These capabilities require OxideTerm 2.2.5 or later. Exclude older hosts in
 `engines.oxideterm` when using them.
 
 A table with `id`, `selectable: true` and `rowKey` supports mouse selection and, when focused,
@@ -1427,14 +1432,18 @@ interface NativePluginPermissions {
 }
 
 interface NativePluginRuntime {
-  kind: 'wasm' | 'process' | 'manifest-only' | 'language';
+  kind: 'wasm' | 'process' | 'manifest-only' | 'language' | 'acp' | 'remote-desktop' | 'terminal-transport' | 'helper';
   entry: string;
 }
 
 interface NativePluginContributes {
   backgrounds?: string[];
   language?: {
-    id: 'elixir' | 'commonlisp' | 'swift' | 'r' | 'scala' | 'objc';
+    id: string;
+    displayName?: string;
+    grammarName?: string;
+    extensions?: string[];
+    fileNames?: string[];
     highlights: string;
     parserSha256: string;
     highlightsSha256: string;
@@ -1865,7 +1874,7 @@ Workspace mutations return `{ queued: true }` after schema and permission prefli
 | `hostTools.capture` | `host_tools.read` | `{ nodeId, osType, resource, preset?, limit? }` | Typed snapshot for `docker`, `services`, `logs`, `tmux`, `ports`, `filesystems`, `packages`, or `scheduledTasks` |
 | `hostTools.execute` | `host_tools.write` | `{ nodeId, osType, resource, action, target, ...actionArgs }` | `{ success, exitCode, truncated }` |
 
-| `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' | 'tmux', action, target }` | `{ success, exitCode, truncated }` |
+| `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' \| 'tmux', action, target }` | `{ success, exitCode, truncated }` |
 | `hostTools.runExtension` | `host_tools.custom.execute` | `{ nodeId, osType, monitorId }` | `{ monitorId, success, data, rowCount, exitCode, truncated }` |
 | `cloudSync.getSummary` | baseline | `{}` | Safe status/progress/dirty/conflict metadata |
 | `cloudSync.getHistory` | `cloud_sync.read` | `{}` | History without errors, remote revisions, destinations, credentials, or payloads |
@@ -1967,7 +1976,7 @@ SCP is a POSIX compatibility transport, not a browsing API. Use `sftp.listDir`, 
 | `forward.listSavedForwards` | read | `{}` | Saved forward rules |
 | `forward.exportSavedForwardsSnapshot` | read | `{}` | Saved-forward sync snapshot |
 | `forward.applySavedForwardsSnapshot` | `network.forward` | `{ snapshot: object, strategy?: string }` | Apply result |
-| `forward.create` | `network.forward` | `{ nodeId: string, type: 'local' | 'remote' | 'dynamic', localPort?: number, remoteHost?: string, remotePort?: number }` | Created rule |
+| `forward.create` | `network.forward` | `{ nodeId: string, type: 'local' \| 'remote' \| 'dynamic', localPort?: number, remoteHost?: string, remotePort?: number }` | Created rule |
 | `forward.stop` | `network.forward` | `{ id: string }` | Stop result |
 | `forward.delete` | `network.forward` | `{ id: string }` | Delete result |
 | `forward.restart` | `network.forward` | `{ id: string }` | Restart result |
@@ -1990,7 +1999,7 @@ SCP is a POSIX compatibility transport, not a browsing API. Use `sftp.listDir`, 
 | `sync.listSavedConnections` | `{}` | Saved connection snapshots |
 | `sync.refreshSavedConnections` | `{}` | Saved connection snapshots after refresh |
 | `sync.exportSavedConnectionsSnapshot` | `{}` | Saved connection sync snapshot |
-| `sync.applySavedConnectionsSnapshot` | `{ snapshot: object, conflictStrategy?: 'rename' | 'skip' | 'replace' | 'merge' }` | Apply result |
+| `sync.applySavedConnectionsSnapshot` | `{ snapshot: object, conflictStrategy?: 'rename' \| 'skip' \| 'replace' \| 'merge' }` | Apply result |
 | `sync.getLocalSyncMetadata` | `{}` | Revision metadata |
 | `sync.preflightExport` | `{ connectionIds?: string[], embedKeys?: boolean, includeManagedKeys?: boolean }` | Export preflight result. Managed keys are excluded by default for plugin-driven sync. |
 | `sync.exportOxide` | `{ connectionIds?: string[], password: string, embedKeys?: boolean, includeManagedKeys?: boolean, includeManagedKeyPassphrases?: boolean, includeAppSettings?: boolean, selectedAppSettingsSections?: string[], includePluginSettings?: boolean, selectedPluginIds?: string[], progressRegistrationId?: string }` | `.oxide` bytes/metadata result. Managed keys are excluded by default for plugin-driven sync. |

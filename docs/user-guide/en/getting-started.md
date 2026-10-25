@@ -12,7 +12,7 @@ On macOS, packaged artifacts include a `.dmg`, an `.app.zip`, and a portable arc
 
 ## First Launch
 
-Open the OxideTerm desktop app first. The main window is a tabbed SSH workspace with a left activity bar for sessions, files, forwarding, Host Tools, graphics/VNC, plugins, cloud sync, notifications, and settings.
+Open the OxideTerm desktop app first. The left side manages connections and global pages, the top bar selects a tab scope, and the right side opens OxideSens and Host Tools. See [Workspace Navigation](workspace.md).
 
 Start with a local terminal tab:
 

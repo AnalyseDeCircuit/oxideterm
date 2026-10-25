@@ -2,6 +2,8 @@
 
 本文档介绍 OxideTerm Native 插件模型。它和 Tauri/Web 插件模型不同：Native 插件不运行 React 组件，不注入 CSS，也不会通过 WebView 执行 `main.js`。Native 插件通过 `plugin.json` 被发现，然后要么只提供清单声明的元数据，要么通过宿主拥有的进程/WASM 运行时桥接运行。
 
+专用包还支持 `language`、`acp`、`remote-desktop`、`terminal-transport` 和 `helper` 运行时。RDP、VNC 引擎由插件市场分发，保存配置和查看器由宿主管理。进程连接插件可提供独立连接实例和持续更新的工作台。
+
 ## 目录
 
 1. [写出一个可运行插件](#写出一个可运行插件)
@@ -13,20 +15,23 @@
 7. [Native 插件与 Tauri 插件的区别](#native-插件与-tauri-插件的区别)
 8. [插件目录](#插件目录)
 9. [最小清单插件](#最小清单插件)
-10. [进程运行时插件](#进程运行时插件)
-11. [协议帧](#协议帧)
-12. [运行时注册](#运行时注册)
-13. [声明式 Native 界面](#声明式-native-界面)
-14. [宿主 API 调用](#宿主-api-调用)
-15. [权限与能力](#权限与能力)
-16. [设置、存储与凭据](#设置存储与凭据)
-17. [终端、SFTP、转发、IDE 与 AI](#终端sftp转发ide-与-ai)
-18. [打包与安装](#打包与安装)
-19. [接口参考](#接口参考)
-20. [宿主 API 参考](#宿主-api-参考)
-21. [事件参考](#事件参考)
-22. [调试](#调试)
-23. [迁移说明](#迁移说明)
+10. [背景素材包](#背景素材包)
+11. [编辑器语言插件](#编辑器语言插件)
+12. [进程运行时插件](#进程运行时插件)
+13. [协议帧](#协议帧)
+14. [运行时注册](#运行时注册)
+15. [插件连接类型](#插件连接类型)
+16. [声明式 Native 界面](#声明式-native-界面)
+17. [宿主 API 调用](#宿主-api-调用)
+18. [权限与能力](#权限与能力)
+19. [设置、存储与凭据](#设置存储与凭据)
+20. [终端、SFTP、转发、IDE 与 AI](#终端sftp转发ide-与-ai)
+21. [打包与安装](#打包与安装)
+22. [接口参考](#接口参考)
+23. [宿主 API 参考](#宿主-api-参考)
+24. [事件参考](#事件参考)
+25. [调试](#调试)
+26. [迁移说明](#迁移说明)
 
 ---
 
@@ -626,13 +631,13 @@ flowchart TB
 - 插件设置、存储和凭据。
 - 通过 Native GPUI 控件渲染界面。
 
-插件不会拿到原始 GPUI 元素、DOM 节点、React 实例、SSH 传输句柄，或越过宿主 API 的直接文件系统访问。
+宿主接口不暴露原始 GPUI 元素、DOM 节点、React 实例或 SSH 传输句柄。原生进程插件拥有其用户的操作系统权限，宿主接口检查不会隔离可执行程序自身的文件与网络访问。
 
 ## Native 插件与 Tauri 插件的区别
 
 | 区域 | Tauri/Web 插件 | Native 插件 |
 |---|---|---|
-| 运行时 | 通过动态导入加载 ESM `main.js` | `runtime.kind` 为 `process`、`wasm`、`manifest-only` 或 `language` |
+| 运行时 | 通过动态导入加载 ESM `main.js` | 通用扩展使用 `process`、`wasm`、`manifest-only`，专用运行时见上文 |
 | 界面 | React 组件和 CSS | GPUI 渲染的声明式 Native UI 结构 |
 | 共享模块 | `window.__OXIDE__` | 不可用 |
 | 样式 | CSS 和主题变量 | 只使用宿主拥有的 Native 控件 |
@@ -882,7 +887,7 @@ WebAssembly 解析器、高亮查询、各自的 SHA-256 校验值、宿主版�
 
 进程插件通过 `contributes.connections` 声明连接类型，直接进入现有的新建连接窗口和连接管理，
 支持搜索、编辑、删除、批量选择和分组。同一配置每次打开都会创建独立实例。
-此接口需要 2.2.4 之后的宿主；在 `engines.oxideterm` 中排除旧版本，并声明 `ui.write` 权限。
+此接口需要 OxideTerm 2.2.5 或更高版本；在 `engines.oxideterm` 中排除旧版本，并声明 `ui.write` 权限。
 
 ```json
 {
@@ -961,7 +966,7 @@ stdout 仍只用于 JSON Lines 协议，后台任务不得混入诊断文本。
 
 切换或关闭普通注册标签页不会停止插件进程。插件负责自身网络连接和任务，提供明确的断开操作；
 停用插件、卸载或退出工作区时，宿主终止运行时及其输出读取任务，并丢弃旧运行实例的更新。
-这些新增能力需要 2.2.4 之后的宿主；依赖它们的插件应在 `engines.oxideterm` 中排除旧版本。
+这些能力需要 OxideTerm 2.2.5 或更高版本；依赖它们的插件应在 `engines.oxideterm` 中排除旧版本。
 
 表格声明 `id`、`selectable: true` 和 `rowKey` 后支持鼠标选择，以及获得焦点后的方向键、
 Home、End 选择。`rowKey` 指定行对象中的字段名，每行必须提供非空、唯一的字符串标识。
@@ -1374,14 +1379,18 @@ interface NativePluginPermissions {
 }
 
 interface NativePluginRuntime {
-  kind: 'wasm' | 'process' | 'manifest-only' | 'language';
+  kind: 'wasm' | 'process' | 'manifest-only' | 'language' | 'acp' | 'remote-desktop' | 'terminal-transport' | 'helper';
   entry: string;
 }
 
 interface NativePluginContributes {
   backgrounds?: string[];
   language?: {
-    id: 'elixir' | 'commonlisp' | 'swift' | 'r' | 'scala' | 'objc';
+    id: string;
+    displayName?: string;
+    grammarName?: string;
+    extensions?: string[];
+    fileNames?: string[];
     highlights: string;
     parserSha256: string;
     highlightsSha256: string;
@@ -1810,7 +1819,7 @@ interface HostCall {
 | `hostTools.capture` | `host_tools.read` | `{ nodeId, osType, resource, preset?, limit? }` | `docker`、`services`、`logs`、`tmux`、`ports`、`filesystems`、`packages` 或 `scheduledTasks` 的类型化快照 |
 | `hostTools.execute` | `host_tools.write` | `{ nodeId, osType, resource, action, target, ...actionArgs }` | `{ success, exitCode, truncated }` |
 
-| `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' | 'tmux', action, target }` | `{ success, exitCode, truncated }` |
+| `hostTools.terminate` | `host_tools.destructive` | `{ nodeId, osType, resource: 'process' \| 'tmux', action, target }` | `{ success, exitCode, truncated }` |
 | `hostTools.runExtension` | `host_tools.custom.execute` | `{ nodeId, osType, monitorId }` | `{ monitorId, success, data, rowCount, exitCode, truncated }` |
 | `cloudSync.getSummary` | 默认 | `{}` | 安全状态、进度、脏状态和冲突元数据 |
 | `cloudSync.getHistory` | `cloud_sync.read` | `{}` | 不含错误、远端 revision、目标、凭据或载荷的历史 |
@@ -1912,7 +1921,7 @@ SCP 是面向 POSIX 主机的兼容传输，不是浏览接口。SFTP 可用时�
 | `forward.listSavedForwards` | 只读 | `{}` | 保存转发规则 |
 | `forward.exportSavedForwardsSnapshot` | 只读 | `{}` | 保存转发同步快照 |
 | `forward.applySavedForwardsSnapshot` | `network.forward` | `{ snapshot: object, strategy?: string }` | 应用结果 |
-| `forward.create` | `network.forward` | `{ nodeId: string, type: 'local' | 'remote' | 'dynamic', localPort?: number, remoteHost?: string, remotePort?: number }` | 创建的规则 |
+| `forward.create` | `network.forward` | `{ nodeId: string, type: 'local' \| 'remote' \| 'dynamic', localPort?: number, remoteHost?: string, remotePort?: number }` | 创建的规则 |
 | `forward.stop` | `network.forward` | `{ id: string }` | 停止结果 |
 | `forward.delete` | `network.forward` | `{ id: string }` | 删除结果 |
 | `forward.restart` | `network.forward` | `{ id: string }` | 重启结果 |
@@ -1935,7 +1944,7 @@ SCP 是面向 POSIX 主机的兼容传输，不是浏览接口。SFTP 可用时�
 | `sync.listSavedConnections` | `{}` | 保存连接快照 |
 | `sync.refreshSavedConnections` | `{}` | 刷新后的保存连接快照 |
 | `sync.exportSavedConnectionsSnapshot` | `{}` | 保存连接同步快照 |
-| `sync.applySavedConnectionsSnapshot` | `{ snapshot: object, conflictStrategy?: 'rename' | 'skip' | 'replace' | 'merge' }` | 应用结果 |
+| `sync.applySavedConnectionsSnapshot` | `{ snapshot: object, conflictStrategy?: 'rename' \| 'skip' \| 'replace' \| 'merge' }` | 应用结果 |
 | `sync.getLocalSyncMetadata` | `{}` | revision 元数据 |
 | `sync.preflightExport` | `{ connectionIds?: string[], embedKeys?: boolean, includeManagedKeys?: boolean }` | 导出预检查结果。插件驱动的同步默认不包含托管密钥。 |
 | `sync.exportOxide` | `{ connectionIds?: string[], password: string, embedKeys?: boolean, includeManagedKeys?: boolean, includeManagedKeyPassphrases?: boolean, includeAppSettings?: boolean, selectedAppSettingsSections?: string[], includePluginSettings?: boolean, selectedPluginIds?: string[], progressRegistrationId?: string }` | `.oxide` 字节/元数据结果。插件驱动的同步默认不包含托管密钥。 |

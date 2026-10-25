@@ -72,11 +72,11 @@ The synchronous baseline uses adaptive normal/interactive/throughput budgets, a 
 
 Producer completion, parser completion and final snapshot readiness are recorded separately. Producer completion means data has been submitted to the russh server API, not consumed by the client. UI callback P95 includes event draining, input probes and any snapshot taken during that callback; it is not the whole application's frame time. Input probes are timestamped when the server receives them. CPU and peak RSS cover the entire benchmark process, including its server and fixture buffers; RSS is a process high-water mark, not per-terminal allocation.
 
-Reproduce sequentially with no other builds running:
+Run the current benchmark sequentially with the repository-pinned toolchain and no other builds running. The linked September report records its original toolchain and measurements; newer runs should record their own commit and environment:
 
 ```sh
-OXIDETERM_SSH_BENCH_MODE=sync cargo +1.94.1 test --release -p oxideterm-terminal ssh_background_performance --lib -- --ignored --nocapture
-OXIDETERM_SSH_BENCH_MODE=worker cargo +1.94.1 test --release -p oxideterm-terminal ssh_background_performance --lib -- --ignored --nocapture
+OXIDETERM_SSH_BENCH_MODE=sync cargo test --release -p oxideterm-terminal ssh_background_performance --lib -- --ignored --nocapture
+OXIDETERM_SSH_BENCH_MODE=worker cargo test --release -p oxideterm-terminal ssh_background_performance --lib -- --ignored --nocapture
 ```
 
 Results and raw samples are recorded in [the benchmark report](benchmarks/ssh-background-2026-09-11.md).

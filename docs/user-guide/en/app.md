@@ -16,7 +16,7 @@ Recommended first pass:
 
 ## App Layout
 
-The main window is organized around a tabbed workspace with a left activity bar and contextual side panels.
+The top bar selects the visible tab scope. The left activity bar opens connection management and global pages; the right activity bar opens OxideSens and individual Host Tools. See [Workspace Navigation](workspace.md) for filtering, shortcuts, background tasks, and quick-command groups.
 
 Primary areas:
 
@@ -101,6 +101,10 @@ Before overwriting important remote files, confirm the path and keep a backup. R
 ## IDE Workspace
 
 Use the IDE surface when you need a project-style remote file workflow. Open an IDE workspace for a connected node, choose a remote folder, and work with project files in tabs.
+
+Choose **SFTP** or **SSH** file access. SSH offers **Pure Shell commands** or an agent installed, updated, or reused on demand. Pure Shell access uses the selected environment's Linux utilities without installing an agent; agent access adds watching and symbol services. From an idle terminal, **Convert to IDE** keeps the current user, container, and working directory. Terminal input pauses during conversion, and you can return to the original terminal.
+
+IDE and SFTP editing share the same search and replacement controls: case sensitivity, regular expressions, multiline paste, explicit newline insertion, capture-group replacement, and replace all. Each input has its own undo history. Dragging a text selection beyond the editor's top or bottom edge scrolls the document.
 
 IDE workspace state is separate from an ordinary terminal tab. The active editor tab, project root, dirty buffers, and open files belong to the IDE surface. If the connection is interrupted, reconnect before relying on saves or project search.
 

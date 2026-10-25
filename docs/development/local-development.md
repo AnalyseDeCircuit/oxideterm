@@ -6,10 +6,9 @@ Local builds and CI use Rust `1.97.0`, pinned in `rust-toolchain.toml`:
 
 ```sh
 rustup toolchain install 1.97.0
-cargo run
 ```
 
-The workspace default member is the native application, so the normal local loop is:
+The workspace default member is the native application. Finish a coherent set of changes before building or launching it:
 
 ```sh
 cargo run
@@ -18,7 +17,7 @@ cargo run
 If rendering is unavailable on the current machine, use the supported compatibility profile:
 
 ```sh
-OXIDETERM_RENDER_PROFILE=compatibility cargo run
+OXIDETERM_RENDER_PROFILE=compatibility target/debug/oxideterm-native
 ```
 
 The compatibility profile is a diagnostic tool, not a renderer fix. Record whether a bug changes under it, then investigate the renderer or platform boundary with that evidence.
@@ -34,7 +33,7 @@ Build the CLI or optional Linux agent only when the change needs them:
 
 ### macOS
 
-Use a supported macOS release with Xcode Command Line Tools available. Native window and Metal changes should be checked with `cargo check -p gpui-pre-macos` before the application check. Test real window behavior locally; a compile check cannot prove titlebar, input, cursor, or accessibility behavior.
+The packaged application requires macOS 13.0 or later. Release packaging uses Xcode 26.3 with SDK 26.2 and explicitly sets `MACOSX_DEPLOYMENT_TARGET=13.0` for both Apple architectures, including the CLI and updater helper. The SDK controls available build APIs; the deployment target controls the oldest supported system. Keep local Xcode Command Line Tools available. For native window or Metal changes, select the affected platform or application check without compiling the same dependency chain twice. Test real window behavior locally; compilation cannot prove titlebar, input, cursor, or accessibility behavior.
 
 ### Windows
 
@@ -75,6 +74,8 @@ For detailed documentation, see [`nix/README.md`](../../nix/README.md).
 
 ## Common Commands
 
+The development profile uses `debug = "line-tables-only"`, incremental compilation, and unpacked debug information. Selected UI/layout/image crates use higher optimization levels to keep interactive development usable; see the `[profile.dev]` sections in `Cargo.toml`. Keep these shared settings rather than adding local profile overrides that invalidate the dependency cache.
+
 ```sh
 # Run the desktop application from the workspace default member.
 cargo run
@@ -90,6 +91,8 @@ cargo tree -p oxideterm-gpui-app
 ```
 
 Use `cargo test -p <crate>` for the crate that owns a stable regression. Use a workspace test run only after the change crosses several layers or before merging a broad change.
+
+Reuse valid results when source, dependencies, configuration, and environment have not changed. To repeat a manual scenario without rebuilding, run the existing executable directly. Avoid routine `cargo clean`: deleting reusable artifacts forces another full compilation and disk write. Documentation-only changes need documentation checks, not a Rust build.
 
 ## Data And Secrets During Development
 

@@ -4,6 +4,7 @@ OxideTerm Native is a Rust/GPUI SSH workspace with terminal, SFTP, forwarding, H
 
 ## Guides
 
+- [Workspace Navigation](./workspace.md): tab scopes, top-bar actions, right-side tools, and quick-command groups.
 - [Getting Started](./getting-started.md): first launch, local terminal check, saved connection setup, and configuration locations.
 - [Application Guide](./app.md): app layout, tabs, sessions, SFTP, IDE, forwarding, Host Tools, graphics/VNC, AI, Agent Skills, the advanced command sender, settings, plugins, and cloud sync.
 - [Architecture](./architecture.md): how the desktop app is organized, including nodes, terminals, Host Tools, modem transfers, graphics/VNC, SFTP, IDE, AI, plugins, sync, security, and CLI boundaries.

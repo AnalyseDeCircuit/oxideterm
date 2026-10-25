@@ -14,6 +14,13 @@ Persisted data is an interface with users, backups, cloud sync, CLI tooling, and
 
 The active data directory is shown in Settings. Its exact location may differ for normal, custom, and portable runtime modes, so application code should use the settings/path APIs rather than assembling an operating-system path by hand.
 
+Distinguish current product state explicitly:
+
+- Tab scope and each scope's last active tab belong to the current window lifetime, not settings or sync.
+- Quick-command group selection is persisted independently of management filtering. Group icons and colors belong to portable group data.
+- Local shell executable overrides belong to this device and are excluded from cross-device export and sync.
+- Light and dark appearance schemes each retain application and terminal theme choices. Fixed light, fixed dark, and system appearance use those same schemes.
+
 ## Changing A Persisted Field
 
 1. Identify whether the field exists in a released settings file, export, cloud-sync snapshot, CLI JSON response, or plugin-facing payload.
@@ -44,7 +51,7 @@ Avoid destructive local experiments against a real profile. A migration test mus
 
 ## Include Business Data In Cloud Sync
 
-The v3 coordinator uses domain stores as the owners of effective local values. [ConfigurationView](../../crates/oxideterm-cloud-sync/src/sync_v3/mapping.rs) converts portable records into fields; [SyncReplica](../../crates/oxideterm-cloud-sync/src/sync_v3/replica.rs) tracks concurrent changes. See [cloud-sync-v3.md](cloud-sync-v3.md) for the implementation record.
+The v3 coordinator uses domain stores as the owners of effective local values. [ConfigurationView](../../crates/oxideterm-cloud-sync/src/sync_v3/mapping.rs) converts portable records into fields; [SyncReplica](../../crates/oxideterm-cloud-sync/src/sync_v3/replica.rs) tracks concurrent changes. See [cloud-sync-v3.md](cloud-sync-v3.md) for publication, application, and recovery contracts.
 
 For a new field on an existing record, first inspect how that record is already mapped. Add a resource kind only when the data has its own stable identity and lifecycle.
 

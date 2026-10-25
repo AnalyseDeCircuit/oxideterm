@@ -21,7 +21,7 @@ This page is for maintainers preparing native releases. Contributors should not 
      --repo . --channel <channel> --version <version>
    ```
 
-5. Review the meaningful changes since that range and update the selected channel changelog under [`.github/release-notes/`](../../.github/release-notes/). Each entry begins with `## <version>` and contains matching `### English` and `### 中文` blocks.
+5. Review the meaningful changes since that range and update the selected channel changelog under [`.github/release-notes/`](../../.github/release-notes/). Each entry begins with `## <version>` and contains matching `### 中文` and `### English` blocks, in the order expected by the composer.
 6. Validate the intended version without writing files:
 
    ```sh
@@ -50,6 +50,8 @@ Do not manually create a GitHub Release. The workflow checks out the tagged comm
 
 ## Failure Boundaries
 
+- Distinguish compilation, packaging, binary verification, and upload failures before changing code. macOS packages use SDK 26.2 from Xcode 26.3 with a 13.0 deployment target for both architectures. Keep the Mach-O deployment target and `LSMinimumSystemVersion` aligned through `scripts/release/package_native.py`; changing only the plist does not change the executable.
+- A packaging fix must be present in the tagged source used by a new dispatch. Re-running a job against an old commit does not pick up a later fix.
 - If a tag exists unexpectedly, compare its annotated object and peeled commit with the intended release commit, then stop.
 - If a packaging dispatch was canceled before a GitHub Release exists and the tag still points at the intended commit, leave the tag unchanged and dispatch a new `Native Package` run with the same tag.
 - Moving an existing tag requires explicit authorization and a force-with-lease update against the recorded annotated tag object. Never delete the remote tag as a shortcut.

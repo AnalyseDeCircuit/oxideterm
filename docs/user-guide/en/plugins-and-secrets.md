@@ -18,6 +18,14 @@ Typical flow:
 
 If a plugin appears to be installed but inactive, check the plugin manager first. Do not edit plugin state files directly while the desktop app is running.
 
+## Updates and Host Compatibility
+
+The marketplace offers the highest plugin release compatible with both your app version and platform. A newer incompatible release shows its requirements rather than replacing the installed version. Incompatible installed plugins keep their files and settings but cannot activate. Refresh the marketplace and check the required app version when an update is missing; older clients using the frozen v1 catalog must upgrade OxideTerm to discover newer releases.
+
+Saved plugin connection profiles and supported credentials can travel through encrypted export and cloud sync. Install the provider separately on each device. Review credentials and routes before connecting; live plugin instances are not synchronized. Updating or disabling a connection provider stops its active instances while retaining saved profiles.
+
+WASM guests use host-authorized capabilities. Process plugins and native protocol helpers are executables with a different operating-system trust boundary; review their source and publisher before enabling them.
+
 ## Plugin Settings
 
 Configure plugin settings from the plugin manager. Use clear labels for non-secret settings. Put credentials only in fields that are explicitly designed as secret fields.
