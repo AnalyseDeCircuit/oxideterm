@@ -30,6 +30,7 @@ mod color;
 mod command_sender;
 mod data;
 mod editor_integration;
+mod integration_scripts;
 mod local_graphics_event_loop;
 mod local_shell;
 mod local_shell_integration;

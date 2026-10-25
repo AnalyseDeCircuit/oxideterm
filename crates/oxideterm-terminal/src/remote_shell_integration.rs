@@ -1,9 +1,15 @@
+use std::borrow::Cow;
+
 use oxideterm_ssh::{RemoteEnvInfo, SftpError, SftpSession};
 use zeroize::Zeroizing;
 
-use crate::{EMACS_FREE_TYPE_INTEGRATION_SOURCE, VIM_FREE_TYPE_INTEGRATION_SOURCE};
+use crate::{
+    EMACS_FREE_TYPE_INTEGRATION_SOURCE, VIM_FREE_TYPE_INTEGRATION_SOURCE,
+    integration_scripts::normalize_integration_script,
+};
 
-pub const REMOTE_SHELL_INTEGRATION_VERSION: u32 = 5;
+// Older clients must not replace repaired LF programs with their CRLF payloads.
+pub const REMOTE_SHELL_INTEGRATION_VERSION: u32 = 6;
 pub const REMOTE_SHELL_INTEGRATION_RELATIVE_DIR: &str = ".oxideterm/shell-integration";
 
 const MANAGED_BLOCK_START: &str = ">>> OxideTerm remote shell integration >>>";
@@ -147,7 +153,7 @@ pub async fn inspect_remote_shell_integration(
         has_package_file |= content.is_some();
         package_matches &= content
             .as_deref()
-            .is_some_and(|content| content == expected_content);
+            .is_some_and(|content| content == expected_content.as_ref());
     }
     let state = if newer_version {
         RemoteShellIntegrationState::NewerVersion
@@ -206,16 +212,22 @@ pub async fn install_remote_shell_integration(
             file.content.as_ref().map_or("", |content| content.as_str()),
             &startup_reference(layout.shell),
         ));
+        if file
+            .content
+            .as_ref()
+            .is_some_and(|current| current.as_str() == updated.as_str())
+        {
+            continue;
+        }
         sftp.replace_config_content(&file.path, updated.as_bytes())
             .await
             .map_err(|_| RemoteShellIntegrationError::WriteFailed)?;
     }
 
-    Ok(status_from_layout(
-        layout,
-        RemoteShellIntegrationState::Installed,
-        startup_files.into_iter().map(|file| file.path).collect(),
-    ))
+    // A completed write is not proof of a complete installation. Return the
+    // read-back state so both automatic and explicit repairs can be retried
+    // without advertising success after partial or externally changed writes.
+    inspect_remote_shell_integration(sftp, remote_env).await
 }
 
 /// Removes only OxideTerm's marked startup block and optionally its owned files.
@@ -411,7 +423,7 @@ fn startup_file_path(shell: RemoteShellKind, remote_env: &RemoteEnvInfo, home: &
     }
 }
 
-fn integration_files() -> [(&'static str, &'static str); 8] {
+fn integration_files() -> [(&'static str, Cow<'static, str>); 8] {
     [
         ("README.txt", REMOTE_INTEGRATION_README),
         ("bash.sh", BASH_INTEGRATION),
@@ -422,6 +434,7 @@ fn integration_files() -> [(&'static str, &'static str); 8] {
         ("oxideterm-free-type.vim", VIM_FREE_TYPE_INTEGRATION_SOURCE),
         ("oxideterm-free-type.el", EMACS_FREE_TYPE_INTEGRATION_SOURCE),
     ]
+    .map(|(name, source)| (name, normalize_integration_script(source)))
 }
 
 fn startup_reference(shell: RemoteShellKind) -> String {
@@ -578,7 +591,7 @@ fn remote_parent(path: &str) -> Option<String> {
 const REMOTE_INTEGRATION_README: &str = r#"OxideTerm Remote Shell Integration
 =====================================
 
-Version: 5
+Version: 6
 Directory protocol: OSC 7
 Command boundary protocol: OSC 133
 Private editor protocol: OSC 7719 v3
@@ -602,7 +615,7 @@ configuration to enable full-screen editor integration.
 "#;
 
 const BASH_INTEGRATION: &str = concat!(
-    r#"# OxideTerm remote shell integration v5.
+    r#"# OxideTerm remote shell integration v6.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 if [ -n "${LC_OXIDETERM_SESSION:-}" ] || [ "${OXIDETERM_PRIVATE_OSC:-}" = 1 ]; then
   export OXIDETERM_PRIVATE_OSC=1
@@ -657,7 +670,7 @@ fi
 );
 
 const ZSH_INTEGRATION: &str = concat!(
-    "# OxideTerm remote shell integration v5.\n",
+    "# OxideTerm remote shell integration v6.\n",
     "# Reports cwd and host through standard OSC 7 and gates private editor adapters.\n",
     "if [ -n \"${LC_OXIDETERM_SESSION:-}\" ] || [ \"${OXIDETERM_PRIVATE_OSC:-}\" = 1 ]; then\n  export OXIDETERM_PRIVATE_OSC=1\n  export OXIDETERM_VIM_INTEGRATION=\"$HOME/.oxideterm/shell-integration/oxideterm-free-type.vim\"\n  export OXIDETERM_EMACS_INTEGRATION=\"$HOME/.oxideterm/shell-integration/oxideterm-free-type.el\"\nfi\n",
     "unset LC_OXIDETERM_SESSION\n",
@@ -669,7 +682,7 @@ const ZSH_INTEGRATION: &str = concat!(
 );
 
 const FISH_INTEGRATION: &str = concat!(
-    r#"# OxideTerm remote shell integration v5.
+    r#"# OxideTerm remote shell integration v6.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 set -l __oxideterm_private_session 0
 if set -q LC_OXIDETERM_SESSION; and test -n "$LC_OXIDETERM_SESSION"
@@ -703,7 +716,7 @@ end
 );
 
 const NUSHELL_INTEGRATION: &str = concat!(
-    r#"# OxideTerm remote shell integration v5.
+    r#"# OxideTerm remote shell integration v6.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 let __oxideterm_private_session = (($env.LC_OXIDETERM_SESSION? | default '') != '') or (($env.OXIDETERM_PRIVATE_OSC? | default '') == '1')
 if $__oxideterm_private_session {
@@ -717,7 +730,7 @@ hide-env --ignore-errors LC_OXIDETERM_SESSION
 );
 
 const POWERSHELL_INTEGRATION: &str = concat!(
-    r#"# OxideTerm remote shell integration v5.
+    r#"# OxideTerm remote shell integration v6.
 # Reports cwd and host through standard OSC 7 and gates private editor adapters.
 if ($env:LC_OXIDETERM_SESSION -or $env:OXIDETERM_PRIVATE_OSC -eq '1') {
     $env:OXIDETERM_PRIVATE_OSC = '1'
@@ -872,7 +885,7 @@ mod tests {
             ),
         ] {
             let block = startup_reference(shell);
-            assert!(block.contains("oxideterm-shell-integration-version: 5"));
+            assert!(block.contains("oxideterm-shell-integration-version: 6"));
             let expected = format!("{prefix}{block}\n{suffix}");
             let installed = install_managed_block(&original, &block);
             assert_eq!(installed, expected, "{original:?}");
@@ -882,10 +895,81 @@ mod tests {
     }
 
     #[test]
+    fn remote_integration_scripts_use_lf() {
+        assert_eq!(
+            integration_files().map(|(name, _)| name),
+            [
+                "README.txt",
+                "bash.sh",
+                "zsh.zsh",
+                "fish.fish",
+                "nushell.nu",
+                "powershell.ps1",
+                "oxideterm-free-type.vim",
+                "oxideterm-free-type.el",
+            ]
+        );
+        for (name, content) in integration_files() {
+            assert!(
+                !content.as_bytes().contains(&b'\r'),
+                "{name} contains a carriage return"
+            );
+            if !name.starts_with("oxideterm-free-type") {
+                assert_eq!(
+                    integration_versions(&content).collect::<Vec<_>>(),
+                    vec![6],
+                    "{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn repair_old_crlf_reference_preserves_surrounding_user_bytes() {
+        let original = concat!(
+            "export EDITOR=vim\r\n",
+            "# >>> OxideTerm remote shell integration >>>\r\n",
+            "# oxideterm-shell-integration-version: 5\r\n",
+            "source old\r\n",
+            "# <<< OxideTerm remote shell integration <<<\r\n",
+            "printf 'user\\r\\n'\r\n",
+        );
+        let installed = install_managed_block(original, &startup_reference(RemoteShellKind::Bash));
+        assert_eq!(
+            installed,
+            concat!(
+                "export EDITOR=vim\r\n",
+                "# >>> OxideTerm remote shell integration >>>\n",
+                "# oxideterm-shell-integration-version: 6\n",
+                "[ -r \"$HOME/.oxideterm/shell-integration/bash.sh\" ] && . \"$HOME/.oxideterm/shell-integration/bash.sh\"\n",
+                "# <<< OxideTerm remote shell integration <<<\n",
+                "printf 'user\\r\\n'\r\n",
+            )
+        );
+        assert_eq!(
+            remove_managed_block(&installed),
+            "export EDITOR=vim\r\nprintf 'user\\r\\n'\r\n"
+        );
+        assert!(
+            integration_versions(original)
+                .all(|version| version < REMOTE_SHELL_INTEGRATION_VERSION)
+        );
+        assert!(has_newer_integration_version(
+            "# OxideTerm remote shell integration v7.\r\n"
+        ));
+    }
+
+    #[test]
     fn remote_package_contains_exact_editor_adapter_sources() {
         let files = integration_files();
-        assert!(files.contains(&("oxideterm-free-type.vim", VIM_FREE_TYPE_INTEGRATION_SOURCE)));
-        assert!(files.contains(&("oxideterm-free-type.el", EMACS_FREE_TYPE_INTEGRATION_SOURCE)));
+        assert!(files.contains(&(
+            "oxideterm-free-type.vim",
+            normalize_integration_script(VIM_FREE_TYPE_INTEGRATION_SOURCE)
+        )));
+        assert!(files.contains(&(
+            "oxideterm-free-type.el",
+            normalize_integration_script(EMACS_FREE_TYPE_INTEGRATION_SOURCE)
+        )));
         assert!(REMOTE_INTEGRATION_README.contains("optional Free Type Mode adapters"));
     }
 

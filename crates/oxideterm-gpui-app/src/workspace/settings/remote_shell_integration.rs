@@ -387,7 +387,22 @@ impl RemoteShellIntegrationRuntimeState {
             return None;
         }
         self.maintenance = None;
+        if action == RemoteShellIntegrationAction::Install {
+            self.terminal_ready_nodes.remove(&node_id);
+        }
         match result {
+            Ok(status)
+                if action == RemoteShellIntegrationAction::Install
+                    && status.state
+                        != oxideterm_terminal::RemoteShellIntegrationState::Installed =>
+            {
+                self.terminal_statuses.insert(node_id, status.state);
+                self.status = Some(status);
+                self.failure = Some(RemoteShellIntegrationFailure::InstallationIncomplete);
+                Some(RemoteShellIntegrationNotice::Failed(
+                    RemoteShellIntegrationFailure::InstallationIncomplete,
+                ))
+            }
             Ok(status) => {
                 let previous = self
                     .status
@@ -1192,9 +1207,10 @@ mod tests {
     fn remote_shell_deferrals_survive_settings_reload_and_expire_for_new_versions() {
         let key = r#"[["server",22,"alice"]]"#;
         let mut settings = oxideterm_settings::TerminalSettings::default();
-        settings
-            .remote_shell_integration_deferred
-            .insert(key.into(), 5);
+        settings.remote_shell_integration_deferred.insert(
+            key.into(),
+            oxideterm_terminal::REMOTE_SHELL_INTEGRATION_VERSION,
+        );
         let saved = serde_json::to_string(&settings).unwrap();
         let restored: oxideterm_settings::TerminalSettings = serde_json::from_str(&saved).unwrap();
         let mut runtime = RemoteShellIntegrationRuntimeState::default();
@@ -1202,8 +1218,94 @@ mod tests {
         runtime.set_deferred(restored.remote_shell_integration_deferred);
         assert!(runtime.is_deferred(key));
         assert!(!runtime.is_deferred(r#"[["server",22,"bob"]]"#));
-        runtime.set_deferred([(key.into(), 4)].into());
+        runtime.set_deferred([(key.into(), 5)].into());
         assert!(!runtime.is_deferred(key));
+    }
+
+    #[test]
+    fn repair_readback_and_write_failures_remain_retryable_until_verified() {
+        use oxideterm_terminal::{
+            RemoteShellIntegrationError, RemoteShellIntegrationState as State, RemoteShellKind,
+        };
+        let status = |state| RemoteShellIntegrationStatus {
+            shell: RemoteShellKind::Bash,
+            state,
+            integration_directory: "/home/fixture/.oxideterm/shell-integration".into(),
+            integration_file: "/home/fixture/.oxideterm/shell-integration/bash.sh".into(),
+            startup_files: vec!["/home/fixture/.bashrc".into()],
+        };
+        for previous in [State::NeedsUpdate, State::NeedsRepair] {
+            let node = NodeId("repair-host".into());
+            let mut runtime = RemoteShellIntegrationRuntimeState::default();
+            let generation = runtime
+                .begin_maintenance(RemoteShellIntegrationAction::Inspect, node.clone())
+                .unwrap();
+            runtime.finish_maintenance(
+                RemoteShellIntegrationAction::Inspect,
+                node.clone(),
+                generation,
+                Ok(status(previous)),
+            );
+
+            let generation = runtime
+                .begin_maintenance(RemoteShellIntegrationAction::Install, node.clone())
+                .unwrap();
+            let notice = runtime.finish_maintenance(
+                RemoteShellIntegrationAction::Install,
+                node.clone(),
+                generation,
+                Ok(status(State::NeedsRepair)),
+            );
+            assert_eq!(
+                notice,
+                Some(RemoteShellIntegrationNotice::Failed(
+                    RemoteShellIntegrationFailure::InstallationIncomplete
+                ))
+            );
+            let card = runtime.card_snapshot(Some(&node));
+            assert_eq!(card.status.unwrap().state, State::NeedsRepair);
+            assert_eq!(
+                card.failure,
+                Some(RemoteShellIntegrationFailure::InstallationIncomplete)
+            );
+            assert!(!card.pending);
+
+            let generation = runtime
+                .begin_maintenance(RemoteShellIntegrationAction::Install, node.clone())
+                .unwrap();
+            let failure = RemoteShellIntegrationFailure::Integration(
+                RemoteShellIntegrationError::WriteFailed,
+            );
+            assert_eq!(
+                runtime.finish_maintenance(
+                    RemoteShellIntegrationAction::Install,
+                    node.clone(),
+                    generation,
+                    Err(failure)
+                ),
+                Some(RemoteShellIntegrationNotice::Failed(failure))
+            );
+
+            let generation = runtime
+                .begin_maintenance(RemoteShellIntegrationAction::Install, node.clone())
+                .unwrap();
+            assert_eq!(
+                runtime.finish_maintenance(
+                    RemoteShellIntegrationAction::Install,
+                    node.clone(),
+                    generation,
+                    Ok(status(State::Installed))
+                ),
+                Some(RemoteShellIntegrationNotice::Configured(
+                    node.clone(),
+                    State::NeedsRepair
+                ))
+            );
+            let card = runtime.card_snapshot(Some(&node));
+            assert_eq!(card.status.unwrap().state, State::Installed);
+            assert_eq!(card.failure, None);
+            assert!(!card.pending);
+        }
     }
 
     #[test]

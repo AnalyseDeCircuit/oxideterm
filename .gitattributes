@@ -1,0 +1,8 @@
+# Embedded integration programs must have identical bytes on every build host.
+crates/oxideterm-terminal/src/shell_integration/*.sh text eol=lf
+crates/oxideterm-terminal/src/shell_integration/*.zsh text eol=lf
+crates/oxideterm-terminal/src/shell_integration/*.fish text eol=lf
+crates/oxideterm-terminal/src/shell_integration/*.nu text eol=lf
+crates/oxideterm-terminal/src/shell_integration/*.ps1 text eol=lf
+crates/oxideterm-terminal/src/editor_integration/*.vim text eol=lf
+crates/oxideterm-terminal/src/editor_integration/*.el text eol=lf
