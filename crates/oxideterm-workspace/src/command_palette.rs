@@ -48,21 +48,30 @@ pub fn command_palette_match(
     let searchable_value = searchable_value.to_lowercase();
     let normalized_query = query.to_lowercase();
     let mut result = CommandPaletteMatch {
-        score: 1.0,
+        score: 3.0,
         highlights: Vec::new(),
     };
     // Each term must match, but separators and term order need not match the label.
     for term in normalized_query.split_whitespace() {
-        if searchable_value.contains(term) {
-            result
-                .highlights
-                .extend(substring_highlights(label, term).unwrap_or_default());
+        let term_score = if let Some(highlights) = substring_highlights(label, term) {
+            let chars: Vec<_> = label.chars().collect();
+            let start = highlights[0];
+            let end = highlights[highlights.len() - 1] + 1;
+            let whole_word = (start == 0 || !chars[start - 1].is_alphanumeric())
+                && (end == chars.len() || !chars[end].is_alphanumeric());
+            result.highlights.extend(highlights);
+            if whole_word { 3.0 } else { 2.0 }
+        } else if searchable_value.contains(term) {
+            1.0
         } else {
             result
                 .highlights
                 .extend(subsequence_highlights(label, term)?);
-            result.score = 0.5;
-        }
+            0.5
+        };
+        // The weakest term determines the tier so auxiliary fields cannot
+        // outrank a name that directly matches every keyword.
+        result.score = result.score.min(term_score);
     }
     result.highlights.sort_unstable();
     result.highlights.dedup();
@@ -71,7 +80,20 @@ pub fn command_palette_match(
 
 fn substring_highlights(label: &str, normalized_query: &str) -> Option<Vec<usize>> {
     let (normalized_label, original_indices) = lowercase_with_original_indices(label);
-    let start_byte = normalized_label.find(normalized_query)?;
+    let start_byte = normalized_label
+        .match_indices(normalized_query)
+        .find(|(start, matched)| {
+            normalized_label[..*start]
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !ch.is_alphanumeric())
+                && normalized_label[start + matched.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|ch| !ch.is_alphanumeric())
+        })
+        .map(|(start, _)| start)
+        .or_else(|| normalized_label.find(normalized_query))?;
     let start = normalized_label[..start_byte].chars().count();
     let len = normalized_query.chars().count();
     Some(unique_original_indices(
@@ -147,7 +169,7 @@ mod tests {
         assert_eq!(
             command_palette_match("Open Settings", "open settings preferences", "settings"),
             Some(CommandPaletteMatch {
-                score: 1.0,
+                score: 3.0,
                 highlights: (5..13).collect(),
             })
         );
@@ -194,6 +216,43 @@ mod tests {
     }
 
     #[test]
+    fn name_matches_rank_above_auxiliary_fields_and_fuzzy_matches() {
+        let candidates = [
+            ("sample-worker-off", "sample-worker-off zone-on"),
+            ("sample-worker-on", "sample-worker-on"),
+            ("sample-worker-only", "sample-worker-only"),
+            ("sample-worker-ocean", "sample-worker-ocean"),
+        ];
+        let mut results: Vec<_> = candidates
+            .iter()
+            .filter_map(|(label, value)| {
+                command_palette_match(label, value, "sample on")
+                    .map(|matched| (*label, matched.score))
+            })
+            .collect();
+        results.sort_by(|left, right| right.1.total_cmp(&left.1));
+        assert_eq!(
+            results.iter().map(|(label, _)| *label).collect::<Vec<_>>(),
+            vec![
+                "sample-worker-on",
+                "sample-worker-only",
+                "sample-worker-off",
+                "sample-worker-ocean"
+            ]
+        );
+        assert_eq!(
+            command_palette_match("sample-worker-off", "sample-worker-off", "sample on"),
+            None
+        );
+        assert_eq!(
+            command_palette_match("only-on", "only-on", "on")
+                .unwrap()
+                .highlights,
+            vec![5, 6]
+        );
+    }
+
+    #[test]
     fn keyword_highlights_merge_label_matches_and_allow_other_search_fields() {
         assert_eq!(
             command_palette_match(
@@ -216,7 +275,7 @@ mod tests {
         assert_eq!(
             command_palette_match("İnfo 设置", "İnfo 设置", "设置 i"),
             Some(CommandPaletteMatch {
-                score: 1.0,
+                score: 2.0,
                 highlights: vec![0, 5, 6]
             }),
         );
