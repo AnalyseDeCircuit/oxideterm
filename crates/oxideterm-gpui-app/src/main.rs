@@ -371,9 +371,9 @@ fn open_main_workspace_window(
                 window,
                 cx,
                 move |_window, cx| {
-                    close_session.update(cx, |workspace, cx| {
-                        !workspace.guard_dirty_knowledge_app_quit(cx)
-                    })
+                    close_session
+                        .update(cx, |workspace, cx| workspace.request_application_quit(cx));
+                    false
                 },
             );
             cx.new(|cx| WorkspaceWindowShell::new(session, window, cx))
@@ -467,7 +467,18 @@ fn looks_like_connection_uri(value: &str) -> bool {
 }
 
 fn quit(_: &Quit, cx: &mut App) {
-    workspace::request_app_quit(cx);
+    cx.defer(|cx| {
+        let session = cx.windows().into_iter().find_map(|window| {
+            window
+                .downcast::<WorkspaceWindowShell>()
+                .and_then(|window| window.read(cx).ok().map(|shell| shell.session_entity()))
+        });
+        if let Some(session) = session {
+            session.update(cx, |workspace, cx| workspace.request_application_quit(cx));
+        } else {
+            workspace::request_app_quit(cx);
+        }
+    });
 }
 
 fn desktop_presence_menu(i18n: &I18n) -> oxideterm_desktop_presence::DesktopPresenceMenu {

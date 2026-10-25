@@ -7,6 +7,8 @@
     "show_main_window": "Mostrar janela principal",
     "hide_main_window": "Ocultar janela principal",
     "quit": "Sair do OxideTerm",
+    "confirm_quit": "Sair do OxideTerm? Todas as sessões de terminal e conexões ativas serão encerradas.",
+    "unlock_to_finish_quit": "Desbloqueie o aplicativo para salvar ou descartar suas alterações antes de sair.",
     "edit": "Editar",
     "cut": "Recortar",
     "copy": "Copiar",

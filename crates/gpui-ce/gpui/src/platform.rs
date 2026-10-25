@@ -2,6 +2,11 @@ mod app_menu;
 mod keyboard;
 mod keystroke;
 
+// OxideTerm: AppKit exposes fullscreen failure only through its window delegate.
+/// Window-scoped notification emitted by the macOS backend when leaving native fullscreen fails.
+pub const MACOS_WINDOW_DID_FAIL_TO_EXIT_FULLSCREEN_NOTIFICATION: &str =
+    "GPUIWindowDidFailToExitFullScreenNotification";
+
 #[cfg(all(any(target_os = "linux", target_os = "freebsd"), feature = "wayland"))]
 #[expect(missing_docs)]
 pub mod layer_shell;

@@ -111,6 +111,15 @@ the actual WGPU uniform.
 
 ## Local Patch Inventory
 
+### Native fullscreen exit failure delivery
+
+The macOS window delegate posts the window-scoped
+`MACOS_WINDOW_DID_FAIL_TO_EXIT_FULLSCREEN_NOTIFICATION` from GPUI's platform API
+after releasing its native-state lock. Desktop presence uses it to cancel a deferred
+hide and permit a later close attempt. AppKit's successful-exit notification remains
+the only path that hides a window after leaving its fullscreen Space. The failure
+event does not hide, close, or retry the window itself.
+
 Every source file changed by OxideTerm should retain an English modification
 notice near the top. The sections below define the behavior to preserve; line
 numbers are intentionally omitted because upstream refreshes move code.

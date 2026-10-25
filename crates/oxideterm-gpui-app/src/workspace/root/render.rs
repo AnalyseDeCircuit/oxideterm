@@ -407,15 +407,8 @@ impl WorkspaceApp {
                 }),
             )
             .on_action(cx.listener(|this, _: &Quit, _window, cx| {
-                if this.guard_dirty_knowledge_app_quit(cx) {
-                    // The global listener terminates the process, so retain this action until the
-                    // user has explicitly saved or discarded the Knowledge draft.
-                    cx.stop_propagation();
-                } else {
-                    // GPUI actions stop during the bubble phase by default. A clean workspace must
-                    // explicitly continue to the application-level quit handler.
-                    cx.propagate();
-                }
+                this.request_application_quit(cx);
+                cx.stop_propagation();
             }))
             .on_mouse_down(
                 MouseButton::Left,

@@ -7,6 +7,8 @@
     "show_main_window": "显示主窗口",
     "hide_main_window": "隐藏主窗口",
     "quit": "退出 OxideTerm",
+    "confirm_quit": "确定退出 OxideTerm？所有活动终端会话和连接都将关闭。",
+    "unlock_to_finish_quit": "解锁后，请保存或放弃未保存的修改，再退出。",
     "edit": "编辑",
     "cut": "剪切",
     "copy": "复制",

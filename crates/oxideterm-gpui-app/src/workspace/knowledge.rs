@@ -1132,6 +1132,10 @@ pub(super) struct KnowledgeWorkspaceEntity {
 }
 
 impl KnowledgeWorkspaceEntity {
+    pub(in crate::workspace) fn app_quit_pending(&self) -> bool {
+        self.pending_app_quit
+    }
+
     fn tab_id(&self) -> Option<TabId> {
         self.tab_id
     }
@@ -1820,14 +1824,6 @@ impl WorkspaceApp {
         self.guard_dirty_knowledge_tab_close(tab_id, window, cx)
     }
 
-    /// Applies the dirty-draft guard for quit intents that do not originate from a focused window.
-    pub(in crate::workspace) fn request_application_quit(&mut self, cx: &mut Context<Self>) {
-        if self.guard_dirty_knowledge_app_quit(cx) {
-            return;
-        }
-        super::request_app_quit(cx);
-    }
-
     /// Loads a document for the editor pane while keeping the Knowledge tab itself stable.
     pub(in crate::workspace) fn select_knowledge_document(
         &mut self,
@@ -2363,6 +2359,7 @@ impl WorkspaceApp {
                 leave_labels.switch_description.clone()
             };
             let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
+                .debug_selector(|| "knowledge-leave-confirmation".into())
                 .w(px(440.0))
                 .max_w(relative(0.92))
                 .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
@@ -2529,8 +2526,96 @@ impl WorkspaceApp {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::workspace) mod tests {
     use super::*;
+
+    pub(in crate::workspace) fn assert_locked_quit_preserves_draft(
+        workspace: &Entity<WorkspaceApp>,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        let store =
+            workspace.read_with(cx, |workspace, cx| workspace.ai_entity.read(cx).rag_store());
+        let collection = oxideterm_ai::rag_create_collection(
+            &store,
+            oxideterm_ai::RagCreateCollectionRequest {
+                name: "Quit regression".into(),
+                scope: oxideterm_ai::RagDocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        let document = oxideterm_ai::rag_create_blank_document(
+            &store,
+            oxideterm_ai::RagCreateBlankDocumentRequest {
+                collection_id: collection.id,
+                title: "Private draft".into(),
+                format: "markdown".into(),
+            },
+        )
+        .unwrap();
+        oxideterm_ai::rag_save_document(&store, &document.id, "saved".into(), Some(0)).unwrap();
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_knowledge_workspace_tab(window, cx);
+                workspace.select_knowledge_document(document.id.clone(), cx);
+            })
+        });
+        cx.run_until_parked();
+        let editor = workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .knowledge_workspace
+                .read(cx)
+                .editor
+                .clone()
+                .unwrap()
+        });
+        editor.update(cx, |editor, cx| {
+            // A conflicted draft remains unsaved while the user resolves the quit request.
+            editor.save_state = KnowledgeDocumentSaveState::Conflict;
+            editor
+                .editor
+                .update(cx, |text, cx| text.replace_text_external("unsaved", cx));
+        });
+        cx.run_until_parked();
+        workspace.update(cx, |workspace, cx| {
+            workspace.app_lock.locked = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.request_close(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes("enter");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("menu.unlock_to_finish_quit").is_some());
+        assert!(cx.debug_bounds("knowledge-leave-confirmation").is_none());
+        workspace.read_with(cx, |workspace, cx| {
+            assert!(workspace.app_lock.locked);
+            assert!(!workspace.ai_entity.read(cx).history.quitting);
+        });
+        assert_eq!(
+            oxideterm_ai::rag_get_document_content(&store, &document.id).unwrap(),
+            "saved"
+        );
+        editor.read_with(cx, |editor, _| assert_eq!(editor.draft.as_ref(), "unsaved"));
+
+        // Authentication is covered by the lock store; resume from its successful unlocked state.
+        workspace.update(cx, |workspace, cx| {
+            workspace.app_lock.locked = false;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("knowledge-leave-confirmation").is_some());
+        assert!(cx.debug_bounds("menu.unlock_to_finish_quit").is_none());
+        cx.simulate_keystrokes("escape");
+        workspace.read_with(cx, |workspace, cx| {
+            assert!(!workspace.knowledge_workspace.read(cx).app_quit_pending());
+        });
+        editor.read_with(cx, |editor, _| assert_eq!(editor.draft.as_ref(), "unsaved"));
+        editor.update(cx, |editor, cx| {
+            editor
+                .editor
+                .update(cx, |text, cx| text.replace_text_external("saved", cx));
+        });
+        cx.run_until_parked();
+    }
 
     #[gpui::test]
     fn undo_during_save_keeps_the_returned_draft_dirty(cx: &mut gpui::TestAppContext) {

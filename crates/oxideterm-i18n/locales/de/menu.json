@@ -7,6 +7,8 @@
     "show_main_window": "Hauptfenster anzeigen",
     "hide_main_window": "Hauptfenster ausblenden",
     "quit": "OxideTerm beenden",
+    "confirm_quit": "OxideTerm beenden? Alle aktiven Terminalsitzungen und Verbindungen werden geschlossen.",
+    "unlock_to_finish_quit": "Entsperren Sie die App, um Ihre Änderungen vor dem Beenden zu speichern oder zu verwerfen.",
     "edit": "Bearbeiten",
     "cut": "Ausschneiden",
     "copy": "Kopieren",

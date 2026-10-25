@@ -727,6 +727,7 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let (title_key, description_key, other_tab_count) = match &snapshot.confirm {
+            TabCloseConfirm::ApplicationQuit => ("menu.quit", Some("menu.confirm_quit"), None),
             TabCloseConfirm::Single { .. } => (
                 "tabbar.confirm_close_terminal_title",
                 Some("tabbar.confirm_close_terminal_desc"),

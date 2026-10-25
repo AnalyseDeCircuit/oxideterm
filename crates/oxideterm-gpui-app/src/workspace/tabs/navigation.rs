@@ -919,6 +919,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match confirm {
+            TabCloseConfirm::ApplicationQuit => {
+                self.quit_after_confirmation(cx);
+            }
             TabCloseConfirm::Single { tab_id } => {
                 self.request_local_terminal_close_check(
                     LocalTerminalCloseCheck::Single { tab_id },
