@@ -1406,15 +1406,16 @@ impl WorkspaceApp {
                 } else {
                     format!("{user}@{hostname}:{port}")
                 };
+                let detail = format!(
+                    "{} {detail}",
+                    self.i18n.t("command_palette.ssh_config_source")
+                );
                 PaletteItem {
                     id: format!("ssh-config:{alias}"),
                     label: alias.clone(),
                     section: PaletteSection::Connections,
                     icon: LucideIcon::FileTerminal,
-                    detail: Some(format!(
-                        "{} {detail}",
-                        self.i18n.t("command_palette.ssh_config_source")
-                    )),
+                    detail: Some(detail.clone()),
                     shortcut: None,
                     value: format!("{alias} {detail}"),
                     action: PaletteAction::QuickConnectAlias(alias),
@@ -1957,32 +1958,47 @@ impl WorkspaceApp {
         selected: bool,
         muted: bool,
     ) -> AnyElement {
-        let mut label = div()
-            .flex()
-            .items_center()
+        let highlight_set = highlights.iter().copied().collect::<HashSet<_>>();
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+        // Search returns character indices; styled text uses UTF-8 byte ranges.
+        for (index, (offset, ch)) in text.char_indices().enumerate() {
+            if highlight_set.contains(&index) {
+                let end = offset + ch.len_utf8();
+                if let Some(previous) = ranges.last_mut()
+                    && previous.end == offset
+                {
+                    previous.end = end;
+                } else {
+                    ranges.push(offset..end);
+                }
+            }
+        }
+        let highlighted = gpui::StyledText::new(text.to_owned()).with_highlights(
+            ranges.into_iter().map(|range| {
+                (
+                    range,
+                    gpui::HighlightStyle {
+                        color: Some(rgb(self.tokens.ui.accent).into()),
+                        font_weight: Some(gpui::FontWeight::SEMIBOLD),
+                        ..Default::default()
+                    },
+                )
+            }),
+        );
+        div()
             .min_w_0()
             .truncate()
             .text_size(px(if muted { 12.0 } else { 14.0 }))
-            .line_height(px(if muted { 16.0 } else { 20.0 }));
-        let highlight_set = highlights.iter().copied().collect::<HashSet<_>>();
-        for (index, ch) in text.chars().enumerate() {
-            let highlighted = highlight_set.contains(&index);
-            label = label.child(
-                div()
-                    .text_color(if highlighted || selected {
-                        rgb(self.tokens.ui.accent)
-                    } else if muted {
-                        rgb(self.tokens.ui.text_muted)
-                    } else {
-                        rgb(self.tokens.ui.text)
-                    })
-                    .when(highlighted, |part| {
-                        part.font_weight(gpui::FontWeight::SEMIBOLD)
-                    })
-                    .child(ch.to_string()),
-            );
-        }
-        label.into_any_element()
+            .line_height(px(if muted { 16.0 } else { 20.0 }))
+            .text_color(rgb(if selected {
+                self.tokens.ui.accent
+            } else if muted {
+                self.tokens.ui.text_muted
+            } else {
+                self.tokens.ui.text
+            }))
+            .child(highlighted)
+            .into_any_element()
     }
 
     pub(super) fn render_shortcuts_modal(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -3106,6 +3122,66 @@ fn shortcut_reference_rows() -> Vec<(
 mod panel_layout_tests {
     use super::*;
     use gpui::{Render, ScrollHandle, TestAppContext, size};
+
+    #[gpui::test]
+    fn ssh_config_source_is_searchable_in_the_visible_locale(cx: &mut TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_PALETTE_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Workspace storage is process-wide; keep the fixture out of the user's profile.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let settings_path = default_settings_path();
+        assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
+        let mut settings = SettingsStore::load_from_path(&settings_path).unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.save().unwrap();
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let hosts = [oxideterm_connections::SshConfigHost {
+            alias: "prod".into(),
+            hostname: Some("db.example".into()),
+            user: Some("operator".into()),
+            ..Default::default()
+        }];
+        workspace.update(cx, |workspace, _| {
+            workspace.settings_store.settings_mut().ssh_config.auto_load_hosts = true;
+            for (locale, query, detail) in [
+                (oxideterm_i18n::Locale::En, "#prod ssh config", "SSH Config host operator@db.example:22"),
+                (oxideterm_i18n::Locale::ZhCn, "#prod SSH 配置", "SSH 配置主机 operator@db.example:22"),
+            ] {
+                workspace.i18n.set_locale(locale);
+                let (_, query) = parse_command_palette_query(query);
+                let results = rank_palette_section(workspace.command_palette_ssh_config_items(&hosts), &query);
+                assert_eq!(results.iter().map(|result| result.item.id.as_str()).collect::<Vec<_>>(), vec!["ssh-config:prod"]);
+                assert_eq!(results[0].item.detail.as_deref(), Some(detail));
+                assert_eq!(results[0].score, 1.0);
+                assert!(matches!(&results[0].item.action, PaletteAction::QuickConnectAlias(alias) if alias == "prod"));
+            }
+        });
+    }
 
     #[test]
     fn saved_local_profiles_are_searchable_without_running_tabs() {
