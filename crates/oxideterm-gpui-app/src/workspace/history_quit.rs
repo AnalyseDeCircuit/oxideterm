@@ -286,6 +286,7 @@ mod tests {
         let retained_root =
             cx.update(|window, _| window.root::<WorkspaceWindowShell>().flatten().unwrap());
         assert_eq!(retained_root, shell);
+        knowledge::tests::assert_locked_quit_preserves_draft(&workspace, cx);
         cx.update(|window, cx| window.request_close(cx));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.simulate_keystrokes("enter");

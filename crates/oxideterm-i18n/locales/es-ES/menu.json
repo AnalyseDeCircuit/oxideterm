@@ -8,6 +8,7 @@
     "hide_main_window": "Ocultar ventana principal",
     "quit": "Salir de OxideTerm",
     "confirm_quit": "¿Salir de OxideTerm? Se cerrarán todas las sesiones de terminal y conexiones activas.",
+    "unlock_to_finish_quit": "Desbloquea la aplicación para guardar o descartar los cambios antes de salir.",
     "edit": "Editar",
     "cut": "Cortar",
     "copy": "Copiar",

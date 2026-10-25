@@ -13,7 +13,7 @@ use objc2::{MainThreadMarker, rc::Retained, runtime::ProtocolObject};
 use objc2_app_kit::{
     NSApplication, NSView, NSWindow, NSWindowDidExitFullScreenNotification, NSWindowStyleMask,
 };
-use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol};
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSString};
 use raw_window_handle::RawWindowHandle;
 
 use crate::{DesktopPresenceDeliverySender, DesktopPresenceMenu};
@@ -28,22 +28,56 @@ thread_local! {
 /// Keeps native callbacks and deferred hiding scoped to the registered main window.
 struct MainWindowPresence {
     address: usize,
-    hide_pending: Arc<AtomicBool>,
-    exiting_fullscreen: Arc<AtomicBool>,
-    observer: Retained<ProtocolObject<dyn NSObjectProtocol>>,
+    hide: Arc<DeferredWindowHide>,
+    observers: Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>,
     _closed_subscription: Subscription,
+}
+
+#[derive(Default)]
+struct DeferredWindowHide {
+    requested: AtomicBool,
+    exiting_fullscreen: AtomicBool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum HideAction {
+    Hide,
+    ExitFullscreen,
+    Wait,
+}
+
+impl DeferredWindowHide {
+    fn request(&self, fullscreen: bool) -> HideAction {
+        if fullscreen || self.exiting_fullscreen.load(Ordering::SeqCst) {
+            self.requested.store(true, Ordering::SeqCst);
+            if self.exiting_fullscreen.swap(true, Ordering::SeqCst) {
+                HideAction::Wait
+            } else {
+                HideAction::ExitFullscreen
+            }
+        } else {
+            HideAction::Hide
+        }
+    }
+
+    fn finish_exit(&self, succeeded: bool) -> bool {
+        self.exiting_fullscreen.store(false, Ordering::SeqCst);
+        let requested = self.requested.swap(false, Ordering::SeqCst);
+        succeeded && requested
+    }
+
+    fn cancel(&self) {
+        self.requested.store(false, Ordering::SeqCst);
+    }
 }
 
 impl MainWindowPresence {
     fn new(ns_window: *mut NSWindow, window: &Window, cx: &App) -> Self {
         let address = ns_window as usize;
-        let hide_pending = Arc::new(AtomicBool::new(false));
-        let exiting_fullscreen = Arc::new(AtomicBool::new(false));
-        let completion_hide_pending = hide_pending.clone();
-        let completion_exiting_fullscreen = exiting_fullscreen.clone();
+        let hide = Arc::new(DeferredWindowHide::default());
+        let completion_hide = hide.clone();
         let completion = block2::RcBlock::new(move |_: NonNull<NSNotification>| {
-            completion_exiting_fullscreen.store(false, Ordering::SeqCst);
-            if completion_hide_pending.swap(false, Ordering::SeqCst) {
+            if completion_hide.finish_exit(true) {
                 // AppKit posts this window-scoped notification synchronously on the main thread.
                 let _mtm = MainThreadMarker::new()
                     .expect("fullscreen completion must run on the main thread");
@@ -60,6 +94,20 @@ impl MainWindowPresence {
                 &completion,
             )
         };
+        let failure_hide = hide.clone();
+        let failure = block2::RcBlock::new(move |_: NonNull<NSNotification>| {
+            failure_hide.finish_exit(false);
+        });
+        let failure_observer = unsafe {
+            NSNotificationCenter::defaultCenter().addObserverForName_object_queue_usingBlock(
+                Some(&NSString::from_str(
+                    gpui::MACOS_WINDOW_DID_FAIL_TO_EXIT_FULLSCREEN_NOTIFICATION,
+                )),
+                Some(&*ns_window),
+                None,
+                &failure,
+            )
+        };
         let window_id = window.window_handle().window_id();
         let closed_subscription = cx.on_window_closed(move |_, closed_id| {
             if closed_id == window_id {
@@ -68,9 +116,8 @@ impl MainWindowPresence {
         });
         Self {
             address,
-            hide_pending,
-            exiting_fullscreen,
-            observer,
+            hide,
+            observers: vec![observer, failure_observer],
             _closed_subscription: closed_subscription,
         }
     }
@@ -78,9 +125,11 @@ impl MainWindowPresence {
 
 impl Drop for MainWindowPresence {
     fn drop(&mut self) {
-        self.hide_pending.store(false, Ordering::SeqCst);
-        unsafe {
-            NSNotificationCenter::defaultCenter().removeObserver((*self.observer).as_ref());
+        self.hide.cancel();
+        for observer in &self.observers {
+            unsafe {
+                NSNotificationCenter::defaultCenter().removeObserver((**observer).as_ref());
+            }
         }
     }
 }
@@ -152,7 +201,7 @@ pub(crate) fn show_main_window() {
     let address = MAIN_WINDOW.with(|window| {
         window.borrow().as_ref().map(|window| {
             // Restoring during the transition must cancel its delayed hide.
-            window.hide_pending.store(false, Ordering::SeqCst);
+            window.hide.cancel();
             window.address
         })
     });
@@ -197,29 +246,44 @@ fn show_ns_window(window: *mut NSWindow) {
 }
 
 fn hide_ns_window(window: *mut NSWindow) {
-    let (hide_pending, exiting_fullscreen) = MAIN_WINDOW.with(|presence| {
+    let hide = MAIN_WINDOW.with(|presence| {
         let presence = presence.borrow();
         let presence = presence
             .as_ref()
             .filter(|presence| presence.address == window as usize)
             .expect("main window presence must own its fullscreen transition");
-        (
-            presence.hide_pending.clone(),
-            presence.exiting_fullscreen.clone(),
-        )
+        presence.hide.clone()
     });
     unsafe {
         let window = &*window;
-        if window.styleMask().contains(NSWindowStyleMask::FullScreen)
-            || exiting_fullscreen.load(Ordering::SeqCst)
-        {
-            hide_pending.store(true, Ordering::SeqCst);
-            if !exiting_fullscreen.swap(true, Ordering::SeqCst) {
+        match hide.request(window.styleMask().contains(NSWindowStyleMask::FullScreen)) {
+            HideAction::ExitFullscreen => {
                 // Order out only after AppKit removes the fullscreen Space.
                 window.toggleFullScreen(None);
             }
-        } else {
-            window.orderOut(None);
+            HideAction::Hide => window.orderOut(None),
+            HideAction::Wait => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_fullscreen_exit_can_retry_without_hiding_a_restored_window() {
+        let hide = DeferredWindowHide::default();
+        assert_eq!(hide.request(true), HideAction::ExitFullscreen);
+        assert_eq!(hide.request(true), HideAction::Wait);
+        assert!(!hide.finish_exit(false));
+        assert_eq!(hide.request(true), HideAction::ExitFullscreen);
+        assert!(hide.finish_exit(true));
+        assert_eq!(hide.request(false), HideAction::Hide);
+
+        assert_eq!(hide.request(true), HideAction::ExitFullscreen);
+        hide.cancel();
+        assert!(!hide.finish_exit(true));
+        assert_eq!(hide.request(true), HideAction::ExitFullscreen);
     }
 }

@@ -3113,6 +3113,14 @@ extern "C" fn window_did_fail_to_exit_fullscreen(this: &Object, _: Sel, _: id) {
     let mut lock = window_state.as_ref().lock();
     lock.is_exiting_fullscreen = false;
     lock.restore_traffic_light();
+    let native_window = lock.native_window;
+    drop(lock);
+    // OxideTerm: notify deferred window owners after releasing the native state lock.
+    unsafe {
+        let center: id = msg_send![class!(NSNotificationCenter), defaultCenter];
+        let name = ns_string(gpui::MACOS_WINDOW_DID_FAIL_TO_EXIT_FULLSCREEN_NOTIFICATION);
+        let _: () = msg_send![center, postNotificationName: name object: native_window];
+    }
 }
 
 extern "C" fn window_did_exit_fullscreen(this: &Object, _: Sel, _: id) {

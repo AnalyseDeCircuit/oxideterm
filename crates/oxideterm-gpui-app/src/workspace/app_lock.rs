@@ -935,6 +935,11 @@ impl WorkspaceApp {
         let titlebar_visible = self.window_titlebar_visible(window);
         let blocked = self.app_lock.retry_blocked();
         let can_submit = !self.app_lock.pending && !blocked;
+        let description_key = if self.knowledge_workspace.read(cx).app_quit_pending() {
+            "menu.unlock_to_finish_quit"
+        } else {
+            "settings_view.general.app_lock_locked_description"
+        };
         let card = oxideterm_gpui_ui::theme_card_surface_shadow(
             div()
                 .w(px(APP_LOCK_SCREEN_CARD_WIDTH))
@@ -971,14 +976,12 @@ impl WorkspaceApp {
                 )
                 .child(
                     div()
+                        .debug_selector(move || description_key.into())
                         .max_w(px(APP_LOCK_SCREEN_DESCRIPTION_WIDTH))
                         .text_center()
                         .text_size(px(self.tokens.metrics.ui_text_sm))
                         .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(
-                            self.i18n
-                                .t("settings_view.general.app_lock_locked_description"),
-                        ),
+                        .child(self.i18n.t(description_key)),
                 )
                 .child(
                     div()
