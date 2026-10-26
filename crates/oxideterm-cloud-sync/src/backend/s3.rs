@@ -321,13 +321,36 @@ fn s3_revision_blob_key(config: &CloudSyncSettings, revision: &str) -> String {
     crate::s3_revision_blob_key(&config.namespace, revision)
 }
 
+fn oss_service_name(host: &str) -> Option<&str> {
+    host.strip_prefix("s3.")
+        .unwrap_or(host)
+        .strip_suffix(".aliyuncs.com")
+        .filter(|service| service.starts_with("oss-") && !service.contains('.'))
+}
+
 fn join_s3_object_url(endpoint: &str, bucket: &str, key: &str) -> Result<Url> {
     let mut url = Url::parse(endpoint).context("missing_endpoint: invalid S3 endpoint")?;
+    let host = url.host_str().unwrap_or_default();
+    let bucket_prefix = format!("{bucket}.");
+    // A service label can also be a bucket name, so recognize service endpoints
+    // before removing a possible bucket prefix.
+    let oss_service = oss_service_name(host)
+        .or_else(|| host.strip_prefix(&bucket_prefix).and_then(oss_service_name));
+    let bucket_path = if let Some(service) = oss_service {
+        // OSS rejects path-style addressing. Normalize native OSS endpoints to
+        // its documented S3 endpoint before signing the bucket-qualified host.
+        let host = format!("{bucket}.s3.{service}.aliyuncs.com");
+        url.set_host(Some(&host))
+            .context("missing_endpoint: invalid S3 endpoint")?;
+        String::new()
+    } else {
+        encode_component(bucket)
+    };
     let base_path = trim_slashes(url.path());
     let encoded_key = encode_path_segments(key);
     let path = [
         base_path.as_str(),
-        encode_component(bucket).as_str(),
+        bucket_path.as_str(),
         encoded_key.as_str(),
     ]
     .into_iter()
@@ -487,6 +510,75 @@ fn s3_host_header(url: &Url) -> String {
 mod tests {
     use super::*;
     use crate::BackendType;
+
+    #[test]
+    fn builds_oss_virtual_hosted_urls_without_changing_other_s3_endpoints() {
+        for (endpoint, bucket, expected) in [
+            (
+                "https://oss-cn-hangzhou.aliyuncs.com",
+                "oxide-test",
+                "https://oxide-test.s3.oss-cn-hangzhou.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://s3.oss-cn-hangzhou.aliyuncs.com",
+                "oxide-test",
+                "https://oxide-test.s3.oss-cn-hangzhou.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oxide-test.oss-cn-hangzhou.aliyuncs.com",
+                "oxide-test",
+                "https://oxide-test.s3.oss-cn-hangzhou.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oxide-test.s3.oss-cn-hangzhou.aliyuncs.com",
+                "oxide-test",
+                "https://oxide-test.s3.oss-cn-hangzhou.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oss-cn-hangzhou-internal.aliyuncs.com",
+                "oxide-test",
+                "https://oxide-test.s3.oss-cn-hangzhou-internal.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oss-accelerate.aliyuncs.com",
+                "oxide-test",
+                "https://oxide-test.s3.oss-accelerate.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oss-cn-hangzhou.aliyuncs.com",
+                "oss-cn-hangzhou",
+                "https://oss-cn-hangzhou.s3.oss-cn-hangzhou.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oss-cn-hangzhou.oss-cn-hangzhou.aliyuncs.com",
+                "oss-cn-hangzhou",
+                "https://oss-cn-hangzhou.s3.oss-cn-hangzhou.aliyuncs.com/team/snapshot%201.oxide",
+            ),
+            (
+                "https://oss-cn-hangzhou.aliyuncs.com.example.test",
+                "oxide-test",
+                "https://oss-cn-hangzhou.aliyuncs.com.example.test/oxide-test/team/snapshot%201.oxide",
+            ),
+            (
+                "https://s3.amazonaws.com",
+                "oxide-test",
+                "https://s3.amazonaws.com/oxide-test/team/snapshot%201.oxide",
+            ),
+            (
+                "http://127.0.0.1:9000/root",
+                "oxide-test",
+                "http://127.0.0.1:9000/root/oxide-test/team/snapshot%201.oxide",
+            ),
+        ] {
+            assert_eq!(
+                join_s3_object_url(endpoint, bucket, "team/snapshot 1.oxide")
+                    .unwrap()
+                    .as_str(),
+                expected,
+                "endpoint: {endpoint}, bucket: {bucket}"
+            );
+        }
+    }
 
     #[test]
     fn builds_s3_object_urls_like_cloud_sync_plugin() {

@@ -32,6 +32,10 @@ The fields depend on the backend:
 | OneDrive / Google Drive | Account and configured sync folder or namespace |
 | HTTP JSON | A server implementing OxideTerm's current sync protocol, endpoint, and namespace |
 
+For Alibaba Cloud OSS, select **S3 Compatible**, enter an endpoint such as `https://s3.oss-cn-hangzhou.aliyuncs.com`, and set the region to the bucket's actual region, such as `cn-hangzhou`. Replace Hangzhou in this example with your bucket's region. Enter the bucket name separately and use the object prefix to separate sync spaces. The client uses the virtual-hosted addressing required by OSS. It also recognizes native official endpoints such as `https://oss-cn-hangzhou.aliyuncs.com` and official endpoints already qualified with the same bucket name. Internal endpoints require access to the corresponding Alibaba Cloud internal network.
+
+The OSS RAM credentials need `oss:ListObjects` permission on the bucket and `oss:GetObject`, `oss:PutObject`, and `oss:DeleteObject` permissions on sync objects to discover, read, publish, and clean up snapshots. For STS credentials, also enter the Session Token and update the credentials when they expire. See Alibaba Cloud's [Accessing OSS with the AWS SDK](https://www.alibabacloud.com/help/en/oss/developer-reference/use-amazon-s3-sdks-to-access-oss) and [S3 compatibility](https://www.alibabacloud.com/help/en/oss/developer-reference/compatibility-with-amazon-s3).
+
 Enter passwords and tokens in the dedicated credential fields. With sensitive sync disabled, connection passwords, key passphrases, managed private keys, AI keys, and privilege credentials are excluded. Enable **Sync sensitive credentials** only for the selected data you intend to share; the app asks for confirmation.
 
 ### Add a second device
