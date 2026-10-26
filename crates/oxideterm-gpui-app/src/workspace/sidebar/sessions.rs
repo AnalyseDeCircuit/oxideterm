@@ -107,6 +107,19 @@ fn session_group_connection_name(members: &[ActiveSessionSidebarRow]) -> Option<
     (!names.is_empty()).then(|| names.join(" · "))
 }
 
+fn session_endpoint_label(username: &str, host: &str, port: u16) -> String {
+    let host = if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    };
+    if username.is_empty() {
+        format!("{host}:{port}")
+    } else {
+        format!("{username}@{host}:{port}")
+    }
+}
+
 struct LocalSessionRowState {
     terminal_ids: Vec<TerminalSessionId>,
     search: String,
@@ -1467,6 +1480,7 @@ impl WorkspaceApp {
                 // actions, and reconnect state all invalidate the cached height.
                 self.active_session_sidebar_row_signature(member, view_mode, cx)
                     .hash(&mut hasher);
+                self.session_group_member_route(member).hash(&mut hasher);
             }
         }
         hasher.finish()
@@ -2792,7 +2806,7 @@ impl WorkspaceApp {
                     items.push(self.render_session_tree_child(
                         2,
                         member_is_last_row && member_items.is_empty(),
-                        self.render_session_group_member_label(member),
+                        self.render_session_group_member_label(member, cx),
                     ));
                 }
                 items.extend(member_items);
@@ -2835,21 +2849,113 @@ impl WorkspaceApp {
         container.into_any_element()
     }
 
-    fn render_session_group_member_label(&self, member: &ActiveSessionSidebarRow) -> AnyElement {
+    fn session_group_member_route(&self, member: &ActiveSessionSidebarRow) -> Option<String> {
+        member.parent_id.as_ref()?;
+        // Use the complete node-owned route, not a terminal pane or secret-bearing config.
+        // Two routes can share the same final jump host in different private networks.
+        let path = self.node_router.path_to_node(&member.node_id).ok()?;
+        let endpoints = path
+            .iter()
+            .map(|id| {
+                let node = self.node_router.node_metadata(id)?;
+                Some(session_endpoint_label(
+                    &node.username,
+                    &node.host,
+                    node.port,
+                ))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(endpoints.join(" → "))
+    }
+
+    fn render_session_group_member_label(
+        &self,
+        member: &ActiveSessionSidebarRow,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
+        let route = self.session_group_member_route(member);
+        let endpoint = session_endpoint_label(&member.username, &member.host, member.port);
+        let tooltip = format!(
+            "{}\n{}",
+            member.title,
+            route.as_deref().unwrap_or(&endpoint)
+        );
+        let tooltip_id = format!("session-group-member-{}", member.node_id.0);
+        let leave_id = tooltip_id.clone();
+        let port_selector = format!("session-group-member-port-{}", member.node_id.0);
+        let route_selector = format!("session-group-member-route-{}", member.node_id.0);
         div()
-            .h(px(SESSION_TREE_ITEM_HEIGHT))
+            .id(SharedString::from(tooltip_id.clone()))
+            .min_w_0()
             .ml_1()
             .px_2()
             .flex()
-            .flex_row()
-            .items_center()
+            .flex_col()
             .text_size(px(SESSION_TREE_TEXT_SIZE))
             .text_color(rgb(theme.text_muted))
-            .child(div().min_w(px(0.0)).truncate().child(member.title.clone()))
             .child(
-                self.render_session_status_dot(self.session_node_status(member.node_view.status())),
+                div()
+                    .h(px(SESSION_TREE_ITEM_HEIGHT))
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .child(member.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .debug_selector(move || port_selector.clone())
+                            .child(format!(":{}", member.port)),
+                    )
+                    .child(self.render_session_status_dot(
+                        self.session_node_status(member.node_view.status()),
+                    )),
             )
+            .when_some(route, |row, route| {
+                row.child(
+                    div()
+                        .h(px(SESSION_TREE_ITEM_HEIGHT))
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.0))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::ArrowDownRight,
+                            SESSION_TREE_CHILD_ICON_SIZE,
+                            rgb(theme.text_muted),
+                        ))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .truncate()
+                                .debug_selector(move || route_selector.clone())
+                                .child(route),
+                        ),
+                )
+            })
+            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
+                this.queue_workspace_tooltip(
+                    tooltip_id.clone(),
+                    tooltip.clone(),
+                    f32::from(event.position.x) + 12.0,
+                    f32::from(event.position.y) + 16.0,
+                    cx,
+                );
+            }))
+            .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(&leave_id, cx);
+                }
+            }))
             .into_any_element()
     }
 
@@ -4700,13 +4806,20 @@ mod host_view_render_tests {
         cx.run_until_parked();
 
         workspace.update(cx, |workspace, _cx| {
-            for (id, username, saved_connection_id, title) in [
-                ("smoke-root", "root", Some("smoke-conn"), "Smoke Prod"),
-                ("smoke-admin", "admin", None, "admin@smoke.invalid"),
+            for (id, username, port, saved_connection_id, title) in [
+                ("smoke-root", "root", 22, Some("smoke-conn"), "Smoke Prod"),
+                (
+                    "smoke-alt",
+                    "root",
+                    2222,
+                    Some("smoke-alt-conn"),
+                    "Smoke Prod",
+                ),
+                ("smoke-admin", "admin", 22, None, "admin@smoke.invalid"),
             ] {
                 let config = SshConfig {
                     host: "smoke.invalid".into(),
-                    port: 22,
+                    port,
                     username: username.into(),
                     ..Default::default()
                 };
@@ -4741,10 +4854,16 @@ mod host_view_render_tests {
                 "session-host-group:smoke.invalid\u{1}admin",
             ]
         );
-        assert_eq!(rows[1].group.as_ref().unwrap().members.len(), 1);
         assert_eq!(
-            rows[1].group.as_ref().unwrap().members[0].node_id.0,
-            "smoke-root"
+            rows[1]
+                .group
+                .as_ref()
+                .unwrap()
+                .members
+                .iter()
+                .map(|member| (member.node_id.0.as_str(), member.port))
+                .collect::<Vec<_>>(),
+            [("smoke-root", 22), ("smoke-alt", 2222)]
         );
         assert_eq!(
             rows[1].group.as_ref().unwrap().connection_name.as_deref(),
@@ -4815,6 +4934,26 @@ mod host_view_render_tests {
             expanded.size.height > px(0.0),
             "the option stack must occupy height, got {expanded:?}"
         );
+        workspace.update(cx, |workspace, _| {
+            for id in ["smoke-root", "smoke-alt"] {
+                workspace.ssh_nodes.get_mut(&NodeId::new(id)).unwrap().title =
+                    "Smoke Prod with a very long connection name ".repeat(8);
+            }
+        });
+        draw_sidebar(cx);
+        for selector in [
+            "session-group-member-port-smoke-root",
+            "session-group-member-port-smoke-alt",
+        ] {
+            let port = cx
+                .debug_bounds(selector)
+                .expect("each member must expose its port beside its title");
+            assert!(port.size.width > px(0.0) && port.size.height > px(0.0));
+            assert!(
+                port.right() <= expanded.right(),
+                "port must remain visible inside the option stack"
+            );
+        }
 
         workspace.update(cx, |workspace, _| {
             workspace.set_session_group_expanded(
@@ -4828,5 +4967,151 @@ mod host_view_render_tests {
             options_bounds(cx).is_none(),
             "collapsing the user row removes its option stack"
         );
+
+        // The final jump endpoint is identical in both private networks. Only the
+        // complete ancestry distinguishes these targets from each other and from direct SSH.
+        workspace.update(cx, |workspace, _| {
+            for (branch, gateway) in [("a", "jump-a.invalid"), ("b", "jump-b.invalid")] {
+                for (id, parent, username, host, port) in [
+                    (format!("jump-{branch}"), None, "ops", gateway, 2201),
+                    (
+                        format!("bridge-{branch}"),
+                        Some(format!("jump-{branch}")),
+                        "relay",
+                        "2001:db8::1",
+                        22,
+                    ),
+                    (
+                        format!("smoke-via-{branch}"),
+                        Some(format!("bridge-{branch}")),
+                        "root",
+                        "smoke.invalid",
+                        22,
+                    ),
+                ] {
+                    let config = SshConfig {
+                        host: host.into(),
+                        port,
+                        username: username.into(),
+                        ..Default::default()
+                    };
+                    let node_id = NodeId::new(id);
+                    if let Some(parent) = parent {
+                        workspace
+                            .node_router
+                            .runtime_store()
+                            .upsert_child_node(NodeId::new(parent), node_id.clone(), config.clone())
+                            .unwrap();
+                    } else {
+                        workspace
+                            .node_router
+                            .upsert_node(node_id.clone(), config.clone());
+                    }
+                    workspace.ssh_nodes.insert(
+                        node_id,
+                        WorkspaceSshNode::new(
+                            None,
+                            &config,
+                            "Smoke Prod".into(),
+                            Vec::new(),
+                            NodeReadiness::Disconnected,
+                        ),
+                    );
+                }
+            }
+            workspace.set_session_group_expanded(
+                NodeId::new("session-host-group:smoke.invalid\u{1}root"),
+                true,
+                false,
+            );
+        });
+        let before_signature = workspace.read_with(cx, |workspace, cx| {
+            let row = workspace
+                .active_session_sidebar_display_rows(cx)
+                .into_iter()
+                .find(|row| row.node_id.0 == "session-host-group:smoke.invalid\u{1}root")
+                .unwrap();
+            let members = &row.group.as_ref().unwrap().members;
+            let route = |id: &str| {
+                workspace.session_group_member_route(
+                    members
+                        .iter()
+                        .find(|member| member.node_id.0 == id)
+                        .unwrap(),
+                )
+            };
+            assert_eq!(route("smoke-root"), None);
+            assert_eq!(
+                route("smoke-via-a").as_deref(),
+                Some("ops@jump-a.invalid:2201 → relay@[2001:db8::1]:22 → root@smoke.invalid:22")
+            );
+            assert_eq!(
+                route("smoke-via-b").as_deref(),
+                Some("ops@jump-b.invalid:2201 → relay@[2001:db8::1]:22 → root@smoke.invalid:22")
+            );
+            workspace.active_session_sidebar_row_signature(
+                &row,
+                ActiveSessionSidebarViewMode::Host,
+                cx,
+            )
+        });
+        draw_sidebar(cx);
+        for selector in [
+            "session-group-member-route-smoke-via-a",
+            "session-group-member-route-smoke-via-b",
+        ] {
+            let route = cx
+                .debug_bounds(selector)
+                .expect("the jump path must be visible on its member row");
+            assert!(route.size.width > px(0.0) && route.size.height > px(0.0));
+        }
+        assert!(
+            cx.debug_bounds("session-group-member-route-smoke-root")
+                .is_none()
+        );
+
+        // Changing an ancestor endpoint must invalidate the child group's cached row even
+        // though the member id, immediate parent, target endpoint, and title are unchanged.
+        workspace.update(cx, |workspace, _| {
+            let id = NodeId::new("jump-a");
+            let config = SshConfig {
+                host: "renamed.invalid".into(),
+                port: 2202,
+                username: "ops".into(),
+                ..Default::default()
+            };
+            workspace
+                .node_router
+                .upsert_node(id.clone(), config.clone());
+            workspace.ssh_nodes.get_mut(&id).unwrap().endpoint =
+                WorkspaceSshNodeEndpoint::from_config(&config);
+        });
+        workspace.read_with(cx, |workspace, cx| {
+            let row = workspace
+                .active_session_sidebar_display_rows(cx)
+                .into_iter()
+                .find(|row| row.node_id.0 == "session-host-group:smoke.invalid\u{1}root")
+                .unwrap();
+            let member = row
+                .group
+                .as_ref()
+                .unwrap()
+                .members
+                .iter()
+                .find(|member| member.node_id.0 == "smoke-via-a")
+                .unwrap();
+            assert_eq!(
+                workspace.session_group_member_route(member).as_deref(),
+                Some("ops@renamed.invalid:2202 → relay@[2001:db8::1]:22 → root@smoke.invalid:22")
+            );
+            assert_ne!(
+                workspace.active_session_sidebar_row_signature(
+                    &row,
+                    ActiveSessionSidebarViewMode::Host,
+                    cx
+                ),
+                before_signature
+            );
+        });
     }
 }
