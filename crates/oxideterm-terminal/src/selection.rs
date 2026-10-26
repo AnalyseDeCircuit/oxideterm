@@ -52,6 +52,44 @@ mod tests {
     use super::*;
     use crate::TerminalSession;
 
+    #[test]
+    fn history_readers_preserve_unicode_links_and_search_positions_after_resize() {
+        let mut session = TerminalSession::recording_playback(120, 3, Default::default(), 100);
+        session.feed_recording_output(
+            "\x1b[31m界e\u{301} \x1b]8;;https://example.test\x1b\\link\x1b]8;;\x1b\\\x1b[0m\r\none\r\ntwo\r\nthree".as_bytes(),
+        );
+        let original = session.snapshot_with_display_offset(1, 3).lines[0].source_id;
+        for cols in [120, 60, 240, 120] {
+            session.resize_with_cell_size(cols, 3, 0, 0).unwrap();
+            assert_eq!(session.buffer_text(), "界e\u{301} link\none\ntwo\nthree");
+            let matches = session
+                .search_source()
+                .unwrap()
+                .search_matches("link", &|| false);
+            assert_eq!(
+                matches,
+                [crate::TerminalSearchMatch {
+                    line: -1,
+                    start_col: 4,
+                    end_col: 8,
+                    ranges: vec![crate::TerminalSearchRange {
+                        line: -1,
+                        start_col: 4,
+                        end_col: 8
+                    }],
+                }]
+            );
+            let snapshot = session.snapshot_with_display_offset(1, 3);
+            let row = &snapshot.lines[0];
+            assert_eq!(row.source_id, original);
+            assert_eq!(row.cells[0].ch, '界');
+            assert!(row.cells[0].wide);
+            assert_eq!(row.cells[2].zerowidth(), "\u{301}");
+            assert_eq!(row.cells[4].hyperlink(), Some("https://example.test"));
+            assert!(row.cells[0].style_origin.foreground_explicit());
+        }
+    }
+
     fn select_line(session: &TerminalSession, line: i32) {
         session.set_selection(Some(TerminalSelectionRange {
             start_line: line,

@@ -9,10 +9,10 @@ use std::cmp::min;
 use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 
-use crate::grid::{Dimensions, GridCell, Indexed};
+use crate::grid::{Dimensions, Indexed};
 use crate::index::{Boundary, Column, Line, Point, Side};
 use crate::term::Term;
-use crate::term::cell::{Cell, Flags};
+use crate::term::cell::Flags;
 use crate::vte::ansi::CursorShape;
 
 /// A Point and side within that point.
@@ -59,7 +59,7 @@ impl SelectionRange {
     /// Check if the cell at a point is part of the selection.
     pub fn contains_cell(
         &self,
-        indexed: &Indexed<&Cell>,
+        indexed: &Indexed<crate::term::cell::CellRef<'_>>,
         point: Point,
         shape: CursorShape,
     ) -> bool {

@@ -69,7 +69,7 @@ fn terminal_buffer_text_from_term<T: EventListener>(term: &Term<T>, max_cols: us
         let row = &grid[Line(line)];
         let mut text = String::new();
         let mut cell_map = Vec::new();
-        append_grid_line_text(row[..].iter(), line, max_cols, &mut text, &mut cell_map);
+        append_grid_line_text(row.iter(), line, max_cols, &mut text, &mut cell_map);
         lines.push(text.trim_end().to_string());
     }
 
@@ -348,7 +348,7 @@ mod tests {
 
         assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
         parser.advance(&mut term, b"next");
-        assert_eq!(term.grid()[Line(0)][Column(0)].c, 'n');
+        assert_eq!(term.grid()[Line(0)].cell(Column(0)).c, 'n');
     }
 
     #[test]

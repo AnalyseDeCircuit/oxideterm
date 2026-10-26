@@ -8,6 +8,7 @@ use crate::term::cell::{Flags, ResetDiscriminant};
 
 use crate::grid::row::Row;
 use crate::grid::{Dimensions, Grid, GridCell};
+use crate::grid::CellView;
 
 impl<T: GridCell + Default + PartialEq> Grid<T> {
     /// Resize the grid's width and/or height.
@@ -29,6 +30,15 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             Ordering::Less => self.grow_columns(reflow, columns),
             Ordering::Greater => self.shrink_columns(reflow, columns),
             Ordering::Equal => (),
+        }
+
+        // Height changes can move history back into the writable screen. Reflow may also
+        // temporarily expand rows; finish with dense screen rows and compact retained history.
+        for line in self.topmost_line().0..0 {
+            drop(self.raw[Line(line)].compact());
+        }
+        for line in 0..self.lines as i32 {
+            self.raw[Line(line)].make_dense();
         }
 
         // Restore template cell.
@@ -102,7 +112,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Check if a row needs to be wrapped.
         let should_reflow = |row: &Row<T>| -> bool {
             let len = Column(row.len());
-            reflow && len.0 > 0 && len < columns && row[len - 1].flags().contains(Flags::WRAPLINE)
+            reflow && len.0 > 0 && len < columns && row.cell(len - 1).flags().contains(Flags::WRAPLINE)
         };
 
         self.columns = columns;
@@ -136,7 +146,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             // Remove leading spacers when reflowing wide char to the previous line.
             let mut last_len = last_row.len();
             if last_len >= 1
-                && last_row[Column(last_len - 1)].flags().contains(Flags::LEADING_WIDE_CHAR_SPACER)
+                && last_row.cell(Column(last_len - 1)).flags().contains(Flags::LEADING_WIDE_CHAR_SPACER)
             {
                 last_row.shrink(last_len - 1);
                 last_len -= 1;
@@ -147,7 +157,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
             let len = min(row.len(), num_wrapped);
 
             // Insert leading spacer when there's not enough room for reflowing wide char.
-            let mut cells = if row[Column(len - 1)].flags().contains(Flags::WIDE_CHAR) {
+            let mut cells = if row.cell(Column(len - 1)).flags().contains(Flags::WIDE_CHAR) {
                 num_wrapped -= 1;
 
                 let mut cells = row.front_split_off(len - 1);
@@ -228,9 +238,13 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         // Reverse iterator and fill all rows that are still too short.
         let mut new_raw = Vec::with_capacity(reversed.len());
-        for mut row in reversed.drain(..).rev() {
+        let history = reversed.len().saturating_sub(self.lines);
+        for (index, mut row) in reversed.drain(..).rev().enumerate() {
             if row.len() < columns {
                 row.grow(columns);
+            }
+            if index < history {
+                drop(row.compact());
             }
             new_raw.push(row);
         }
@@ -280,6 +294,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
                             Vec::new()
                         } else {
                             // Since it fits, just push the existing line without any reflow.
+                            if new_raw.len() >= self.lines { drop(row.compact()); }
                             new_raw.push(row);
                             break;
                         }
@@ -288,12 +303,12 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
                 // Insert spacer if a wide char would be wrapped into the last column.
                 if row.len() >= columns
-                    && row[Column(columns - 1)].flags().contains(Flags::WIDE_CHAR)
+                    && row.cell(Column(columns - 1)).flags().contains(Flags::WIDE_CHAR)
                 {
                     let mut spacer = T::default();
                     spacer.flags_mut().insert(Flags::LEADING_WIDE_CHAR_SPACER);
 
-                    let wide_char = mem::replace(&mut row[Column(columns - 1)], spacer);
+                    let wide_char = mem::replace(row.cell_mut(Column(columns - 1)), spacer);
                     wrapped.insert(0, wide_char);
                 }
 
@@ -301,7 +316,8 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
                 let len = wrapped.len();
                 if len > 0 && wrapped[len - 1].flags().contains(Flags::LEADING_WIDE_CHAR_SPACER) {
                     if len == 1 {
-                        row[Column(columns - 1)].flags_mut().insert(Flags::WRAPLINE);
+                        row.cell_mut(Column(columns - 1)).flags_mut().insert(Flags::WRAPLINE);
+                        if new_raw.len() >= self.lines { drop(row.compact()); }
                         new_raw.push(row);
                         break;
                     } else {
@@ -375,7 +391,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         if !reflow {
             self.cursor.point.column = min(self.cursor.point.column, Column(columns - 1));
         } else if self.cursor.point.column == columns
-            && !self[self.cursor.point.line][Column(columns - 1)].flags().contains(Flags::WRAPLINE)
+            && !self[self.cursor.point.line].cell(Column(columns - 1)).flags().contains(Flags::WRAPLINE)
         {
             self.cursor.input_needs_wrap = true;
             self.cursor.point.column -= 1;

@@ -1325,7 +1325,7 @@ pub(crate) fn text_between_positions<T: EventListener>(
             term.columns()
         };
         let mut segment = Zeroizing::new(String::new());
-        for cell in row[..].iter().take(last_col).skip(first_col) {
+        for cell in row.iter().take(last_col).skip(first_col) {
             if cell
                 .flags
                 .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
@@ -1337,7 +1337,8 @@ pub(crate) fn text_between_positions<T: EventListener>(
                 segment.push(*ch);
             }
         }
-        let wrapped = row[alacritty_terminal::index::Column(term.columns() - 1)]
+        let wrapped = row
+            .cell(alacritty_terminal::index::Column(term.columns() - 1))
             .flags
             .contains(Flags::WRAPLINE);
         let segment = if wrapped {
@@ -1370,7 +1371,7 @@ pub(crate) fn line_text<T: EventListener>(term: &Term<T>, absolute_line: usize) 
     let grid = term.grid();
     let row = &grid[Line(line)];
     let mut text = String::new();
-    for cell in row[..].iter().take(term.columns()) {
+    for cell in row.iter().take(term.columns()) {
         if cell
             .flags
             .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)

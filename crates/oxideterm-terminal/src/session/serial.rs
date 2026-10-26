@@ -2484,12 +2484,12 @@ mod serial_tests {
         let term = session.term.lock();
         for col in 0..3 {
             assert_eq!(
-                term.grid()[Line(0)][Column(col)].fg,
+                term.grid()[Line(0)].cell(Column(col)).fg,
                 Color::Named(NamedColor::Red)
             );
         }
         assert_eq!(
-            term.grid()[Line(1)][Column(0)].fg,
+            term.grid()[Line(1)].cell(Column(0)).fg,
             Color::Named(NamedColor::Foreground)
         );
     }

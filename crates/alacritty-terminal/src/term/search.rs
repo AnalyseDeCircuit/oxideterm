@@ -433,10 +433,11 @@ impl<T> Term<T> {
     }
 
     /// Advance a grid iterator over fullwidth characters.
+    #[inline]
     fn skip_fullwidth<'a>(
         &self,
-        iter: &'a mut GridIterator<'_, Cell>,
-        cell: &mut &'a Cell,
+        iter: &mut GridIterator<'a, Cell>,
+        cell: &mut crate::term::cell::CellRef<'a>,
         direction: Direction,
     ) {
         match direction {
@@ -460,7 +461,7 @@ impl<T> Term<T> {
                 }
 
                 let prev = iter.point().sub(self, Boundary::Grid, 1);
-                if self.grid[prev].flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
+                if self.grid.cell(prev).flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
                     iter.prev();
                 }
             },
@@ -470,7 +471,7 @@ impl<T> Term<T> {
 
     /// Find next matching bracket.
     pub fn bracket_search(&self, point: Point) -> Option<Point> {
-        let start_char = self.grid[point].c;
+        let start_char = self.grid.cell(point).c;
 
         // Find the matching bracket we're looking for
         let (forward, end_char) = BRACKET_PAIRS.iter().find_map(|(open, close)| {
@@ -570,7 +571,7 @@ impl<T> Term<T> {
         let last_column = self.columns() - 1;
 
         // Immediately stop if start point in on line break.
-        if point.column == last_column && !self.grid[point].flags.contains(Flags::WRAPLINE) {
+        if point.column == last_column && !self.grid.cell(point).flags.contains(Flags::WRAPLINE) {
             return Err(point);
         }
 
@@ -592,7 +593,7 @@ impl<T> Term<T> {
     /// Find the beginning of the current line across linewraps.
     pub fn line_search_left(&self, mut point: Point) -> Point {
         while point.line > self.topmost_line()
-            && self.grid[point.line - 1i32][self.last_column()].flags.contains(Flags::WRAPLINE)
+            && self.grid[point.line - 1i32].cell(self.last_column()).flags.contains(Flags::WRAPLINE)
         {
             point.line -= 1;
         }
@@ -605,7 +606,7 @@ impl<T> Term<T> {
     /// Find the end of the current line across linewraps.
     pub fn line_search_right(&self, mut point: Point) -> Point {
         while point.line + 1 < self.screen_lines()
-            && self.grid[point.line][self.last_column()].flags.contains(Flags::WRAPLINE)
+            && self.grid[point.line].cell(self.last_column()).flags.contains(Flags::WRAPLINE)
         {
             point.line += 1;
         }
@@ -1030,7 +1031,7 @@ mod tests {
             xxx \n\
             🦇xx\
         ");
-        term.grid[Line(0)][Column(3)].flags.insert(Flags::LEADING_WIDE_CHAR_SPACER);
+        term.grid[Line(0)].cell_mut(Column(3)).flags.insert(Flags::LEADING_WIDE_CHAR_SPACER);
 
         let mut regex = RegexSearch::new("🦇x").unwrap();
         let start = Point::new(Line(0), Column(0));
@@ -1065,9 +1066,9 @@ mod tests {
     fn wide_without_spacer() {
         let size = TermSize::new(2, 2);
         let mut term = Term::new(Config::default(), &size, ());
-        term.grid[Line(0)][Column(0)].c = 'x';
-        term.grid[Line(0)][Column(1)].c = '字';
-        term.grid[Line(0)][Column(1)].flags = Flags::WIDE_CHAR;
+        term.grid[Line(0)].cell_mut(Column(0)).c = 'x';
+        term.grid[Line(0)].cell_mut(Column(1)).c = '字';
+        term.grid[Line(0)].cell_mut(Column(1)).flags = Flags::WIDE_CHAR;
 
         let mut regex = RegexSearch::new("test").unwrap();
 
@@ -1232,7 +1233,7 @@ mod tests {
     #[test]
     fn no_spacer_fullwidth_linewrap() {
         let mut term = mock_term("abY\nxab");
-        term.grid_mut()[Line(0)][Column(2)].c = '🦇';
+        term.grid_mut()[Line(0)].cell_mut(Column(2)).c = '🦇';
 
         let mut regex = RegexSearch::new("🦇x").unwrap();
         let start = Point::new(Line(0), Column(0));

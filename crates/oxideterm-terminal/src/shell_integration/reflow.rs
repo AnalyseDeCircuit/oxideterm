@@ -37,14 +37,16 @@ fn row_width(grid: &Grid<Cell>, row: Line) -> usize {
     let columns = grid.columns();
     columns
         - usize::from(
-            grid[row][Column(columns - 1)]
+            grid[row]
+                .cell(Column(columns - 1))
                 .flags
                 .contains(Flags::LEADING_WIDE_CHAR_SPACER),
         )
 }
 
 fn wraps(grid: &Grid<Cell>, row: Line) -> bool {
-    grid[row][Column(grid.columns() - 1)]
+    grid[row]
+        .cell(Column(grid.columns() - 1))
         .flags
         .contains(Flags::WRAPLINE)
 }

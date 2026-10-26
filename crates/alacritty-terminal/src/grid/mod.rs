@@ -11,15 +11,20 @@ use crate::term::cell::{Flags, ResetDiscriminant};
 use crate::vte::ansi::{CharsetIndex, StandardCharset};
 
 pub mod resize;
+mod history;
 mod row;
 mod storage;
 #[cfg(test)]
 mod tests;
 
 pub use self::row::Row;
+pub use self::history::{CellView, HistoryCursor, HistoryStorage};
 use self::storage::Storage;
 
-pub trait GridCell: Sized {
+pub trait GridCell: Sized + Clone + PartialEq + std::fmt::Debug {
+    type View<'a>: CellView<Self> where Self: 'a;
+    type History: HistoryStorage<Self>;
+    fn view(&self) -> Self::View<'_>;
     /// Check if the cell contains any content.
     fn is_empty(&self) -> bool;
 
@@ -107,7 +112,7 @@ pub enum Scroll {
 /// ```
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Grid<T> {
+pub struct Grid<T: GridCell> {
     /// Current cursor for writing data.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub cursor: Cursor<T>,
@@ -141,7 +146,7 @@ pub struct Grid<T> {
     scrolled_out_lines: usize,
 }
 
-impl<T: GridCell + Default + PartialEq> Grid<T> {
+impl<T: GridCell + Default> Grid<T> {
     pub fn new(lines: usize, columns: usize, max_scroll_limit: usize) -> Grid<T> {
         Grid {
             raw: Storage::with_capacity(lines, columns),
@@ -275,6 +280,11 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         // Only rotate the entire history if the active region starts at the top.
         if region.start == 0 {
+            // Wide-character repair may have expanded the immediately preceding history row.
+            // Recompact it before it moves deeper into history, without scanning older rows.
+            if self.history_size() != 0 {
+                drop(self.raw[Line(-1)].compact());
+            }
             // Create scrollback for the new lines.
             let history_available = self.max_scroll_limit - self.history_size();
             self.scrolled_out_lines = self
@@ -311,6 +321,13 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
         // Ensure all new lines are fully cleared.
         for i in (region.end.0 - positions as i32..region.end.0).map(Line::from) {
+            // Compact only rows crossing into retained history. Hand their dense allocations
+            // directly to the exposed screen rows instead of reallocating full rows per scroll.
+            let history_line = i - region.end.0;
+            if region.start == 0 && history_line >= self.topmost_line() {
+                self.raw.compact_history(history_line, i, &self.cursor.template);
+                continue;
+            }
             self.raw[i].reset(&self.cursor.template);
         }
     }
@@ -361,7 +378,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
     }
 }
 
-impl<T> Grid<T> {
+impl<T: GridCell> Grid<T> {
     pub fn scrolled_out_lines(&self) -> usize {
         self.scrolled_out_lines
     }
@@ -424,7 +441,7 @@ impl<T> Grid<T> {
     #[inline]
     pub fn iter_from(&self, point: Point) -> GridIterator<'_, T> {
         let end = Point::new(self.bottommost_line(), self.last_column());
-        GridIterator { grid: self, point, end }
+        GridIterator { grid: self, point, end, cursor: HistoryCursor::default(), cached: None }
     }
 
     /// Iterate over all visible cells.
@@ -438,7 +455,7 @@ impl<T> Grid<T> {
         let end_line = min(start.line + self.screen_lines(), self.bottommost_line());
         let end = Point::new(end_line, last_column);
 
-        GridIterator { grid: self, point: start, end }
+        GridIterator { grid: self, point: start, end, cursor: HistoryCursor::default(), cached: None }
     }
 
     #[inline]
@@ -447,13 +464,13 @@ impl<T> Grid<T> {
     }
 
     #[inline]
-    pub fn cursor_cell(&mut self) -> &mut T {
+    pub fn cursor_cell(&mut self) -> &mut T where T: Clone {
         let point = self.cursor.point;
-        &mut self[point.line][point.column]
+        self[point.line].cell_mut(point.column)
     }
 }
 
-impl<T: PartialEq> PartialEq for Grid<T> {
+impl<T: GridCell> PartialEq for Grid<T> {
     fn eq(&self, other: &Self) -> bool {
         // Compare struct fields and check result of grid comparison.
         self.raw.eq(&other.raw)
@@ -463,7 +480,7 @@ impl<T: PartialEq> PartialEq for Grid<T> {
     }
 }
 
-impl<T> Index<Line> for Grid<T> {
+impl<T: GridCell> Index<Line> for Grid<T> {
     type Output = Row<T>;
 
     #[inline]
@@ -472,26 +489,21 @@ impl<T> Index<Line> for Grid<T> {
     }
 }
 
-impl<T> IndexMut<Line> for Grid<T> {
+impl<T: GridCell> IndexMut<Line> for Grid<T> {
     #[inline]
     fn index_mut(&mut self, index: Line) -> &mut Row<T> {
         &mut self.raw[index]
     }
 }
 
-impl<T> Index<Point> for Grid<T> {
-    type Output = T;
-
+impl<T: GridCell> Grid<T> {
     #[inline]
-    fn index(&self, point: Point) -> &T {
-        &self[point.line][point.column]
+    pub fn cell(&self, point: Point) -> T::View<'_> {
+        self[point.line].cell(point.column)
     }
-}
-
-impl<T> IndexMut<Point> for Grid<T> {
     #[inline]
-    fn index_mut(&mut self, point: Point) -> &mut T {
-        &mut self[point.line][point.column]
+    pub fn cell_mut(&mut self, point: Point) -> &mut T {
+        self[point.line].cell_mut(point.column)
     }
 }
 
@@ -531,7 +543,7 @@ pub trait Dimensions {
     }
 }
 
-impl<G> Dimensions for Grid<G> {
+impl<G: GridCell> Dimensions for Grid<G> {
     #[inline]
     fn total_lines(&self) -> usize {
         self.raw.len()
@@ -579,7 +591,7 @@ impl<T> Deref for Indexed<T> {
 }
 
 /// Grid cell iterator.
-pub struct GridIterator<'a, T> {
+pub struct GridIterator<'a, T: GridCell> {
     /// Immutable grid reference.
     grid: &'a Grid<T>,
 
@@ -588,23 +600,29 @@ pub struct GridIterator<'a, T> {
 
     /// Last cell included in the iterator.
     end: Point,
+    cursor: HistoryCursor,
+    cached: Option<T::View<'a>>,
 }
 
-impl<'a, T> GridIterator<'a, T> {
+impl<'a, T: GridCell> GridIterator<'a, T> {
     /// Current iterator position.
     pub fn point(&self) -> Point {
         self.point
     }
 
     /// Cell at the current iterator position.
-    pub fn cell(&self) -> &'a T {
-        &self.grid[self.point]
+    #[inline]
+    pub fn cell(&self) -> T::View<'a> {
+        if let Some(cell) = self.cached { return cell; }
+        let mut cursor = self.cursor;
+        self.grid[self.point.line].cell_with_cursor(self.point.column, &mut cursor)
     }
 }
 
-impl<'a, T> Iterator for GridIterator<'a, T> {
-    type Item = Indexed<&'a T>;
+impl<'a, T: GridCell> Iterator for GridIterator<'a, T> {
+    type Item = Indexed<T::View<'a>>;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         // Stop once we've reached the end of the grid.
         if self.point >= self.end {
@@ -615,11 +633,14 @@ impl<'a, T> Iterator for GridIterator<'a, T> {
             Point { column, .. } if column >= self.grid.last_column() => {
                 self.point.column = Column(0);
                 self.point.line += 1;
+                self.cursor = HistoryCursor::default();
             },
             _ => self.point.column += Column(1),
         }
 
-        Some(Indexed { cell: &self.grid[self.point], point: self.point })
+        let cell = self.grid[self.point.line].cell_with_cursor(self.point.column, &mut self.cursor);
+        self.cached = Some(cell);
+        Some(Indexed { cell, point: self.point })
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -646,7 +667,8 @@ pub trait BidirectionalIterator: Iterator {
     fn prev(&mut self) -> Option<Self::Item>;
 }
 
-impl<T> BidirectionalIterator for GridIterator<'_, T> {
+impl<T: GridCell> BidirectionalIterator for GridIterator<'_, T> {
+    #[inline]
     fn prev(&mut self) -> Option<Self::Item> {
         let topmost_line = self.grid.topmost_line();
         let last_column = self.grid.last_column();
@@ -660,10 +682,13 @@ impl<T> BidirectionalIterator for GridIterator<'_, T> {
             Point { column: Column(0), .. } => {
                 self.point.column = last_column;
                 self.point.line -= 1;
+                self.cursor = HistoryCursor::default();
             },
             _ => self.point.column -= Column(1),
         }
 
-        Some(Indexed { cell: &self.grid[self.point], point: self.point })
+        let cell = self.grid[self.point.line].cell_with_cursor(self.point.column, &mut self.cursor);
+        self.cached = Some(cell);
+        Some(Indexed { cell, point: self.point })
     }
 }

@@ -9,6 +9,9 @@ use crate::grid::{self, GridCell};
 use crate::index::Column;
 use crate::vte::ansi::{Color, Hyperlink as VteHyperlink, NamedColor};
 
+mod history;
+pub use history::{CellRef, PackedHistory};
+
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
     #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -222,6 +225,12 @@ impl Cell {
 }
 
 impl GridCell for Cell {
+    type View<'a> = CellRef<'a>;
+    type History = PackedHistory;
+    #[inline]
+    fn view(&self) -> CellRef<'_> {
+        CellRef { c: self.c, fg: self.fg, bg: self.bg, flags: self.flags, extra: self.extra.as_ref() }
+    }
     #[inline]
     fn is_empty(&self) -> bool {
         (self.c == ' ' || self.c == '\t')
@@ -271,11 +280,11 @@ impl LineLength for grid::Row<Cell> {
     fn line_length(&self) -> Column {
         let mut length = Column(0);
 
-        if self[Column(self.len() - 1)].flags.contains(Flags::WRAPLINE) {
+        if self.cell(Column(self.len() - 1)).flags.contains(Flags::WRAPLINE) {
             return Column(self.len());
         }
 
-        for (index, cell) in self[..].iter().rev().enumerate() {
+        for (index, cell) in self.iter().rev().enumerate() {
             if cell.c != ' '
                 || cell.extra.as_ref().map(|extra| extra.zerowidth.is_empty()) == Some(false)
             {
@@ -309,7 +318,7 @@ mod tests {
     #[test]
     fn line_length_works() {
         let mut row = Row::<Cell>::new(10);
-        row[Column(5)].c = 'a';
+        row.cell_mut(Column(5)).c = 'a';
 
         assert_eq!(row.line_length(), Column(6));
     }
@@ -317,7 +326,7 @@ mod tests {
     #[test]
     fn line_length_works_with_wrapline() {
         let mut row = Row::<Cell>::new(10);
-        row[Column(9)].flags.insert(super::Flags::WRAPLINE);
+        row.cell_mut(Column(9)).flags.insert(super::Flags::WRAPLINE);
 
         assert_eq!(row.line_length(), Column(10));
     }

@@ -1288,16 +1288,15 @@ fn snapshot_row_source<T: EventListener>(
     }
 
     let terminal_row = &term.grid()[Line(grid_line)];
-    let terminal_cells = &terminal_row[..];
     let default_cell = AlacrittyCell::default();
-    let populated_cols = terminal_cells
+    let populated_cols = terminal_row
         .iter()
         .take(size.cols)
         .rposition(|cell| cell != &default_cell)
         .map_or(0, |column| column + 1);
-    let visible_cells = &terminal_cells[..populated_cols];
-    let wrapped = visible_cells
+    let wrapped = terminal_row
         .iter()
+        .take(populated_cols)
         .any(|cell| cell.flags.contains(Flags::WRAPLINE));
 
     Some(SnapshotRowSource {
@@ -1318,14 +1317,13 @@ fn snapshot_row_from_source<T: EventListener>(
 ) -> TerminalRow {
     let grid_line = row as i32 - display_offset as i32;
     let terminal_row = &term.grid()[Line(grid_line)];
-    let terminal_cells = &terminal_row[..];
     let overrides = term.colors();
     let mut cells = Vec::with_capacity(size.cols);
     let mut recent_styles = [None, None];
     let mut next_style_slot = 0;
     let mut previous_extra = None;
     // Default trailing cells have fixed paint data, so skip color and metadata conversion.
-    for cell in &terminal_cells[..source.populated_cols] {
+    for cell in terminal_row.iter().take(source.populated_cols) {
         let spacer = cell
             .flags
             .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
@@ -1543,7 +1541,7 @@ mod incremental_snapshot_tests {
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, "\x1b[37;107mab─cd\x1b[2mef\x1b[7mgh\x1b[0mij\x1b[38;2;1;2;3mkl\x1b[38;5;196mmn\x1b[0m\r\n\x1b]8;;https://one.example\x1b\\ABe\u{301}C\x1b]8;;\x1b\\D\x1b]8;;https://two.example\x1b\\EF\x1b]8;;\x1b\\".as_bytes());
         let snapshot = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
-        for (source, actual) in term.grid()[Line(0)][..]
+        for (source, actual) in term.grid()[Line(0)]
             .iter()
             .take(16)
             .zip(snapshot.lines[0].cells.iter())

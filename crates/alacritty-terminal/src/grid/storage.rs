@@ -5,7 +5,7 @@ use std::ops::{Index, IndexMut};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::Row;
+use super::{GridCell, Row};
 use crate::index::Line;
 
 /// Maximum number of buffered lines outside of the grid for performance optimization.
@@ -29,7 +29,7 @@ const MAX_CACHE_SIZE: usize = 1_000;
 /// [`zero`]: #structfield.zero
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct Storage<T> {
+pub struct Storage<T: GridCell> {
     inner: Vec<Row<T>>,
 
     /// Starting point for the storage of rows.
@@ -51,7 +51,7 @@ pub struct Storage<T> {
     len: usize,
 }
 
-impl<T: PartialEq> PartialEq for Storage<T> {
+impl<T: GridCell> PartialEq for Storage<T> {
     fn eq(&self, other: &Self) -> bool {
         // Both storage buffers need to be truncated and zeroed.
         assert_eq!(self.zero, 0);
@@ -61,7 +61,7 @@ impl<T: PartialEq> PartialEq for Storage<T> {
     }
 }
 
-impl<T> Storage<T> {
+impl<T: GridCell> Storage<T> {
     #[inline]
     pub fn with_capacity(visible_lines: usize, columns: usize) -> Storage<T>
     where
@@ -130,7 +130,7 @@ impl<T> Storage<T> {
             self.rezero();
 
             let realloc_size = self.inner.len() + max(additional_rows, MAX_CACHE_SIZE);
-            self.inner.resize_with(realloc_size, || Row::new(columns));
+            self.inner.resize_with(realloc_size, || Row::spare(columns));
         }
 
         self.len += additional_rows;
@@ -146,6 +146,19 @@ impl<T> Storage<T> {
         let a = self.compute_index(a);
         let b = self.compute_index(b);
         self.inner.swap(a, b);
+    }
+
+    pub fn compact_history<D>(&mut self, history: Line, screen: Line, template: &T)
+    where T: crate::term::cell::ResetDiscriminant<D>, D: PartialEq {
+        let indices = [self.compute_index(history), self.compute_index(screen)];
+        let [history, screen] = self.inner.get_disjoint_mut(indices)
+            .expect("retained history and exposed screen rows are distinct");
+        let reuse = screen.take_history();
+        if let Some((buffer, occ)) = history.compact_reusing(reuse) {
+            screen.recycle(buffer, occ, template);
+        } else {
+            screen.reset(template);
+        }
     }
 
     /// Rotate the grid, moving all lines up/down in history.
@@ -218,7 +231,7 @@ impl<T> Storage<T> {
     }
 }
 
-impl<T> Index<Line> for Storage<T> {
+impl<T: GridCell> Index<Line> for Storage<T> {
     type Output = Row<T>;
 
     #[inline]
@@ -228,7 +241,7 @@ impl<T> Index<Line> for Storage<T> {
     }
 }
 
-impl<T> IndexMut<Line> for Storage<T> {
+impl<T: GridCell> IndexMut<Line> for Storage<T> {
     #[inline]
     fn index_mut(&mut self, index: Line) -> &mut Self::Output {
         let index = self.compute_index(index);
@@ -245,6 +258,9 @@ mod tests {
     use crate::term::cell::Flags;
 
     impl GridCell for char {
+    type View<'a> = &'a Self;
+    type History = Vec<Self>;
+    fn view(&self) -> &Self { self }
         fn is_empty(&self) -> bool {
             *self == ' ' || *self == '\t'
         }
@@ -736,7 +752,7 @@ mod tests {
 
     fn filled_row(content: char) -> Row<char> {
         let mut row = Row::new(1);
-        row[Column(0)] = content;
+        *row.cell_mut(Column(0)) = content;
         row
     }
 }

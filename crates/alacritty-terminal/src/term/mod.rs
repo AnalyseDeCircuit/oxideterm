@@ -626,13 +626,13 @@ impl<T> Term<T> {
         let line_length = cmp::min(grid_line.line_length(), cols.end + 1);
 
         // Include wide char when trailing spacer is selected.
-        if grid_line[cols.start].flags.contains(Flags::WIDE_CHAR_SPACER) {
+        if grid_line.cell(cols.start).flags.contains(Flags::WIDE_CHAR_SPACER) {
             cols.start -= 1;
         }
 
         let mut tab_mode = false;
         for column in (cols.start.0..line_length.0).map(Column::from) {
-            let cell = &grid_line[column];
+            let cell = grid_line.cell(column);
 
             // Skip over cells until next tab-stop once a tab was found.
             if tab_mode {
@@ -660,7 +660,7 @@ impl<T> Term<T> {
 
         if cols.end >= self.columns() - 1
             && (line_length.0 == 0
-                || !self.grid[line][line_length - 1].flags.contains(Flags::WRAPLINE))
+                || !self.grid[line].cell(line_length - 1).flags.contains(Flags::WRAPLINE))
         {
             text.push('\n');
         }
@@ -668,10 +668,10 @@ impl<T> Term<T> {
         // If wide char is not part of the selection, but leading spacer is, include it.
         if line_length == self.columns()
             && line_length.0 >= 2
-            && grid_line[line_length - 1].flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
+            && grid_line.cell(line_length - 1).flags.contains(Flags::LEADING_WIDE_CHAR_SPACER)
             && include_wrapped_wide
         {
-            text.push(self.grid[line - 1i32][Column(0)].c);
+            text.push(self.grid[line - 1i32].cell(Column(0)).c);
         }
 
         text
@@ -997,7 +997,7 @@ impl<T> Term<T> {
 
     /// Jump to the end of a wide cell.
     pub fn expand_wide(&self, mut point: Point, direction: Direction) -> Point {
-        let flags = self.grid[point.line][point.column].flags;
+        let flags = self.grid[point.line].cell(point.column).flags;
 
         match direction {
             Direction::Right if flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) => {
@@ -1013,7 +1013,7 @@ impl<T> Term<T> {
                 }
 
                 let prev = point.sub(self, Boundary::Grid, 1);
-                if self.grid[prev].flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
+                if self.grid.cell(prev).flags.contains(Flags::LEADING_WIDE_CHAR_SPACER) {
                     point = prev;
                 }
             },
@@ -1094,15 +1094,15 @@ impl<T> Term<T> {
             let wide = cursor_cell.flags.contains(Flags::WIDE_CHAR);
             let point = self.grid.cursor.point;
             if wide && point.column < self.last_column() {
-                self.grid[point.line][point.column + 1].flags.remove(Flags::WIDE_CHAR_SPACER);
+                self.grid[point.line].cell_mut(point.column + 1).flags.remove(Flags::WIDE_CHAR_SPACER);
             } else if point.column > 0 {
-                self.grid[point.line][point.column - 1].clear_wide();
+                self.grid[point.line].cell_mut(point.column - 1).clear_wide();
             }
 
             // Remove leading spacers.
             if point.column <= 1 && point.line != self.topmost_line() {
                 let column = self.last_column();
-                self.grid[point.line - 1i32][column].flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
+                self.grid[point.line - 1i32].cell_mut(column).flags.remove(Flags::LEADING_WIDE_CHAR_SPACER);
             }
 
             cursor_cell = self.grid.cursor_cell();
@@ -1183,11 +1183,11 @@ impl<T: EventListener> Handler for Term<T> {
 
             // Put zerowidth characters over first fullwidth character cell.
             let line = self.grid.cursor.point.line;
-            if self.grid[line][column].flags.contains(Flags::WIDE_CHAR_SPACER) {
+            if self.grid[line].cell(column).flags.contains(Flags::WIDE_CHAR_SPACER) {
                 column.0 = column.saturating_sub(1);
             }
 
-            self.grid[line][column].push_zerowidth(c);
+            self.grid[line].cell_mut(column).push_zerowidth(c);
             return;
         }
 
@@ -1201,7 +1201,7 @@ impl<T: EventListener> Handler for Term<T> {
         if self.mode.contains(TermMode::INSERT) && self.grid.cursor.point.column + width < columns {
             let line = self.grid.cursor.point.line;
             let col = self.grid.cursor.point.column;
-            let row = &mut self.grid[line][..];
+            let row = self.grid[line].as_mut_slice();
 
             for col in (col.0..(columns - width)).rev() {
                 row.swap(col + width, col);
@@ -1274,9 +1274,12 @@ impl<T: EventListener> Handler for Term<T> {
             let write_len = (columns - start).min(bytes.len() - processed);
             let end = start + write_len;
 
-            // Scalar input repairs both halves of wide cells, so resume it before touching one.
-            let overlaps_wide_cell = self.grid[line][Column(start)..Column(end)]
-                .iter()
+            let template = self.grid.cursor.template.clone();
+            // This span will be written by either path. Inspect the writable screen cells
+            // directly instead of paying for history iteration on every ASCII span.
+            let cells = self.grid[line].cells_mut(start..end);
+            // Scalar input repairs both halves of wide cells before replacing them.
+            let overlaps_wide_cell = cells.iter()
                 .any(|cell| cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER));
             if overlaps_wide_cell {
                 for character in text[processed..].chars() {
@@ -1285,8 +1288,6 @@ impl<T: EventListener> Handler for Term<T> {
                 return;
             }
 
-            let template = self.grid.cursor.template.clone();
-            let cells = &mut self.grid[line][Column(start)..Column(end)];
             // Keep charset mapping outside the ordinary ASCII fill loop.
             if active_charset == StandardCharset::Ascii {
                 for (cell, byte) in cells
@@ -1377,7 +1378,7 @@ impl<T: EventListener> Handler for Term<T> {
             for offset in 0..batch_lines {
                 let line = next_ascii_line(text, &mut text_offset);
                 let line_index = first_line + offset as i32;
-                for (cell, byte) in self.grid[line_index][..Column(line.len())]
+                for (cell, byte) in self.grid[line_index].cells_mut(0..line.len())
                     .iter_mut()
                     .zip(line.bytes())
                 {
@@ -1401,7 +1402,7 @@ impl<T: EventListener> Handler for Term<T> {
 
         for line in (0..self.screen_lines()).map(Line::from) {
             for column in 0..self.columns() {
-                let cell = &mut self.grid[line][Column(column)];
+                let cell = self.grid[line].cell_mut(Column(column));
                 *cell = Cell::default();
                 cell.c = 'E';
             }
@@ -1456,7 +1457,7 @@ impl<T: EventListener> Handler for Term<T> {
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
 
-        let row = &mut self.grid[line][..];
+        let row = self.grid[line].as_mut_slice();
 
         for offset in (0..num_cells).rev() {
             row.swap(destination + offset, source.0 + offset);
@@ -1794,7 +1795,7 @@ impl<T: EventListener> Handler for Term<T> {
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, start.0, end.0);
         let row = &mut self.grid[line];
-        for cell in &mut row[start..end] {
+        for cell in row.cells_mut(start.0..end.0) {
             *cell = bg.into();
         }
     }
@@ -1814,7 +1815,7 @@ impl<T: EventListener> Handler for Term<T> {
 
         let line = cursor.point.line;
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
-        let row = &mut self.grid[line][..];
+        let row = self.grid[line].as_mut_slice();
 
         for offset in 0..num_cells {
             row.swap(start + offset, end + offset);
@@ -1914,7 +1915,7 @@ impl<T: EventListener> Handler for Term<T> {
         self.damage.damage_line(point.line.0 as usize, left.0, right.0 - 1);
 
         let row = &mut self.grid[point.line];
-        for cell in &mut row[left..right] {
+        for cell in row.cells_mut(left.0..right.0) {
             *cell = bg.into();
         }
 
@@ -2030,7 +2031,7 @@ impl<T: EventListener> Handler for Term<T> {
 
                 // Clear up to the current column in the current line.
                 let end = cmp::min(cursor.column + 1, Column(self.columns()));
-                for cell in &mut self.grid[cursor.line][..end] {
+                for cell in self.grid[cursor.line].cells_mut(0..end.0) {
                     *cell = bg.into();
                 }
 
@@ -2039,7 +2040,8 @@ impl<T: EventListener> Handler for Term<T> {
             },
             ansi::ClearMode::Below => {
                 let cursor = self.grid.cursor.point;
-                for cell in &mut self.grid[cursor.line][cursor.column..] {
+                let columns = self.columns();
+                for cell in self.grid[cursor.line].cells_mut(cursor.column.0..columns) {
                     *cell = bg.into();
                 }
 
@@ -2645,7 +2647,7 @@ impl RenderableCursor {
         // Cursor position.
         let vi_mode = term.mode().contains(TermMode::VI);
         let mut point = if vi_mode { term.vi_mode_cursor.point } else { term.grid.cursor.point };
-        if term.grid[point].flags.contains(Flags::WIDE_CHAR_SPACER) {
+        if term.grid.cell(point).flags.contains(Flags::WIDE_CHAR_SPACER) {
             point.column -= 1;
         }
 
@@ -2755,18 +2757,18 @@ pub mod test {
         for (line, text) in lines.iter().enumerate() {
             let line = Line(line as i32);
             if !text.ends_with('\r') && line + 1 != lines.len() {
-                term.grid[line][Column(num_cols - 1)].flags.insert(Flags::WRAPLINE);
+                term.grid[line].cell_mut(Column(num_cols - 1)).flags.insert(Flags::WRAPLINE);
             }
 
             let mut index = 0;
             for c in text.chars().take_while(|c| *c != '\r') {
-                term.grid[line][Column(index)].c = c;
+                term.grid[line].cell_mut(Column(index)).c = c;
 
                 // Handle fullwidth characters.
                 let width = c.width().unwrap();
                 if width == 2 {
-                    term.grid[line][Column(index)].flags.insert(Flags::WIDE_CHAR);
-                    term.grid[line][Column(index + 1)].flags.insert(Flags::WIDE_CHAR_SPACER);
+                    term.grid[line].cell_mut(Column(index)).flags.insert(Flags::WIDE_CHAR);
+                    term.grid[line].cell_mut(Column(index + 1)).flags.insert(Flags::WIDE_CHAR_SPACER);
                 }
 
                 index += width;
@@ -3038,18 +3040,18 @@ mod tests {
                 continue;
             }
 
-            grid[Line(i)][Column(0)].c = '"';
+            grid[Line(i)].cell_mut(Column(0)).c = '"';
 
             for j in 1..4 {
-                grid[Line(i)][Column(j)].c = 'a';
+                grid[Line(i)].cell_mut(Column(j)).c = 'a';
             }
 
-            grid[Line(i)][Column(4)].c = '"';
+            grid[Line(i)].cell_mut(Column(4)).c = '"';
         }
-        grid[Line(2)][Column(0)].c = ' ';
-        grid[Line(2)][Column(4)].c = ' ';
-        grid[Line(2)][Column(4)].flags.insert(Flags::WRAPLINE);
-        grid[Line(3)][Column(0)].c = ' ';
+        grid[Line(2)].cell_mut(Column(0)).c = ' ';
+        grid[Line(2)].cell_mut(Column(4)).c = ' ';
+        grid[Line(2)].cell_mut(Column(4)).flags.insert(Flags::WRAPLINE);
+        grid[Line(3)].cell_mut(Column(0)).c = ' ';
 
         // Multiple lines contain an empty line.
         term.selection = Some(Selection::new(
@@ -3081,13 +3083,13 @@ mod tests {
         let mut grid: Grid<Cell> = Grid::new(3, 5, 0);
         for i in 0..5 {
             for j in 0..2 {
-                grid[Line(j)][Column(i)].c = 'a';
+                grid[Line(j)].cell_mut(Column(i)).c = 'a';
             }
         }
-        grid[Line(0)][Column(0)].c = '"';
-        grid[Line(0)][Column(3)].c = '"';
-        grid[Line(1)][Column(2)].c = '"';
-        grid[Line(0)][Column(4)].flags.insert(Flags::WRAPLINE);
+        grid[Line(0)].cell_mut(Column(0)).c = '"';
+        grid[Line(0)].cell_mut(Column(3)).c = '"';
+        grid[Line(1)].cell_mut(Column(2)).c = '"';
+        grid[Line(0)].cell_mut(Column(4)).flags.insert(Flags::WRAPLINE);
 
         let mut escape_chars = String::from("\"");
 
@@ -3128,10 +3130,10 @@ mod tests {
         let mut term = Term::new(Config::default(), &size, VoidListener);
         let mut grid: Grid<Cell> = Grid::new(1, 5, 0);
         for i in 0..5 {
-            grid[Line(0)][Column(i)].c = 'a';
+            grid[Line(0)].cell_mut(Column(i)).c = 'a';
         }
-        grid[Line(0)][Column(0)].c = '"';
-        grid[Line(0)][Column(3)].c = '"';
+        grid[Line(0)].cell_mut(Column(0)).c = '"';
+        grid[Line(0)].cell_mut(Column(3)).c = '"';
 
         mem::swap(&mut term.grid, &mut grid);
 
@@ -3149,17 +3151,17 @@ mod tests {
         let mut term = Term::new(Config::default(), &size, VoidListener);
         let grid = term.grid_mut();
         for i in 1..4 {
-            grid[Line(i)][Column(0)].c = '"';
+            grid[Line(i)].cell_mut(Column(0)).c = '"';
 
             for j in 1..4 {
-                grid[Line(i)][Column(j)].c = 'a';
+                grid[Line(i)].cell_mut(Column(j)).c = 'a';
             }
 
-            grid[Line(i)][Column(4)].c = '"';
+            grid[Line(i)].cell_mut(Column(4)).c = '"';
         }
-        grid[Line(2)][Column(2)].c = ' ';
-        grid[Line(2)][Column(4)].flags.insert(Flags::WRAPLINE);
-        grid[Line(3)][Column(4)].c = ' ';
+        grid[Line(2)].cell_mut(Column(2)).c = ' ';
+        grid[Line(2)].cell_mut(Column(4)).flags.insert(Flags::WRAPLINE);
+        grid[Line(3)].cell_mut(Column(4)).c = ' ';
 
         term.selection = Some(Selection::new(
             SelectionType::Block,
@@ -3208,7 +3210,7 @@ mod tests {
         term.configure_charset(CharsetIndex::G0, StandardCharset::SpecialCharacterAndLineDrawing);
         term.input('a');
 
-        assert_eq!(term.grid()[cursor].c, '▒');
+        assert_eq!(term.grid().cell(cursor).c, '▒');
     }
 
     #[test]

@@ -53,3 +53,7 @@ harness = false
 [[bench]]
 name = "privilege_prompt_stream"
 harness = false
+
+[[bench]]
+name = "history_search"
+harness = false

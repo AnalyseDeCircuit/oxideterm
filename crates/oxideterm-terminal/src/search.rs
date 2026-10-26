@@ -100,10 +100,29 @@ impl SearchRow {
         } else {
             cols
         };
+        if let Some(prefix) = row.ascii_prefix() {
+            let cols = cols.min(row.len());
+            let mut text = String::with_capacity(cols);
+            text.push_str(&prefix[..prefix.len().min(cols)]);
+            if cols > prefix.len() {
+                text.extend(std::iter::repeat_n(
+                    char::from(*prefix.as_bytes().last().unwrap()),
+                    cols - prefix.len(),
+                ));
+            }
+            return Self {
+                identity: row.identity(),
+                start: 0,
+                text,
+                wrapped,
+                history: false,
+                adjustments: Vec::new(),
+            };
+        }
         let mut text = String::new();
         let mut adjustments = Vec::new();
         let mut next_col = 0;
-        for (col, cell) in row[..].iter().take(cols).enumerate() {
+        for (col, cell) in row.iter().take(cols).enumerate() {
             if cell
                 .flags
                 .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
@@ -444,13 +463,7 @@ pub(crate) fn search_matches_from_term<T: EventListener>(
 
     for line in top_line..bottom_line {
         let row = &grid[Line(line)];
-        append_grid_line_text(
-            row[..].iter(),
-            line,
-            cols,
-            &mut logical_text,
-            &mut logical_map,
-        );
+        append_grid_line_text(row.iter(), line, cols, &mut logical_text, &mut logical_map);
         let wrapped = row
             .last()
             .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
@@ -561,7 +574,7 @@ fn ranges_for_match(
 }
 
 pub(crate) fn append_grid_line_text<'a>(
-    cells: impl Iterator<Item = &'a Cell>,
+    cells: impl Iterator<Item = alacritty_terminal::term::cell::CellRef<'a>>,
     line: i32,
     max_cols: usize,
     text: &mut String,
@@ -596,6 +609,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn background_search_preserves_text_history_tails_and_chunk_boundaries() {
+        let mut session =
+            crate::TerminalSession::recording_playback(400, 3, Default::default(), 100);
+        for line in 0..70 {
+            let row = format!("row{line:02} {}", "abcdefghij".repeat(39));
+            session.feed_recording_output(format!("\x1b[31m{row}\x1b[0m\r\n").as_bytes());
+        }
+        let source = session.search_source().unwrap();
+        {
+            let term = source.term.lock();
+            let copied = SearchRow::from_grid(&term.grid()[Line(-36)], 800, false);
+            assert_eq!(
+                copied.text,
+                format!("row32 {}    ", "abcdefghij".repeat(39))
+            );
+        }
+        for (query, regex, expected) in [
+            ("row32", false, vec![(-36, 0, 5)]),
+            (
+                "ij    ",
+                false,
+                (0..70).map(|i| (i - 68, 394, 400)).collect(),
+            ),
+            ("ghij\nrow33", false, vec![(-36, 392, 396), (-35, 0, 5)]),
+            (r"ghij\nrow33", true, vec![(-36, 392, 396), (-35, 0, 5)]),
+        ] {
+            let matches = source.search_matches_with_options(
+                query,
+                TerminalSearchOptions {
+                    regex,
+                    case_sensitive: true,
+                },
+                &|| false,
+            );
+            let actual: Vec<_> = matches
+                .iter()
+                .flat_map(|hit| &hit.ranges)
+                .map(|range| (range.line, range.start_col, range.end_col))
+                .collect();
+            assert_eq!(actual, expected, "{query}");
+        }
+        let mut wrapped =
+            crate::TerminalSession::recording_playback(80, 3, Default::default(), 100);
+        wrapped.feed_recording_output(
+            format!(
+                "{}needle{}\r\none\r\ntwo\r\nthree",
+                "a".repeat(76),
+                "b".repeat(78)
+            )
+            .as_bytes(),
+        );
+        let matches = wrapped
+            .search_source()
+            .unwrap()
+            .search_matches("needle", &|| false);
+        let ranges: Vec<_> = matches
+            .iter()
+            .flat_map(|hit| &hit.ranges)
+            .map(|range| (range.line, range.start_col, range.end_col))
+            .collect();
+        assert_eq!(ranges, vec![(-2, 76, 80), (-1, 0, 2)]);
+    }
+
+    #[test]
     fn search_ranges_cover_complete_wide_cells() {
         let mut cells = Vec::new();
         for ch in "a中文b".chars() {
@@ -613,7 +690,13 @@ mod tests {
         }
         let mut text = String::new();
         let mut map = Vec::new();
-        append_grid_line_text(cells.iter(), 0, 6, &mut text, &mut map);
+        append_grid_line_text(
+            cells.iter().map(alacritty_terminal::grid::GridCell::view),
+            0,
+            6,
+            &mut text,
+            &mut map,
+        );
         for (query, expected) in [("中", (1, 3)), ("中文", (1, 5)), ("文b", (3, 6))] {
             for options in [
                 TerminalSearchOptions::default(),

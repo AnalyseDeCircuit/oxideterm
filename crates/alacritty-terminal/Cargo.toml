@@ -50,6 +50,10 @@ path = "src/lib.rs"
 name = "ref"
 path = "tests/ref.rs"
 
+[[bench]]
+name = "history"
+harness = false
+
 [dependencies.base64]
 version = "0.22.0"
 
