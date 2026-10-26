@@ -449,6 +449,9 @@ impl WorkspaceApp {
                 ActiveSessionSidebarViewMode::Focus => {
                     (LucideIcon::ListChecks, SidebarActionKind::ToggleSessionView)
                 }
+                ActiveSessionSidebarViewMode::Host => {
+                    (LucideIcon::Server, SidebarActionKind::ToggleSessionView)
+                }
             };
             header = header
                 .child(self.render_session_search_button(cx))
@@ -473,17 +476,19 @@ impl WorkspaceApp {
         let label = match action {
             SidebarActionKind::ToggleSessionView => match self.active_session_sidebar_view_mode {
                 ActiveSessionSidebarViewMode::Tree => self.i18n.t("sidebar.tooltips.switch_focus"),
-                ActiveSessionSidebarViewMode::Focus => self.i18n.t("sidebar.tooltips.switch_tree"),
+                ActiveSessionSidebarViewMode::Focus => self.i18n.t("sidebar.tooltips.switch_host"),
+                ActiveSessionSidebarViewMode::Host => self.i18n.t("sidebar.tooltips.switch_tree"),
             },
             SidebarActionKind::NewConnection => self.i18n.t("sidebar.tooltips.new_connection"),
         };
 
         let toggle_focus_active = action == SidebarActionKind::ToggleSessionView
-            && self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus;
+            && self.active_session_sidebar_view_mode != ActiveSessionSidebarViewMode::Tree;
 
         // Tauri sidebar header actions are icon buttons with title tooltips.
         // The view-mode action is the old Folder/ListChecks toggle from
-        // Sidebar.tsx; keep its active "secondary" chrome only in focus mode.
+        // Sidebar.tsx; keep its active "secondary" chrome for every non-default
+        // view mode so the header shows that a mode is engaged.
         div()
             .ml_1()
             .child(self.workspace_tooltip_icon_button(

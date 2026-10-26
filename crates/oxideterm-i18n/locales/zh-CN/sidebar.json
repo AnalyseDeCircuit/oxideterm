@@ -95,6 +95,7 @@
       "ai_hint": "OxideSens",
       "switch_tree": "切换到树形视图",
       "switch_focus": "切换到聚焦视图",
+      "switch_host": "切换到主机视图",
       "new_connection": "新建连接",
       "lock_app": "锁定 OxideTerm",
       "setup_app_lock": "设置应用锁",

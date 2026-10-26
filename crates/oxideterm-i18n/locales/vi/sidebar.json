@@ -95,6 +95,7 @@
       "ai_hint": "OxideSens",
       "switch_tree": "Chế độ cây",
       "switch_focus": "Chế độ tập trung",
+      "switch_host": "Chế độ máy chủ",
       "new_connection": "Kết nối mới",
       "lock_app": "Khóa OxideTerm",
       "setup_app_lock": "Thiết lập khóa ứng dụng",
