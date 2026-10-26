@@ -2,15 +2,6 @@ name: Background Media
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'crates/oxideterm-background-media/**'
-      - 'crates/oxideterm-gpui-background/**'
-      - 'crates/gpui-ce/**'
-      - 'Cargo.lock'
-      - 'Cargo.toml'
-      - '.github/workflows/background-media.yml'
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:

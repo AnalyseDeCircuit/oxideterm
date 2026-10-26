@@ -2,16 +2,6 @@ name: Nix Package
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, experiment/rust-native-v2]
-    paths:
-      - 'nix/**/*.nix'
-      - 'flake.nix'
-      - 'flake.lock'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'crates/**/Cargo.toml'
-      - '.github/workflows/nix-package.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]

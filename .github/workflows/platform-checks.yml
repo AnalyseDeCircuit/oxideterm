@@ -2,18 +2,6 @@ name: Native Platform Checks
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, experiment/rust-native-v2]
-    paths:
-      - 'crates/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'rustfmt.toml'
-      - 'rust-toolchain.toml'
-      - 'scripts/release/conpty_runtime.py'
-      - 'scripts/ci/install-linux-deps.sh'
-      - '.github/actions/install-linux-deps/**'
-      - '.github/workflows/platform-checks.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]

@@ -2,12 +2,6 @@ name: Remote Agent CI
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, experiment/rust-native-v2]
-    paths:
-      - 'agent/**'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/agent-ci.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]

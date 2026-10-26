@@ -60,10 +60,10 @@ Whenever modifying, bumping, or adding a Git dependency in `Cargo.toml`:
 
 The independent [Nix Package workflow](../.github/workflows/nix-package.yml) runs the package build and flake checks with a 90-minute timeout.
 
-It runs automatically for pushes and pull requests targeting `main` or `experiment/rust-native-v2` when any of these files change:
+It runs automatically for non-draft pull requests targeting `main` or `experiment/rust-native-v2` when any of these files change:
 
 - Nix expressions under `nix/`, `flake.nix`, or `flake.lock`.
 - The root `Cargo.toml`, `Cargo.lock`, or any crate's `Cargo.toml` under `crates/`.
 - `.github/workflows/nix-package.yml`.
 
-Before a release, or when other source or build changes need Nix verification, run **Nix Package** manually from GitHub Actions and select the branch to check. The workflow validates the build and Git dependency hashes.
+Before a release, or when direct pushes or other source or build changes need Nix verification, run **Nix Package** manually from GitHub Actions and select the branch to check. Pushes do not trigger this workflow. The workflow validates the build and Git dependency hashes.
