@@ -2860,6 +2860,9 @@ fn render_image(
 }
 
 fn image_path_from_url(url: &str, opts: &MarkdownOptions) -> Option<PathBuf> {
+    if !should_load_image(url, opts) {
+        return None;
+    }
     if let Some(scheme) = url_scheme(url) {
         if !image_scheme_allowed(scheme, opts) {
             return None;
@@ -2883,7 +2886,8 @@ fn image_path_from_url(url: &str, opts: &MarkdownOptions) -> Option<PathBuf> {
 
 fn should_load_image(url: &str, opts: &MarkdownOptions) -> bool {
     let Some(scheme) = url_scheme(url) else {
-        return true;
+        // Relative and absolute filesystem paths share the file-scheme policy.
+        return image_scheme_allowed("file", opts);
     };
     image_scheme_allowed(scheme, opts)
 }
@@ -3604,8 +3608,17 @@ mod tests {
     fn image_resolution_preserves_local_paths_and_enforces_scheme_policy() {
         let opts = MarkdownOptions::default();
         let source_opts = MarkdownOptions::default().with_source_path("/tmp/docs/README.md");
+        let remote_opts = MarkdownOptions {
+            allowed_image_schemes: vec!["http", "https", "data"],
+            ..MarkdownOptions::default()
+        };
         for (url, options, allowed, path) in [
             ("images/logo.png", &opts, true, Some("images/logo.png")),
+            ("images/logo.png", &remote_opts, false, None),
+            ("/tmp/logo.png", &remote_opts, false, None),
+            ("file:///tmp/logo.png", &remote_opts, false, None),
+            (r"C:\images\logo.png", &remote_opts, false, None),
+            ("https://example.com/logo.png", &remote_opts, true, None),
             ("file:///tmp/logo.png", &opts, true, Some("/tmp/logo.png")),
             ("https://example.com/logo.png", &opts, true, None),
             ("http://example.com/logo.png", &opts, true, None),

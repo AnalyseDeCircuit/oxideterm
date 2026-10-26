@@ -1,5 +1,7 @@
 {
   "ide": {
+    "markdown_edit": "Chỉnh sửa Markdown",
+    "markdown_preview": "Xem trước Markdown",
     "file_binary": "Đây là tệp nhị phân và không thể mở trong trình soạn thảo văn bản.",
     "file_too_large": "Tệp vượt quá giới hạn chỉnh sửa 100 MiB của IDE.",
     "file_encoding": "Mã hóa tệp",

@@ -81,6 +81,9 @@ impl Render for IdeSurface {
                     this.handle_project_search_key(event, window, cx);
                     return;
                 }
+                if this.handle_markdown_preview_key(event, cx) {
+                    return;
+                }
                 this.handle_editor_find_shortcut(event, cx);
                 this.handle_tree_name_input_key(event, cx);
                 this.handle_folder_picker_key(event, window, cx);

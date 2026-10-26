@@ -20,6 +20,7 @@ impl IdeSurface {
             .flex_1()
             .min_h_0()
             .child(match self.active_editor() {
+                Some(_) if self.is_markdown_preview() => self.render_markdown_preview(cx),
                 Some(editor) => editor.into_any_element(),
                 None if self
                     .workspace
@@ -219,11 +220,25 @@ impl IdeSurface {
             .border_b_1()
             .border_color(rgb(self.tokens.ui.border))
             .bg(self.ide_bg(self.tokens.ui.bg, IDE_BG_HALF_ALPHA))
-            .child(scroll_viewport)
+            .flex()
+            .items_center()
             .child(
-                Scrollbar::new(&self.tab_scroll_handle)
-                    .id("ide-tabs-horizontal-scrollbar")
-                    .axis(ScrollbarAxis::Horizontal),
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_hidden()
+                    .child(scroll_viewport)
+                    .child(
+                        Scrollbar::new(&self.tab_scroll_handle)
+                            .id("ide-tabs-horizontal-scrollbar")
+                            .axis(ScrollbarAxis::Horizontal),
+                    ),
+            )
+            .when(
+                self.active_markdown_tab().is_some() && self.active_editor().is_some(),
+                |row| row.child(self.render_markdown_toggle(cx)),
             )
             .into_any_element()
     }

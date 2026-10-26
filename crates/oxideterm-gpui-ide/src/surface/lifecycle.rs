@@ -38,6 +38,7 @@ impl IdeSurface {
             tree_resize_activation: None,
             generation: 0,
             editors: HashMap::new(),
+            markdown_previews: HashMap::new(),
             loading_paths: HashSet::new(),
             loading_file_tabs: HashSet::new(),
             saving_tabs: HashSet::new(),
@@ -247,6 +248,7 @@ impl IdeSurface {
         self.tree_clipboard = None;
         self.agent_action = None;
         self.editors.clear();
+        self.markdown_previews.clear();
         self.workspace = IdeWorkspace::new();
         cx.notify();
 

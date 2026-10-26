@@ -482,6 +482,7 @@ pub struct IdeSurface {
     tree_resize_activation: Option<gpui::Subscription>,
     generation: u64,
     editors: HashMap<EditorTabId, Entity<TextEditorView>>,
+    markdown_previews: HashMap<EditorTabId, MarkdownPreviewState>,
     loading_paths: HashSet<String>,
     loading_file_tabs: HashSet<EditorTabId>,
     saving_tabs: HashSet<EditorTabId>,
@@ -542,6 +543,7 @@ include!("surface/tree_name_input.rs");
 include!("surface/render_root.rs");
 include!("surface/render_tree.rs");
 include!("surface/render_tabs.rs");
+include!("surface/markdown_preview.rs");
 include!("surface/render_agent.rs");
 include!("surface/render_dialogs.rs");
 include!("surface/render_helpers.rs");

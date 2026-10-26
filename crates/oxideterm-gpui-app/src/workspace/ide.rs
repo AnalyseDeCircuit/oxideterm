@@ -1077,6 +1077,11 @@ impl WorkspaceApp {
 
     fn ide_labels(&self) -> IdeLabels {
         IdeLabels {
+            markdown_edit: self.i18n.t("ide.markdown_edit"),
+            markdown_preview: self.i18n.t("ide.markdown_preview"),
+            markdown_details: self.i18n.t("markdown.html_details"),
+            markdown_mermaid_error: self.i18n.t("markdown.mermaid_unsupported"),
+            markdown_mermaid_loading: self.i18n.t("markdown.mermaid_loading"),
             file_binary: self.i18n.t("ide.file_binary"),
             file_too_large: self.i18n.t("ide.file_too_large"),
             file_encoding: self.i18n.t("ide.file_encoding"),

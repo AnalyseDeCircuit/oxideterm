@@ -12,6 +12,7 @@ gpui.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-ide-core = { path = "../oxideterm-ide-core" }
 oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }

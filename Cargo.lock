@@ -7418,6 +7418,7 @@ dependencies = [
  "oxideterm-audit",
  "oxideterm-editor-syntax",
  "oxideterm-gpui-editor",
+ "oxideterm-gpui-markdown",
  "oxideterm-gpui-ui",
  "oxideterm-ide-core",
  "oxideterm-ide-fs",

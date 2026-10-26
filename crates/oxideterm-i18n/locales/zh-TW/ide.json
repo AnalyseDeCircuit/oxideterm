@@ -1,5 +1,7 @@
 {
   "ide": {
+    "markdown_edit": "編輯 Markdown",
+    "markdown_preview": "預覽 Markdown",
     "file_binary": "此檔案是二進位檔案，無法在文字編輯器中開啟。",
     "file_too_large": "檔案超過 IDE 的 100 MiB 編輯上限。",
     "file_encoding": "檔案編碼",
