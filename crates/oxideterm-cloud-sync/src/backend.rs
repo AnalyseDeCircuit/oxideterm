@@ -1096,6 +1096,161 @@ mod tests {
     use super::*;
 
     #[tokio::test]
+    async fn oss_s3_sync_lists_pages_publishes_verifies_and_deletes_in_the_bucket_host() {
+        let bytes = b"encrypted-publication-fixture".to_vec();
+        let pending = crate::sync_v3::PendingPublication {
+            path: format!(
+                "sync-v3/{}/2-{}.oxide",
+                uuid::Uuid::from_u128(1),
+                sha256_hex(&bytes).trim_start_matches("sha256:")
+            ),
+            bytes: bytes.clone(),
+        };
+        let old_path = format!(
+            "sync-v3/{}/1-{}.oxide",
+            uuid::Uuid::from_u128(1),
+            "a".repeat(64)
+        );
+        let xml_response = |xml: String| {
+            HttpResponseSnapshot::new(StatusCode::OK, HeaderMap::new(), xml.into_bytes())
+        };
+        let executor = Arc::new(FakeHttpExecutor::new([
+            xml_response(format!(
+                "<ListBucketResult><Contents><Key>team/default/{old_path}</Key></Contents><IsTruncated>true</IsTruncated><NextContinuationToken>page/2+token=</NextContinuationToken></ListBucketResult>"
+            )),
+            xml_response(format!(
+                "<ListBucketResult><Contents><Key>team/default/{}</Key></Contents><IsTruncated>false</IsTruncated></ListBucketResult>",
+                pending.path
+            )),
+            response(StatusCode::NOT_FOUND, HeaderMap::new(), Value::Null),
+            response(StatusCode::OK, HeaderMap::new(), Value::Null),
+            HttpResponseSnapshot::new(StatusCode::OK, HeaderMap::new(), bytes.clone()),
+            response(StatusCode::NO_CONTENT, HeaderMap::new(), Value::Null),
+        ]));
+        let backend = CloudSyncBackend::with_http_executor(executor.clone());
+        let config = CloudSyncSettings {
+            backend_type: BackendType::S3,
+            endpoint: "https://s3.oss-cn-hangzhou.aliyuncs.com".into(),
+            s3_bucket: "oxide-test".into(),
+            s3_region: "cn-hangzhou".into(),
+            namespace: "team/default".into(),
+            ..Default::default()
+        };
+        let secrets = CloudSyncSecrets {
+            access_key_id: Some(Zeroizing::new("oss-test-access-key".into())),
+            secret_access_key: Some(Zeroizing::new("oss-test-secret-key".into())),
+            session_token: Some(Zeroizing::new("oss-test-session-token".into())),
+            ..Default::default()
+        };
+        assert_eq!(
+            backend
+                .list_publications(&config, &secrets)
+                .await
+                .unwrap()
+                .iter()
+                .map(|id| id.path())
+                .collect::<Vec<_>>(),
+            [old_path.clone(), pending.path.clone()]
+        );
+        backend
+            .publish_replica(&config, &secrets, &pending)
+            .await
+            .unwrap();
+        backend
+            .delete_publication(
+                &config,
+                &secrets,
+                &crate::sync_v3::PublicationId::parse(&old_path).unwrap(),
+            )
+            .await
+            .unwrap();
+        let requests = executor.requests();
+        assert_eq!(
+            requests
+                .iter()
+                .map(|request| request.method.clone())
+                .collect::<Vec<_>>(),
+            [
+                Method::GET,
+                Method::GET,
+                Method::GET,
+                Method::PUT,
+                Method::GET,
+                Method::DELETE
+            ]
+        );
+        for request in &requests {
+            assert_eq!(
+                request.url.host_str(),
+                Some("oxide-test.s3.oss-cn-hangzhou.aliyuncs.com")
+            );
+            assert_eq!(
+                request.headers["x-amz-security-token"],
+                "oss-test-session-token"
+            );
+        }
+        assert_eq!(requests[0].url.path(), "/");
+        assert_eq!(
+            requests[0].url.query_pairs().collect::<Vec<_>>(),
+            [
+                ("list-type".into(), "2".into()),
+                ("prefix".into(), "team/default/sync-v3/".into())
+            ]
+        );
+        assert_eq!(
+            requests[1].url.query_pairs().collect::<Vec<_>>(),
+            [
+                ("list-type".into(), "2".into()),
+                ("prefix".into(), "team/default/sync-v3/".into()),
+                ("continuation-token".into(), "page/2+token=".into())
+            ]
+        );
+        for request in &requests[2..5] {
+            assert_eq!(
+                request.url.path(),
+                format!("/team/default/{}", pending.path)
+            );
+        }
+        assert_eq!(requests[5].url.path(), format!("/team/default/{old_path}"));
+        // The expected canonical request fixes OSS's host, root listing path,
+        // and encoded query independently of the URL/signing implementation.
+        use hmac::Mac;
+        let amz_date = requests[0].headers["x-amz-date"].to_str().unwrap();
+        let date = &amz_date[..8];
+        let empty_hash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+        let signed_headers = "host;x-amz-content-sha256;x-amz-date;x-amz-security-token";
+        let canonical = format!(
+            "GET\n/\nlist-type=2&prefix=team%2Fdefault%2Fsync-v3%2F\nhost:oxide-test.s3.oss-cn-hangzhou.aliyuncs.com\nx-amz-content-sha256:{empty_hash}\nx-amz-date:{amz_date}\nx-amz-security-token:oss-test-session-token\n\n{signed_headers}\n{empty_hash}"
+        );
+        let scope = format!("{date}/cn-hangzhou/s3/aws4_request");
+        let string_to_sign = format!(
+            "AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{}",
+            sha256_hex(canonical.as_bytes()).trim_start_matches("sha256:")
+        );
+        let mut key = Zeroizing::new(b"AWS4oss-test-secret-key".to_vec());
+        for message in [date, "cn-hangzhou", "s3", "aws4_request", &string_to_sign] {
+            let mut mac = hmac::Hmac::<Sha256>::new_from_slice(key.as_slice()).unwrap();
+            mac.update(message.as_bytes());
+            key = Zeroizing::new(mac.finalize().into_bytes().to_vec());
+        }
+        let signature = key
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let expected_authorization = Zeroizing::new(format!(
+            "AWS4-HMAC-SHA256 Credential=oss-test-access-key/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
+        ));
+        assert_eq!(
+            requests[0].headers[AUTHORIZATION],
+            expected_authorization.as_str()
+        );
+        match &requests[3].body {
+            HttpRequestBody::Bytes(body) => assert_eq!(body.as_slice(), bytes),
+            _ => panic!("publication must upload the encrypted bytes"),
+        }
+    }
+
+    #[tokio::test]
     async fn v3_enumeration_follows_pages_and_publication_verifies_bytes_after_write_error() {
         let path = format!(
             "sync-v3/{}/1-{}.oxide",

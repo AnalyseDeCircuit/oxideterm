@@ -32,6 +32,10 @@
 | OneDrive / Google Drive | 账号和配置的同步文件夹或命名空间 |
 | HTTP JSON | 支持 OxideTerm 当前同步协议的服务器、端点和命名空间 |
 
+使用阿里云 OSS 时，选择“S3 兼容存储”，服务端点填写 `https://s3.oss-cn-hangzhou.aliyuncs.com`，区域填写存储桶的实际地域，例如 `cn-hangzhou`；请将示例中的杭州地域替换为自己的存储桶地域。存储桶名称单独填写，对象前缀用于区分同步空间。客户端会采用 OSS 要求的虚拟主机式地址，也可识别 `https://oss-cn-hangzhou.aliyuncs.com` 形式的官方端点，以及带有同一存储桶名称的官方端点。内网端点仅适用于能够访问对应阿里云内网的设备。
+
+OSS 的 RAM 凭据需要目标存储桶的 `oss:ListObjects` 权限，以及同步对象的 `oss:GetObject`、`oss:PutObject` 和 `oss:DeleteObject` 权限，分别用于发现、读取、发布和清理快照。STS 临时凭据还需填写 Session Token，并在到期后更新。接入要求见阿里云官方的[使用 AWS SDK 访问 OSS](https://help.aliyun.com/zh/oss/developer-reference/use-amazon-s3-sdks-to-access-oss)和[OSS 与 Amazon S3 的兼容性](https://www.alibabacloud.com/help/en/oss/developer-reference/compatibility-with-amazon-s3)。
+
 密码和令牌填写在对应的凭据字段中。未启用敏感凭据同步时，连接密码、密钥口令、托管私钥、AI 密钥和提权凭据均被排除。需要共享时，为所选数据开启“同步敏感凭据”，并确认应用提示。
 
 ### 接入第二台设备
