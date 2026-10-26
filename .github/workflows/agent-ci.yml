@@ -10,6 +10,7 @@ on:
       - '.github/workflows/agent-ci.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - 'agent/**'
       - 'rust-toolchain.toml'
@@ -25,12 +26,21 @@ concurrency:
 jobs:
   agent:
     name: Remote agent (check + fmt + test)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Determine Rust check scope
+        id: scope
+        shell: bash
+        run: node scripts/ci/rust-scope.cjs >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
+        if: steps.scope.outputs.rust == 'true'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.0
@@ -38,20 +48,25 @@ jobs:
           targets: x86_64-unknown-linux-musl,aarch64-unknown-linux-musl
 
       - name: Rust cache
+        if: steps.scope.outputs.rust == 'true'
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: ./agent -> target
           cache-on-failure: false
 
       - name: cargo check
+        if: steps.scope.outputs.rust == 'true'
         run: cargo check --manifest-path agent/Cargo.toml
 
       - name: cargo fmt
+        if: steps.scope.outputs.rust == 'true'
         run: cargo fmt --manifest-path agent/Cargo.toml --check
 
       - name: cargo test
+        if: steps.scope.outputs.rust == 'true'
         run: cargo test --manifest-path agent/Cargo.toml
 
       # CI builds the same bundled Linux agent binaries that release packages ship.
       - name: Build bundled remote agents
+        if: steps.scope.outputs.rust == 'true'
         run: ./scripts/build/build-agent.sh

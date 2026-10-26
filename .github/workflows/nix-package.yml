@@ -14,6 +14,7 @@ on:
       - '.github/workflows/nix-package.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - 'nix/**/*.nix'
       - 'flake.nix'
@@ -33,6 +34,7 @@ concurrency:
 jobs:
   nix:
     name: Nix package build
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     steps:

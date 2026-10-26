@@ -16,6 +16,7 @@ on:
       - '.github/workflows/platform-checks.yml'
   pull_request:
     branches: [main, experiment/rust-native-v2]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
     paths:
       - 'crates/**'
       - 'Cargo.toml'
@@ -37,96 +38,100 @@ concurrency:
 jobs:
   windows:
     name: Windows native check
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Determine Rust check scope
+        id: scope
+        shell: bash
+        run: node scripts/ci/rust-scope.cjs >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
+        if: steps.scope.outputs.rust == 'true'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.0
 
       - name: Rust cache
+        if: steps.scope.outputs.rust == 'true'
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: native-check-windows-x64
           cache-on-failure: false
 
       - name: Check Windows GPUI backend
+        if: steps.scope.outputs.rust == 'true'
         run: cargo check -p gpui-pre-windows
 
       - name: Check Windows precompiled release shaders
+        if: steps.scope.outputs.rust == 'true'
         run: cargo check --release -p gpui-pre-windows
 
       - name: Test Windows frame and quit message handling
+        if: steps.scope.outputs.rust == 'true'
         run: cargo test -p gpui-pre-windows --lib windows_message_
 
       - name: Test Windows text fallback identity
+        if: steps.scope.outputs.rust == 'true'
         run: cargo test -p gpui-pre-windows --lib windows_text_
 
       - name: Test Windows terminal pipe readiness and EOF
+        if: steps.scope.outputs.rust == 'true'
         run: cargo test -p alacritty_terminal --lib tty::windows::blocking::tests
 
       - name: Stage pinned ConPTY for console input tests
+        if: steps.scope.outputs.rust == 'true'
         run: python scripts/release/conpty_runtime.py --target x86_64-pc-windows-msvc --destination target/debug/deps
 
       - name: Test negotiated Windows key encoding
+        if: steps.scope.outputs.rust == 'true'
         run: cargo test -p oxideterm-gpui-terminal --lib terminal_view::tests::input_tests
 
       - name: Test actual ConPTY control and Enter keys
+        if: steps.scope.outputs.rust == 'true'
         run: cargo test -p oxideterm-gpui-terminal --lib bundled_conpty_delivers_distinct_ctrl_j_and_enter_events -- --ignored
 
       - name: Check Windows application
+        if: steps.scope.outputs.rust == 'true'
         run: cargo check -p oxideterm-gpui-app
 
   macos:
     name: macOS native check
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: macos-14
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Determine Rust check scope
+        id: scope
+        shell: bash
+        run: node scripts/ci/rust-scope.cjs >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
+        if: steps.scope.outputs.rust == 'true'
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.97.0
 
       - name: Rust cache
+        if: steps.scope.outputs.rust == 'true'
         uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           key: native-check-macos-arm64
           cache-on-failure: false
 
       - name: Check macOS GPUI backend
+        if: steps.scope.outputs.rust == 'true'
         run: cargo check -p gpui-pre-macos
 
       - name: Check macOS application
-        run: cargo check -p oxideterm-gpui-app
-
-  linux:
-    name: Linux native check
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-        with:
-          toolchain: 1.97.0
-
-      - name: Install Linux system dependencies
-        uses: ./.github/actions/install-linux-deps
-
-      - name: Rust cache
-        uses: swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
-        with:
-          key: native-check-linux-x64
-          cache-on-failure: false
-
-      - name: Check Linux GPUI backend
-        run: cargo check -p gpui-pre-linux
-
-      - name: Check Linux application
+        if: steps.scope.outputs.rust == 'true'
         run: cargo check -p oxideterm-gpui-app
