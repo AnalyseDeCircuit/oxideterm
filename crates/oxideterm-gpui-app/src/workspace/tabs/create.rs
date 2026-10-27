@@ -789,9 +789,15 @@ impl WorkspaceApp {
         config: SshConfig,
         title: String,
         mut auth_save_target: Option<new_connection::SavedAuthSaveTarget>,
+        open_sftp_on_connect_override: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        let open_sftp_on_connect = open_sftp_on_connect_override
+            || self
+                .connection_store
+                .get(&saved_connection_id)
+                .is_some_and(|connection| connection.options.open_sftp_on_connect);
         let (
             saved_terminal_options,
             saved_dedicated_new_terminal_connection,
@@ -831,6 +837,13 @@ impl WorkspaceApp {
                 && self.focus_terminal_session(session_id, window, cx)
             {
                 let _ = self.connection_store.mark_used(&saved_connection_id);
+                self.maybe_open_sftp_after_terminal_open(
+                    &node_id,
+                    session_id,
+                    open_sftp_on_connect,
+                    window,
+                    cx,
+                );
                 return Ok(());
             }
             if self.ssh_nodes.contains_key(&node_id) {
@@ -850,6 +863,7 @@ impl WorkspaceApp {
                     Some(saved_connection_id.clone()),
                     Some(saved_connection_id.clone()),
                     None,
+                    open_sftp_on_connect,
                     window,
                     cx,
                 )?;
@@ -893,6 +907,7 @@ impl WorkspaceApp {
                 Some(saved_connection_id.clone()),
                 Some(saved_connection_id.clone()),
                 None,
+                open_sftp_on_connect,
                 window,
                 cx,
             )?;
@@ -924,6 +939,13 @@ impl WorkspaceApp {
                     && self.focus_terminal_session(session_id, window, cx)
                 {
                     let _ = self.connection_store.mark_used(&saved_connection_id);
+                    self.maybe_open_sftp_after_terminal_open(
+                        &existing_node_id,
+                        session_id,
+                        open_sftp_on_connect,
+                        window,
+                        cx,
+                    );
                     return Ok(());
                 }
                 if let Some((node_title, node_saved_connection_id)) = self
@@ -951,6 +973,7 @@ impl WorkspaceApp {
                         node_saved_connection_id,
                         Some(saved_connection_id.clone()),
                         None,
+                        open_sftp_on_connect,
                         window,
                         cx,
                     )?;
@@ -978,6 +1001,7 @@ impl WorkspaceApp {
                 Some(saved_connection_id.clone()),
                 Some(saved_connection_id.clone()),
                 None,
+                open_sftp_on_connect,
                 window,
                 cx,
             );
@@ -1212,6 +1236,7 @@ impl WorkspaceApp {
                     save_after_open: None,
                     cleanup_node_id: Some(node_id.clone()),
                     title,
+                    open_sftp_on_connect: false,
                 },
                 runtime_cx,
             )
@@ -1580,17 +1605,53 @@ impl WorkspaceApp {
         node_id: &NodeId,
         post_connect_command: Option<String>,
         title: String,
+        open_sftp_on_connect: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
-        self.create_ssh_terminal_tab_for_existing_node_with_policy(
+        let session_id = self.create_ssh_terminal_tab_for_existing_node_with_policy(
             node_id,
             post_connect_command,
             title,
             false,
             window,
             cx,
-        )
+        )?;
+        self.maybe_open_sftp_after_terminal_open(
+            node_id,
+            session_id,
+            open_sftp_on_connect,
+            window,
+            cx,
+        );
+        Ok(session_id)
+    }
+
+    /// Open SFTP for a freshly-created terminal when requested, then restore the
+    /// terminal tab so the user keeps typing where the connection started.
+    pub(in crate::workspace) fn maybe_open_sftp_after_terminal_open(
+        &mut self,
+        node_id: &NodeId,
+        session_id: TerminalSessionId,
+        open_sftp_on_connect: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !open_sftp_on_connect {
+            return;
+        }
+        let terminal_tab_id = self
+            .tab_host
+            .read(cx)
+            .terminal_location(session_id)
+            .map(|location| location.tab_id);
+        self.open_sftp_tab(node_id.clone(), window, cx);
+        if let Some(tab_id) = terminal_tab_id
+            && !self.tab_host.read(cx).is_outside_main_window(tab_id)
+        {
+            self.set_main_window_active_tab(Some(tab_id), cx);
+            self.focus_active_pane(window, cx);
+        }
     }
 
     fn create_ssh_terminal_tab_for_existing_node_with_policy(
@@ -1643,19 +1704,34 @@ impl WorkspaceApp {
         node_id: NodeId,
         post_connect_command: Option<String>,
         title: String,
+        open_sftp_on_connect: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
         if !self.node_is_ready_for_terminal(&node_id) {
             return Err(anyhow::anyhow!("SSH node {} is not ready", node_id.0));
         }
-        self.create_ssh_terminal_tab_for_existing_node(
+        let open_sftp_on_connect = open_sftp_on_connect
+            || self
+                .ssh_nodes
+                .get(&node_id)
+                .and_then(|node| node.saved_connection_id.as_deref())
+                .and_then(|id| self.connection_store.get(id))
+                .is_some_and(|connection| connection.options.open_sftp_on_connect);
+        let session_id = self.create_ssh_terminal_tab_for_existing_node(
             &node_id,
             post_connect_command,
             title,
             window,
             cx,
         )?;
+        self.maybe_open_sftp_after_terminal_open(
+            &node_id,
+            session_id,
+            open_sftp_on_connect,
+            window,
+            cx,
+        );
         Ok(())
     }
 
@@ -1688,6 +1764,7 @@ impl WorkspaceApp {
         saved_connection_id: Option<String>,
         mark_used_connection_id: Option<String>,
         mut save_after_open: Option<SaveConnectionRequest>,
+        open_sftp_on_connect_override: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
@@ -1703,11 +1780,17 @@ impl WorkspaceApp {
         if let Some(saved_connection_id) = saved_connection_id.as_deref() {
             self.associate_existing_node_with_saved_connection(&node_id, saved_connection_id);
         }
+        let open_sftp_on_connect = open_sftp_on_connect_override
+            || saved_connection_id
+                .as_deref()
+                .and_then(|id| self.connection_store.get(id))
+                .is_some_and(|connection| connection.options.open_sftp_on_connect);
         if self.node_is_ready_for_terminal(&node_id) {
             self.create_initial_ssh_terminal_tab_for_existing_node(
                 &node_id,
                 post_connect_command,
                 title,
+                open_sftp_on_connect,
                 window,
                 cx,
             )?;
@@ -1731,6 +1814,7 @@ impl WorkspaceApp {
                 .map(|id| SshConnectionIntent::ConnectSaved {
                     id,
                     auth_save_target: None,
+                    open_sftp_on_connect,
                 })
                 .unwrap_or_else(|| {
                     let terminal_options = self
@@ -1744,6 +1828,7 @@ impl WorkspaceApp {
                             .ssh_nodes
                             .get(&node_id)
                             .is_some_and(|node| node.dedicated_new_terminal_connection),
+                        open_sftp_on_connect,
                         ssh_channel_strategy: self
                             .ssh_nodes
                             .get(&node_id)
@@ -1773,6 +1858,7 @@ impl WorkspaceApp {
                     save_after_open,
                     cleanup_node_id: None,
                     title,
+                    open_sftp_on_connect,
                 },
                 runtime_cx,
             )
@@ -1826,6 +1912,7 @@ impl WorkspaceApp {
                     &request.node_id,
                     request.post_connect_command,
                     request.title,
+                    request.open_sftp_on_connect,
                     window,
                     cx,
                 )

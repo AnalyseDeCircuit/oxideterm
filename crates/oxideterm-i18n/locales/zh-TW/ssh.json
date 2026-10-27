@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "清單順序就是用戶端在 SSH 協商時使用的優先順序。",
       "save": "儲存",
       "save_and_connect": "儲存並連線",
-      "runtime_node_missing": "執行中的 SSH 節點已不可用"
+      "runtime_node_missing": "執行中的 SSH 節點已不可用",
+      "open_sftp_on_connect": "連線時一併開啟 SFTP 面板",
+      "open_sftp_on_connect_hint": "為此連線開啟終端機時一併開啟 SFTP 瀏覽器。按住 Ctrl 點選「連線」或「新增終端機」可僅對本次強制開啟。"
     },
     "auth": {
       "password": "密碼",

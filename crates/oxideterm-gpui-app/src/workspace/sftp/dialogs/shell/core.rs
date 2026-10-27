@@ -27,6 +27,12 @@ impl WorkspaceApp {
                 self.render_sftp_dialog_input("sftp.dialogs.rename_desc", cx),
                 Some(self.i18n.t("sftp.dialogs.rename")),
             ),
+            SftpDialog::BookmarkRename { .. } => (
+                self.i18n.t("sftp.dialogs.rename_bookmark"),
+                self.i18n.t("sftp.dialogs.rename_bookmark_desc"),
+                self.render_sftp_dialog_input("sftp.dialogs.rename_bookmark_desc", cx),
+                Some(self.i18n.t("sftp.dialogs.rename_bookmark")),
+            ),
             SftpDialog::NewFolder { .. } => (
                 self.i18n.t("sftp.dialogs.new_folder"),
                 self.i18n.t("sftp.dialogs.new_folder_desc"),
@@ -82,6 +88,7 @@ impl WorkspaceApp {
         let width = match &dialog {
             SftpDialog::Drives => SFTP_DIALOG_WIDTH_XS,
             SftpDialog::Rename { .. }
+            | SftpDialog::BookmarkRename { .. }
             | SftpDialog::NewFolder { .. }
             | SftpDialog::Delete { .. } => SFTP_DIALOG_WIDTH_SM,
             SftpDialog::Conflict => SFTP_DIALOG_WIDTH_LG,

@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "一覧の順序が SSH ネゴシエーション時のクライアント優先順位です。",
       "save": "保存",
       "save_and_connect": "保存して接続",
-      "runtime_node_missing": "実行中の SSH ノードは利用できません"
+      "runtime_node_missing": "実行中の SSH ノードは利用できません",
+      "open_sftp_on_connect": "接続時に SFTP パネルを開く",
+      "open_sftp_on_connect_hint": "この接続でターミナルを開くときに SFTP ブラウザーも開きます。Ctrl を押しながら「接続」または「新しいターミナル」をクリックすると、今回だけ強制的に開きます。"
     },
     "auth": {
       "password": "パスワード",

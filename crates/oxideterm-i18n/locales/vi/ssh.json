@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "Thứ tự danh sách là mức ưu tiên của máy khách khi thương lượng SSH.",
       "save": "Lưu",
       "save_and_connect": "Lưu và kết nối",
-      "runtime_node_missing": "Nút SSH đang chạy không còn khả dụng"
+      "runtime_node_missing": "Nút SSH đang chạy không còn khả dụng",
+      "open_sftp_on_connect": "Mở bảng SFTP cùng kết nối",
+      "open_sftp_on_connect_hint": "Mở trình duyệt SFTP khi mở terminal cho kết nối này. Giữ Ctrl và nhấp “Kết nối” hoặc “Terminal mới” để buộc mở một lần."
     },
     "auth": {
       "password": "Mật khẩu",

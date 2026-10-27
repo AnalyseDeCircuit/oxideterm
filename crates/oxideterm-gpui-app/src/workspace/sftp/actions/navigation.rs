@@ -256,6 +256,7 @@ impl WorkspaceApp {
                         sftp.set_dialog(SftpDialog::Delete {
                             pane: active_pane,
                             files,
+                            paths: Vec::new(),
                         });
                         cx.notify();
                     });
@@ -267,7 +268,7 @@ impl WorkspaceApp {
             "f2" | "F2" => {
                 if let Some(file) = self.single_selected_sftp_file(active_pane, cx) {
                     self.sftp_view().update(cx, |sftp, cx| {
-                        sftp.open_rename_dialog(active_pane, file.name, cx);
+                        sftp.open_rename_dialog(active_pane, file.name, None, cx);
                     });
                     cx.notify();
                     return true;

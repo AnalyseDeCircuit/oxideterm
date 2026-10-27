@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "L’ordre de la liste correspond à la priorité du client pendant la négociation SSH.",
       "save": "Enregistrer",
       "save_and_connect": "Enregistrer et se connecter",
-      "runtime_node_missing": "Le nœud SSH en cours n’est plus disponible"
+      "runtime_node_missing": "Le nœud SSH en cours n’est plus disponible",
+      "open_sftp_on_connect": "Ouvrir le panneau SFTP avec la connexion",
+      "open_sftp_on_connect_hint": "Ouvre l'explorateur SFTP lorsqu'un terminal de cette connexion est ouvert. Ctrl-clic sur « Connexion » ou « Nouveau terminal » pour le forcer une fois."
     },
     "auth": {
       "password": "Mot de passe",

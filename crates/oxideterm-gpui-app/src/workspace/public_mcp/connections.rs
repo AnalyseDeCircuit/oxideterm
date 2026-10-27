@@ -361,6 +361,8 @@ fn save_profile(
                     .map(|connection| connection.options.ssh_algorithms.clone())
                     .unwrap_or_default(),
                 dedicated_new_terminal_connection: profile.dedicated_new_terminal_connection,
+                open_sftp_on_connect: existing
+                    .is_some_and(|connection| connection.options.open_sftp_on_connect),
                 ssh_channel_strategy: match profile.ssh_channel_strategy {
                     PublicSshChannelStrategy::Multiplexed => SshChannelStrategy::Multiplexed,
                     PublicSshChannelStrategy::DedicatedPerConsumer => {

@@ -253,6 +253,7 @@ impl ConnectionStore {
             options.ssh_algorithms = request.ssh_algorithms;
             options.totp_credential_id = request.totp_credential_id;
             options.dedicated_new_terminal_connection = request.dedicated_new_terminal_connection;
+            options.open_sftp_on_connect = request.open_sftp_on_connect;
             options.ssh_channel_strategy = request.ssh_channel_strategy;
             options.x11_forwarding = request.x11_forwarding;
             if options.ssh_channel_strategy.requires_dedicated_consumers() {

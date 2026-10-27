@@ -892,6 +892,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     /// Preserves transient invalid input while the numeric value fails closed at zero.
     pub(in crate::workspace) connect_timeout_seconds_text: String,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+    pub(in crate::workspace) open_sftp_on_connect: bool,
     pub(in crate::workspace) ssh_channel_strategy: SshChannelStrategy,
     pub(in crate::workspace) x11_forwarding: ConnectionX11ForwardingOptions,
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
@@ -1197,6 +1198,7 @@ impl Default for NewConnectionForm {
             connect_timeout_seconds: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS,
             connect_timeout_seconds_text: DEFAULT_SSH_CONNECT_TIMEOUT_SECONDS.to_string(),
             dedicated_new_terminal_connection: false,
+            open_sftp_on_connect: false,
             ssh_channel_strategy: SshChannelStrategy::default(),
             x11_forwarding: ConnectionX11ForwardingOptions::default(),
             terminal: ConnectionTerminalOptions::default(),

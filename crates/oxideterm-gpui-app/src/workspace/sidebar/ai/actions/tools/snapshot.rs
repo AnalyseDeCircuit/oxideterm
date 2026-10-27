@@ -2302,6 +2302,7 @@ impl WorkspaceApp {
             config,
             title,
             None,
+            connection.options.open_sftp_on_connect,
             window,
             cx,
         );

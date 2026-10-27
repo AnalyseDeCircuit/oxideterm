@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "목록 순서는 SSH 협상 중 클라이언트가 사용하는 우선순위입니다.",
       "save": "저장",
       "save_and_connect": "저장 후 연결",
-      "runtime_node_missing": "실행 중인 SSH 노드를 더 이상 사용할 수 없습니다"
+      "runtime_node_missing": "실행 중인 SSH 노드를 더 이상 사용할 수 없습니다",
+      "open_sftp_on_connect": "연결 시 SFTP 패널 열기",
+      "open_sftp_on_connect_hint": "이 연결의 터미널을 열 때 SFTP 브라우저도 함께 엽니다. Ctrl 키를 누른 채 \"연결\" 또는 \"새 터미널\"을 클릭하면 이번에만 강제로 엽니다."
     },
     "auth": {
       "password": "비밀번호",

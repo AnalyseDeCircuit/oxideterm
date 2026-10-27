@@ -181,6 +181,8 @@ pub enum TerminalPaneEvent {
     // Match payloads remain pane-owned; Workspace drains them using the source pane identity.
     TriggerMatchesAvailable,
     TriggerInteractionRequested,
+    // Dropped OS paths stay pane-owned until Workspace routes them to SFTP.
+    ExternalPathsDropped,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
     // The pane retains the hovered value; Workspace owns tooltip timing and placement.
@@ -604,6 +606,9 @@ pub struct TerminalPane {
     last_cursor_blink: Instant,
     last_terminal_input: Instant,
     last_terminal_activity: Instant,
+    /// Paths dropped from the OS onto an SSH pane. The workspace drains this
+    /// after `ExternalPathsDropped` so the terminal crate never owns SFTP policy.
+    dropped_external_paths: Vec<std::path::PathBuf>,
     last_drain_budget_exhausted: bool,
     scheduler_wake_sender: Sender<()>,
     process_info_refresh_in_flight: bool,
@@ -1366,6 +1371,7 @@ impl TerminalPane {
             last_cursor_blink: Instant::now(),
             last_terminal_input: Instant::now(),
             last_terminal_activity: Instant::now(),
+            dropped_external_paths: Vec::new(),
             last_drain_budget_exhausted: false,
             scheduler_wake_sender,
             process_info_refresh_in_flight: false,
@@ -2828,6 +2834,10 @@ impl TerminalPane {
             return true;
         }
         false
+    }
+
+    pub fn take_dropped_external_paths(&mut self) -> Vec<std::path::PathBuf> {
+        std::mem::take(&mut self.dropped_external_paths)
     }
 
     pub fn send_command_line(&mut self, command: &str, cx: &mut Context<Self>) -> bool {

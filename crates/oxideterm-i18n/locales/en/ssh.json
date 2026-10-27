@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "The list order is the client preference used during SSH negotiation.",
       "save": "Save",
       "save_and_connect": "Save & Connect",
-      "runtime_node_missing": "Runtime SSH node is no longer available"
+      "runtime_node_missing": "Runtime SSH node is no longer available",
+      "open_sftp_on_connect": "Open SFTP panel with the connection",
+      "open_sftp_on_connect_hint": "Automatically opens the SFTP browser for this connection. Ctrl-click Connect or New Terminal to force it for one session."
     },
     "auth": {
       "password": "Password",

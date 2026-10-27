@@ -796,6 +796,18 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        self.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(node_id, false, window, cx)
+    }
+
+    /// Ctrl-clicking "New Terminal" forces the same SFTP-alongside-terminal
+    /// behavior as opening a connection with the per-connection option.
+    pub(in crate::workspace) fn queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
+        &mut self,
+        node_id: NodeId,
+        open_sftp_on_connect_override: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<()> {
         let title = self
             .ssh_nodes
             .get(&node_id)
@@ -813,10 +825,16 @@ impl WorkspaceApp {
             &node_id,
         );
         if self.node_is_ready_for_terminal(&node_id) {
+            let open_sftp_on_connect = open_sftp_on_connect_override
+                || saved_connection_id
+                    .as_deref()
+                    .and_then(|id| self.connection_store.get(id))
+                    .is_some_and(|connection| connection.options.open_sftp_on_connect);
             return self.queue_ssh_terminal_tab_for_existing_node(
                 node_id,
                 post_connect_command,
                 title,
+                open_sftp_on_connect,
                 window,
                 cx,
             );
@@ -837,6 +855,7 @@ impl WorkspaceApp {
             saved_connection_id,
             None,
             None,
+            open_sftp_on_connect_override,
             window,
             cx,
         )
@@ -2033,12 +2052,14 @@ impl WorkspaceApp {
                                 .child(action_label)
                                 .on_mouse_down(
                                     MouseButton::Left,
-                                    cx.listener(move |this, _event, window, cx| {
-                                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
-                                            node_id.clone(),
-                                            window,
-                                            cx,
-                                        );
+                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                                        let _ = this
+                                            .queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
+                                                node_id.clone(),
+                                                event.modifiers.control,
+                                                window,
+                                                cx,
+                                            );
                                         cx.stop_propagation();
                                     }),
                                 ),
@@ -2291,9 +2312,13 @@ impl WorkspaceApp {
                 LucideIcon::Plus,
                 self.i18n.t("sessions.tree.actions.new_terminal"),
                 SessionActionVariant::Primary,
-                cx.listener(move |this, _event, window, cx| {
-                    let _ =
-                        this.queue_ssh_terminal_tab_for_sidebar_node(node_id.clone(), window, cx);
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    let _ = this.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
+                        node_id.clone(),
+                        event.modifiers.control,
+                        window,
+                        cx,
+                    );
                     cx.stop_propagation();
                 }),
                 cx,
@@ -2392,9 +2417,10 @@ impl WorkspaceApp {
             ) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
-                    move |this, _event, window, cx| {
-                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
+                    move |this, event: &MouseDownEvent, window, cx| {
+                        let _ = this.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
                             node_id.clone(),
+                            event.modifiers.control,
                             window,
                             cx,
                         );
@@ -3101,7 +3127,7 @@ impl WorkspaceApp {
                     } else {
                         SessionActionVariant::Primary
                     },
-                    cx.listener(move |this, _, window, cx| {
+                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                         match action {
                             SessionNodeRowAction::Remove => {
                                 this.remove_inactive_session_tree_node(&id, window, cx)
@@ -3113,8 +3139,9 @@ impl WorkspaceApp {
                                 this.request_disconnect_ssh_node(&id, window, cx)
                             }
                             SessionNodeRowAction::Connect | SessionNodeRowAction::Reconnect => {
-                                let _ = this.queue_ssh_terminal_tab_for_sidebar_node(
+                                let _ = this.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
                                     id.clone(),
+                                    event.modifiers.control,
                                     window,
                                     cx,
                                 );

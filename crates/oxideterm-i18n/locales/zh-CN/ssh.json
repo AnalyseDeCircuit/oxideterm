@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "列表顺序就是客户端在 SSH 协商时使用的优先级。",
       "save": "保存",
       "save_and_connect": "保存并连接",
-      "runtime_node_missing": "运行中的 SSH 节点已不可用"
+      "runtime_node_missing": "运行中的 SSH 节点已不可用",
+      "open_sftp_on_connect": "连接时同时打开 SFTP 面板",
+      "open_sftp_on_connect_hint": "为此连接打开终端时同时打开 SFTP 浏览器。按住 Ctrl 点击“连接”或“新建终端”可仅对本次强制打开。"
     },
     "auth": {
       "password": "密码",

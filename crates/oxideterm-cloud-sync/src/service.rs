@@ -1115,6 +1115,7 @@ mod tests {
                 legacy_ssh_compatibility: false,
                 ssh_algorithms: oxideterm_connections::SshAlgorithmPreferences::default(),
                 dedicated_new_terminal_connection: false,
+                open_sftp_on_connect: false,
                 ssh_channel_strategy: oxideterm_connections::SshChannelStrategy::default(),
                 x11_forwarding: Default::default(),
                 post_connect_command: None,

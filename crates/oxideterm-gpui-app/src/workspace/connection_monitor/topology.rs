@@ -532,13 +532,18 @@ impl WorkspaceApp {
                     false,
                     {
                         let node_id = node_id.clone();
-                        move |this, _event, window, cx| {
+                        move |this, event: &MouseDownEvent, window, cx| {
                             if let Some(node_id) = node_id.clone()
                                 && let Some(title) =
                                     this.ssh_nodes.get(&node_id).map(|node| node.title.clone())
                             {
                                 let _ = this.queue_ssh_terminal_tab_for_existing_node(
-                                    node_id, None, title, window, cx,
+                                    node_id,
+                                    None,
+                                    title,
+                                    event.modifiers.control,
+                                    window,
+                                    cx,
                                 );
                             }
                         }

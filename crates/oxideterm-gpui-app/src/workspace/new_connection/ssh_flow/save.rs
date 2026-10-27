@@ -1316,6 +1316,7 @@ impl WorkspaceApp {
                     dedicated_new_terminal_connection: connection
                         .options
                         .dedicated_new_terminal_connection,
+                    open_sftp_on_connect: connection.options.open_sftp_on_connect,
                     ssh_channel_strategy: connection.options.ssh_channel_strategy,
                 },
             }
@@ -1323,6 +1324,7 @@ impl WorkspaceApp {
             SshConnectionIntent::ConnectSaved {
                 id: connection.id.clone(),
                 auth_save_target: None,
+                open_sftp_on_connect: connection.options.open_sftp_on_connect,
             }
         };
         self.update_connection_form_state(cx, |state| {
@@ -2676,6 +2678,18 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.open_saved_connection_with_sftp(id, false, window, cx);
+    }
+
+    /// `open_sftp_on_connect_override` is the Ctrl-click escape hatch; saved
+    /// connections otherwise follow their own per-connection setting.
+    pub(crate) fn open_saved_connection_with_sftp(
+        &mut self,
+        id: &str,
+        open_sftp_on_connect_override: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(conn) = saved_connection_for_open(&self.connection_store, id) else {
             // Saved rows can outlive an external store update. Report the
             // stale reference without exposing its identifier or connection data.
@@ -2698,8 +2712,23 @@ impl WorkspaceApp {
             self.settings_store.settings(),
             &conn,
         );
+        let open_sftp_on_connect =
+            open_sftp_on_connect_override || conn.options.open_sftp_on_connect;
         if saved_connection_requires_credentials(config.as_ref()) {
             if self.try_reuse_active_saved_connection_terminal(id, &conn, window, cx) {
+                if open_sftp_on_connect
+                    && let Some(node_id) = self.indexed_saved_ssh_node_for_connection(id, &conn)
+                    && let Some(session_id) = self
+                        .workspace_runtime
+                        .read(cx)
+                        .ssh_terminal_session_ids_for_node(&node_id)
+                        .first()
+                        .copied()
+                {
+                    self.maybe_open_sftp_after_terminal_open(
+                        &node_id, session_id, true, window, cx,
+                    );
+                }
                 return;
             }
             self.open_saved_connection_prompt(
@@ -2712,11 +2741,26 @@ impl WorkspaceApp {
                 window,
                 cx,
             );
+            if open_sftp_on_connect {
+                self.update_connection_form_state(cx, |state| {
+                    if let Some(form) = state.form.as_mut() {
+                        form.open_sftp_on_connect = true;
+                    }
+                });
+            }
             return;
         }
         let config = config.expect("credential form handles unavailable configurations");
         let title = conn.name.clone();
-        self.start_saved_connection_flow(id.to_string(), config, title, None, window, cx);
+        self.start_saved_connection_flow(
+            id.to_string(),
+            config,
+            title,
+            None,
+            open_sftp_on_connect,
+            window,
+            cx,
+        );
     }
 
     pub(in crate::workspace) fn open_saved_connection_prompt(
@@ -2888,13 +2932,26 @@ impl WorkspaceApp {
                 }
             }
             SavedConnectionPromptAction::Connect => {
+                let open_sftp_on_connect = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .is_some_and(|form| form.open_sftp_on_connect);
                 self.update_connection_form_state(cx, |state| {
                     if let Some(form) = state.form.as_mut() {
                         form.pending = true;
                         form.error = Some(self.i18n.t("ssh.form.checking_host_key"));
                     }
                 });
-                self.start_saved_connection_flow(id, config, title, auth_save_target, window, cx);
+                self.start_saved_connection_flow(
+                    id,
+                    config,
+                    title,
+                    auth_save_target,
+                    open_sftp_on_connect,
+                    window,
+                    cx,
+                );
             }
             SavedConnectionPromptAction::Test => {
                 self.start_ssh_test_flow(config, title, cx);
@@ -3005,7 +3062,13 @@ impl WorkspaceApp {
                                 // materializing the edited connection again.
                                 self.remove_inactive_session_tree_node(&node_id, window, cx);
                                 self.start_saved_connection_flow(
-                                    id, config, title, None, window, cx,
+                                    id,
+                                    config,
+                                    title,
+                                    None,
+                                    conn.options.open_sftp_on_connect,
+                                    window,
+                                    cx,
                                 );
                             } else {
                                 self.open_saved_connection_prompt(
@@ -3158,6 +3221,7 @@ impl WorkspaceApp {
         mut config: SshConfig,
         title: String,
         auth_save_target: Option<super::super::password_prompt::SavedAuthSaveTarget>,
+        open_sftp_on_connect: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3184,6 +3248,7 @@ impl WorkspaceApp {
                 SshConnectionIntent::ConnectSaved {
                     id,
                     auth_save_target,
+                    open_sftp_on_connect,
                 },
                 None,
                 window,
@@ -3198,6 +3263,7 @@ impl WorkspaceApp {
             SshConnectionIntent::ConnectSaved {
                 id,
                 auth_save_target,
+                open_sftp_on_connect,
             },
             cx,
         );

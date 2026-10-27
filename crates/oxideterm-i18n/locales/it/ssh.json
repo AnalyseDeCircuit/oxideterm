@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "L’ordine dell’elenco è la priorità usata dal client durante la negoziazione SSH.",
       "save": "Salva",
       "save_and_connect": "Salva e connetti",
-      "runtime_node_missing": "Il nodo SSH in esecuzione non è più disponibile"
+      "runtime_node_missing": "Il nodo SSH in esecuzione non è più disponibile",
+      "open_sftp_on_connect": "Apri il pannello SFTP con la connessione",
+      "open_sftp_on_connect_hint": "Apre il browser SFTP quando viene aperto un terminale per questa connessione. Ctrl+clic su «Connetti» o «Nuovo terminale» per forzarlo una volta."
     },
     "auth": {
       "password": "Password",

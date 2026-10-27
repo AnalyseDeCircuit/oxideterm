@@ -88,6 +88,143 @@ impl WorkspaceApp {
         .detach();
     }
 
+    pub(in crate::workspace) fn handle_sftp_terminal_drop(
+        &mut self,
+        pane_id: PaneId,
+        session_id: TerminalSessionId,
+        paths: Vec<std::path::PathBuf>,
+        cx: &mut Context<Self>,
+    ) {
+        if paths.is_empty() {
+            return;
+        }
+        let Some(node) = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)
+        else {
+            return;
+        };
+        let Some(target_dir) = self
+            .tab_host
+            .read(cx)
+            .panes()
+            .get(&pane_id)
+            .and_then(|pane| {
+                crate::workspace::terminal_cwd::terminal_cwd_snapshot_from_pane(
+                    oxideterm_environment::CurrentDirectoryScope::ssh_node(node.0.clone()),
+                    pane.read(cx),
+                )
+                .map(|snapshot| snapshot.path().to_string())
+            })
+        else {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toolbar.terminal_directory_unavailable"),
+                None,
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return;
+        };
+        let pending_transfers = build_sftp_pending_uploads(&paths);
+        if pending_transfers.is_empty() {
+            return;
+        }
+        let remote_id = SftpRemoteId::Node(node);
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.upload_failed"),
+                Some("SFTP endpoint is no longer available".to_string()),
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return;
+        };
+        // SFTP session acquisition and channel teardown use Tokio primitives, so the
+        // request must run on the node runtime instead of the GPUI foreground executor.
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let runtime = self.forwarding_runtime.clone();
+        let listing_dir = target_dir.clone();
+        runtime.spawn(async move {
+            // Observational listing: it must not move the node's SFTP ready cwd.
+            let result = load_remote_sftp_completion_listing(backend, &listing_dir).await;
+            let _ = sender.send(result);
+        });
+        cx.spawn(async move |weak, cx| {
+            let Ok(result) = receiver.await else {
+                return;
+            };
+            let _ = weak.update(cx, |this, cx| {
+                this.finish_sftp_terminal_drop_upload(
+                    remote_id,
+                    target_dir,
+                    pending_transfers,
+                    result,
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
+    fn finish_sftp_terminal_drop_upload(
+        &mut self,
+        remote_id: SftpRemoteId,
+        target_dir: String,
+        pending_transfers: Vec<SftpPendingTransfer>,
+        result: Result<RemoteSftpListing, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let listing = match result {
+            Ok(listing) => listing,
+            Err(error) => {
+                self.push_sftp_toast(
+                    self.i18n.t("sftp.toast.upload_failed"),
+                    Some(error),
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                return;
+            }
+        };
+        let node_id = remote_id.node_id().cloned();
+        // Prefer the node's open SFTP tab; otherwise make the sidebar queue
+        // visible instead of silently accumulating transfers in a hidden view.
+        let target_surface = node_id
+            .as_ref()
+            .and_then(|node| {
+                self.sftp_tab_nodes.iter().find_map(|(tab_id, tab_node)| {
+                    (tab_node == node && self.has_sftp_surface(SftpSurfaceId::Tab(*tab_id)))
+                        .then_some(SftpSurfaceId::Tab(*tab_id))
+                })
+            })
+            .unwrap_or(SftpSurfaceId::Sidebar);
+        if target_surface == SftpSurfaceId::Sidebar
+            && let Some(node) = node_id
+        {
+            self.open_sftp_sidebar_surface(node, Some(target_dir.clone()), cx);
+        }
+        let _scope = self.enter_sftp_surface(target_surface);
+        let conflicts = sftp_transfer_conflicts(&pending_transfers, &listing.files);
+        let action = self.settings_store.settings().sftp.conflict_action;
+        let resolved_actions = conflicts
+            .into_iter()
+            .map(|conflict| {
+                (
+                    conflict.file_name,
+                    sftp_terminal_drop_conflict_resolution(action),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        self.execute_sftp_pending_transfers(
+            remote_id,
+            pending_transfers,
+            resolved_actions,
+            Some((&target_dir, &listing.files)),
+            cx,
+        );
+    }
+
     pub(in crate::workspace::sftp) fn browse_sftp_local_folder(&mut self, cx: &mut Context<Self>) {
         // Tauri SFTP uses @tauri-apps/plugin-dialog `open({ directory: true,
         // multiple: false, defaultPath: localPath })` for this toolbar button.

@@ -122,6 +122,8 @@ struct SavedConnectionRuntimeHandoff {
 pub(in crate::workspace) struct SshTerminalConnectionOptions {
     pub(in crate::workspace) terminal: ConnectionTerminalOptions,
     pub(in crate::workspace) dedicated_new_terminal_connection: bool,
+    /// One-shot/per-connection intent to open SFTP alongside the first terminal.
+    pub(in crate::workspace) open_sftp_on_connect: bool,
     pub(in crate::workspace) ssh_channel_strategy: SshChannelStrategy,
 }
 
@@ -131,6 +133,7 @@ impl SshTerminalConnectionOptions {
         Self {
             terminal: form.terminal.clone(),
             dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
+            open_sftp_on_connect: form.open_sftp_on_connect,
             ssh_channel_strategy: form.ssh_channel_strategy,
         }
     }
@@ -145,6 +148,7 @@ pub(in crate::workspace) enum SshConnectionIntent {
     ConnectSaved {
         id: String,
         auth_save_target: Option<super::password_prompt::SavedAuthSaveTarget>,
+        open_sftp_on_connect: bool,
     },
     DrillDown {
         parent_id: NodeId,

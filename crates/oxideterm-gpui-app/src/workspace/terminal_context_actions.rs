@@ -46,6 +46,7 @@ impl WorkspaceApp {
                     save_after_open: None,
                     cleanup_node_id: None,
                     title: String::new(),
+                    open_sftp_on_connect: false,
                 },
                 cx,
             )

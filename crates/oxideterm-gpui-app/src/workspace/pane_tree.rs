@@ -296,6 +296,13 @@ impl WorkspaceApp {
                 let matches = pane.update(cx, |pane, _cx| pane.take_trigger_matches());
                 self.handle_terminal_trigger_matches(pane_id, session_id, pane_owner, matches, cx);
             }
+            TerminalPaneEvent::ExternalPathsDropped => {
+                let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+                    return;
+                };
+                let paths = pane.update(cx, |pane, _cx| pane.take_dropped_external_paths());
+                self.handle_sftp_terminal_drop(pane_id, session_id, paths, cx);
+            }
             TerminalPaneEvent::CurrentDirectoryChanged => {
                 if self.active_pane_id(cx) == Some(pane_id) {
                     self.sync_active_terminal_metadata_context(cx);

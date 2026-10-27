@@ -412,6 +412,7 @@ pub(in crate::workspace) fn form_from_saved_connection(
     form.connect_timeout_seconds = conn.options.effective_connect_timeout_seconds();
     form.connect_timeout_seconds_text = form.connect_timeout_seconds.to_string();
     form.dedicated_new_terminal_connection = conn.options.dedicated_new_terminal_connection;
+    form.open_sftp_on_connect = conn.options.open_sftp_on_connect;
     form.ssh_channel_strategy = conn.options.ssh_channel_strategy;
     form.x11_forwarding = conn.options.x11_forwarding;
     if form.ssh_channel_strategy.requires_dedicated_consumers() {
@@ -834,6 +835,7 @@ fn connection_draft_from_form_with_proxy_hop_prefix(
         ssh_algorithms: form.ssh_algorithms.clone(),
         connect_timeout_seconds: form.connect_timeout_seconds,
         dedicated_new_terminal_connection: form.dedicated_new_terminal_connection,
+        open_sftp_on_connect: form.open_sftp_on_connect,
         ssh_channel_strategy: form.ssh_channel_strategy,
         x11_forwarding: form.x11_forwarding,
         post_connect_command: form.post_connect_command.clone(),

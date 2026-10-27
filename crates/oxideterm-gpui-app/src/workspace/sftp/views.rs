@@ -230,6 +230,9 @@ impl WorkspaceApp {
             sftp::SftpWorkspaceEvent::OpenFileRequested { pane, file } => {
                 self.open_or_preview_sftp_file(*pane, file, cx);
             }
+            sftp::SftpWorkspaceEvent::ToggleTreeDirectoryRequested { path } => {
+                self.toggle_sftp_tree_directory(path.clone(), cx);
+            }
             sftp::SftpWorkspaceEvent::TransferStateRequested { id, state } => {
                 self.set_sftp_transfer_state(*id, *state, cx);
             }

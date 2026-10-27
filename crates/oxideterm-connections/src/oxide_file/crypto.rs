@@ -493,6 +493,8 @@ struct ConnectionOptionsBeforeSshAlgorithms<'a> {
     legacy_ssh_compatibility: bool,
     #[serde(skip_serializing_if = "bool_is_false")]
     dedicated_new_terminal_connection: bool,
+    #[serde(skip_serializing_if = "bool_is_false")]
+    open_sftp_on_connect: bool,
     #[serde(skip_serializing_if = "x11_options_are_default")]
     x11_forwarding: &'a ConnectionX11ForwardingOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -514,6 +516,7 @@ impl<'a> From<&'a ConnectionOptions> for ConnectionOptionsBeforeSshAlgorithms<'a
             agent_forwarding_socket: options.agent_forwarding_socket.as_deref(),
             legacy_ssh_compatibility: options.legacy_ssh_compatibility,
             dedicated_new_terminal_connection: options.dedicated_new_terminal_connection,
+            open_sftp_on_connect: options.open_sftp_on_connect,
             x11_forwarding: &options.x11_forwarding,
             post_connect_command: options.post_connect_command.as_deref(),
             terminal: &options.terminal,

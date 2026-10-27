@@ -51,6 +51,9 @@ pub struct SftpSettings {
     // The default keeps existing installations neutral until the user chooses a surface.
     #[serde(default)]
     pub presentation: SftpPresentationPreference,
+    // The sidebar keeps flat/tree as a user preference; tabs always stay flat.
+    #[serde(default)]
+    pub sidebar_view_mode: SftpSidebarViewMode,
     // Preserve the user's embedded sidebar split without exposing transient
     // drag state in settings.
     #[serde(default = "default_sftp_sidebar_session_fraction")]
@@ -71,6 +74,7 @@ impl Default for SftpSettings {
     fn default() -> Self {
         Self {
             presentation: SftpPresentationPreference::Ask,
+            sidebar_view_mode: SftpSidebarViewMode::Flat,
             sidebar_session_fraction: default_sftp_sidebar_session_fraction(),
             transfer_protocol: FileTransferProtocolPreference::Auto,
             max_concurrent_transfers: 3,
@@ -94,6 +98,15 @@ pub enum SftpPresentationPreference {
     Ask,
     Tab,
     Sidebar,
+}
+
+/// Remote list presentation for the embedded sidebar browser.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SftpSidebarViewMode {
+    #[default]
+    Flat,
+    Tree,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

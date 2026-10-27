@@ -509,8 +509,10 @@ impl Render for TerminalPane {
         .performance_metrics_enabled(performance_metrics_enabled)
         .command_mark_gutter_width(self.command_mark_gutter_width())
         .layout_cache(self.layout_cache.clone());
-        let accepts_external_path_drop =
+        let accepts_local_path_drop =
             cfg!(target_os = "macos") && self.session_kind() == TerminalSessionKind::LocalPty;
+        let accepts_ssh_path_drop = self.session_kind() == TerminalSessionKind::SshPty;
+        let accepts_external_path_drop = accepts_local_path_drop || accepts_ssh_path_drop;
         div()
             .id("terminal-pane")
             .size_full()
@@ -526,21 +528,35 @@ impl Render for TerminalPane {
             .text_size(self.metrics.font_size)
             .line_height(self.metrics.line_height)
             .track_focus(&self.focus_handle)
+            .when(accepts_ssh_path_drop, |pane| {
+                let accent = self.theme.tokens.ui.accent;
+                pane.drag_over::<ExternalPaths>(move |style, _paths, _window, _cx| {
+                    style.bg(rgba((accent << 8) | 0x1a))
+                })
+            })
             .can_drop(move |drag, _window, _cx| {
                 accepts_external_path_drop && drag.is::<ExternalPaths>()
             })
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-                if !cfg!(target_os = "macos")
-                    || this.session_kind() != TerminalSessionKind::LocalPty
+                if cfg!(target_os = "macos") && this.session_kind() == TerminalSessionKind::LocalPty
                 {
+                    let Some(input) = external_paths_for_local_terminal(paths.paths()) else {
+                        return;
+                    };
+                    window.focus(&this.focus_handle, cx);
+                    this.paste_text(&input, cx);
+                    cx.stop_propagation();
                     return;
                 }
-                let Some(input) = external_paths_for_local_terminal(paths.paths()) else {
+                // SSH panes route dropped files to SFTP instead of typing their
+                // paths into the shell; the workspace owns the upload destination.
+                if this.session_kind() != TerminalSessionKind::SshPty || paths.paths().is_empty() {
                     return;
-                };
-
+                }
+                this.dropped_external_paths
+                    .extend(paths.paths().iter().cloned());
                 window.focus(&this.focus_handle, cx);
-                this.paste_text(&input, cx);
+                cx.emit(TerminalPaneEvent::ExternalPathsDropped);
                 cx.stop_propagation();
             }))
             .on_mouse_down(
