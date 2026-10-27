@@ -199,22 +199,17 @@ mod proxy_command_tests {
         .unwrap();
         let mut stream = dial_proxy_command(&command).await.unwrap();
 
-        stream
-            .write_all(b"hidden-console-proxy-probe\r\n")
-            .await
-            .unwrap();
-        let mut buffer = [0u8; 64];
-        let read = tokio::time::timeout(
+        let expected = b"hidden-console-proxy-probe\r\n";
+        stream.write_all(expected).await.unwrap();
+        let mut buffer = vec![0u8; expected.len()];
+        // Pipe reads may split the response even when the helper writes it at once.
+        tokio::time::timeout(
             std::time::Duration::from_secs(15),
-            stream.read(&mut buffer),
+            stream.read_exact(&mut buffer),
         )
         .await
         .expect("proxy stream stalled behind the hidden console")
         .unwrap();
-        let echoed = std::str::from_utf8(&buffer[..read]).unwrap();
-        assert!(
-            echoed.contains("hidden-console-proxy-probe"),
-            "unexpected helper output: {echoed:?}"
-        );
+        assert_eq!(buffer, expected);
     }
 }
