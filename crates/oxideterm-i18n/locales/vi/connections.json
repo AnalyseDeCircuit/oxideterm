@@ -72,6 +72,20 @@
       "no_connection_id": "Không có ID kết nối nào được gán sau khi kết nối lại."
     },
     "failedFetchStats": "Không thể lấy thống kê",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "Liệt kê bộ chuyển đổi BLE thất bại: {error}",
+              "no_adapters": "Không có bộ chuyển đổi Bluetooth khả dụng",
+              "adapter_open_failed": "Mở bộ chuyển đổi BLE thất bại: {error}",
+              "device_enumeration_failed": "Liệt kê thiết bị BLE thất bại: {error}",
+              "scan_failed": "Quét BLE thất bại: {error}",
+              "no_device_matched": "Không có thiết bị BLE trong phạm vi khớp với hồ sơ ({identity})",
+              "connect_failed": "Kết nối thiết bị BLE thất bại: {error}",
+              "service_discovery_failed": "Khám phá dịch vụ thất bại: {error}",
+              "service_mismatch": "Thiết bị khớp nhưng không quảng bá dịch vụ đích {uuid}",
+              "invalid_service_uuid": "UUID dịch vụ không hợp lệ: {uuid}"
+        }
+      },
     "errors": {
       "chain_busy_desc": "Một chuỗi kết nối khác đang được thực hiện. Vui lòng chờ.",
       "chain_busy_title": "Thao tác đang diễn ra",
@@ -126,6 +140,11 @@
         "no_common": "không có thuật toán {{kind}} chung"
       },
       "stage": {
+        "ble_opening_adapter": "Đang mở bộ điều hợp Bluetooth",
+        "ble_scanning": "Đang quét thiết bị Bluetooth",
+        "ble_matching": "Đang khớp thiết bị",
+        "ble_verifying_service": "Đang xác minh dịch vụ",
+        "ble_ready": "Sẵn sàng",
         "authentication": "Đang xác thực",
         "kerberos_credentials": "Đang kiểm tra thông tin Kerberos",
         "gssapi_exchange": "Đang trao đổi token GSSAPI",

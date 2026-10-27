@@ -263,6 +263,8 @@ pub struct RawSyncScope {
     #[serde(default)]
     pub sync_serial_profiles: Option<bool>,
     #[serde(default)]
+    pub sync_ble_profiles: Option<bool>,
+    #[serde(default)]
     pub sync_telnet_profiles: Option<bool>,
     #[serde(default)]
     pub sync_mosh_profiles: Option<bool>,
@@ -293,6 +295,8 @@ pub struct SyncScope {
     pub sync_quick_commands: bool,
     #[serde(default = "default_true")]
     pub sync_serial_profiles: bool,
+    #[serde(default = "default_true")]
+    pub sync_ble_profiles: bool,
     #[serde(default = "default_true")]
     pub sync_telnet_profiles: bool,
     #[serde(default = "default_true")]
@@ -331,6 +335,8 @@ pub struct LocalSyncMetadata {
     #[serde(default)]
     pub serial_profiles_revision: Option<String>,
     #[serde(default)]
+    pub ble_profiles_revision: Option<String>,
+    #[serde(default)]
     pub telnet_profiles_revision: Option<String>,
     #[serde(default)]
     pub mosh_profiles_revision: Option<String>,
@@ -358,6 +364,8 @@ pub struct StructuredLocalState {
     #[serde(default)]
     pub serial_profiles: Option<String>,
     #[serde(default)]
+    pub ble_profiles: Option<String>,
+    #[serde(default)]
     pub telnet_profiles: Option<String>,
     #[serde(default)]
     pub mosh_profiles: Option<String>,
@@ -382,6 +390,8 @@ pub struct StructuredDirtySections {
     pub quick_commands: bool,
     #[serde(default)]
     pub serial_profiles: bool,
+    #[serde(default)]
+    pub ble_profiles: bool,
     #[serde(default)]
     pub telnet_profiles: bool,
     #[serde(default)]
@@ -416,6 +426,8 @@ pub struct StructuredSectionRevisions {
     #[serde(default)]
     pub serial_profiles: Option<String>,
     #[serde(default)]
+    pub ble_profiles: Option<String>,
+    #[serde(default)]
     pub telnet_profiles: Option<String>,
     #[serde(default)]
     pub mosh_profiles: Option<String>,
@@ -440,6 +452,8 @@ pub struct StructuredApplySelection {
     pub quick_commands: bool,
     #[serde(default)]
     pub serial_profiles: bool,
+    #[serde(default)]
+    pub ble_profiles: bool,
     #[serde(default)]
     pub telnet_profiles: bool,
     #[serde(default)]
@@ -475,6 +489,8 @@ pub struct StructuredManifestSections {
     pub quick_commands: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub serial_profiles: Option<StructuredObjectEntry>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ble_profiles: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub telnet_profiles: Option<StructuredObjectEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -542,6 +558,9 @@ pub fn normalize_sync_scope(
             .unwrap_or(true),
         sync_serial_profiles: scope
             .and_then(|scope| scope.sync_serial_profiles)
+            .unwrap_or(true),
+        sync_ble_profiles: scope
+            .and_then(|scope| scope.sync_ble_profiles)
             .unwrap_or(true),
         sync_telnet_profiles: scope
             .and_then(|scope| scope.sync_telnet_profiles)
@@ -628,6 +647,10 @@ pub fn build_structured_local_state(
             .sync_serial_profiles
             .then(|| local_metadata.serial_profiles_revision.clone())
             .flatten(),
+        ble_profiles: scope
+            .sync_ble_profiles
+            .then(|| local_metadata.ble_profiles_revision.clone())
+            .flatten(),
         telnet_profiles: scope
             .sync_telnet_profiles
             .then(|| local_metadata.telnet_profiles_revision.clone())
@@ -667,6 +690,9 @@ pub fn compute_structured_dirty_sections(
         serial_profiles: scope.sync_serial_profiles
             && current_state.serial_profiles
                 != baseline_state.and_then(|state| state.serial_profiles.clone()),
+        ble_profiles: scope.sync_ble_profiles
+            && current_state.ble_profiles
+                != baseline_state.and_then(|state| state.ble_profiles.clone()),
         telnet_profiles: scope.sync_telnet_profiles
             && current_state.telnet_profiles
                 != baseline_state.and_then(|state| state.telnet_profiles.clone()),
@@ -730,6 +756,7 @@ pub fn compute_structured_dirty_sections(
         || dirty_sections.forwards
         || dirty_sections.quick_commands
         || dirty_sections.serial_profiles
+        || dirty_sections.ble_profiles
         || dirty_sections.telnet_profiles
         || dirty_sections.mosh_profiles
         || dirty_sections.remote_desktop_profiles
@@ -786,6 +813,11 @@ pub fn build_manifest_section_revisions(
             .serial_profiles
             .as_ref()
             .map(|entry| entry.revision.clone()),
+        ble_profiles: manifest
+            .sections
+            .ble_profiles
+            .as_ref()
+            .map(|entry| entry.revision.clone()),
         telnet_profiles: manifest
             .sections
             .telnet_profiles
@@ -840,6 +872,9 @@ pub fn merge_structured_baseline(
     if selection.serial_profiles {
         merged.serial_profiles = next_state.serial_profiles.clone();
     }
+    if selection.ble_profiles {
+        merged.ble_profiles = next_state.ble_profiles.clone();
+    }
     if selection.telnet_profiles {
         merged.telnet_profiles = next_state.telnet_profiles.clone();
     }
@@ -885,6 +920,9 @@ pub fn count_structured_upload_plan_units(
     }
     if scope.sync_serial_profiles {
         total += usize::from(local_metadata.serial_profiles_revision.is_some());
+    }
+    if scope.sync_ble_profiles {
+        total += usize::from(local_metadata.ble_profiles_revision.is_some());
     }
     if scope.sync_telnet_profiles {
         total += usize::from(local_metadata.telnet_profiles_revision.is_some());
@@ -936,6 +974,10 @@ pub fn quick_commands_object_path(revision: &str) -> String {
 
 pub fn serial_profiles_object_path(revision: &str) -> String {
     format!("structured/serial-profiles/{revision}.json")
+}
+
+pub fn ble_profiles_object_path(revision: &str) -> String {
+    format!("structured/ble-profiles/{revision}.json")
 }
 
 pub fn telnet_profiles_object_path(revision: &str) -> String {
@@ -1191,6 +1233,7 @@ mod tests {
             forwards: Some("fwd-1".into()),
             quick_commands: None,
             serial_profiles: None,
+            ble_profiles: None,
             telnet_profiles: None,
             mosh_profiles: None,
             remote_desktop_profiles: None,
@@ -1298,6 +1341,7 @@ mod tests {
             forwards: Some("fwd-old".into()),
             quick_commands: None,
             serial_profiles: None,
+            ble_profiles: None,
             telnet_profiles: None,
             mosh_profiles: None,
             remote_desktop_profiles: None,
@@ -1313,6 +1357,7 @@ mod tests {
             forwards: Some("fwd-new".into()),
             quick_commands: None,
             serial_profiles: None,
+            ble_profiles: None,
             telnet_profiles: None,
             mosh_profiles: None,
             remote_desktop_profiles: None,

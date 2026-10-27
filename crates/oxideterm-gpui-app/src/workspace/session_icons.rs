@@ -110,6 +110,10 @@ pub(super) const SESSION_ICON_CHOICES: &[SessionIconChoice] = &[
         icon: LucideIcon::ArrowUpDown,
     },
     SessionIconChoice {
+        id: "bluetooth",
+        icon: LucideIcon::Bluetooth,
+    },
+    SessionIconChoice {
         id: "book-open",
         icon: LucideIcon::BookOpen,
     },

@@ -1543,6 +1543,7 @@ impl WorkspaceApp {
                 .len(),
             quick_commands: 0,
             serial_profiles: self.connection_store.serial_profiles().len(),
+            ble_profiles: self.connection_store.ble_profiles().len(),
             telnet_profiles: self.connection_store.telnet_profiles().len(),
             mosh_profiles: self.connection_store.mosh_profiles().len(),
             remote_desktop_profiles: self.connection_store.remote_desktop_profiles().len(),

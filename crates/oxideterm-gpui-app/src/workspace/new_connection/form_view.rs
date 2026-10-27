@@ -72,6 +72,7 @@ use oxideterm_remote_desktop::{
 use oxideterm_settings_model::{settings_multiline_line_ranges, settings_multiline_line_selection};
 // Keep the modal, proxy-chain, and field-control implementations in explicit
 // submodules so their dependencies and visibility remain locally auditable.
+mod ble_fields;
 mod field_controls;
 mod form_modal;
 mod ftp;

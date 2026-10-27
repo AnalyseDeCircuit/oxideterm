@@ -590,6 +590,9 @@ fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_
         TerminalSessionKind::Serial => {
             "Serial device (OS and command interface unverified)".to_string()
         }
+        TerminalSessionKind::Ble => {
+            "BLE device (OS and command interface unverified)".to_string()
+        }
     }
 }
 
@@ -666,6 +669,7 @@ mod terminal_environment_tests {
             (TerminalSessionKind::Mosh, "Mosh (remote OS and shell unverified)"),
             (TerminalSessionKind::Telnet, "Telnet (remote OS and shell unverified)"),
             (TerminalSessionKind::Serial, "Serial device (OS and command interface unverified)"),
+            (TerminalSessionKind::Ble, "BLE device (OS and command interface unverified)"),
         ] {
             assert_eq!(ai_terminal_environment(kind, "macOS"), expected);
         }

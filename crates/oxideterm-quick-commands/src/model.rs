@@ -65,6 +65,7 @@ pub enum QuickCommandTargetProtocol {
     Mosh,
     Telnet,
     Serial,
+    Ble,
     Tmux,
 }
 

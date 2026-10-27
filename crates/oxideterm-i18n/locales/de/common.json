@@ -217,7 +217,8 @@
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "no": "Nein",
-    "yes": "Ja"
+    "yes": "Ja",
+    "status_connecting": "Verbindung wird hergestellt"
   },
   "topology": {
     "button_title": "Topologie-Ansicht",
@@ -503,6 +504,7 @@
         "sync_forwards": "Portweiterleitungen und SSH-Tunnel synchronisieren",
         "sync_quick_commands": "Schnellbefehle synchronisieren",
         "sync_serial_profiles": "Serielle Profile synchronisieren",
+        "sync_ble_profiles": "BLE-Profile synchronisieren",
         "sync_telnet_profiles": "Telnet-Profile synchronisieren",
         "sync_mosh_profiles": "Mosh-Profile synchronisieren",
         "sync_remote_desktop_profiles": "Remotedesktop-Verbindungen synchronisieren",
@@ -546,6 +548,7 @@
         "forwards_detail": "Gespeicherte Portweiterleitungen werden zusammen mit den Metadaten der zugehörigen Verbindung synchronisiert.",
         "quick_commands_detail": "Definitionen für Schnellbefehle sind enthalten.",
         "serial_profiles_detail": "Serielle Verbindungsprofile sind enthalten.",
+        "ble_profiles_detail": "BLE-Geräteprofile sind enthalten.",
         "telnet_profiles_detail": "Telnet-Verbindungsprofile sind enthalten.",
         "mosh_profiles_detail": "Mosh-Verbindungsprofile werden ohne lokale Gerätezugangsdaten einbezogen.",
         "app_settings_sections_detail": "Ausgewählte Bereiche: {{sections}}",
@@ -570,13 +573,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync Rollback-Sicherung",
-        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{telnetProfiles}} Telnet-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{size}}, {{sensitiveCredentials}} sensible Anmeldedaten"
+        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{bleProfiles}} BLE-Profile, {{telnetProfiles}} Telnet-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{size}}, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "history": {
         "action_upload": "Hochladen",
         "action_pull": "Abrufen",
         "action_restore": "Wiederherstellen",
-        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{telnetProfiles}} Telnet-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{sensitiveCredentials}} sensible Anmeldedaten"
+        "summary_line": "{{connections}} Verbindungen, {{forwards}} Weiterleitungen, {{quickCommands}} Schnellbefehle, {{serialProfiles}} serielle Profile, {{bleProfiles}} BLE-Profile, {{telnetProfiles}} Telnet-Profile, {{pluginSettingsCount}} Plugin-Einstellungen, {{sensitiveCredentials}} sensible Anmeldedaten"
       },
       "errors": {
         "local_forward_requires_connection": "Wählen Sie für den lokalen Export auch die Verbindungen der ausgewählten Weiterleitungsregeln aus.",
@@ -719,6 +722,7 @@
         "total_forwards": "Weiterleitungen",
         "quick_commands_label": "Schnellbefehle",
         "serial_profiles_label": "Serielle Profile",
+        "ble_profiles_label": "BLE-Profile",
         "telnet_profiles_label": "Telnet-Profile",
         "mosh_profiles_label": "Mosh-Profile",
         "will_import": "Wird importiert",
@@ -739,6 +743,7 @@
         "toggle_forwards": "Gespeicherte Weiterleitungen importieren ({{count}})",
         "toggle_quick_commands": "Schnellbefehle importieren ({{count}})",
         "toggle_serial_profiles": "Serielle Profile importieren ({{count}})",
+        "toggle_ble_profiles": "BLE-Profile importieren ({{count}})",
         "toggle_telnet_profiles": "Telnet-Profile importieren ({{count}})",
         "toggle_mosh_profiles": "Mosh-Profile importieren ({{count}})",
         "toggle_remote_desktop_profiles": "Remotedesktop-Verbindungen importieren ({{count}})",
@@ -918,6 +923,11 @@
         "stop_bits": "Stoppbits",
         "parity": "Parität",
         "flow_control": "Flusskontrolle",
+        "device_mac": "Geräte-MAC",
+        "device_name": "Gerätename",
+        "service_uuid": "Dienst-UUID",
+        "mtu": "MTU",
+        "write_without_response": "Write Without Response",
         "connect_on_open": "Beim Öffnen verbinden",
         "line_ending": "Zeilenende",
         "display_mode": "Anzeigemodus",

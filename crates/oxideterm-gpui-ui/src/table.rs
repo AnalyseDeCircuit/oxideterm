@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, Div, FontWeight, InteractiveElement, IntoElement, ParentElement, Rgba,
-    SharedString, Styled, div, prelude::*, px, rgb, rgba,
+    AnyElement, Div, Font, FontWeight, InteractiveElement, IntoElement, ParentElement, Rgba,
+    SharedString, Styled, TextRun, WindowTextSystem, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -114,7 +114,7 @@ pub fn tauri_table_cell(
     options: &TauriTableCellOptions,
     style: TauriTableCellStyle,
     text: impl Into<String>,
-) -> AnyElement {
+) -> Div {
     let strong = style == TauriTableCellStyle::Primary;
     let cell = div()
         .when(options.flexible, |cell| {
@@ -146,7 +146,35 @@ pub fn tauri_table_cell(
                 cell
             }
         });
-    cell.child(text.into()).into_any_element()
+    cell.child(text.into())
+}
+
+/// Measures the laid-out width of single-line text at the given font and
+/// size, matching what a `.truncate()` cell paints before clipping. Overflow
+/// tooltips compare this width against the cell's available width so only
+/// clipped content gets a hover hint. Must be called with the window's text
+/// system; line layouts are cached, so a probe per cell per frame is cheap.
+pub fn shaped_text_width(
+    text: &str,
+    font: Font,
+    font_size: f32,
+    text_system: &WindowTextSystem,
+) -> f32 {
+    let text = SharedString::from(text.to_string());
+    let run = TextRun {
+        len: text.len(),
+        font,
+        color: rgb(0x000000).into(),
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+        letter_spacing: None,
+    };
+    f32::from(
+        text_system
+            .shape_line(text, px(font_size), &[run], None)
+            .width,
+    )
 }
 
 pub fn tauri_table_sort_header(

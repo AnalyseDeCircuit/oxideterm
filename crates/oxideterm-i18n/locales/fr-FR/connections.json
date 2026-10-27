@@ -72,6 +72,20 @@
       "no_connection_id": "Aucun identifiant de connexion n'a été attribué après la reconnexion."
     },
     "failedFetchStats": "Échec de la récupération des statistiques",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "Échec de l'énumération des adaptateurs BLE : {error}",
+              "no_adapters": "Aucun adaptateur Bluetooth disponible",
+              "adapter_open_failed": "Échec de l'ouverture de l'adaptateur BLE : {error}",
+              "device_enumeration_failed": "Échec de l'énumération des appareils BLE : {error}",
+              "scan_failed": "Échec de l'analyse BLE : {error}",
+              "no_device_matched": "Aucun appareil BLE à portée ne correspond au profil ({identity})",
+              "connect_failed": "Échec de la connexion à l'appareil BLE : {error}",
+              "service_discovery_failed": "Échec de la découverte des services : {error}",
+              "service_mismatch": "L'appareil correspond mais n'annonce pas le service cible {uuid}",
+              "invalid_service_uuid": "UUID de service non valide : {uuid}"
+        }
+      },
     "errors": {
       "chain_busy_desc": "Une autre chaîne de connexion est déjà en cours. Veuillez patienter.",
       "chain_busy_title": "Opération en cours",
@@ -126,6 +140,11 @@
         "no_common": "aucun algorithme {{kind}} commun"
       },
       "stage": {
+        "ble_opening_adapter": "Ouverture de l’adaptateur Bluetooth",
+        "ble_scanning": "Recherche des appareils Bluetooth",
+        "ble_matching": "Identification de l’appareil",
+        "ble_verifying_service": "Vérification du service",
+        "ble_ready": "Prêt",
         "authentication": "Authentification",
         "kerberos_credentials": "Vérification des identifiants Kerberos",
         "gssapi_exchange": "Échange des jetons GSSAPI",

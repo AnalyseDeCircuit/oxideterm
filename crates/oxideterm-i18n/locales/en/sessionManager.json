@@ -231,6 +231,11 @@
       "delete": "Delete local session",
       "delete_failed": "Could not delete local session",
       "confirm_delete": "Delete local session \"{{name}}\"? Running terminals will remain open."
+    },
+    "ble_profiles": {
+      "delete": "Delete",
+      "delete_failed": "Failed to delete BLE connection",
+      "confirm_delete": "Delete BLE connection \"{{name}}\"?"
     }
   }
 }

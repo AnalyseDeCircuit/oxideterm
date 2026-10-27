@@ -18,6 +18,13 @@ pub enum ConnectionTraceStage {
     Pty,
     ShellReady,
     Ready,
+    // BLE profiles resolve through scan/match/verify stages instead of an SSH
+    // handshake; the UI reuses the same progress card vocabulary.
+    BleOpeningAdapter,
+    BleScanning,
+    BleMatching,
+    BleVerifyingService,
+    BleReady,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

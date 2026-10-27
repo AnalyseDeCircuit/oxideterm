@@ -362,7 +362,10 @@ impl WorkspaceApp {
         self.bind_saved_console_command_history(session_id, cx);
         if matches!(
             kind,
-            SavedConnectionKind::Mosh | SavedConnectionKind::Telnet | SavedConnectionKind::Serial
+            SavedConnectionKind::Mosh
+                | SavedConnectionKind::Telnet
+                | SavedConnectionKind::Serial
+                | SavedConnectionKind::Ble
         ) {
             self.standalone_connections.replace_with_saved_profile(
                 crate::workspace::standalone_connections::StandaloneConnectionSurface::Terminal(

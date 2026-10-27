@@ -117,6 +117,7 @@ fn preview_oxide_import_inner(
         mosh_profiles_json,
         standalone_sftp_profiles_json,
         remote_desktop_profiles_json,
+        ble_profiles_json,
         plugin_settings,
         portable_secrets,
         ..
@@ -154,6 +155,7 @@ fn preview_oxide_import_inner(
         remote_desktop_profiles_count: count_remote_desktop_profiles(
             remote_desktop_profiles_json.as_deref(),
         ),
+        ble_profiles_count: count_ble_profiles(ble_profiles_json.as_deref()),
         plugin_settings_count: plugin_settings.len(),
         portable_secret_count: portable_secrets.len(),
         profile_credentials: portable_secrets.iter().filter(|secret| crate::is_profile_credential(secret)).map(|secret| {

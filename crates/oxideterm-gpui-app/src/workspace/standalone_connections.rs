@@ -1,7 +1,9 @@
 use super::*;
 use oxideterm_connections::SavedUpstreamProxyPolicy;
 mod persistence;
-use crate::workspace::new_connection::MoshConnectionOptions;
+use crate::workspace::new_connection::{
+    BleOpenRequest, BleStandaloneTarget, BleTraceTarget, MoshConnectionOptions,
+};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopProviderManifest, RemoteDesktopSecret,
 };
@@ -13,8 +15,22 @@ pub(super) enum StandaloneConnectionKind {
     Mosh,
     Telnet,
     Serial,
+    Ble,
     Rdp,
     Vnc,
+}
+
+/// Device identity carried by a BLE session record.
+///
+/// A BLE peripheral handle is assigned by the OS at scan time and cannot be
+/// restored, so the record keeps the discovery clues the resolver matches
+/// against instead of the runtime id.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) struct BleConnectionClues {
+    pub adapter_mac: Option<String>,
+    pub device_mac: Option<String>,
+    pub device_name: Option<String>,
+    pub service_uuid: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -42,6 +58,15 @@ pub(super) enum StandaloneConnectionLaunch {
         profile_id: String,
         config: TelnetSessionConfig,
         upstream_proxy: SavedUpstreamProxyPolicy,
+        terminal_options: ConnectionTerminalOptions,
+    },
+    Ble {
+        clues: BleConnectionClues,
+        terminal_options: ConnectionTerminalOptions,
+    },
+    SavedBle {
+        profile_id: String,
+        clues: BleConnectionClues,
         terminal_options: ConnectionTerminalOptions,
     },
     MoshPreflight {
@@ -89,6 +114,11 @@ enum StandaloneReconnectPlan {
     Telnet {
         config: TelnetSessionConfig,
         upstream_proxy: SavedUpstreamProxyPolicy,
+        terminal_options: ConnectionTerminalOptions,
+        saved_profile_id: Option<String>,
+    },
+    Ble {
+        clues: BleConnectionClues,
         terminal_options: ConnectionTerminalOptions,
         saved_profile_id: Option<String>,
     },
@@ -211,6 +241,60 @@ impl WorkspaceApp {
                         );
                     }
                 }),
+            StandaloneReconnectPlan::Ble {
+                clues,
+                terminal_options,
+                saved_profile_id,
+            } => {
+                // BLE never mounts a terminal directly: the resolver must scan
+                // and match the device again, and it reports through the same
+                // trace card as a saved-profile open.
+                let saved_profile = saved_profile_id.as_deref().and_then(|id| {
+                    self.connection_store
+                        .ble_profiles()
+                        .iter()
+                        .find(|p| p.id == id)
+                });
+                let runtime_options = saved_profile
+                    .map(|profile| {
+                        crate::workspace::new_connection::terminal_serial_runtime_options_from_ble_profile(profile)
+                    })
+                    .unwrap_or_default();
+                let mtu = saved_profile.and_then(|profile| profile.mtu);
+                self.start_ble_open_flow(
+                    BleOpenRequest {
+                        target: BleTraceTarget {
+                            node_id: connection_id.to_string(),
+                            label: title.clone(),
+                            endpoint: clues
+                                .device_name
+                                .clone()
+                                .or_else(|| clues.device_mac.clone()),
+                        },
+                        adapter_guard: None,
+                        adapter_mac: clues.adapter_mac,
+                        device_mac: clues.device_mac,
+                        device_name: clues.device_name,
+                        service_uuid: clues.service_uuid,
+                        title: format!("BLE {title}"),
+                        terminal_options,
+                        runtime_options,
+                        mtu,
+                        // Saved profiles carry the user's preference; unsaved
+                        // clues fall back to the lower-latency default.
+                        write_without_response: saved_profile
+                            .map(|profile| profile.write_without_response)
+                            .unwrap_or(true),
+                        profile_id: saved_profile_id,
+                        from_form: false,
+                        standalone: BleStandaloneTarget::Reconnect {
+                            attempt_id: connection_attempt_id.clone(),
+                        },
+                    },
+                    cx,
+                );
+                Ok(())
+            }
             StandaloneReconnectPlan::MoshPreflight {
                 config,
                 mut options,
@@ -400,6 +484,43 @@ impl WorkspaceApp {
                             ),
                             host: profile.host.clone(),
                             port: profile.port,
+                        },
+                    ),
+                    terminal_options: current_profile.map_or_else(
+                        || terminal_options.clone(),
+                        |profile| profile.terminal.clone(),
+                    ),
+                    saved_profile_id: Some(profile_id.clone()),
+                }
+            }
+            StandaloneConnectionLaunch::Ble {
+                clues,
+                terminal_options,
+            } => StandaloneReconnectPlan::Ble {
+                clues: clues.clone(),
+                terminal_options: terminal_options.clone(),
+                saved_profile_id: None,
+            },
+            StandaloneConnectionLaunch::SavedBle {
+                profile_id,
+                clues,
+                terminal_options,
+            } => {
+                // A saved profile stays authoritative so edits (renamed device,
+                // changed service) apply on the next reconnect.
+                let current_profile = self
+                    .connection_store
+                    .ble_profiles()
+                    .iter()
+                    .find(|profile| profile.id == *profile_id);
+                StandaloneReconnectPlan::Ble {
+                    clues: current_profile.map_or_else(
+                        || clues.clone(),
+                        |profile| BleConnectionClues {
+                            adapter_mac: profile.adapter_mac.clone(),
+                            device_mac: profile.device_mac.clone(),
+                            device_name: profile.device_name.clone(),
+                            service_uuid: profile.service_uuid.clone(),
                         },
                     ),
                     terminal_options: current_profile.map_or_else(
@@ -723,6 +844,21 @@ impl StandaloneConnectionRegistry {
                         // Saving transfers retry credentials to the protected store.
                         upstream_proxy: profile.upstream_proxy.clone(),
                         terminal_options: profile.terminal.clone(),
+                    };
+                }
+            }
+            StandaloneConnectionKind::Ble => {
+                // Saving an ad-hoc BLE session keeps the discovered identity as
+                // a fallback for when the profile is deleted or unreadable.
+                if let StandaloneConnectionLaunch::Ble {
+                    clues,
+                    terminal_options,
+                } = &record.launch
+                {
+                    record.launch = StandaloneConnectionLaunch::SavedBle {
+                        profile_id,
+                        clues: clues.clone(),
+                        terminal_options: terminal_options.clone(),
                     };
                 }
             }

@@ -881,6 +881,9 @@ pub(in crate::workspace) fn terminal_ai_inline_os_context(
         oxideterm_terminal::TerminalSessionKind::Serial => {
             "Serial device (command interface unknown)".into()
         }
+        oxideterm_terminal::TerminalSessionKind::Ble => {
+            "BLE device (command interface unknown)".into()
+        }
     }
 }
 

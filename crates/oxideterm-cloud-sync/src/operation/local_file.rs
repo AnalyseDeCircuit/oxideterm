@@ -245,6 +245,7 @@ mod tests {
                 revision: "files".into(),
                 exported_at: Utc::now().to_rfc3339(),
                 records: vec![sftp],
+                tombstones: Vec::new(),
                 ftp: None,
             })
             .unwrap();
@@ -270,6 +271,7 @@ mod tests {
                 revision: "desktops".into(),
                 exported_at: Utc::now().to_rfc3339(),
                 records: vec![first, second],
+                tombstones: Vec::new(),
             })
             .unwrap();
         let settings = SettingsStore::load_from_path(directory.join("settings.json")).unwrap();

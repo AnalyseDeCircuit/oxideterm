@@ -165,10 +165,10 @@
       "flow_none": "Sem controle de fluxo",
       "flow_software": "XON/XOFF",
       "flow_hardware": "RTS/CTS",
-      "send_mode": "Enviar",
-      "display_mode": "Exibir",
-      "line_ending": "Fim de linha TX",
-      "output_line_ending": "Fim de linha RX",
+      "send_mode": "Modo de envio",
+      "display_mode": "Modo de exibição",
+      "line_ending": "Caractere de fim de linha TX",
+      "output_line_ending": "Caractere de fim de linha RX",
       "local_echo": "Eco",
       "text_mode": "Texto",
       "hex_mode": "Hex",
@@ -642,7 +642,14 @@
       "ssh_shell": "SSH (canal Shell)",
       "agent_installing": "Instalando agente: {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "Iniciando agente…"
-    }
+    },
+      "ble": {
+        "connection_failed": "Falha na conexão BLE: {error}",
+        "runtime_init_failed": "Falha ao inicializar o runtime BLE",
+        "adapter_index_out_of_range": "O índice do adaptador Bluetooth {n} está fora do intervalo",
+        "service_not_found": "Serviço {uuid} não encontrado",
+        "no_notify_write_pair": "O serviço selecionado não tem um par de características notify+write"
+      }
   },
   "search": {
     "placeholder": "Buscar",

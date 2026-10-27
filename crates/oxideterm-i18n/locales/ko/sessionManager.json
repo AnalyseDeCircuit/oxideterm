@@ -231,6 +231,11 @@
       "delete": "로컬 세션 삭제",
       "delete_failed": "로컬 세션을 삭제하지 못했습니다",
       "confirm_delete": "로컬 세션 “{{name}}”을 삭제할까요? 실행 중인 터미널은 유지됩니다."
+    },
+    "ble_profiles": {
+      "delete": "삭제",
+      "delete_failed": "BLE 연결을 삭제할 수 없습니다",
+      "confirm_delete": "BLE 연결 \"{{name}}\"을(를) 삭제하시겠습니까?"
     }
   }
 }

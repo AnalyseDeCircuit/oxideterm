@@ -1,5 +1,5 @@
 use super::*;
-use oxideterm_connections::{ConnectionStoreData, SerialProfile, TelnetProfile};
+use oxideterm_connections::{BleProfile, ConnectionStoreData, SerialProfile, TelnetProfile};
 use oxideterm_remote_desktop::{
     RemoteDesktopEndpoint, RemoteDesktopProtocol, RemoteDesktopProxyAuth, RemoteDesktopSocksProxy,
     builtin_provider_registry,
@@ -24,6 +24,12 @@ fn saved_sessions_restore_from_current_profiles_and_removed_sessions_stay_remove
             RemoteDesktopProfile::new("desktop", RemoteDesktopProtocol::Rdp, "rdp.test", 3389),
             RemoteDesktopProfile::new("screen", RemoteDesktopProtocol::Vnc, "vnc.test", 5900),
         ],
+        ble_profiles: vec![{
+            let mut profile = BleProfile::new("bridge", "6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+            profile.device_mac = Some("AA:BB:CC:DD:EE:FF".into());
+            profile.device_name = Some("bridge".into());
+            profile
+        }],
         ..ConnectionStoreData::default()
     };
     fs::write(&store_path, serde_json::to_vec(&data).unwrap()).unwrap();
@@ -50,6 +56,10 @@ fn saved_sessions_restore_from_current_profiles_and_removed_sessions_stay_remove
             StandaloneConnectionKind::Vnc,
             data.remote_desktop_profiles[1].id.clone(),
         ),
+        (
+            StandaloneConnectionKind::Ble,
+            data.ble_profiles[0].id.clone(),
+        ),
     ];
     let ids = profiles
         .iter()
@@ -64,6 +74,8 @@ fn saved_sessions_restore_from_current_profiles_and_removed_sessions_stay_remove
         .collect::<Vec<_>>();
     // A saved profile remains authoritative even when edited after the last active-session write.
     data.serial_profiles[0].baud_rate = 57600;
+    data.ble_profiles[0].device_name = Some("renamed bridge".into());
+    data.ble_profiles[0].service_uuid = "6e400002-b5a3-f393-e0a9-e50e24dcca9e".into();
     fs::write(&store_path, serde_json::to_vec(&data).unwrap()).unwrap();
     let store = ConnectionStore::load_read_only(&store_path).unwrap();
     let mut restored = StandaloneConnectionRegistry::restore(snapshot_path.clone(), &store);
@@ -89,6 +101,24 @@ fn saved_sessions_restore_from_current_profiles_and_removed_sessions_stay_remove
     assert_eq!(
         (config.port_path.as_str(), config.baud_rate),
         ("COM5", 57600)
+    );
+    // The runtime peripheral id is not restorable, so reconnect clues follow the live profile.
+    let StandaloneConnectionLaunch::SavedBle { clues, .. } =
+        &restored.record(&ids[5]).unwrap().launch
+    else {
+        panic!("saved BLE record");
+    };
+    assert_eq!(
+        (
+            clues.device_mac.as_deref(),
+            clues.device_name.as_deref(),
+            clues.service_uuid.as_str()
+        ),
+        (
+            Some("AA:BB:CC:DD:EE:FF"),
+            Some("renamed bridge"),
+            "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
+        )
     );
 
     // Explicit removal is durable without an exit hook; deleting an asset also prevents revival.

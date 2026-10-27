@@ -891,6 +891,47 @@ impl WorkspaceApp {
                     ));
                 }
             }
+            NewConnectionSelect::BleAdapter => {
+                let selected_index = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.ble.selected_adapter_index)
+                    .unwrap_or_default();
+                let adapters = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.ble.adapters.clone())
+                    .unwrap_or_default();
+                if adapters.is_empty() {
+                    let label = if self
+                        .connection_form_state(cx)
+                        .form
+                        .as_ref()
+                        .is_some_and(|form| form.ble.adapters_loading)
+                    {
+                        self.i18n.t("modals.new_connection.ble_loading_adapters")
+                    } else {
+                        self.i18n.t("modals.new_connection.ble_no_adapters")
+                    };
+                    popup = popup.child(select_option(&self.tokens, label, false));
+                } else {
+                    for (index, adapter) in adapters.iter().enumerate() {
+                        let selected = index == selected_index;
+                        popup = popup.child(select_option_action(
+                            select_option(&self.tokens, adapter.display_label(), selected),
+                            false,
+                            false,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.close_new_connection_select(cx);
+                                this.set_new_connection_ble_adapter(index, cx);
+                                cx.stop_propagation();
+                            }),
+                        ));
+                    }
+                }
+            }
             NewConnectionSelect::SerialPort => {
                 let selected_port = self
                     .connection_form_state(cx)
@@ -979,19 +1020,31 @@ impl WorkspaceApp {
                 }
             }
             NewConnectionSelect::TelnetInputLineEnding
-            | NewConnectionSelect::TelnetOutputLineEnding => {
+            | NewConnectionSelect::TelnetOutputLineEnding
+            | NewConnectionSelect::BleInputLineEnding
+            | NewConnectionSelect::BleOutputLineEnding => {
                 use oxideterm_connections::SerialLineEnding;
-                let output = select_id == NewConnectionSelect::TelnetOutputLineEnding;
+                // Telnet and BLE share one line-ending popup: the select id
+                // alone picks the form family and the edited direction.
+                let output = matches!(
+                    select_id,
+                    NewConnectionSelect::TelnetOutputLineEnding
+                        | NewConnectionSelect::BleOutputLineEnding
+                );
+                let ble = matches!(
+                    select_id,
+                    NewConnectionSelect::BleInputLineEnding
+                        | NewConnectionSelect::BleOutputLineEnding
+                );
                 let selected = self
                     .connection_form_state(cx)
                     .form
                     .as_ref()
-                    .map(|form| {
-                        if output {
-                            form.telnet_output_line_ending
-                        } else {
-                            form.telnet_input_line_ending
-                        }
+                    .map(|form| match (ble, output) {
+                        (false, false) => form.telnet_input_line_ending,
+                        (false, true) => form.telnet_output_line_ending,
+                        (true, false) => form.ble.input_line_ending,
+                        (true, true) => form.ble.output_line_ending,
                     })
                     .unwrap_or_default();
                 for value in [
@@ -1012,11 +1065,76 @@ impl WorkspaceApp {
                             this.close_new_connection_select(cx);
                             this.update_connection_form_state(cx, |state| {
                                 if let Some(form) = state.form.as_mut() {
-                                    if output {
-                                        form.telnet_output_line_ending = value;
-                                    } else {
-                                        form.telnet_input_line_ending = value;
+                                    match (ble, output) {
+                                        (false, false) => form.telnet_input_line_ending = value,
+                                        (false, true) => form.telnet_output_line_ending = value,
+                                        (true, false) => form.ble.input_line_ending = value,
+                                        (true, true) => form.ble.output_line_ending = value,
                                     }
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::BleSendMode => {
+                use oxideterm_connections::SerialSendMode;
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.ble.send_mode)
+                    .unwrap_or_default();
+                for value in [SerialSendMode::Text, SerialSendMode::Hex] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.connection_send_mode_label(value),
+                            selected == value,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.ble.send_mode = value;
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ));
+                }
+            }
+            NewConnectionSelect::BleDisplayMode => {
+                use oxideterm_connections::SerialDisplayMode;
+                let selected = self
+                    .connection_form_state(cx)
+                    .form
+                    .as_ref()
+                    .map(|form| form.ble.display_mode)
+                    .unwrap_or_default();
+                for value in [
+                    SerialDisplayMode::Text,
+                    SerialDisplayMode::Hex,
+                    SerialDisplayMode::Mixed,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            self.connection_display_mode_label(value),
+                            selected == value,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _, _, cx| {
+                            this.close_new_connection_select(cx);
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.ble.display_mode = value;
                                 }
                             });
                             cx.stop_propagation();

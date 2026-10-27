@@ -231,6 +231,11 @@
       "delete": "Lokale Sitzung löschen",
       "delete_failed": "Lokale Sitzung konnte nicht gelöscht werden",
       "confirm_delete": "Lokale Sitzung „{{name}}“ löschen? Laufende Terminals bleiben geöffnet."
+    },
+    "ble_profiles": {
+      "delete": "Löschen",
+      "delete_failed": "BLE-Verbindung konnte nicht gelöscht werden",
+      "confirm_delete": "BLE-Verbindung „{{name}}\" löschen?"
     }
   }
 }

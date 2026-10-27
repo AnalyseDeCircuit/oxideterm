@@ -41,6 +41,7 @@ fn ftp_cloud_merge_keeps_independent_local_and_remote_edits() {
         revision: "base".into(),
         exported_at: now.to_rfc3339(),
         records: vec![],
+        tombstones: vec![],
         ftp: Some(FtpProfilesSyncSnapshot {
             revision: "base-ftp".into(),
             exported_at: now.to_rfc3339(),

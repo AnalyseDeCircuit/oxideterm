@@ -12,6 +12,9 @@ use crate::workspace::browser_behavior::{self, BrowserFocusOrigin};
 /// Owns the secret-bearing connection draft and its modal interaction metadata.
 pub(in crate::workspace) struct ConnectionFormState {
     pub(in crate::workspace) form: Option<NewConnectionForm>,
+    /// Stable focus target for the BLE scan-result list so Enter can inspect
+    /// the selected device after a click moves focus onto the list.
+    pub(in crate::workspace) ble_device_list_focus: gpui::FocusHandle,
     pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(in crate::workspace) jump_server_presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(in crate::workspace) jump_server_exit_commits: bool,
@@ -22,12 +25,17 @@ pub(in crate::workspace) struct ConnectionFormState {
     pub(in crate::workspace) saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
     pub(in crate::workspace) open_select: Option<NewConnectionSelect>,
     pub(in crate::workspace) select_focus_origin: Option<BrowserFocusOrigin>,
+    /// Laid-out width of the BLE scan table captured by a bounds probe. The
+    /// overflow-tooltip predicates for flexible cells need the previous
+    /// frame's real geometry, which no render-time arithmetic reproduces.
+    pub(in crate::workspace) ble_scan_table_width: Option<f32>,
 }
 
 impl ConnectionFormState {
-    pub(in crate::workspace) fn new() -> Self {
+    pub(in crate::workspace) fn new(ble_device_list_focus: gpui::FocusHandle) -> Self {
         Self {
             form: None,
+            ble_device_list_focus,
             presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             jump_server_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             jump_server_exit_commits: false,
@@ -38,6 +46,7 @@ impl ConnectionFormState {
             saved_connection_prompt_action: None,
             open_select: None,
             select_focus_origin: None,
+            ble_scan_table_width: None,
         }
     }
 
@@ -78,6 +87,7 @@ impl ConnectionFormState {
         self.close_select();
         self.jump_server_exit_commits = false;
         self.jump_server_presence.reopen();
+        self.ble_scan_table_width = None;
     }
 
     pub(in crate::workspace) fn close_select(&mut self) {

@@ -1,10 +1,10 @@
 #[derive(Debug, Default)]
-struct LineEndingIngress {
+pub(crate) struct LineEndingIngress {
     previous_was_carriage_return: bool,
 }
 
 impl LineEndingIngress {
-    fn normalize(&mut self, bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
+    pub(crate) fn normalize(&mut self, bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
         if matches!(line_ending, SerialLineEnding::None) {
             self.previous_was_carriage_return = false;
             return bytes.to_vec();
@@ -35,12 +35,12 @@ impl LineEndingIngress {
         normalized
     }
 
-    fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.previous_was_carriage_return = false;
     }
 }
 
-fn encode_text_line_endings(bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
+pub(crate) fn encode_text_line_endings(bytes: &[u8], line_ending: SerialLineEnding) -> Vec<u8> {
     if matches!(line_ending, SerialLineEnding::None) {
         return bytes.to_vec();
     }

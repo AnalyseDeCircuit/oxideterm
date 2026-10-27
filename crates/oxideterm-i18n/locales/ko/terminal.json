@@ -165,10 +165,10 @@
       "flow_none": "흐름 제어 없음",
       "flow_software": "XON/XOFF",
       "flow_hardware": "RTS/CTS",
-      "send_mode": "전송",
-      "display_mode": "표시",
-      "line_ending": "송신 줄 끝",
-      "output_line_ending": "수신 줄 끝",
+      "send_mode": "전송 모드",
+      "display_mode": "표시 모드",
+      "line_ending": "송신 줄 끝 문자",
+      "output_line_ending": "수신 줄 끝 문자",
       "local_echo": "에코",
       "text_mode": "텍스트",
       "hex_mode": "16진수",
@@ -642,7 +642,14 @@
       "ssh_shell": "SSH (Shell 채널)",
       "agent_installing": "에이전트 설치 중: {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "에이전트 시작 중…"
-    }
+    },
+      "ble": {
+        "connection_failed": "BLE 연결 실패: {error}",
+        "runtime_init_failed": "BLE 런타임 초기화 실패",
+        "adapter_index_out_of_range": "Bluetooth 어댑터 인덱스 {n}이(가) 범위를 벗어났습니다",
+        "service_not_found": "서비스 {uuid}를 찾을 수 없습니다",
+        "no_notify_write_pair": "선택한 서비스에 notify+write 특성 쌍이 없습니다"
+      }
   },
   "search": {
     "placeholder": "검색",

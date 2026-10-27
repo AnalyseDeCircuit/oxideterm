@@ -72,6 +72,20 @@
       "no_connection_id": "재연결 후 연결 ID가 할당되지 않았습니다."
     },
     "failedFetchStats": "통계를 가져오지 못했습니다",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "BLE 어댑터 열거 실패: {error}",
+              "no_adapters": "사용 가능한 Bluetooth 어댑터가 없습니다",
+              "adapter_open_failed": "BLE 어댑터 열기 실패: {error}",
+              "device_enumeration_failed": "BLE 장치 열거 실패: {error}",
+              "scan_failed": "BLE 스캔 실패: {error}",
+              "no_device_matched": "근처에 프로필과 일치하는 BLE 장치가 없습니다({identity})",
+              "connect_failed": "BLE 장치 연결 실패: {error}",
+              "service_discovery_failed": "서비스 검색 실패: {error}",
+              "service_mismatch": "장치가 일치하지만 대상 서비스 {uuid}를 광고하지 않습니다",
+              "invalid_service_uuid": "잘못된 서비스 UUID: {uuid}"
+        }
+      },
     "errors": {
       "chain_busy_desc": "다른 연결 체인이 진행 중입니다. 잠시만 기다려 주세요.",
       "chain_busy_title": "작업 진행 중",
@@ -126,6 +140,11 @@
         "no_common": "공통 {{kind}} 알고리즘 없음"
       },
       "stage": {
+        "ble_opening_adapter": "Bluetooth 어댑터 여는 중",
+        "ble_scanning": "Bluetooth 장치 검색 중",
+        "ble_matching": "장치 매칭 중",
+        "ble_verifying_service": "서비스 확인 중",
+        "ble_ready": "준비 완료",
         "authentication": "인증 중",
         "kerberos_credentials": "Kerberos 자격 증명 확인 중",
         "gssapi_exchange": "GSSAPI 토큰 교환 중",

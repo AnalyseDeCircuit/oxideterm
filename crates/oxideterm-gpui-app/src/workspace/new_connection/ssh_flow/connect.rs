@@ -1,7 +1,10 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::VecDeque;
+
 use super::*;
+use crate::workspace::new_connection::BleConnectionWorkerResult;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ssh_worker_sender(
@@ -11,6 +14,13 @@ impl WorkspaceApp {
         self.connection_flow.read(cx).ssh_worker_sender()
     }
 
+    pub(in crate::workspace) fn ble_worker_sender(
+        &self,
+        cx: &App,
+    ) -> ActiveDeliverySender<BleConnectionWorkerResult> {
+        self.connection_flow.read(cx).ble_worker_sender()
+    }
+
     pub(in crate::workspace) fn apply_connection_flow_worker_delivery(
         &mut self,
         window: &mut Window,
@@ -18,10 +28,26 @@ impl WorkspaceApp {
     ) {
         // Secret-bearing worker results stay in ConnectionFlowEntity until the
         // registry supplies a live native window for their root adapter.
-        let results = self.connection_flow.update(cx, |connection_flow, _cx| {
+        let ssh_results = self.connection_flow.update(cx, |connection_flow, _cx| {
             connection_flow.take_worker_results()
         });
-        self.apply_ssh_worker_results(results, window, cx);
+        self.apply_ssh_worker_results(ssh_results, window, cx);
+
+        let ble_results = self.connection_flow.update(cx, |connection_flow, _cx| {
+            connection_flow.take_ble_worker_results()
+        });
+        self.apply_ble_worker_results(ble_results, window, cx);
+    }
+
+    pub(super) fn apply_ble_worker_results(
+        &mut self,
+        results: VecDeque<BleConnectionWorkerResult>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for result in results {
+            self.handle_ble_worker_result(result, window, cx);
+        }
     }
 
     pub(super) fn build_new_connection_config(

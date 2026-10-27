@@ -253,10 +253,10 @@
       "flow_none": "No flow",
       "flow_software": "XON/XOFF",
       "flow_hardware": "RTS/CTS",
-      "send_mode": "Send",
-      "display_mode": "Display",
-      "line_ending": "TX line ending",
-      "output_line_ending": "RX line ending",
+      "send_mode": "Send mode",
+      "display_mode": "Display mode",
+      "line_ending": "TX line ending character",
+      "output_line_ending": "RX line ending character",
       "local_echo": "Echo",
       "text_mode": "Text",
       "hex_mode": "Hex",
@@ -642,7 +642,14 @@
       "ssh_shell": "SSH (shell channel)",
       "agent_installing": "Installing agent: {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "Starting agent…"
-    }
+    },
+      "ble": {
+        "connection_failed": "BLE connection failed: {error}",
+        "runtime_init_failed": "failed to initialize BLE runtime",
+        "adapter_index_out_of_range": "bluetooth adapter index {n} is out of range",
+        "service_not_found": "service {uuid} not found",
+        "no_notify_write_pair": "selected service has no notify+write characteristic pair"
+      }
   },
   "search": {
     "placeholder": "Search",

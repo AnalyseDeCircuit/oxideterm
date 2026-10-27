@@ -217,7 +217,8 @@
     "cancel": "キャンセル",
     "delete": "削除",
     "no": "いいえ",
-    "yes": "はい"
+    "yes": "はい",
+    "status_connecting": "接続中"
   },
   "topology": {
     "button_title": "トポロジビュー",
@@ -503,6 +504,7 @@
         "sync_forwards": "ポート転送と SSH トンネルを同期",
         "sync_quick_commands": "クイックコマンドを同期",
         "sync_serial_profiles": "シリアルプロファイルを同期",
+        "sync_ble_profiles": "BLE プロファイルを同期",
         "sync_telnet_profiles": "Telnet プロファイルを同期",
         "sync_mosh_profiles": "Mosh プロファイルを同期",
         "sync_remote_desktop_profiles": "リモートデスクトップ接続を同期",
@@ -546,6 +548,7 @@
         "forwards_detail": "保存済みポート転送ルールが所有元接続のメタデータと一緒に含まれます。",
         "quick_commands_detail": "クイックコマンド定義が含まれます。",
         "serial_profiles_detail": "シリアル接続プロファイルが含まれます。",
+        "ble_profiles_detail": "BLE デバイスプロファイルが含まれます。",
         "telnet_profiles_detail": "Telnet 接続プロファイルが含まれます。",
         "mosh_profiles_detail": "端末固有の認証情報を除いた Mosh 接続プロファイルが含まれます。",
         "app_settings_sections_detail": "選択済みセクション: {{sections}}",
@@ -570,13 +573,13 @@
       },
       "backup": {
         "description": "Oxide クラウド同期ロールバックバックアップ",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{telnetProfiles}} 件の Telnet プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{bleProfiles}} 件の BLE プロファイル、{{telnetProfiles}} 件の Telnet プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{size}}、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "history": {
         "action_upload": "アップロード",
         "action_pull": "プル",
         "action_restore": "復元",
-        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{telnetProfiles}} 件の Telnet プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{sensitiveCredentials}} 件の機密資格情報"
+        "summary_line": "{{connections}} 件の接続、{{forwards}} 件のフォワード、{{quickCommands}} 件のクイックコマンド、{{serialProfiles}} 件のシリアルプロファイル、{{bleProfiles}} 件の BLE プロファイル、{{telnetProfiles}} 件の Telnet プロファイル、{{pluginSettingsCount}} 件のプラグイン設定、{{sensitiveCredentials}} 件の機密資格情報"
       },
       "errors": {
         "local_forward_requires_connection": "ローカルファイルにエクスポートするには、選択した転送ルールの接続も選択してください。",
@@ -719,6 +722,7 @@
         "total_forwards": "フォワード数",
         "quick_commands_label": "クイックコマンド",
         "serial_profiles_label": "シリアルプロファイル",
+        "ble_profiles_label": "BLE プロファイル",
         "telnet_profiles_label": "Telnet プロファイル",
         "mosh_profiles_label": "Mosh プロファイル",
         "will_import": "インポート対象",
@@ -739,6 +743,7 @@
         "toggle_forwards": "保存済みフォワードをインポート ({{count}})",
         "toggle_quick_commands": "クイックコマンドをインポート ({{count}})",
         "toggle_serial_profiles": "シリアルプロファイルをインポート ({{count}})",
+        "toggle_ble_profiles": "BLE プロファイルをインポート ({{count}})",
         "toggle_telnet_profiles": "Telnet プロファイルをインポート ({{count}})",
         "toggle_mosh_profiles": "Mosh プロファイルをインポート ({{count}})",
         "toggle_remote_desktop_profiles": "リモートデスクトップ接続をインポート ({{count}})",
@@ -918,6 +923,11 @@
         "stop_bits": "ストップビット",
         "parity": "パリティ",
         "flow_control": "フロー制御",
+        "device_mac": "デバイス MAC",
+        "device_name": "デバイス名",
+        "service_uuid": "サービス UUID",
+        "mtu": "MTU",
+        "write_without_response": "Write Without Response",
         "connect_on_open": "開いたら接続",
         "line_ending": "改行コード",
         "display_mode": "表示モード",

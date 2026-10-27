@@ -806,9 +806,13 @@ impl WorkspaceOverlayEntity {
                     .step_index
                     .zip(event.total_steps)
                     .is_none_or(|(step, total)| step >= total);
-            if final_step_ready {
+            let ble_trace = connection_trace_transport(event.stage) == TraceTransport::Ble;
+            if final_step_ready && !ble_trace {
                 // A ready terminal is already the success confirmation. Remove
                 // its overlay in the same delivery instead of covering the pane.
+                // BLE is the exception: its scan→match→verify sequence can
+                // finish in milliseconds, so the card keeps the success state
+                // for CONNECTION_TRACE_SUCCESS_TTL to stay readable.
                 changed |= self.connection_trace_cards.remove(&attempt_id).is_some();
                 continue;
             }
@@ -825,7 +829,6 @@ impl WorkspaceOverlayEntity {
                     self.connection_trace_cards.remove(&superseded_attempt_id);
                     self.dismissed_connection_traces
                         .retain(|dismissed| dismissed != &superseded_attempt_id);
-                    changed = true;
                 }
             }
             let trace = self
@@ -872,6 +875,11 @@ impl WorkspaceOverlayEntity {
                             now + CONNECTION_TRACE_UPDATE_COALESCE,
                             trace.flush_generation,
                         ));
+                        // Scheduling the deadline is the only way `displayed` catches up
+                        // with `latest`; without marking the intent as changed the owner
+                        // never arms the timer, leaving the stage path frozen on the
+                        // first stage while the history list keeps updating.
+                        changed = true;
                     }
                 }
                 ConnectionTraceStatus::Ready => {
@@ -1396,6 +1404,10 @@ fn render_connection_card(
         ConnectionTraceStatus::Running | ConnectionTraceStatus::Cancelled => tokens.ui.accent,
     };
     let title = connection_trace_title(i18n, event);
+    let transport_badge = match connection_trace_transport(event.stage) {
+        TraceTransport::Ssh => "SSH",
+        TraceTransport::Ble => "BLE",
+    };
     let status = (event.status != ConnectionTraceStatus::Failed)
         .then(|| connection_trace_status_text(i18n, event));
     let endpoint = event.endpoint.clone();
@@ -1449,7 +1461,7 @@ fn render_connection_card(
                 .text_size(px(12.0))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(status_color))
-                .child("SSH"),
+                .child(transport_badge),
         )
         .child(
             div()
@@ -1472,7 +1484,7 @@ fn render_connection_card(
                         div()
                             .text_size(px(12.0))
                             .text_color(rgb(tokens.ui.text_muted))
-                            .child(format!("SSH  {endpoint}")),
+                            .child(format!("{transport_badge}  {endpoint}")),
                     )
                 })
                 .when_some(status, |header, status| {
@@ -1525,7 +1537,7 @@ fn render_connection_stage_path(
     attempt_id: &str,
     event: &ConnectionTraceEvent,
 ) -> AnyElement {
-    const STAGES: [(ConnectionTraceStage, &str); 4] = [
+    const SSH_STAGES: [(ConnectionTraceStage, &str); 4] = [
         (
             ConnectionTraceStage::OpeningTransport,
             "connections.trace.stage.opening_transport",
@@ -1540,11 +1552,33 @@ fn render_connection_stage_path(
         ),
         (ConnectionTraceStage::Ready, "connections.trace.stage.ready"),
     ];
-    let current = connection_trace_path_index(event.stage);
+    const BLE_STAGES: [(ConnectionTraceStage, &str); 4] = [
+        (
+            ConnectionTraceStage::BleOpeningAdapter,
+            "connections.trace.stage.ble_opening_adapter",
+        ),
+        (
+            ConnectionTraceStage::BleScanning,
+            "connections.trace.stage.ble_scanning",
+        ),
+        (
+            ConnectionTraceStage::BleMatching,
+            "connections.trace.stage.ble_matching",
+        ),
+        (
+            ConnectionTraceStage::BleVerifyingService,
+            "connections.trace.stage.ble_verifying_service",
+        ),
+    ];
+    let (stages, current): (&[(ConnectionTraceStage, &str)], usize) =
+        match connection_trace_transport(event.stage) {
+            TraceTransport::Ble => (&BLE_STAGES, ble_trace_path_index(event.stage)),
+            TraceTransport::Ssh => (&SSH_STAGES, connection_trace_path_index(event.stage)),
+        };
     let failed = event.status == ConnectionTraceStatus::Failed;
     let ready = event.status == ConnectionTraceStatus::Ready;
 
-    let nodes = STAGES
+    let nodes = stages
         .iter()
         .enumerate()
         .map(|(index, (_, label_key))| {
@@ -1605,25 +1639,30 @@ fn render_connection_stage_path(
                 .gap(px(tokens.spacing.two))
                 .child(marker)
                 .child(
+                    // Full width + centered alignment so long translations
+                    // (ja/de) wrap inside the quarter-width cell instead of
+                    // spilling over the neighbouring stage labels.
                     div()
+                        .w_full()
+                        .px(px(2.0))
+                        .text_align(gpui::TextAlign::Center)
                         .text_size(px(12.0))
                         .text_color(rgb(color))
-                        .whitespace_nowrap()
                         .child(i18n.t(label_key)),
                 )
                 .into_any_element()
         })
         .collect::<Vec<_>>();
 
-    let current_connector = current.min(STAGES.len() - 1);
-    let connectors = (0..STAGES.len() - 1)
+    let current_connector = current.min(stages.len() - 1);
+    let connectors = (0..stages.len() - 1)
         .map(|index| {
             let complete = ready || index < current_connector;
             div()
                 .absolute()
                 .top(px(14.0))
-                .left(relative((index as f32 + 0.5) / STAGES.len() as f32))
-                .w(relative(1.0 / STAGES.len() as f32))
+                .left(relative((index as f32 + 0.5) / stages.len() as f32))
+                .w(relative(1.0 / stages.len() as f32))
                 .h(px(2.0))
                 .bg(rgb(if complete {
                     tokens.ui.success
@@ -1766,6 +1805,44 @@ fn connection_trace_path_index(stage: ConnectionTraceStage) -> usize {
         ConnectionTraceStage::Pty
         | ConnectionTraceStage::ShellReady
         | ConnectionTraceStage::Ready => 3,
+        // BLE stages are rendered through their own path; this SSH mapping is
+        // only reached if a BLE stage ever arrives on a non-BLE card.
+        ConnectionTraceStage::BleOpeningAdapter
+        | ConnectionTraceStage::BleScanning
+        | ConnectionTraceStage::BleMatching
+        | ConnectionTraceStage::BleVerifyingService => 0,
+        ConnectionTraceStage::BleReady => 3,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TraceTransport {
+    Ssh,
+    Ble,
+}
+
+/// Derives the card flavor from the stage vocabulary so BLE progress events do
+/// not need a parallel event type just to change the badge and stage labels.
+fn connection_trace_transport(stage: ConnectionTraceStage) -> TraceTransport {
+    match stage {
+        ConnectionTraceStage::BleOpeningAdapter
+        | ConnectionTraceStage::BleScanning
+        | ConnectionTraceStage::BleMatching
+        | ConnectionTraceStage::BleVerifyingService
+        | ConnectionTraceStage::BleReady => TraceTransport::Ble,
+        _ => TraceTransport::Ssh,
+    }
+}
+
+fn ble_trace_path_index(stage: ConnectionTraceStage) -> usize {
+    match stage {
+        ConnectionTraceStage::BleOpeningAdapter => 0,
+        ConnectionTraceStage::BleScanning => 1,
+        ConnectionTraceStage::BleMatching => 2,
+        ConnectionTraceStage::BleVerifyingService => 3,
+        // Past the last visible stage so every node renders as completed.
+        ConnectionTraceStage::BleReady => 4,
+        _ => 0,
     }
 }
 
@@ -2046,6 +2123,13 @@ pub(in crate::workspace) fn connection_trace_stage_key(
         ConnectionTraceStage::Pty => "connections.trace.stage.pty",
         ConnectionTraceStage::ShellReady => "connections.trace.stage.shell_ready",
         ConnectionTraceStage::Ready => "connections.trace.stage.ready",
+        ConnectionTraceStage::BleOpeningAdapter => "connections.trace.stage.ble_opening_adapter",
+        ConnectionTraceStage::BleScanning => "connections.trace.stage.ble_scanning",
+        ConnectionTraceStage::BleMatching => "connections.trace.stage.ble_matching",
+        ConnectionTraceStage::BleVerifyingService => {
+            "connections.trace.stage.ble_verifying_service"
+        }
+        ConnectionTraceStage::BleReady => "connections.trace.stage.ble_ready",
     }
 }
 
@@ -2062,6 +2146,85 @@ mod tests {
     use gpui::TestAppContext;
 
     use super::*;
+
+    fn ble_trace_event(stage: ConnectionTraceStage) -> ConnectionTraceEvent {
+        ConnectionTraceEvent {
+            attempt_id: "attempt-1".to_string(),
+            node_id: NodeId::new("node-1"),
+            stage,
+            status: ConnectionTraceStatus::Running,
+            progress: 0.0,
+            elapsed_ms: 0,
+            detail: None,
+            label: None,
+            endpoint: None,
+            step_index: None,
+            total_steps: None,
+            mode: ConnectionTraceMode::Connect,
+        }
+    }
+
+    #[gpui::test]
+    fn running_stage_updates_arm_the_coalesced_flush(cx: &mut TestAppContext) {
+        let overlay = cx.new(|cx| WorkspaceOverlayEntity::new(Duration::from_millis(90), cx));
+        overlay.update(cx, |overlay, _cx| {
+            let started = Instant::now();
+            assert!(overlay.apply_connection_trace_events(
+                vec![ble_trace_event(ConnectionTraceStage::BleOpeningAdapter)],
+                started,
+            ));
+
+            // A stage change only updates `latest`; the card must still report the
+            // intent as changed so the owner arms the coalescing timer.
+            let dispatched_at = started + Duration::from_millis(50);
+            assert!(overlay.apply_connection_trace_events(
+                vec![ble_trace_event(ConnectionTraceStage::BleScanning)],
+                dispatched_at,
+            ));
+            let card = overlay.connection_trace_cards.get("attempt-1").unwrap();
+            assert_eq!(card.latest.stage, ConnectionTraceStage::BleScanning);
+            assert_eq!(
+                card.displayed.as_ref().unwrap().stage,
+                ConnectionTraceStage::BleOpeningAdapter
+            );
+            assert!(card.flush_deadline.is_some());
+
+            assert!(overlay.process_due_deadlines(
+                dispatched_at + CONNECTION_TRACE_UPDATE_COALESCE + Duration::from_millis(1)
+            ));
+            let card = overlay.connection_trace_cards.get("attempt-1").unwrap();
+            assert_eq!(
+                card.displayed.as_ref().unwrap().stage,
+                ConnectionTraceStage::BleScanning
+            );
+            assert!(card.flush_deadline.is_none());
+
+            // A BLE ready event must keep the card for the success TTL: the
+            // scan→match→verify sequence can finish in milliseconds, so an
+            // immediate removal would flash the card instead of confirming it.
+            let mut ready = ble_trace_event(ConnectionTraceStage::BleReady);
+            ready.status = ConnectionTraceStatus::Ready;
+            let ready_at = dispatched_at + CONNECTION_TRACE_UPDATE_COALESCE;
+            assert!(overlay.apply_connection_trace_events(vec![ready], ready_at));
+            let card = overlay.connection_trace_cards.get("attempt-1").unwrap();
+            assert_eq!(
+                card.displayed.as_ref().unwrap().stage,
+                ConnectionTraceStage::BleReady
+            );
+            assert!(card.expires_at.is_some());
+
+            assert!(overlay.process_due_deadlines(ready_at + CONNECTION_TRACE_SUCCESS_TTL));
+            assert_eq!(
+                overlay
+                    .connection_trace_cards
+                    .get("attempt-1")
+                    .unwrap()
+                    .presence
+                    .phase(),
+                oxideterm_gpui_ui::motion::ExitPhase::Exiting
+            );
+        });
+    }
 
     #[gpui::test]
     fn plugin_requirement_notices_route_install_and_enable_actions(cx: &mut TestAppContext) {

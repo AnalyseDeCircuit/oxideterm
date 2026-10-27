@@ -40,6 +40,16 @@ fn saved_console_history_identity(
                 &profile.name,
             )
         }
+        SavedConnectionKind::Ble => {
+            let profile = connections
+                .ble_profiles()
+                .iter()
+                .find(|p| p.id == connection.id)?;
+            (
+                serde_json::json!([connection.kind, profile.id, profile.service_uuid]),
+                &profile.name,
+            )
+        }
         SavedConnectionKind::Ssh => return None,
     };
     Some((scope.to_string(), label.clone()))

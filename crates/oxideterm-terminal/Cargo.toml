@@ -12,12 +12,16 @@ oxideterm-audit = { path = "../oxideterm-audit" }
 alacritty_terminal.workspace = true
 anyhow.workspace = true
 async-channel.workspace = true
+btleplug.workspace = true
 crossbeam-channel.workspace = true
+futures-util.workspace = true
 fernomade-predict = { path = "../fernomade/predict" }
 libc.workspace = true
 memchr.workspace = true
 regex.workspace = true
 oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-ble = { path = "../oxideterm-ble" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-mosh = { path = "../oxideterm-mosh" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
@@ -32,11 +36,12 @@ polling.workspace = true
 serialport.workspace = true
 serde.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 tempfile = "3.23"
 unicode-segmentation.workspace = true
-zeroize.workspace = true
 uuid.workspace = true
+zeroize.workspace = true
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading"] }

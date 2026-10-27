@@ -514,6 +514,7 @@ pub async fn deliver_cloud_sync_upload(
             scope.sync_forwards,
             scope.sync_quick_commands,
             scope.sync_serial_profiles,
+            scope.sync_ble_profiles,
             scope.sync_telnet_profiles,
             scope.sync_mosh_profiles,
             scope.sync_remote_desktop_profiles,
@@ -953,6 +954,11 @@ fn filter_structured_preview_for_selection(
             .records
             .retain(|profile| selection.selected_serial_profile_ids.contains(&profile.id));
     }
+    if let Some(snapshot) = preview.ble_profiles_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|profile| selection.selected_ble_profile_ids.contains(&profile.id));
+    }
     if let Some(snapshot) = preview.telnet_profiles_snapshot.as_mut() {
         snapshot
             .records
@@ -1199,6 +1205,7 @@ mod tests {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            ble_profiles_snapshot: None,
             telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
             standalone_sftp_profiles_snapshot: None,
@@ -1207,12 +1214,14 @@ mod tests {
                     revision: "desktops".into(),
                     exported_at: "2026-09-07T00:00:00Z".into(),
                     records: vec![first.clone(), second],
+                    tombstones: Vec::new(),
                 },
             ),
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_ble_profiles_snapshot: None,
             base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,
             base_standalone_sftp_profiles_snapshot: None,
@@ -1403,6 +1412,14 @@ fn create_cloud_sync_rollback_backup(
                 })
         })
         .collect::<Vec<_>>();
+    // Rollback backups must cover every profile family: after a bad pull
+    // replaces local data, BLE profiles have no source to recover from.
+    let ble_profiles_json = serde_json::to_string(
+        &connection_store
+            .export_ble_profiles_snapshot()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+    )
+    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let bytes = oxideterm_connections::oxide_file::export_connections_to_oxide_with_progress(
         connection_store,
         &connection_ids,
@@ -1410,6 +1427,7 @@ fn create_cloud_sync_rollback_backup(
         OxideExportOptions {
             description: Some("Oxide Cloud Sync rollback backup".to_string()),
             embed_keys: false,
+            ble_profiles_json: Some(ble_profiles_json),
             app_settings_json: Some(app_settings_json),
             plugin_settings,
             forwards,
@@ -1450,6 +1468,7 @@ fn create_cloud_sync_rollback_backup(
             forwards: preview.total_forwards,
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: metadata.serial_profiles_count.unwrap_or(0),
+            ble_profiles: metadata.ble_profiles_count.unwrap_or(0),
             telnet_profiles: metadata.telnet_profiles_count.unwrap_or(0),
             mosh_profiles: metadata.mosh_profiles_count.unwrap_or(0),
             remote_desktop_profiles: metadata.remote_desktop_profiles_count.unwrap_or(0),

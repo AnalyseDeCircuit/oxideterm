@@ -224,7 +224,8 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "no": "No",
-    "yes": "Yes"
+    "yes": "Yes",
+    "status_connecting": "Connecting"
   },
   "topology": {
     "button_title": "Topology View",
@@ -495,6 +496,7 @@
         "sync_forwards": "Sync port forwards and SSH tunnels",
         "sync_quick_commands": "Sync quick commands",
         "sync_serial_profiles": "Sync serial profiles",
+        "sync_ble_profiles": "Sync BLE profiles",
         "sync_telnet_profiles": "Sync Telnet profiles",
         "sync_mosh_profiles": "Sync Mosh profiles",
         "sync_remote_desktop_profiles": "Sync remote desktop connections",
@@ -538,6 +540,7 @@
         "forwards_detail": "Saved port forwarding rules are included with their owner connection metadata.",
         "quick_commands_detail": "Quick command definitions are included.",
         "serial_profiles_detail": "Serial connection profiles are included.",
+        "ble_profiles_detail": "BLE device profiles are included.",
         "telnet_profiles_detail": "Telnet connection profiles are included.",
         "mosh_profiles_detail": "Mosh connection profiles are included without device-local credentials.",
         "app_settings_sections_detail": "Selected sections: {{sections}}",
@@ -562,13 +565,13 @@
       },
       "backup": {
         "description": "Oxide Cloud Sync rollback backup",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{telnetProfiles}} Telnet profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{bleProfiles}} BLE profiles, {{telnetProfiles}} Telnet profiles, {{pluginSettingsCount}} plugin settings, {{size}}, {{sensitiveCredentials}} sensitive credentials"
       },
       "history": {
         "action_upload": "Upload",
         "action_pull": "Pull",
         "action_restore": "Restore",
-        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{telnetProfiles}} Telnet profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
+        "summary_line": "{{connections}} connections, {{forwards}} forwards, {{quickCommands}} quick commands, {{serialProfiles}} serial profiles, {{bleProfiles}} BLE profiles, {{telnetProfiles}} Telnet profiles, {{pluginSettingsCount}} plugin settings, {{sensitiveCredentials}} sensitive credentials"
       },
       "errors": {
         "local_forward_requires_connection": "Select the connections that own the selected forwarding rules before exporting a local file.",
@@ -711,6 +714,7 @@
         "total_forwards": "Forwards",
         "quick_commands_label": "Quick Commands",
         "serial_profiles_label": "Serial Profiles",
+        "ble_profiles_label": "BLE Profiles",
         "telnet_profiles_label": "Telnet Profiles",
         "mosh_profiles_label": "Mosh Profiles",
         "will_import": "Will import",
@@ -731,6 +735,7 @@
         "toggle_forwards": "Import saved forwards ({{count}})",
         "toggle_quick_commands": "Import quick commands ({{count}})",
         "toggle_serial_profiles": "Import serial profiles ({{count}})",
+        "toggle_ble_profiles": "Import BLE profiles ({{count}})",
         "toggle_telnet_profiles": "Import Telnet profiles ({{count}})",
         "toggle_mosh_profiles": "Import Mosh profiles ({{count}})",
         "toggle_remote_desktop_profiles": "Import remote desktop connections ({{count}})",
@@ -910,6 +915,11 @@
         "stop_bits": "Stop bits",
         "parity": "Parity",
         "flow_control": "Flow control",
+        "device_mac": "Device MAC",
+        "device_name": "Device name",
+        "service_uuid": "Service UUID",
+        "mtu": "MTU",
+        "write_without_response": "Write Without Response",
         "connect_on_open": "Connect on open",
         "line_ending": "Line ending",
         "display_mode": "Display mode",

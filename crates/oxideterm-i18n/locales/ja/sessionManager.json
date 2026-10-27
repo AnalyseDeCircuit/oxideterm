@@ -231,6 +231,11 @@
       "delete": "ローカルセッションを削除",
       "delete_failed": "ローカルセッションを削除できませんでした",
       "confirm_delete": "ローカルセッション「{{name}}」を削除しますか？実行中の端末は開いたままになります。"
+    },
+    "ble_profiles": {
+      "delete": "削除",
+      "delete_failed": "BLE 接続を削除できませんでした",
+      "confirm_delete": "BLE 接続「{{name}}」を削除しますか?"
     }
   }
 }

@@ -22,6 +22,7 @@ struct ConnectionFormModalSnapshot {
     serial_profile_id: Option<String>,
     local_profile_id: Option<String>,
     telnet_profile_id: Option<String>,
+    ble_profile_id: Option<String>,
     saved_password_keychain_id: Option<String>,
     password_loaded: bool,
     key_path: String,
@@ -35,10 +36,6 @@ struct ConnectionFormModalSnapshot {
     proxy_command_enabled: bool,
     proxy_command: zeroize::Zeroizing<String>,
     proxy_command_configured: bool,
-    color: String,
-    icon_background_color: String,
-    icon: String,
-    icon_picker_expanded: bool,
     legacy_ssh_compatibility: bool,
     ssh_algorithm_editor_open: bool,
     agent_forwarding: bool,
@@ -55,6 +52,9 @@ struct ConnectionFormModalSnapshot {
     mosh_locale: String,
     sftp_initial_remote_path: String,
     connect_timeout_seconds_text: String,
+    // True when the selected BLE service offers both notify and write, i.e. it
+    // can back a read/write terminal channel.
+    ble_can_open: bool,
 }
 
 impl ConnectionFormModalSnapshot {
@@ -77,6 +77,7 @@ impl ConnectionFormModalSnapshot {
             serial_profile_id: form.serial_profile_id.clone(),
             local_profile_id: form.local_profile_id.clone(),
             telnet_profile_id: form.telnet_profile_id.clone(),
+            ble_profile_id: form.ble.profile_id.clone(),
             saved_password_keychain_id: form.saved_password_keychain_id.clone(),
             password_loaded: form.password_loaded,
             key_path: form.key_path.clone(),
@@ -91,10 +92,6 @@ impl ConnectionFormModalSnapshot {
             // Rendering owns one bounded zeroizing copy; persisted forms retain only a keychain id.
             proxy_command: zeroize::Zeroizing::new(form.proxy_command.clone()),
             proxy_command_configured: form.proxy_command_keychain_id.is_some(),
-            color: form.color.clone(),
-            icon_background_color: form.icon_background_color.clone(),
-            icon: form.icon.clone(),
-            icon_picker_expanded: form.icon_picker_expanded,
             legacy_ssh_compatibility: form.legacy_ssh_compatibility,
             ssh_algorithm_editor_open: form.ssh_algorithm_editor_open,
             agent_forwarding: form.agent_forwarding,
@@ -111,6 +108,30 @@ impl ConnectionFormModalSnapshot {
             mosh_locale: form.mosh_locale.clone(),
             sftp_initial_remote_path: form.sftp_initial_remote_path.clone(),
             connect_timeout_seconds_text: form.connect_timeout_seconds_text.clone(),
+            ble_can_open: form
+                .ble
+                .selected_service_uuid
+                .and_then(|uuid| {
+                    form.ble
+                        .device_details
+                        .as_ref()
+                        .and_then(|details| details.services.iter().find(|s| s.uuid == uuid))
+                })
+                .map(|service| {
+                    let mut notify = false;
+                    let mut write = false;
+                    for ch in &service.characteristics {
+                        for prop in &ch.properties {
+                            match *prop {
+                                "notify" => notify = true,
+                                "write" | "write-without-response" => write = true,
+                                _ => {}
+                            }
+                        }
+                    }
+                    notify && write
+                })
+                .unwrap_or(false),
         }
     }
 }
@@ -185,6 +206,11 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::Serial;
+        let ble_mode = !prompt_mode
+            && !duplicate_mode
+            && !edit_properties_mode
+            && !drill_down_mode
+            && form.transport == NewConnectionTransport::Ble;
         let telnet_mode = !prompt_mode
             && !duplicate_mode
             && !edit_properties_mode
@@ -226,7 +252,7 @@ impl WorkspaceApp {
             && !edit_properties_mode
             && !drill_down_mode
             && form.transport == NewConnectionTransport::WslGraphics;
-        let local_transport_mode = serial_mode || telnet_mode;
+        let local_transport_mode = serial_mode || telnet_mode || ble_mode;
         let ftp_mode = form.transport == NewConnectionTransport::Ftp;
         let remote_desktop_mode = remote_desktop_protocol.is_some();
         let ssh_submission_mode = !local_terminal_mode
@@ -258,6 +284,8 @@ impl WorkspaceApp {
             self.i18n.t("sessionManager.edit_properties.title")
         } else if ftp_mode {
             self.i18n.t("modals.new_connection.transport_ftp")
+        } else if ble_mode {
+            self.i18n.t("ssh.form.title")
         } else if mosh_mode {
             self.i18n.t("mosh.form.title")
         } else if standalone_sftp_mode {
@@ -296,6 +324,8 @@ impl WorkspaceApp {
             self.i18n.t("mosh.form.description")
         } else if standalone_sftp_mode {
             self.i18n.t("sftp.standalone.form_description")
+        } else if ble_mode {
+            self.i18n.t("modals.new_connection.ble_description")
         } else if serial_mode {
             self.i18n.t("modals.new_connection.serial_description")
         } else if remote_desktop_protocol
@@ -348,6 +378,11 @@ impl WorkspaceApp {
                 && form.port.trim().parse::<u16>().is_ok_and(|port| port > 0)
         } else if wsl_graphics_mode {
             true
+        } else if ble_mode {
+            // The primary action is enabled only once a service with both
+            // notify and write characteristics is selected in the details
+            // table; that pairing is the minimum for a read/write channel.
+            form.ble_can_open
         } else {
             !form.host.trim().is_empty()
                 && !form.username.trim().is_empty()
@@ -355,6 +390,10 @@ impl WorkspaceApp {
                 && connect_timeout_valid
         };
         let primary_disabled = form.pending || !has_required_fields;
+        // Editing a saved BLE profile can persist metadata changes without a
+        // live scan because the stored device identity is reused on save.
+        let save_disabled =
+            form.pending || !(has_required_fields || (ble_mode && form.ble_profile_id.is_some()));
         let form_visible = self.connection_form_state(cx).presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         let base_modal_width = if drill_down_mode {
@@ -462,6 +501,9 @@ impl WorkspaceApp {
                                         .when(serial_mode, |content| {
                                             content.child(self.render_serial_form_branch(cx))
                                         })
+                                        .when(ble_mode, |content| {
+                                            content.child(self.render_ble_form_branch(window, cx))
+                                        })
                                         .when(telnet_mode, |content| {
                                             content.child(self.render_telnet_form_branch(cx))
                                         })
@@ -475,6 +517,7 @@ impl WorkspaceApp {
                                         })
                                         .when(
                                             !serial_mode
+                                                && !ble_mode
                                                 && !local_terminal_mode
                                                 && !telnet_mode
                                                 && !ftp_mode
@@ -1192,62 +1235,9 @@ impl WorkspaceApp {
                                 })
                                     })
                                     .when(shows_icon_field, |content| {
-                                        let appearance_body = div()
-                                            .flex()
-                                            .flex_col()
-                                            .gap(px(self.tokens.metrics.modal_section_gap))
-                                            .child(self.render_edit_icon_field(
-                                                &form.icon,
-                                                &form.color,
-                                                &form.icon_background_color,
-                                                form.icon_picker_expanded,
-                                                form.transport == NewConnectionTransport::Ssh,
-                                                cx,
-                                            ))
-                                            .child(
-                                            // The two asset colors form one responsive pair:
-                                            // share a row when the modal has room and wrap together
-                                            // without compressing either input below a usable width.
-                                            div()
-                                                .flex()
-                                                .flex_row()
-                                                .flex_wrap()
-                                                .gap(px(self.tokens.spacing.three))
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w(px(
-                                                            CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH,
-                                                        ))
-                                                        .child(self.render_edit_color_field(
-                                                            self.i18n.t(
-                                                                "sessionManager.edit_properties.icon_color",
-                                                            ),
-                                                            &form.color,
-                                                            NewConnectionField::Color,
-                                                            cx,
-                                                        )),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w(px(
-                                                            CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH,
-                                                        ))
-                                                        .child(self.render_edit_color_field(
-                                                            self.i18n.t(
-                                                                "sessionManager.edit_properties.icon_background_color",
-                                                            ),
-                                                            &form.icon_background_color,
-                                                            NewConnectionField::IconBackgroundColor,
-                                                            cx,
-                                                        )),
-                                                ),
-                                            )
-                                            .into_any_element();
                                         content.child(self.render_connection_form_section(
                                             ConnectionFormSection::Appearance,
-                                            appearance_body,
+                                            self.render_connection_appearance_options(cx),
                                             cx,
                                         ))
                                     })
@@ -1328,7 +1318,7 @@ impl WorkspaceApp {
                                         self.i18n.t("ssh.form.save"),
                                         false,
                                         ConnectionButtonAction::Save,
-                                        primary_disabled,
+                                        save_disabled,
                                         cx,
                                     ))
                                     .child(self.render_connection_button(

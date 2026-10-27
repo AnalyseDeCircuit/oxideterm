@@ -217,7 +217,8 @@
     "cancel": "Cancelar",
     "delete": "Excluir",
     "no": "Não",
-    "yes": "Sim"
+    "yes": "Sim",
+    "status_connecting": "Conectando"
   },
   "topology": {
     "button_title": "Visualização de topologia",
@@ -503,6 +504,7 @@
         "sync_forwards": "Sincronizar encaminhamentos de portas e túneis SSH",
         "sync_quick_commands": "Sincronizar comandos rápidos",
         "sync_serial_profiles": "Sincronizar perfis seriais",
+        "sync_ble_profiles": "Sincronizar perfis BLE",
         "sync_telnet_profiles": "Sincronizar perfis Telnet",
         "sync_mosh_profiles": "Sincronizar perfis Mosh",
         "sync_remote_desktop_profiles": "Sincronizar conexões de área de trabalho remota",
@@ -546,6 +548,7 @@
         "forwards_detail": "Regras de encaminhamento de porta salvas são incluídas com os metadados da conexão proprietária.",
         "quick_commands_detail": "Definições de comandos rápidos são incluídas.",
         "serial_profiles_detail": "Perfis de conexão serial são incluídos.",
+        "ble_profiles_detail": "Perfis de dispositivos BLE são incluídos.",
         "telnet_profiles_detail": "Perfis de conexão Telnet são incluídos.",
         "mosh_profiles_detail": "Perfis Mosh são incluídos sem as credenciais locais do dispositivo.",
         "app_settings_sections_detail": "Seções selecionadas: {{sections}}",
@@ -570,13 +573,13 @@
       },
       "backup": {
         "description": "Backup de reversão Oxide Cloud Sync",
-        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{telnetProfiles}} perfis Telnet, {{pluginSettingsCount}} configurações de plugin, {{size}}, {{sensitiveCredentials}} credenciais sensíveis"
+        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{bleProfiles}} perfis BLE, {{telnetProfiles}} perfis Telnet, {{pluginSettingsCount}} configurações de plugin, {{size}}, {{sensitiveCredentials}} credenciais sensíveis"
       },
       "history": {
         "action_upload": "Enviar",
         "action_pull": "Baixar",
         "action_restore": "Restaurar",
-        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{telnetProfiles}} perfis Telnet, {{pluginSettingsCount}} configurações de plugin, {{sensitiveCredentials}} credenciais sensíveis"
+        "summary_line": "{{connections}} conexões, {{forwards}} encaminhamentos, {{quickCommands}} comandos rápidos, {{serialProfiles}} perfis seriais, {{bleProfiles}} perfis BLE, {{telnetProfiles}} perfis Telnet, {{pluginSettingsCount}} configurações de plugin, {{sensitiveCredentials}} credenciais sensíveis"
       },
       "errors": {
         "local_forward_requires_connection": "Para exportar um arquivo local, selecione também as conexões das regras de encaminhamento selecionadas.",
@@ -719,6 +722,7 @@
         "total_forwards": "Encaminhamentos",
         "quick_commands_label": "Comandos rápidos",
         "serial_profiles_label": "Perfis seriais",
+        "ble_profiles_label": "Perfis BLE",
         "telnet_profiles_label": "Perfis Telnet",
         "mosh_profiles_label": "Perfis Mosh",
         "will_import": "Será importado",
@@ -739,6 +743,7 @@
         "toggle_forwards": "Importar encaminhamentos salvos ({{count}})",
         "toggle_quick_commands": "Importar comandos rápidos ({{count}})",
         "toggle_serial_profiles": "Importar perfis seriais ({{count}})",
+        "toggle_ble_profiles": "Importar perfis BLE ({{count}})",
         "toggle_telnet_profiles": "Importar perfis Telnet ({{count}})",
         "toggle_mosh_profiles": "Importar perfis Mosh ({{count}})",
         "toggle_remote_desktop_profiles": "Importar conexões de área de trabalho remota ({{count}})",
@@ -918,6 +923,11 @@
         "stop_bits": "Bits de parada",
         "parity": "Paridade",
         "flow_control": "Controle de fluxo",
+        "device_mac": "MAC do dispositivo",
+        "device_name": "Nome do dispositivo",
+        "service_uuid": "UUID do serviço",
+        "mtu": "MTU",
+        "write_without_response": "Write Without Response",
         "connect_on_open": "Conectar ao abrir",
         "line_ending": "Fim de linha",
         "display_mode": "Modo de exibição",

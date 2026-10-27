@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-ble = { path = "../oxideterm-ble" }
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
@@ -22,6 +23,7 @@ oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
 oxideterm-theme = { path = "../oxideterm-theme" }
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
 url.workspace = true

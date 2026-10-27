@@ -231,6 +231,11 @@
       "delete": "Excluir sessão local",
       "delete_failed": "Não foi possível excluir a sessão local",
       "confirm_delete": "Excluir a sessão local “{{name}}”? Os terminais em execução permanecerão abertos."
+    },
+    "ble_profiles": {
+      "delete": "Excluir",
+      "delete_failed": "Falha ao excluir a conexão BLE",
+      "confirm_delete": "Excluir a conexão BLE \"{{name}}\"?"
     }
   }
 }

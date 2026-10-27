@@ -5,6 +5,7 @@ pub enum TerminalSessionKind {
     Telnet,
     Mosh,
     Serial,
+    Ble,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -13,6 +14,18 @@ pub enum MoshConnectionStatus {
     Connecting,
     Connected,
     Interrupted,
+}
+
+/// Link state of a BLE GATT terminal.
+///
+/// `Disconnected` is terminal: the worker released the notify subscription and
+/// the physical link, so the session cannot recover without a new open.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum BleConnectionStatus {
+    #[default]
+    Connecting,
+    Connected,
+    Disconnected,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -197,6 +210,13 @@ pub trait TerminalSessionBackend: Send {
         bail!("Telnet line endings are only supported by Telnet sessions")
     }
     fn mosh_connection_status(&self) -> Option<MoshConnectionStatus> {
+        None
+    }
+    fn ble_connection_status(&self) -> Option<BleConnectionStatus> {
+        None
+    }
+    /// ATT MTU negotiated with the BLE peripheral; `None` for non-BLE sessions or before negotiation.
+    fn ble_negotiated_mtu(&self) -> Option<u16> {
         None
     }
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}

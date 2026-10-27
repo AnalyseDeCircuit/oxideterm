@@ -10,9 +10,9 @@ use std::{
 };
 
 use super::{
-    ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge, NewConnectionField,
-    SshConnectionIntent, SshConnectionWorkerResult, form_state::clear_connection_selection,
-    password_prompt::SavedPasswordLoadError,
+    BleConnectionWorkerResult, ConnectionFormState, HostKeyChallenge, KeyboardInteractiveChallenge,
+    NewConnectionField, SshConnectionIntent, SshConnectionWorkerResult,
+    form_state::clear_connection_selection, password_prompt::SavedPasswordLoadError,
 };
 use crate::workspace::delivery;
 use gpui::{Context, EventEmitter, Task, Timer};
@@ -80,6 +80,9 @@ pub(in crate::workspace) struct ConnectionFlowEntity {
     ssh_worker_tx: delivery::ActiveDeliverySender<SshConnectionWorkerResult>,
     ssh_worker_rx: std::sync::mpsc::Receiver<SshConnectionWorkerResult>,
     ssh_worker_results: VecDeque<SshConnectionWorkerResult>,
+    ble_worker_tx: delivery::ActiveDeliverySender<BleConnectionWorkerResult>,
+    ble_worker_rx: std::sync::mpsc::Receiver<BleConnectionWorkerResult>,
+    ble_worker_results: VecDeque<BleConnectionWorkerResult>,
     active_proxy_connect_run: Option<NativeProxyConnectRun>,
     cancelled_proxy_connect_runs: VecDeque<NativeProxyConnectRun>,
     next_proxy_connect_generation: u64,
@@ -123,6 +126,8 @@ impl ConnectionFlowEntity {
         let delivery_wake = delivery::ActiveDeliveryWake::default();
         let (ssh_worker_tx, ssh_worker_rx) =
             delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
+        let (ble_worker_tx, ble_worker_rx) =
+            delivery::ActiveDeliverySender::channel_with_wake(delivery_wake.clone());
         let release_wake = delivery_wake.clone();
         cx.on_release(move |_, _| {
             // External SSH tasks may finish after the window owner is released.
@@ -152,11 +157,14 @@ impl ConnectionFlowEntity {
         .detach();
 
         Self {
-            form: ConnectionFormState::new(),
+            form: ConnectionFormState::new(cx.focus_handle()),
             select_anchors: ConnectionSelectAnchorStore::default(),
             ssh_worker_tx,
             ssh_worker_rx,
             ssh_worker_results: VecDeque::new(),
+            ble_worker_tx,
+            ble_worker_rx,
+            ble_worker_results: VecDeque::new(),
             active_proxy_connect_run: None,
             cancelled_proxy_connect_runs: VecDeque::new(),
             next_proxy_connect_generation: 0,
@@ -181,6 +189,12 @@ impl ConnectionFlowEntity {
         self.ssh_worker_tx.clone()
     }
 
+    pub(in crate::workspace) fn ble_worker_sender(
+        &self,
+    ) -> delivery::ActiveDeliverySender<BleConnectionWorkerResult> {
+        self.ble_worker_tx.clone()
+    }
+
     pub(in crate::workspace) fn select_anchor_store(&self) -> ConnectionSelectAnchorStore {
         self.select_anchors.clone()
     }
@@ -191,14 +205,28 @@ impl ConnectionFlowEntity {
         std::mem::take(&mut self.ssh_worker_results)
     }
 
+    pub(in crate::workspace) fn take_ble_worker_results(
+        &mut self,
+    ) -> VecDeque<BleConnectionWorkerResult> {
+        std::mem::take(&mut self.ble_worker_results)
+    }
+
     fn drain_worker_results(&mut self, cx: &mut Context<Self>) -> bool {
-        let delivery_batch =
+        let ssh_batch =
             delivery::drain_channel(&self.ssh_worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
-        if !delivery_batch.items.is_empty() {
-            self.ssh_worker_results.extend(delivery_batch.items);
+        let ble_batch =
+            delivery::drain_channel(&self.ble_worker_rx, delivery::USER_ACTION_DELIVERY_BUDGET);
+        let had_results = !ssh_batch.items.is_empty() || !ble_batch.items.is_empty();
+        if !ssh_batch.items.is_empty() {
+            self.ssh_worker_results.extend(ssh_batch.items);
+        }
+        if !ble_batch.items.is_empty() {
+            self.ble_worker_results.extend(ble_batch.items);
+        }
+        if had_results {
             cx.emit(ConnectionFlowEvent::WorkerResultsReady);
         }
-        delivery_batch.outcome.backlog_remaining
+        ssh_batch.outcome.backlog_remaining || ble_batch.outcome.backlog_remaining
     }
 
     pub(in crate::workspace) fn has_active_proxy_connect_run(&self) -> bool {

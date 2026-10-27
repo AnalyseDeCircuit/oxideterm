@@ -26,6 +26,8 @@ pub enum CloudSyncPreviewSelectionAction {
     ToggleQuickCommandItem(String),
     ToggleSerialProfiles,
     ToggleSerialProfileItem(String),
+    ToggleBleProfiles,
+    ToggleBleProfileItem(String),
     ToggleTelnetProfiles,
     ToggleTelnetProfileItem(String),
     ToggleMoshProfiles,
@@ -88,6 +90,8 @@ pub struct CloudSyncPreviewSelection {
     pub selected_quick_command_ids: BTreeSet<String>,
     pub import_serial_profiles: bool,
     pub selected_serial_profile_ids: BTreeSet<String>,
+    pub import_ble_profiles: bool,
+    pub selected_ble_profile_ids: BTreeSet<String>,
     pub import_telnet_profiles: bool,
     pub selected_telnet_profile_ids: BTreeSet<String>,
     pub import_mosh_profiles: bool,
@@ -114,6 +118,8 @@ pub enum CloudSyncUploadSelectionAction {
     ToggleQuickCommandItem(String),
     ToggleSerialProfiles,
     ToggleSerialProfileItem(String),
+    ToggleBleProfiles,
+    ToggleBleProfileItem(String),
     ToggleTelnetProfiles,
     ToggleTelnetProfileItem(String),
     ToggleMoshProfiles,
@@ -140,6 +146,9 @@ pub struct CloudSyncUploadSelection {
     pub sync_serial_profiles: bool,
     pub serial_profile_item_ids: BTreeSet<String>,
     pub selected_serial_profile_ids: Option<BTreeSet<String>>,
+    pub sync_ble_profiles: bool,
+    pub ble_profile_item_ids: BTreeSet<String>,
+    pub selected_ble_profile_ids: Option<BTreeSet<String>>,
     pub sync_telnet_profiles: bool,
     pub telnet_profile_item_ids: BTreeSet<String>,
     pub selected_telnet_profile_ids: Option<BTreeSet<String>>,
@@ -198,6 +207,15 @@ impl CloudSyncUploadSelection {
                 .map(|profile| profile.id.clone())
                 .collect(),
             selected_serial_profile_ids: None,
+            sync_ble_profiles: scope.sync_ble_profiles,
+            ble_profile_item_ids: local
+                .ble_profiles
+                .as_ref()
+                .into_iter()
+                .flat_map(|snapshot| snapshot.records.iter())
+                .map(|profile| profile.id.clone())
+                .collect(),
+            selected_ble_profile_ids: None,
             sync_telnet_profiles: scope.sync_telnet_profiles,
             telnet_profile_item_ids: local
                 .telnet_profiles
@@ -238,6 +256,7 @@ impl CloudSyncUploadSelection {
         scope.sync_forwards = Some(self.sync_forwards);
         scope.sync_quick_commands = Some(self.sync_quick_commands);
         scope.sync_serial_profiles = Some(self.sync_serial_profiles);
+        scope.sync_ble_profiles = Some(self.sync_ble_profiles);
         scope.sync_telnet_profiles = Some(self.sync_telnet_profiles);
         scope.sync_mosh_profiles = Some(self.sync_mosh_profiles);
         scope.sync_remote_desktop_profiles = Some(self.sync_remote_desktop_profiles);
@@ -259,6 +278,7 @@ impl CloudSyncUploadSelection {
             forward_ids: self.selected_forward_ids.clone(),
             quick_command_ids: self.selected_quick_command_ids.clone(),
             serial_profile_ids: self.selected_serial_profile_ids.clone(),
+            ble_profile_ids: self.selected_ble_profile_ids.clone(),
             telnet_profile_ids: self.selected_telnet_profile_ids.clone(),
             mosh_profile_ids: self.selected_mosh_profile_ids.clone(),
             remote_desktop_profile_ids: self.selected_remote_desktop_profile_ids.clone(),
@@ -283,6 +303,10 @@ impl CloudSyncUploadSelection {
                 .selected_serial_profile_ids
                 .as_ref()
                 .is_none_or(|selected| selected.contains(id)),
+            CloudSyncUploadSelectionAction::ToggleBleProfileItem(id) => self
+                .selected_ble_profile_ids
+                .as_ref()
+                .is_none_or(|selected| selected.contains(id)),
             CloudSyncUploadSelectionAction::ToggleTelnetProfileItem(id) => self
                 .selected_telnet_profile_ids
                 .as_ref()
@@ -302,6 +326,7 @@ impl CloudSyncUploadSelection {
             CloudSyncUploadSelectionAction::ToggleForwards => self.sync_forwards,
             CloudSyncUploadSelectionAction::ToggleQuickCommands => self.sync_quick_commands,
             CloudSyncUploadSelectionAction::ToggleSerialProfiles => self.sync_serial_profiles,
+            CloudSyncUploadSelectionAction::ToggleBleProfiles => self.sync_ble_profiles,
             CloudSyncUploadSelectionAction::ToggleTelnetProfiles => self.sync_telnet_profiles,
             CloudSyncUploadSelectionAction::ToggleMoshProfiles => self.sync_mosh_profiles,
             CloudSyncUploadSelectionAction::ToggleRemoteDesktopProfiles => {
@@ -350,6 +375,16 @@ impl CloudSyncUploadSelection {
                 toggle_optional_set_value(
                     &mut self.selected_serial_profile_ids,
                     &self.serial_profile_item_ids,
+                    id,
+                );
+            }
+            CloudSyncUploadSelectionAction::ToggleBleProfiles => {
+                self.sync_ble_profiles = !self.sync_ble_profiles;
+            }
+            CloudSyncUploadSelectionAction::ToggleBleProfileItem(id) => {
+                toggle_optional_set_value(
+                    &mut self.selected_ble_profile_ids,
+                    &self.ble_profile_item_ids,
                     id,
                 );
             }
@@ -444,6 +479,7 @@ pub fn cloud_sync_legacy_import_options(
             import_mosh_profiles: selection.import_mosh_profiles,
             import_standalone_sftp_profiles: selection.import_connections,
             import_remote_desktop_profiles: selection.import_remote_desktop_profiles,
+            import_ble_profiles: selection.import_ble_profiles,
             restore_managed_key_passphrases: import_portable_secrets,
             import_portable_secrets,
             ..OxideImportOptions::default()
@@ -491,6 +527,10 @@ impl CloudSyncPreviewSelection {
                     selection.serial_profiles
                 }),
             selected_serial_profile_ids: preview_serial_profile_ids(preview),
+            import_ble_profiles: structured_full_selection
+                .as_ref()
+                .map_or(summary.ble_profiles > 0, |selection| selection.ble_profiles),
+            selected_ble_profile_ids: preview_ble_profile_ids(preview),
             import_telnet_profiles: structured_full_selection
                 .as_ref()
                 .map_or(summary.telnet_profiles > 0, |selection| {
@@ -585,6 +625,7 @@ impl CloudSyncPreviewSelection {
             || self.effective_import_forwards(summary)
             || self.effective_import_quick_commands(summary)
             || self.effective_import_serial_profiles(summary)
+            || self.effective_import_ble_profiles(summary)
             || self.effective_import_telnet_profiles(summary)
             || self.effective_import_mosh_profiles(summary)
             || self.effective_import_remote_desktop_profiles(summary)
@@ -631,6 +672,14 @@ impl CloudSyncPreviewSelection {
                     !self.selected_serial_profile_ids.is_empty(),
                     preview
                         .serial_profiles_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.records.len()),
+                ),
+            ble_profiles: self.import_ble_profiles
+                && structured_record_section_selected(
+                    !self.selected_ble_profile_ids.is_empty(),
+                    preview
+                        .ble_profiles_snapshot
                         .as_ref()
                         .map(|snapshot| snapshot.records.len()),
                 ),
@@ -688,6 +737,11 @@ impl CloudSyncPreviewSelection {
     pub fn effective_import_serial_profiles(&self, summary: &CloudSyncPreviewSummary) -> bool {
         self.import_serial_profiles
             && (summary.serial_profiles == 0 || !self.selected_serial_profile_ids.is_empty())
+    }
+
+    pub fn effective_import_ble_profiles(&self, summary: &CloudSyncPreviewSummary) -> bool {
+        self.import_ble_profiles
+            && (summary.ble_profiles == 0 || !self.selected_ble_profile_ids.is_empty())
     }
 
     pub fn effective_import_telnet_profiles(&self, summary: &CloudSyncPreviewSummary) -> bool {
@@ -794,6 +848,19 @@ impl CloudSyncPreviewSelection {
                 checked: self.import_serial_profiles,
                 disabled: false,
                 action: CloudSyncPreviewSelectionAction::ToggleSerialProfiles,
+            });
+        }
+        if summary.ble_profiles > 0 {
+            rows.push(CloudSyncPreviewSelectionRow {
+                label: CloudSyncPreviewSelectionLabel::I18nCount {
+                    key: "plugin.cloud_sync.preview.toggle_ble_profiles",
+                    count_name: "count",
+                    count: summary.ble_profiles,
+                },
+                meta: None,
+                checked: self.import_ble_profiles,
+                disabled: false,
+                action: CloudSyncPreviewSelectionAction::ToggleBleProfiles,
             });
         }
         if summary.telnet_profiles > 0 {
@@ -948,6 +1015,12 @@ impl CloudSyncPreviewSelection {
             CloudSyncPreviewSelectionAction::ToggleSerialProfileItem(profile_id) => {
                 toggle_set_value(&mut self.selected_serial_profile_ids, profile_id);
             }
+            CloudSyncPreviewSelectionAction::ToggleBleProfiles => {
+                self.import_ble_profiles = !self.import_ble_profiles;
+            }
+            CloudSyncPreviewSelectionAction::ToggleBleProfileItem(profile_id) => {
+                toggle_set_value(&mut self.selected_ble_profile_ids, profile_id);
+            }
             CloudSyncPreviewSelectionAction::ToggleTelnetProfiles => {
                 self.import_telnet_profiles = !self.import_telnet_profiles;
             }
@@ -1074,6 +1147,19 @@ fn preview_serial_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Str
     }
 }
 
+fn preview_ble_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String> {
+    match preview {
+        CloudSyncPendingPreview::Structured(preview) => preview
+            .ble_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| snapshot.records.iter())
+            .map(|profile| profile.id.clone())
+            .collect(),
+        CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
+    }
+}
+
 fn preview_telnet_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String> {
     match preview {
         CloudSyncPendingPreview::Structured(preview) => preview
@@ -1121,6 +1207,7 @@ pub fn structured_apply_covers_full_remote(
         && (manifest.sections.forwards.is_none() || selection.forwards)
         && (manifest.sections.quick_commands.is_none() || selection.quick_commands)
         && (manifest.sections.serial_profiles.is_none() || selection.serial_profiles)
+        && (manifest.sections.ble_profiles.is_none() || selection.ble_profiles)
         && (manifest.sections.telnet_profiles.is_none() || selection.telnet_profiles)
         && (manifest.sections.mosh_profiles.is_none() || selection.mosh_profiles)
         && (manifest.sections.remote_desktop_profiles.is_none()
@@ -1156,6 +1243,9 @@ pub fn merge_structured_remote_baseline(
     }
     if selection.serial_profiles {
         merged.serial_profiles = next.serial_profiles.clone();
+    }
+    if selection.ble_profiles {
+        merged.ble_profiles = next.ble_profiles.clone();
     }
     if selection.telnet_profiles {
         merged.telnet_profiles = next.telnet_profiles.clone();
@@ -1208,6 +1298,7 @@ pub fn legacy_apply_covers_full_remote(
         && (summary.forwards == 0 || selection.import_forwards)
         && (summary.quick_commands == 0 || selection.import_quick_commands)
         && (summary.serial_profiles == 0 || selection.import_serial_profiles)
+        && (summary.ble_profiles == 0 || selection.import_ble_profiles)
         && (summary.telnet_profiles == 0 || selection.import_telnet_profiles)
         && (summary.mosh_profiles == 0 || selection.import_mosh_profiles)
         && (summary.sensitive_credentials == 0 || selection.import_sensitive_credentials)
@@ -1229,43 +1320,45 @@ pub fn cloud_sync_apply_total_units(
     create_rollback_backup: bool,
 ) -> f64 {
     let rollback_units = usize::from(create_rollback_backup);
-    let import_units = match preview {
-        CloudSyncPendingPreview::Structured(preview) => {
-            let structured_selection = selection.structured_selection(preview);
-            usize::from(structured_selection.connections && preview.connections_snapshot.is_some())
-                + usize::from(structured_selection.forwards && preview.forwards_snapshot.is_some())
-                + usize::from(
+    let import_units =
+        match preview {
+            CloudSyncPendingPreview::Structured(preview) => {
+                let structured_selection = selection.structured_selection(preview);
+                usize::from(
+                    structured_selection.connections && preview.connections_snapshot.is_some(),
+                ) + usize::from(
+                    structured_selection.forwards && preview.forwards_snapshot.is_some(),
+                ) + usize::from(
                     structured_selection.quick_commands
                         && preview.quick_commands_snapshot_json.is_some(),
-                )
-                + usize::from(
+                ) + usize::from(
                     structured_selection.serial_profiles
                         && preview.serial_profiles_snapshot.is_some(),
-                )
-                + usize::from(
+                ) + usize::from(
+                    structured_selection.ble_profiles && preview.ble_profiles_snapshot.is_some(),
+                ) + usize::from(
                     structured_selection.telnet_profiles
                         && preview.telnet_profiles_snapshot.is_some(),
-                )
-                + usize::from(
+                ) + usize::from(
                     structured_selection.mosh_profiles && preview.mosh_profiles_snapshot.is_some(),
-                )
-                + usize::from(
+                ) + usize::from(
                     structured_selection.sensitive_credentials
                         && preview.sensitive_credentials_entry.is_some(),
-                )
-                + structured_selection
+                ) + structured_selection
                     .app_settings_sections
                     .iter()
                     .filter(|section_id| preview.app_settings_entries.contains_key(*section_id))
                     .count()
-                + structured_selection
-                    .plugin_ids
-                    .iter()
-                    .filter(|plugin_id| preview.plugin_settings_entries.contains_key(*plugin_id))
-                    .count()
-        }
-        CloudSyncPendingPreview::Legacy { .. } => 1,
-    };
+                    + structured_selection
+                        .plugin_ids
+                        .iter()
+                        .filter(|plugin_id| {
+                            preview.plugin_settings_entries.contains_key(*plugin_id)
+                        })
+                        .count()
+            }
+            CloudSyncPendingPreview::Legacy { .. } => 1,
+        };
     (rollback_units + import_units).max(1) as f64
 }
 
@@ -1292,6 +1385,12 @@ pub fn history_summary_from_manifest(manifest: &StructuredManifest) -> CloudSync
         serial_profiles: manifest
             .sections
             .serial_profiles
+            .as_ref()
+            .and_then(|entry| entry.record_count)
+            .unwrap_or(0),
+        ble_profiles: manifest
+            .sections
+            .ble_profiles
             .as_ref()
             .and_then(|entry| entry.record_count)
             .unwrap_or(0),
@@ -1330,6 +1429,7 @@ pub fn history_summary_from_legacy_preview(preview: &LegacyPreview) -> CloudSync
         forwards: preview.preview.total_forwards,
         quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
         serial_profiles: preview.metadata.serial_profiles_count.unwrap_or(0),
+        ble_profiles: 0,
         telnet_profiles: preview.metadata.telnet_profiles_count.unwrap_or(0),
         mosh_profiles: preview.metadata.mosh_profiles_count.unwrap_or(0),
         remote_desktop_profiles: 0,
@@ -1349,6 +1449,7 @@ pub fn has_cloud_sync_structured_conflict(
             || dirty.forwards
             || dirty.quick_commands
             || dirty.serial_profiles
+            || dirty.ble_profiles
             || dirty.telnet_profiles
             || dirty.mosh_profiles
             || dirty.sensitive_credentials
@@ -1366,6 +1467,9 @@ pub fn has_cloud_sync_structured_conflict(
         return true;
     }
     if dirty.serial_profiles && remote.serial_profiles != previous.serial_profiles {
+        return true;
+    }
+    if dirty.ble_profiles && remote.ble_profiles != previous.ble_profiles {
         return true;
     }
     if dirty.telnet_profiles && remote.telnet_profiles != previous.telnet_profiles {
@@ -1440,6 +1544,7 @@ mod tests {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            ble_profiles_snapshot: None,
             telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
             standalone_sftp_profiles_snapshot: None,
@@ -1448,6 +1553,7 @@ mod tests {
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_ble_profiles_snapshot: None,
             base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,
             base_standalone_sftp_profiles_snapshot: None,

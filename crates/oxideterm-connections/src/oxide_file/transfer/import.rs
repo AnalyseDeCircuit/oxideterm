@@ -104,6 +104,7 @@ fn apply_oxide_import_with_options_inner(
         mosh_profiles_json,
         standalone_sftp_profiles_json,
         remote_desktop_profiles_json,
+        ble_profiles_json,
         plugin_settings,
         mut portable_secrets,
         ..
@@ -248,6 +249,29 @@ fn apply_oxide_import_with_options_inner(
             })?;
         }
     }
+    let ble_profiles_snapshot = ble_profiles_json
+        .as_deref()
+        .map(|snapshot_json| {
+            serde_json::from_str::<BleProfilesSyncSnapshot>(snapshot_json).map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Invalid BLE profiles snapshot in .oxide payload: {error}"
+                ))
+            })
+        })
+        .transpose()?;
+    if options.import_ble_profiles {
+        for profile in ble_profiles_snapshot
+            .as_ref()
+            .into_iter()
+            .flat_map(|snapshot| &snapshot.records)
+        {
+            profile.validate().map_err(|error| {
+                OxideFileError::InvalidFormat(format!(
+                    "Failed to validate BLE profiles from .oxide payload: {error}"
+                ))
+            })?;
+        }
+    }
     current_step += 1;
     report_progress("filtering_selection", current_step);
     let mut selected_connections =
@@ -273,6 +297,7 @@ fn apply_oxide_import_with_options_inner(
         mosh_profiles_json,
         standalone_sftp_profiles_json,
         remote_desktop_profiles_json,
+        ble_profiles_json,
         plugin_settings,
         portable_secrets: if options.import_portable_secrets {
             portable_secrets.clone()
@@ -574,6 +599,22 @@ fn apply_oxide_import_with_options_inner(
                     profile_count.saturating_sub(result.imported_remote_desktop_profiles);
             } else {
                 result.skipped_remote_desktop_profiles = profile_count;
+            }
+        }
+        if let Some(ble_profiles_snapshot) = ble_profiles_snapshot {
+            let profile_count = ble_profiles_snapshot.records.len();
+            if options.import_ble_profiles {
+                result.imported_ble_profiles = store
+                    .apply_ble_profiles_snapshot(ble_profiles_snapshot)
+                    .map_err(|error| {
+                        OxideFileError::InvalidFormat(format!(
+                            "Failed to import BLE profiles from .oxide payload: {error}"
+                        ))
+                    })?;
+                result.skipped_ble_profiles =
+                    profile_count.saturating_sub(result.imported_ble_profiles);
+            } else {
+                result.skipped_ble_profiles = profile_count;
             }
         }
 

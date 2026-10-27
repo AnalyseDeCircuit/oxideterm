@@ -93,6 +93,7 @@ impl WorkspaceApp {
                     scope.sync_forwards,
                     scope.sync_quick_commands,
                     scope.sync_serial_profiles,
+                    scope.sync_ble_profiles,
                     scope.sync_telnet_profiles,
                     scope.sync_mosh_profiles,
                     scope.sync_remote_desktop_profiles,

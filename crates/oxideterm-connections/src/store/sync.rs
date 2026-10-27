@@ -167,6 +167,10 @@ impl ConnectionStore {
         audit_configuration_snapshot("serial_profiles", || build_serial_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
 
+    pub fn export_ble_profiles_snapshot(&self) -> Result<BleProfilesSyncSnapshot> {
+        audit_configuration_snapshot("ble_profiles", || build_ble_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
+    }
+
     pub fn export_telnet_profiles_snapshot(&self) -> Result<TelnetProfilesSyncSnapshot> {
         audit_configuration_snapshot("telnet_profiles", || build_telnet_profiles_sync_snapshot(&self.data), |snapshot| snapshot.records.len())
     }
@@ -569,7 +573,44 @@ impl ConnectionStore {
             profile.validate()?;
         }
         let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .serial_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.serial_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.serial_profiles.len();
+        self.data.serial_profiles.retain(|profile| {
+            !self
+                .data
+                .serial_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.serial_profiles.len() != record_count;
         for profile in snapshot.records {
+            // A deletion that postdates the incoming record suppresses it; a
+            // record re-created after the deletion keeps its newer timestamp
+            // and must survive.
+            if self
+                .data
+                .serial_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
             if let Some(existing) = self
                 .data
                 .serial_profiles
@@ -585,7 +626,76 @@ impl ConnectionStore {
                 applied += 1;
             }
         }
-        if applied > 0 {
+        changed |= applied > 0;
+        if changed {
+            self.normalize();
+            self.save()?;
+        }
+        Ok(applied)
+    }
+
+    pub fn apply_ble_profiles_snapshot(
+        &mut self,
+        snapshot: BleProfilesSyncSnapshot,
+    ) -> Result<usize> {
+        // Validate the complete batch before mutating store data so a bad late
+        // record cannot leave earlier profiles applied in memory.
+        for profile in &snapshot.records {
+            profile.validate()?;
+        }
+        let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .ble_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.ble_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.ble_profiles.len();
+        self.data.ble_profiles.retain(|profile| {
+            !self
+                .data
+                .ble_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.ble_profiles.len() != record_count;
+        for profile in snapshot.records {
+            if self
+                .data
+                .ble_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
+            if let Some(existing) = self
+                .data
+                .ble_profiles
+                .iter_mut()
+                .find(|existing| existing.id == profile.id)
+            {
+                if profile.updated_at >= existing.updated_at {
+                    *existing = profile;
+                    applied += 1;
+                }
+            } else {
+                self.data.ble_profiles.push(profile);
+                applied += 1;
+            }
+        }
+        changed |= applied > 0;
+        if changed {
             self.normalize();
             self.save()?;
         }
@@ -601,7 +711,41 @@ impl ConnectionStore {
             profile.validate()?;
         }
         let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .telnet_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.telnet_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.telnet_profiles.len();
+        self.data.telnet_profiles.retain(|profile| {
+            !self
+                .data
+                .telnet_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.telnet_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            if self
+                .data
+                .telnet_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
             profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
             if let Some(existing) = self
                 .data
@@ -622,7 +766,8 @@ impl ConnectionStore {
                 applied += 1;
             }
         }
-        if applied > 0 {
+        changed |= applied > 0;
+        if changed {
             self.normalize();
             self.save()?;
         }
@@ -638,7 +783,41 @@ impl ConnectionStore {
             profile.validate()?;
         }
         let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .remote_desktop_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.remote_desktop_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.remote_desktop_profiles.len();
+        self.data.remote_desktop_profiles.retain(|profile| {
+            !self
+                .data
+                .remote_desktop_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.remote_desktop_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            if self
+                .data
+                .remote_desktop_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
             // Protected-store references are device-local and cannot be imported as credentials.
             profile.credential_ref = None;
             profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
@@ -663,7 +842,8 @@ impl ConnectionStore {
                 applied += 1;
             }
         }
-        if applied > 0 {
+        changed |= applied > 0;
+        if changed {
             self.normalize();
             self.save()?;
         }
@@ -679,7 +859,41 @@ impl ConnectionStore {
             profile.validate()?;
         }
         let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .mosh_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.mosh_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.mosh_profiles.len();
+        self.data.mosh_profiles.retain(|profile| {
+            !self
+                .data
+                .mosh_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.mosh_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            if self
+                .data
+                .mosh_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
             if let Some(existing) = self
                 .data
                 .mosh_profiles
@@ -700,7 +914,8 @@ impl ConnectionStore {
                 applied += 1;
             }
         }
-        if applied > 0 {
+        changed |= applied > 0;
+        if changed {
             self.normalize();
             self.save()?;
         }
@@ -718,7 +933,41 @@ impl ConnectionStore {
         }
         // Treat every incoming snapshot as portable metadata, even when it came from a .oxide file.
         let mut applied = 0usize;
+        let mut changed = false;
+        for tombstone in snapshot.tombstones {
+            if let Some(local) = self
+                .data
+                .standalone_sftp_tombstones
+                .iter_mut()
+                .find(|t| t.id == tombstone.id)
+            {
+                if tombstone.deleted_at > local.deleted_at {
+                    local.deleted_at = tombstone.deleted_at;
+                    changed = true;
+                }
+            } else {
+                self.data.standalone_sftp_tombstones.push(tombstone);
+                changed = true;
+            }
+        }
+        let record_count = self.data.standalone_sftp_profiles.len();
+        self.data.standalone_sftp_profiles.retain(|profile| {
+            !self
+                .data
+                .standalone_sftp_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+        });
+        changed |= self.data.standalone_sftp_profiles.len() != record_count;
         for mut profile in snapshot.records {
+            if self
+                .data
+                .standalone_sftp_tombstones
+                .iter()
+                .any(|t| t.id == profile.id && t.deleted_at >= profile.updated_at)
+            {
+                continue;
+            }
             if profile.transfer_mode == StandaloneSftpTransferMode::LocalRemote {
                 profile.secondary_endpoint = None;
             }
@@ -743,7 +992,8 @@ impl ConnectionStore {
         if let Some(ftp) = snapshot.ftp {
             applied += self.apply_ftp_profiles_snapshot(ftp)?;
         }
-        if applied > 0 {
+        changed |= applied > 0;
+        if changed {
             self.normalize();
             self.save()?;
         }
@@ -880,17 +1130,44 @@ fn build_serial_profiles_sync_snapshot(
 ) -> Result<SerialProfilesSyncSnapshot> {
     let mut records = data.serial_profiles.clone();
     records.sort_by(|left, right| left.id.cmp(&right.id));
-    let revision = sha256_hex(
-        &records
+    let mut tombstones = data.serial_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
             .iter()
             .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
             .collect::<Vec<_>>(),
-    )?;
+        &tombstones,
+    ))?;
 
     Ok(SerialProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        tombstones,
+    })
+}
+
+fn build_ble_profiles_sync_snapshot(
+    data: &ConnectionStoreData,
+) -> Result<BleProfilesSyncSnapshot> {
+    let mut records = data.ble_profiles.clone();
+    records.sort_by(|left, right| left.id.cmp(&right.id));
+    let mut tombstones = data.ble_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
+            .iter()
+            .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
+            .collect::<Vec<_>>(),
+        &tombstones,
+    ))?;
+
+    Ok(BleProfilesSyncSnapshot {
+        revision,
+        exported_at: Utc::now().to_rfc3339(),
+        records,
+        tombstones,
     })
 }
 
@@ -902,17 +1179,21 @@ fn build_telnet_profiles_sync_snapshot(
         profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
-    let revision = sha256_hex(
-        &records
+    let mut tombstones = data.telnet_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
             .iter()
             .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
             .collect::<Vec<_>>(),
-    )?;
+        &tombstones,
+    ))?;
 
     Ok(TelnetProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        tombstones,
     })
 }
 
@@ -927,16 +1208,20 @@ fn build_mosh_profiles_sync_snapshot(
         }
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
-    let revision = sha256_hex(
-        &records
+    let mut tombstones = data.mosh_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
             .iter()
             .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
             .collect::<Vec<_>>(),
-    )?;
+        &tombstones,
+    ))?;
     Ok(MoshProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        tombstones,
     })
 }
 
@@ -948,12 +1233,15 @@ fn build_standalone_sftp_profiles_sync_snapshot(
         make_standalone_sftp_profile_portable(profile);
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
-    let revision = sha256_hex(
-        &records
+    let mut tombstones = data.standalone_sftp_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
             .iter()
             .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
             .collect::<Vec<_>>(),
-    )?;
+        &tombstones,
+    ))?;
     let ftp = if data.ftp_profiles.is_empty() && data.ftp_tombstones.is_empty() {
         None
     } else {
@@ -968,6 +1256,7 @@ fn build_standalone_sftp_profiles_sync_snapshot(
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        tombstones,
         ftp,
     })
 }
@@ -1277,17 +1566,21 @@ fn build_remote_desktop_profiles_sync_snapshot(
         profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
     }
     records.sort_by(|left, right| left.id.cmp(&right.id));
-    let revision = sha256_hex(
-        &records
+    let mut tombstones = data.remote_desktop_tombstones.clone();
+    tombstones.sort_by(|left, right| left.id.cmp(&right.id));
+    let revision = sha256_hex(&(
+        records
             .iter()
             .map(|profile| (&profile.id, profile.updated_at.to_rfc3339()))
             .collect::<Vec<_>>(),
-    )?;
+        &tombstones,
+    ))?;
 
     Ok(RemoteDesktopProfilesSyncSnapshot {
         revision,
         exported_at: Utc::now().to_rfc3339(),
         records,
+        tombstones,
     })
 }
 
@@ -1651,6 +1944,7 @@ mod mosh_tests {
                 revision: "remote-revision".to_string(),
                 exported_at: Utc::now().to_rfc3339(),
                 records: vec![incoming],
+                tombstones: Vec::new(),
             })
             .expect("snapshot must apply");
 

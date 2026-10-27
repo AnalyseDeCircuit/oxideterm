@@ -173,6 +173,7 @@ pub enum SelectAnchorId {
     NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth,
     NewConnectionLocalShell,
     NewConnectionSerialPort,
+    NewConnectionBleAdapter,
     NewConnectionSerialDataBits,
     NewConnectionSerialStopBits,
     NewConnectionSerialParity,
@@ -182,6 +183,10 @@ pub enum SelectAnchorId {
     NewConnectionTerminalDeleteSequence,
     NewConnectionTelnetInputLineEnding,
     NewConnectionTelnetOutputLineEnding,
+    NewConnectionBleInputLineEnding,
+    NewConnectionBleOutputLineEnding,
+    NewConnectionBleSendMode,
+    NewConnectionBleDisplayMode,
     NewConnectionTerminalSemanticScheme,
     NewConnectionTerminalHighlightRuleSet,
     NewConnectionTerminalSessionLogPolicy,
@@ -308,6 +313,7 @@ impl SelectAnchorId {
                 | Self::NewConnectionStandaloneSftpSecondaryUpstreamProxyAuth
                 | Self::NewConnectionLocalShell
                 | Self::NewConnectionSerialPort
+                | Self::NewConnectionBleAdapter
                 | Self::NewConnectionSerialDataBits
                 | Self::NewConnectionSerialStopBits
                 | Self::NewConnectionSerialParity
@@ -317,6 +323,10 @@ impl SelectAnchorId {
                 | Self::NewConnectionTerminalDeleteSequence
                 | Self::NewConnectionTelnetInputLineEnding
                 | Self::NewConnectionTelnetOutputLineEnding
+                | Self::NewConnectionBleInputLineEnding
+                | Self::NewConnectionBleOutputLineEnding
+                | Self::NewConnectionBleSendMode
+                | Self::NewConnectionBleDisplayMode
                 | Self::NewConnectionTerminalSemanticScheme
                 | Self::NewConnectionTerminalHighlightRuleSet
         )

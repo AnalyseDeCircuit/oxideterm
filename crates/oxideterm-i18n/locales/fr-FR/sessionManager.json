@@ -231,6 +231,11 @@
       "delete": "Supprimer la session locale",
       "delete_failed": "Impossible de supprimer la session locale",
       "confirm_delete": "Supprimer la session locale « {{name}} » ? Les terminaux actifs resteront ouverts."
+    },
+    "ble_profiles": {
+      "delete": "Supprimer",
+      "delete_failed": "Impossible de supprimer la connexion BLE",
+      "confirm_delete": "Supprimer la connexion BLE « {{name}} » ?"
     }
   }
 }

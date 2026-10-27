@@ -290,6 +290,20 @@ impl I18n {
             .unwrap_or_else(|| key.to_string())
     }
 
+    /// Translates a message and substitutes `{name}` placeholders with the
+    /// given argument values. Substitution is textual and runs in argument
+    /// order, so argument values must not contain the placeholder of a later
+    /// argument; callers pass identifiers, numbers and error text, which do
+    /// not. Missing arguments keep their placeholder visible instead of
+    /// collapsing into an empty span.
+    pub fn t_with(&self, key: &str, args: &[(&str, &str)]) -> String {
+        let mut message = self.t(key);
+        for (name, value) in args {
+            message = message.replace(&format!("{{{name}}}"), value);
+        }
+        message
+    }
+
     fn ensure_catalog(&self, locale: Locale) {
         if self
             .catalogs
@@ -401,6 +415,23 @@ mod tests {
 
         i18n.set_locale(Locale::En);
         assert_eq!(i18n.t("menu.new_terminal"), "New Terminal");
+    }
+
+    #[test]
+    fn t_with_substitutes_named_placeholders() {
+        let i18n = I18n::default();
+        assert_eq!(
+            i18n.t_with("terminal.ble.adapter_index_out_of_range", &[("n", "7")]),
+            "蓝牙适配器索引 7 越界"
+        );
+        // A missing argument keeps its placeholder visible so the gap is
+        // diagnosable instead of silently producing an empty span.
+        assert_eq!(
+            i18n.t_with("terminal.ble.adapter_index_out_of_range", &[]),
+            "蓝牙适配器索引 {n} 越界"
+        );
+        // Messages without placeholders ignore the arguments entirely.
+        assert_eq!(i18n.t_with("menu.new_terminal", &[("x", "y")]), "新建终端");
     }
 
     #[test]

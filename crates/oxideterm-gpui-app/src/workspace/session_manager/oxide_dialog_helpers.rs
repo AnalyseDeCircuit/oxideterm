@@ -192,6 +192,7 @@ pub(super) fn oxide_export_has_selected_content(dialog: &OxideExportDialogState)
         || dialog.include_telnet_profiles
         || dialog.include_mosh_profiles
         || dialog.include_remote_desktop_profiles
+        || dialog.include_ble_profiles
         || (dialog.include_plugin_settings
             && oxide_export_selected_plugin_setting_count(dialog) > 0)
         || dialog.include_portable_secrets

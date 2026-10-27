@@ -3,6 +3,7 @@
 pub struct ResolvedConnectionConfiguration {
     pub connections: SavedConnectionsSyncSnapshot,
     pub serial: Vec<SerialProfile>,
+    pub ble: Vec<BleProfile>,
     pub telnet: Vec<TelnetProfile>,
     pub mosh: Vec<MoshProfile>,
     pub sftp: Vec<StandaloneSftpProfile>,
@@ -135,7 +136,46 @@ impl ConnectionStore {
         for profile in &incoming.serial {
             profile.validate()?;
         }
+        // The resolved set is identity-complete: a local profile missing from
+        // it was deleted on the publishing device, so record a tombstone to
+        // keep later snapshot exports from resurrecting it.
+        let serial_ids = incoming
+            .serial
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.serial_tombstones
+            .retain(|entry| !serial_ids.contains(&entry.id));
+        for profile in &self.data.serial_profiles {
+            if !serial_ids.contains(&profile.id) {
+                next.serial_tombstones.retain(|entry| entry.id != profile.id);
+                next.serial_tombstones.push(DeletedConnectionTombstone {
+                    id: profile.id.clone(),
+                    deleted_at: now,
+                });
+            }
+        }
         next.serial_profiles = incoming.serial;
+        for profile in &incoming.ble {
+            profile.validate()?;
+        }
+        let ble_ids = incoming
+            .ble
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.ble_tombstones
+            .retain(|entry| !ble_ids.contains(&entry.id));
+        for profile in &self.data.ble_profiles {
+            if !ble_ids.contains(&profile.id) {
+                next.ble_tombstones.retain(|entry| entry.id != profile.id);
+                next.ble_tombstones.push(DeletedConnectionTombstone {
+                    id: profile.id.clone(),
+                    deleted_at: now,
+                });
+            }
+        }
+        next.ble_profiles = incoming.ble;
         for profile in &mut incoming.telnet {
             profile.validate()?;
             profile.upstream_proxy = portable_upstream_proxy(&profile.upstream_proxy);
@@ -149,6 +189,22 @@ impl ConnectionStore {
                     &mut profile.upstream_proxy,
                     &old.upstream_proxy,
                 );
+            }
+        }
+        let telnet_ids = incoming
+            .telnet
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.telnet_tombstones
+            .retain(|entry| !telnet_ids.contains(&entry.id));
+        for profile in &self.data.telnet_profiles {
+            if !telnet_ids.contains(&profile.id) {
+                next.telnet_tombstones.retain(|entry| entry.id != profile.id);
+                next.telnet_tombstones.push(DeletedConnectionTombstone {
+                    id: profile.id.clone(),
+                    deleted_at: now,
+                });
             }
         }
         next.telnet_profiles = incoming.telnet;
@@ -168,6 +224,22 @@ impl ConnectionStore {
                 preserve_proxy_chain_local_secrets(&mut profile.proxy_chain, &old.proxy_chain);
             }
         }
+        let mosh_ids = incoming
+            .mosh
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.mosh_tombstones
+            .retain(|entry| !mosh_ids.contains(&entry.id));
+        for profile in &self.data.mosh_profiles {
+            if !mosh_ids.contains(&profile.id) {
+                next.mosh_tombstones.retain(|entry| entry.id != profile.id);
+                next.mosh_tombstones.push(DeletedConnectionTombstone {
+                    id: profile.id.clone(),
+                    deleted_at: now,
+                });
+            }
+        }
         next.mosh_profiles = incoming.mosh;
         for profile in &mut incoming.sftp {
             make_standalone_sftp_profile_portable(profile);
@@ -179,6 +251,24 @@ impl ConnectionStore {
                 .find(|old| old.id == profile.id)
             {
                 preserve_standalone_sftp_local_secrets(profile, old);
+            }
+        }
+        let sftp_ids = incoming
+            .sftp
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.standalone_sftp_tombstones
+            .retain(|entry| !sftp_ids.contains(&entry.id));
+        for profile in &self.data.standalone_sftp_profiles {
+            if !sftp_ids.contains(&profile.id) {
+                next.standalone_sftp_tombstones
+                    .retain(|entry| entry.id != profile.id);
+                next.standalone_sftp_tombstones
+                    .push(DeletedConnectionTombstone {
+                        id: profile.id.clone(),
+                        deleted_at: now,
+                    });
             }
         }
         next.standalone_sftp_profiles = incoming.sftp;
@@ -237,6 +327,24 @@ impl ConnectionStore {
                     &mut profile.upstream_proxy,
                     &old.upstream_proxy,
                 );
+            }
+        }
+        let remote_desktop_ids = incoming
+            .remote_desktop
+            .iter()
+            .map(|p| p.id.clone())
+            .collect::<HashSet<_>>();
+        next.remote_desktop_tombstones
+            .retain(|entry| !remote_desktop_ids.contains(&entry.id));
+        for profile in &self.data.remote_desktop_profiles {
+            if !remote_desktop_ids.contains(&profile.id) {
+                next.remote_desktop_tombstones
+                    .retain(|entry| entry.id != profile.id);
+                next.remote_desktop_tombstones
+                    .push(DeletedConnectionTombstone {
+                        id: profile.id.clone(),
+                        deleted_at: now,
+                    });
             }
         }
         next.remote_desktop_profiles = incoming.remote_desktop;

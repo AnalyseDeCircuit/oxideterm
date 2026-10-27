@@ -231,6 +231,11 @@
       "delete": "刪除本機工作階段",
       "delete_failed": "無法刪除本機工作階段",
       "confirm_delete": "刪除本機工作階段「{{name}}」？執行中的終端會保留。"
+    },
+    "ble_profiles": {
+      "delete": "刪除",
+      "delete_failed": "無法刪除 BLE 連線",
+      "confirm_delete": "刪除 BLE 連線「{{name}}」？"
     }
   }
 }

@@ -72,6 +72,20 @@
       "no_connection_id": "Nessun ID connessione assegnato dopo la riconnessione."
     },
     "failedFetchStats": "Impossibile recuperare le statistiche",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "Enumerazione degli adattatori BLE non riuscita: {error}",
+              "no_adapters": "Nessun adattatore Bluetooth disponibile",
+              "adapter_open_failed": "Apertura dell'adattatore BLE non riuscita: {error}",
+              "device_enumeration_failed": "Enumerazione dei dispositivi BLE non riuscita: {error}",
+              "scan_failed": "Scansione BLE non riuscita: {error}",
+              "no_device_matched": "Nessun dispositivo BLE nel raggio corrisponde al profilo ({identity})",
+              "connect_failed": "Connessione del dispositivo BLE non riuscita: {error}",
+              "service_discovery_failed": "Individuazione dei servizi non riuscita: {error}",
+              "service_mismatch": "Dispositivo corrispondente ma non pubblicizza il servizio di destinazione {uuid}",
+              "invalid_service_uuid": "UUID del servizio non valido: {uuid}"
+        }
+      },
     "errors": {
       "chain_busy_desc": "Un'altra catena di connessione è già in corso. Attendi.",
       "chain_busy_title": "Operazione in corso",
@@ -126,6 +140,11 @@
         "no_common": "nessun algoritmo {{kind}} comune"
       },
       "stage": {
+        "ble_opening_adapter": "Apertura dell'adattatore Bluetooth",
+        "ble_scanning": "Ricerca dei dispositivi Bluetooth",
+        "ble_matching": "Identificazione del dispositivo",
+        "ble_verifying_service": "Verifica del servizio",
+        "ble_ready": "Pronto",
         "authentication": "Autenticazione",
         "kerberos_credentials": "Verifica delle credenziali Kerberos",
         "gssapi_exchange": "Scambio dei token GSSAPI",

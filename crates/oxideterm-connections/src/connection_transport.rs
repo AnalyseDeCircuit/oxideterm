@@ -18,6 +18,7 @@ pub enum ConnectionTransport {
     Mosh,
     Telnet,
     Serial,
+    Ble,
     Rdp,
     Vnc,
     WslGraphics,
@@ -39,7 +40,9 @@ pub fn transport_default_port(transport: ConnectionTransport) -> Option<&'static
         ConnectionTransport::Telnet => Some(TELNET_DEFAULT_PORT_TEXT),
         ConnectionTransport::Rdp => Some(RDP_DEFAULT_PORT_TEXT),
         ConnectionTransport::Vnc => Some(VNC_DEFAULT_PORT_TEXT),
-        ConnectionTransport::Serial | ConnectionTransport::WslGraphics => None,
+        ConnectionTransport::Serial
+        | ConnectionTransport::Ble
+        | ConnectionTransport::WslGraphics => None,
     }
 }
 
@@ -104,8 +107,11 @@ pub fn transport_username_transition(
 }
 
 pub fn transport_is_persistable(transport: ConnectionTransport) -> bool {
-    // WSL graphics discovery is a launch surface without saved connection metadata.
-    !matches!(transport, ConnectionTransport::WslGraphics)
+    // WSL graphics and BLE discovery is a launch surface without saved connection metadata.
+    !matches!(
+        transport,
+        ConnectionTransport::WslGraphics | ConnectionTransport::Ble
+    )
 }
 
 fn is_known_transport_default_port(port: &str) -> bool {

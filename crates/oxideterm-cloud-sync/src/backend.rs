@@ -824,6 +824,9 @@ fn normalize_structured_section_revisions(
     revisions.serial_profiles = revisions
         .serial_profiles
         .or_else(|| sections.serial_profiles.map(|entry| entry.revision));
+    revisions.ble_profiles = revisions
+        .ble_profiles
+        .or_else(|| sections.ble_profiles.map(|entry| entry.revision));
     revisions.telnet_profiles = revisions
         .telnet_profiles
         .or_else(|| sections.telnet_profiles.map(|entry| entry.revision));

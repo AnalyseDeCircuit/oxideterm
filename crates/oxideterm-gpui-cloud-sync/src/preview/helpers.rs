@@ -389,6 +389,7 @@ pub fn cloud_sync_preview_fact_rows(
     ]];
     if summary.quick_commands > 0
         || summary.serial_profiles > 0
+        || summary.ble_profiles > 0
         || summary.telnet_profiles > 0
         || summary.mosh_profiles > 0
         || summary.sensitive_credentials > 0
@@ -401,6 +402,10 @@ pub fn cloud_sync_preview_fact_rows(
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.serial_profiles_label",
                 value: CloudSyncPreviewFactValue::Count(summary.serial_profiles),
+            },
+            CloudSyncPreviewFactSpec {
+                label_key: "plugin.cloud_sync.preview.ble_profiles_label",
+                value: CloudSyncPreviewFactValue::Count(summary.ble_profiles),
             },
             CloudSyncPreviewFactSpec {
                 label_key: "plugin.cloud_sync.preview.telnet_profiles_label",
@@ -491,6 +496,11 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                     .as_ref()
                     .map(|snapshot| snapshot.records.len())
                     .unwrap_or(0),
+                ble_profiles: preview
+                    .ble_profiles_snapshot
+                    .as_ref()
+                    .map(|snapshot| snapshot.records.len())
+                    .unwrap_or(0),
                 telnet_profiles: preview
                     .telnet_profiles_snapshot
                     .as_ref()
@@ -540,6 +550,7 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
             forwards: preview.preview.total_forwards,
             quick_commands: preview.metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: preview.metadata.serial_profiles_count.unwrap_or(0),
+            ble_profiles: preview.metadata.ble_profiles_count.unwrap_or(0),
             telnet_profiles: preview.metadata.telnet_profiles_count.unwrap_or(0),
             mosh_profiles: preview.metadata.mosh_profiles_count.unwrap_or(0),
             remote_desktop_profiles: preview.metadata.remote_desktop_profiles_count.unwrap_or(0),

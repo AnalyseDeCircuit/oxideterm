@@ -101,6 +101,7 @@ pub enum SavedConnectionKind {
     Telnet,
     Mosh,
     Serial,
+    Ble,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]

@@ -156,6 +156,31 @@ impl CloudSyncOperationService {
             );
         }
 
+        if local_snapshot.scope.sync_ble_profiles {
+            let mut snapshot = connection_store.export_ble_profiles_snapshot()?;
+            filter_ble_profiles_snapshot(&mut snapshot, item_filter.ble_profile_ids.as_ref());
+            let bytes = serde_json::to_vec(&snapshot)?;
+            let path = ble_profiles_object_path(&snapshot.revision);
+            manifest.sections.ble_profiles = Some(crate::StructuredObjectEntry {
+                revision: snapshot.revision.clone(),
+                path: path.clone(),
+                record_count: Some(snapshot.records.len()),
+                content_type: "application/json".to_string(),
+            });
+            objects.push(StructuredUploadObject {
+                path,
+                bytes,
+                content_type: "application/json".to_string(),
+            });
+            completed_exports += 1;
+            report_progress(
+                progress,
+                CloudSyncProgressStage::Exporting,
+                2 + completed_exports,
+                total,
+            );
+        }
+
         if local_snapshot.scope.sync_telnet_profiles {
             let mut snapshot = connection_store.export_telnet_profiles_snapshot()?;
             filter_telnet_profiles_snapshot(&mut snapshot, item_filter.telnet_profile_ids.as_ref());

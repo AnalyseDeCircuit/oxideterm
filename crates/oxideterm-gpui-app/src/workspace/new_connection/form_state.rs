@@ -171,6 +171,7 @@ pub(in crate::workspace) enum NewConnectionSelect {
     RemoteDesktopSshGateway,
     LocalShell,
     SerialPort,
+    BleAdapter,
     SerialDataBits,
     SerialStopBits,
     SerialParity,
@@ -180,6 +181,10 @@ pub(in crate::workspace) enum NewConnectionSelect {
     TerminalDeleteSequence,
     TelnetInputLineEnding,
     TelnetOutputLineEnding,
+    BleInputLineEnding,
+    BleOutputLineEnding,
+    BleSendMode,
+    BleDisplayMode,
     TerminalSemanticScheme,
     TerminalHighlightRuleSet,
     TerminalSessionLogPolicy,
@@ -264,6 +269,8 @@ pub(in crate::workspace) enum NewConnectionField {
     SerialBaudRate,
     SerialProfileName,
     TelnetProfileName,
+    BleProfileName,
+    BleMtu,
     MoshServerExecutable,
     MoshUdpHost,
     MoshUdpPort,
@@ -914,6 +921,7 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) serial_parity: oxideterm_terminal::SerialParity,
     pub(in crate::workspace) serial_flow_control: oxideterm_terminal::SerialFlowControl,
     pub(in crate::workspace) serial_profile_name: String,
+    pub(in crate::workspace) ble: BleFormState,
     pub(in crate::workspace) telnet_profile_name: String,
     pub(in crate::workspace) mosh_server_executable: String,
     pub(in crate::workspace) mosh_udp_host: String,
@@ -921,6 +929,120 @@ pub(in crate::workspace) struct NewConnectionForm {
     pub(in crate::workspace) mosh_locale: String,
     pub(in crate::workspace) mosh_ip_family: MoshIpFamily,
     pub(in crate::workspace) mosh_prediction: MoshPredictionMode,
+}
+
+/// BLE-specific draft and discovery view state of the new-connection form.
+/// Grouped so the shared form draft keeps other transports' fields flat while
+/// the BLE surface stays in one resettable unit; nothing here is persisted —
+/// saving still materializes a `BleProfile` into the connection store.
+pub(in crate::workspace) struct BleFormState {
+    pub(in crate::workspace) discovery_section_expanded: Option<bool>,
+    pub(in crate::workspace) profile_name: String,
+    // Set only when the form edits an existing BLE profile; the save request
+    // reuses the stored device identity when no live scan selection is made.
+    pub(in crate::workspace) profile_id: Option<String>,
+    pub(in crate::workspace) adapters: Vec<oxideterm_ble::BleAdapterInfo>,
+    pub(in crate::workspace) adapters_loading: bool,
+    pub(in crate::workspace) selected_adapter_index: usize,
+    pub(in crate::workspace) devices: Vec<oxideterm_ble::BleDeviceInfo>,
+    pub(in crate::workspace) scanning: bool,
+    pub(in crate::workspace) scan_started: bool,
+    // Holds the adapter that produced `devices` so inspection and the
+    // terminal session resolve peripherals against the same BlueZ object
+    // (Linux) or peripheral cache (macOS/Windows); the scan it owns stays
+    // running until the terminal link is up or the form is dismissed.
+    pub(in crate::workspace) adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+    // Monotonic token: in-flight discovery writes back only when the generation
+    // still matches, so stale adapter or scan results never reach the form.
+    pub(in crate::workspace) scan_generation: u64,
+    pub(in crate::workspace) selected_device_id: Option<oxideterm_ble::BlePeripheralId>,
+    pub(in crate::workspace) device_details: Option<oxideterm_ble::BleDeviceDetails>,
+    pub(in crate::workspace) inspecting: bool,
+    // Inspection failure is scoped to the selected device's expanded row, not
+    // the whole form, so switching devices drops it instead of leaking across rows.
+    pub(in crate::workspace) inspect_error: Option<String>,
+    // The service selected inside the expanded details table; drives whether the
+    // open button can start a read/write (notify + write) channel.
+    pub(in crate::workspace) selected_service_uuid: Option<uuid::Uuid>,
+    // Byte-stream transport options. Shared with SerialRuntimeOptions so the
+    // terminal panel and the saved-profile store consume the same shape.
+    pub(in crate::workspace) input_line_ending: oxideterm_connections::SerialLineEnding,
+    pub(in crate::workspace) output_line_ending: oxideterm_connections::SerialLineEnding,
+    pub(in crate::workspace) send_mode: oxideterm_connections::SerialSendMode,
+    pub(in crate::workspace) display_mode: oxideterm_connections::SerialDisplayMode,
+    pub(in crate::workspace) local_echo: bool,
+    /// Draft text for the optional ATT MTU override; parsed at submit time.
+    pub(in crate::workspace) mtu: String,
+    /// Prefer the write-without-response characteristic. Only editable while
+    /// the selected service exposes one; the enabled state is derived from the
+    /// inspected device details at render time, not stored here.
+    pub(in crate::workspace) write_without_response: bool,
+    pub(in crate::workspace) transport_section_expanded: Option<bool>,
+}
+
+impl Default for BleFormState {
+    fn default() -> Self {
+        Self {
+            discovery_section_expanded: None,
+            profile_name: String::new(),
+            profile_id: None,
+            adapters: Vec::new(),
+            adapters_loading: false,
+            selected_adapter_index: 0,
+            devices: Vec::new(),
+            scanning: false,
+            scan_started: false,
+            adapter_guard: None,
+            scan_generation: 0,
+            selected_device_id: None,
+            device_details: None,
+            inspecting: false,
+            inspect_error: None,
+            selected_service_uuid: None,
+            input_line_ending: oxideterm_connections::SerialLineEnding::default(),
+            output_line_ending: oxideterm_connections::SerialLineEnding::default(),
+            send_mode: oxideterm_connections::SerialSendMode::default(),
+            display_mode: oxideterm_connections::SerialDisplayMode::default(),
+            local_echo: false,
+            mtu: String::new(),
+            write_without_response: true,
+            transport_section_expanded: None,
+        }
+    }
+}
+
+impl fmt::Debug for BleFormState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("BleFormState")
+            .field(
+                "discovery_section_expanded",
+                &self.discovery_section_expanded,
+            )
+            .field("adapters", &self.adapters)
+            .field("adapters_loading", &self.adapters_loading)
+            .field("selected_adapter_index", &self.selected_adapter_index)
+            .field("devices", &self.devices)
+            .field("scanning", &self.scanning)
+            .field("scan_started", &self.scan_started)
+            .field("adapter_guard", &self.adapter_guard.is_some())
+            .field("scan_generation", &self.scan_generation)
+            .field("selected_device", &self.selected_device_id.is_some())
+            .field(
+                "device_details_services",
+                &self
+                    .device_details
+                    .as_ref()
+                    .map(|details| details.services.len()),
+            )
+            .field("inspecting", &self.inspecting)
+            .field("inspect_error", &self.inspect_error.is_some())
+            .field(
+                "selected_service_uuid",
+                &self.selected_service_uuid.is_some(),
+            )
+            .finish()
+    }
 }
 
 impl fmt::Debug for NewConnectionForm {
@@ -1084,6 +1206,7 @@ impl fmt::Debug for NewConnectionForm {
             .field("serial_parity", &self.serial_parity)
             .field("serial_flow_control", &self.serial_flow_control)
             .field("serial_profile_name", &self.serial_profile_name)
+            .field("ble", &self.ble)
             .field("telnet_profile_name", &self.telnet_profile_name)
             .field("mosh_server_executable", &self.mosh_server_executable)
             .field("mosh_udp_host", &self.mosh_udp_host)
@@ -1219,6 +1342,7 @@ impl Default for NewConnectionForm {
             serial_parity: oxideterm_terminal::SerialParity::None,
             serial_flow_control: oxideterm_terminal::SerialFlowControl::None,
             serial_profile_name: String::new(),
+            ble: BleFormState::default(),
             telnet_profile_name: String::new(),
             mosh_server_executable: "mosh-server".to_string(),
             mosh_udp_host: String::new(),
@@ -1413,6 +1537,53 @@ pub(super) fn terminal_serial_line_ending_from_profile(
         oxideterm_connections::SerialLineEnding::CrLf => oxideterm_terminal::SerialLineEnding::CrLf,
         oxideterm_connections::SerialLineEnding::Cr => oxideterm_terminal::SerialLineEnding::Cr,
         oxideterm_connections::SerialLineEnding::None => oxideterm_terminal::SerialLineEnding::None,
+    }
+}
+
+pub(super) fn terminal_serial_send_mode_from_profile(
+    mode: oxideterm_connections::SerialSendMode,
+) -> oxideterm_terminal::SerialSendMode {
+    match mode {
+        oxideterm_connections::SerialSendMode::Text => oxideterm_terminal::SerialSendMode::Text,
+        oxideterm_connections::SerialSendMode::Hex => oxideterm_terminal::SerialSendMode::Hex,
+    }
+}
+
+pub(super) fn terminal_serial_display_mode_from_profile(
+    mode: oxideterm_connections::SerialDisplayMode,
+) -> oxideterm_terminal::SerialDisplayMode {
+    match mode {
+        oxideterm_connections::SerialDisplayMode::Text => {
+            oxideterm_terminal::SerialDisplayMode::Text
+        }
+        oxideterm_connections::SerialDisplayMode::Hex => oxideterm_terminal::SerialDisplayMode::Hex,
+        oxideterm_connections::SerialDisplayMode::Mixed => {
+            oxideterm_terminal::SerialDisplayMode::Mixed
+        }
+    }
+}
+
+pub(in crate::workspace) fn terminal_serial_runtime_options_from_ble_profile(
+    profile: &oxideterm_connections::BleProfile,
+) -> oxideterm_terminal::SerialRuntimeOptions {
+    oxideterm_terminal::SerialRuntimeOptions {
+        line_ending: terminal_serial_line_ending_from_profile(profile.input_line_ending),
+        output_line_ending: terminal_serial_line_ending_from_profile(profile.output_line_ending),
+        send_mode: terminal_serial_send_mode_from_profile(profile.send_mode),
+        display_mode: terminal_serial_display_mode_from_profile(profile.display_mode),
+        local_echo: profile.local_echo,
+    }
+}
+
+pub(in crate::workspace) fn terminal_serial_runtime_options_from_ble_form(
+    form: &NewConnectionForm,
+) -> oxideterm_terminal::SerialRuntimeOptions {
+    oxideterm_terminal::SerialRuntimeOptions {
+        line_ending: terminal_serial_line_ending_from_profile(form.ble.input_line_ending),
+        output_line_ending: terminal_serial_line_ending_from_profile(form.ble.output_line_ending),
+        send_mode: terminal_serial_send_mode_from_profile(form.ble.send_mode),
+        display_mode: terminal_serial_display_mode_from_profile(form.ble.display_mode),
+        local_echo: form.ble.local_echo,
     }
 }
 
@@ -2213,6 +2384,8 @@ pub(in crate::workspace) fn current_connection_field_mut(
         NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
+        NewConnectionField::BleProfileName => &mut form.ble.profile_name,
+        NewConnectionField::BleMtu => &mut form.ble.mtu,
         NewConnectionField::MoshServerExecutable => &mut form.mosh_server_executable,
         NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
@@ -2373,6 +2546,8 @@ pub(in crate::workspace) fn current_connection_field(form: &NewConnectionForm) -
         NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
         NewConnectionField::SerialProfileName => &form.serial_profile_name,
         NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
+        NewConnectionField::BleProfileName => &form.ble.profile_name,
+        NewConnectionField::BleMtu => &form.ble.mtu,
         NewConnectionField::MoshServerExecutable => &form.mosh_server_executable,
         NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
         NewConnectionField::MoshUdpPort => &form.mosh_udp_port,

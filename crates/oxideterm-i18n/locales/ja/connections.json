@@ -72,6 +72,20 @@
       "no_connection_id": "再接続後に接続 ID が割り当てられませんでした。"
     },
     "failedFetchStats": "統計情報の取得に失敗しました",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "BLEアダプターの列挙に失敗しました：{error}",
+              "no_adapters": "利用可能なBluetoothアダプターがありません",
+              "adapter_open_failed": "BLEアダプターのオープンに失敗しました：{error}",
+              "device_enumeration_failed": "BLEデバイスの列挙に失敗しました：{error}",
+              "scan_failed": "BLEスキャンに失敗しました：{error}",
+              "no_device_matched": "付近にプロファイルに一致するBLEデバイスがありません（{identity}）",
+              "connect_failed": "BLEデバイスへの接続に失敗しました：{error}",
+              "service_discovery_failed": "サービス探索に失敗しました：{error}",
+              "service_mismatch": "デバイスは一致しましたが、対象サービス {uuid} をアドバタイズしていません",
+              "invalid_service_uuid": "サービスUUIDが無効です：{uuid}"
+        }
+      },
     "errors": {
       "chain_busy_desc": "別の接続チェーンが進行中です。しばらくお待ちください。",
       "chain_busy_title": "処理中です",
@@ -126,6 +140,11 @@
         "no_common": "共通の{{kind}}アルゴリズムがありません"
       },
       "stage": {
+        "ble_opening_adapter": "Bluetooth アダプターを開いています",
+        "ble_scanning": "Bluetooth デバイスをスキャン中",
+        "ble_matching": "デバイスを照合中",
+        "ble_verifying_service": "サービスを確認中",
+        "ble_ready": "準備完了",
         "authentication": "認証中",
         "kerberos_credentials": "Kerberos 資格情報を確認中",
         "gssapi_exchange": "GSSAPI トークンを交換中",

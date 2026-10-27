@@ -71,6 +71,20 @@
       "connection_failed": "連線失敗",
       "no_connection_id": "重新連線後未分配連線 ID。"
     },
-    "failedFetchStats": "取得統計資訊失敗"
+    "failedFetchStats": "取得統計資訊失敗",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "列舉藍牙介面卡失敗：{error}",
+              "no_adapters": "沒有可用的藍牙介面卡",
+              "adapter_open_failed": "開啟藍牙介面卡失敗：{error}",
+              "device_enumeration_failed": "列舉藍牙裝置失敗：{error}",
+              "scan_failed": "藍牙掃描失敗：{error}",
+              "no_device_matched": "附近沒有符合該設定檔的 BLE 裝置（{identity}）",
+              "connect_failed": "連線 BLE 裝置失敗：{error}",
+              "service_discovery_failed": "服務探索失敗：{error}",
+              "service_mismatch": "裝置已符合，但不廣播目標服務 {uuid}",
+              "invalid_service_uuid": "服務 UUID 無效：{uuid}"
+        }
+      }
   }
 }

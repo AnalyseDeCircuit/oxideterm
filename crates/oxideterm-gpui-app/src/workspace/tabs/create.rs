@@ -723,6 +723,70 @@ impl WorkspaceApp {
         Ok(session_id)
     }
 
+    pub(in crate::workspace) fn create_ble_terminal_tab(
+        &mut self,
+        config: BleSessionConfig,
+        adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+        terminal_options: ConnectionTerminalOptions,
+        title: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<TerminalSessionId> {
+        let tab_id = self.alloc_tab_id(cx);
+        let pane_id = self.alloc_pane_id(cx);
+        let session_id = self.alloc_session_id(cx);
+        let mut preference_overrides = terminal_preference_overrides(
+            terminal_options,
+            &self.settings_store.settings().terminal,
+        );
+        preference_overrides.session_log_context = Some(TerminalSessionLogContext {
+            session: title.clone(),
+            host: config.device_label.clone(),
+            username: String::new(),
+            protocol: "ble".to_string(),
+        });
+        let mut preferences =
+            self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
+        // BLE device commands must not share the user's local shell history.
+        preferences.command_history = SharedTerminalCommandHistory::default();
+        preference_overrides.apply_to(&mut preferences);
+        let pane = cx.new(|cx| {
+            TerminalPane::new_ble_with_preferences(
+                config.clone(),
+                adapter_guard,
+                preferences,
+                window,
+                cx,
+                self.i18n.clone(),
+            )
+            .expect("failed to initialize BLE terminal pane")
+            .with_preference_overrides(preference_overrides)
+        });
+
+        // BLE owns no SSH node and is intentionally not persistable.
+        self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
+        self.refresh_native_plugin_terminal_hooks(cx);
+        self.insert_tab(
+            Tab {
+                id: tab_id,
+                kind: TabKind::LocalTerminal,
+                title: title,
+                title_source: TabTitleSource::Static,
+                root_pane: Some(PaneNode::leaf(pane_id, session_id)),
+                active_pane_id: Some(pane_id),
+            },
+            cx,
+        );
+        self.bind_terminal_location(tab_id, pane_id, session_id, cx);
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.active_surface = ActiveSurface::Terminal;
+        self.needs_active_pane_focus = true;
+        pane.update(cx, |pane, cx| pane.focus(window, cx));
+        self.reveal_active_tab(window, cx);
+        cx.notify();
+        Ok(session_id)
+    }
+
     pub(in crate::workspace) fn create_mosh_terminal_tab_for_connection(
         &mut self,
         mut config: MoshTerminalConfig,

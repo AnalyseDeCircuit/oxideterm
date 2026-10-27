@@ -72,6 +72,10 @@ impl ConnectionStore {
         &self.data.serial_profiles
     }
 
+    pub fn ble_profiles(&self) -> &[BleProfile] {
+        &self.data.ble_profiles
+    }
+
     pub fn telnet_profiles(&self) -> &[TelnetProfile] {
         &self.data.telnet_profiles
     }
@@ -1236,6 +1240,9 @@ impl ConnectionStore {
             } else {
                 self.data.serial_profiles.push(profile.clone());
             }
+            self.data
+                .serial_tombstones
+                .retain(|t| t.id != profile.id);
             self.normalize();
             self.save()?;
             Ok(profile)
@@ -1299,6 +1306,13 @@ impl ConnectionStore {
             self.data.serial_profiles.retain(|profile| profile.id != id);
             let deleted = self.data.serial_profiles.len() != before;
             if deleted {
+                self.data.serial_tombstones =
+                    active_connection_tombstones(&self.data.serial_tombstones);
+                self.data.serial_tombstones.retain(|t| t.id != id);
+                self.data.serial_tombstones.push(DeletedConnectionTombstone {
+                    id: id.to_owned(),
+                    deleted_at: Utc::now(),
+                });
                 self.save()?;
             }
             Ok(deleted)
@@ -1311,6 +1325,135 @@ impl ConnectionStore {
         let Some(profile) = self
             .data
             .serial_profiles
+            .iter_mut()
+            .find(|profile| profile.id == id)
+        else {
+            return Ok(false);
+        };
+        let now = Utc::now();
+        profile.last_used_at = Some(now);
+        profile.updated_at = now;
+        self.save()?;
+        Ok(true)
+    }
+
+    pub fn upsert_ble_profile(
+        &mut self,
+        request: SaveBleProfileRequest,
+    ) -> Result<BleProfile> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            request.id.as_deref(),
+            Some(&request.name),
+        );
+        let audit_result = (|| {
+            let group = normalize_optional_group_name(request.group.as_deref())?;
+            let now = Utc::now();
+            let id = request.id.unwrap_or_else(|| Uuid::new_v4().to_string());
+            let mut profile = self
+                .data
+                .ble_profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .cloned()
+                .unwrap_or_else(|| {
+                    let mut profile =
+                        BleProfile::new(request.name.trim(), request.service_uuid.trim());
+                    profile.id = id.clone();
+                    profile
+                });
+
+            profile.name = request.name.trim().to_string();
+            profile.group = group;
+            profile.notes = normalize_optional_text(request.notes);
+            profile.icon = normalize_optional_text(request.icon);
+            profile.color = normalize_optional_text(request.color);
+            profile.icon_background_color = normalize_optional_text(request.icon_background_color);
+            profile.adapter_mac = normalize_optional_text(request.adapter_mac);
+            profile.device_mac = normalize_optional_text(request.device_mac);
+            profile.device_name = normalize_optional_text(request.device_name);
+            profile.service_uuid = request.service_uuid.trim().to_string();
+            profile.terminal = request.terminal;
+            if let Some(value) = request.input_line_ending {
+                profile.input_line_ending = value;
+            }
+            if let Some(value) = request.output_line_ending {
+                profile.output_line_ending = value;
+            }
+            if let Some(value) = request.send_mode {
+                profile.send_mode = value;
+            }
+            if let Some(value) = request.display_mode {
+                profile.display_mode = value;
+            }
+            if let Some(value) = request.local_echo {
+                profile.local_echo = value;
+            }
+            if let Some(value) = request.mtu {
+                profile.mtu = value.map(|mtu| mtu.clamp(BLE_ATT_MTU_MIN, BLE_ATT_MTU_MAX));
+            }
+            if let Some(value) = request.write_without_response {
+                profile.write_without_response = value;
+            }
+            profile.connect_on_open = request.connect_on_open.unwrap_or(false);
+            if !self.data.ble_profiles.iter().any(|existing| existing.id == id) {
+                profile.created_at = now;
+            }
+            profile.updated_at = now;
+            profile.validate()?;
+
+            if let Some(existing) = self
+                .data
+                .ble_profiles
+                .iter_mut()
+                .find(|existing| existing.id == id)
+            {
+                *existing = profile.clone();
+            } else {
+                self.data.ble_profiles.push(profile.clone());
+            }
+            self.data.ble_tombstones.retain(|t| t.id != profile.id);
+            self.normalize();
+            self.save()?;
+            Ok(profile)
+        })();
+        audit.result(&audit_result);
+        audit_result
+    }
+
+    pub fn delete_ble_profile(&mut self, id: &str) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_delete",
+            Some(id),
+            None,
+        );
+        let audit_result = (|| {
+            let before = self.data.ble_profiles.len();
+            self.data.ble_profiles.retain(|profile| profile.id != id);
+            let deleted = self.data.ble_profiles.len() != before;
+            if deleted {
+                self.data.ble_tombstones =
+                    active_connection_tombstones(&self.data.ble_tombstones);
+                self.data.ble_tombstones.retain(|t| t.id != id);
+                self.data.ble_tombstones.push(DeletedConnectionTombstone {
+                    id: id.to_owned(),
+                    deleted_at: Utc::now(),
+                });
+                self.normalize();
+                self.save()?;
+            }
+            Ok(deleted)
+        })();
+        audit.changed(&audit_result);
+        audit_result
+    }
+
+    pub fn mark_ble_profile_used(&mut self, id: &str) -> Result<bool> {
+        let Some(profile) = self
+            .data
+            .ble_profiles
             .iter_mut()
             .find(|profile| profile.id == id)
         else {
@@ -1396,6 +1539,9 @@ impl ConnectionStore {
             } else {
                 self.data.telnet_profiles.push(profile.clone());
             }
+            self.data
+                .telnet_tombstones
+                .retain(|t| t.id != profile.id);
             self.record_cleared_credentials(previous_credentials);
             self.normalize();
             self.save()?;
@@ -1451,6 +1597,109 @@ impl ConnectionStore {
         result
     }
 
+    /// Persists BLE transport runtime options (line endings, send/display mode,
+    /// local echo) on the matching profile. Returns `Ok(false)` when the profile
+    /// is missing or no field changed so callers can skip downstream work.
+    pub fn set_ble_profile_runtime_options(
+        &mut self,
+        id: &str,
+        input_line_ending: Option<SerialLineEnding>,
+        output_line_ending: Option<SerialLineEnding>,
+        send_mode: Option<SerialSendMode>,
+        display_mode: Option<SerialDisplayMode>,
+        local_echo: Option<bool>,
+    ) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            Some(id),
+            Some("ble_runtime_options"),
+        );
+        let result = (|| {
+            let Some(profile) = self
+                .data
+                .ble_profiles
+                .iter_mut()
+                .find(|profile| profile.id == id)
+            else {
+                return Ok(false);
+            };
+            let mut changed = false;
+            if let Some(value) = input_line_ending
+                && profile.input_line_ending != value
+            {
+                profile.input_line_ending = value;
+                changed = true;
+            }
+            if let Some(value) = output_line_ending
+                && profile.output_line_ending != value
+            {
+                profile.output_line_ending = value;
+                changed = true;
+            }
+            if let Some(value) = send_mode
+                && profile.send_mode != value
+            {
+                profile.send_mode = value;
+                changed = true;
+            }
+            if let Some(value) = display_mode
+                && profile.display_mode != value
+            {
+                profile.display_mode = value;
+                changed = true;
+            }
+            if let Some(value) = local_echo
+                && profile.local_echo != value
+            {
+                profile.local_echo = value;
+                changed = true;
+            }
+            if !changed {
+                return Ok(false);
+            }
+            profile.updated_at = Utc::now();
+            self.save()?;
+            Ok(true)
+        })();
+        audit.changed(&result);
+        result
+    }
+
+    /// Persists the ATT MTU negotiated at runtime back onto the saved BLE
+    /// profile so future sessions can start from the known-good value. The
+    /// runtime always clamps to `[BLE_ATT_MTU_MIN, BLE_ATT_MTU_MAX]`, so we
+    /// repeat the clamp here for callers that bypass the session pipeline
+    /// (cloud-sync snapshots, manual edits).
+    pub fn set_ble_profile_mtu(&mut self, id: &str, mtu: u16) -> Result<bool> {
+        let audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_save",
+            Some(id),
+            Some("ble_negotiated_mtu"),
+        );
+        let result = (|| {
+            let Some(profile) = self
+                .data
+                .ble_profiles
+                .iter_mut()
+                .find(|profile| profile.id == id)
+            else {
+                return Ok(false);
+            };
+            let clamped = mtu.clamp(BLE_ATT_MTU_MIN, BLE_ATT_MTU_MAX);
+            if profile.mtu == Some(clamped) {
+                return Ok(false);
+            }
+            profile.mtu = Some(clamped);
+            profile.updated_at = Utc::now();
+            self.save()?;
+            Ok(true)
+        })();
+        audit.changed(&result);
+        result
+    }
+
     pub fn delete_telnet_profile(&mut self, id: &str) -> Result<bool> {
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,
@@ -1470,6 +1719,13 @@ impl ConnectionStore {
             self.data.telnet_profiles.retain(|profile| profile.id != id);
             let deleted = self.data.telnet_profiles.len() != before;
             if deleted {
+                self.data.telnet_tombstones =
+                    active_connection_tombstones(&self.data.telnet_tombstones);
+                self.data.telnet_tombstones.retain(|t| t.id != id);
+                self.data.telnet_tombstones.push(DeletedConnectionTombstone {
+                    id: id.to_owned(),
+                    deleted_at: Utc::now(),
+                });
                 self.save()?;
                 for reference in proxy_ids {
                     self.delete_or_queue_connection_keychain_entry(reference)?;
@@ -1581,6 +1837,9 @@ impl ConnectionStore {
                 profile.created_at = now;
                 self.data.mosh_profiles.push(profile.clone());
             }
+            self.data
+                .mosh_tombstones
+                .retain(|t| t.id != profile.id);
             if let Some(group) = group {
                 self.ensure_group(group)?;
             }
@@ -1621,6 +1880,13 @@ impl ConnectionStore {
             self.data.mosh_profiles.retain(|profile| profile.id != id);
             let deleted = self.data.mosh_profiles.len() != before;
             if deleted {
+                self.data.mosh_tombstones =
+                    active_connection_tombstones(&self.data.mosh_tombstones);
+                self.data.mosh_tombstones.retain(|t| t.id != id);
+                self.data.mosh_tombstones.push(DeletedConnectionTombstone {
+                    id: id.to_owned(),
+                    deleted_at: Utc::now(),
+                });
                 self.save()?;
                 for keychain_id in keychain_ids {
                     let _ = self.keychain.delete(&keychain_id);
@@ -1959,6 +2225,9 @@ impl ConnectionStore {
                 profile.created_at = now;
                 self.data.standalone_sftp_profiles.push(profile.clone());
             }
+            self.data
+                .standalone_sftp_tombstones
+                .retain(|t| t.id != profile.id);
             if let Some(group) = group {
                 self.ensure_group(group)?;
             }
@@ -2067,6 +2336,15 @@ impl ConnectionStore {
                 .retain(|profile| profile.id != id);
             let deleted = self.data.standalone_sftp_profiles.len() != before;
             if deleted {
+                self.data.standalone_sftp_tombstones =
+                    active_connection_tombstones(&self.data.standalone_sftp_tombstones);
+                self.data.standalone_sftp_tombstones.retain(|t| t.id != id);
+                self.data
+                    .standalone_sftp_tombstones
+                    .push(DeletedConnectionTombstone {
+                        id: id.to_owned(),
+                        deleted_at: Utc::now(),
+                    });
                 self.save()?;
                 for keychain_id in keychain_ids {
                     let _ = self.keychain.delete(&keychain_id);
@@ -2198,6 +2476,9 @@ impl ConnectionStore {
                 profile.created_at = now;
                 self.data.remote_desktop_profiles.push(profile.clone());
             }
+            self.data
+                .remote_desktop_tombstones
+                .retain(|t| t.id != profile.id);
             if let Some(group) = group {
                 self.ensure_group(group)?;
             }
@@ -2262,6 +2543,15 @@ impl ConnectionStore {
                 .retain(|profile| profile.id != id);
             let deleted = self.data.remote_desktop_profiles.len() != before;
             if deleted {
+                self.data.remote_desktop_tombstones =
+                    active_connection_tombstones(&self.data.remote_desktop_tombstones);
+                self.data.remote_desktop_tombstones.retain(|t| t.id != id);
+                self.data
+                    .remote_desktop_tombstones
+                    .push(DeletedConnectionTombstone {
+                        id: id.to_owned(),
+                        deleted_at: Utc::now(),
+                    });
                 self.save()?;
                 for reference in proxy_ids {
                     self.delete_or_queue_connection_keychain_entry(reference)?;
@@ -4304,6 +4594,12 @@ impl ConnectionStore {
             )
             .chain(
                 self.data
+                    .ble_profiles
+                    .iter()
+                    .filter_map(|profile| profile.group.clone()),
+            )
+            .chain(
+                self.data
                     .local_terminal_profiles
                     .iter()
                     .filter_map(|profile| profile.group.clone()),
@@ -4345,6 +4641,9 @@ impl ConnectionStore {
             .sort_by_key(|profile| profile.name.to_lowercase());
         self.data
             .standalone_sftp_profiles
+            .sort_by_key(|profile| profile.name.to_lowercase());
+        self.data
+            .ble_profiles
             .sort_by_key(|profile| profile.name.to_lowercase());
         self.data.ftp_profiles.sort_by_key(|profile| profile.name.to_lowercase());
     }

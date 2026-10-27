@@ -584,6 +584,7 @@ mod tests {
             revision: "invalid".to_string(),
             exported_at: Utc::now().to_rfc3339(),
             records: vec![invalid_profile],
+            tombstones: Vec::new(),
         };
         let bytes = export_connections_to_oxide(
             &source,
