@@ -82,9 +82,7 @@ mod drag_tests {
     }
 
     #[gpui::test]
-    fn cross_pane_drag_reaches_transfer_conflicts_before_workspace_cleanup(
-        cx: &mut TestAppContext,
-    ) {
+    fn sftp_pointer_and_keyboard_actions_use_visible_selection(cx: &mut TestAppContext) {
         let executable = std::env::current_exe().unwrap();
         let fixture_key = "OXIDETERM_SFTP_DRAG_TEST_DIR";
         let Some(fixture_dir) = std::env::var_os(fixture_key) else {
@@ -229,6 +227,166 @@ mod drag_tests {
                 assert!(sftp.drag_autoscroll_position.is_none());
             });
         }
+
+        // Reuse the isolated workspace to exercise real keyboard dispatch on
+        // nested tree entries, with a different stale flat selection present.
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_main_window_active_tab(None, cx);
+            workspace.open_sftp_sidebar_surface(NodeId::new("tree-fixture"), None, cx);
+        });
+        cx.run_until_parked();
+        workspace.update(cx, |workspace, cx| {
+            workspace
+                .settings_store
+                .settings_mut()
+                .sftp
+                .sidebar_view_mode = oxideterm_settings::SftpSidebarViewMode::Tree;
+            workspace.sftp_view.update(cx, |sftp, _| {
+                sftp.current_surface_id = Some(SftpSurfaceId::Sidebar);
+                sftp.current_remote_id = Some(SftpRemoteId::Node(NodeId::new("tree-fixture")));
+                sftp.active_pane = SftpPane::Local;
+                sftp.remote_path = "/remote".into();
+                sftp.remote_loading = false;
+                sftp.remote_load_pending = false;
+                sftp.remote_load_inflight = false;
+                sftp.init_error = None;
+                sftp.local_files = vec![file("/local/drag.txt")];
+                let mut directory = file("/remote/dir");
+                directory.name = "dir".into();
+                directory.file_type = SftpFileType::Directory;
+                sftp.remote_files = vec![directory, file("/remote/drag.txt")];
+                sftp.tree_children
+                    .insert("/remote/dir".into(), vec![file("/remote/dir/drag.txt")]);
+                sftp.tree_expanded.insert("/remote/dir".into());
+                sftp.remote_selected.insert("drag.txt".into());
+            });
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        let child_position = workspace.read_with(cx, |workspace, cx| {
+            let bounds = workspace
+                .sftp_view
+                .read(cx)
+                .remote_file_scroll
+                .0
+                .borrow()
+                .base_handle
+                .bounds();
+            assert!(bounds.size.width > px(0.0) && bounds.size.height > px(2.0 * SFTP_ROW_HEIGHT));
+            Point::new(bounds.center().x, bounds.top() + px(1.5 * SFTP_ROW_HEIGHT))
+        });
+        cx.simulate_mouse_down(
+            child_position,
+            MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            child_position,
+            MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        workspace.update(cx, |workspace, cx| {
+            workspace.sftp_view.update(cx, |sftp, _| {
+                assert_eq!(sftp.active_pane, SftpPane::Remote);
+                assert_eq!(sftp.tree_selected.as_deref(), Some("/remote/dir/drag.txt"));
+                assert!(sftp.remote_selected.is_empty());
+                // Keyboard routing must ignore flat selection even if another
+                // consumer left one behind after the pointer interaction.
+                sftp.remote_selected.insert("drag.txt".into());
+            });
+        });
+        let dispatch = |key: &str, cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    let _scope = workspace.enter_sftp_surface(SftpSurfaceId::Sidebar);
+                    workspace.handle_sftp_key(
+                        &gpui::KeyDownEvent {
+                            keystroke: gpui::Keystroke::parse(key).unwrap(),
+                            is_held: false,
+                            prefer_character_input: false,
+                        },
+                        window,
+                        cx,
+                    )
+                })
+            })
+        };
+        assert!(dispatch("f2", cx));
+        workspace.update(cx, |workspace, cx| {
+            workspace.sftp_view.update(cx, |sftp, _| {
+                assert!(matches!(&sftp.dialog,
+                    Some(SftpDialog::Rename { old_path: Some(path), .. })
+                    if path == "/remote/dir/drag.txt"));
+                sftp.dialog = None;
+                sftp.focused_input = None;
+            });
+        });
+        assert!(dispatch("delete", cx));
+        workspace.update(cx, |workspace, cx| {
+            workspace.sftp_view.update(cx, |sftp, _| {
+                assert!(matches!(&sftp.dialog,
+                    Some(SftpDialog::Delete { files, paths, .. })
+                    if files == &["drag.txt"] && paths == &["/remote/dir/drag.txt"]));
+                sftp.dialog = None;
+            });
+        });
+        assert!(dispatch("down", cx));
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.sftp_view.read(cx).tree_selected.as_deref(),
+                Some("/remote/drag.txt")
+            );
+        });
+        assert!(dispatch("up", cx));
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.sftp_view.read(cx).tree_selected.as_deref(),
+                Some("/remote/dir/drag.txt")
+            );
+        });
+        assert!(dispatch("left", cx));
+        workspace.update(cx, |workspace, cx| {
+            workspace.sftp_view.update(cx, |sftp, _| {
+                let pending = &sftp.conflict_state.as_ref().unwrap().pending_transfers;
+                assert_eq!(
+                    pending
+                        .iter()
+                        .map(|transfer| (transfer.source.path.as_str(), transfer.direction))
+                        .collect::<Vec<_>>(),
+                    [("/remote/dir/drag.txt", SftpTransferDirection::Download)]
+                );
+                sftp.conflict_state = None;
+                sftp.dialog = None;
+                sftp.select_tree_file("/remote/dir".into());
+            });
+        });
+        assert!(dispatch("enter", cx));
+        workspace.update(cx, |workspace, cx| {
+            workspace.sftp_view.update(cx, |sftp, _| {
+                assert!(!sftp.tree_expanded.contains("/remote/dir"));
+                // Selecting a filtered flat row replaces the tree focus.
+                *sftp.input_value_mut(SftpInput::RemoteFilter) = "drag".into();
+                sftp.select_file(
+                    SftpPane::Remote,
+                    "drag.txt".into(),
+                    gpui::Modifiers::default(),
+                );
+            });
+        });
+        assert!(dispatch("f2", cx));
+        workspace.update(cx, |workspace, cx| {
+            workspace.sftp_view.update(cx, |sftp, _| {
+                assert!(matches!(&sftp.dialog, Some(SftpDialog::Rename { old_name, old_path: None, .. }) if old_name == "drag.txt"));
+                sftp.dialog = None;
+                sftp.focused_input = None;
+                sftp.input_value_mut(SftpInput::RemoteFilter).clear();
+            });
+        });
+        assert!(
+            !dispatch("delete", cx),
+            "clearing the filter must not retain a hidden flat selection"
+        );
     }
 }
 
@@ -243,11 +401,7 @@ impl WorkspaceApp {
         let tokens = self.tokens;
         let theme = tokens.ui;
         let compact = self.sftp_view().read(cx).current_surface_id == Some(SftpSurfaceId::Sidebar);
-        let tree_mode = pane == SftpPane::Remote
-            && compact
-            && self.settings_store.settings().sftp.sidebar_view_mode
-                == oxideterm_settings::SftpSidebarViewMode::Tree
-            && self.sftp_view().read(cx).remote_filter.trim().is_empty();
+        let tree_mode = pane == SftpPane::Remote && self.sftp_tree_mode(cx);
         let drag_over = self.sftp_view().read(cx).drag_over_pane == Some(pane);
         let list = div()
             .id(("sftp-file-list-scroll", pane as u64))
@@ -664,7 +818,7 @@ impl WorkspaceApp {
                                 .on_mouse_down(MouseButton::Left, move |_event, window, cx| {
                                     window.focus(&chevron_focus, cx);
                                     chevron_view.update(cx, |sftp, cx| {
-                                        sftp.tree_selected = Some(path.clone());
+                                        sftp.select_tree_file(path.clone());
                                         sftp.request_tree_toggle(path.clone(), cx);
                                         cx.stop_propagation();
                                         cx.notify();
@@ -737,7 +891,7 @@ impl WorkspaceApp {
                                 move |event: &MouseDownEvent, window, cx| {
                                     window.focus(&row_focus, cx);
                                     row_view.update(cx, |sftp, cx| {
-                                        sftp.tree_selected = Some(row_path.clone());
+                                        sftp.select_tree_file(row_path.clone());
                                         if event.click_count >= 2 {
                                             if is_directory {
                                                 sftp.request_tree_toggle(row_path.clone(), cx);

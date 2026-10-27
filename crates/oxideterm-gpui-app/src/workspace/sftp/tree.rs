@@ -13,23 +13,60 @@ pub(in crate::workspace::sftp) struct SftpTreeRow {
 impl SftpWorkspaceEntity {
     pub(in crate::workspace::sftp) fn flatten_sftp_tree_rows(&self) -> Vec<SftpTreeRow> {
         let mut rows = Vec::new();
-        self.push_sftp_tree_rows(&self.remote_files, 0, &mut rows);
+        self.push_sftp_tree_rows(&self.remote_files, 0, &mut HashSet::new(), &mut rows);
         rows
+    }
+
+    pub(in crate::workspace::sftp) fn selected_tree_file(&self) -> Option<SftpFileEntry> {
+        let selected = self.tree_selected.as_deref()?;
+        self.flatten_sftp_tree_rows()
+            .into_iter()
+            .find(|row| row.entry.path == selected)
+            .map(|row| row.entry)
+    }
+
+    pub(in crate::workspace::sftp) fn select_tree_file(&mut self, path: String) {
+        self.active_pane = SftpPane::Remote;
+        self.focused_input = None;
+        self.clear_context_menu_immediately();
+        self.remote_selected.clear();
+        self.remote_last_selected = None;
+        self.tree_selected = Some(path);
+    }
+
+    pub(in crate::workspace::sftp) fn move_tree_selection(&mut self, delta: isize) -> bool {
+        let rows = self.flatten_sftp_tree_rows();
+        if rows.is_empty() {
+            return false;
+        }
+        let current = rows
+            .iter()
+            .position(|row| Some(&row.entry.path) == self.tree_selected.as_ref());
+        let next = match current {
+            Some(index) if delta > 0 => (index + 1) % rows.len(),
+            Some(0) | None if delta < 0 => rows.len() - 1,
+            Some(index) => index - 1,
+            None => 0,
+        };
+        self.select_tree_file(rows[next].entry.path.clone());
+        scroll_tauri_virtual_list_to_index(
+            &self.remote_file_scroll,
+            next,
+            sftp_file_list_virtual_spec(),
+            TauriVirtualScrollAlign::Nearest,
+        );
+        true
     }
 
     /// The directory represented by the visible tree focus. A selected file
     /// resolves to its containing directory; stale selections are ignored so
     /// navigation and collapse cannot leave the sync target outside the tree.
     pub(in crate::workspace::sftp) fn tree_sync_directory_path(&self) -> Option<String> {
-        let selected = self.tree_selected.as_deref()?;
-        let row = self
-            .flatten_sftp_tree_rows()
-            .into_iter()
-            .find(|row| row.entry.path == selected)?;
-        if row.entry.file_type == SftpFileType::Directory {
-            Some(row.entry.path)
+        let file = self.selected_tree_file()?;
+        if file.file_type == SftpFileType::Directory {
+            Some(file.path)
         } else {
-            Some(parent_path(&row.entry.path, true))
+            Some(parent_path(&file.path, true))
         }
     }
 
@@ -37,6 +74,7 @@ impl SftpWorkspaceEntity {
         &self,
         files: &[SftpFileEntry],
         depth: usize,
+        ancestors: &mut HashSet<String>,
         rows: &mut Vec<SftpTreeRow>,
     ) {
         let indices = sftp_sorted_filtered_indices(
@@ -46,6 +84,12 @@ impl SftpWorkspaceEntity {
             self.remote_sort_direction,
         );
         for index in indices {
+            // SFTP canonicalizes directory listings. A link back to an ancestor
+            // can return the same cached path; only prune that ancestry chain,
+            // so sibling links to a shared directory remain independently visible.
+            if ancestors.contains(&files[index].path) {
+                continue;
+            }
             let entry = files[index].clone();
             let is_directory = entry.file_type == SftpFileType::Directory;
             let expanded = is_directory && self.tree_expanded.contains(&entry.path);
@@ -60,9 +104,21 @@ impl SftpWorkspaceEntity {
                 loading,
             });
             if expanded && let Some(children) = self.tree_children.get(&path) {
-                self.push_sftp_tree_rows(children, depth + 1, rows);
+                ancestors.insert(path.clone());
+                self.push_sftp_tree_rows(children, depth + 1, ancestors, rows);
+                ancestors.remove(&path);
             }
         }
+    }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace::sftp) fn sftp_tree_mode(&self, cx: &App) -> bool {
+        let sftp = self.sftp_view().read(cx);
+        sftp.current_surface_id == Some(SftpSurfaceId::Sidebar)
+            && self.settings_store.settings().sftp.sidebar_view_mode
+                == oxideterm_settings::SftpSidebarViewMode::Tree
+            && sftp.remote_filter.trim().is_empty()
     }
 }
 
@@ -137,6 +193,43 @@ mod tests {
     }
 
     #[gpui::test]
+    fn flatten_stops_ancestor_cycles_without_hiding_sibling_aliases(cx: &mut TestAppContext) {
+        let entity = prepare_entity(cx);
+        entity.update(cx, |sftp, _| {
+            let first = file("first", "/root/first", SftpFileType::Directory);
+            let second = file("second", "/root/second", SftpFileType::Directory);
+            let shared = file("shared", "/target/shared", SftpFileType::Directory);
+            sftp.remote_files = vec![first.clone(), second];
+            sftp.tree_expanded.extend([
+                "/root/first".into(),
+                "/root/second".into(),
+                "/target/shared".into(),
+            ]);
+            // A canonical listing for a self-link includes the link itself.
+            sftp.tree_children
+                .insert("/root/first".into(), vec![first.clone(), shared.clone()]);
+            sftp.tree_children
+                .insert("/root/second".into(), vec![shared]);
+            // A link through a shared directory can also point back to an ancestor.
+            sftp.tree_children
+                .insert("/target/shared".into(), vec![first]);
+            let rows = sftp.flatten_sftp_tree_rows();
+            assert_eq!(
+                rows.iter()
+                    .map(|row| (row.entry.path.as_str(), row.depth))
+                    .collect::<Vec<_>>(),
+                [
+                    ("/root/first", 0),
+                    ("/target/shared", 1),
+                    ("/root/second", 0),
+                    ("/target/shared", 1),
+                    ("/root/first", 2),
+                ]
+            );
+        });
+    }
+
+    #[gpui::test]
     fn sync_target_follows_the_selected_tree_entry(cx: &mut TestAppContext) {
         let entity = prepare_entity(cx);
         entity.update(cx, |sftp, _cx| {
@@ -165,7 +258,7 @@ mod tests {
             let row = file("dir", "/root/dir", SftpFileType::Directory);
             sftp.open_tree_context_menu(row, 10.0, 20.0, cx);
             assert_eq!(sftp.tree_selected.as_deref(), Some("/root/dir"));
-            assert!(sftp.remote_selected.contains("unrelated"));
+            assert!(sftp.remote_selected.is_empty());
             let menu = sftp.context_menu.as_ref().expect("tree menu");
             assert!(menu.tree);
             assert_eq!(

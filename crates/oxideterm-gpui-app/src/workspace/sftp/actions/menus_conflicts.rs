@@ -133,8 +133,7 @@ impl SftpWorkspaceEntity {
         y: f32,
         cx: &mut Context<Self>,
     ) {
-        self.active_pane = SftpPane::Remote;
-        self.tree_selected = Some(file.path.clone());
+        self.select_tree_file(file.path.clone());
         self.context_menu_presence.reopen();
         self.context_menu_exit_generation = None;
         self.context_menu = Some(SftpContextMenu {
@@ -534,6 +533,12 @@ impl WorkspaceApp {
         direction: SftpTransferDirection,
         cx: &mut Context<Self>,
     ) {
+        if pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+            if let Some(file) = self.sftp_view().read(cx).selected_tree_file() {
+                self.queue_sftp_tree_download(file, cx);
+            }
+            return;
+        }
         let selected = self.sftp_view().read(cx).selected_transfer_names(pane);
         self.queue_sftp_named_transfers(pane, direction, selected, cx);
     }

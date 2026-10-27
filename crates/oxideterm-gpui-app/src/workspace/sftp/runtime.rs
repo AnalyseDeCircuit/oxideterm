@@ -1018,11 +1018,7 @@ impl WorkspaceApp {
     /// Directory the sync action will send, including the tree row focus.
     pub(in crate::workspace::sftp) fn sftp_terminal_sync_target_path(&self, cx: &App) -> String {
         let sftp = self.sftp_view().read(cx);
-        let tree_mode = sftp.current_surface_id == Some(SftpSurfaceId::Sidebar)
-            && self.settings_store.settings().sftp.sidebar_view_mode
-                == oxideterm_settings::SftpSidebarViewMode::Tree
-            && sftp.remote_filter.trim().is_empty();
-        if tree_mode {
+        if self.sftp_tree_mode(cx) {
             sftp.tree_sync_directory_path()
                 .unwrap_or_else(|| sftp.remote_path.trim().to_string())
         } else {
@@ -1049,7 +1045,7 @@ impl WorkspaceApp {
         let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
             return;
         };
-        if !pane.read(cx).can_switch_working_directory_from_chrome() {
+        if !pane.read(cx).can_sync_working_directory() {
             self.push_sftp_toast(
                 self.i18n.t("sftp.toast.sync_terminal_busy"),
                 None,
