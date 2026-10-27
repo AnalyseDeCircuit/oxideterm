@@ -204,7 +204,9 @@
       "ssh_algorithms_negotiation_order_hint": "Die Listenreihenfolge entspricht der Client-Priorität bei der SSH-Aushandlung.",
       "save": "Speichern",
       "save_and_connect": "Speichern und verbinden",
-      "runtime_node_missing": "Der laufende SSH-Knoten ist nicht mehr verfügbar"
+      "runtime_node_missing": "Der laufende SSH-Knoten ist nicht mehr verfügbar",
+      "open_sftp_on_connect": "SFTP-Panel mit der Verbindung öffnen",
+      "open_sftp_on_connect_hint": "Öffnet beim Öffnen eines Terminals für diese Verbindung auch den SFTP-Browser. Strg-Klick auf „Verbinden“ oder „Neues Terminal“ erzwingt dies für eine Sitzung."
     },
     "auth": {
       "password": "Passwort",

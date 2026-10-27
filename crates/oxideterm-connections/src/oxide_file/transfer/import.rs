@@ -1356,6 +1356,7 @@ fn merge_options(
     }
     existing.legacy_ssh_compatibility |= imported.legacy_ssh_compatibility;
     existing.dedicated_new_terminal_connection |= imported.dedicated_new_terminal_connection;
+    existing.open_sftp_on_connect |= imported.open_sftp_on_connect;
     if imported.ssh_channel_strategy.requires_dedicated_consumers() {
         existing.ssh_channel_strategy = imported.ssh_channel_strategy;
     }

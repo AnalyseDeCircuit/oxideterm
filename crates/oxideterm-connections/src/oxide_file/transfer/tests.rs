@@ -416,6 +416,7 @@ mod tests {
                 ssh_algorithms: SshAlgorithmPreferences::default(),
                 x11_forwarding: crate::ConnectionX11ForwardingOptions::default(),
                 dedicated_new_terminal_connection: false,
+                open_sftp_on_connect: false,
                 ssh_channel_strategy: crate::SshChannelStrategy::default(),
                 post_connect_command: None,
                 terminal: ConnectionTerminalOptions::default(),
@@ -2069,5 +2070,22 @@ mod tests {
             forwards: Vec::new(),
             privilege_credentials: Vec::new(),
         }
+    }
+
+    #[test]
+    fn merge_options_preserves_open_sftp_on_connect() {
+        let imported = ConnectionOptions {
+            open_sftp_on_connect: true,
+            ..Default::default()
+        };
+        assert!(merge_options(ConnectionOptions::default(), imported, false).open_sftp_on_connect);
+
+        let existing = ConnectionOptions {
+            open_sftp_on_connect: true,
+            ..Default::default()
+        };
+        assert!(
+            merge_options(existing, ConnectionOptions::default(), false).open_sftp_on_connect
+        );
     }
 }

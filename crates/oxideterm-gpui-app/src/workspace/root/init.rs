@@ -859,6 +859,8 @@ impl WorkspaceApp {
             sftp_pages: HashMap::new(),
             sftp_dispatch_surface: Rc::new(Cell::new(None)),
             sftp_focused_surface: sftp::SftpSurfaceId::Sidebar,
+            sftp_path_bookmarks: Vec::new(),
+            sftp_path_bookmarks_loaded: false,
             _sftp_observation: sftp_observation,
             _sftp_subscription: sftp_subscription,
             graphics,

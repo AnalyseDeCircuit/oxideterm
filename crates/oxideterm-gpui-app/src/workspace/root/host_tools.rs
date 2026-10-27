@@ -43,6 +43,7 @@ impl WorkspaceApp {
                     node_id,
                     Some(command),
                     title,
+                    false,
                     window,
                     cx,
                 ) {

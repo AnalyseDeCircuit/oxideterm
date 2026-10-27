@@ -724,6 +724,7 @@ pub(super) fn edit_properties_preserves_transport_policy_and_terminal_overrides(
     saved_connection.options.legacy_ssh_compatibility = true;
     saved_connection.options.ssh_algorithms.mac = vec!["hmac-sha1".to_string()];
     saved_connection.options.dedicated_new_terminal_connection = true;
+    saved_connection.options.open_sftp_on_connect = true;
 
     saved_connection.options.terminal = ConnectionTerminalOptions {
         encoding: Some(oxideterm_connections::ConnectionTerminalEncoding::Gb18030),
@@ -745,6 +746,8 @@ pub(super) fn edit_properties_preserves_transport_policy_and_terminal_overrides(
     assert_eq!(request.ssh_algorithms.mac, ["hmac-sha1"]);
     assert!(form.dedicated_new_terminal_connection);
     assert!(request.dedicated_new_terminal_connection);
+    assert!(form.open_sftp_on_connect);
+    assert!(request.open_sftp_on_connect);
     assert_eq!(form.terminal, saved_connection.options.terminal);
     assert_eq!(request.terminal, saved_connection.options.terminal);
 }

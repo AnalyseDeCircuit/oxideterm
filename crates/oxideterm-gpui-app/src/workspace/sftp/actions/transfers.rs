@@ -359,7 +359,13 @@ impl WorkspaceApp {
         else {
             return;
         };
-        self.execute_sftp_pending_transfers(remote_id, pending_transfers, resolved_actions, cx);
+        self.execute_sftp_pending_transfers(
+            remote_id,
+            pending_transfers,
+            resolved_actions,
+            None,
+            cx,
+        );
     }
 
     pub(in crate::workspace::sftp) fn spawn_sftp_incomplete_load_with_sender(

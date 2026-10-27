@@ -52,8 +52,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(in crate::workspace) mod bookmarks;
 pub(super) mod ftp;
 pub(super) mod native_video;
+
+pub(in crate::workspace) use bookmarks::SftpPathBookmark;
 
 use native_video::{SharedSftpNativeVideoSurface, sftp_native_video_element};
 
@@ -490,6 +493,14 @@ pub(super) enum SftpWorkerResult {
         path: String,
         result: Result<RemoteSftpListing, String>,
     },
+    TreeChildren {
+        surface_id: SftpSurfaceId,
+        remote_id: SftpRemoteId,
+        view_generation: u64,
+        tree_generation: u64,
+        path: String,
+        result: Result<RemoteSftpListing, String>,
+    },
     PairPrimaryList {
         surface_id: SftpSurfaceId,
         remote_id: SftpRemoteId,
@@ -600,6 +611,17 @@ pub(in crate::workspace::sftp) enum SftpWorkspaceEffect {
         path: String,
         view_generation: u64,
     },
+    TreeChildrenLoadFailed {
+        path: String,
+        error: String,
+    },
+    StartTreeChildrenLoad {
+        surface_id: SftpSurfaceId,
+        remote_id: SftpRemoteId,
+        view_generation: u64,
+        tree_generation: u64,
+        path: String,
+    },
     TransferFinishedForReconnect {
         remote_id: SftpRemoteId,
         transfer_id: String,
@@ -641,6 +663,9 @@ pub(super) enum SftpWorkspaceEvent {
     OpenFileRequested {
         pane: SftpPane,
         file: SftpFileEntry,
+    },
+    ToggleTreeDirectoryRequested {
+        path: String,
     },
     TransferStateRequested {
         id: u64,
@@ -697,6 +722,17 @@ pub(super) struct SftpPreviewSaveResult {
 struct SftpContextMenu {
     pane: SftpPane,
     file: Option<SftpFileEntry>,
+    x: f32,
+    y: f32,
+    /// Tree rows are not part of `remote_files`; their menu actions resolve
+    /// absolute paths from the row instead of the flat-pane selection.
+    tree: bool,
+}
+
+/// Window-anchored bookmark popover; the bookmark data itself lives on
+/// `WorkspaceApp` because it is shared across SFTP tabs.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::workspace) struct SftpBookmarkMenu {
     x: f32,
     y: f32,
 }
@@ -969,13 +1005,23 @@ pub(super) enum SftpDialog {
     Rename {
         pane: SftpPane,
         old_name: String,
+        /// Tree rows carry an absolute path; the flat pane resolves the name
+        /// against its current directory.
+        old_path: Option<String>,
+    },
+    BookmarkRename {
+        bookmark_id: String,
     },
     NewFolder {
         pane: SftpPane,
+        /// Tree rows create inside the focused directory, not the tree root.
+        remote_path: Option<String>,
     },
     Delete {
         pane: SftpPane,
         files: Vec<String>,
+        /// Absolute tree paths; empty for flat panes that resolve by name.
+        paths: Vec<String>,
     },
     Conflict,
     Diff {
@@ -1039,6 +1085,15 @@ pub(super) struct SftpWorkspaceEntity {
     pub(in crate::workspace) drives_scroll: ScrollHandle,
     local_last_selected: Option<String>,
     remote_last_selected: Option<String>,
+    // Sidebar-only tree browser. Paths are absolute remote paths.
+    tree_expanded: HashSet<String>,
+    tree_children: HashMap<String, Vec<SftpFileEntry>>,
+    tree_loading: HashSet<String>,
+    tree_pending: VecDeque<String>,
+    /// Invalidates in-flight child listings when the tree is reset by a root
+    /// reload or navigation, which do not change `view_generation`.
+    tree_generation: u64,
+    tree_selected: Option<String>,
     local_files: Vec<SftpFileEntry>,
     remote_files: Vec<SftpFileEntry>,
     remote_loading: bool,
@@ -1114,6 +1169,7 @@ pub(super) struct SftpWorkspaceEntity {
     context_menu: Option<SftpContextMenu>,
     context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence,
     context_menu_exit_generation: Option<u64>,
+    bookmark_menu: Option<SftpBookmarkMenu>,
     folder_picker_task: Option<Task<()>>,
     drag_state: Option<SftpDragState>,
     drag_over_pane: Option<SftpPane>,
@@ -1164,6 +1220,12 @@ impl Default for SftpWorkspaceEntity {
             drives_scroll: ScrollHandle::new(),
             local_last_selected: None,
             remote_last_selected: None,
+            tree_expanded: HashSet::new(),
+            tree_children: HashMap::new(),
+            tree_loading: HashSet::new(),
+            tree_pending: VecDeque::new(),
+            tree_generation: 0,
+            tree_selected: None,
             local_files: list_local_files(&local_path).unwrap_or_else(|_| Vec::new()),
             remote_files: Vec::new(),
             remote_loading: false,
@@ -1261,6 +1323,7 @@ impl Default for SftpWorkspaceEntity {
             context_menu: None,
             context_menu_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
             context_menu_exit_generation: None,
+            bookmark_menu: None,
             folder_picker_task: None,
             drag_state: None,
             drag_over_pane: None,
@@ -1587,9 +1650,20 @@ impl SftpWorkspaceEntity {
 
     pub(super) fn clear_context_menu_immediately(&mut self) -> bool {
         let changed = self.context_menu.take().is_some();
+        let bookmark_changed = self.bookmark_menu.take().is_some();
         self.context_menu_exit_generation = None;
         self.context_menu_presence.reopen();
-        changed
+        changed || bookmark_changed
+    }
+
+    /// Collapse the sidebar tree whenever the root listing is replaced.
+    pub(super) fn clear_sftp_tree_state(&mut self) {
+        self.tree_generation = self.tree_generation.wrapping_add(1);
+        self.tree_expanded.clear();
+        self.tree_children.clear();
+        self.tree_loading.clear();
+        self.tree_pending.clear();
+        self.tree_selected = None;
     }
 
     pub(in crate::workspace::sftp) fn activate_file(
@@ -1602,6 +1676,16 @@ impl SftpWorkspaceEntity {
         self.clear_context_menu_immediately();
         cx.emit(SftpWorkspaceEvent::OpenFileRequested { pane, file });
         cx.notify();
+    }
+
+    pub(in crate::workspace::sftp) fn request_tree_toggle(
+        &mut self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        // The workspace owns the SFTP backend and the single-flight queue; the
+        // entity only translates the row interaction into an intent.
+        cx.emit(SftpWorkspaceEvent::ToggleTreeDirectoryRequested { path });
     }
 
     pub(super) fn has_drag_capture(&self) -> bool {
@@ -1970,6 +2054,7 @@ mod menus;
 mod runtime;
 mod surface;
 mod transfers;
+mod tree;
 pub(super) mod views;
 
 // Re-export only the cross-module helpers needed by the SFTP facade and its children.

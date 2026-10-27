@@ -205,7 +205,11 @@ impl WorkspaceApp {
                     // Tauri SFTP only opens directories on Enter; file quick-look is
                     // intentionally bound to Space and double-click.
                     if file.file_type == SftpFileType::Directory {
-                        self.open_or_preview_sftp_file(active_pane, &file, cx);
+                        if active_pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+                            self.toggle_sftp_tree_directory(file.path, cx);
+                        } else {
+                            self.open_or_preview_sftp_file(active_pane, &file, cx);
+                        }
                         cx.notify();
                         return true;
                     }
@@ -237,7 +241,7 @@ impl WorkspaceApp {
             }
             "left" | "arrowleft" => {
                 if active_pane == SftpPane::Remote
-                    && !self.sftp_view().read(cx).remote_selected.is_empty()
+                    && !self.sftp_selected_names(active_pane, cx).is_empty()
                 {
                     self.queue_sftp_transfers(
                         SftpPane::Remote,
@@ -252,10 +256,18 @@ impl WorkspaceApp {
             "delete" | "backspace" => {
                 let files = self.sftp_selected_names(active_pane, cx);
                 if !files.is_empty() {
+                    let paths = if active_pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+                        self.single_selected_sftp_file(active_pane, cx)
+                            .map(|file| vec![file.path])
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
                     self.sftp_view().update(cx, |sftp, cx| {
                         sftp.set_dialog(SftpDialog::Delete {
                             pane: active_pane,
                             files,
+                            paths,
                         });
                         cx.notify();
                     });
@@ -266,8 +278,10 @@ impl WorkspaceApp {
             }
             "f2" | "F2" => {
                 if let Some(file) = self.single_selected_sftp_file(active_pane, cx) {
+                    let path = (active_pane == SftpPane::Remote && self.sftp_tree_mode(cx))
+                        .then_some(file.path);
                     self.sftp_view().update(cx, |sftp, cx| {
-                        sftp.open_rename_dialog(active_pane, file.name, cx);
+                        sftp.open_rename_dialog(active_pane, file.name, path, cx);
                     });
                     cx.notify();
                     return true;
@@ -841,6 +855,11 @@ impl WorkspaceApp {
     }
 
     fn select_all_sftp_files(&mut self, pane: SftpPane, cx: &mut Context<Self>) {
+        // The tree has a single focused row. Select-all must not create an
+        // invisible flat selection that later shortcuts could operate on.
+        if pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+            return;
+        }
         self.sftp_view().update(cx, |sftp, cx| {
             sftp.select_all_files(pane);
             cx.notify();
@@ -853,6 +872,11 @@ impl WorkspaceApp {
         delta: isize,
         cx: &mut Context<Self>,
     ) -> bool {
+        if pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+            return self
+                .sftp_view()
+                .update(cx, |sftp, _| sftp.move_tree_selection(delta));
+        }
         self.sftp_view()
             .update(cx, |sftp, _cx| sftp.move_selection(pane, delta))
     }
@@ -862,10 +886,21 @@ impl WorkspaceApp {
         pane: SftpPane,
         cx: &App,
     ) -> Vec<String> {
+        if pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+            return self
+                .sftp_view()
+                .read(cx)
+                .selected_tree_file()
+                .map(|file| vec![file.name])
+                .unwrap_or_default();
+        }
         self.sftp_view().read(cx).selected_names(pane)
     }
 
     fn single_selected_sftp_file(&self, pane: SftpPane, cx: &App) -> Option<SftpFileEntry> {
+        if pane == SftpPane::Remote && self.sftp_tree_mode(cx) {
+            return self.sftp_view().read(cx).selected_tree_file();
+        }
         self.sftp_view().read(cx).single_selected_file(pane)
     }
 }
@@ -1026,8 +1061,10 @@ impl SftpWorkspaceEntity {
                 changed
             }
             SftpPane::Remote => {
-                let changed =
-                    !self.remote_selected.is_empty() || self.remote_last_selected.is_some();
+                let tree_changed = self.tree_selected.take().is_some();
+                let changed = tree_changed
+                    || !self.remote_selected.is_empty()
+                    || self.remote_last_selected.is_some();
                 self.remote_selected.clear();
                 self.remote_last_selected = None;
                 changed
@@ -1056,6 +1093,10 @@ impl SftpWorkspaceEntity {
         modifiers: gpui::Modifiers,
     ) {
         self.active_pane = pane;
+        if pane == SftpPane::Remote {
+            // A filtered flat selection replaces the previously focused tree row.
+            self.tree_selected = None;
+        }
         self.clear_context_menu_immediately();
         let range_names = self.ordered_file_names(pane);
         let (selected, last_selected) = match pane {

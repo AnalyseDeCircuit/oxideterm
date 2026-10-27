@@ -168,6 +168,7 @@ impl SftpWorkspaceEntity {
 
         self.current_remote_id = Some(remote_id.clone());
         self.view_generation = self.view_generation.wrapping_add(1);
+        self.clear_sftp_tree_state();
         let local_path = self
             .local_path_by_remote
             .get(&remote_id)
@@ -257,7 +258,9 @@ impl SftpWorkspaceEntity {
         self.drag_over_pane = None;
         self.drag_autoscroll_position = None;
         self.drag_autoscroll_scheduled = false;
+        self.clear_sftp_tree_state();
         self.clear_context_menu_immediately();
+        self.bookmark_menu = None;
         self.begin_dialog_exit(Duration::ZERO, cx);
         // Transfer tasks own their remote consumer and survive removal of this UI projection.
         cx.notify();
@@ -306,6 +309,7 @@ impl SftpWorkspaceEntity {
                 self.remote_path.clone_from(&cwd);
                 self.remote_path_input.clone_from(&cwd);
                 self.remote_files = listing.files;
+                self.clear_sftp_tree_state();
                 self.remote_selected.clear();
                 self.remote_last_selected = None;
                 if self
@@ -463,6 +467,48 @@ impl SftpWorkspaceEntity {
                 }
                 self.push_remote_load_pending_effect(effects);
                 outcome.changed
+            }
+            SftpWorkerResult::TreeChildren {
+                surface_id,
+                remote_id,
+                view_generation,
+                tree_generation,
+                path,
+                result,
+            } => {
+                // A root reload or navigation clears the tree state but keeps
+                // `view_generation`, so the tree epoch is the authoritative
+                // invalidation for in-flight child listings.
+                if self.current_surface_id != Some(surface_id)
+                    || self.current_remote_id.as_ref() != Some(&remote_id)
+                    || self.view_generation != view_generation
+                    || self.tree_generation != tree_generation
+                {
+                    return false;
+                }
+                self.tree_loading.remove(&path);
+                match result {
+                    Ok(listing) => {
+                        self.tree_children.insert(path, listing.files);
+                    }
+                    Err(error) => {
+                        self.tree_expanded.remove(&path);
+                        effects
+                            .push_back(SftpWorkspaceEffect::TreeChildrenLoadFailed { path, error });
+                    }
+                }
+                // Failed loads must advance the queue just like successful ones.
+                if let Some(next) = self.tree_pending.pop_front() {
+                    self.tree_loading.insert(next.clone());
+                    effects.push_back(SftpWorkspaceEffect::StartTreeChildrenLoad {
+                        surface_id,
+                        remote_id,
+                        view_generation,
+                        tree_generation: self.tree_generation,
+                        path: next,
+                    });
+                }
+                true
             }
             SftpWorkerResult::PairPrimaryList {
                 surface_id,
@@ -919,11 +965,15 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::sftp) fn sftp_terminal_directory(&self, cx: &App) -> Option<String> {
-        if !self.terminal_current_directory_awareness_enabled() {
-            return None;
-        }
+    /// Resolve the terminal pane that a terminal-directory action should target.
+    ///
+    /// This intentionally does not consult the cwd-awareness setting: reading the
+    /// terminal cwd is gated by that setting, writing a `cd` command is not.
+    pub(in crate::workspace::sftp) fn sftp_terminal_target_pane(&self, cx: &App) -> Option<PaneId> {
         let remote = self.sftp_view().read(cx).current_remote_id.as_ref()?;
+        let SftpRemoteId::Node(node) = remote else {
+            return None;
+        };
         // A detached browser must not mistake the main window's selected tab for its focus.
         let active = match self.sftp_surface_id() {
             SftpSurfaceId::Sidebar => self.active_terminal_cwd_scope_and_pane(cx),
@@ -934,9 +984,6 @@ impl WorkspaceApp {
             active,
             &self.terminal.read(cx).last_ssh_terminal_panes,
         )?;
-        let SftpRemoteId::Node(node) = remote else {
-            return None;
-        };
         let session = self.session_id_for_pane(pane_id, cx)?;
         // Recheck the live registration: a closed or replaced pane cannot select another server.
         if self
@@ -948,6 +995,17 @@ impl WorkspaceApp {
         {
             return None;
         }
+        Some(pane_id)
+    }
+
+    pub(in crate::workspace::sftp) fn sftp_terminal_directory(&self, cx: &App) -> Option<String> {
+        if !self.terminal_current_directory_awareness_enabled() {
+            return None;
+        }
+        let pane_id = self.sftp_terminal_target_pane(cx)?;
+        let SftpRemoteId::Node(node) = self.sftp_view().read(cx).current_remote_id.clone()? else {
+            return None;
+        };
         let host = self.tab_host.read(cx);
         let pane = host.panes().get(&pane_id)?.read(cx);
         super::super::terminal_cwd::terminal_cwd_snapshot_from_pane(
@@ -955,6 +1013,142 @@ impl WorkspaceApp {
             pane,
         )
         .map(|snapshot| snapshot.path().to_string())
+    }
+
+    /// Directory the sync action will send, including the tree row focus.
+    pub(in crate::workspace::sftp) fn sftp_terminal_sync_target_path(&self, cx: &App) -> String {
+        let sftp = self.sftp_view().read(cx);
+        if self.sftp_tree_mode(cx) {
+            sftp.tree_sync_directory_path()
+                .unwrap_or_else(|| sftp.remote_path.trim().to_string())
+        } else {
+            sftp.remote_path.trim().to_string()
+        }
+    }
+
+    /// Send the visible SFTP directory to the matching SSH terminal as a visible `cd`.
+    pub(in crate::workspace::sftp) fn sync_sftp_directory_to_terminal(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = self.sftp_terminal_sync_target_path(cx);
+        if path.is_empty() {
+            return;
+        }
+        let Some(pane_id) = self.sftp_terminal_target_pane(cx) else {
+            return;
+        };
+        let Some(command) = oxideterm_environment::current_directory_cd_command(&path) else {
+            return;
+        };
+        let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() else {
+            return;
+        };
+        if !pane.read(cx).can_sync_working_directory() {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.sync_terminal_busy"),
+                None,
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return;
+        }
+        // The SFTP path bar may still look focused after the terminal takes over.
+        self.sftp_view().update(cx, |sftp, cx| {
+            sftp.clear_input_focus(cx);
+            sftp.dismiss_context_menu(cx);
+        });
+        let sent = pane.update(cx, |pane, cx| {
+            if !pane.send_command_line(&command, cx) {
+                return false;
+            }
+            // The command mark remains authoritative for success/rollback.
+            pane.set_pending_current_working_directory_from_terminal_action(
+                path.clone(),
+                command.clone(),
+                cx,
+            );
+            true
+        });
+        if !sent {
+            self.push_sftp_toast(
+                self.i18n.t("sftp.toast.sync_terminal_failed"),
+                None,
+                TerminalNoticeVariant::Error,
+                cx,
+            );
+            return;
+        }
+        let tab_id = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| {
+                tab.root_pane
+                    .as_ref()
+                    .is_some_and(|root| root.contains_pane(pane_id))
+            })
+            .map(|tab| tab.id);
+        let Some(tab_id) = tab_id else {
+            return;
+        };
+        self.tab_host
+            .update(cx, |host, _| host.set_active_pane(Some(tab_id), pane_id));
+        if !self.tab_host.read(cx).is_outside_main_window(tab_id) {
+            self.set_main_window_active_tab(Some(tab_id), cx);
+            self.focus_active_pane(window, cx);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn toggle_sftp_tree_directory(
+        &mut self,
+        path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let spawn = self.sftp_view().update(cx, |sftp, cx| {
+            if sftp.tree_expanded.contains(&path) {
+                sftp.tree_expanded.remove(&path);
+                // A collapsed directory should not keep a queued expansion.
+                sftp.tree_pending.retain(|pending| pending != &path);
+                cx.notify();
+                return None;
+            }
+            let surface_id = sftp.current_surface_id?;
+            let remote_id = sftp.current_remote_id.clone()?;
+            sftp.tree_expanded.insert(path.clone());
+            if sftp.tree_children.contains_key(&path) {
+                cx.notify();
+                return None;
+            }
+            if sftp.tree_loading.contains(&path) || sftp.tree_pending.contains(&path) {
+                cx.notify();
+                return None;
+            }
+            if sftp.tree_loading.is_empty() {
+                sftp.tree_loading.insert(path.clone());
+                let view_generation = sftp.view_generation;
+                let tree_generation = sftp.tree_generation;
+                cx.notify();
+                Some((surface_id, remote_id, view_generation, tree_generation))
+            } else {
+                sftp.tree_pending.push_back(path.clone());
+                cx.notify();
+                None
+            }
+        });
+        let Some((surface_id, remote_id, view_generation, tree_generation)) = spawn else {
+            return;
+        };
+        let delivery = self.sftp_view().read(cx).worker_sender();
+        self.spawn_sftp_tree_children_load(
+            surface_id,
+            remote_id,
+            view_generation,
+            tree_generation,
+            path,
+            delivery,
+        );
     }
 
     pub(in crate::workspace::sftp) fn reveal_sftp_terminal_directory(
@@ -1545,6 +1739,42 @@ impl WorkspaceApp {
         });
     }
 
+    fn spawn_sftp_tree_children_load(
+        &self,
+        surface_id: SftpSurfaceId,
+        remote_id: SftpRemoteId,
+        view_generation: u64,
+        tree_generation: u64,
+        path: String,
+        tx: delivery::ActiveDeliverySender<SftpWorkerResult>,
+    ) {
+        let runtime = self.forwarding_runtime.clone();
+        let Some(backend) = self.sftp_remote_backend(&remote_id) else {
+            let _ = tx.send(SftpWorkerResult::TreeChildren {
+                surface_id,
+                remote_id,
+                view_generation,
+                tree_generation,
+                path,
+                result: Err("SFTP endpoint is no longer available".to_string()),
+            });
+            return;
+        };
+        runtime.spawn(async move {
+            // Observational listing: expanding a node must not move the node's
+            // SFTP ready cwd to the expanded directory.
+            let result = load_remote_sftp_completion_listing(backend, &path).await;
+            let _ = tx.send(SftpWorkerResult::TreeChildren {
+                surface_id,
+                remote_id,
+                view_generation,
+                tree_generation,
+                path,
+                result,
+            });
+        });
+    }
+
     pub(in crate::workspace) fn handle_sftp_worker_effects(
         &mut self,
         effect_batch: &SftpWorkspaceEffects,
@@ -1603,6 +1833,30 @@ impl WorkspaceApp {
                         path,
                         view_generation,
                         audit_request,
+                        delivery.clone(),
+                    );
+                }
+                SftpWorkspaceEffect::TreeChildrenLoadFailed { path, error } => {
+                    self.push_sftp_toast(
+                        self.i18n.t("sftp.toast.load_more_failed"),
+                        Some(format!("{path}: {error}")),
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
+                }
+                SftpWorkspaceEffect::StartTreeChildrenLoad {
+                    surface_id,
+                    remote_id,
+                    view_generation,
+                    tree_generation,
+                    path,
+                } => {
+                    self.spawn_sftp_tree_children_load(
+                        surface_id,
+                        remote_id,
+                        view_generation,
+                        tree_generation,
+                        path,
                         delivery.clone(),
                     );
                 }
@@ -2259,5 +2513,46 @@ mod tests {
         assert_eq!(sidebar_sftp_target(Some(&a), false, None), None);
         assert_eq!(sidebar_sftp_target(Some(&a), true, None), Some(a));
         assert_eq!(sidebar_sftp_target(None, false, Some(b)), None);
+    }
+
+    #[gpui::test]
+    fn accepted_root_listing_clears_tree_state(cx: &mut gpui::TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        entity.update(cx, |sftp, _cx| {
+            sftp.current_surface_id = Some(SftpSurfaceId::Sidebar);
+            sftp.current_remote_id = Some(SftpRemoteId::Node(NodeId::new("node")));
+            sftp.view_generation = 1;
+            sftp.remote_path = "/root".to_string();
+            sftp.remote_path_input = "/root".to_string();
+            sftp.remote_load_inflight = true;
+            sftp.tree_expanded.insert("/root/dir".to_string());
+            sftp.tree_children
+                .insert("/root/dir".to_string(), Vec::new());
+            sftp.tree_loading.insert("/root/dir".to_string());
+            sftp.tree_pending.push_back("/root/other".to_string());
+            sftp.tree_selected = Some("/root/dir".to_string());
+        });
+        let outcome = entity.update(cx, |sftp, cx| {
+            sftp.apply_remote_list(
+                SftpSurfaceId::Sidebar,
+                SftpRemoteId::Node(NodeId::new("node")),
+                1,
+                "session".to_string(),
+                "/root".to_string(),
+                Ok(RemoteSftpListing {
+                    cwd: "/root".to_string(),
+                    files: Vec::new(),
+                }),
+                cx,
+            )
+        });
+        assert!(outcome.changed);
+        entity.read_with(cx, |sftp, _| {
+            assert!(sftp.tree_expanded.is_empty());
+            assert!(sftp.tree_children.is_empty());
+            assert!(sftp.tree_loading.is_empty());
+            assert!(sftp.tree_pending.is_empty());
+            assert!(sftp.tree_selected.is_none());
+        });
     }
 }

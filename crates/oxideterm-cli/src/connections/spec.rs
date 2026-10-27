@@ -245,6 +245,9 @@ pub(super) fn connection_request_from_spec(
         dedicated_new_terminal_connection: existing
             .map(|connection| connection.options.dedicated_new_terminal_connection)
             .unwrap_or(false),
+        open_sftp_on_connect: existing
+            .map(|connection| connection.options.open_sftp_on_connect)
+            .unwrap_or(false),
         ssh_channel_strategy: spec.ssh_channel_strategy.unwrap_or_else(|| {
             existing
                 .map(|connection| connection.options.ssh_channel_strategy)

@@ -955,6 +955,8 @@ pub(crate) struct WorkspaceApp {
     sftp_pages: HashMap<TabId, sftp::views::SftpPage>,
     sftp_dispatch_surface: Rc<Cell<Option<sftp::SftpSurfaceId>>>,
     sftp_focused_surface: sftp::SftpSurfaceId,
+    sftp_path_bookmarks: Vec<sftp::SftpPathBookmark>,
+    sftp_path_bookmarks_loaded: bool,
     _sftp_observation: Subscription,
     _sftp_subscription: Subscription,
     graphics: Entity<GraphicsWorkspaceEntity>,

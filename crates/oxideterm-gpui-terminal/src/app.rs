@@ -181,6 +181,8 @@ pub enum TerminalPaneEvent {
     // Match payloads remain pane-owned; Workspace drains them using the source pane identity.
     TriggerMatchesAvailable,
     TriggerInteractionRequested,
+    // Dropped OS paths stay pane-owned until Workspace routes them to SFTP.
+    ExternalPathsDropped,
     // Search completion is asynchronous; Workspace reads the latest pane-owned status.
     SearchStatusChanged,
     // The pane retains the hovered value; Workspace owns tooltip timing and placement.
@@ -604,6 +606,9 @@ pub struct TerminalPane {
     last_cursor_blink: Instant,
     last_terminal_input: Instant,
     last_terminal_activity: Instant,
+    /// Paths dropped from the OS onto an SSH pane. The workspace drains this
+    /// after `ExternalPathsDropped` so the terminal crate never owns SFTP policy.
+    dropped_external_paths: Vec<std::path::PathBuf>,
     last_drain_budget_exhausted: bool,
     scheduler_wake_sender: Sender<()>,
     process_info_refresh_in_flight: bool,
@@ -1366,6 +1371,7 @@ impl TerminalPane {
             last_cursor_blink: Instant::now(),
             last_terminal_input: Instant::now(),
             last_terminal_activity: Instant::now(),
+            dropped_external_paths: Vec::new(),
             last_drain_budget_exhausted: false,
             scheduler_wake_sender,
             process_info_refresh_in_flight: false,
@@ -1700,6 +1706,20 @@ impl TerminalPane {
     pub fn can_switch_working_directory_from_chrome(&self) -> bool {
         let mode = self.terminal.lock().mode();
         !mode.contains(TermMode::ALT_SCREEN) && !mode.intersects(TermMode::MOUSE_MODE)
+    }
+
+    pub fn can_sync_working_directory(&self) -> bool {
+        // SFTP can target an unfocused pane. Only submit to a recognized empty
+        // shell prompt, never append to a draft or feed a foreground program.
+        let mode = self.terminal.lock().mode();
+        self.terminal_accepts_input()
+            && self.autosuggest_prompt_active
+            && self.history_input_available(mode)
+            && !self.input_tracker.untracked
+            && self.input_tracker.value.is_empty()
+            && self.marked_text.is_none()
+            && self.pending_paste.is_none()
+            && self.tmux_prompt.is_none()
     }
 
     pub fn command_marks(&self) -> Vec<TerminalCommandMark> {
@@ -2828,6 +2848,10 @@ impl TerminalPane {
             return true;
         }
         false
+    }
+
+    pub fn take_dropped_external_paths(&mut self) -> Vec<std::path::PathBuf> {
+        std::mem::take(&mut self.dropped_external_paths)
     }
 
     pub fn send_command_line(&mut self, command: &str, cx: &mut Context<Self>) -> bool {
@@ -6132,6 +6156,87 @@ mod tests {
             pane.observe_autosuggest_input_bytes(b"\r", cx);
             assert!(!pane.autosuggest_prompt_active);
             assert!(pane.terminal_autosuggest_candidates().is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn sftp_directory_sync_requires_an_empty_shell_prompt(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            assert!(!pane.can_sync_working_directory(), "unknown prompt");
+            pane.handle_terminal_event(
+                TerminalEvent::CwdChanged {
+                    cwd: "/work".into(),
+                    host: None,
+                },
+                cx,
+            );
+            assert!(pane.can_sync_working_directory(), "empty prompt");
+            pane.settings.current_directory_awareness_enabled = false;
+            assert!(
+                pane.can_sync_working_directory(),
+                "sync must not depend on cwd awareness"
+            );
+            for (enter, leave) in [
+                (b"\x1b[?1049h".as_slice(), b"\x1b[?1049l".as_slice()),
+                (b"\x1b[?1000h".as_slice(), b"\x1b[?1000l".as_slice()),
+                (b"\x1b[?1004h".as_slice(), b"\x1b[?1004l".as_slice()),
+            ] {
+                pane.terminal.lock().feed_recording_output(enter);
+                assert!(!pane.can_sync_working_directory(), "application input mode");
+                pane.terminal.lock().feed_recording_output(leave);
+            }
+            pane.observe_autosuggest_input_bytes(b"cat > output", cx);
+            assert!(!pane.can_sync_working_directory(), "unfinished command");
+            pane.observe_autosuggest_input_bytes(b"\r", cx);
+            assert!(
+                !pane.can_sync_working_directory(),
+                "running foreground command"
+            );
+            pane.handle_terminal_event(
+                TerminalEvent::CwdChanged {
+                    cwd: "/work".into(),
+                    host: None,
+                },
+                cx,
+            );
+            pane.observe_autosuggest_input_bytes(b"\x1b[A", cx);
+            assert!(
+                !pane.can_sync_working_directory(),
+                "shell history is untracked"
+            );
+            pane.observe_autosuggest_input_bytes(b"\r", cx);
+            pane.handle_terminal_event(
+                TerminalEvent::CwdChanged {
+                    cwd: "/work".into(),
+                    host: None,
+                },
+                cx,
+            );
+            pane.privilege_prompt_tracker.observe_terminal_prompt_event(
+                oxideterm_terminal::TerminalPrivilegePromptEvent::Visible {
+                    prompt: oxideterm_terminal::detect_terminal_privilege_prompt(
+                        "[sudo] password for deploy:",
+                    )
+                    .unwrap(),
+                    retry: false,
+                },
+                Instant::now(),
+            );
+            assert!(!pane.can_sync_working_directory(), "password prompt");
         });
     }
 

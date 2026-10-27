@@ -367,6 +367,9 @@ pub struct ConnectionOptions {
     /// Some SSH servers require a new authentication exchange for every terminal.
     #[serde(default, skip_serializing_if = "is_false")]
     pub dedicated_new_terminal_connection: bool,
+    /// Open SFTP alongside the terminal when this connection is opened.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub open_sftp_on_connect: bool,
     /// Single-channel appliances require every concurrent consumer to use its own transport.
     #[serde(default, skip_serializing_if = "SshChannelStrategy::is_default")]
     pub ssh_channel_strategy: SshChannelStrategy,
@@ -2036,6 +2039,7 @@ pub struct SaveConnectionRequest {
     pub legacy_ssh_compatibility: bool,
     pub ssh_algorithms: SshAlgorithmPreferences,
     pub dedicated_new_terminal_connection: bool,
+    pub open_sftp_on_connect: bool,
     pub ssh_channel_strategy: SshChannelStrategy,
     pub x11_forwarding: ConnectionX11ForwardingOptions,
     pub post_connect_command: Option<String>,

@@ -114,7 +114,11 @@ impl WorkspaceApp {
             return;
         };
         match dialog {
-            SftpDialog::Rename { pane, old_name } => {
+            SftpDialog::Rename {
+                pane,
+                old_name,
+                old_path,
+            } => {
                 let new_name = self
                     .sftp_view()
                     .read(cx)
@@ -201,14 +205,14 @@ impl WorkspaceApp {
                             }
                         }
                         SftpPane::Remote => {
-                            let old_path = {
+                            let old_path = old_path.unwrap_or_else(|| {
                                 let sftp = self.sftp_view().read(cx);
                                 sftp.remote_files
                                     .iter()
                                     .find(|file| file.name == old_name)
                                     .map(|file| file.path.clone())
                                     .unwrap_or_else(|| join_sftp_path(&sftp.remote_path, &old_name))
-                            };
+                            });
                             let new_path = join_sftp_path(&parent_path(&old_path, true), &new_name);
                             let toast = SftpMutationToast {
                                 success_title: self.i18n.t("sftp.toast.renamed"),
@@ -230,7 +234,33 @@ impl WorkspaceApp {
                     }
                 }
             }
-            SftpDialog::NewFolder { pane } => {
+            SftpDialog::BookmarkRename { bookmark_id } => {
+                let new_name = self
+                    .sftp_view()
+                    .read(cx)
+                    .input_value(SftpInput::DialogValue)
+                    .trim()
+                    .to_string();
+                if new_name.is_empty() {
+                    return;
+                }
+                self.ensure_sftp_path_bookmarks_loaded();
+                let renamed = if let Some(bookmark) = self
+                    .sftp_path_bookmarks
+                    .iter_mut()
+                    .find(|bookmark| bookmark.id == bookmark_id)
+                {
+                    bookmark.name = new_name;
+                    true
+                } else {
+                    false
+                };
+                if renamed {
+                    self.persist_sftp_path_bookmarks(cx);
+                    self.close_sftp_dialog(cx);
+                }
+            }
+            SftpDialog::NewFolder { pane, remote_path } => {
                 let name = self
                     .sftp_view()
                     .read(cx)
@@ -298,8 +328,9 @@ impl WorkspaceApp {
                             }
                         }
                         SftpPane::Remote => {
-                            let remote_path = self.sftp_view().read(cx).remote_path.clone();
-                            let path = join_sftp_path(&remote_path, &name);
+                            let base = remote_path
+                                .unwrap_or_else(|| self.sftp_view().read(cx).remote_path.clone());
+                            let path = join_sftp_path(&base, &name);
                             let toast = SftpMutationToast {
                                 success_title: self.i18n.t("sftp.toast.folder_created"),
                                 success_description: Some(name),
@@ -314,7 +345,7 @@ impl WorkspaceApp {
                     }
                 }
             }
-            SftpDialog::Delete { pane, files } => {
+            SftpDialog::Delete { pane, files, paths } => {
                 if pane == SftpPane::Local && self.sftp_pair_primary_remote_id(cx).is_some() {
                     let local_files = self.sftp_view().read(cx).local_files.clone();
                     let targets = files
@@ -439,16 +470,20 @@ impl WorkspaceApp {
                         }
                     }
                     SftpPane::Remote => {
-                        let remote_files = self.sftp_view().read(cx).remote_files.clone();
-                        let targets = files
-                            .into_iter()
-                            .filter_map(|name| {
-                                remote_files
-                                    .iter()
-                                    .find(|file| file.name == name)
-                                    .map(|file| file.path.clone())
-                            })
-                            .collect::<Vec<_>>();
+                        let targets = if paths.is_empty() {
+                            let remote_files = self.sftp_view().read(cx).remote_files.clone();
+                            files
+                                .into_iter()
+                                .filter_map(|name| {
+                                    remote_files
+                                        .iter()
+                                        .find(|file| file.name == name)
+                                        .map(|file| file.path.clone())
+                                })
+                                .collect::<Vec<_>>()
+                        } else {
+                            paths
+                        };
                         let Some(remote_id) = self.visible_sftp_remote_id(cx) else {
                             self.close_sftp_dialog(cx);
                             return;

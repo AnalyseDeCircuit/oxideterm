@@ -131,6 +131,7 @@ const AI_KEYS: &[&str] = &[
 ];
 const SFTP_KEYS: &[&str] = &[
     "presentation",
+    "sidebarViewMode",
     "maxConcurrentTransfers",
     "directoryParallelism",
     "speedLimitEnabled",

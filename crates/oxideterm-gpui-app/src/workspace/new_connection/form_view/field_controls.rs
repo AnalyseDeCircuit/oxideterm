@@ -4494,14 +4494,21 @@ impl WorkspaceApp {
     pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
         // Saved host controls are optional overrides so application defaults
         // continue to govern legacy records and temporary local terminals.
-        let Some((terminal, dedicated_new_terminal_connection, ssh_channel_strategy)) =
-            self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.terminal.clone(),
-                    form.dedicated_new_terminal_connection,
-                    form.ssh_channel_strategy,
-                )
-            })
+        let Some((
+            terminal,
+            dedicated_new_terminal_connection,
+            open_sftp_on_connect,
+            ssh_channel_strategy,
+            ssh_transport,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            (
+                form.terminal.clone(),
+                form.dedicated_new_terminal_connection,
+                form.open_sftp_on_connect,
+                form.ssh_channel_strategy,
+                form.transport == NewConnectionTransport::Ssh,
+            )
+        })
         else {
             return div().into_any_element();
         };
@@ -4759,6 +4766,20 @@ impl WorkspaceApp {
                 },
                 cx,
             ))
+            .when(ssh_transport, |section| {
+                section.child(self.render_connection_checkbox_with_help(
+                    "new-connection-open-sftp-help",
+                    "new-connection-open-sftp",
+                    "ssh.form.open_sftp_on_connect",
+                    "ssh.form.open_sftp_on_connect_hint",
+                    open_sftp_on_connect,
+                    false,
+                    |form| {
+                        form.open_sftp_on_connect = !form.open_sftp_on_connect;
+                    },
+                    cx,
+                ))
+            })
             .into_any_element()
     }
 

@@ -8,5 +8,7 @@ mod navigation;
 mod preview_editor;
 mod transfers;
 
-pub(in crate::workspace::sftp) use menus_conflicts::sftp_extract_archive_kind;
+pub(in crate::workspace::sftp) use menus_conflicts::{
+    build_sftp_pending_uploads, sftp_extract_archive_kind, sftp_terminal_drop_conflict_resolution,
+};
 pub(in crate::workspace::sftp) use transfers::SftpTransferLaunch;
