@@ -282,7 +282,12 @@ pub fn render_document_selectable_with_code_actions(
         ));
 
     if opts.enable_footnotes && !document.footnotes.is_empty() {
-        content = content.child(render_footnotes(&document.footnotes, tokens, opts));
+        content = content.child(render_selectable_footnotes(
+            &document.footnotes,
+            tokens,
+            opts,
+            render_text,
+        ));
     }
 
     if opts.enable_async_images {
@@ -402,7 +407,7 @@ pub fn render_document_windowed_selectable_with_code_actions(
                                 tokens,
                                 opts,
                                 code_actions,
-                                &format!("w:{index}"),
+                                &format!("b:{index}"),
                                 render_text,
                             ))
                             .into_any_element(),
@@ -410,7 +415,10 @@ pub fn render_document_windowed_selectable_with_code_actions(
                 );
             }
             MarkdownLayoutItem::Footnotes(footnotes) => {
-                rendered.push(layout.measure(index, render_footnotes(footnotes, tokens, opts)));
+                rendered.push(layout.measure(
+                    index,
+                    render_selectable_footnotes(footnotes, tokens, opts, render_text),
+                ));
             }
         }
     }
@@ -2359,6 +2367,20 @@ fn render_footnotes(
     tokens: &ThemeTokens,
     opts: &MarkdownOptions,
 ) -> AnyElement {
+    render_selectable_footnotes(footnotes, tokens, opts, &mut plain_text_element)
+}
+
+fn render_selectable_footnotes(
+    footnotes: &[FootnoteDefinition],
+    tokens: &ThemeTokens,
+    opts: &MarkdownOptions,
+    render_text: &mut impl FnMut(
+        MarkdownTextFragmentId,
+        SharedString,
+        Vec<TextRun>,
+        Vec<MarkdownTextLink>,
+    ) -> AnyElement,
+) -> AnyElement {
     div()
         .flex()
         .flex_col()
@@ -2381,21 +2403,27 @@ fn render_footnotes(
                     div()
                         .min_w(px(opts.list_indent))
                         .text_color(style::accent_color(tokens))
-                        .child(render_styled_inlines(
+                        .child(render_selectable_inlines(
+                            &format!("footnote:{index}:label"),
                             &[Inline::Link {
                                 text: vec![Inline::Text(format!("[{}] ↩", index + 1))],
                                 url: format!("#fnback:{}", index + 1),
                             }],
                             tokens,
                             opts,
+                            render_text,
                         )),
                 )
-                .child(
-                    div()
-                        .flex_1()
-                        .text_color(style::muted_color(tokens))
-                        .child(render_blocks(&footnote.blocks, tokens, opts)),
-                )
+                .child(div().flex_1().text_color(style::muted_color(tokens)).child(
+                    render_selectable_blocks(
+                        &footnote.blocks,
+                        tokens,
+                        opts,
+                        None,
+                        &format!("footnote:{index}:body"),
+                        render_text,
+                    ),
+                ))
         }))
         .into_any_element()
 }

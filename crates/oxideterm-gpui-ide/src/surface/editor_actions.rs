@@ -196,6 +196,7 @@ impl IdeSurface {
 
     pub fn copy_active_editor_selection(&mut self, cx: &mut Context<Self>) -> bool {
         if self.is_markdown_preview() {
+            self.copy_markdown_selection(cx);
             return true;
         }
         let Some(editor) = self.active_editor() else {
@@ -231,6 +232,7 @@ impl IdeSurface {
 
     pub fn select_all_in_active_editor(&mut self, cx: &mut Context<Self>) -> bool {
         if self.is_markdown_preview() {
+            self.select_all_markdown(cx);
             return true;
         }
         let Some(editor) = self.active_editor() else {
@@ -1287,6 +1289,7 @@ impl IdeSurface {
     }
 
     fn activate_tab(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
+        self.finish_markdown_selection();
         let previous = self.workspace.active_tab();
         if previous == Some(tab_id) {
             return;

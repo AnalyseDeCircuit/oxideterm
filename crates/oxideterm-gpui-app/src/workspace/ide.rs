@@ -1549,6 +1549,15 @@ mod tests {
                     oxideterm_ide_core::SavedFileVersion::unknown(),
                 )
                 .unwrap();
+            let text_tab = project.active_tab().unwrap();
+            project
+                .open_file(
+                    oxideterm_ide_core::IdeLocation::remote("node", "/repo/README.md"),
+                    "# Read **this**.\n\nCopy me.",
+                    oxideterm_ide_core::SavedFileVersion::unknown(),
+                )
+                .unwrap();
+            project.set_active_tab(text_tab).unwrap();
             surface.restore_snapshot(project.snapshot().unwrap(), cx);
         });
         let (shell, cx) = cx.add_window_view(|window, cx| {
@@ -1771,6 +1780,60 @@ mod tests {
         cx.simulate_keystrokes(&format!("{modifier}-\\"));
         workspace.read_with(cx, |workspace, _| {
             assert_eq!(workspace.sidebar_collapsed, !sidebar_collapsed)
+        });
+
+        surface.update(cx, |surface, cx| {
+            surface.plugin_open_remote_file("/repo/README.md".into(), cx);
+            let snapshot = surface.snapshot(cx).unwrap();
+            assert_eq!(
+                snapshot
+                    .tabs
+                    .iter()
+                    .find(|tab| Some(tab.id) == snapshot.active_tab)
+                    .unwrap()
+                    .title,
+                "README.md"
+            );
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        workspace.update(cx, |workspace, _| {
+            workspace
+                .selectable_text_values
+                .insert(42, "previous sidebar selection".into());
+            workspace.selected_ime_target =
+                Some(super::super::ime::WorkspaceImeTarget::ReadOnlyText(42));
+        });
+        let text_bounds = cx.debug_bounds("ide-markdown-fragment-b:1").unwrap();
+        let start = gpui::point(text_bounds.left() + gpui::px(1.0), text_bounds.center().y);
+        let end = gpui::point(text_bounds.right() - gpui::px(1.0), text_bounds.center().y);
+        cx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-c"
+        } else {
+            "ctrl-c"
+        });
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some("Copy me.")
+        );
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-a cmd-c cmd-x cmd-v"
+        } else {
+            "ctrl-a ctrl-c ctrl-x ctrl-v"
+        });
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some("Read this.\nCopy me.")
+        );
+        surface.update(cx, |surface, cx| {
+            assert_eq!(
+                surface.snapshot(cx).unwrap().buffers.iter().find(|buffer| matches!(&buffer.location, oxideterm_ide_core::IdeLocation::Remote { path, .. } if path == "/repo/README.md")).unwrap().text.as_ref(),
+                "# Read **this**.\n\nCopy me."
+            );
         });
     }
 

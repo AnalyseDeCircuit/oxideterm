@@ -544,6 +544,7 @@ include!("surface/render_root.rs");
 include!("surface/render_tree.rs");
 include!("surface/render_tabs.rs");
 include!("surface/markdown_preview.rs");
+include!("surface/markdown_selection.rs");
 include!("surface/render_agent.rs");
 include!("surface/render_dialogs.rs");
 include!("surface/render_helpers.rs");

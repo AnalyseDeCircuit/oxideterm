@@ -7,6 +7,7 @@ struct MarkdownPreviewState {
     editing: bool,
     source: Option<Arc<str>>,
     document: Option<MarkdownDocument>,
+    selection: Option<MarkdownPreviewSelection>,
     scroll: MarkdownVirtualListScrollHandle,
     // The file tab owns parsing; closing it cancels delivery to the surface.
     parse_task: Option<Task<()>>,
@@ -52,6 +53,7 @@ impl IdeSurface {
     }
 
     fn toggle_markdown_mode(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.finish_markdown_selection();
         let Some(tab_id) = self.active_markdown_tab() else {
             return;
         };
@@ -140,6 +142,7 @@ impl IdeSurface {
         }
         state.source = Some(source.clone());
         state.document = None;
+        state.selection = None;
         let parse_source = source.clone();
         let parse = cx
             .background_executor()
@@ -147,6 +150,7 @@ impl IdeSurface {
         state.parse_task = Some(cx.spawn(async move |weak, cx| {
             let document = parse.await;
             let _ = weak.update(cx, |this, cx| {
+                let options = this.markdown_options();
                 let Some(state) = this.markdown_previews.get_mut(&tab_id) else {
                     return;
                 };
@@ -155,6 +159,11 @@ impl IdeSurface {
                     .as_ref()
                     .is_some_and(|current| Arc::ptr_eq(current, &source))
                 {
+                    state.selection = Some(MarkdownPreviewSelection::new(
+                        &document,
+                        &this.tokens,
+                        &options,
+                    ));
                     state.document = Some(document);
                     state.parse_task = None;
                     cx.notify();
@@ -167,7 +176,11 @@ impl IdeSurface {
         let tab_id = self.active_markdown_tab().expect("markdown tab selected");
         let source = self.editors[&tab_id].read(cx).buffer().text_snapshot();
         self.prepare_markdown_preview(tab_id, source, cx);
+        let options = self.markdown_options();
         let state = &self.markdown_previews[&tab_id];
+        if let Some(selection) = &state.selection {
+            selection.layouts.borrow_mut().clear();
+        }
         let Some(document) = &state.document else {
             return self.render_loading_file();
         };
@@ -175,13 +188,19 @@ impl IdeSurface {
             .debug_selector(|| "ide-markdown-preview".into())
             .size_full()
             .p_4()
-            .child(oxideterm_gpui_markdown::render::render_document_virtual(
-                SharedString::from(format!("ide-markdown-preview-{}", tab_id.0)),
-                document,
-                &self.tokens,
-                &self.markdown_options(),
-                &state.scroll,
-            ))
+            .child(
+                oxideterm_gpui_markdown::render::render_document_virtual_selectable(
+                    SharedString::from(format!("ide-markdown-preview-{}", tab_id.0)),
+                    document,
+                    &self.tokens,
+                    &options,
+                    &state.scroll,
+                    None,
+                    &mut |key, text, runs, links| {
+                        self.render_markdown_fragment(tab_id, key, text, runs, links, cx)
+                    },
+                ),
+            )
             .into_any_element()
     }
 
@@ -202,12 +221,29 @@ impl IdeSurface {
             } else {
                 modifiers.control
             };
-            (command
-                && !modifiers.shift
-                && !modifiers.alt
-                && event.keystroke.key.eq_ignore_ascii_case("s"))
-            .then_some(EditorShortcut::Save)
+            if command && !modifiers.shift && !modifiers.alt {
+                match event.keystroke.key.to_ascii_lowercase().as_str() {
+                    "s" => Some(EditorShortcut::Save),
+                    "c" => Some(EditorShortcut::Copy),
+                    "a" => Some(EditorShortcut::SelectAll),
+                    "x" => Some(EditorShortcut::Cut),
+                    "v" => Some(EditorShortcut::Paste),
+                    _ => None,
+                }
+            } else {
+                None
+            }
         };
+        match shortcut {
+            Some(EditorShortcut::Copy) => self.copy_markdown_selection(cx),
+            Some(EditorShortcut::SelectAll) => self.select_all_markdown(cx),
+            Some(EditorShortcut::Cut | EditorShortcut::Paste) => {}
+            _ => {
+                if shortcut != Some(EditorShortcut::Save) {
+                    return false;
+                }
+            }
+        }
         if shortcut == Some(EditorShortcut::Save) {
             if let Some(tab_id) = self.workspace.active_tab() {
                 self.sync_editor_to_workspace(tab_id, cx);
@@ -216,7 +252,8 @@ impl IdeSurface {
             cx.stop_propagation();
             return true;
         }
-        false
+        cx.stop_propagation();
+        true
     }
 }
 
@@ -257,6 +294,181 @@ mod markdown_preview_tests {
         let first = surface.workspace.tabs()[0].id;
         surface.workspace.set_active_tab(first).unwrap();
         surface
+    }
+
+    #[gpui::test]
+    fn markdown_preview_copies_rendered_text_without_editing_source(cx: &mut TestAppContext) {
+        let (surface, cx) = cx.add_window_view(|_, cx| ready_surface(cx));
+        let source = "# Title\n\nAlpha **bold** 与🙂.\n\nNext line.\n\n```sh\nprintf ok\n```";
+        surface.update(cx, |surface, cx| {
+            surface
+                .active_editor()
+                .unwrap()
+                .update(cx, |editor, cx| editor.replace_text_external(source, cx));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (start, end) = surface.read_with(cx, |surface, _| {
+            let tab = surface.workspace.active_tab().unwrap();
+            let selection = surface.markdown_previews[&tab].selection.as_ref().unwrap();
+            let layouts = selection.layouts.borrow();
+            let first = &layouts
+                .iter()
+                .find(|(range, _)| range.start == "Title\n".len())
+                .unwrap()
+                .1;
+            let second = &layouts
+                .iter()
+                .find(|(range, _)| range.start == "Title\nAlpha bold 与🙂.\n".len())
+                .unwrap()
+                .1;
+            (
+                first.position_for_index(0).unwrap()
+                    + gpui::point(px(1.0), first.line_height() / 2.0),
+                second.position_for_index("Next line.".len()).unwrap()
+                    + gpui::point(px(8.0), second.line_height() / 2.0),
+            )
+        });
+        cx.simulate_mouse_down(start, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::default());
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-c"
+        } else {
+            "ctrl-c"
+        });
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some("Alpha bold 与🙂.\nNext line.")
+        );
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-a cmd-c"
+        } else {
+            "ctrl-a ctrl-c"
+        });
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some("Title\nAlpha bold 与🙂.\nNext line.\nprintf ok")
+        );
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-x cmd-v"
+        } else {
+            "ctrl-x ctrl-v"
+        });
+        cx.simulate_input("must not edit");
+        surface.update(cx, |surface, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("previous clipboard".into()));
+            surface.select_all_in_active_editor(cx);
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("Title\nAlpha bold 与🙂.\nNext line.\nprintf ok")
+            );
+            assert_eq!(
+                surface
+                    .active_editor()
+                    .unwrap()
+                    .read(cx)
+                    .buffer()
+                    .text_snapshot()
+                    .as_ref(),
+                source
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_preview_selection_spans_virtual_rows_and_stays_with_its_tab(
+        cx: &mut TestAppContext,
+    ) {
+        let (surface, cx) = cx.add_window_view(|_, cx| ready_surface(cx));
+        let source = format!("{}Last paragraph.", "**Visible text**\n\n".repeat(120));
+        let expected = format!("{}Last paragraph.", "Visible text\n".repeat(120));
+        let (first, second) = surface.update(cx, |surface, cx| {
+            surface
+                .active_editor()
+                .unwrap()
+                .update(cx, |editor, cx| editor.replace_text_external(source, cx));
+            (
+                surface.workspace.tabs()[0].id,
+                surface.workspace.tabs()[1].id,
+            )
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        surface.update(cx, |surface, cx| {
+            surface.select_all_in_active_editor(cx);
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(expected.as_str())
+            );
+            surface.markdown_previews[&first]
+                .scroll
+                .set_offset(gpui::point(px(0.0), px(-1400.0)));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        surface.update(cx, |surface, cx| {
+            let selection = surface.markdown_previews[&first]
+                .selection
+                .as_ref()
+                .unwrap();
+            assert!(
+                selection.layouts.borrow().len() < selection.fragments.len(),
+                "keep virtual rendering"
+            );
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(expected.as_str())
+            );
+            surface.activate_tab(second, cx);
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        surface.update(cx, |surface, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("unchanged".into()));
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("unchanged")
+            );
+            surface.select_all_in_active_editor(cx);
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("Original")
+            );
+            surface.activate_tab(first, cx);
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(expected.as_str())
+            );
+            surface.active_editor().unwrap().update(cx, |editor, cx| {
+                editor.replace_text_external("# Updated", cx)
+            });
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        surface.update(cx, |surface, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("new revision".into()));
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("new revision")
+            );
+            surface.select_all_in_active_editor(cx);
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some("Updated")
+            );
+        });
     }
 
     #[gpui::test]

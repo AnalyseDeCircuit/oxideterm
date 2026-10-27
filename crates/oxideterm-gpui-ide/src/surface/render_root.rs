@@ -52,6 +52,7 @@ impl Render for IdeSurface {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| {
+                    this.finish_markdown_selection();
                     this.finish_tab_drag(cx);
                     this.finish_tree_resize(cx);
                     this.finish_folder_picker_path_selection_drag();
@@ -59,9 +60,13 @@ impl Render for IdeSurface {
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.finish_tree_resize(cx)),
+                cx.listener(|this, _, _, cx| {
+                    this.finish_markdown_selection();
+                    this.finish_tree_resize(cx);
+                }),
             )
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                this.drag_markdown_selection(event, cx);
                 this.update_tree_resize(event, cx);
                 this.update_folder_picker_path_selection_drag(event, window, cx);
             }))
