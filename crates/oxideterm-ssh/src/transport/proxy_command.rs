@@ -1,4 +1,8 @@
 const PROXY_COMMAND_BUFFER_BYTES: usize = 64 * 1024;
+// ProxyCommand runs while the GUI process has no console, so Windows would otherwise
+// allocate a console window for the helper and its children.
+#[cfg(windows)]
+const PROXY_COMMAND_CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub(super) struct ProxyCommandStream {
     stream: tokio::io::DuplexStream,
@@ -73,6 +77,8 @@ pub(super) async fn dial_proxy_command(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(PROXY_COMMAND_CREATE_NO_WINDOW);
     let mut child = command.spawn().map_err(|_| {
         // Never include the executable, arguments, or child stderr in an error because
         // ProxyCommand values may contain credentials supplied by external tooling.
@@ -176,5 +182,34 @@ mod proxy_command_tests {
         stream.read_exact(&mut output).await.unwrap();
 
         assert_eq!(output, b"proxy-command-round-trip");
+    }
+
+    // The Windows spawn path runs the helper without a console; this pins that its
+    // piped stdio still carries bytes in both directions.
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn hidden_console_helper_keeps_piped_stdio_working() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let command = crate::ProxyCommandConfig::direct(vec![
+            Zeroizing::new("cmd.exe".to_string()),
+            Zeroizing::new("/c".to_string()),
+            Zeroizing::new("more".to_string()),
+        ])
+        .unwrap();
+        let mut stream = dial_proxy_command(&command).await.unwrap();
+
+        let expected = b"hidden-console-proxy-probe\r\n";
+        stream.write_all(expected).await.unwrap();
+        let mut buffer = vec![0u8; expected.len()];
+        // Pipe reads may split the response even when the helper writes it at once.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(15),
+            stream.read_exact(&mut buffer),
+        )
+        .await
+        .expect("proxy stream stalled behind the hidden console")
+        .unwrap();
+        assert_eq!(buffer, expected);
     }
 }
