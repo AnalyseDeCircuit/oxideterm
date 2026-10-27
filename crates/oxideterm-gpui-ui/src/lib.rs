@@ -37,6 +37,7 @@ pub mod surface;
 pub mod table;
 pub mod tabs;
 pub mod text_input;
+pub mod text_selection;
 pub mod toast;
 pub mod toaster;
 pub mod tooltip;

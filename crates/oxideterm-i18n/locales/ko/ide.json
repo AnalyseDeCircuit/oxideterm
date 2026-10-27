@@ -1,5 +1,7 @@
 {
   "ide": {
+    "markdown_edit": "Markdown 편집",
+    "markdown_preview": "Markdown 미리 보기",
     "file_binary": "바이너리 파일이므로 텍스트 편집기에서 열 수 없습니다.",
     "file_too_large": "파일이 IDE 편집 한도인 100 MiB를 초과합니다.",
     "file_encoding": "파일 인코딩",

@@ -7,6 +7,11 @@
 /// the crate testable without depending on the app-level locale crate.
 #[derive(Clone, Debug)]
 pub struct IdeLabels {
+    pub markdown_edit: String,
+    pub markdown_preview: String,
+    pub markdown_details: String,
+    pub markdown_mermaid_error: String,
+    pub markdown_mermaid_loading: String,
     pub file_binary: String,
     pub file_too_large: String,
     pub file_encoding: String,
@@ -122,6 +127,11 @@ pub struct IdeLabels {
 impl Default for IdeLabels {
     fn default() -> Self {
         Self {
+            markdown_edit: "Edit Markdown".into(),
+            markdown_preview: "Preview Markdown".into(),
+            markdown_details: "Details".into(),
+            markdown_mermaid_error: "Unsupported Mermaid diagram".into(),
+            markdown_mermaid_loading: "Rendering diagram…".into(),
             file_binary: "This is a binary file and cannot be opened in the text editor.".into(),
             file_too_large: "The file exceeds the 100 MiB IDE editing limit.".into(),
             file_encoding: "File encoding".into(),

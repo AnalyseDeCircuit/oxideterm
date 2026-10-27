@@ -1,5 +1,7 @@
 {
   "ide": {
+    "markdown_edit": "Modifica Markdown",
+    "markdown_preview": "Anteprima Markdown",
     "file_binary": "Questo file è binario e non può essere aperto nell’editor di testo.",
     "file_too_large": "Il file supera il limite di modifica dell’IDE di 100 MiB.",
     "file_encoding": "Codifica del file",
