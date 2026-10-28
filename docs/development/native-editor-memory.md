@@ -2,6 +2,87 @@
 
 Date: 2026-10-27. Baseline: main at 38fa618ba; subsequent changes are recorded by batch below.
 
+## Ninth batch: reduce work within the existing memory budgets (2026-10-28)
+
+Baseline: `df7538086`, with the paced-playback and statistics probes added before production
+changes. The database page budgets, image-cache budgets, three-frame playback cache, decoded
+resolution and pixel transforms are unchanged.
+
+### Knowledge statistics no longer scan embeddings during rendering
+
+The settings document card requests statistics from its AI workspace entity. One background
+read serves repeated renders; the entity retains only the last collection's numeric statistics
+and request/revision keys. A shared in-memory revision advances after successful collection,
+document and embedding writes. A result for an obsolete selection or revision cannot publish.
+Only one statistics worker runs at a time. Entity release cancels delivery, and failed reads
+can retry on a subsequent render without scheduling a self-sustaining retry loop.
+
+The probe creates one document with 1,024 chunks and 768 stored 1,536-dimensional vectors.
+It checks the expected counts on every request. Fixture construction is excluded.
+
+| Statistics operation | Time, ms |
+| --- | ---: |
+| Before: 120 synchronous statistics reads | 332.494 |
+| After: same direct-read comparator, 120 calls | 327.585 |
+| After: first asynchronous request through completion | 2.941 |
+| After: 120 cache-hit requests through the entity | 0.017 |
+
+These times cover statistics retrieval, not complete page rendering. Collection listing and
+document pagination remain on their existing paths. The optimization removes repeated reads;
+it does not make a full database scan faster or increase the redb page budget.
+
+### Animated uploads borrow cached pixels and prefetch separately
+
+The normal upload path holds an `Arc` lease on a streamed frame instead of allocating and
+copying its pixel vector. Atlas misses acquire that lease; atlas hits do not request pixels.
+The lease survives eviction until upload returns. Explicit persistent `as_bytes` consumers
+keep their existing borrowed-read behavior.
+
+Each decoder request now prepares only its target frame. The image element and upload reader
+request the next frame separately, including frame zero at the loop boundary. Already-ready
+prefetches are skipped. This avoids waiting for a future frame before replying and prevents
+queued prefetches from doing an extra frame of work ahead of a demand read. The channel remains
+bounded to one queued request and the cache to three frames.
+
+The same 240-frame, 640 × 360 GIF is measured both as a continuous sequence of reads and at its
+40 ms frame interval. The paced probe uses the production prefetch contract, checks readiness
+at each deadline and validates pixels. Timing covers CPU frame acquisition, not GPU upload or
+native presentation. Each table entry is a single paired run; no builds ran concurrently with
+the retained baseline or final measurements.
+
+| Streaming measurement | Before | After |
+| --- | ---: | ---: |
+| Continuous read P95, ms | 1.567 | 0.826 |
+| Continuous read maximum, ms | 1.621 | 0.901 |
+| Paced read P95, ms | 0.253 | 0.029 |
+| Paced read maximum, ms | 0.523 | 0.061 |
+| Frames unavailable at their paced deadline | 0 / 240 | 0 / 240 |
+| Retained cached pixels after playback, MiB | 2.64 | 2.64 |
+| Sampled initial decode heap peak delta, MiB | 36.94 | 36.94 |
+| Initial decode, ms | 259.011 | 260.690 |
+
+The all-frames-cached control's continuous P95 was 0.225 ms before and 0.234 ms after, while
+retaining 52.99 MiB of pixel payload. Streaming still pays for decoding during playback; the
+improvements remove copying and queue delays rather than restoring full-frame retention.
+
+### Verification
+
+- GPUI: 425 passed, 6 probes ignored by default. The existing GIF disposal/transparency test
+  now also checks that two upload reads share one allocation and that a held upload remains
+  valid after cache eviction. Its allocation assertion failed before the fix and passes now.
+  Existing tests cover resizing, playback position, pause/resume, looping, WebP and atlas reuse.
+- AI: 238 passed, 3 probes ignored; application knowledge filter: 17 passed, 1 probe ignored.
+  The new entity regression exercises selection changes before delivery, a write during an
+  outstanding read, document editing, embedding insertion through a cloned store, deletion,
+  repeated cache hits and owner release. The native application test target compiled.
+- Both probes below were run explicitly. No native application launch or GPU presentation
+  measurement was performed for this batch.
+
+```sh
+cargo test --locked -p oxideterm-gpui-app --bin oxideterm-native knowledge_statistics_redraw_cost -- --ignored --nocapture --test-threads=1
+cargo test --locked -p gpui-pre --lib long_animation_memory -- --ignored --nocapture --test-threads=1
+```
+
 ## Eighth batch: application-wide memory owners (2026-10-28)
 
 ### Default image and database caches
