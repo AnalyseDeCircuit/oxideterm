@@ -47,12 +47,23 @@ pub(crate) struct MarkdownMeasurements(Rc<RefCell<Option<MeasurementState>>>);
 #[derive(Debug)]
 struct MeasurementState {
     layout: MarkdownBlockLayout,
+    document_released: bool,
     width: f32,
     fonts: (String, String),
     geometry_style: Vec<f32>,
 }
 
 impl MarkdownMeasurements {
+    pub(crate) fn release_document(&self) {
+        if let Some(state) = self.0.borrow_mut().as_mut() {
+            if state.document_released {
+                return;
+            }
+            state.layout.items = Rc::new(Vec::new());
+            state.document_released = true;
+        }
+    }
+
     pub(crate) fn prepare(
         &self,
         mut layout: MarkdownBlockLayout,
@@ -83,7 +94,7 @@ impl MarkdownMeasurements {
             opts.heading_font_scales[5],
         ];
         if let Some(previous) = state.as_ref()
-            && previous.layout.items == layout.items
+            && (previous.document_released || previous.layout.items == layout.items)
         {
             layout.disclosures = previous.layout.disclosures.clone();
         }
@@ -91,11 +102,16 @@ impl MarkdownMeasurements {
             && previous.width == width
             && previous.fonts == fonts
             && previous.geometry_style == geometry_style
-            && previous.layout.items == layout.items
+            && (previous.document_released || previous.layout.items == layout.items)
             && previous.layout.item_sizes == layout.item_sizes
         {
             layout.measured = previous.layout.measured.clone();
             layout.disclosures = previous.layout.disclosures.clone();
+            if previous.document_released {
+                let previous = state.as_mut().unwrap();
+                previous.layout = layout.clone();
+                previous.document_released = false;
+            }
             return layout;
         }
         let mut measured = vec![None; layout.items.len()];
@@ -149,6 +165,7 @@ impl MarkdownMeasurements {
         layout.measured = Some(Rc::new(RefCell::new(measured)));
         *state = Some(MeasurementState {
             layout: layout.clone(),
+            document_released: false,
             width,
             fonts,
             geometry_style,
@@ -487,6 +504,14 @@ mod tests {
         );
         layout.disclosures.toggle("html-details", false);
         layout.disclosures.toggle("html-details-2", true);
+        layout.measured.as_ref().unwrap().borrow_mut()[0] = Some(245.0);
+        let items = Rc::downgrade(&layout.items);
+        drop(layout);
+        measurements.release_document();
+        assert!(
+            items.upgrade().is_none(),
+            "suspended geometry retained document blocks"
+        );
         for width in [640.0, 320.0] {
             let layout = measurements.prepare(
                 MarkdownBlockLayout::from_document(&document, &opts),
@@ -495,6 +520,9 @@ mod tests {
             );
             assert!(layout.disclosures.is_open("html-details", false));
             assert!(!layout.disclosures.is_open("html-details-2", true));
+            if width == 640.0 {
+                assert_eq!(layout.measured.as_ref().unwrap().borrow()[0], Some(245.0));
+            }
         }
         let replacement =
             crate::parser::parse("<details><summary>Different</summary><p>New body</p></details>");

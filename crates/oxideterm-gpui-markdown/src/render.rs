@@ -13,7 +13,7 @@ use gpui::{
     Image, InteractiveElement, IntoElement, MouseButton, ParentElement, SharedString,
     StatefulInteractiveElement, StrikethroughStyle, Styled, StyledImage, StyledText, TextAlign,
     TextRun, UnderlineStyle, Window, div, image_cache, img, prelude::FluentBuilder, px, relative,
-    retain_all,
+    retain_recent,
 };
 use oxideterm_gpui_ui::{ScrollableElement, Scrollbar};
 use oxideterm_theme::ThemeTokens;
@@ -30,8 +30,12 @@ use crate::model::{
 use crate::options::MarkdownOptions;
 use crate::style;
 
+mod text_index;
+pub use text_index::visit_selectable_text;
+
 const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
 const MARKDOWN_VIRTUAL_OVERDRAW_PX: f32 = 480.0;
+const MARKDOWN_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct MarkdownTextFragmentId {
@@ -98,9 +102,12 @@ fn render_document_with_code_actions(
     }
 
     if opts.enable_async_images {
-        image_cache(retain_all(opts.image_cache_id))
-            .child(content)
-            .into_any_element()
+        image_cache(retain_recent(
+            opts.image_cache_id,
+            MARKDOWN_IMAGE_CACHE_BYTES,
+        ))
+        .child(content)
+        .into_any_element()
     } else {
         content.into_any_element()
     }
@@ -199,9 +206,12 @@ fn render_document_windowed_with_code_actions(
     if rendered.is_empty() {
         let content = div().w_full().min_w_0().h(px(total_height));
         return if opts.enable_async_images {
-            image_cache(retain_all(opts.image_cache_id))
-                .child(content)
-                .into_any_element()
+            image_cache(retain_recent(
+                opts.image_cache_id,
+                MARKDOWN_IMAGE_CACHE_BYTES,
+            ))
+            .child(content)
+            .into_any_element()
         } else {
             content.into_any_element()
         };
@@ -231,9 +241,12 @@ fn render_document_windowed_with_code_actions(
     }
 
     if opts.enable_async_images {
-        image_cache(retain_all(opts.image_cache_id))
-            .child(content)
-            .into_any_element()
+        image_cache(retain_recent(
+            opts.image_cache_id,
+            MARKDOWN_IMAGE_CACHE_BYTES,
+        ))
+        .child(content)
+        .into_any_element()
     } else {
         content.into_any_element()
     }
@@ -291,9 +304,12 @@ pub fn render_document_selectable_with_code_actions(
     }
 
     if opts.enable_async_images {
-        image_cache(retain_all(opts.image_cache_id))
-            .child(content)
-            .into_any_element()
+        image_cache(retain_recent(
+            opts.image_cache_id,
+            MARKDOWN_IMAGE_CACHE_BYTES,
+        ))
+        .child(content)
+        .into_any_element()
     } else {
         content.into_any_element()
     }
@@ -426,9 +442,12 @@ pub fn render_document_windowed_selectable_with_code_actions(
     if rendered.is_empty() {
         let content = div().w_full().min_w_0().h(px(total_height));
         return if opts.enable_async_images {
-            image_cache(retain_all(opts.image_cache_id))
-                .child(content)
-                .into_any_element()
+            image_cache(retain_recent(
+                opts.image_cache_id,
+                MARKDOWN_IMAGE_CACHE_BYTES,
+            ))
+            .child(content)
+            .into_any_element()
         } else {
             content.into_any_element()
         };
@@ -458,9 +477,12 @@ pub fn render_document_windowed_selectable_with_code_actions(
     }
 
     if opts.enable_async_images {
-        image_cache(retain_all(opts.image_cache_id))
-            .child(content)
-            .into_any_element()
+        image_cache(retain_recent(
+            opts.image_cache_id,
+            MARKDOWN_IMAGE_CACHE_BYTES,
+        ))
+        .child(content)
+        .into_any_element()
     } else {
         content.into_any_element()
     }
@@ -2540,13 +2562,9 @@ fn render_selectable_inlines_with_style(
             return;
         }
         let (value, runs, links) = flat_text(text, tokens, opts);
-        let mut start = 0;
-        let ends = breaks
-            .range((*logical_cursor + 1)..(*logical_cursor + value.len()))
-            .map(|offset| offset - *logical_cursor)
-            .chain(std::iter::once(value.len()))
-            .collect::<Vec<_>>();
-        for end in ends {
+        for range in inline_text_segments(&value, *logical_cursor, &breaks) {
+            let start = range.start;
+            let end = range.end;
             let segment = &value[start..end];
             let hard_break = segment.ends_with('\n');
             let visible_end = if hard_break { end - 1 } else { end };
@@ -2577,7 +2595,6 @@ fn render_selectable_inlines_with_style(
                 hard_break,
             });
             previous_hard_break.set(hard_break);
-            start = end;
             part += 1;
         }
         *logical_cursor += value.len();
@@ -2773,6 +2790,24 @@ fn inline_break_offsets(flat: &[FlatRun]) -> std::collections::BTreeSet<usize> {
     unicode_linebreak::linebreaks(&logical_text)
         .map(|(offset, _)| offset)
         .collect()
+}
+
+fn inline_text_segments<'a>(
+    text: &'a str,
+    logical_cursor: usize,
+    breaks: &'a std::collections::BTreeSet<usize>,
+) -> impl Iterator<Item = Range<usize>> + 'a {
+    // The text index and the renderer must use identical byte ranges around
+    // inline images, formulas and hard breaks.
+    breaks
+        .range((logical_cursor + 1)..(logical_cursor + text.len()).max(logical_cursor + 1))
+        .map(move |offset| offset - logical_cursor)
+        .chain(std::iter::once(text.len()))
+        .scan(0, |start, end| {
+            let range = *start..end;
+            *start = end;
+            Some(range)
+        })
 }
 
 fn inline_text_baseline_depth(line_height: f32, ascent: f32, descent: f32) -> f32 {

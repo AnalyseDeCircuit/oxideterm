@@ -13,24 +13,22 @@ struct MarkdownPreviewSelection {
 }
 
 impl MarkdownPreviewSelection {
-    fn new(document: &MarkdownDocument, tokens: &ThemeTokens, options: &MarkdownOptions) -> Self {
+    fn new(document: &MarkdownDocument, options: &MarkdownOptions) -> Self {
         let mut selection = Self::default();
         // Index the renderer's text once per document, including virtualized
         // blocks. Clipboard contents must not depend on which rows were painted.
-        let _ = oxideterm_gpui_markdown::render::render_document_selectable(
+        oxideterm_gpui_markdown::render::visit_selectable_text(
             document,
-            tokens,
             options,
-            &mut |key, text, _, _| {
+            &mut |key, text| {
                 if !selection.text.is_empty() && !key.join_previous {
                     selection.text.push('\n');
                 }
                 let start = selection.text.len();
-                selection.text.push_str(&text);
+                selection.text.push_str(text);
                 selection
                     .fragments
                     .insert(key.key, start..selection.text.len());
-                div().into_any_element()
             },
         );
         selection
@@ -215,7 +213,10 @@ impl IdeSurface {
         }
     }
 
-    fn copy_markdown_selection(&self, cx: &mut Context<Self>) {
+    fn copy_markdown_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(tab) = self.active_markdown_tab() {
+            self.ensure_markdown_selection(tab, cx);
+        }
         if let Some(tab) = self.active_markdown_tab()
             && let Some(selection) = self
                 .markdown_previews
@@ -230,6 +231,9 @@ impl IdeSurface {
     }
 
     fn select_all_markdown(&mut self, cx: &mut Context<Self>) {
+        if let Some(tab) = self.active_markdown_tab() {
+            self.ensure_markdown_selection(tab, cx);
+        }
         if let Some(tab) = self.active_markdown_tab()
             && let Some(selection) = self
                 .markdown_previews

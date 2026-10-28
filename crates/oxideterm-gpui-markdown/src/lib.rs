@@ -90,6 +90,19 @@ impl MarkdownVirtualListScrollHandle {
     pub fn scroll_handle(&self) -> &ScrollHandle {
         &self.scroll
     }
+
+    /// Release document copies while retaining offsets, measured heights and disclosures.
+    /// Before resuming with changed source, call `invalidate_document_cache`.
+    pub fn release_document_cache(&mut self) {
+        self.measurements.release_document();
+        self.navigation.release_targets();
+    }
+
+    /// Invalidate retained geometry when the source changed while suspended.
+    pub fn invalidate_document_cache(&mut self) {
+        self.measurements = Default::default();
+        self.navigation = navigation::MarkdownNavigation::new(self.scroll.clone());
+    }
 }
 
 impl std::ops::Deref for MarkdownVirtualListScrollHandle {

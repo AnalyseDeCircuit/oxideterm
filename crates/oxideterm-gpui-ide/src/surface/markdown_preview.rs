@@ -8,12 +8,48 @@ struct MarkdownPreviewState {
     source: Option<Arc<str>>,
     document: Option<MarkdownDocument>,
     selection: Option<MarkdownPreviewSelection>,
+    source_version: Option<u64>,
+    suspended_selection: Option<(usize, usize)>,
     scroll: MarkdownVirtualListScrollHandle,
     // The file tab owns parsing; closing it cancels delivery to the surface.
     parse_task: Option<Task<()>>,
 }
 
+impl MarkdownPreviewState {
+    fn release_cache(&mut self) {
+        self.parse_task = None;
+        self.source = None;
+        self.document = None;
+        if let Some(selection) = self.selection.take() {
+            self.suspended_selection = Some((selection.anchor, selection.head));
+        }
+        self.scroll.release_document_cache();
+    }
+}
+
 impl IdeSurface {
+    fn sync_tab_render_caches(&mut self, cx: &mut Context<Self>) {
+        let active = self
+            .workspace
+            .active_tab()
+            .filter(|_| self.mount.is_visible());
+        let preview = self.is_markdown_preview();
+        for (&tab, state) in &mut self.markdown_previews {
+            if active != Some(tab) || state.editing {
+                state.release_cache();
+            }
+        }
+        for (&tab, editor) in &self.editors {
+            let visible = active == Some(tab);
+            editor.update(cx, |editor, cx| {
+                editor.set_render_cache_active(visible && !preview, cx);
+                if !visible {
+                    editor.buffer().release_text_cache();
+                }
+            });
+        }
+    }
+
     fn active_markdown_tab(&self) -> Option<EditorTabId> {
         self.workspace
             .active_tab()
@@ -41,9 +77,10 @@ impl IdeSurface {
         })
     }
 
-    fn show_markdown_source(&mut self, tab_id: EditorTabId) {
+    fn show_markdown_source(&mut self, tab_id: EditorTabId, cx: &mut Context<Self>) {
         if self.is_markdown_tab(tab_id) {
             self.markdown_previews.entry(tab_id).or_default().editing = true;
+            self.sync_tab_render_caches(cx);
         }
     }
 
@@ -63,6 +100,7 @@ impl IdeSurface {
         let editing = self.is_markdown_preview();
         self.sync_editor_to_workspace(tab_id, cx);
         self.markdown_previews.entry(tab_id).or_default().editing = editing;
+        self.sync_tab_render_caches(cx);
         if editing {
             window.focus(&editor.focus_handle(cx), cx);
         } else {
@@ -132,44 +170,79 @@ impl IdeSurface {
         source: Arc<str>,
         cx: &mut Context<Self>,
     ) {
-        let state = self.markdown_previews.entry(tab_id).or_default();
-        if state
-            .source
-            .as_ref()
-            .is_some_and(|previous| Arc::ptr_eq(previous, &source))
-        {
+        if !self.update_markdown_source(tab_id, &source, cx) {
             return;
         }
-        state.source = Some(source.clone());
-        state.document = None;
-        state.selection = None;
         let parse_source = source.clone();
         let parse = cx
             .background_executor()
             .spawn(async move { oxideterm_gpui_markdown::parser::parse(&parse_source) });
-        state.parse_task = Some(cx.spawn(async move |weak, cx| {
+        let task = cx.spawn(async move |weak, cx| {
             let document = parse.await;
             let _ = weak.update(cx, |this, cx| {
-                let options = this.markdown_options();
-                let Some(state) = this.markdown_previews.get_mut(&tab_id) else {
-                    return;
-                };
-                if state
-                    .source
-                    .as_ref()
+                if this
+                    .markdown_previews
+                    .get(&tab_id)
+                    .and_then(|state| state.source.as_ref())
                     .is_some_and(|current| Arc::ptr_eq(current, &source))
                 {
-                    state.selection = Some(MarkdownPreviewSelection::new(
-                        &document,
-                        &this.tokens,
-                        &options,
-                    ));
-                    state.document = Some(document);
-                    state.parse_task = None;
+                    this.install_markdown_document(tab_id, document);
                     cx.notify();
                 }
             });
-        }));
+        });
+        self.markdown_previews.get_mut(&tab_id).unwrap().parse_task = Some(task);
+    }
+
+    fn update_markdown_source(
+        &mut self,
+        tab_id: EditorTabId,
+        source: &Arc<str>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let version = self.editors[&tab_id].read(cx).buffer().version();
+        let state = self.markdown_previews.entry(tab_id).or_default();
+        if state
+            .source
+            .as_ref()
+            .is_some_and(|previous| Arc::ptr_eq(previous, source))
+        {
+            return false;
+        }
+        if state.source_version != Some(version) {
+            state.suspended_selection = None;
+            state.scroll.invalidate_document_cache();
+        }
+        state.source_version = Some(version);
+        state.source = Some(source.clone());
+        state.document = None;
+        state.selection = None;
+        state.parse_task = None;
+        true
+    }
+
+    fn ensure_markdown_selection(&mut self, tab: EditorTabId, cx: &mut Context<Self>) {
+        let source = self.editors[&tab].read(cx).buffer().text_snapshot();
+        self.update_markdown_source(tab, &source, cx);
+        if self.markdown_previews[&tab].selection.is_some() {
+            return;
+        }
+        // Copy/select-all must work even before the first resumed frame. Only
+        // explicit clipboard commands synchronously rebuild a cold preview.
+        let document = oxideterm_gpui_markdown::parser::parse(&source);
+        self.install_markdown_document(tab, document);
+    }
+
+    fn install_markdown_document(&mut self, tab: EditorTabId, document: MarkdownDocument) {
+        let mut selection = MarkdownPreviewSelection::new(&document, &self.markdown_options());
+        let state = self.markdown_previews.get_mut(&tab).unwrap();
+        state.parse_task = None;
+        if let Some((anchor, head)) = state.suspended_selection.take() {
+            selection.anchor = anchor;
+            selection.head = head;
+        }
+        state.selection = Some(selection);
+        state.document = Some(document);
     }
 
     fn render_markdown_preview(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -293,6 +366,7 @@ mod markdown_preview_tests {
         }
         let first = surface.workspace.tabs()[0].id;
         surface.workspace.set_active_tab(first).unwrap();
+        surface.set_mount(IdeSurfaceMount::MainWindow, cx);
         surface
     }
 
@@ -425,6 +499,11 @@ mod markdown_preview_tests {
                 Some(expected.as_str())
             );
             surface.activate_tab(second, cx);
+            let state = &surface.markdown_previews[&first];
+            assert!(state.document.is_none());
+            assert!(state.source.is_none());
+            assert!(state.selection.is_none());
+            assert_eq!(state.scroll.offset().y, px(-1400.0));
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.run_until_parked();
@@ -443,6 +522,18 @@ mod markdown_preview_tests {
                 Some("Original")
             );
             surface.activate_tab(first, cx);
+            surface.copy_active_editor_selection(cx);
+            assert_eq!(
+                cx.read_from_clipboard().unwrap().text().as_deref(),
+                Some(expected.as_str())
+            );
+            assert_eq!(
+                surface.markdown_previews[&first].scroll.offset().y,
+                px(-1400.0)
+            );
+            surface.set_mount(IdeSurfaceMount::Hidden, cx);
+            assert!(surface.markdown_previews[&first].document.is_none());
+            surface.set_mount(IdeSurfaceMount::DetachedWindow, cx);
             surface.copy_active_editor_selection(cx);
             assert_eq!(
                 cx.read_from_clipboard().unwrap().text().as_deref(),
@@ -485,6 +576,7 @@ mod markdown_preview_tests {
         cx.update(|window, cx| {
             surface.update(cx, |surface, cx| {
                 assert!(!surface.is_markdown_preview());
+                assert!(surface.markdown_previews[&first].document.is_none());
                 let editor = surface.active_editor().unwrap();
                 assert!(editor.focus_handle(cx).is_focused(window));
                 editor.update(cx, |editor, cx| {
@@ -667,5 +759,72 @@ mod markdown_preview_tests {
             source.len(),
             start.elapsed()
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[gpui::test]
+    #[ignore = "manual active/background/restored tab live-allocation comparison"]
+    fn ide_background_tab_memory(cx: &mut TestAppContext) {
+        #[repr(C)]
+        #[derive(Default)]
+        struct Statistics {
+            blocks: u32,
+            live: usize,
+            peak: usize,
+            allocated: usize,
+        }
+        unsafe extern "C" {
+            fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Statistics);
+        }
+        let allocated = || {
+            let mut stats = Statistics::default();
+            // A null zone measures live allocations across zones, not RSS.
+            unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
+            stats.live
+        };
+        for markdown in [false, true] {
+            let baseline = allocated();
+            let (surface, cx) = cx.add_window_view(|_, cx| ready_surface(cx));
+            let (tab, other) = surface.update(cx, |surface, cx| {
+                surface.set_mount(IdeSurfaceMount::MainWindow, cx);
+                let tab = surface.workspace.tabs()[0].id;
+                let other = surface.workspace.tabs()[2].id;
+                let text = if markdown {
+                    "# Heading\n\nParagraph with **bold**, `code`, and a link.\n\n".repeat(16384)
+                } else {
+                    format!("[{}0]", "{\"key\":42,\"text\":\"sample\"},\n".repeat(32768))
+                };
+                if !markdown {
+                    surface.show_markdown_source(tab, cx);
+                }
+                surface.editors[&tab].update(cx, |editor, cx| {
+                    editor.replace_text_external(text, cx);
+                    if !markdown {
+                        editor.set_language(Some(oxideterm_editor_syntax::LanguageId::Json), cx);
+                    }
+                });
+                (tab, other)
+            });
+            let draw = |cx: &mut gpui::VisualTestContext| {
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+                cx.run_until_parked();
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            };
+            draw(cx);
+            let active = allocated();
+            surface.update(cx, |surface, cx| surface.activate_tab(other, cx));
+            draw(cx);
+            let background = allocated();
+            let start = Instant::now();
+            surface.update(cx, |surface, cx| surface.activate_tab(tab, cx));
+            draw(cx);
+            let restore_ms = start.elapsed().as_secs_f64() * 1000.0;
+            let restored = allocated();
+            cx.update(|window, _| window.remove_window());
+            drop(surface);
+            cx.cx.update(|_| {});
+            cx.run_until_parked();
+            eprintln!("IDE_TAB_MEMORY markdown={markdown} baseline={baseline} active={active} background={background} restored={restored} closed={} restore_ms={restore_ms:.3}", allocated());
+        }
     }
 }
