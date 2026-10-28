@@ -26,6 +26,132 @@ Use the same fixture size, warm-up count, measured-run count, terminal dimension
 
 ## In-App Performance Work
 
+### Shared Background-Search Text (2026-10-28)
+
+The background search path now retains one text owner per matched logical line, or one
+owner for the complete cross-line subject. Rows carry byte ranges into that owner instead
+of keeping a second copy of every row's text. Extraction still holds the terminal lock
+for at most 32 rows at a time; a reusable chunk string separates that bounded copy from
+growth of the complete subject outside the lock. Immutable Unicode column adjustments
+use exactly sized boxed slices rather than retaining vector growth capacity.
+
+Arbitrary cross-line regex semantics remain unchanged: no fixed search window or match
+limit was introduced. Stable row identities, screen-content checks, neighbor context,
+written spaces, wide cells and combining marks still determine result validation.
+
+Measured on the same Apple M5 / macOS 26.6.2 / Rust 1.97.0 setup as below, optimized bench
+profile, one warm-up and five measured samples. The fixture contains 20,000 history rows
+at 400 columns plus 40 screen rows. The baseline is the original search implementation
+at `f11dff350`; the earlier hidden-cache changes do not participate in this backend fixture.
+Queries are compiled before measurement, matching the UI's compiled-query reuse. Peak
+heap is additional requested Rust heap above the populated terminal and compiled query,
+covering both scanning and result reconciliation. It excludes allocator slack and RSS.
+Time is the median sum of scanning and reconciliation; the CSV also separates both stages.
+
+| Workload | Peak before | Peak after | Time before | Time after |
+| --- | ---: | ---: | ---: | ---: |
+| Full ASCII, regex miss | 22.40 MiB | 14.26 MiB | 3.60 ms | 3.18 ms |
+| Full ASCII, regex hit | 27.11 MiB | 18.67 MiB | 7.34 ms | 6.85 ms |
+| Full ASCII, cross-line literal | 27.11 MiB | 18.67 MiB | 3.86 ms | 3.36 ms |
+| Alternating per-cell colors, regex miss | 24.54 MiB | 14.26 MiB | 31.82 ms | 37.17 ms |
+| Alternating per-cell colors, regex hit | 29.25 MiB | 18.67 MiB | 35.78 ms | 40.52 ms |
+| CJK + combining marks, regex miss | 161.11 MiB | 115.38 MiB | 50.35 ms | 44.52 ms |
+| CJK + combining marks, regex hit | 165.82 MiB | 119.79 MiB | 75.05 ms | 71.13 ms |
+| CJK + combining marks, cross-line literal | 165.82 MiB | 119.79 MiB | 58.78 ms | 54.02 ms |
+
+Retained because memory is the priority: the alternating-color cases cost about 3–5 ms
+more per search, while plain text and mixed Unicode regex searches improve. Dense ASCII
+literal results still consume about 68 MiB at peak for 280,546 hits; result objects are
+not capped or discarded. Unicode mapping data remains the largest mixed-text allocation.
+
+All paired benchmark result counts are unchanged. The complete terminal-core unit suite
+passed with its existing ignored cases left ignored; all 11 selected terminal-view search
+tests passed, including SSH search refresh during output, cancellation, manual-scroll
+preservation and result selection near the viewport. The real backend Unicode case now
+also checks a dot-all regex spanning three rows against explicit column ranges. Formatting
+and diff checks passed. This batch does not change the pre-existing animation-test failure
+recorded below.
+
+Raw data: `target/memory-evaluation/search-before.csv`, `search-shared.csv` (text sharing
+before tightening coordinate allocations), and `search-after.csv`.
+
+```sh
+cargo bench -p oxideterm-terminal --bench history_search
+cargo test -p oxideterm-terminal --lib
+cargo test -p oxideterm-gpui-terminal search
+```
+
+### Hidden Terminal Caches And Rejected Palette Expansion (2026-10-28)
+
+Baseline: `f11dff350`, Apple M5, macOS 26.6.2, Rust 1.97.0. The homepage redesign
+was reverted before this work. Only hidden terminal text-cache reclamation was retained;
+both expanded-history-attribute candidates were rejected and their production changes removed.
+
+Hidden tabs now release retained row layouts, text shaping/paint caches, highlights and
+link layouts. Visibility follows the tab host, including every split pane and detached
+window, rather than keyboard focus. App locking releases these caches in all panes.
+Session state, selection, scroll position, search state, and image animation clocks remain
+owned by the pane. Visible panes rebuild text caches on demand. Images and background
+media are not evicted by this change.
+
+The native `terminal_tab_switch_frame` benchmark opens eight playback terminals and presents
+32 batches of 16 distinct log lines in each before cycling between tabs. Both revisions
+use the same tracking allocator and workload. The heap measurement is the requested Rust
+heap increment after setup with seven tabs hidden; it excludes native font allocations,
+GPU resources and allocator size classes. It is a setup measurement, not process RSS.
+Frame measurements use native text shaping and the Metal headless renderer, with ten
+Criterion samples, one second of warm-up and two seconds of measurement.
+
+| Measurement | Before | Retained candidate |
+| --- | ---: | ---: |
+| Eight-tab requested heap increment | 60.02 MiB | 35.25 MiB |
+| Tab-switch iteration estimate | 0.894 ms | 1.299 ms |
+| Tab-switch dirty-to-draw p99 | 3.557 ms | 3.330 ms |
+| Continuous playback-output iteration estimate | 0.835 ms | 0.816 ms |
+
+The heap reduction is 24.77 MiB (41.3%) in this fixture. Switching pays about 0.405 ms
+for rebuilding discarded layouts; all measured tab-switch frames remained inside the
+120 Hz frame budget. Continuous playback output showed no statistically significant change.
+This measures rendering and playback parsing, not end-to-end PTY or SSH throughput.
+
+History experiments used the existing 20,000-line, 400-column benchmark, extended with
+17- and 64-color indexed palettes. Values below are medians of five measured samples
+after one warm-up. The generic candidate used a hash table beyond 16 attributes; the
+restricted candidate used direct indexed-color lookup and kept the old complex-color fallback.
+
+| Input / candidate | Retained heap | Steady output | Narrow to 200 columns and restore |
+| --- | ---: | ---: | ---: |
+| 17 colors / baseline | 189.65 MiB | 160.58 ms | 24.31 ms |
+| 17 colors / generic table | 72.77 MiB | 231.01 ms | 132.36 ms |
+| 17 colors / direct palette | 72.77 MiB | 179.25 ms | 59.48 ms |
+| 64 colors / baseline | 189.65 MiB | 160.12 ms | 23.77 ms |
+| 64 colors / generic table | 87.11 MiB | 265.42 ms | 200.80 ms |
+| 64 colors / direct palette | 87.11 MiB | 179.92 ms | 67.12 ms |
+| Unique RGB per cell / baseline | 189.65 MiB | 212.14 ms | 26.11 ms |
+| Unique RGB per cell / generic table | 189.65 MiB | 430.12 ms | 288.42 ms |
+
+Both candidates saved memory on repeated palettes, but their output and narrowing costs
+were unacceptable for this iteration. The existing 16-attribute admission policy remains.
+
+Validation: 212 of 213 terminal-view tests passed, including hidden output/search/selection/
+scroll preservation and release/rebuild of cached text. The extended application test for
+split panes, background tabs, detached windows, return-to-main and app-lock visibility passed.
+The existing `terminal_background_animation_plays_and_pauses` test failed at `app/render.rs:3027`;
+running it with both modified terminal source files restored to HEAD reproduced the same
+failure (`false` versus expected `true`). Its test and animation implementation were not changed.
+Formatting and diff checks passed. Interactive testing in a user's live SSH sessions was not run.
+
+Local raw results: `target/memory-evaluation/history-before.csv`, `history-candidate.csv`,
+`history-palette.csv`, `tabs-before.txt`, `tabs-after.txt`, and `animation-baseline.txt`.
+The rejected direct-palette patch is retained there as `rejected-palette.patch`.
+
+```sh
+cargo bench -p alacritty_terminal --bench history
+cargo bench -p oxideterm-gpui-terminal --features bench --bench terminal_render -- \
+  'terminal_(tab_switch_frame|playback_output_frame)' \
+  --sample-size 10 --warm-up-time 1 --measurement-time 2
+```
+
 ### Text-Run History And Sequential Reads (2026-10-26)
 
 The third-stage baseline is the completed eight-byte implementation, saved before production edits in `target/text-history/baseline-src/` and `phase2.patch`. Both revisions were measured on the same Apple M5, ARM64 macOS 26.6.2, Rust 1.97.0, optimized bench profile, with one warm-up and five measured samples. Values below are medians; MB means 1,000,000 requested heap bytes.

@@ -1899,6 +1899,22 @@ mod incremental_snapshot_tests {
                 );
             }
         }
+        let spanning = source.search_matches_with_options(
+            r"(?s)中文.*bar",
+            crate::TerminalSearchOptions {
+                regex: true,
+                ..Default::default()
+            },
+            &|| false,
+        );
+        assert_eq!(
+            spanning
+                .iter()
+                .flat_map(|hit| &hit.ranges)
+                .map(|range| (range.line, range.start_col, range.end_col))
+                .collect::<Vec<_>>(),
+            vec![(0, 1, 7), (1, 0, 4), (2, 0, 3)]
+        );
     }
 
     #[test]

@@ -486,6 +486,7 @@ pub struct TerminalPane {
     snapshot: TerminalSnapshot,
     render_mode: TermMode,
     snapshot_dirty: bool,
+    render_cache_visible: bool,
     snapshot_deferred_since: Option<Instant>,
     snapshot_generation: u64,
     next_snapshot_line_id: u64,
@@ -1255,6 +1256,7 @@ impl TerminalPane {
             snapshot,
             render_mode,
             snapshot_dirty: false,
+            render_cache_visible: true,
             snapshot_deferred_since: None,
             snapshot_generation: 1,
             next_snapshot_line_id,
@@ -1497,6 +1499,24 @@ impl TerminalPane {
         if self.selection.is_none() {
             self.selecting = false;
             self.selection_autoscroll_position = None;
+        }
+    }
+
+    pub fn render_cache_visible(&self) -> bool {
+        self.render_cache_visible
+    }
+
+    pub fn set_render_cache_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.render_cache_visible == visible {
+            return;
+        }
+        self.render_cache_visible = visible;
+        if visible {
+            cx.notify();
+        } else {
+            // Only discard derived text layouts. The session, selection, viewport and image
+            // animation clocks remain pane-owned and continue independently of presentation.
+            self.layout_cache.lock().clear();
         }
     }
 
@@ -5041,6 +5061,49 @@ mod tests {
             );
             assert_eq!(text.as_str(), "captured");
             assert!(pane.take_plugin_text_request().is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_render_cache_preserves_output_selection_and_scroll(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.feed_recording_output("kept selection\r\n".repeat(80).as_bytes(), cx);
+            pane.terminal.lock().scroll_lines(20);
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.set_selection(Some(TerminalSelection {
+                anchor: TerminalGridPoint { line: -20, col: 0 },
+                head: TerminalGridPoint { line: -20, col: 3 },
+                mode: TerminalSelectionMode::Simple,
+            }));
+            pane.set_render_cache_visible(false, cx);
+            pane.feed_recording_output(b"late", cx);
+            assert_eq!(pane.selected_text_snapshot().as_deref(), Some("kept"));
+            let source = pane.terminal.lock().search_source().unwrap();
+            assert_eq!(
+                source
+                    .search_matches("late", &|| false)
+                    .iter()
+                    .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                    .collect::<Vec<_>>(),
+                vec![(23, 0, 4)]
+            );
+            pane.set_render_cache_visible(true, cx);
+        });
+        cx.update(|window, cx| {
+            pane.update(cx, |pane, cx| {
+                let _ = pane.render(window, cx).into_any_element();
+                assert_eq!(pane.snapshot.display_offset, 20);
+                assert_eq!(pane.selected_text_snapshot().as_deref(), Some("kept"));
+                assert!(pane.ai_buffer_snapshot().ends_with("late"));
+            })
         });
     }
 

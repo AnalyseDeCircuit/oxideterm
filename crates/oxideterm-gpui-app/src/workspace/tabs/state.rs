@@ -79,6 +79,7 @@ impl WorkspaceApp {
         cx: &mut App,
     ) {
         if previous_active_tab_id != active_tab_id {
+            self.sync_terminal_render_caches(cx);
             let mut previous_panes = Vec::new();
             if let Some(root) = previous_active_tab_id
                 .and_then(|id| self.tab_by_id(id, cx))
@@ -110,6 +111,12 @@ impl WorkspaceApp {
             self.sync_active_terminal_recording_elapsed_tick(cx);
             self.sync_active_privilege_prompt_inline_hint(cx);
         }
+    }
+
+    pub(in crate::workspace) fn sync_terminal_render_caches(&self, cx: &mut App) {
+        self.tab_host.update(cx, |host, cx| {
+            host.sync_terminal_render_caches(!self.app_lock.locked, cx);
+        });
     }
 
     pub(in crate::workspace) fn tabs<'a>(&self, cx: &'a App) -> &'a [Tab] {
