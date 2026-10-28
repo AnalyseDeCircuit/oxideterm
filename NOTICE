@@ -88,11 +88,11 @@ Russh
 Copyright 2016 Pierre-Étienne Meunier.
 Copyright 2024-2026 Eugeny contributors and Russh contributors.
 Licensed under the Apache License, Version 2.0.
-Vendored as crates/russh from the Tauri application vendor copy
-src-tauri/vendor/russh-0.59.0. That vendored copy is based on Eugeny's
-russh fork (https://github.com/Eugeny/russh), which in turn derives from
-Pierre-Étienne Meunier's Thrussh/Russh lineage. Original source copyright
-and license headers are preserved in the vendored files.
+Consumed from OxideTerm's maintained fork (https://github.com/AnalyseDeCircuit/russh),
+based on upstream Russh 0.65.0 (https://github.com/warp-tech/russh).
+The fork history was extracted from the application's former vendored copy,
+derived from Eugeny's Russh and Pierre-Étienne Meunier's Thrussh/Russh lineage.
+Original source copyright and license headers are preserved in the fork.
 
 Linux distribution icons
 Debian, Gentoo, NixOS, and Rocky Linux artwork is bundled under its respective

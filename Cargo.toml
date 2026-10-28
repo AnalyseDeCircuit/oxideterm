@@ -103,7 +103,7 @@ gpui-pre-windows = { path = "crates/gpui-ce/gpui_windows" }
 gpui-pre-linux = { path = "crates/gpui-ce/gpui_linux" }
 gpui-pre-wgpu = { path = "crates/gpui-ce/gpui_wgpu" }
 # Keep the SSH protocol fork independent from application lint and test targets.
-russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "df41ee42819999db363e67309bbde0955a43e693" }
+russh = { git = "https://github.com/AnalyseDeCircuit/russh", rev = "e115f85e095b2f6fb5dc171988e720048fe1dd7c" }
 russh-sftp = { path = "crates/russh-sftp" }
 vte = { path = "crates/vte" }
 
@@ -213,7 +213,7 @@ rand10 = { package = "rand", version = "0.10" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots", "socks", "stream", "system-proxy"] }
 rmcp = { version = "3.1.2", default-features = false, features = ["server", "transport-streamable-http-server"] }
 rmp-serde = "1"
-russh = "=0.63.0"
+russh = "=0.65.0"
 scap = { version = "0.0.8-zed", package = "zed-scap", default-features = false }
 schemars = { version = "1.0", features = ["indexmap2"] }
 semver = { version = "1.0", features = ["serde"] }
