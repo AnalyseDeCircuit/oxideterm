@@ -355,8 +355,10 @@ impl TextEditorView {
         } else {
             EditorSaveStatus::Clean
         };
-        self.viewport
-            .clamp(self.document_row_count(), self.metrics.line_height);
+        if self.render_cache_active {
+            self.viewport
+                .clamp(self.document_row_count(), self.metrics.line_height);
+        }
         cx.notify();
     }
 

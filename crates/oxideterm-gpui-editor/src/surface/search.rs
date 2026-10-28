@@ -4,7 +4,6 @@
 use gpui::Context;
 use oxideterm_editor_core::{
     BufferOffset, EditTransaction, FindMatch, FindOptions, Selection, TextEdit, TextRange,
-    find_all, replace_all_transaction, word_at,
 };
 
 use super::TextEditorView;
@@ -137,7 +136,7 @@ impl TextEditorView {
             let Ok(pattern) = self.find_pattern() else {
                 return;
             };
-            let expanded = self.buffer.with_text(|text| {
+            let expanded = self.buffer.with_temporary_text(|text| {
                 let captures = pattern.captures_at(text, hit.range.start.0)?;
                 let matched = captures.get(0)?;
                 if matched.start() != hit.range.start.0 || matched.end() != hit.range.end.0 {
@@ -169,7 +168,7 @@ impl TextEditorView {
             let Ok(pattern) = self.find_pattern() else {
                 return;
             };
-            self.buffer.with_text(|text| {
+            self.buffer.with_temporary_text(|text| {
                 let edits = pattern
                     .captures_iter(text)
                     .filter_map(|captures| {
@@ -191,9 +190,13 @@ impl TextEditorView {
                 EditTransaction::new(edits)
             })
         } else {
-            self.buffer.with_text(|text| {
-                replace_all_transaction(text, &self.find_query, &replacement, self.find_options())
-            })
+            EditTransaction::new(
+                self.buffer
+                    .find_all(&self.find_query, self.find_options())
+                    .into_iter()
+                    .map(|hit| TextEdit::new(hit.range, replacement.clone()))
+                    .collect(),
+            )
         };
         if transaction.is_empty() {
             return;
@@ -219,14 +222,13 @@ impl TextEditorView {
         self.find_regex_error = false;
         if self.find_query.is_empty() {
             self.find_pattern_cache.borrow_mut().take();
-            self.find_matches.clear();
-            self.find_line_matches.clear();
+            self.find_matches = Vec::new();
             self.active_find_index = None;
             return;
         }
         self.find_matches = if self.find_regex {
             match self.find_pattern() {
-                Ok(pattern) => self.buffer.with_text(|text| {
+                Ok(pattern) => self.buffer.with_temporary_text(|text| {
                     pattern
                         .find_iter(text)
                         .filter(|matched| !matched.is_empty())
@@ -244,10 +246,8 @@ impl TextEditorView {
                 }
             }
         } else {
-            self.buffer
-                .with_text(|text| find_all(text, &self.find_query, self.find_options()))
+            self.buffer.find_all(&self.find_query, self.find_options())
         };
-        self.find_line_matches = self.build_find_line_matches();
         if self
             .active_find_index
             .is_some_and(|index| index >= self.find_matches.len())
@@ -264,7 +264,7 @@ impl TextEditorView {
     pub(super) fn select_current_word_for_find(&mut self, cx: &mut Context<Self>) {
         let selection = self.cursor.selection();
         let query = if selection.is_caret() {
-            self.buffer.with_text(|text| word_at(text, selection.head))
+            self.buffer.word_at(selection.head)
         } else {
             self.buffer.slice(selection.range()).unwrap_or_default()
         };

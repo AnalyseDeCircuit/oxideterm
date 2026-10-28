@@ -97,6 +97,7 @@ impl Render for TextEditorView {
         let focused = self.focus_handle.is_focused(window);
         self.sync_caret_blink_focus(focused, cx);
         self.measure_code_metrics(window, cx);
+        self.highlight_chunk_cache.borrow_mut().begin_frame();
         // Content edits, wrapping, and resizing can all shorten the widest row.
         self.viewport
             .clamp_horizontal(self.max_horizontal_scroll_px());
@@ -135,6 +136,11 @@ impl Render for TextEditorView {
             rows = rows.child(self.render_row(display_index, row, &row_context, window, cx));
         }
         rows = rows.child(div().h(px(visible.bottom_spacer_px as f32)));
+        self.highlight_chunk_cache.borrow_mut().finish_frame();
+        self.segment_cache
+            .borrow_mut()
+            .lines
+            .retain(|line, _| visible_rows.iter().any(|row| row.line == *line));
 
         let mut body_content = div()
             .relative()
@@ -525,12 +531,35 @@ impl TextEditorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        if matches!(
+            &*self.display_rows(),
+            super::wrap::DisplayRows::Unwrapped(_)
+        ) && let Some(segments) = self.line_segments(display_row.line)
+        {
+            let first = segments.at_x(self.viewport.scroll_x_px).saturating_sub(1);
+            let last = (segments
+                .at_x(self.viewport.scroll_x_px + self.horizontal_viewport_width_px())
+                + 1)
+            .min(segments.starts.len() - 1);
+            let origin = segments.starts[first];
+            let text = self.segment_text(display_row.line, origin.byte, segments.end(last));
+            return self.render_row_with_text(
+                display_index,
+                display_row,
+                &text,
+                origin,
+                row_context,
+                window,
+                cx,
+            );
+        }
         self.buffer
             .with_line_text(display_row.line, |line_text| {
                 self.render_row_with_text(
                     display_index,
                     display_row,
                     line_text,
+                    super::segments::SegmentOrigin::default(),
                     row_context,
                     window,
                     cx,
@@ -544,6 +573,7 @@ impl TextEditorView {
         display_index: usize,
         display_row: DisplayRow,
         line_text: &str,
+        origin: super::segments::SegmentOrigin,
         row_context: &RenderRowContext,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -571,21 +601,38 @@ impl TextEditorView {
             .iter()
             .any(|range| range.contains(&line));
         let cursor_visual_column = cursor_position
-            .map(|position| visual_column_for_byte_column(&line_text, position.column))
+            .map(|position| {
+                origin.column
+                    + visual_column_for_byte_column(
+                        &line_text,
+                        position.column.saturating_sub(origin.byte),
+                    )
+            })
             .unwrap_or(0);
-        let show_cursor = row_context.primary_caret_display_index == Some(display_index);
-        let cursor_column = cursor_visual_column.saturating_sub(display_row.start_col);
+        let show_cursor = row_context.primary_caret_display_index == Some(display_index)
+            && cursor_position.is_some_and(|position| {
+                position.column >= origin.byte && position.column <= origin.byte + line_text.len()
+            });
+        let cursor_column =
+            cursor_visual_column.saturating_sub(display_row.start_col.max(origin.column));
         let line_height = self.metrics.line_height;
         let gutter_width = self.visible_gutter_width();
-        let content_left = self.visible_content_padding_x() - self.viewport.scroll_x_px;
+        let content_left = self.visible_content_padding_x() - self.viewport.scroll_x_px + origin.x;
         let row_display = display_row;
-        let byte_start = byte_column_for_visual_column(&line_text, display_row.start_col);
-        let byte_end = byte_column_for_visual_column(&line_text, display_row.end_col);
+        let byte_start = byte_column_for_visual_column(
+            &line_text,
+            display_row.start_col.saturating_sub(origin.column),
+        );
+        let byte_end = byte_column_for_visual_column(
+            &line_text,
+            display_row.end_col.saturating_sub(origin.column),
+        );
         let segment_text = &line_text[byte_start..byte_end];
         let cursor_byte_column = cursor_position
             .filter(|_| show_cursor)
-            .map(|position| position.column.saturating_sub(byte_start));
-        let segment_range = (line_start + byte_start)..(line_start + byte_end).min(line_end);
+            .map(|position| position.column.saturating_sub(origin.byte + byte_start));
+        let segment_range = (line_start + origin.byte + byte_start)
+            ..(line_start + origin.byte + byte_end).min(line_end);
         let selection_ranges = if row_context.selections.is_empty() {
             Vec::new()
         } else {
@@ -598,15 +645,18 @@ impl TextEditorView {
         let find_ranges = if self.find_matches.is_empty() {
             Vec::new()
         } else {
-            self.find_rects_for_line(line, &segment_text, segment_range.clone())
+            self.find_rects_for_line(&segment_text, segment_range.clone())
         };
         let bracket_ranges = row_context
             .matching_bracket_pair
             .as_ref()
             .map(|pair| self.bracket_rects_for_line(pair, &segment_text, segment_range.clone()))
             .unwrap_or_default();
-        let indent_guides =
-            self.indentation_marker_columns(display_row, &row_context.indentation_columns_by_line);
+        let indent_guides = self
+            .indentation_marker_columns(display_row, &row_context.indentation_columns_by_line)
+            .into_iter()
+            .filter_map(|column| column.checked_sub(origin.column))
+            .collect::<Vec<_>>();
         let needs_shaped_coordinates = cursor_byte_column.is_some()
             || !selection_ranges.is_empty()
             || !find_ranges.is_empty()
@@ -827,6 +877,7 @@ impl TextEditorView {
                     show_cursor,
                     marked_text,
                     folded,
+                    window,
                 )),
         );
 
@@ -1063,6 +1114,7 @@ impl TextEditorView {
         show_cursor: bool,
         marked_text: Option<&str>,
         folded: bool,
+        window: &mut Window,
     ) -> Div {
         let byte_column = byte_column_for_visual_column(line_text, cursor_column);
         let mut row = div().flex().items_center();
@@ -1106,7 +1158,7 @@ impl TextEditorView {
                 row = self.append_rendered_text(row, after, chunk.color);
                 cursor_drawn = true;
             } else {
-                row = self.append_rendered_chunk(row, chunk);
+                row = self.append_rendered_chunk(row, chunk, window);
             }
         }
 
@@ -1152,11 +1204,64 @@ impl TextEditorView {
         row
     }
 
-    fn append_rendered_chunk(&self, row: Div, chunk: &LineChunkSpec) -> Div {
+    fn append_rendered_chunk(&self, row: Div, chunk: &LineChunkSpec, window: &mut Window) -> Div {
         if !self.settings.highlight_special_chars || !contains_special_char(&chunk.text) {
-            // Highlight chunks are cached across scroll frames, so retain the
-            // shared text allocation instead of rebuilding a String per row.
-            return row.child(colored_shared_text(chunk.text.clone(), chunk.color));
+            // Retain the native glyph layout with the existing bounded row cache,
+            // so scrolling back does not depend on GPUI's previous-frame cache.
+            let layout = chunk
+                .layout
+                .get_or_init(|| {
+                    let run = gpui::TextRun {
+                        len: chunk.text.len(),
+                        font: editor_code_font(
+                            &self.appearance.font_family,
+                            self.appearance.font_fallback_family.as_deref(),
+                            self.appearance.font_weight,
+                        ),
+                        color: rgb(chunk.color).into(),
+                        background_color: None,
+                        underline: None,
+                        strikethrough: None,
+                        letter_spacing: None,
+                    };
+                    window.text_system().layout_line(
+                        &chunk.text,
+                        px(self.metrics.font_size),
+                        &[run],
+                        None,
+                    )
+                })
+                .clone();
+            let width = layout.width.ceil();
+            let line_height = px(self.metrics.line_height);
+            let decoration = gpui::DecorationRun {
+                len: chunk.text.len() as u32,
+                color: rgb(chunk.color).into(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            return row.child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, cx| {
+                        layout
+                            .paint(
+                                bounds.origin,
+                                line_height,
+                                gpui::TextAlign::Left,
+                                None,
+                                std::slice::from_ref(&decoration),
+                                window,
+                                cx,
+                            )
+                            .expect("editor text painting failed");
+                    },
+                )
+                .w(width)
+                .h(line_height)
+                .flex_none(),
+            );
         }
         self.append_rendered_text(row, &chunk.text, chunk.color)
     }
@@ -1186,6 +1291,9 @@ impl TextEditorView {
                     .offset_to_line_col(self.cursor.selection().head)
                     .ok()
                     .and_then(|position| {
+                        if matches!(display_rows, super::wrap::DisplayRows::Unwrapped(_)) {
+                            return Some(position.line);
+                        }
                         let line_text = self.buffer.line_text(position.line).unwrap_or_default();
                         let visual_column =
                             visual_column_for_byte_column(&line_text, position.column);
@@ -1291,20 +1399,15 @@ impl TextEditorView {
             .collect()
     }
 
-    fn find_rects_for_line(
-        &self,
-        line: usize,
-        line_text: &str,
-        line_range: Range<usize>,
-    ) -> Vec<Range<usize>> {
-        let match_range = self.find_line_matches.get(line).cloned().unwrap_or(0..0);
-        if match_range.is_empty() {
-            return Vec::new();
-        }
-        self.find_matches
-            .get(match_range)
-            .unwrap_or(&[])
+    fn find_rects_for_line(&self, line_text: &str, line_range: Range<usize>) -> Vec<Range<usize>> {
+        // Literal matches have equal byte lengths and regex matches do not
+        // overlap, so both their starts and ends are ordered, including multiline hits.
+        let first = self
+            .find_matches
+            .partition_point(|hit| hit.range.end.0 <= line_range.start);
+        self.find_matches[first..]
             .iter()
+            .take_while(|hit| hit.range.start.0 < line_range.end)
             .filter_map(|hit| {
                 selection_byte_range_for_line(
                     Selection::new(hit.range.start, hit.range.end),
@@ -1375,7 +1478,7 @@ impl TextEditorView {
             range_start: line_range.start,
             range_end: line_range.end,
         };
-        if let Some(chunks) = self.highlight_chunk_cache.borrow().get(&key) {
+        if let Some(chunks) = self.highlight_chunk_cache.borrow_mut().get(&key) {
             return chunks;
         }
 
@@ -1536,11 +1639,8 @@ fn push_chunk(
         end,
         color,
         text: SharedString::from(line_text[start..end].to_string()),
+        layout: Default::default(),
     });
-}
-
-fn colored_shared_text(text: SharedString, color: u32) -> Div {
-    div().text_color(rgb(color)).child(text)
 }
 
 fn contains_special_char(text: &str) -> bool {
