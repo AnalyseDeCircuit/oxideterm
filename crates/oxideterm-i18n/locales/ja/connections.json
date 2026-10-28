@@ -43,7 +43,6 @@
       "loading": "統計を読み込み中...",
       "idle_timeout": "アイドル: {{min}}分",
       "idle_timeout_never": "アイドル: タイムアウトなし",
-      "capacity": "容量: {{capacity}}",
       "active": "アクティブ",
       "idle": "アイドル",
       "reconnecting": "再接続中",

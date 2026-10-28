@@ -43,7 +43,6 @@
       "loading": "載入統計資料...",
       "idle_timeout": "閒置：{{min}} 分鐘",
       "idle_timeout_never": "閒置：永不逾時",
-      "capacity": "容量：{{capacity}}",
       "active": "使用中",
       "idle": "閒置",
       "reconnecting": "重新連線中",

@@ -111,7 +111,7 @@ impl ConnectionPoolEntrySummary {
     }
 }
 
-/// Tauri-compatible `ssh_get_pool_stats` payload.
+/// Native dashboard statistics; plugin RPCs expose their own compact payload.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionPoolMonitorStats {
@@ -124,18 +124,15 @@ pub struct ConnectionPoolMonitorStats {
     pub total_sftp_sessions: usize,
     pub total_forwards: usize,
     pub total_ref_count: u32,
-    pub pool_capacity: usize,
     pub idle_timeout_secs: u64,
 }
 
 impl ConnectionPoolMonitorStats {
     pub fn from_snapshots(
         snapshots: impl IntoIterator<Item = PoolConnectionMonitorSnapshot>,
-        pool_capacity: usize,
         idle_timeout_secs: u64,
     ) -> Self {
         let mut stats = Self {
-            pool_capacity,
             idle_timeout_secs,
             ..Self::default()
         };

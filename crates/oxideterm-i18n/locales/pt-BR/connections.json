@@ -43,7 +43,6 @@
       "loading": "Carregando estatísticas...",
       "idle_timeout": "Inativo: {{min}} min",
       "idle_timeout_never": "Inativo: sem limite",
-      "capacity": "Capacidade: {{capacity}}",
       "active": "Ativo",
       "idle": "Inativo",
       "reconnecting": "Reconectando",

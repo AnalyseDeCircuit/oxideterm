@@ -206,7 +206,6 @@ impl fmt::Debug for SharedSftpState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConnectionPoolConfig {
     pub idle_timeout: Option<Duration>,
-    pub max_connections: usize,
     pub protect_on_exit: bool,
 }
 
@@ -214,7 +213,6 @@ impl Default for ConnectionPoolConfig {
     fn default() -> Self {
         Self {
             idle_timeout: Some(DEFAULT_IDLE_TIMEOUT),
-            max_connections: 128,
             protect_on_exit: true,
         }
     }
@@ -1726,11 +1724,7 @@ impl SshConnectionRegistry {
             .map(|entry| entry.monitor_snapshot())
             .collect::<Vec<_>>();
 
-        ConnectionPoolMonitorStats::from_snapshots(
-            snapshots,
-            self.config.read().max_connections,
-            idle_timeout_secs,
-        )
+        ConnectionPoolMonitorStats::from_snapshots(snapshots, idle_timeout_secs)
     }
 
     pub fn connection_topology_snapshot(&self) -> ConnectionTopologySnapshot {
@@ -2810,7 +2804,6 @@ mod tests {
     async fn idle_timeout_disconnects_unused_connection() {
         let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
             idle_timeout: Some(Duration::from_millis(10)),
-            max_connections: 4,
             protect_on_exit: true,
         });
         registry.set_task_runtime(tokio::runtime::Handle::current());
@@ -2842,6 +2835,40 @@ mod tests {
 
         registry.release(first.connection_id(), &consumer);
         assert_eq!(first.info().ref_count, 0);
+    }
+
+    #[test]
+    fn registry_preserves_connections_beyond_the_former_display_capacity() {
+        let registry = SshConnectionRegistry::default();
+        let handles = (0..129)
+            .map(|index| {
+                registry.acquire(
+                    SshConfig {
+                        host: format!("host-{index}.example.invalid"),
+                        username: "test".into(),
+                        ..SshConfig::default()
+                    },
+                    ConnectionConsumer::Terminal(format!("term-{index}")),
+                )
+            })
+            .collect::<Vec<_>>();
+        let stats = registry.monitor_stats();
+        assert_eq!(
+            (
+                stats.total_connections,
+                stats.total_terminals,
+                stats.total_ref_count
+            ),
+            (129, 129, 129)
+        );
+        for (index, handle) in handles.iter().enumerate() {
+            let info = registry.get(handle.connection_id()).unwrap().info();
+            assert_eq!(info.host, format!("host-{index}.example.invalid"));
+            assert_eq!(
+                info.consumers,
+                vec![ConnectionConsumer::Terminal(format!("term-{index}"))]
+            );
+        }
     }
 
     #[test]
@@ -2924,7 +2951,6 @@ mod tests {
     async fn keep_alive_cancels_idle_timeout_disconnect() {
         let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
             idle_timeout: Some(Duration::from_millis(10)),
-            max_connections: 4,
             protect_on_exit: true,
         });
         registry.set_task_runtime(tokio::runtime::Handle::current());
@@ -2969,7 +2995,6 @@ mod tests {
     async fn idle_timeout_updates_across_registry_clones() {
         let registry = SshConnectionRegistry::new(ConnectionPoolConfig {
             idle_timeout: Some(Duration::from_secs(60)),
-            max_connections: 4,
             protect_on_exit: true,
         });
         registry.set_task_runtime(tokio::runtime::Handle::current());

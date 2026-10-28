@@ -34,14 +34,6 @@ fn connection_runtime_attention_rank(state: &ConnectionPoolEntryState) -> usize 
     }
 }
 
-fn connection_runtime_pool_usage(total: usize, capacity: usize) -> f32 {
-    if capacity == 0 {
-        0.0
-    } else {
-        (total as f32 / capacity as f32).clamp(0.0, 1.0)
-    }
-}
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_connection_runtime_surface(
         &mut self,
@@ -279,7 +271,8 @@ impl WorkspaceApp {
             .child(
                 div()
                     .w_full()
-                    .p(px(RUNTIME_CONTENT_PADDING))
+                    .px(px(self.tokens.metrics.settings_content_padding))
+                    .py(px(RUNTIME_CONTENT_PADDING))
                     .flex()
                     .flex_col()
                     .gap_3()
@@ -337,8 +330,6 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_background = self.background_surface_active("runtime");
-        let pool_capacity = stats.pool_capacity;
-        let pool_usage = connection_runtime_pool_usage(stats.total_connections, pool_capacity);
         let timeout_minutes = stats.idle_timeout_secs.saturating_add(59) / 60;
         let timeout_label = if stats.idle_timeout_secs == 0 {
             self.i18n.t("connections.monitor.idle_timeout_never")
@@ -375,48 +366,19 @@ impl WorkspaceApp {
                     ),
             )
             .child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap_2()
-                    .child(
-                        oxideterm_gpui_ui::monospace_datum(
-                            &self.tokens,
-                            stats.total_connections.to_string(),
-                            Some(settings_mono_font_family(self.settings_store.settings())),
-                            oxideterm_gpui_ui::MonospaceDatumOptions::new(
-                                oxideterm_gpui_ui::MonospaceDatumTone::Primary,
-                            )
-                            .text_size(30.0)
-                            .strong(),
+                div().flex().items_baseline().gap_2().child(
+                    oxideterm_gpui_ui::monospace_datum(
+                        &self.tokens,
+                        stats.total_connections.to_string(),
+                        Some(settings_mono_font_family(self.settings_store.settings())),
+                        oxideterm_gpui_ui::MonospaceDatumOptions::new(
+                            oxideterm_gpui_ui::MonospaceDatumTone::Primary,
                         )
-                        .text_color(rgb(theme.text_heading)),
+                        .text_size(30.0)
+                        .strong(),
                     )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(theme.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("connections.monitor.capacity")
-                                    .replace("{{capacity}}", &pool_capacity.to_string()),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .h(px(6.0))
-                    .rounded_full()
-                    .overflow_hidden()
-                    .bg(rgb(theme.bg_hover))
-                    .child(
-                        div()
-                            .h_full()
-                            .w(relative(pool_usage))
-                            .rounded_full()
-                            .bg(rgb(theme.accent)),
-                    ),
+                    .text_color(rgb(theme.text_heading)),
+                ),
             )
             .child(
                 div()
