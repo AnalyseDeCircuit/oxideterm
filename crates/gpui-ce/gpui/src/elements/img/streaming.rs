@@ -152,8 +152,8 @@ impl AnimationStream {
                             decoder = Some(frames(input.clone(), format)?);
                             position = 0;
                         }
-                        let end = (request.index + 1).min(count - 1);
-                        while position <= end {
+                        // Prefetch is a separate request; it must not hold up a demand reply.
+                        while position <= request.index {
                             if cancelled.load(Ordering::Acquire) {
                                 return Err(anyhow::anyhow!("animation decoder stopped").into());
                             }
@@ -222,10 +222,11 @@ impl AnimationStream {
     }
 
     pub(crate) fn prefetch(&self, index: usize) {
-        let _ = self.sender.try_send(Request {
-            index: index % self.count,
-            reply: None,
-        });
+        let index = index % self.count;
+        if self.ready(index) {
+            return;
+        }
+        let _ = self.sender.try_send(Request { index, reply: None });
     }
 
     pub(crate) async fn prepare(&self, index: usize) -> Result<(), ImageCacheError> {
@@ -255,11 +256,11 @@ impl AnimationStream {
             .map_err(|_| anyhow::anyhow!("animation decoder stopped"))?
     }
 
-    pub(crate) fn pixels(&self, index: usize) -> Result<Vec<u8>> {
+    pub(crate) fn pixels(&self, index: usize) -> Result<Arc<Vec<u8>>> {
         let pixels =
             futures::executor::block_on(self.request(index)).map_err(anyhow::Error::new)?;
         self.prefetch(index + 1);
-        Ok((*pixels).clone())
+        Ok(pixels)
     }
 
     pub(crate) fn retained_bytes(&self) -> usize {

@@ -310,7 +310,7 @@ impl SizedImage {
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
         let frame = frame.min(image.frame_count().saturating_sub(1));
         if image.frame_ready(frame) {
-            image.prefetch_frame(frame);
+            image.prefetch_frame(frame + 1);
             if image.frame_count() > 1
                 && self
                     .ready
@@ -520,6 +520,29 @@ pub(crate) mod tests {
                 times[227],
                 times[239]
             );
+            futures::executor::block_on(output.prepare_frame(0)).unwrap();
+            let start = Instant::now();
+            let mut late = 0;
+            let mut reads = Vec::new();
+            for index in 0..240 {
+                let deadline = start + Duration::from_millis(index as u64 * 40);
+                std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                late += usize::from(!output.frame_ready(index));
+                let read = Instant::now();
+                let pixels = output.frame_bytes(index).unwrap().unwrap();
+                let color = (index * 7 % 256) as u8;
+                assert_eq!(
+                    &pixels[..4],
+                    &[color.wrapping_mul(7), color.wrapping_mul(3), color, 255]
+                );
+                output.prefetch_frame(index + 1);
+                reads.push(read.elapsed().as_secs_f64() * 1000.0);
+            }
+            reads.sort_by(f64::total_cmp);
+            eprintln!(
+                "PACED_PLAYBACK adaptive={adaptive} late={late} read_p95_ms={:.3} read_max_ms={:.3}",
+                reads[227], reads[239]
+            );
             if adaptive {
                 assert!(output.retained_bytes() <= 640 * 360 * 4 * 3);
             }
@@ -622,6 +645,22 @@ pub(crate) mod tests {
             );
             for frames in [regular, streamed] {
                 assert_eq!(frames.frame_count(), 4);
+                if frames.estimated_decode_working_bytes() != 0 {
+                    let upload = frames.frame_bytes(0).unwrap().unwrap();
+                    let same_frame = frames.frame_bytes(0).unwrap().unwrap();
+                    assert_eq!(
+                        upload.as_ptr(),
+                        same_frame.as_ptr(),
+                        "upload copied a cached frame"
+                    );
+                    futures::executor::block_on(frames.prepare_frame(3)).unwrap();
+                    assert!(
+                        upload
+                            .chunks_exact(4)
+                            .all(|pixel| pixel == [0, 0, 255, 255]),
+                        "eviction changed pixels still held for upload"
+                    );
+                }
                 let expected = [
                     ([0, 0, 255, 255], [0, 0, 255, 255], 70),
                     ([255, 0, 0, 255], [0, 0, 255, 255], 130),

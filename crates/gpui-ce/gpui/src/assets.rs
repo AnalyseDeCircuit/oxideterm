@@ -125,6 +125,31 @@ enum ImageFrameData {
     },
 }
 
+/// Keeps streamed pixels alive through upload without copying the cache's allocation.
+pub(crate) enum ImageFrameBytes<'a> {
+    Borrowed(&'a [u8]),
+    Owned(Vec<u8>),
+    Shared(Arc<Vec<u8>>),
+}
+
+impl std::ops::Deref for ImageFrameBytes<'_> {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Borrowed(bytes) => bytes,
+            Self::Owned(bytes) => bytes,
+            Self::Shared(bytes) => bytes,
+        }
+    }
+}
+
+impl AsRef<[u8]> for ImageFrameBytes<'_> {
+    fn as_ref(&self) -> &[u8] {
+        self
+    }
+}
+
 impl PartialEq for RenderImage {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
@@ -260,23 +285,25 @@ impl RenderImage {
             .sum()
     }
 
-    pub(crate) fn frame_bytes(&self, index: usize) -> Result<Option<Cow<'_, [u8]>>> {
+    pub(crate) fn frame_bytes(&self, index: usize) -> Result<Option<ImageFrameBytes<'_>>> {
         match self.data.get(index) {
             Some(ImageFrameData::Stream {
                 stream, decoded, ..
             }) => {
                 if let Some(pixels) = decoded.get() {
-                    Ok(Some(Cow::Borrowed(pixels)))
+                    Ok(Some(ImageFrameBytes::Borrowed(pixels)))
                 } else {
-                    Ok(Some(Cow::Owned(stream.pixels(index)?)))
+                    Ok(Some(ImageFrameBytes::Shared(stream.pixels(index)?)))
                 }
             }
-            Some(ImageFrameData::Pixels(frame)) => Ok(Some(Cow::Borrowed(frame.buffer().as_raw()))),
+            Some(ImageFrameData::Pixels(frame)) => {
+                Ok(Some(ImageFrameBytes::Borrowed(frame.buffer().as_raw())))
+            }
             Some(ImageFrameData::Compact { bytes, decoded, .. }) => {
                 if let Some(pixels) = decoded.get() {
-                    Ok(Some(Cow::Borrowed(pixels)))
+                    Ok(Some(ImageFrameBytes::Borrowed(pixels)))
                 } else {
-                    Ok(Some(Cow::Owned(
+                    Ok(Some(ImageFrameBytes::Owned(
                         image::load_from_memory_with_format(bytes, image::ImageFormat::Qoi)?
                             .into_rgba8()
                             .into_raw(),
@@ -300,7 +327,7 @@ impl RenderImage {
         }) = self.data.get(frame_index)
         {
             if decoded.get().is_none() {
-                let _ = decoded.set(stream.pixels(frame_index).ok()?);
+                let _ = decoded.set(stream.pixels(frame_index).ok()?.as_ref().clone());
             }
             return decoded.get().map(Vec::as_slice);
         }

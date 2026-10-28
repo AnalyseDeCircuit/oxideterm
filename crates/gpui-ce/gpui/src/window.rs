@@ -5398,13 +5398,20 @@ impl Window {
         };
         self.next_frame.image_frames.push(params.clone());
 
+        // Load only on an atlas miss, and hold the frame lease until the upload returns.
+        let frame_bytes = std::cell::OnceCell::new();
         let tile = self
             .sprite_atlas
             .get_or_insert_with(params.into(), &mut || {
+                if frame_bytes.get().is_none() {
+                    let bytes = data
+                        .frame_bytes(frame_index)?
+                        .expect("It's the caller's job to pass a valid frame index");
+                    let _ = frame_bytes.set(bytes);
+                }
                 Ok(Some((
                     data.size(frame_index),
-                    data.frame_bytes(frame_index)?
-                        .expect("It's the caller's job to pass a valid frame index"),
+                    Cow::Borrowed(frame_bytes.get().unwrap().as_ref()),
                 )))
             })?
             .expect("Callback above only returns Some");
