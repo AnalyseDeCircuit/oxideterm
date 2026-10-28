@@ -6392,6 +6392,184 @@ pub(in crate::workspace) mod entity_tests {
     }
 
     #[gpui::test]
+    #[ignore = "manual knowledge statistics redraw cost comparison"]
+    fn knowledge_statistics_redraw_cost(cx: &mut TestAppContext) {
+        use serde_json::json;
+        let directory = tempfile::tempdir().unwrap();
+        let entity = cx.new(|cx| {
+            let mut entity =
+                AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx);
+            entity.rag_store = LazyAiRagStore::new(directory.path().into());
+            entity
+        });
+        let store = entity.read_with(cx, |entity, _| entity.rag_store());
+        store.create_collection(&serde_json::from_value(json!({ "id": "stats", "name": "Statistics", "scope": "Global", "created_at": 1, "updated_at": 1 })).unwrap()).unwrap();
+        let chunks = (0..1024).map(|i| serde_json::from_value(json!({
+            "id": format!("chunk-{i:04}"), "doc_id": "document", "section_path": null,
+            "content": format!("Synthetic chunk {i}"), "tokens_estimate": 4, "offset": i * 32, "length": 20,
+        })).unwrap()).collect::<Vec<_>>();
+        store.add_document(&serde_json::from_value(json!({
+            "id": "document", "collection_id": "stats", "title": "Statistics", "source_path": null,
+            "format": "PlainText", "content_hash": "fixture", "indexed_at": 2, "chunk_count": chunks.len(), "version": 1,
+        })).unwrap(), &chunks, None).unwrap();
+        store.store_embeddings_batch(&(0..768).map(|i| serde_json::from_value(json!({
+            "chunk_id": format!("chunk-{i:04}"), "vector": vec![0.5; 1536], "model_name": "fixture", "dimensions": 1536,
+        })).unwrap()).collect::<Vec<_>>()).unwrap();
+        let start = Instant::now();
+        for _ in 0..120 {
+            let stats = store.get_collection_stats("stats").unwrap();
+            assert_eq!(
+                (
+                    stats.doc_count,
+                    stats.chunk_count,
+                    stats.embedded_chunk_count
+                ),
+                (1, 1024, 768)
+            );
+        }
+        eprintln!(
+            "KNOWLEDGE_STATS direct_120_ms={:.3}",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+        let start = Instant::now();
+        entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .request_knowledge_collection_stats("stats", cx)
+                    .is_none()
+            );
+        });
+        cx.run_until_parked();
+        eprintln!(
+            "KNOWLEDGE_STATS initial_async_ms={:.3}",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+        let start = Instant::now();
+        for _ in 0..120 {
+            let stats = entity.update(cx, |entity, cx| {
+                entity
+                    .request_knowledge_collection_stats("stats", cx)
+                    .unwrap()
+            });
+            assert_eq!(
+                (
+                    stats.doc_count,
+                    stats.chunk_count,
+                    stats.embedded_chunk_count
+                ),
+                (1, 1024, 768)
+            );
+        }
+        eprintln!(
+            "KNOWLEDGE_STATS cached_120_ms={:.3}",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+
+    #[gpui::test]
+    fn knowledge_statistics_discard_stale_reads_and_refresh_after_writes(cx: &mut TestAppContext) {
+        let directory = tempfile::tempdir().unwrap();
+        let entity = cx.new(|cx| {
+            let mut entity =
+                AiWorkspaceEntity::new(test_runtime(), oxideterm_ai::AiProviderKeyStore::new(), cx);
+            entity.rag_store = LazyAiRagStore::new(directory.path().into());
+            entity
+        });
+        let store = entity.read_with(cx, |entity, _| entity.rag_store());
+        let collection = |name: &str| {
+            oxideterm_ai::rag_create_collection(
+                &store,
+                oxideterm_ai::RagCreateCollectionRequest {
+                    name: name.into(),
+                    scope: oxideterm_ai::RagDocScopeRequest::Global,
+                },
+            )
+            .unwrap()
+            .id
+        };
+        let first = collection("First");
+        let second = collection("Second");
+        // Both requests arrive before background delivery; the first result must not publish.
+        entity.update(cx, |entity, cx| {
+            assert!(
+                entity
+                    .request_knowledge_collection_stats(&first, cx)
+                    .is_none()
+            );
+            assert!(
+                entity
+                    .request_knowledge_collection_stats(&second, cx)
+                    .is_none()
+            );
+        });
+        cx.run_until_parked();
+        entity.update(cx, |entity, cx| {
+            assert!(entity.knowledge_stats_cache_key().is_none());
+            assert!(
+                entity
+                    .request_knowledge_collection_stats(&second, cx)
+                    .is_none()
+            );
+        });
+        // A committed write between request and delivery must invalidate that read as well.
+        let document = oxideterm_ai::rag_create_blank_document(
+            &store,
+            oxideterm_ai::RagCreateBlankDocumentRequest {
+                collection_id: second.clone(),
+                title: "Note".into(),
+                format: "markdown".into(),
+            },
+        )
+        .unwrap();
+        cx.run_until_parked();
+        assert!(entity.read_with(cx, |entity, _| entity.knowledge_stats_cache_key().is_none()));
+        let refresh = |cx: &mut TestAppContext, expected: (usize, usize, usize)| {
+            entity.update(cx, |entity, cx| {
+                assert!(
+                    entity
+                        .request_knowledge_collection_stats(&second, cx)
+                        .is_none()
+                );
+            });
+            cx.run_until_parked();
+            for _ in 0..2 {
+                let stats = entity.update(cx, |entity, cx| {
+                    entity
+                        .request_knowledge_collection_stats(&second, cx)
+                        .unwrap()
+                });
+                assert_eq!(
+                    (
+                        stats.doc_count,
+                        stats.chunk_count,
+                        stats.embedded_chunk_count
+                    ),
+                    expected
+                );
+            }
+        };
+        refresh(cx, (1, 0, 0));
+        oxideterm_ai::rag_save_document(&store, &document.id, "A single paragraph.".into(), None)
+            .unwrap();
+        refresh(cx, (1, 1, 0));
+        let chunks = store.get_chunks_for_doc(&document.id).unwrap();
+        store.as_ref().clone().store_embedding(&serde_json::from_value(serde_json::json!({
+            "chunk_id": chunks[0].id, "vector": [1.0, 0.0], "dimensions": 2, "model_name": "fixture",
+        })).unwrap()).unwrap();
+        refresh(cx, (1, 1, 1));
+        oxideterm_ai::rag_remove_document(&store, &document.id).unwrap();
+        refresh(cx, (0, 0, 0));
+        // Releasing the owner while another collection is pending must not retain the entity.
+        entity.update(cx, |entity, cx| {
+            entity.request_knowledge_collection_stats(&first, cx);
+        });
+        let weak = entity.downgrade();
+        drop(entity);
+        cx.run_until_parked();
+        assert!(weak.upgrade().is_none());
+    }
+
+    #[gpui::test]
     fn hidden_knowledge_page_still_receives_import_completion(cx: &mut TestAppContext) {
         let data_dir = std::env::temp_dir().join(format!(
             "oxideterm-knowledge-entity-test-{}",

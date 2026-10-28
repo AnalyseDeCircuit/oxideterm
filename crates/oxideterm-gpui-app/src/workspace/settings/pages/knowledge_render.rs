@@ -42,18 +42,16 @@ impl WorkspaceApp {
         }
         if index == 2 {
             if let Some(collection) = selected_collection {
+                let stats = self.ai_entity.update(cx, |ai, cx| {
+                    ai.request_knowledge_collection_stats(&collection.id, cx)
+                });
                 let page = self
                     .ai_entity
                     .read(cx)
                     .knowledge_document_page(&collection.id);
                 return match page {
                     Ok((page_index, documents)) => self.knowledge_documents_card(
-                        collection,
-                        documents,
-                        page_index,
-                        oxideterm_ai::rag_get_collection_stats(&rag_store, &collection.id).ok(),
-                        true,
-                        cx,
+                        collection, documents, page_index, stats, true, cx,
                     ),
                     Err(error) => self.knowledge_error_row(&error),
                 };

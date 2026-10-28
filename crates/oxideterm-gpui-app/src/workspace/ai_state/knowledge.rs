@@ -25,11 +25,19 @@ pub(in crate::workspace) enum KnowledgeExternalSyncOutcome {
     Failed,
 }
 
+struct KnowledgeCollectionStats {
+    key: (String, u64),
+    value: oxideterm_ai::RagStatsResponse,
+}
+
 /// Page-local Knowledge state whose lifetime follows the AI workspace entity.
 ///
 /// The type intentionally has no `Debug` implementation because drafts and
 /// external-edit metadata can describe user-owned document content.
 pub(in crate::workspace) struct KnowledgePageState {
+    stats_request: Option<(String, u64)>,
+    stats: Option<KnowledgeCollectionStats>,
+    stats_task: Option<Task<()>>,
     pub(super) selected_collection_id: Option<String>,
     pub(super) document_page: usize,
     pub(super) create_dialog_open: bool,
@@ -57,6 +65,9 @@ pub(in crate::workspace) struct KnowledgePageState {
 impl Default for KnowledgePageState {
     fn default() -> Self {
         Self {
+            stats_request: None,
+            stats: None,
+            stats_task: None,
             selected_collection_id: None,
             document_page: 0,
             create_dialog_open: false,
@@ -94,6 +105,56 @@ impl KnowledgePageState {
 }
 
 impl AiWorkspaceEntity {
+    pub(in crate::workspace) fn knowledge_stats_cache_key(&self) -> Option<&(String, u64)> {
+        self.knowledge_page.stats.as_ref().map(|stats| &stats.key)
+    }
+
+    pub(in crate::workspace) fn request_knowledge_collection_stats(
+        &mut self,
+        collection_id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<oxideterm_ai::RagStatsResponse> {
+        let store = self.rag_store();
+        let key = (collection_id.to_owned(), store.collection_stats_revision());
+        self.knowledge_page.stats_request = Some(key.clone());
+        if let Some(stats) = &self.knowledge_page.stats
+            && stats.key == key
+        {
+            return Some(stats.value.clone());
+        }
+        // One worker at a time, even when selection or data changes during a read.
+        // Only the most recently requested collection/revision can publish its result.
+        if self.knowledge_page.stats_task.is_none() {
+            let task = cx.spawn(async move |entity, cx| {
+                let read_store = store.clone();
+                let collection = key.0.clone();
+                let value = cx
+                    .background_executor()
+                    .spawn(async move {
+                        oxideterm_ai::rag_get_collection_stats(&read_store, &collection).ok()
+                    })
+                    .await;
+                let _ = entity.update(cx, |entity, cx| {
+                    let current = entity.knowledge_page.stats_request.as_ref() == Some(&key)
+                        && store.collection_stats_revision() == key.1;
+                    let loaded = value.is_some();
+                    if current {
+                        entity.knowledge_page.stats =
+                            value.map(|value| KnowledgeCollectionStats { key, value });
+                    }
+                    entity.knowledge_page.stats_task = None;
+                    // A failed read can retry on the next user-driven render without a retry loop.
+                    if loaded || !current {
+                        entity.emit_knowledge_page_changed(cx);
+                    }
+                });
+            });
+            // Dropping the entity cancels delivery; the worker owns no UI or document content.
+            self.knowledge_page.stats_task = Some(task);
+        }
+        None
+    }
+
     fn emit_knowledge_page_changed(&self, cx: &mut Context<Self>) {
         cx.emit(AiWorkspaceEvent::KnowledgePageChanged);
         cx.notify();

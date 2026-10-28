@@ -149,6 +149,7 @@ pub struct RagStore {
     data_dir: PathBuf,
     hnsw_index: Arc<HnswRuntime>,
     bm25_index: Arc<Bm25Runtime>,
+    collection_stats_revision: Arc<AtomicU64>,
 }
 
 impl Clone for RagStore {
@@ -158,6 +159,7 @@ impl Clone for RagStore {
             data_dir: self.data_dir.clone(),
             hnsw_index: self.hnsw_index.clone(),
             bm25_index: self.bm25_index.clone(),
+            collection_stats_revision: self.collection_stats_revision.clone(),
         }
     }
 }
@@ -254,6 +256,7 @@ impl RagStore {
             data_dir: data_dir.to_path_buf(),
             hnsw_index: Arc::new(HnswRuntime::new()),
             bm25_index: Arc::new(Bm25Runtime::new()),
+            collection_stats_revision: Arc::new(AtomicU64::new(0)),
         };
         if store.bm25_rebuild_required()?
             && let Err(error) = store.queue_bm25_rebuild()
@@ -379,6 +382,8 @@ impl RagStore {
             )?;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!("Created collection: {}", collection.id);
         Ok(())
     }
@@ -401,6 +406,8 @@ impl RagStore {
             table.insert(collection_id, rmp_serde::to_vec(&collection)?.as_slice())?;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         Ok(())
     }
 
@@ -486,6 +493,8 @@ impl RagStore {
             updated = doc;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         if embeddings_changed && let Err(error) = self.invalidate_hnsw_index() {
             warn!("Note metadata saved but HNSW invalidation failed: {error}");
         }
@@ -568,6 +577,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
 
         // BM25 postings will be cleaned up via reindex
         info!(
@@ -585,6 +596,11 @@ impl RagStore {
         }
 
         Ok(())
+    }
+
+    /// Invalidates derived statistics after committed collection, document or embedding writes.
+    pub fn collection_stats_revision(&self) -> u64 {
+        self.collection_stats_revision.load(Ordering::Acquire)
     }
 
     pub fn get_collection_stats(&self, collection_id: &str) -> Result<CollectionStats, RagError> {
@@ -727,6 +743,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!(
             "Added document {} ({} chunks) to collection {}",
             metadata.id,
@@ -779,6 +797,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!("Removed document {}", doc_id);
 
         // Invalidate HNSW index since embeddings changed
@@ -897,6 +917,8 @@ impl RagStore {
             t.insert(record.chunk_id.as_str(), data.as_slice())?;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         Ok(())
     }
 
@@ -910,6 +932,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!("Stored {} embeddings", records.len());
         Ok(())
     }
@@ -1551,6 +1575,8 @@ impl RagStore {
             (updated_meta, old_chunk_ids.len())
         };
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!(
             "Updated document {} ({} → {} chunks)",
             doc_id,
