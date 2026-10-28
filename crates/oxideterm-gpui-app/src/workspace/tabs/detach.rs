@@ -602,6 +602,7 @@ impl WorkspaceApp {
                     return;
                 }
                 self.sync_ide_surface_mount(tab_id, cx);
+                self.sync_knowledge_cache_visibility(cx);
                 self.sync_host_tools_lifecycle(false, cx);
                 self.bind_remote_desktop_window(tab_id, detached_window_handle, cx);
                 self.resume_remote_desktop_frame_delivery(tab_id, cx);

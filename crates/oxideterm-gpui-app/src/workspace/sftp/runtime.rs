@@ -2405,6 +2405,50 @@ fn apply_tauri_transfer_completion(
 mod tests {
     use super::*;
 
+    #[gpui::test]
+    fn closed_preview_releases_content_and_rejects_late_delivery(cx: &mut gpui::TestAppContext) {
+        let entity = cx.new(SftpWorkspaceEntity::new);
+        entity.update(cx, |sftp, cx| {
+            sftp.set_dialog(SftpDialog::Preview {
+                name: "sample.txt".into(),
+            });
+            let content = Arc::new(PreviewContent::Hex {
+                data: "ab".repeat(512 * 1024),
+                total_size: 512 * 1024,
+                offset: 0,
+                chunk_size: 512 * 1024,
+                has_more: false,
+            });
+            let weak = Arc::downgrade(&content);
+            sftp.preview_content = Some(content);
+            let generation = sftp.preview_generation;
+            sftp.begin_dialog_exit(Duration::ZERO, cx);
+            eprintln!(
+                "SFTP_PREVIEW_RETAINED_BYTES={}",
+                if weak.upgrade().is_some() {
+                    1024 * 1024
+                } else {
+                    0
+                }
+            );
+            assert!(
+                weak.upgrade().is_none(),
+                "closed preview retained its payload"
+            );
+            assert!(!sftp.apply_preview_loaded(
+                generation,
+                "sample.txt".into(),
+                Ok(PreviewContent::Unsupported {
+                    mime_type: "text/plain".into(),
+                    reason: "late completion".into(),
+                }),
+                None,
+                cx
+            ));
+            assert!(sftp.preview_content.is_none());
+        });
+    }
+
     #[test]
     fn terminal_directory_target_stays_on_the_file_browsers_server() {
         let node = NodeId::new("server-a");

@@ -192,6 +192,7 @@ impl WorkspaceApp {
         self.begin_selectable_text_frame();
         self.schedule_pending_auto_close_terminal_sessions(window, cx);
         self.sync_ai_workspace_visibility(cx);
+        self.sync_knowledge_cache_visibility(cx);
         let cloud_sync_confirm_open = self.cloud_sync.read(cx).view.confirm.is_some();
         if self.app_lock.locked {
             window.set_window_title(&SharedString::from(

@@ -105,6 +105,7 @@ impl WorkspaceApp {
             self.sync_forwarding_sampling_visibility(cx);
             // Graphics owns frame presentation; tab navigation only supplies mount visibility.
             self.sync_graphics_surface_visibility(cx);
+            self.sync_knowledge_cache_visibility(cx);
             self.sync_active_terminal_metadata_context(cx);
             self.sync_active_terminal_recording_elapsed_tick(cx);
             self.sync_active_privilege_prompt_inline_hint(cx);

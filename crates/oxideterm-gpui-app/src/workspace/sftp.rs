@@ -1542,6 +1542,11 @@ impl SftpWorkspaceEntity {
         self.dialog_value.clear();
         self.preview_asset_owner = None;
         self.preview_plugin = None;
+        self.preview_content = None;
+        self.preview_path = None;
+        self.preview_pane = None;
+        self.preview_error = None;
+        self.preview_loading = false;
         self.preview_hex_loading_more = false;
         self.preview_markdown_source_mode = false;
         self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
