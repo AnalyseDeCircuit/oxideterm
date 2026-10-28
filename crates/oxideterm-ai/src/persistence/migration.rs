@@ -26,7 +26,7 @@ impl ConversationStore {
         let temporary = destination.with_extension("redb.migrating");
         let legacy = AiChatPersistenceStore {
             path: legacy_path.to_owned(),
-            db: Arc::new(Database::open(legacy_path)?),
+            db: Arc::new(history_database_builder().open(legacy_path)?),
         };
         // Hold the source lock before cleaning a previous attempt's temporary destination.
         if temporary.exists() {

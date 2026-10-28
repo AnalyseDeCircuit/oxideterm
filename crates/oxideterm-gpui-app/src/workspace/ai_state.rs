@@ -314,6 +314,7 @@ impl Default for AiSettingsViewState {
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub(in crate::workspace) struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
+    _rag_cache_cleanup: Task<()>,
     key_store: oxideterm_ai::AiProviderKeyStore,
     model_ui: AiModelWorkspaceState,
     chat_ui: AiChatWorkspaceState,
@@ -1152,6 +1153,22 @@ impl AiWorkspaceEntity {
         let mcp_registry = oxideterm_ai::McpRegistry::new(key_store.clone());
         let mut entity = Self {
             task_runtime,
+            // Entity ownership cancels cleanup; the weak handle cannot keep a closed workspace alive.
+            _rag_cache_cleanup: cx.spawn(async move |weak, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(60))
+                        .await;
+                    let Ok(store) = weak.update(cx, |ai, _| ai.rag_store.clone()) else {
+                        break;
+                    };
+                    cx.background_executor()
+                        .spawn(async move {
+                            store.release_idle_index();
+                        })
+                        .await;
+                }
+            }),
             model_ui: AiModelWorkspaceState::new(),
             chat_ui: AiChatWorkspaceState::new(360.0, None),
             knowledge_window_activation_subscription: None,

@@ -5,6 +5,71 @@ use redb::ReadableTableMetadata;
 // durable writes of oversized messages share CPU and disk with other CI tests.
 const WRITER_TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+#[test]
+#[cfg(target_os = "macos")]
+#[ignore = "manual redb page-cache memory and read/write comparison"]
+fn database_page_cache_memory() {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Stats {
+        blocks: u32,
+        live: usize,
+        peak: usize,
+        allocated: usize,
+    }
+    unsafe extern "C" {
+        fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Stats);
+    }
+    fn live() -> usize {
+        let mut stats = Stats::default();
+        unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
+        stats.live
+    }
+    const TABLE: TableDefinition<u64, &[u8]> = TableDefinition::new("payload");
+    let directory = tempfile::tempdir().unwrap();
+    for budget in [
+        1024 * 1024 * 1024,
+        HISTORY_PAGE_CACHE_BYTES,
+        64 * 1024 * 1024,
+        8 * 1024 * 1024,
+    ] {
+        let path = directory.path().join(format!("cache-{budget}.redb"));
+        let baseline = live();
+        let db = Database::builder()
+            .set_cache_size(budget)
+            .create(&path)
+            .unwrap();
+        let start = std::time::Instant::now();
+        for batch in 0..16u64 {
+            let tx = db.begin_write().unwrap();
+            {
+                let mut table = tx.open_table(TABLE).unwrap();
+                for key in batch * 128..(batch + 1) * 128 {
+                    table
+                        .insert(key, vec![key as u8; 65536].as_slice())
+                        .unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+        let write_ms = start.elapsed().as_secs_f64() * 1000.0;
+        let start = std::time::Instant::now();
+        for _ in 0..2 {
+            let tx = db.begin_read().unwrap();
+            let table = tx.open_table(TABLE).unwrap();
+            for key in 0..2048u64 {
+                let value = table.get(key).unwrap().unwrap();
+                assert_eq!(value.value(), vec![key as u8; 65536]);
+            }
+        }
+        eprintln!(
+            "DATABASE_CACHE budget={budget} live_delta={} write_ms={write_ms:.3} scans_ms={:.3}",
+            live().saturating_sub(baseline),
+            start.elapsed().as_secs_f64() * 1000.0
+        );
+    }
+}
+
 fn empty_conversation() -> AiConversation {
     let mut state = AiChatState::default();
     state.create_conversation("history".into(), Some("Original".into()), 1, None);

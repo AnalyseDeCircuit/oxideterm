@@ -15,6 +15,7 @@ use tracing::{debug, info, warn};
 use crate::{RemoteRelayDisposition, SftpError};
 
 const REMOTE_RELAY_PROGRESS_VERSION: u8 = 1;
+const PROGRESS_PAGE_CACHE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteRelayProgressContext {
@@ -361,7 +362,9 @@ impl RedbProgressStore {
             })?;
         }
         info!("Creating SFTP progress store at: {:?}", db_path);
-        let db = redb::Database::create(db_path)
+        let db = redb::Database::builder()
+            .set_cache_size(PROGRESS_PAGE_CACHE_BYTES)
+            .create(db_path)
             .map(Arc::new)
             .map_err(|error| {
                 SftpError::StorageError(format!("Failed to create progress database: {error}"))

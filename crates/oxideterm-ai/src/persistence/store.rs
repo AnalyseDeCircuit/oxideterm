@@ -65,9 +65,9 @@ impl ConversationStore {
         // Opening a damaged history must never replace it with an empty database.
         let existed = path.exists();
         let db = if existed {
-            Database::open(&path)?
+            history_database_builder().open(&path)?
         } else {
-            Database::create(&path)?
+            history_database_builder().create(&path)?
         };
         set_owner_only_permissions(&path);
         if existed {
@@ -107,7 +107,7 @@ impl ConversationStore {
         // Wait for active reads to finish before releasing the file lock and recovering a failed transaction.
         let mut database = self.db.write();
         database.take();
-        *database = Some(Database::open(&self.path)?);
+        *database = Some(history_database_builder().open(&self.path)?);
         Ok(())
     }
 
