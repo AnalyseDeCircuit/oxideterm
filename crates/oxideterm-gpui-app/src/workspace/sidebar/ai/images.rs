@@ -392,10 +392,11 @@ impl WorkspaceApp {
                             .overflow_hidden()
                             .rounded(px(self.tokens.radii.md))
                             .child(
-                                gpui::img(preview.unwrap_or(thumbnail))
-                                    .w_full()
-                                    .h(px(if expanded { 280.0 } else { 80.0 }))
-                                    .object_fit(gpui::ObjectFit::Contain),
+                                gpui::image_cache(gpui::retain_recent(format!("ai-image-cache-{}", image.id), 0))
+                                    .child(gpui::img(preview.unwrap_or(thumbnail))
+                                        .w_full()
+                                        .h(px(if expanded { 280.0 } else { 80.0 }))
+                                        .object_fit(gpui::ObjectFit::Contain)),
                             ),
                         move |this, _, cx| this.preview_ai_image(image_copy.clone(), cx),
                         cx,

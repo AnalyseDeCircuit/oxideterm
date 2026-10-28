@@ -987,6 +987,7 @@ pub(crate) struct Frame {
     pub(crate) mouse_listeners: Vec<Option<AnyMouseListener>>,
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
+    image_frames: Vec<RenderImageParams>,
     pub(crate) hitboxes: Vec<Hitbox>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
@@ -1037,6 +1038,7 @@ pub(crate) struct PrepaintStateIndex {
 #[derive(Clone, Default)]
 pub(crate) struct PaintIndex {
     scene_index: usize,
+    image_frames_index: usize,
     #[cfg(any(test, feature = "test-support"))]
     debug_bounds_index: usize,
     mouse_listeners_index: usize,
@@ -1063,6 +1065,7 @@ impl Frame {
             mouse_listeners: Vec::new(),
             dispatch_tree,
             scene: Scene::default(),
+            image_frames: Vec::new(),
             hitboxes: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
@@ -1090,6 +1093,7 @@ impl Frame {
         self.mouse_listeners.clear();
         self.dispatch_tree.clear();
         self.scene.clear();
+        self.image_frames.clear();
         self.input_handlers.clear();
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
@@ -3472,6 +3476,16 @@ impl Window {
         self.layout_engine.as_mut().unwrap().clear();
         self.text_system().finish_frame();
         self.next_frame.finish(&mut self.rendered_frame);
+        // Cached subtrees retain their tiles; obsolete animation frames and
+        // superseded decode resolutions do not remain in the atlas.
+        let used: FxHashSet<_> = self.next_frame.image_frames.iter().cloned().collect();
+        let painted = used.iter().map(|image| image.image_id).collect();
+        crate::finish_default_image_cache(&painted, self, cx);
+        for previous in &self.rendered_frame.image_frames {
+            if !used.contains(previous) {
+                self.sprite_atlas.remove(&previous.clone().into());
+            }
+        }
 
         self.invalidator.set_phase(DrawPhase::Focus);
         let previous_focus_path = self.rendered_frame.focus_path();
@@ -4015,6 +4029,7 @@ impl Window {
     pub(crate) fn paint_index(&self) -> PaintIndex {
         PaintIndex {
             scene_index: self.next_frame.scene.len(),
+            image_frames_index: self.next_frame.image_frames.len(),
             #[cfg(any(test, feature = "test-support"))]
             debug_bounds_index: self.next_frame.debug_bounds_records.len(),
             mouse_listeners_index: self.next_frame.mouse_listeners.len(),
@@ -4027,6 +4042,10 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        self.next_frame.image_frames.extend_from_slice(
+            &self.rendered_frame.image_frames
+                [range.start.image_frames_index..range.end.image_frames_index],
+        );
         // Cached elements still exist in the frame even when their paint methods don't run.
         #[cfg(any(test, feature = "test-support"))]
         for (selector, bounds) in &self.rendered_frame.debug_bounds_records
@@ -5377,16 +5396,15 @@ impl Window {
             image_id: data.id,
             frame_index,
         };
+        self.next_frame.image_frames.push(params.clone());
 
         let tile = self
             .sprite_atlas
             .get_or_insert_with(params.into(), &mut || {
                 Ok(Some((
                     data.size(frame_index),
-                    Cow::Borrowed(
-                        data.as_bytes(frame_index)
-                            .expect("It's the caller's job to pass a valid frame index"),
-                    ),
+                    data.frame_bytes(frame_index)?
+                        .expect("It's the caller's job to pass a valid frame index"),
                 )))
             })?
             .expect("Callback above only returns Some");
@@ -10004,6 +10022,109 @@ mod inspector_tests {
 
     struct InspectorTestRoot {
         child: Entity<InspectorTestView>,
+    }
+
+    #[gpui::test]
+    fn animated_atlas_releases_old_frames_but_keeps_cached_paints(cx: &mut TestAppContext) {
+        struct ImageView {
+            image: Arc<RenderImage>,
+            frame: usize,
+        }
+        impl Render for ImageView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let image = self.image.clone();
+                let frame = self.frame;
+                crate::canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        window
+                            .paint_image(bounds, bounds, Corners::default(), image, frame, false)
+                            .unwrap();
+                    },
+                )
+                .size_full()
+            }
+        }
+        struct Root {
+            first: Entity<ImageView>,
+            second: Option<Entity<ImageView>>,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .child(
+                        self.first
+                            .clone()
+                            .cached(StyleRefinement::default().size(px(10.))),
+                    )
+                    .children(
+                        self.second
+                            .iter()
+                            .cloned()
+                            .map(|view| view.cached(StyleRefinement::default().size(px(10.)))),
+                    )
+            }
+        }
+        let image = Arc::new(RenderImage::new(SmallVec::from_iter(
+            (0..3).map(|_| image::Frame::new(image::RgbaImage::new(1, 1))),
+        )));
+        let first = cx.new(|_| ImageView {
+            image: image.clone(),
+            frame: 0,
+        });
+        let second = cx.new(|_| ImageView {
+            image: image.clone(),
+            frame: 1,
+        });
+        let (root, cx) = cx.add_window_view(|_, _| Root {
+            first,
+            second: Some(second.clone()),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        second.update(cx, |view, cx| {
+            view.frame = 2;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            for (frame_index, expected) in [(0, true), (1, false), (2, true)] {
+                assert_eq!(
+                    window.sprite_atlas.contains(
+                        &RenderImageParams {
+                            image_id: image.id,
+                            frame_index
+                        }
+                        .into()
+                    ),
+                    expected
+                );
+            }
+        });
+        root.update(cx, |root, cx| {
+            root.second = None;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(
+                window.sprite_atlas.contains(
+                    &RenderImageParams {
+                        image_id: image.id,
+                        frame_index: 0
+                    }
+                    .into()
+                )
+            );
+            assert!(
+                !window.sprite_atlas.contains(
+                    &RenderImageParams {
+                        image_id: image.id,
+                        frame_index: 2
+                    }
+                    .into()
+                )
+            );
+        });
     }
 
     impl Render for InspectorTestRoot {

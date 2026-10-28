@@ -267,12 +267,6 @@ pub(super) enum FileManagerOperationEvent {
     Finished(Result<(), String>),
 }
 
-pub(super) struct FileManagerRotatedPreviewImage {
-    pub(super) path: String,
-    pub(super) rotation: i32,
-    pub(super) image: Arc<RenderImage>,
-}
-
 struct FileManagerSortedFilesCache {
     source_revision: u64,
     filter: String,
@@ -365,8 +359,6 @@ pub(super) struct FileManagerState {
     pub(super) preview_markdown_source: bool,
     pub(super) preview_image_zoom: f32,
     pub(super) preview_image_rotation: i32,
-    pub(super) preview_rotated_image_cache: RefCell<Option<FileManagerRotatedPreviewImage>>,
-    pub(super) preview_retired_images: RefCell<Vec<Arc<RenderImage>>>,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
     pub(in crate::workspace) preview_document_scroll: ScrollHandle,
@@ -443,8 +435,6 @@ impl Default for FileManagerState {
             preview_markdown_source: false,
             preview_image_zoom: 1.0,
             preview_image_rotation: 0,
-            preview_rotated_image_cache: RefCell::new(None),
-            preview_retired_images: RefCell::new(Vec::new()),
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
             preview_document_scroll: ScrollHandle::new(),

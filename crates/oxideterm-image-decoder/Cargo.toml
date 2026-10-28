@@ -1,0 +1,15 @@
+[package]
+name = "oxideterm-image-decoder"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+png = "0.18.1"
+jpeg-decoder = {version = "0.3.2", default-features = false}
+fast_image_resize = {version = "6.0", features = ["image", "only_u8x4"]}

@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/oxideterm-image-decoder",
   "crates/oxideterm-background-media",
   "crates/oxideterm-gpui-background",
   "crates/fernomade/crypto",
@@ -383,4 +384,14 @@ opt-level = 2
 opt-level = 2
 
 [profile.dev.package.oxideterm-background-media]
+opt-level = 2
+
+[profile.dev.package.oxideterm-image-decoder]
+opt-level = 2
+
+# GIF playback now decodes frames as they are presented, not only during initial loading.
+[profile.dev.package.gif]
+opt-level = 2
+
+[profile.dev.package.weezl]
 opt-level = 2

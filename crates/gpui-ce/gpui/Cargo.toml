@@ -108,6 +108,9 @@ features = ["font-kit", "wayland", "x11", "test-support"]
 [dev-dependencies.env_logger]
 version = "0.11"
 
+[dev-dependencies.gif]
+version = "0.14.2"
+
 [dev-dependencies.proptest]
 version = "1"
 
@@ -234,6 +237,13 @@ default-features = false
 
 [dependencies.inventory]
 version = "0.3.19"
+
+[dependencies.oxideterm-image-decoder]
+path = "../../oxideterm-image-decoder"
+
+[dependencies.fast_image_resize]
+version = "6.0"
+features = ["image", "only_u8x4"]
 
 [dependencies.itertools]
 version = "0.14.0"

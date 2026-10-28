@@ -2,8 +2,9 @@
 
 use crate::{DevicePixels, Pixels, Result, SharedString, Size, size};
 use smallvec::SmallVec;
+use std::sync::Arc;
 
-use image::{Delay, Frame};
+use image::{Delay, Frame, ImageEncoder};
 use std::{
     borrow::Cow,
     fmt,
@@ -101,8 +102,27 @@ pub struct RenderImage {
     pub id: ImageId,
     /// The scale factor of this image on render.
     pub(crate) scale_factor: f32,
-    data: SmallVec<[Frame; 1]>,
+    intrinsic_size: Option<Size<DevicePixels>>,
+    data: SmallVec<[ImageFrameData; 1]>,
     retained: Vec<Box<dyn std::any::Any + Send + Sync>>,
+}
+
+enum ImageFrameData {
+    Stream {
+        stream: Arc<crate::AnimationStream>,
+        index: usize,
+        size: Size<DevicePixels>,
+        delay: Delay,
+        decoded: std::sync::OnceLock<Vec<u8>>,
+    },
+    Pixels(Frame),
+    Compact {
+        bytes: Vec<u8>,
+        size: Size<DevicePixels>,
+        delay: Delay,
+        // Explicit borrowed reads retain their result; painting uses a temporary decode.
+        decoded: std::sync::OnceLock<Vec<u8>>,
+    },
 }
 
 impl PartialEq for RenderImage {
@@ -114,6 +134,54 @@ impl PartialEq for RenderImage {
 impl Eq for RenderImage {}
 
 impl RenderImage {
+    pub(crate) fn from_animation(
+        stream: Arc<crate::AnimationStream>,
+        delays: Vec<Delay>,
+        size: Size<DevicePixels>,
+    ) -> Self {
+        let mut image = Self::new(SmallVec::<[Frame; 1]>::new());
+        image.data = delays
+            .into_iter()
+            .enumerate()
+            .map(|(index, delay)| ImageFrameData::Stream {
+                stream: stream.clone(),
+                index,
+                size,
+                delay,
+                decoded: Default::default(),
+            })
+            .collect();
+        image
+    }
+
+    pub(crate) fn frame_ready(&self, index: usize) -> bool {
+        match self.data.get(index) {
+            Some(ImageFrameData::Stream {
+                stream, decoded, ..
+            }) => decoded.get().is_some() || stream.ready(index),
+            _ => true,
+        }
+    }
+
+    pub(crate) fn estimated_decode_working_bytes(&self) -> usize {
+        match self.data.first() {
+            Some(ImageFrameData::Stream { stream, .. }) => stream.working_bytes(),
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn prefetch_frame(&self, index: usize) {
+        if let Some(ImageFrameData::Stream { stream, .. }) = self.data.first() {
+            stream.prefetch(index);
+        }
+    }
+
+    pub(crate) async fn prepare_frame(&self, index: usize) -> Result<(), crate::ImageCacheError> {
+        if let Some(ImageFrameData::Stream { stream, .. }) = self.data.get(index) {
+            stream.prepare(index).await?;
+        }
+        Ok(())
+    }
     /// Create a new image from the given data.
     pub fn new(data: impl Into<SmallVec<[Frame; 1]>>) -> Self {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -121,8 +189,101 @@ impl RenderImage {
         Self {
             id: ImageId(NEXT_ID.fetch_add(1, SeqCst)),
             scale_factor: 1.0,
-            data: data.into(),
+            intrinsic_size: None,
+            data: data
+                .into()
+                .into_iter()
+                .map(ImageFrameData::Pixels)
+                .collect(),
             retained: Vec::new(),
+        }
+    }
+
+    pub(crate) fn push_decoded_frame(&mut self, frame: Frame) -> Result<()> {
+        let pixels = frame.buffer();
+        if pixels.len() < 64 * 1024 {
+            self.data.push(ImageFrameData::Pixels(frame));
+            return Ok(());
+        }
+        let mut encoded = Vec::new();
+        image::codecs::qoi::QoiEncoder::new(&mut encoded).write_image(
+            pixels.as_raw(),
+            pixels.width(),
+            pixels.height(),
+            image::ExtendedColorType::Rgba8,
+        )?;
+        if encoded.len() < pixels.len() {
+            encoded.shrink_to_fit();
+            self.data.push(ImageFrameData::Compact {
+                bytes: encoded,
+                size: size(pixels.width().into(), pixels.height().into()),
+                delay: frame.delay(),
+                decoded: Default::default(),
+            });
+        } else {
+            self.data.push(ImageFrameData::Pixels(frame));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn from_decoded_frames(frames: impl IntoIterator<Item = Frame>) -> Result<Self> {
+        let mut image = Self::new(SmallVec::<[Frame; 1]>::new());
+        for frame in frames {
+            image.push_decoded_frame(frame)?;
+        }
+        Ok(image)
+    }
+
+    /// Retained CPU pixel/encoded storage, including explicitly materialized borrowed reads.
+    pub fn retained_bytes(&self) -> usize {
+        self.data
+            .iter()
+            .map(|frame| match frame {
+                ImageFrameData::Stream {
+                    stream,
+                    index,
+                    decoded,
+                    ..
+                } => {
+                    decoded.get().map_or(0, Vec::capacity)
+                        + if *index == 0 {
+                            stream.retained_bytes()
+                        } else {
+                            0
+                        }
+                }
+                ImageFrameData::Pixels(frame) => frame.buffer().as_raw().capacity(),
+                ImageFrameData::Compact { bytes, decoded, .. } => {
+                    bytes.capacity() + decoded.get().map_or(0, Vec::capacity)
+                }
+            })
+            .sum()
+    }
+
+    pub(crate) fn frame_bytes(&self, index: usize) -> Result<Option<Cow<'_, [u8]>>> {
+        match self.data.get(index) {
+            Some(ImageFrameData::Stream {
+                stream, decoded, ..
+            }) => {
+                if let Some(pixels) = decoded.get() {
+                    Ok(Some(Cow::Borrowed(pixels)))
+                } else {
+                    Ok(Some(Cow::Owned(stream.pixels(index)?)))
+                }
+            }
+            Some(ImageFrameData::Pixels(frame)) => Ok(Some(Cow::Borrowed(frame.buffer().as_raw()))),
+            Some(ImageFrameData::Compact { bytes, decoded, .. }) => {
+                if let Some(pixels) = decoded.get() {
+                    Ok(Some(Cow::Borrowed(pixels)))
+                } else {
+                    Ok(Some(Cow::Owned(
+                        image::load_from_memory_with_format(bytes, image::ImageFormat::Qoi)?
+                            .into_rgba8()
+                            .into_raw(),
+                    )))
+                }
+            }
+            None => Ok(None),
         }
     }
 
@@ -134,33 +295,69 @@ impl RenderImage {
 
     /// Convert this image into a byte slice.
     pub fn as_bytes(&self, frame_index: usize) -> Option<&[u8]> {
-        self.data
-            .get(frame_index)
-            .map(|frame| frame.buffer().as_raw().as_slice())
+        if let Some(ImageFrameData::Stream {
+            stream, decoded, ..
+        }) = self.data.get(frame_index)
+        {
+            if decoded.get().is_none() {
+                let _ = decoded.set(stream.pixels(frame_index).ok()?);
+            }
+            return decoded.get().map(Vec::as_slice);
+        }
+        self.data.get(frame_index).map(|frame| match frame {
+            ImageFrameData::Stream { .. } => unreachable!(),
+            ImageFrameData::Pixels(frame) => frame.buffer().as_raw().as_slice(),
+            ImageFrameData::Compact { bytes, decoded, .. } => decoded
+                .get_or_init(|| {
+                    image::load_from_memory_with_format(bytes, image::ImageFormat::Qoi)
+                        .expect("internally encoded QOI frame remains valid")
+                        .into_rgba8()
+                        .into_raw()
+                })
+                .as_slice(),
+        })
     }
 
     /// Get the size of this image, in pixels.
     pub fn size(&self, frame_index: usize) -> Size<DevicePixels> {
         self.data
             .get(frame_index)
-            .map(|frame| {
-                let (width, height) = frame.buffer().dimensions();
-                size(width.into(), height.into())
+            .map(|frame| match frame {
+                ImageFrameData::Pixels(frame) => {
+                    let (width, height) = frame.buffer().dimensions();
+                    size(width.into(), height.into())
+                }
+                ImageFrameData::Compact { size, .. } | ImageFrameData::Stream { size, .. } => *size,
             })
             .unwrap_or_default()
     }
 
     /// Get the size of this image, in pixels for display, adjusted for the scale factor.
     pub(crate) fn render_size(&self, frame_index: usize) -> Size<Pixels> {
-        self.size(frame_index)
+        self.intrinsic_size(frame_index)
             .map(|v| (v.0 as f32 / self.scale_factor).into())
+    }
+
+    pub(crate) fn with_intrinsic_size(mut self, size: Size<DevicePixels>) -> Self {
+        self.intrinsic_size = Some(size);
+        self
+    }
+
+    pub(crate) fn intrinsic_size(&self, frame_index: usize) -> Size<DevicePixels> {
+        self.intrinsic_size
+            .unwrap_or_else(|| self.size(frame_index))
     }
 
     /// Get the delay of this frame from the previous
     pub fn delay(&self, frame_index: usize) -> Delay {
         self.data
             .get(frame_index)
-            .map(|frame| frame.delay())
+            .map(|frame| match frame {
+                ImageFrameData::Pixels(frame) => frame.delay(),
+                ImageFrameData::Compact { delay, .. } | ImageFrameData::Stream { delay, .. } => {
+                    *delay
+                }
+            })
             .unwrap_or(Delay::from_numer_denom_ms(100, 1))
     }
 
@@ -174,7 +371,7 @@ impl fmt::Debug for RenderImage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ImageData")
             .field("id", &self.id)
-            .field("size", &self.data.first().map(|f| f.buffer().dimensions()))
+            .field("size", &self.size(0))
             .finish()
     }
 }
@@ -183,6 +380,87 @@ impl fmt::Debug for RenderImage {
 mod tests {
     use super::*;
     use smallvec::SmallVec;
+
+    #[test]
+    fn compact_frames_preserve_pixels_delays_and_borrowed_reads() {
+        let mut image = RenderImage::new(SmallVec::<[Frame; 1]>::new());
+        for index in 0..3 {
+            let pixels = image::RgbaImage::from_fn(256, 128, |x, y| {
+                image::Rgba([index, (x % 8) as u8, (y % 8) as u8, 255])
+            });
+            image
+                .push_decoded_frame(Frame::from_parts(
+                    pixels,
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(20 + index as u32, 1),
+                ))
+                .unwrap();
+        }
+        assert!(image.retained_bytes() < 3 * 256 * 128 * 4);
+        for index in [2, 0, 1, 2] {
+            assert_eq!(image.size(index), size(256.into(), 128.into()));
+            assert_eq!(
+                image.delay(index),
+                Delay::from_numer_denom_ms(20 + index as u32, 1)
+            );
+            let bytes = image.frame_bytes(index).unwrap().unwrap();
+            for (position, pixel) in bytes.chunks_exact(4).enumerate() {
+                assert_eq!(
+                    pixel,
+                    [
+                        index as u8,
+                        (position % 256 % 8) as u8,
+                        (position / 256 % 8) as u8,
+                        255
+                    ]
+                );
+            }
+        }
+        let retained = image.retained_bytes();
+        assert_eq!(&image.as_bytes(1).unwrap()[..4], &[1, 0, 0, 255]);
+        assert!(image.retained_bytes() > retained);
+        assert_eq!(
+            &image.frame_bytes(1).unwrap().unwrap()[..4],
+            &[1, 0, 0, 255]
+        );
+        assert_eq!(image.frame_count(), 3);
+    }
+
+    #[test]
+    #[ignore = "manual lossless frame storage and upload-read benchmark"]
+    fn image_memory_lifecycle() {
+        let frames = || {
+            (0..60).map(|index| {
+                Frame::from_parts(
+                    image::RgbaImage::from_fn(640, 360, |x, y| {
+                        image::Rgba([((x / 16 + index) % 256) as u8, (y / 16) as u8, 80, 255])
+                    }),
+                    0,
+                    0,
+                    Delay::from_numer_denom_ms(40, 1),
+                )
+            })
+        };
+        for compact in [false, true] {
+            let start = std::time::Instant::now();
+            let image = if compact {
+                RenderImage::from_decoded_frames(frames()).unwrap()
+            } else {
+                RenderImage::new(frames().collect::<SmallVec<[_; 1]>>())
+            };
+            let load_ms = start.elapsed().as_secs_f64() * 1000.0;
+            let start = std::time::Instant::now();
+            for index in 0..image.frame_count() {
+                std::hint::black_box(image.frame_bytes(index).unwrap());
+            }
+            eprintln!(
+                "IMAGE_MEMORY compact={compact} bytes={} build_ms={load_ms:.3} read_all_ms={:.3}",
+                image.retained_bytes(),
+                start.elapsed().as_secs_f64() * 1000.0
+            );
+        }
+    }
 
     #[test]
     fn empty_render_image_does_not_panic() {

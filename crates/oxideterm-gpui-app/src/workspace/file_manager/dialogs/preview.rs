@@ -368,7 +368,7 @@ impl WorkspaceApp {
         &self,
         entry: LocalFileEntry,
         has_background: bool,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let preview = self.file_manager.read(cx).preview.clone();
@@ -417,7 +417,7 @@ impl WorkspaceApp {
                 self.render_file_manager_preview_markdown(content, &entry.path, cx)
             }
             Some(LocalPreview::Image { path, mime_type }) => self
-                .render_file_manager_preview_image(path, mime_type.clone(), window, cx)
+                .render_file_manager_preview_image(path, mime_type.clone(), cx)
                 .into_any_element(),
             Some(LocalPreview::Video { path, mime_type }) => {
                 self.render_file_manager_preview_video(entry.name, path, mime_type, cx)
@@ -470,7 +470,6 @@ impl WorkspaceApp {
         &self,
         path: &str,
         fallback_label: String,
-        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let file_manager = self.file_manager.read(cx);
@@ -479,19 +478,15 @@ impl WorkspaceApp {
             .clamp(FILE_MANAGER_PREVIEW_MIN_ZOOM, FILE_MANAGER_PREVIEW_MAX_ZOOM);
         let height = 560.0 * zoom;
         let rotation = file_manager.preview_image_rotation.rem_euclid(360);
-        let image = if rotation == 0 {
-            self.clear_rotated_file_manager_preview_image(window, cx);
-            gpui::img(std::path::PathBuf::from(path))
-        } else if let Some(render_image) =
-            self.rotated_file_manager_preview_image(path, rotation, cx)
-        {
-            self.drop_file_manager_preview_retired_images(window, cx);
-            gpui::img(render_image)
+        let source = if rotation == 0 {
+            gpui::Resource::from(std::path::PathBuf::from(path))
         } else {
-            self.clear_rotated_file_manager_preview_image(window, cx);
-            gpui::img(std::path::PathBuf::from(path))
+            gpui::Resource::RotatedImage {
+                path: std::path::PathBuf::from(path).into(),
+                quarter_turns: (rotation / 90) as u8,
+            }
         };
-        image
+        let image = gpui::img(gpui::ImageSource::Resource(source))
             .w_full()
             .h(px(height))
             .object_fit(ObjectFit::Contain)
@@ -505,79 +500,12 @@ impl WorkspaceApp {
                     .text_size(px(FILE_MANAGER_TEXT_SM))
                     .child(fallback_label.clone())
                     .into_any_element()
-            })
+            });
+        // Pin the visible preview only; changing files/angles or closing the
+        // dialog must not leave old decode workers and pixel tiers in a global cache.
+        gpui::image_cache(gpui::retain_recent("file-manager-preview-image", 0))
+            .child(image)
             .into_any_element()
-    }
-
-    fn rotated_file_manager_preview_image(
-        &self,
-        path: &str,
-        rotation: i32,
-        cx: &App,
-    ) -> Option<Arc<RenderImage>> {
-        let rotation = rotation.rem_euclid(360);
-        let file_manager = self.file_manager.read(cx);
-        if let Some(cached) = file_manager.preview_rotated_image_cache.borrow().as_ref()
-            && cached.path == path
-            && cached.rotation == rotation
-        {
-            return Some(cached.image.clone());
-        }
-
-        let image = rotated_local_preview_image(path, rotation)?;
-        let previous = file_manager.preview_rotated_image_cache.replace(Some(
-            FileManagerRotatedPreviewImage {
-                path: path.to_string(),
-                rotation,
-                image: image.clone(),
-            },
-        ));
-        if let Some(previous) = previous {
-            file_manager
-                .preview_retired_images
-                .borrow_mut()
-                .push(previous.image);
-        }
-        Some(image)
-    }
-
-    fn clear_rotated_file_manager_preview_image(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let previous = self
-            .file_manager
-            .read(cx)
-            .preview_rotated_image_cache
-            .replace(None);
-        if let Some(previous) = previous {
-            self.file_manager
-                .read(cx)
-                .preview_retired_images
-                .borrow_mut()
-                .push(previous.image);
-        }
-        self.drop_file_manager_preview_retired_images(window, cx);
-    }
-
-    fn drop_file_manager_preview_retired_images(
-        &self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let retired_images = self
-            .file_manager
-            .read(cx)
-            .preview_retired_images
-            .borrow_mut()
-            .drain(..)
-            .collect::<Vec<_>>();
-        for image in retired_images {
-            // Rotated local previews are rendered as GPUI atlas images; release
-            // old rotations when the preview path or angle changes.
-            cx.drop_image(image, Some(window));
-        }
     }
 
     fn render_file_manager_preview_audio(
@@ -2000,26 +1928,6 @@ fn format_unix_permission_bits(mode: u32) -> String {
         });
     }
     output
-}
-
-fn rotated_local_preview_image(path: &str, rotation: i32) -> Option<std::sync::Arc<RenderImage>> {
-    let image = image::open(std::path::PathBuf::from(path)).ok()?;
-    let image = match rotation.rem_euclid(360) {
-        90 => image.rotate90(),
-        180 => image.rotate180(),
-        270 => image.rotate270(),
-        _ => image,
-    };
-    let rgba = image.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    let mut pixels = rgba.into_raw();
-    for pixel in pixels.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-    let buffer = image::RgbaImage::from_raw(width, height, pixels)?;
-    Some(std::sync::Arc::new(RenderImage::new(vec![
-        image::Frame::new(buffer),
-    ])))
 }
 
 fn file_manager_preview_language_for_name(filename: &str) -> String {
