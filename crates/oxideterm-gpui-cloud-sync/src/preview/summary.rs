@@ -3,6 +3,26 @@
 
 use super::*;
 
+macro_rules! profile_deletions {
+    ($items:expr, $incoming:expr, $local:expr, $section:expr) => {
+        if let Some(incoming) = $incoming {
+            push_profile_deletion_fields(
+                $items,
+                $section,
+                &incoming.tombstones,
+                incoming
+                    .records
+                    .iter()
+                    .map(|record| (record.id.as_str(), record.name.as_str(), record.updated_at)),
+                $local
+                    .into_iter()
+                    .flat_map(|snapshot| snapshot.records.iter())
+                    .map(|record| (record.id.as_str(), record.name.as_str(), record.updated_at)),
+            );
+        }
+    };
+}
+
 impl CloudSyncPreviewSummary {
     pub fn grouped_records(&self) -> Vec<(&'static str, Vec<CloudSyncPreviewRecord>)> {
         ["import", "merge", "replace", "skip", "rename"]
@@ -449,7 +469,9 @@ pub fn cloud_sync_apply_diff_items(
             preview
                 .serial_profiles_snapshot
                 .as_ref()
-                .map_or(0, |snapshot| snapshot.records.len()),
+                .map_or(0, |snapshot| {
+                    snapshot.records.len() + snapshot.tombstones.len()
+                }),
         ),
     );
     push_apply_section_diff(
@@ -462,7 +484,9 @@ pub fn cloud_sync_apply_diff_items(
             preview
                 .ble_profiles_snapshot
                 .as_ref()
-                .map_or(0, |snapshot| snapshot.records.len()),
+                .map_or(0, |snapshot| {
+                    snapshot.records.len() + snapshot.tombstones.len()
+                }),
         ),
     );
     push_apply_section_diff(
@@ -475,7 +499,9 @@ pub fn cloud_sync_apply_diff_items(
             preview
                 .telnet_profiles_snapshot
                 .as_ref()
-                .map_or(0, |snapshot| snapshot.records.len()),
+                .map_or(0, |snapshot| {
+                    snapshot.records.len() + snapshot.tombstones.len()
+                }),
         ),
     );
     push_apply_section_diff(
@@ -603,6 +629,54 @@ pub fn cloud_sync_apply_field_diff_items(
             &selection.conflict_strategy,
         );
     }
+    if selection.import_serial_profiles {
+        profile_deletions!(
+            &mut items,
+            preview.serial_profiles_snapshot.as_ref(),
+            local.serial_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_serial_profiles"
+        );
+    }
+    if selection.import_ble_profiles {
+        profile_deletions!(
+            &mut items,
+            preview.ble_profiles_snapshot.as_ref(),
+            local.ble_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_ble_profiles"
+        );
+    }
+    if selection.import_telnet_profiles {
+        profile_deletions!(
+            &mut items,
+            preview.telnet_profiles_snapshot.as_ref(),
+            local.telnet_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_telnet_profiles"
+        );
+    }
+    if selection.import_mosh_profiles {
+        profile_deletions!(
+            &mut items,
+            preview.mosh_profiles_snapshot.as_ref(),
+            local.mosh_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_mosh_profiles"
+        );
+    }
+    if selection.import_remote_desktop_profiles {
+        profile_deletions!(
+            &mut items,
+            preview.remote_desktop_profiles_snapshot.as_ref(),
+            local.remote_desktop_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_remote_desktop_profiles"
+        );
+    }
+    if selection.import_connections {
+        profile_deletions!(
+            &mut items,
+            preview.standalone_sftp_profiles_snapshot.as_ref(),
+            local.standalone_sftp_profiles.as_ref(),
+            "plugin.cloud_sync.settings.sync_connections"
+        );
+    }
     if selection.import_app_settings {
         push_app_settings_field_diffs(&mut items, preview, selection, local);
     }
@@ -666,6 +740,54 @@ pub fn cloud_sync_upload_field_diff_items(
             &mut items,
             remote_preview.ble_profiles_snapshot.as_ref(),
             local,
+        );
+    }
+    if scope.sync_serial_profiles {
+        profile_deletions!(
+            &mut items,
+            local.serial_profiles.as_ref(),
+            remote_preview.serial_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_serial_profiles"
+        );
+    }
+    if scope.sync_ble_profiles {
+        profile_deletions!(
+            &mut items,
+            local.ble_profiles.as_ref(),
+            remote_preview.ble_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_ble_profiles"
+        );
+    }
+    if scope.sync_telnet_profiles {
+        profile_deletions!(
+            &mut items,
+            local.telnet_profiles.as_ref(),
+            remote_preview.telnet_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_telnet_profiles"
+        );
+    }
+    if scope.sync_mosh_profiles {
+        profile_deletions!(
+            &mut items,
+            local.mosh_profiles.as_ref(),
+            remote_preview.mosh_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_mosh_profiles"
+        );
+    }
+    if scope.sync_remote_desktop_profiles {
+        profile_deletions!(
+            &mut items,
+            local.remote_desktop_profiles.as_ref(),
+            remote_preview.remote_desktop_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_remote_desktop_profiles"
+        );
+    }
+    if scope.sync_connections {
+        profile_deletions!(
+            &mut items,
+            local.standalone_sftp_profiles.as_ref(),
+            remote_preview.standalone_sftp_profiles_snapshot.as_ref(),
+            "plugin.cloud_sync.settings.sync_connections"
         );
     }
     if scope.sync_app_settings {

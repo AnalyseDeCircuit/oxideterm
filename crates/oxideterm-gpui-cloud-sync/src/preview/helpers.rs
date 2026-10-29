@@ -487,34 +487,36 @@ pub fn cloud_sync_preview_summary(preview: &CloudSyncPendingPreview) -> CloudSyn
                 standalone_sftp_profiles: preview
                     .standalone_sftp_profiles_snapshot
                     .as_ref()
-                    .map_or(0, |snapshot| snapshot.record_count()),
+                    .map_or(0, |snapshot| {
+                        snapshot.record_count() + snapshot.tombstones.len()
+                    }),
                 connections,
                 forwards,
                 quick_commands,
                 serial_profiles: preview
                     .serial_profiles_snapshot
                     .as_ref()
-                    .map(|snapshot| snapshot.records.len())
+                    .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
                     .unwrap_or(0),
                 ble_profiles: preview
                     .ble_profiles_snapshot
                     .as_ref()
-                    .map(|snapshot| snapshot.records.len())
+                    .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
                     .unwrap_or(0),
                 telnet_profiles: preview
                     .telnet_profiles_snapshot
                     .as_ref()
-                    .map(|snapshot| snapshot.records.len())
+                    .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
                     .unwrap_or(0),
                 mosh_profiles: preview
                     .mosh_profiles_snapshot
                     .as_ref()
-                    .map(|snapshot| snapshot.records.len())
+                    .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
                     .unwrap_or(0),
                 remote_desktop_profiles: preview
                     .remote_desktop_profiles_snapshot
                     .as_ref()
-                    .map(|snapshot| snapshot.records.len())
+                    .map(|snapshot| snapshot.records.len() + snapshot.tombstones.len())
                     .unwrap_or(0),
                 sensitive_credentials: preview
                     .sensitive_credentials_preview

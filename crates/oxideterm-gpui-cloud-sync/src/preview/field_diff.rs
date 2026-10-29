@@ -3,6 +3,45 @@
 
 use super::*;
 
+pub(super) fn push_profile_deletion_fields<'a>(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    section: &'static str,
+    tombstones: &[oxideterm_connections::DeletedConnectionTombstone],
+    incoming: impl Iterator<Item = (&'a str, &'a str, chrono::DateTime<chrono::Utc>)>,
+    local: impl Iterator<Item = (&'a str, &'a str, chrono::DateTime<chrono::Utc>)>,
+) {
+    let incoming = incoming
+        .map(|(id, name, updated)| (id, (name, updated)))
+        .collect::<BTreeMap<_, _>>();
+    let local = local
+        .map(|(id, name, updated)| (id, (name, updated)))
+        .collect::<BTreeMap<_, _>>();
+    for tombstone in tombstones {
+        let id = tombstone.id.as_str();
+        if incoming
+            .get(id)
+            .into_iter()
+            .chain(local.get(id))
+            .any(|(_, updated)| *updated > tombstone.deleted_at)
+        {
+            continue;
+        }
+        let name = local
+            .get(id)
+            .or_else(|| incoming.get(id))
+            .map_or(id, |(name, _)| *name)
+            .to_owned();
+        items.retain(|item| item.section_label_key != section || item.item_key != id);
+        items.push(field_diff_item_with_key(
+            section,
+            id.to_owned(),
+            name,
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
 pub(super) fn push_preview_impact(
     items: &mut Vec<CloudSyncPreviewImpactItem>,
     label_key: &'static str,

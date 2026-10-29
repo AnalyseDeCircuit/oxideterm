@@ -1157,6 +1157,14 @@ impl CloudSyncPageRenderer {
             "plugin.cloud_sync.settings.sync_telnet_profiles" => Some(
                 CloudSyncPreviewSelectionAction::ToggleTelnetProfileItem(item.item_key.clone()),
             ),
+            "plugin.cloud_sync.settings.sync_mosh_profiles" => Some(
+                CloudSyncPreviewSelectionAction::ToggleMoshProfileItem(item.item_key.clone()),
+            ),
+            "plugin.cloud_sync.settings.sync_remote_desktop_profiles" => Some(
+                CloudSyncPreviewSelectionAction::ToggleRemoteDesktopProfileItem(
+                    item.item_key.clone(),
+                ),
+            ),
             "plugin.cloud_sync.settings.sync_app_settings" => Some(
                 CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(item.item_key.clone()),
             ),
@@ -1187,6 +1195,12 @@ impl CloudSyncPageRenderer {
             }
             CloudSyncPreviewSelectionAction::ToggleTelnetProfileItem(id) => {
                 selection.selected_telnet_profile_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleMoshProfileItem(id) => {
+                selection.selected_mosh_profile_ids.contains(id)
+            }
+            CloudSyncPreviewSelectionAction::ToggleRemoteDesktopProfileItem(id) => {
+                selection.selected_remote_desktop_profile_ids.contains(id)
             }
             CloudSyncPreviewSelectionAction::ToggleAppSettingsSection(id) => {
                 selection.selected_app_settings_sections.contains(id)

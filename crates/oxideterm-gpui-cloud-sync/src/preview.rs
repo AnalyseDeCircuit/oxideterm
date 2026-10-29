@@ -220,6 +220,7 @@ pub struct CloudSyncLocalFieldDiffSnapshot {
     pub quick_commands: Option<QuickCommandsSnapshot>,
     pub serial_profiles: Option<SerialProfilesSyncSnapshot>,
     pub ble_profiles: Option<BleProfilesSyncSnapshot>,
+    pub standalone_sftp_profiles: Option<oxideterm_connections::StandaloneSftpProfilesSyncSnapshot>,
     pub telnet_profiles: Option<TelnetProfilesSyncSnapshot>,
     pub mosh_profiles: Option<MoshProfilesSyncSnapshot>,
     pub remote_desktop_profiles: Option<RemoteDesktopProfilesSyncSnapshot>,

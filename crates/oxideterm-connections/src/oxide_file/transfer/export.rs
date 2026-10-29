@@ -761,28 +761,28 @@ fn count_quick_commands_for_export(snapshot_json: Option<&str>) -> Option<(usize
 
 fn count_serial_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_telnet_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_ble_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_mosh_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_standalone_sftp_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let snapshot =
         serde_json::from_str::<StandaloneSftpProfilesSyncSnapshot>(snapshot_json?).ok()?;
-    Some(snapshot.record_count())
+    Some(snapshot.record_count() + snapshot.tombstones.len())
 }
 
 fn portable_standalone_sftp_profiles_json(
@@ -815,5 +815,5 @@ fn portable_standalone_sftp_profiles_json(
 fn count_remote_desktop_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let snapshot =
         serde_json::from_str::<RemoteDesktopProfilesSyncSnapshot>(snapshot_json?).ok()?;
-    Some(snapshot.records.len())
+    Some(snapshot.records.len() + snapshot.tombstones.len())
 }

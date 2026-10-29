@@ -139,7 +139,7 @@ impl CloudSyncOperationService {
             manifest.sections.serial_profiles = Some(crate::StructuredObjectEntry {
                 revision: snapshot.revision.clone(),
                 path: path.clone(),
-                record_count: Some(snapshot.records.len()),
+                record_count: Some(snapshot.records.len() + snapshot.tombstones.len()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {
@@ -164,7 +164,7 @@ impl CloudSyncOperationService {
             manifest.sections.ble_profiles = Some(crate::StructuredObjectEntry {
                 revision: snapshot.revision.clone(),
                 path: path.clone(),
-                record_count: Some(snapshot.records.len()),
+                record_count: Some(snapshot.records.len() + snapshot.tombstones.len()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {
@@ -189,7 +189,7 @@ impl CloudSyncOperationService {
             manifest.sections.telnet_profiles = Some(crate::StructuredObjectEntry {
                 revision: snapshot.revision.clone(),
                 path: path.clone(),
-                record_count: Some(snapshot.records.len()),
+                record_count: Some(snapshot.records.len() + snapshot.tombstones.len()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {
@@ -214,7 +214,7 @@ impl CloudSyncOperationService {
             manifest.sections.mosh_profiles = Some(crate::StructuredObjectEntry {
                 revision: snapshot.revision.clone(),
                 path: path.clone(),
-                record_count: Some(snapshot.records.len()),
+                record_count: Some(snapshot.records.len() + snapshot.tombstones.len()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {
@@ -232,7 +232,8 @@ impl CloudSyncOperationService {
         }
 
         if local_snapshot.scope.sync_connections {
-            let snapshot = connection_store.export_standalone_sftp_profiles_snapshot()?;
+            let mut snapshot = connection_store.export_standalone_sftp_profiles_snapshot()?;
+            filter_standalone_sftp_deletions(&mut snapshot, item_filter.connection_ids.as_ref());
             let bytes = serde_json::to_vec(&snapshot)?;
             let connections_revision = local_snapshot
                 .metadata
@@ -243,7 +244,7 @@ impl CloudSyncOperationService {
             manifest.sections.standalone_sftp_profiles = Some(crate::StructuredObjectEntry {
                 revision: connections_revision,
                 path: path.clone(),
-                record_count: Some(snapshot.record_count()),
+                record_count: Some(snapshot.record_count() + snapshot.tombstones.len()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {
@@ -274,7 +275,7 @@ impl CloudSyncOperationService {
             manifest.sections.remote_desktop_profiles = Some(crate::StructuredObjectEntry {
                 revision: snapshot.revision.clone(),
                 path: path.clone(),
-                record_count: Some(snapshot.records.len()),
+                record_count: Some(snapshot.records.len() + snapshot.tombstones.len()),
                 content_type: "application/json".to_string(),
             });
             objects.push(StructuredUploadObject {

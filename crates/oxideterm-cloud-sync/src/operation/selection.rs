@@ -81,6 +81,17 @@ pub(super) fn filter_saved_forwards_snapshot(
     }
 }
 
+pub(super) fn filter_standalone_sftp_deletions(
+    snapshot: &mut StandaloneSftpProfilesSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
+    }
+}
+
 pub(super) fn filter_serial_profiles_snapshot(
     snapshot: &mut SerialProfilesSyncSnapshot,
     selected_ids: Option<&BTreeSet<String>>,
@@ -89,6 +100,9 @@ pub(super) fn filter_serial_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -100,6 +114,9 @@ pub(super) fn filter_ble_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -111,6 +128,9 @@ pub(super) fn filter_telnet_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -122,6 +142,9 @@ pub(super) fn filter_mosh_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -133,6 +156,9 @@ pub(super) fn filter_remote_desktop_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 

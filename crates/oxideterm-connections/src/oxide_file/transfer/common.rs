@@ -59,6 +59,7 @@ fn count_serial_profiles(snapshot_json: Option<&str>) -> usize {
         .get("records")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
+        + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len)
 }
 
 fn count_ble_profiles(snapshot_json: Option<&str>) -> usize {
@@ -72,6 +73,7 @@ fn count_ble_profiles(snapshot_json: Option<&str>) -> usize {
         .get("records")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
+        + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len)
 }
 
 fn count_telnet_profiles(snapshot_json: Option<&str>) -> usize {
@@ -85,6 +87,7 @@ fn count_telnet_profiles(snapshot_json: Option<&str>) -> usize {
         .get("records")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
+        + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len)
 }
 
 fn count_mosh_profiles(snapshot_json: Option<&str>) -> usize {
@@ -98,6 +101,7 @@ fn count_mosh_profiles(snapshot_json: Option<&str>) -> usize {
         .get("records")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
+        + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len)
 }
 
 fn count_standalone_sftp_profiles(snapshot_json: Option<&str>) -> usize {
@@ -107,7 +111,7 @@ fn count_standalone_sftp_profiles(snapshot_json: Option<&str>) -> usize {
     let Ok(snapshot) = serde_json::from_str::<StandaloneSftpProfilesSyncSnapshot>(json) else {
         return 0;
     };
-    snapshot.record_count()
+    snapshot.record_count() + snapshot.tombstones.len()
 }
 
 fn count_remote_desktop_profiles(snapshot_json: Option<&str>) -> usize {
@@ -121,6 +125,7 @@ fn count_remote_desktop_profiles(snapshot_json: Option<&str>) -> usize {
         .get("records")
         .and_then(Value::as_array)
         .map_or(0, Vec::len)
+        + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len)
 }
 
 fn plugin_settings_by_plugin(settings: &[EncryptedPluginSetting]) -> HashMap<String, usize> {

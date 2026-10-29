@@ -98,15 +98,20 @@ impl CloudSyncOperationService {
             filter_telnet_profiles_snapshot(&mut snapshot, filter.telnet_profile_ids.as_ref());
             options.telnet_profiles_json = Some(serde_json::to_string(&snapshot)?);
         }
+        if scope.sync_ble_profiles {
+            let mut snapshot = connections.export_ble_profiles_snapshot()?;
+            filter_ble_profiles_snapshot(&mut snapshot, filter.ble_profile_ids.as_ref());
+            options.ble_profiles_json = Some(serde_json::to_string(&snapshot)?);
+        }
         if scope.sync_mosh_profiles {
             let mut snapshot = connections.export_mosh_profiles_snapshot()?;
             filter_mosh_profiles_snapshot(&mut snapshot, filter.mosh_profile_ids.as_ref());
             options.mosh_profiles_json = Some(serde_json::to_string(&snapshot)?);
         }
         if scope.sync_connections {
-            options.standalone_sftp_profiles_json = Some(serde_json::to_string(
-                &connections.export_standalone_sftp_profiles_snapshot()?,
-            )?);
+            let mut snapshot = connections.export_standalone_sftp_profiles_snapshot()?;
+            filter_standalone_sftp_deletions(&mut snapshot, filter.connection_ids.as_ref());
+            options.standalone_sftp_profiles_json = Some(serde_json::to_string(&snapshot)?);
         }
         if scope.sync_remote_desktop_profiles {
             let mut snapshot = connections.export_remote_desktop_profiles_snapshot()?;

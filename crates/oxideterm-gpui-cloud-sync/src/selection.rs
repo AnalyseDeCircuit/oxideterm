@@ -178,6 +178,18 @@ impl CloudSyncUploadSelection {
                 .into_iter()
                 .flat_map(|snapshot| snapshot.record_ids())
                 .map(ToOwned::to_owned)
+                .chain(
+                    local
+                        .standalone_sftp_profiles
+                        .as_ref()
+                        .into_iter()
+                        .flat_map(|snapshot| {
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone())
+                        }),
+                )
                 .collect(),
             selected_connection_ids: None,
             sync_forwards: scope.sync_forwards,
@@ -203,8 +215,18 @@ impl CloudSyncUploadSelection {
                 .serial_profiles
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| snapshot.records.iter())
-                .map(|profile| profile.id.clone())
+                .flat_map(|snapshot| {
+                    snapshot
+                        .records
+                        .iter()
+                        .map(|profile| profile.id.clone())
+                        .chain(
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone()),
+                        )
+                })
                 .collect(),
             selected_serial_profile_ids: None,
             sync_ble_profiles: scope.sync_ble_profiles,
@@ -212,8 +234,18 @@ impl CloudSyncUploadSelection {
                 .ble_profiles
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| snapshot.records.iter())
-                .map(|profile| profile.id.clone())
+                .flat_map(|snapshot| {
+                    snapshot
+                        .records
+                        .iter()
+                        .map(|profile| profile.id.clone())
+                        .chain(
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone()),
+                        )
+                })
                 .collect(),
             selected_ble_profile_ids: None,
             sync_telnet_profiles: scope.sync_telnet_profiles,
@@ -221,8 +253,18 @@ impl CloudSyncUploadSelection {
                 .telnet_profiles
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| snapshot.records.iter())
-                .map(|profile| profile.id.clone())
+                .flat_map(|snapshot| {
+                    snapshot
+                        .records
+                        .iter()
+                        .map(|profile| profile.id.clone())
+                        .chain(
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone()),
+                        )
+                })
                 .collect(),
             selected_telnet_profile_ids: None,
             sync_mosh_profiles: scope.sync_mosh_profiles,
@@ -230,8 +272,18 @@ impl CloudSyncUploadSelection {
                 .mosh_profiles
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| snapshot.records.iter())
-                .map(|profile| profile.id.clone())
+                .flat_map(|snapshot| {
+                    snapshot
+                        .records
+                        .iter()
+                        .map(|profile| profile.id.clone())
+                        .chain(
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone()),
+                        )
+                })
                 .collect(),
             selected_mosh_profile_ids: None,
             sync_remote_desktop_profiles: scope.sync_remote_desktop_profiles,
@@ -239,8 +291,18 @@ impl CloudSyncUploadSelection {
                 .remote_desktop_profiles
                 .as_ref()
                 .into_iter()
-                .flat_map(|snapshot| snapshot.records.iter())
-                .map(|profile| profile.id.clone())
+                .flat_map(|snapshot| {
+                    snapshot
+                        .records
+                        .iter()
+                        .map(|profile| profile.id.clone())
+                        .chain(
+                            snapshot
+                                .tombstones
+                                .iter()
+                                .map(|tombstone| tombstone.id.clone()),
+                        )
+                })
                 .collect(),
             selected_remote_desktop_profile_ids: None,
             sync_sensitive_credentials: scope.sync_sensitive_credentials,
@@ -1098,6 +1160,18 @@ fn preview_connection_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String>
             .into_iter()
             .flat_map(|snapshot| snapshot.record_ids())
             .map(ToOwned::to_owned)
+            .chain(
+                preview
+                    .standalone_sftp_profiles_snapshot
+                    .as_ref()
+                    .into_iter()
+                    .flat_map(|snapshot| {
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone())
+                    }),
+            )
             .collect(),
         CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
     }
@@ -1140,8 +1214,18 @@ fn preview_serial_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Str
             .serial_profiles_snapshot
             .as_ref()
             .into_iter()
-            .flat_map(|snapshot| snapshot.records.iter())
-            .map(|profile| profile.id.clone())
+            .flat_map(|snapshot| {
+                snapshot
+                    .records
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .chain(
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone()),
+                    )
+            })
             .collect(),
         CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
     }
@@ -1153,8 +1237,18 @@ fn preview_ble_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<String
             .ble_profiles_snapshot
             .as_ref()
             .into_iter()
-            .flat_map(|snapshot| snapshot.records.iter())
-            .map(|profile| profile.id.clone())
+            .flat_map(|snapshot| {
+                snapshot
+                    .records
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .chain(
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone()),
+                    )
+            })
             .collect(),
         CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
     }
@@ -1166,8 +1260,18 @@ fn preview_telnet_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Str
             .telnet_profiles_snapshot
             .as_ref()
             .into_iter()
-            .flat_map(|snapshot| snapshot.records.iter())
-            .map(|profile| profile.id.clone())
+            .flat_map(|snapshot| {
+                snapshot
+                    .records
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .chain(
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone()),
+                    )
+            })
             .collect(),
         CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
     }
@@ -1179,8 +1283,18 @@ fn preview_mosh_profile_ids(preview: &CloudSyncPendingPreview) -> BTreeSet<Strin
             .mosh_profiles_snapshot
             .as_ref()
             .into_iter()
-            .flat_map(|snapshot| snapshot.records.iter())
-            .map(|profile| profile.id.clone())
+            .flat_map(|snapshot| {
+                snapshot
+                    .records
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .chain(
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone()),
+                    )
+            })
             .collect(),
         CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
     }
@@ -1192,8 +1306,18 @@ fn preview_remote_desktop_profile_ids(preview: &CloudSyncPendingPreview) -> BTre
             .remote_desktop_profiles_snapshot
             .as_ref()
             .into_iter()
-            .flat_map(|snapshot| snapshot.records.iter())
-            .map(|profile| profile.id.clone())
+            .flat_map(|snapshot| {
+                snapshot
+                    .records
+                    .iter()
+                    .map(|profile| profile.id.clone())
+                    .chain(
+                        snapshot
+                            .tombstones
+                            .iter()
+                            .map(|tombstone| tombstone.id.clone()),
+                    )
+            })
             .collect(),
         CloudSyncPendingPreview::Legacy { .. } => BTreeSet::new(),
     }
